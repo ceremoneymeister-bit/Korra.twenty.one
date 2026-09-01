@@ -163,7 +163,7 @@ def test_refusal_receipt_written_as_refused(tmp_path, monkeypatch):
         UpdateRefusal(
             code="image-marker",
             message="msg",
-            update_command="docker pull nousresearch/hermes-agent:latest",
+            update_command="docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest",
         )
     )
     receipts = list((tmp_path / "receipts").glob("*.json"))

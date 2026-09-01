@@ -552,3 +552,35 @@ def pytest_configure(config):
         else:
             cache_file.write_text("clean", encoding="utf-8")
 
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _korra_pin_english_ui(monkeypatch):
+    """Korra: дефолт интерфейса теперь ru, а тесты гейтвея исторически
+    ассертят английские строки.
+
+    Тесты этого пакета проверяют ЛОГИКУ команд (форматирование, ветвления,
+    персистентность), а не перевод. Язык закрепляется через HERMES_LANGUAGE —
+    приоритет №2 в agent/i18n.py, выше config.yaml — чтобы 20+ тестов не
+    зависели от смены канонического дефолта форка.
+
+    Русскость дефолта сторожат отдельно test_korra_canonical_defaults.py
+    (display.language == ru) и tests/agent/test_i18n.py (паритет локали).
+    """
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
+    try:
+        from agent import i18n
+        if hasattr(i18n, "reset_language_cache"):
+            i18n.reset_language_cache()
+    except Exception:
+        pass
+    yield
+    try:
+        from agent import i18n
+        if hasattr(i18n, "reset_language_cache"):
+            i18n.reset_language_cache()
+    except Exception:
+        pass

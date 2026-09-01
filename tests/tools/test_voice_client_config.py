@@ -76,9 +76,9 @@ def test_groq_stt_resolves_direct_with_env_key(voice_home, monkeypatch):
     stt = result["stt"]
     assert stt["mode"] == "direct"
     assert stt["api_key"] == "gsk_env456"
-    # DEFAULT_CONFIG pins stt.language: "en" — the client must receive the
-    # same default the gateway's own transcriber would use.
-    assert stt["language"] == "en"
+    # Korra: DEFAULT_CONFIG закрепляет stt.language: "ru" — клиент обязан
+    # получить тот же дефолт, что и транскрайбер гейтвея.
+    assert stt["language"] == "ru"
 
 
 def test_language_pin_propagates(voice_home, monkeypatch):

@@ -11,8 +11,10 @@ from tools.transcription_tools import _resolve_stt_language
 
 
 class TestDefaultSttLanguage:
-    def test_default_config_pins_english(self):
-        assert DEFAULT_CONFIG["stt"]["language"] == "en"
+    def test_default_config_pins_russian(self):
+        # Korra: голосовые шлют по-русски; подсказка en на коротком клипе
+        # даёт связный бред латиницей (каноническое значение форка).
+        assert DEFAULT_CONFIG["stt"]["language"] == "ru"
 
 
     def test_per_provider_still_wins_over_default(self, monkeypatch):

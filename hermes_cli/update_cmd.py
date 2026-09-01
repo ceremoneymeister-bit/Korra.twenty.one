@@ -2991,7 +2991,7 @@ def _sync_with_upstream_if_needed(
 
         print()
         print("ℹ Your fork is not tracking the official Hermes repository.")
-        print("  This means you may miss updates from NousResearch/hermes-agent.")
+        print("  This means you may miss updates from ceremoneymeister-bit/Korra.twenty.one.")
         print()
 
         if assume_yes or (
@@ -3001,7 +3001,7 @@ def _sync_with_upstream_if_needed(
             # without persisting the decline so interactive runs still get asked.
             print("  Skipping upstream setup (non-interactive run).")
             print(
-                "  Add it later with: git remote add upstream https://github.com/NousResearch/hermes-agent.git"
+                "  Add it later with: git remote add upstream " + OFFICIAL_REPO_URL
             )
             return False
 
@@ -3027,7 +3027,7 @@ def _sync_with_upstream_if_needed(
             print("→ Adding upstream remote...")
             if _add_upstream_remote(git_cmd, cwd):
                 print(
-                    "  ✓ Added upstream: https://github.com/NousResearch/hermes-agent.git"
+                    "  ✓ Added upstream: " + OFFICIAL_REPO_URL
                 )
                 has_upstream = True
             else:
@@ -3035,7 +3035,7 @@ def _sync_with_upstream_if_needed(
                 return False
         else:
             print(
-                "  Skipped. Run 'git remote add upstream https://github.com/NousResearch/hermes-agent.git' to add later."
+                "  Skipped. Run 'git remote add upstream " + OFFICIAL_REPO_URL + "' to add later."
             )
             _mark_skip_upstream_prompt()
             return False
