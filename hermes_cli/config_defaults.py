@@ -1920,11 +1920,16 @@ DEFAULT_CONFIG = {
         # autodetect ladder covers unset. Valid values when set:
         # "local" (free, faster-whisper) | "groq" | "openai" (Whisper API) | "mistral" (Voxtral Transcribe) | "elevenlabs" (Scribe) | "deepinfra"
         # Global language hint applied to EVERY provider unless a per-provider
-        # language overrides it. Defaults to "en" — Whisper auto-detection
-        # frequently misidentifies short/accented clips, which reads as
-        # "STT transcribed the wrong language". Set to "" to restore
-        # auto-detect, or to your language code ("es", "zh", "uk", ...).
-        "language": "en",
+        # language overrides it. Whisper auto-detection frequently misidentifies
+        # short/accented clips, which reads as "STT transcribed the wrong
+        # language". Set to "" to restore auto-detect.
+        #
+        # Korra: "ru" вместо апстримного "en". Голосовые нам шлют по-русски, и
+        # подсказка "en" на коротком сообщении даёт не «чуть хуже», а связный
+        # бред латиницей — клиент видит, что агент его не понял. Это НЕ
+        # автоопределение: если контуру нужен другой язык, значение меняется
+        # в его config.yaml, а "" возвращает автодетект.
+        "language": "ru",
         # Pre-upload silence trim for cloud providers (groq/openai/mistral/
         # xai/elevenlabs/deepinfra). Local whisper gets Silero VAD; cloud
         # endpoints otherwise receive raw audio — silence inflates upload
