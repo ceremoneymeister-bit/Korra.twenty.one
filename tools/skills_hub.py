@@ -3760,7 +3760,14 @@ class OptionalSkillSource(SkillSource):
         GitHubSource, plus the shared on-disk index cache). Returns {} when
         the network/API is unavailable — callers degrade to local-only.
         """
-        if self._remote_dirs is not None:
+        # Korra: жёсткий форк. «Официальные» скиллы — ровно те, что мы
+        # поставляем в optional-skills/. Докачка с живого main апстрима
+        # означала бы, что их новый скилл приезжает к нам как «встроенный»
+        # с исполняемым кодом и без нашего коммита. Пустой словарь —
+        # штатный путь деградации, предусмотренный выше в docstring.
+        return {}
+
+        if self._remote_dirs is not None:  # noqa: B012  (недостижимо, см. выше)
             return self._remote_dirs
 
         cache_key = "official_optional_dirs"
@@ -4496,7 +4503,10 @@ def check_for_skill_updates(
 # Hermes centralized index source
 # ---------------------------------------------------------------------------
 
-HERMES_INDEX_URL = "https://hermes-agent.nousresearch.com/docs/api/skills-index.json"
+# Korra: жёсткий форк — централизованный индекс апстрима не тянем.
+# Пустая строка выключает загрузку в _load_hermes_index(); хаб продолжает
+# работать с локальным каталогом и явно указанными github-репозиториями.
+HERMES_INDEX_URL = ""
 HERMES_INDEX_TTL = 6 * 3600  # 6 hours
 
 
@@ -4511,6 +4521,10 @@ def _load_hermes_index() -> Optional[dict]:
     We cache it locally for HERMES_INDEX_TTL seconds to avoid repeated
     downloads within a session.
     """
+    # Korra: пустой URL = источник выключен (жёсткий форк).
+    if not HERMES_INDEX_URL:
+        return None
+
     # Check local cache
     hermes_index_cache_file = _hermes_index_cache_file()
     if hermes_index_cache_file.exists():

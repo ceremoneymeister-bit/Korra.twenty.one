@@ -3047,8 +3047,13 @@ DEFAULT_CONFIG = {
     # falling back to the in-repo snapshot on network failure.  Lets us
     # update model picker lists without shipping a hermes-agent release.
     # The default URL is served by the docs site GitHub Pages deploy.
+    #
+    # Korra: выключено (жёсткий форк). Каталог обновлялся с сайта апстрима
+    # раз в час и мог МОЛЧА сменить дефолтную модель на контуре клиента —
+    # чужое решение с денежными последствиями. Списки моделей берём из кода.
+    # Включать только вместе с подменой url на наш собственный манифест.
     "model_catalog": {
-        "enabled": True,
+        "enabled": False,
         "url": "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json",
         # Disk cache TTL in hours.  Beyond this, the CLI refetches on the
         # next /model or `hermes model` invocation; network failures
