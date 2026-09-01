@@ -896,126 +896,26 @@ class TestOptionalSkillSourceBinaryAssets:
 
 
 class TestOptionalSkillSourceLiveRepoFallback:
-    """Skills merged to main after the local install was cut must still be
-    searchable and installable without `hermes update` (live-repo fallback)."""
+    """Korra: докачка «официальных» скиллов с живого main апстрима ВЫКЛЮЧЕНА.
 
-    def _make_source(self, tmp_path, remote_dirs):
-        optional_root = tmp_path / "optional-skills"
-        optional_root.mkdir(exist_ok=True)
+    Прежние тесты этого класса ТРЕБОВАЛИ, чтобы недостающий скилл тянулся из
+    репозитория NousResearch как «встроенный» — для жёсткого форка это дыра:
+    чужой исполняемый код без нашего коммита. Инвариант перевёрнут.
+    """
+
+    def test_remote_dirs_are_disabled(self):
         src = OptionalSkillSource()
-        src._optional_dir = optional_root
-        src._remote_dirs = dict.fromkeys(remote_dirs, True)
-        return src
-
-    @staticmethod
-    def _fake_github_with_tree(remote_dirs, extra_files=()):
-        """MagicMock GitHubSource whose repo tree contains each skill dir's
-        SKILL.md plus any extra files, served byte-exact by _fetch_file_bytes."""
-        entries = []
-        contents = {}
-        for rel_dir in remote_dirs:
-            p = f"optional-skills/{rel_dir}/SKILL.md"
-            entries.append({"type": "blob", "path": p, "mode": "100644"})
-            contents[p] = b"---\nname: " + rel_dir.rsplit("/", 1)[-1].encode() + b"\n---\nBody"
-        for rel_path, data in extra_files:
-            entries.append({"type": "blob", "path": rel_path, "mode": "100644"})
-            contents[rel_path] = data
-        fake = MagicMock()
-        fake._get_repo_tree.return_value = ("main", entries)
-        fake._fetch_file_bytes.side_effect = lambda repo, path: contents.get(path)
-        return fake
-
-    def test_fetch_falls_back_to_live_repo_when_missing_locally(self, tmp_path):
-        src = self._make_source(tmp_path, ["software-development/ast-grep"])
-        src._github = self._fake_github_with_tree(
-            ["software-development/ast-grep"],
-            extra_files=[
-                ("optional-skills/software-development/ast-grep/install.sh", b"#!/bin/sh\n"),
-                ("optional-skills/software-development/ast-grep/LICENSE", b"MIT"),
-            ],
+        assert src._list_remote_skill_dirs() == {}, (
+            "докачка с живого репо апстрима должна быть выключена"
         )
 
-        bundle = src.fetch("official/software-development/ast-grep")
-
-        assert bundle is not None
-        # Provenance is rewritten to official/builtin
-        assert bundle.source == "official"
-        assert bundle.identifier == "official/software-development/ast-grep"
-        assert bundle.trust_level == "builtin"
-        # FULL directory arrives — including root-level files GitHubSource.fetch drops
-        assert bundle.files["install.sh"] == b"#!/bin/sh\n"
-        assert bundle.files["LICENSE"] == b"MIT"
-
-    def test_fetch_bare_name_resolves_via_remote_tree(self, tmp_path):
-        src = self._make_source(tmp_path, ["software-development/ast-grep"])
-        src._github = self._fake_github_with_tree(["software-development/ast-grep"])
-
-        bundle = src.fetch("official/ast-grep")
-
-        assert bundle is not None
-        assert bundle.identifier == "official/software-development/ast-grep"
-
-    def test_fetch_ambiguous_bare_name_refuses(self, tmp_path):
-        src = self._make_source(
-            tmp_path, ["security/scanner", "devops/scanner"]
-        )
-        fake_github = MagicMock()
-        src._github = fake_github
-
-        assert src.fetch("official/scanner") is None
-        fake_github.fetch.assert_not_called()
-
-    def test_local_checkout_wins_over_remote(self, tmp_path):
-        src = self._make_source(tmp_path, ["research/local-skill"])
-        skill_dir = src._optional_dir / "research" / "local-skill"
-        skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: local-skill\ndescription: local\n---\nBody",
-            encoding="utf-8",
-        )
-        fake_github = MagicMock()
-        src._github = fake_github
-
-        bundle = src.fetch("official/research/local-skill")
-
-        assert bundle is not None
-        fake_github.fetch.assert_not_called()
-
-    def test_fallback_rejects_traversal_rel(self, tmp_path):
-        src = self._make_source(tmp_path, ["security/whatever"])
-        fake_github = MagicMock()
-        src._github = fake_github
-
-        assert src._fetch_from_live_repo("../../etc/passwd") is None
-        fake_github.fetch.assert_not_called()
-
-    def test_search_surfaces_remote_only_skills(self, tmp_path):
-        src = self._make_source(tmp_path, ["software-development/ast-grep"])
-
-        results = src.search("ast-grep")
-
-        assert any(
-            r.identifier == "official/software-development/ast-grep"
-            and r.trust_level == "builtin"
-            for r in results
-        )
-
-    def test_inspect_surfaces_remote_only_skill(self, tmp_path):
-        src = self._make_source(tmp_path, ["software-development/ast-grep"])
-
-        meta = src.inspect("official/software-development/ast-grep")
-
-        assert meta is not None
-        assert meta.repo == "NousResearch/hermes-agent"
-        assert meta.path == "optional-skills/software-development/ast-grep"
-
-    def test_offline_degrades_to_local_only(self, tmp_path):
-        src = self._make_source(tmp_path, [])
-        fake_github = MagicMock()
-        src._github = fake_github
-
-        assert src.fetch("official/never-heard-of-it") is None
-        assert src.search("never-heard-of-it") == []
+    def test_search_is_local_only(self, tmp_path, monkeypatch):
+        src = OptionalSkillSource()
+        results = src.search("nonexistent-remote-only-skill", limit=5)
+        for meta in results:
+            assert "run install to fetch" not in (meta.description or ""), (
+                "поиск не должен предлагать скиллы, существующие только в репо апстрима"
+            )
 
 
 class TestQuarantineBundleBinaryAssets:
@@ -1853,77 +1753,12 @@ class TestParallelSearchSourcesTimeout:
 
 
 class TestLoadHermesIndex:
-    """Regression coverage for the Skills-Hub index fetch.
+    """Korra: централизованный индекс скиллов апстрима выключен (URL пуст)."""
 
-    The centralized index is a large body served with Content-Encoding: br.
-    httpx's streaming Brotli decoder (brotlicffi 1.2.0.1, pinned for Discord
-    attachment decoding) raises DecodingError on payloads this size, which
-    used to cascade into a silently-empty Skills Hub. The fetch must therefore
-    (a) not ask for Brotli, and (b) survive a DecodingError by retrying
-    uncompressed instead of blanking the hub.
-    """
-
-    @staticmethod
-    def _isolate_cache(monkeypatch, tmp_path):
-        """Point the on-disk cache at an empty tmp dir so no real cache leaks in."""
-        import tools.skills_hub as hub
-
-        cache_file = tmp_path / "hermes-index.json"
-        monkeypatch.setattr(hub, "_hermes_index_cache_file", lambda: cache_file)
-        return cache_file
-
-    def test_fetch_does_not_request_brotli(self, monkeypatch, tmp_path):
-        """The index fetch must not negotiate Brotli (the broken decoder path)."""
-        import tools.skills_hub as hub
-
-        self._isolate_cache(monkeypatch, tmp_path)
-
-        captured = {}
-
-        def fake_get(url, *args, **kwargs):
-            captured["headers"] = kwargs.get("headers", {})
-            resp = MagicMock()
-            resp.status_code = 200
-            resp.json.return_value = {"skills": [{"name": "x"}]}
-            return resp
-
-        monkeypatch.setattr(hub.httpx, "get", fake_get)
-
-        data = hub._load_hermes_index()
-        assert data == {"skills": [{"name": "x"}]}
-
-        accept = captured["headers"].get("Accept-Encoding", "")
-        assert "br" not in [tok.strip() for tok in accept.split(",")], (
-            f"index fetch must not request Brotli, got Accept-Encoding={accept!r}"
-        )
-
-    def test_persistent_decoding_error_falls_back_to_stale_cache(
-        self, monkeypatch, tmp_path
-    ):
-        """If every attempt fails to decode, serve the stale cache rather than None."""
-        import tools.skills_hub as hub
-
-        cache_file = self._isolate_cache(monkeypatch, tmp_path)
-        cache_file.write_text(json.dumps({"skills": [{"name": "stale"}]}))
-        # Force the cache to look expired so the network path runs.
-        old = time.time() - (hub.HERMES_INDEX_TTL + 100)
-        import os
-
-        os.utime(cache_file, (old, old))
-
-        def fake_get(url, *args, **kwargs):
-            raise httpx.DecodingError("brotli boom")
-
-        monkeypatch.setattr(hub.httpx, "get", fake_get)
-
-        data = hub._load_hermes_index()
-        assert data == {"skills": [{"name": "stale"}]}
-
-
-# ---------------------------------------------------------------------------
-# Referenced-path extraction & missing support files (regression: a prose
-# glob or a repo-only dev tool referenced in SKILL.md must not abort install)
-# ---------------------------------------------------------------------------
+    def test_index_is_disabled(self):
+        import tools.skills_hub as _hub
+        assert _hub.HERMES_INDEX_URL == ""
+        assert _hub._load_hermes_index() is None
 
 
 class TestReferencedSupportPaths:

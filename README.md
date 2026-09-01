@@ -55,7 +55,8 @@ docker run --rm -it \
 
 ### Windows (Docker Desktop, PowerShell)
 
-Run the ready-made image directly:
+Run the ready-made image directly (source installs use `scripts/install.ps1`
+and need access to this private repository):
 
 ```powershell
 docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
