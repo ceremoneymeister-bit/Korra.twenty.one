@@ -1521,8 +1521,17 @@ DEFAULT_CONFIG = {
         # UI language for static user-facing messages (approval prompts, a
         # handful of gateway slash-command replies).  Does NOT affect agent
         # responses, log lines, tool outputs, or slash-command descriptions.
-        # Supported: en, zh, ja, de, es, fr, tr, uk.  Unknown values fall back to en.
-        "language": "en",
+        # Полный список — SUPPORTED_LANGUAGES в agent/i18n.py; неизвестное
+        # значение откатывается на en.
+        #
+        # Korra: RU-FIRST. Продукт русскоязычный — владелец и все клиенты.
+        # Апстримный дефолт "en" означал, что свежепоставленный контур
+        # разговаривает с клиентом по-английски, пока кто-то не вспомнит про
+        # настройку. Это КАНОНИЧЕСКОЕ значение форка: при любом изменении
+        # каркаса сверять именно его, а не число конфликтов — в прошлом форке
+        # мерж молча вернул сюда "en", и счётчик конфликтов этого не показал.
+        # Сторож: tests/hermes_cli/test_korra_canonical_defaults.py
+        "language": "ru",
         # TUI busy indicator style: kaomoji (default), emoji, unicode (braille
         # spinner), or ascii.  Live-swappable via `/indicator <style>`.
         "tui_status_indicator": "kaomoji",
