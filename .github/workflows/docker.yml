@@ -24,7 +24,7 @@ permissions:
 # cancel-in-progress: true so rapid pushes to the same PR collapse to
 # the latest commit.
 concurrency:
-  group: docker-${{ github.event.pull_request.number || github.ref }}
+  group: korra-docker-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

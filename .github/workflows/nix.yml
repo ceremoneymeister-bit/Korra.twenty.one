@@ -22,7 +22,7 @@ permissions:
 # each one saves the store cache that later PRs restore from, so cancelling a
 # merge would leave the next PR to build from nothing.
 concurrency:
-  group: nix-${{ github.event.pull_request.number || github.ref }}
+  group: korra-nix-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
