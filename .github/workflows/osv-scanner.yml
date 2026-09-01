@@ -46,7 +46,7 @@ jobs:
     # Заменено прямым прогоном сканера в его официальном образе той же версии:
     # тот же список уязвимостей в логе джоба, без code-scanning.
     # Джоб информационный, как и был: fail-on-vuln у апстрима выключен.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     container:
       image: ghcr.io/google/osv-scanner:v2.3.8
     steps:
@@ -63,7 +63,7 @@ jobs:
 
   emit-status:
     name: Emit review status
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     needs: scan
     if: always()
     outputs:

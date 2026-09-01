@@ -37,7 +37,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────
   detect:
     name: Detect affected areas
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 1
     outputs:
       python: ${{ steps.classify.outputs.python }}
@@ -82,7 +82,11 @@ jobs:
   tests-os:
     name: OS-specific tests
     needs: detect
-    if: needs.detect.outputs.python == 'true'
+    # Korra: macOS/Windows существуют ТОЛЬКО hosted-раннерами и жгут минуты
+    # с множителями ×10/×2 — квота 2000 мин сожжена за 01.09, джобы падали
+    # на старте («payments have failed or spending limit»). Гейт на
+    # переменной репо: включить = gh variable set HOSTED_MINUTES -b on
+    if: vars.HOSTED_MINUTES == 'on' && needs.detect.outputs.python == 'true'
     uses: ./.github/workflows/tests-os.yml
 
   lint:
@@ -103,7 +107,8 @@ jobs:
     name: Installer tests
     needs: detect
     # Windows-only, and only for PRs that touch install.ps1 or its tests.
-    if: needs.detect.outputs.installer == 'true'
+    # Korra: windows-latest = hosted-минуты, см. гейт tests-os выше.
+    if: vars.HOSTED_MINUTES == 'on' && needs.detect.outputs.installer == 'true'
     uses: ./.github/workflows/installer-tests.yml
 
   rust-tests:
@@ -230,7 +235,7 @@ jobs:
       # to block a merge. A separate run also stops it from holding this
       # run open. That is what blocked ``gh run rerun``.
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 10
     outputs:
       needs-json: ${{ steps.evaluate.outputs.needs-json }}
@@ -273,7 +278,7 @@ jobs:
     name: CI timing report
     needs: [all-checks-pass]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 10
     steps:
       - name: Checkout code

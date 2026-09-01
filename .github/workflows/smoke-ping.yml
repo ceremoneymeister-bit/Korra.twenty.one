@@ -8,6 +8,6 @@ on:
     paths: ['.github/workflows/smoke-ping.yml']
 jobs:
   ping:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - run: echo "pong $(date -u)"
