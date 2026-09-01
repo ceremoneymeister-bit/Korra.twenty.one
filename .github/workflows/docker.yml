@@ -82,16 +82,13 @@ jobs:
             platform: linux/amd64
             cache-from: type=gha,scope=docker-amd64
             cache-to: type=gha,mode=max,scope=docker-amd64
-          # arm64 builds on the native arm64 larger runner. A build of
-          # linux/arm64 on an x64 host uses emulation.
-          - arch: arm64
-            runner: ubuntu-latest
-            platform: linux/arm64
-            cache-from: type=gha,scope=docker-arm64
-            cache-to: type=gha,mode=max,scope=docker-arm64
+          # Korra: arm64 вырезан. У апстрима он собирался на НАТИВНОМ
+          # arm64-раннере; у нас таких нет, а сборка через QEMU-эмуляцию на
+          # 2 ядрах занимает часы и упирается в таймаут. Весь наш флот —
+          # x86 VPS; вернуть arm64 = вернуть этот блок + нативный раннер.
 
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -197,13 +194,8 @@ jobs:
             cache-from: type=gha,scope=docker-amd64
             cache-to: type=gha,mode=max,scope=docker-amd64
           # Native arm64 for the same reason as the build matrix above.
-          - arch: arm64
-            runner: ubuntu-latest
-            platform: linux/arm64
-            cache-from: type=gha,scope=docker-arm64
-            cache-to: type=gha,mode=max,scope=docker-arm64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout trusted source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
