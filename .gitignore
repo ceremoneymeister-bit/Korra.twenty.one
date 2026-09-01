@@ -213,3 +213,18 @@ native/fts5_cjk/*.so
 # by accident via 3a69e34702, removed in the #72002 salvage).
 .lazy-refresh-incomplete
 .skills_prompt_snapshot.json
+
+# ── Korra: восстановление после жёсткого форка ──────────────────────────
+# Обобщённые правила выше (export*, examples/, apps/desktop/src/**/*.js,
+# web/public/fonts/) ловят не мусор, а контент. Апстрим держал эти файлы под
+# версией принудительно; наш свежий `git init` их молча отбросил — 25 штук.
+# Последствия были реальные: скиллы p5js и concept-diagrams ссылаются на
+# отсутствующие скрипт и 15 примеров, а шрифты попадают в образ, но не в репо,
+# из-за чего сборка из чистого clone отличается от сборки из рабочего каталога.
+!skills/creative/p5js/scripts/export-frames.js
+!skills/creative/p5js/references/export-pipeline.md
+!optional-skills/creative/concept-diagrams/examples/
+!optional-skills/creative/concept-diagrams/examples/**
+!apps/desktop/src/plugins/hello-runtime/plugin.runtime.js
+!web/public/fonts/
+!web/public/fonts/**
