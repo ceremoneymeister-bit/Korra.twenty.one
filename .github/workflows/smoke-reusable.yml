@@ -1,0 +1,10 @@
+# Диагностика №2: один локальный reusable-вызов. Если пинг бежит, а этот
+# виснет в pending с 0 джобов — сломан именно граф reusable на push-событиях.
+name: smoke-reusable
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/smoke-reusable.yml']
+jobs:
+  call-history:
+    uses: ./.github/workflows/history-check.yml
