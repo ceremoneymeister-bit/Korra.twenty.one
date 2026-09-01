@@ -18,6 +18,24 @@ from agent.account_usage import CreditsView, build_credits_view
 from hermes_cli.nous_account import NousPortalAccountInfo, NousPaidServiceAccessInfo
 
 
+
+@pytest.fixture(autouse=True)
+def _korra_pin_english(monkeypatch):
+    """Korra: дефолт интерфейса ru; тест ассертит английскую строку, но
+    проверяет ветвление «не залогинен», а не перевод."""
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
+    try:
+        from agent import i18n
+        i18n.reset_language_cache()
+    except Exception:
+        pass
+    yield
+    try:
+        from agent import i18n
+        i18n.reset_language_cache()
+    except Exception:
+        pass
+
 def _account(**kwargs) -> NousPortalAccountInfo:
     kwargs.setdefault("logged_in", True)
     kwargs.setdefault("source", "account_api")
