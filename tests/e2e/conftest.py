@@ -459,3 +459,23 @@ def discord_runner(discord_setup):
 @pytest.fixture()
 def bot_user():
     return make_fake_bot_user()
+
+
+@pytest.fixture(autouse=True)
+def _korra_pin_english_ui(monkeypatch):
+    """Korra: дефолт интерфейса ru, а e2e-тесты ассертят английские подстроки
+    в ответах слэш-команд. Они проверяют МАРШРУТИЗАЦИЮ команд, не перевод —
+    язык закрепляется env-переменной (приоритет выше config.yaml).
+    Русскость дефолта сторожат test_korra_canonical_defaults и test_i18n."""
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
+    try:
+        from agent import i18n
+        i18n.reset_language_cache()
+    except Exception:
+        pass
+    yield
+    try:
+        from agent import i18n
+        i18n.reset_language_cache()
+    except Exception:
+        pass
