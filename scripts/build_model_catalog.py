@@ -14,7 +14,7 @@ Usage::
 
     python scripts/build_model_catalog.py
 
-Output: ``website/static/api/model-catalog.json``
+Output: ``hermes_cli/data/model-catalog.json`` (Korra: переехал из website/)
 
 Live URL (after ``deploy-site.yml`` runs on merge to main):
 ``https://hermes-agent.nousresearch.com/docs/api/model-catalog.json``
@@ -39,7 +39,9 @@ from hermes_cli.models import (  # noqa: E402
     _PROVIDER_MODELS,
 )
 
-OUTPUT_PATH = os.path.join(REPO_ROOT, "website", "static", "api", "model-catalog.json")
+# Korra: website/ удалён вместе с сайтом апстрима — манифест живёт
+# в package-data движка, откуда его читает seed_cache_from_checkout().
+OUTPUT_PATH = os.path.join(REPO_ROOT, "hermes_cli", "data", "model-catalog.json")
 CATALOG_VERSION = 1
 
 

@@ -52,18 +52,15 @@ def test_every_reference_is_reachable_from_the_skill(skill_text):
     )
 
 
-def test_unknown_features_route_to_the_published_index(skill_text):
-    """The catch-all is what makes coverage of the whole product possible."""
-    assert "/docs/llms.txt" in skill_text
-    # web_extract can be disabled; terminal never is.
-    assert "curl" in skill_text, "no way to reach the index without web tools"
+def test_skill_does_not_route_to_upstream_docs(skill_text):
+    """Korra — жёсткий форк: документация Nous описывает другой код.
 
-
-def test_the_index_is_published_where_the_skill_says_it_is(skill_text):
-    """A skill pointing at a URL nobody generates is worse than no routing."""
-    spec = importlib.util.spec_from_file_location("generate_llms_txt", GENERATOR)
-    assert spec is not None and spec.loader is not None
-    gen = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(gen)
-
-    assert f"{gen.SITE_BASE}/llms.txt" in skill_text
+    Заменяет два прежних теста, которые ТРЕБОВАЛИ маршрутизации на
+    hermes-agent.nousresearch.com и на генератор из удалённого website/.
+    Инвариант перевёрнут: агент не должен отправлять пользователя туда.
+    """
+    assert "nousresearch.com" not in skill_text, (
+        "скилл направляет агента на документацию апстрима — она описывает "
+        "другой код и расходится с этой сборкой"
+    )
+    assert "--help" in skill_text, "не осталось указания на источник правды (CLI)"

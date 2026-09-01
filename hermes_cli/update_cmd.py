@@ -1924,8 +1924,10 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
         )
         _m().sys.exit(1)
     _abort_zip_update_if_dirty_tree()
+    # Korra: обновляемся из своего репозитория, а не из апстрима.
     zip_url = (
-        f"https://github.com/NousResearch/hermes-agent/archive/refs/heads/{branch}.zip"
+        "https://github.com/ceremoneymeister-bit/Korra.twenty.one"
+        f"/archive/refs/heads/{branch}.zip"
     )
 
     print("→ Downloading latest version...")
@@ -2839,14 +2841,20 @@ def _discard_stashed_changes(
     print("→ Discarded local source changes (updates.non_interactive_local_changes=discard).")
     return True
 
+# Korra: жёсткий форк — «официальный» репозиторий это МЫ.
+# От этих констант зависит _is_fork(), а от него — предложение завести
+# remote `upstream` и сделать `pull --ff-only upstream main`. С репозиторием
+# Nous в списке обновление на контуре клиента могло затянуть чужой код
+# поверх нашего движка. Переопределив официальный источник, мы убираем
+# запрещённый апстрим-синк, не вырезая саму механику обновления.
 OFFICIAL_REPO_URLS = {
-    "https://github.com/NousResearch/hermes-agent.git",
-    "git@github.com:NousResearch/hermes-agent.git",
-    "https://github.com/NousResearch/hermes-agent",
-    "git@github.com:NousResearch/hermes-agent",
+    "https://github.com/ceremoneymeister-bit/Korra.twenty.one.git",
+    "git@github.com:ceremoneymeister-bit/Korra.twenty.one.git",
+    "https://github.com/ceremoneymeister-bit/Korra.twenty.one",
+    "git@github.com:ceremoneymeister-bit/Korra.twenty.one",
 }
 
-OFFICIAL_REPO_URL = "https://github.com/NousResearch/hermes-agent.git"
+OFFICIAL_REPO_URL = "https://github.com/ceremoneymeister-bit/Korra.twenty.one.git"
 
 SKIP_UPSTREAM_PROMPT_FILE = ".skip_upstream_prompt"
 

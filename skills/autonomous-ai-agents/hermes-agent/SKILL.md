@@ -28,7 +28,8 @@ What makes Hermes different:
 
 **This skill is a hub.** The body covers identity, quick start, spawning/orchestration, and hard invariants. Everything else lives in reference files — **load the matching reference (below) before answering**; do not answer detail questions from the body alone.
 
-**Docs:** https://hermes-agent.nousresearch.com/docs/
+**Docs:** этот скилл и его `references/`. Внешнего сайта документации у Korra нет —
+документация апстрима описывает ДРУГОЙ код и расходится с этой сборкой.
 
 ## Scope & Verification
 
@@ -36,9 +37,13 @@ This skill is a concise operating guide, not the complete source of truth for ev
 
 Good verification targets, cheapest first:
 
-- **Every shipped feature, one line each: https://hermes-agent.nousresearch.com/docs/llms.txt.** Start here for any "can Hermes do X?" or "how do I do X?" — it indexes the entire documentation set with a link to the page that answers. It is generated from the docs tree on every build, so it is never behind the product. Fetch it with `web_extract`, or `curl -s https://hermes-agent.nousresearch.com/docs/llms.txt` when web tools are off. The whole documentation set in one file is at `/docs/llms-full.txt`.
-- CLI commands: `hermes --help`, `hermes <command> --help`, and `hermes_cli/main.py`
-- Source tree: https://github.com/NousResearch/hermes-agent
+- **CLI как источник правды: `hermes --help`, `hermes <command> --help`.** Это единственный
+  ответ, который ГАРАНТИРОВАННО соответствует установленной сборке. Начинай отсюда для
+  любого «умеет ли Korra X?» и «как сделать X?».
+- Дерево исходников установленной сборки — оно рядом, его можно читать напрямую.
+- `references/` этого скилла — разобранные темы, которые не влезли в тело.
+- ⚠️ Не отвечай по документации Hermes Agent: Korra — жёсткий форк, апстрим не мержится,
+  и их страницы описывают другой код. Лучше честно сказать «проверю по `--help`».
 
 Never answer "Hermes can't do that" from memory. Hermes ships far more than this skill body describes, and the index exists so a negative answer is always checkable.
 
@@ -46,7 +51,7 @@ Never answer "Hermes can't do that" from memory. Hermes ships far more than this
 
 ```bash
 # Install (shell installer — sets up uv, Python, the venv, and the launcher)
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+# (Korra ставится образом из registry; исходники — приватный репозиторий)
 
 # Interactive chat (default surface; set display.interface: tui to launch the Ink TUI instead)
 hermes
@@ -88,7 +93,7 @@ Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile i
 
 | User wants... | Load |
 |---|---|
-| **Anything not listed below — "can Hermes do X?", "how do I set up X?"** | **https://hermes-agent.nousresearch.com/docs/llms.txt** |
+| **Anything not listed below — "can Korra do X?", "how do I set up X?"** | **`hermes --help` / `hermes <command> --help`, затем код** |
 | Bots that chat, run routines, or message each other; the Bots tab | docs: `/user-guide/bot-mode` |
 | CLI commands, subcommands, flags, "how do I run X" | `references/cli-reference.md` |
 | In-session slash commands | `references/slash-commands.md` |
@@ -111,8 +116,8 @@ Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile i
 | Connecting a messaging platform (Telegram, Discord, Slack, WhatsApp, …) | docs: `/user-guide/messaging` |
 
 The reference list above is not the feature list — it is the set of topics that
-need more than their docs page. For everything else Hermes ships, fetch
-`llms.txt` and it maps the question to the page that answers it.
+need more than one screen. For everything else Korra ships, ask the CLI itself
+(`hermes --help`, `hermes <command> --help`) and read the source tree.
 
 Two theming rules that hold even without loading the reference: **you apply skins yourself** (`hermes config set display.skin <name>` — every surface repaints live within ~a second; don't tell the user to run `/skin`), and **to tweak one color, edit the ACTIVE skin** (`hermes skin set <key> <hex>`) — never fork `default`, which drops the palette and resets the background.
 

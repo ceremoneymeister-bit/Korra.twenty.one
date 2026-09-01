@@ -625,7 +625,8 @@ def recommended_update_command_for_method(method: str) -> str:
     if is_nix_install_method(method):
         return _NIX_UPDATE_MSG
     if method == "docker":
-        return "docker pull nousresearch/hermes-agent:latest"
+        # Korra: свой registry, не образ апстрима.
+        return "docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest"
     if method == "apt":
         # By contract, the current "apt" install method is the Termux APT
         # distribution. It deliberately uses Termux's `pkg` frontend.
@@ -663,23 +664,22 @@ def recommended_update_command() -> str:
 _DOCKER_UPDATE_MESSAGE = """\
 ✗ ``hermes update`` doesn't apply inside the Docker container.
 
-Hermes Agent runs as a published image (nousresearch/hermes-agent), not a
-git checkout — the container has no working tree to pull into.  Update by
+Korra runs as a published image (ghcr.io/ceremoneymeister-bit/korra.twenty.one),
+not a git checkout — the container has no working tree to pull into.  Update by
 pulling a fresh image and restarting your container instead:
 
-  docker pull nousresearch/hermes-agent:latest
+  docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
   # then restart whatever started the container, e.g.:
-  docker compose up -d --force-recreate hermes-agent
+  docker compose up -d --force-recreate korra
   # or, for ad-hoc runs, exit the current container and `docker run` again
 
 Verify the new version after restart:
-  docker run --rm nousresearch/hermes-agent:latest --version
+  docker run --rm ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest --version
 
 Notes:
-  • If you pinned a specific tag (e.g. ``:v0.14.0``) the ``:latest`` tag
-    won't move your container — pull the newer tag you actually want, or
-    switch to ``:latest`` / ``:main`` for rolling updates.  See available
-    tags at https://hub.docker.com/r/nousresearch/hermes-agent/tags
+  • If you pinned a specific tag the ``:latest`` tag won't move your
+    container — pull the newer tag you actually want, or switch to
+    ``:latest`` / ``:main`` for rolling updates.
   • Your config and session history live under ``$HERMES_HOME`` (``/opt/data``
     in the container, typically bind-mounted from the host) and persist
     across image upgrades — re-pulling doesn't lose any state.

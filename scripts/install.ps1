@@ -383,8 +383,9 @@ $script:ResolvedPathReport = @{
 # Configuration
 # ============================================================================
 
-$RepoUrlSsh = "git@github.com:NousResearch/hermes-agent.git"
-$RepoUrlHttps = "https://github.com/NousResearch/hermes-agent.git"
+# Korra: жёсткий форк — ставим свой движок, а не апстримный.
+$RepoUrlSsh = "git@github.com:ceremoneymeister-bit/Korra.twenty.one.git"
+$RepoUrlHttps = "https://github.com/ceremoneymeister-bit/Korra.twenty.one.git"
 $PythonVersion = "3.11"
 # Minor versions the installer accepts when the requested $PythonVersion isn't
 # available, in preference order.  uv discovers both uv-managed and system

@@ -65,15 +65,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_CATALOG_URL = (
     "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json"
 )
-# Fallback fetch chain. The Docusaurus site is served through Vercel, which
-# occasionally returns HTTP 403 + x-vercel-mitigated: challenge for non-
-# browser clients (urllib, curl). When that happens the disk cache goes
-# stale and new model releases never reach the picker. The raw GitHub URL
-# is the same manifest published from the same repo and is not bot-gated,
-# so we fall through to it whenever the primary URL fails.
-DEFAULT_CATALOG_FALLBACK_URLS: tuple[str, ...] = (
-    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/website/static/api/model-catalog.json",
-)
+# Korra: запасной URL на raw.githubusercontent апстрима убран. Это была вторая
+# дорога, по которой ЧУЖОЙ манифест мог сменить дефолтную модель на контуре
+# клиента — та же зависимость, что и основной URL, только в обход него.
+# Цепочка пуста; при выключенном model_catalog (наш дефолт) списки берутся из
+# кода, а локальный снимок лежит в hermes_cli/data/model-catalog.json.
+DEFAULT_CATALOG_FALLBACK_URLS: tuple[str, ...] = ()
 DEFAULT_TTL_HOURS = 1
 DEFAULT_FETCH_TIMEOUT = 8.0
 SUPPORTED_SCHEMA_VERSION = 1
@@ -449,7 +446,14 @@ def seed_cache_from_checkout(project_root: "Path | str") -> bool:
     as non-fatal — the network fetch path still applies on the next picker
     open).
     """
-    src = Path(project_root) / "website" / "static" / "api" / "model-catalog.json"
+    # Korra: манифест переехал из website/ (каталог удалён вместе с сайтом
+    # апстрима) в package-data движка — hermes_cli/data/model-catalog.json.
+    # Так он доступен и в контейнере, где чекаута репозитория нет вовсе,
+    # а не только при установке из исходников. Старый путь остаётся как
+    # запасной, чтобы функция не сломалась на чужом дереве.
+    src = Path(__file__).resolve().parent / "data" / "model-catalog.json"
+    if not src.exists():
+        src = Path(project_root) / "website" / "static" / "api" / "model-catalog.json"
     try:
         with open(src, encoding="utf-8") as fh:
             data = json.load(fh)

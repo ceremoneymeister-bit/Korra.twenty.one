@@ -323,8 +323,11 @@ fn upgrade_cached_script(kind: ScriptKind, cached: &Path, emit_log: &impl Fn(&st
 /// packets) never errors — the whole bootstrap would hang here instead of
 /// falling back to the cached script.
 async fn download(kind: ScriptKind, commit_or_ref: &str, dest_path: &Path) -> Result<()> {
+    // Korra: жёсткий форк — установочные скрипты берём из своего репозитория.
+    // Он приватный, поэтому этот путь требует токена; клиентская раскатка
+    // идёт готовым образом из registry, а не бутстрапом из raw.github.
     let url = format!(
-        "https://raw.githubusercontent.com/NousResearch/hermes-agent/{}/scripts/{}",
+        "https://raw.githubusercontent.com/ceremoneymeister-bit/Korra.twenty.one/{}/scripts/{}",
         commit_or_ref,
         kind.filename()
     );

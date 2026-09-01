@@ -19,6 +19,12 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("HERMES_HOME", str(home))
 
+    # Korra: в форке model_catalog ВЫКЛЮЧЕН по умолчанию — удалённый манифест
+    # апстрима мог молча сменить дефолтную модель на контуре клиента. Тесты
+    # ниже проверяют саму механику загрузки, которая остаётся рабочей при
+    # явном включении, поэтому включаем её здесь явно.
+    (home / "config.yaml").write_text("model_catalog:\n  enabled: true\n", encoding="utf-8")
+
     # Force a fresh catalog module state for each test.
     import importlib
     from hermes_cli import model_catalog
@@ -138,6 +144,20 @@ class TestFallbackChain:
     """
 
     PRIMARY = "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json"
+
+    def test_no_upstream_urls_in_fallback_chain(self):
+        """Korra — жёсткий форк: чужой манифест не должен решать за нас.
+
+        Заменяет два прежних теста, которые ТРЕБОВАЛИ отката на
+        raw.githubusercontent.com апстрима. Это была вторая дорога, по
+        которой их манифест мог сменить дефолтную модель на контуре клиента.
+        """
+        from hermes_cli import model_catalog
+        for url in model_catalog.DEFAULT_CATALOG_FALLBACK_URLS:
+            assert "nousresearch" not in url and "NousResearch" not in url, (
+                f"в цепочке отката остался источник апстрима: {url}"
+            )
+
     FALLBACK = (
         "https://raw.githubusercontent.com/NousResearch/hermes-agent"
         "/main/website/static/api/model-catalog.json"
@@ -156,43 +176,6 @@ class TestFallbackChain:
 
         assert result is not None
         assert calls == [self.PRIMARY], "fallback URLs must not be touched on primary success"
-
-    def test_falls_through_to_raw_github_on_primary_failure(self, isolated_home):
-        from hermes_cli import model_catalog
-        calls: list[str] = []
-
-        def fake_fetch(url, timeout):
-            calls.append(url)
-            if url == self.PRIMARY:
-                return None  # simulate Vercel 403
-            return _valid_manifest()
-
-        with patch.object(model_catalog, "_fetch_manifest", side_effect=fake_fetch):
-            result = model_catalog._fetch_manifest_with_fallback(self.PRIMARY, 5.0)
-
-        assert result is not None
-        assert calls == [self.PRIMARY, self.FALLBACK]
-
-
-    def test_get_catalog_uses_fallback_chain(self, isolated_home):
-        """End-to-end: ``get_catalog`` routes through the fallback helper so
-        a primary URL failure transparently produces a working catalog."""
-        from hermes_cli import model_catalog
-        manifest = _valid_manifest()
-        calls: list[str] = []
-
-        def fake_fetch(url, timeout):
-            calls.append(url)
-            if url == self.PRIMARY:
-                return None
-            return manifest
-
-        with patch.object(model_catalog, "_fetch_manifest", side_effect=fake_fetch):
-            result = model_catalog.get_catalog(force_refresh=True)
-
-        assert result == manifest
-        assert self.FALLBACK in calls
-
 
 class TestCuratedAccessors:
     def test_openrouter_returns_tuples(self, isolated_home):
@@ -258,9 +241,11 @@ class TestDefaultModelFromCache:
         import hermes_cli.model_catalog as model_catalog
         from hermes_cli.models import PREFERRED_SILENT_DEFAULT_MODEL
 
-        repo_root = Path(model_catalog.__file__).resolve().parent.parent
+        # Korra: манифест переехал из website/ (удалён вместе с сайтом
+        # апстрима) в package-data движка.
+        pkg_dir = Path(model_catalog.__file__).resolve().parent
         manifest = json.loads(
-            (repo_root / "website" / "static" / "api" / "model-catalog.json").read_text()
+            (pkg_dir / "data" / "model-catalog.json").read_text()
         )
         for provider in ("openrouter", "nous"):
             block = manifest["providers"][provider]

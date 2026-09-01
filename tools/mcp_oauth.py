@@ -1300,14 +1300,19 @@ def remove_oauth_tokens(
 # given flow is eligible and hands the URL to ``OAuthClientProvider``.
 # ---------------------------------------------------------------------------
 
-# Published from ``website/static/oauth/client-metadata.json`` by the docs
-# deploy. The github.io origin is deliberate: an authorization server MUST NOT
-# follow HTTP redirects when fetching the document
-# (draft-ietf-oauth-client-id-metadata-document section 5), and
-# hermes-agent.nousresearch.com/docs/* 301s here.
-_CIMD_CLIENT_METADATA_URL = (
-    "https://nousresearch.github.io/hermes-agent/docs/oauth/client-metadata.json"
-)
+# Korra: жёсткий форк — CIMD выключен, потоки идут через DCR.
+#
+# Раньше здесь стоял документ, публикуемый апстримом. Он определяет, каким
+# OAuth-клиентом мы представляемся стороннему MCP-серверу, и какие
+# redirect-порты объявлены. То есть чужая сторона могла в любой момент сменить
+# нашу клиентскую идентичность и набор портов. Локальную копию контракта мы
+# к тому же удалили вместе с website/, так что сверять стало не с чем.
+#
+# Пустая строка не проходит _is_valid_cimd_url(), и _maybe_use_cimd() отдаёт
+# None — это штатный путь на Dynamic Client Registration, описанный в его же
+# docstring. Вернуть CIMD можно, опубликовав СВОЙ client-metadata.json и
+# прописав его сюда (или в oauth.client_metadata_url конфига).
+_CIMD_CLIENT_METADATA_URL = ""
 
 # Loopback callback ports declared in that document. The redirect URI in the
 # authorization request must be an exact string match against a listed one
