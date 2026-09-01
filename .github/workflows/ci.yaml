@@ -132,11 +132,10 @@ jobs:
     if: ${{ false && (needs.detect.outputs.python_prod == 'true' || needs.detect.outputs.frontend == 'true') }}
     uses: ./.github/workflows/e2e-desktop.yml
 
-  docs-site:
-    name: Docs Site
-    needs: detect
-    if: needs.detect.outputs.site == 'true'
-    uses: ./.github/workflows/docs-site-checks.yml
+  # Korra: docs-site и contributor-check удалены вместе с website/ и
+  # contributors/. GitHub валидирует локальные reusable workflows ДО
+  # вычисления if — ссылка на отсутствующий файл делает весь workflow
+  # невалидным, и ни один push/PR не запускает вообще ничего.
 
   history-check:
     name: Deny unrelated histories
@@ -144,11 +143,6 @@ jobs:
     if: needs.detect.outputs.event_name == 'pull_request'
     uses: ./.github/workflows/history-check.yml
 
-  contributor-check:
-    name: Check contributors
-    needs: detect
-    if: needs.detect.outputs.python == 'true'
-    uses: ./.github/workflows/contributor-check.yml
 
   uv-lockfile:
     name: Check uv.lock
@@ -224,9 +218,7 @@ jobs:
       - installer-tests
       - rust-tests
       - e2e-desktop
-      - docs-site
       - history-check
-      - contributor-check
       - uv-lockfile
       - lockfile-diff
       - docker-lint
