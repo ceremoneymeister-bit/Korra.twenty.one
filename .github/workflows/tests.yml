@@ -21,7 +21,13 @@ jobs:
     # 96 cores clear the floor that the slowest single test file sets (about
     # 82s). A second slice divides work that is already at that floor, and
     # adds a second setup.
-    runs-on: ubuntu-latest
+    #
+    # Korra: тяжёлая матрица идёт на НАШЕМ self-hosted раннере (8 ядер
+    # ceremoneymeister). На 2-ядерном hosted тайминговые тесты голодают и
+    # падают ротацией (~12 разных за прогон), плюс полный прогон жёг
+    # ~80 минут квоты. Тот же приём, что на линии korra-agent-2 с 10.07.
+    # ⚠️ ubuntu-latest НЕ роутится на self-hosted — только явные метки.
+    runs-on: [self-hosted, linux, x64]
     # Korra: таймаут поднят с 30 — он был откалиброван под 32-ядерный раннер
     # апстрима. На стандартном 2-ядерном та же матрица идёт дольше и джоб
     # убивался «exceeded the maximum execution time of 30m0s» (attempt 2
