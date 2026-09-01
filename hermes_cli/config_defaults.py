@@ -1521,6 +1521,12 @@ DEFAULT_CONFIG = {
         # UI language for static user-facing messages (approval prompts, a
         # handful of gateway slash-command replies).  Does NOT affect agent
         # responses, log lines, tool outputs, or slash-command descriptions.
+        #
+        # Уточнение контракта (аудит, находка 12): канбан-«wake» инструкции
+        # (gateway/kanban_watchers.py) локализуются ЭТИМ же ключом и уходят
+        # модели как user-сообщение. Для русскоязычного продукта это желаемое
+        # поведение — модель прекрасно читает русские управляющие инструкции, —
+        # но это НЕ «только отображение», поэтому зафиксировано здесь явно.
         # Полный список — SUPPORTED_LANGUAGES в agent/i18n.py; неизвестное
         # значение откатывается на en.
         #
