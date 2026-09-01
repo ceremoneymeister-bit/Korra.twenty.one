@@ -74,7 +74,7 @@ metadata:
 - State the capability, not the implementation, and don't repeat the skill name.
 - No marketing words ("powerful", "comprehensive", "seamless", "advanced").
 - The system prompt skill index truncates at 57 chars + "..." — the trigger/capability must be self-contained in that window.
-- If the description contains a `:`, wrap it in double quotes or YAML parses it as a mapping and the docs generator crashes. Quotes don't count toward the 60.
+- If the description contains a `:`, wrap it in double quotes or YAML parses it as a mapping. Quotes don't count toward the 60.
 
 Good: `Track named companies for material news with cited digests.`
 Bad: `Use when a user asks to monitor named competitors or companies for product launches, pricing changes, funding, ...` (240 chars — rejected in review)
@@ -145,10 +145,10 @@ A skill exists to make the agent's process more predictable — the agent reliab
 5. **Use strong leading words** ("tight loop," "root cause," "regression test") over long repeated explanations.
 6. **Prune duplication and no-ops.** "Be careful" and "use best practices" don't change model behavior — replace with a checkable criterion or delete.
 
-## Tests and Docs (required for repo skills)
+## Tests and Documentation (required for repo skills)
 
 1. **Tests** live at `tests/skills/test_<skill>_skill.py` — stdlib + pytest + `unittest.mock` only, no live network. Run via `scripts/run_tests.sh tests/skills/test_<skill>_skill.py -q`. (The generic `tests/tools/test_skill_manager_tool.py` passing proves nothing about YOUR skill.)
-2. **Docs regen:** run `python website/scripts/generate-skill-docs.py`, then apply scope discipline — the generator rewrites EVERY auto-gen page. `git checkout --` everything that isn't yours; the final diff must show only your SKILL.md, your one per-skill docs page, a one-line catalog row, and a one-line `website/sidebars.ts` insertion (verify with `search_files(pattern='<your-slug>', path='website/sidebars.ts')` — exactly one hit, or the page is an orphan).
+2. **Documentation:** the website and skill-docs generator were removed from this fork. Do not generate per-skill docs pages or recreate website catalog/sidebar entries; keep the skill's documentation in its `SKILL.md` and supporting files.
 3. **`.env.example`** (only if the skill needs new env vars): one clearly delimited commented block; touch nothing else in the file.
 
 ## Workflow
@@ -170,7 +170,7 @@ A skill exists to make the agent's process more predictable — the agent reliab
    assert len(content) <= 100_000
    ```
    Also verify every `related_skills` entry exists in-repo.
-5. **Add tests + regen docs** (previous section).
+5. **Add tests** (previous section). No docs pages are generated in this fork.
 6. **Git add + commit** on the active branch; open a PR.
 7. **Note:** the CURRENT session's skill loader is cached — `skill_view` / `skills_list` will not see the new skill until a new session. This is expected, not a bug.
 
@@ -179,18 +179,18 @@ A skill exists to make the agent's process more predictable — the agent reliab
 - **Small fix:** `skill_manage(action='patch', ...)` works on in-repo skills, as does `patch`.
 - **Major rewrite:** `write_file` the whole SKILL.md.
 - **Supporting files:** `write_file` to `references/`, `templates/`, or `scripts/` under the skill dir.
-- **Always commit** — in-repo skills are source, not runtime state. Re-run the docs generator when frontmatter changed.
+- **Always commit** — in-repo skills are source, not runtime state.
 
 ## Common Pitfalls
 
 1. **Using `skill_manage(action='create')` for an in-repo skill.** It writes to `~/.hermes/skills/`, not the repo tree. Use `write_file`.
-2. **Trusting the validator's limits as the standard.** The validator allows 1024-char descriptions; review rejects anything over 60. The validator doesn't check `platforms:`, author format, tests, or docs — review does.
+2. **Trusting the validator's limits as the standard.** The validator allows 1024-char descriptions; review rejects anything over 60. The validator doesn't check `platforms:`, author format, or tests — review does.
 3. **`author: Hermes Agent` on a contributed skill.** Credit the human first.
 4. **Leading whitespace before `---`.** Validation fails on any leading blank line or BOM.
 5. **Description too generic or trigger buried past char 57.**
 6. **`related_skills` pointing at skills that don't exist in-repo** (user-local, planned, or in a sibling PR).
 7. **Duplicating a peer.** Survey the category first; extend rather than sibling.
-8. **Skipping the docs generator or pushing its unrelated drift.** Both directions are wrong: no regen = orphan skill with no docs page; blind regen = a ballooned diff full of other skills' drift.
+8. **Recreating the removed website or docs generator.** This fork keeps skill documentation in `SKILL.md` and its supporting files.
 9. **Expecting the current session to see the new skill.** The loader is initialized at session start.
 10. **Letting skills accumulate sediment.** When adding a rule, remove the old wording it replaces.
 
@@ -208,5 +208,5 @@ A skill exists to make the agent's process more predictable — the agent reliab
 - [ ] No machine-local paths anywhere in the file
 - [ ] Each ordered step has a checkable completion criterion
 - [ ] Tests at `tests/skills/test_<skill>_skill.py` pass under `scripts/run_tests.sh`
-- [ ] Docs regenerated with scope discipline; sidebar has exactly one entry for the slug
+- [ ] No generated docs page, website catalog row, or sidebar entry was added
 - [ ] `git add` + commit on the intended branch; PR opened

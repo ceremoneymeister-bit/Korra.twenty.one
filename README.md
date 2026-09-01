@@ -1,24 +1,28 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Hermes Agent" width="100%">
+  <img src="assets/banner.png" alt="Korra 21" width="100%">
 </p>
 
-# Hermes Agent ☤
+# Korra 21 ☤
 <p align="center">
-  <a href="https://hermes-agent.nousresearch.com/">Hermes Agent</a> | <a href="https://hermes-agent.nousresearch.com/">Hermes Desktop</a>
+  <a href="https://github.com/ceremoneymeister-bit/Korra.twenty.one">Private repository</a> | <code>ghcr.io/ceremoneymeister-bit/korra.twenty.one</code>
 </p>
 <p align="center">
-  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
-  <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://nousresearch.com"><img src="https://img.shields.io/badge/Built%20by-Nous%20Research-blueviolet?style=for-the-badge" alt="Built by Nous Research"></a>
+  <a href="https://github.com/ceremoneymeister-bit/Korra.twenty.one"><img src="https://img.shields.io/badge/Repository-private-blueviolet?style=for-the-badge" alt="Private repository"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
   <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
   <a href="README.ur-pk.md"><img src="https://img.shields.io/badge/Lang-اردو-green?style=for-the-badge" alt="اردو"></a>
   <a href="README.es.md"><img src="https://img.shields.io/badge/Lang-Español-orange?style=for-the-badge" alt="Español"></a>
 </p>
 
-**The self-improving AI agent built by [Nous Research](https://nousresearch.com).** It's the only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge, searches its own past conversations, and builds a deepening model of who you are across sessions. Run it on a $5 VPS, a GPU cluster, or serverless infrastructure that costs nearly nothing when idle. It's not tied to your laptop — talk to it from Telegram while it works on a cloud VM.
+**Korra is a self-improving AI agent and a private hard fork of Hermes Agent
+0.21.** It has a built-in learning loop: it creates skills from experience,
+improves them during use, persists knowledge, searches past conversations, and
+builds a deepening model of who you are across sessions. Upstream authorship and
+licensing are preserved in [LICENSE](LICENSE).
 
-Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenRouter, OpenAI, your own endpoint, and [many others](https://hermes-agent.nousresearch.com/docs/integrations/providers). Switch with `hermes model` — no code changes, no lock-in.
+Use any model you want — Nous Portal, OpenRouter, OpenAI, your own endpoint, and
+the providers included in the installed build. Inspect them with
+`hermes model --help`; switch with `hermes model` — no code changes, no lock-in.
 
 <table>
 <tr><td><b>A real terminal interface</b></td><td>Full TUI with multiline editing, slash-command autocomplete, conversation history, interrupt-and-redirect, and streaming tool output.</td></tr>
@@ -34,36 +38,43 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 
 ## Quick Install
 
-### Linux, macOS, WSL2, Termux
+Korra's source repository,
+[`ceremoneymeister-bit/Korra.twenty.one`](https://github.com/ceremoneymeister-bit/Korra.twenty.one),
+is private. Client installations use the ready-made container image; there is
+no public shell or PowerShell installer. Authenticate to GHCR first if your
+account is prompted for package access.
+
+### Linux, macOS, WSL2
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
+docker run --rm -it \
+  -v "${HOME}/.hermes:/opt/data" \
+  ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
 ```
 
-### Windows (native, PowerShell)
+### Windows (Docker Desktop, PowerShell)
 
-> **Heads up:** Native Windows runs Hermes without WSL — CLI, gateway, TUI, and tools all work natively. If you'd rather use WSL2, the Linux/macOS one-liner above works there too. Found a bug? Please [file issues](https://github.com/NousResearch/hermes-agent/issues).
-
-Run this in PowerShell:
+Run the ready-made image directly:
 
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
+docker run --rm -it `
+  -v "${env:USERPROFILE}/.hermes:/opt/data" `
+  ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
 ```
 
-The installer handles everything: uv, Python 3.11, Node.js, ripgrep, ffmpeg, **and a portable Git Bash** (MinGit, unpacked to `%LOCALAPPDATA%\hermes\git` — no admin required, completely isolated from any system Git install). Hermes uses this bundled Git Bash to run shell commands.
+For the background gateway and dashboard on Windows, use the supplied compose
+file:
 
-If you already have Git installed, the installer detects it and uses that instead. Otherwise a ~45MB MinGit download is all you need — it won't touch or interfere with any system Git.
-
-> **Android / Termux:** The tested manual path is documented in the [Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux). On Termux, Hermes installs a curated `.[termux]` extra because the full `.[all]` extra currently pulls Android-incompatible voice dependencies.
->
-> **Windows:** Native Windows is fully supported — the PowerShell one-liner above installs everything. If you'd rather use WSL2, the Linux command works there too. Native Windows install lives under `%LOCALAPPDATA%\hermes`; WSL2 installs under `~/.hermes` as on Linux.
-
-After installation:
-
-```bash
-source ~/.bashrc    # reload shell (or: source ~/.zshrc)
-hermes              # start chatting!
+```powershell
+docker compose -f docker-compose.windows.yml pull
+docker compose -f docker-compose.windows.yml up -d
 ```
+
+The mounted `.hermes` directory keeps configuration and sessions between
+container runs. Termux does not have a separate public client installer in this
+fork.
 
 ### Troubleshooting
 

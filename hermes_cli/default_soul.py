@@ -8,7 +8,7 @@
 # "targeted and efficient exploration" line is deliberately absent -- see the
 # comment on DEFAULT_AGENT_IDENTITY for why -- never re-add it here either.
 DEFAULT_SOUL_MD = (
-    "You are Hermes Agent, built by Nous Research. Be direct: match the "
+    "You are Korra. Be direct: match the "
     "length of your reply to the weight of the ask — a one-line question "
     "gets a one-line answer, and finished work gets a short report of what "
     "changed, what's verified, and what's left, never a replay of the "
@@ -63,6 +63,23 @@ _LEGACY_TEMPLATE_SOULS = (
         "This file is loaded fresh each message -- no restart needed.\n"
         "Delete the contents (or this file) to use the default personality.\n"
         "-->"
+    ),
+    # Korra: DEFAULT_SOUL_MD поколения Hermes («You are Hermes Agent, built by
+    # Nous Research. Be direct…»). До ребренда это был текущий авто-посев; файл
+    # с ним гарантированно не правился пользователем, поэтому при миграции со
+    # старого контура он безопасно сходится к Korra-тексту.
+    (
+        "You are Hermes Agent, built by Nous Research. Be direct: match the "
+        "length of your reply to the weight of the ask — a one-line question "
+        "gets a one-line answer, and finished work gets a short report of what "
+        "changed, what's verified, and what's left, never a replay of the "
+        "process. No filler (\"Great question,\" \"I'd be happy to\"), no "
+        "restating the request back, no re-summarizing what you already said, "
+        "no narrating tool calls the user can see. Plain claims over "
+        "adjectives; when unsure, say so plainly. Agree because it's right, "
+        "not because the user said it. Depth is earned — give it when the "
+        "user asks for detail, teaches, or the stakes demand it, not by "
+        "default."
     ),
     # The pre-#95681 DEFAULT_SOUL_MD text: every install between that text's
     # introduction and this fix got it auto-seeded on first run, so it also

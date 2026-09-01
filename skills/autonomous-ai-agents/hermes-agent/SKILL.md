@@ -1,6 +1,6 @@
 ---
 name: hermes-agent
-description: "Use, configure, theme, extend, and orchestrate Hermes Agent."
+description: "Use, configure, theme, extend, and orchestrate Korra."
 version: 3.2.0
 author: Hermes Agent + Teknium
 license: MIT
@@ -8,22 +8,27 @@ platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [hermes, setup, configuration, multi-agent, spawning, cli, gateway, bots, bot-mode, features, themes, skins, desktop-plugins, tui-widgets, petdex, development]
-    homepage: https://github.com/NousResearch/hermes-agent
+    homepage: https://github.com/ceremoneymeister-bit/Korra.twenty.one
     related_skills: [claude-code, codex, opencode]
 ---
 
-# Hermes Agent
+# Korra
 
-Hermes Agent is an open-source AI agent framework by Nous Research that runs in your terminal, a native desktop app, messaging platforms, and IDEs. It's in the same category as Claude Code (Anthropic), Codex (OpenAI), and OpenClaw — autonomous coding and task-execution agents that use tool calling to interact with your system. Hermes works with any LLM provider (OpenRouter, Anthropic, OpenAI, Google, DeepSeek, xAI, local models, and 20+ others) and runs on Linux, macOS, Windows, and WSL.
+You are Korra, an AI agent that runs in a terminal, a native desktop app,
+messaging platforms, and IDEs. Korra is in the same category as Claude Code
+(Anthropic), Codex (OpenAI), and OpenClaw — autonomous coding and task-execution
+agents that use tool calling to interact with the system. Korra works with any
+LLM provider (OpenRouter, Anthropic, OpenAI, Google, DeepSeek, xAI, local models,
+and 20+ others) and runs on Linux, macOS, Windows, and WSL.
 
-What makes Hermes different:
+What makes Korra different:
 
-- **Self-improving through skills** — Hermes learns from experience by saving reusable procedures as skills that load into future sessions.
+- **Self-improving through skills** — Korra learns from experience by saving reusable procedures as skills that load into future sessions.
 - **Persistent memory across sessions** — remembers who you are, your preferences, environment details, and lessons learned. Pluggable memory backends.
 - **Multi-platform gateway** — the same agent runs on Telegram, Discord, Slack, WhatsApp, iMessage, Signal, Matrix, Teams, Email, and a dozen more platforms with full tool access, not just chat.
 - **Many surfaces** — the same agent core drives the CLI, the Ink TUI, a native Electron desktop app, a web dashboard, and an ACP server for IDEs (VS Code / Zed / JetBrains).
 - **Provider-agnostic** — swap models and providers mid-workflow; credential pools rotate across multiple API keys automatically.
-- **Profiles** — run multiple independent Hermes instances with isolated configs, sessions, skills, and memory.
+- **Profiles** — run multiple independent Korra instances with isolated configs, sessions, skills, and memory.
 - **Extensible & themeable** — plugins, MCP servers, custom tools, webhook triggers, cron scheduling, skins that theme every surface, desktop UI plugins, TUI widgets, and pet mascots.
 
 **This skill is a hub.** The body covers identity, quick start, spawning/orchestration, and hard invariants. Everything else lives in reference files — **load the matching reference (below) before answering**; do not answer detail questions from the body alone.
@@ -33,7 +38,10 @@ What makes Hermes different:
 
 ## Scope & Verification
 
-This skill is a concise operating guide, not the complete source of truth for every Hermes feature. If a Hermes feature, command, or setting is not mentioned here or in a reference, do not treat that absence as evidence that it does not exist. Check the live repository and official docs before giving a negative answer.
+This skill is a concise operating guide, not the complete source of truth for
+every Korra feature. If a Korra feature, command, or setting is not mentioned
+here or in a reference, do not treat that absence as evidence that it does not
+exist. Check the installed CLI and source code before giving a negative answer.
 
 Good verification targets, cheapest first:
 
@@ -42,10 +50,12 @@ Good verification targets, cheapest first:
   любого «умеет ли Korra X?» и «как сделать X?».
 - Дерево исходников установленной сборки — оно рядом, его можно читать напрямую.
 - `references/` этого скилла — разобранные темы, которые не влезли в тело.
-- ⚠️ Не отвечай по документации Hermes Agent: Korra — жёсткий форк, апстрим не мержится,
-  и их страницы описывают другой код. Лучше честно сказать «проверю по `--help`».
+- Для вопросов о Korra опирайся на установленную CLI и код: это жёсткий форк,
+  апстрим не мержится, а его страницы описывают другую сборку.
 
-Never answer "Hermes can't do that" from memory. Hermes ships far more than this skill body describes, and the index exists so a negative answer is always checkable.
+Never answer "Korra can't do that" from memory. Korra ships far more than this
+skill body describes, and the index exists so a negative answer is always
+checkable.
 
 ## Quick Start
 
@@ -94,7 +104,7 @@ Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile i
 | User wants... | Load |
 |---|---|
 | **Anything not listed below — "can Korra do X?", "how do I set up X?"** | **`hermes --help` / `hermes <command> --help`, затем код** |
-| Bots that chat, run routines, or message each other; the Bots tab | docs: `/user-guide/bot-mode` |
+| Bots that chat, run routines, or message each other; the Bots tab | `hermes --help`, then the installed bot-mode code |
 | CLI commands, subcommands, flags, "how do I run X" | `references/cli-reference.md` |
 | In-session slash commands | `references/slash-commands.md` |
 | Provider setup, API keys, OAuth | `references/providers-and-models.md` |
@@ -113,7 +123,7 @@ Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile i
 | Contributing code: adding tools, slash commands, tests | `references/contributor-guide.md` |
 | delegate_task "capped at N" reports | `references/delegate-task-concurrency-diagnosis.md` |
 | "Can app X use my Nous Portal subscription/OAuth?" | `references/portal-auth-for-third-party-apps.md` |
-| Connecting a messaging platform (Telegram, Discord, Slack, WhatsApp, …) | docs: `/user-guide/messaging` |
+| Connecting a messaging platform (Telegram, Discord, Slack, WhatsApp, …) | `hermes gateway --help`, then the installed platform adapter |
 
 The reference list above is not the feature list — it is the set of topics that
 need more than one screen. For everything else Korra ships, ask the CLI itself
@@ -121,9 +131,10 @@ need more than one screen. For everything else Korra ships, ask the CLI itself
 
 Two theming rules that hold even without loading the reference: **you apply skins yourself** (`hermes config set display.skin <name>` — every surface repaints live within ~a second; don't tell the user to run `/skin`), and **to tweak one color, edit the ACTIVE skin** (`hermes skin set <key> <hex>`) — never fork `default`, which drops the palette and resets the background.
 
-## Spawning Additional Hermes Instances
+## Spawning Additional Korra Instances
 
-Run additional Hermes processes as fully independent subprocesses — separate sessions, tools, and environments.
+Run additional Korra processes as fully independent subprocesses — separate
+sessions, tools, and environments. The executable remains `hermes`.
 
 ### When to Use This vs delegate_task
 
@@ -146,7 +157,7 @@ terminal(command="hermes chat -q 'Set up CI/CD for ~/myapp'", background=true)
 
 ### Interactive PTY Mode (via tmux)
 
-Hermes uses prompt_toolkit, which requires a real terminal. Use tmux for interactive spawning:
+Korra uses prompt_toolkit, which requires a real terminal. Use tmux for interactive spawning:
 
 ```
 # Start
@@ -199,7 +210,7 @@ terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_14305
 - **Use `hermes chat -q` for fire-and-forget** — no PTY needed
 - **Use tmux for interactive sessions** — raw PTY mode has `\r` vs `\n` issues with prompt_toolkit
 - **For scheduled tasks**, use the `cronjob` tool instead of spawning — handles delivery and retry
-- **"delegate_task is capped at N" reports** — see `references/delegate-task-concurrency-diagnosis.md`. Three real cap paths in Hermes; if none fired, the model is self-limiting and rationalising it as "the runtime caps."
+- **"delegate_task is capped at N" reports** — see `references/delegate-task-concurrency-diagnosis.md`. Three real cap paths in Korra; if none fired, the model is self-limiting and rationalising it as "the runtime caps."
 - **"Can $external_app use my Nous Portal subscription / OAuth?"** — see `references/portal-auth-for-third-party-apps.md`. Walk the user through three layers (plugin-vs-app, what Portal actually exposes, local-broker-proxy option).
 
 ## Surfaces (quick orientation)
