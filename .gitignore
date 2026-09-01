@@ -228,3 +228,11 @@ native/fts5_cjk/*.so
 !apps/desktop/src/plugins/hello-runtime/plugin.runtime.js
 !web/public/fonts/
 !web/public/fonts/**
+
+# Korra: рабочие каталоги песочницы кодинг-агентов. bwrap требует их наличия
+# в корне проекта и падает с 'Can't mkdir: Permission denied', если их нет —
+# создавать сам он не может, потому что делает это уже без привилегий.
+# Локальные артефакты машины, не содержимое форка.
+.agents/
+.codex/
+.claude/
