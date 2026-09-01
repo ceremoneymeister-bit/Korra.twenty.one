@@ -73,7 +73,11 @@ import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { PluginSlot } from "@/plugins";
-import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
+import {
+  isProductUiMode,
+  isDashboardEmbeddedChatEnabled,
+} from "@/lib/dashboard-flags";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 const SOURCE_CONFIG: Record<string, { icon: typeof Terminal; color: string }> =
   {
@@ -128,7 +132,7 @@ function sourceBelongsToCategory(
 function sourceLabel(source: string): string {
   switch (source) {
     case "api_server":
-      return "API server";
+      return "API-сервер";
     case "acp":
       return "ACP";
     case "cli":
@@ -148,15 +152,15 @@ function sourceLabel(source: string): string {
     case "sms":
       return "SMS";
     case "cron":
-      return "Cron";
+      return "Расписание";
     case "tool":
-      return "Tool";
+      return "Инструмент";
     case "hermes_flow":
-      return "Hermes Flow";
+      return "Korra Flow";
     case "vulcan_delegate":
-      return "Vulcan delegate";
+      return "Делегирование Vulcan";
     case "webhook":
-      return "Webhook";
+      return "Вебхук";
     default:
       return source
         .split("_")
@@ -330,7 +334,7 @@ function MessageBubble({
     compaction: {
       bg: "bg-muted/50",
       text: "text-muted-foreground italic",
-      label: "Context handoff",
+      label: "Сжатый контекст",
     },
   };
 
@@ -468,6 +472,7 @@ function SessionRow({
   searchQuery,
   isExpanded,
   isSelected,
+  allowSelection,
   onToggle,
   onSelectClick,
   onDelete,
@@ -525,7 +530,7 @@ function SessionRow({
     <>
       <Badge tone="outline" className="text-xs">
         <SourceIcon className={`mr-1 h-3 w-3 ${sourceInfo.color}`} />
-        {session.source ? sourceLabel(session.source) : "local"}
+        {session.source ? sourceLabel(session.source) : "Локально"}
       </Badge>
 
       {resumeInChatEnabled && (
@@ -548,8 +553,8 @@ function SessionRow({
         ghost
         size="icon"
         className="text-muted-foreground hover:text-foreground"
-        aria-label="Rename session"
-        title="Rename session"
+        aria-label="Переименовать диалог"
+        title="Переименовать диалог"
         onClick={(e) => {
           e.stopPropagation();
           setRenameValue(
@@ -567,8 +572,8 @@ function SessionRow({
         ghost
         size="icon"
         className="text-muted-foreground hover:text-foreground"
-        aria-label="Export session"
-        title="Export session JSON"
+        aria-label="Скачать диалог"
+        title="Скачать диалог в JSON"
         onClick={(e) => {
           e.stopPropagation();
           onExport(session.id);
@@ -623,13 +628,15 @@ function SessionRow({
         className="flex cursor-pointer items-start gap-3 p-3 transition-colors hover:bg-secondary/30"
         onClick={onToggle}
       >
-        <span className="flex shrink-0 items-center pt-0.5">
-          <Checkbox
-            checked={isSelected}
-            onClick={handleSelectClick}
-            aria-label={t.sessions.selectSession}
-          />
-        </span>
+        {allowSelection && (
+          <span className="flex shrink-0 items-center pt-0.5">
+            <Checkbox
+              checked={isSelected}
+              onClick={handleSelectClick}
+              aria-label={t.sessions.selectSession}
+            />
+          </span>
+        )}
         <div className={`shrink-0 pt-0.5 ${sourceInfo.color}`}>
           <SourceIcon className="h-4 w-4" />
         </div>
@@ -650,7 +657,7 @@ function SessionRow({
                         if (e.key === "Enter") void submitRename();
                         else if (e.key === "Escape") setRenaming(false);
                       }}
-                      placeholder="Session title"
+                      placeholder="Название сессии"
                       className="h-7 min-w-0 flex-1 py-0 text-sm"
                       disabled={renameSaving}
                     />
@@ -658,8 +665,8 @@ function SessionRow({
                       ghost
                       size="icon"
                       className="text-muted-foreground hover:text-success"
-                      aria-label="Save title"
-                      title="Save title"
+                      aria-label="Сохранить название"
+                      title="Сохранить название"
                       disabled={renameSaving}
                       onClick={() => void submitRename()}
                     >
@@ -673,8 +680,8 @@ function SessionRow({
                       ghost
                       size="icon"
                       className="text-muted-foreground hover:text-foreground"
-                      aria-label="Cancel rename"
-                      title="Cancel rename"
+                      aria-label="Отменить переименование"
+                      title="Отменить переименование"
                       disabled={renameSaving}
                       onClick={() => setRenaming(false)}
                     >
@@ -813,16 +820,20 @@ function SessionsPagination({
 }
 
 export default function SessionsPage() {
+  const clientMode = isProductUiMode();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<
     SessionSearchResult[] | null
   >(null);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchRetry, setSearchRetry] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const logScrollRef = useRef<HTMLPreElement | null>(null);
@@ -956,14 +967,14 @@ export default function SessionsPage() {
   );
 
   const defaultSourceFilterLabel = useMemo(() => {
-    if (sessionCategory === "chats") return "Any chat source";
-    if (sessionCategory === "automation") return "Any automation source";
+    if (sessionCategory === "chats") return "Любой источник чата";
+    if (sessionCategory === "automation") return "Любой источник автоматизации";
     return t.sessions.anySource;
   }, [sessionCategory, t.sessions.anySource]);
 
   const sourceMenuTitle = useMemo(() => {
-    if (sessionCategory === "chats") return "Chat sources";
-    if (sessionCategory === "automation") return "Automation sources";
+    if (sessionCategory === "chats") return "Источники чатов";
+    if (sessionCategory === "automation") return "Источники автоматизации";
     return t.sessions.sourceFilter;
   }, [sessionCategory, t.sessions.sourceFilter]);
 
@@ -972,20 +983,21 @@ export default function SessionsPage() {
       return defaultSourceFilterLabel;
     }
     if (selectedSources.length === 0) {
-      return "No sources";
+      return "Без источников";
     }
     if (selectedSources.length === 1) {
       return sourceLabel(selectedSources[0]);
     }
-    return `${selectedSources.length} sources`;
+    return `Источников: ${selectedSources.length}`;
   }, [defaultSourceFilterLabel, selectedSources]);
 
   const refreshEmptyCount = useCallback(() => {
+    if (clientMode) return;
     api
       .getEmptySessionsCount()
       .then((r) => setEmptyCount(r.count))
       .catch(() => {});
-  }, []);
+  }, [clientMode]);
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
@@ -1008,6 +1020,10 @@ export default function SessionsPage() {
   }, [loading, setAfterTitle, total]);
 
   useEffect(() => {
+    if (clientMode) {
+      setEnd(null);
+      return;
+    }
     setEnd(
       <Button
         outlined
@@ -1015,13 +1031,13 @@ export default function SessionsPage() {
         onClick={() => setPruneOpen(true)}
         prefix={<Archive />}
       >
-        Prune old sessions
+        Очистить старые сессии
       </Button>,
     );
     return () => {
       setEnd(null);
     };
-  }, [setEnd]);
+  }, [clientMode, setEnd]);
 
   useEffect(() => {
     if (!sourceMenuOpen) return;
@@ -1047,7 +1063,10 @@ export default function SessionsPage() {
       ? sessionsRequestRef.current
       : sessionsRequestRef.current + 1;
     if (!silent) sessionsRequestRef.current = requestId;
-    if (!silent) setLoading(true);
+    if (!silent) {
+      setLoading(true);
+      setLoadError(null);
+    }
     api
       .getSessions(PAGE_SIZE, p * PAGE_SIZE, sessionQueryOptions)
       .then((resp) => {
@@ -1055,7 +1074,10 @@ export default function SessionsPage() {
         setSessions(resp.sessions);
         setTotal(resp.total);
       })
-      .catch(() => {})
+      .catch((exception) => {
+        if (requestId !== sessionsRequestRef.current || silent) return;
+        setLoadError(ownerFacingError(exception, "Не удалось загрузить историю."));
+      })
       .finally(() => {
         if (requestId !== sessionsRequestRef.current) return;
         if (!silent) setLoading(false);
@@ -1249,30 +1271,46 @@ export default function SessionsPage() {
 
   // Debounced FTS search
   useEffect(() => {
+    let active = true;
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     if (!search.trim()) {
       debounceRef.current = setTimeout(() => {
+        if (!active) return;
         setSearchResults(null);
+        setSearchError(null);
         setSearching(false);
       }, 0);
-      return;
+      return () => {
+        active = false;
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+      };
     }
 
     debounceRef.current = setTimeout(() => {
       setSearching(true);
       setSearchResults(null);
+      setSearchError(null);
       api
         .searchSessions(search.trim(), sessionQueryOptions)
-        .then((resp) => setSearchResults(resp.results))
-        .catch(() => setSearchResults(null))
-        .finally(() => setSearching(false));
+        .then((resp) => {
+          if (active) setSearchResults(resp.results);
+        })
+        .catch((exception) => {
+          if (!active) return;
+          setSearchResults([]);
+          setSearchError(ownerFacingError(exception, "Не удалось выполнить поиск."));
+        })
+        .finally(() => {
+          if (active) setSearching(false);
+        });
     }, 300);
 
     return () => {
+      active = false;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [search, sessionQueryOptions]);
+  }, [search, searchRetry, sessionQueryOptions]);
 
   const sessionDelete = useConfirmDelete({
     onDelete: useCallback(
@@ -1456,10 +1494,10 @@ export default function SessionsPage() {
         setOverviewSessions((prev) =>
           prev.map((s) => (s.id === id ? { ...s, title } : s)),
         );
-        showToast("Session renamed", "success");
+        showToast("Диалог переименован", "success");
         loadStats();
       } catch {
-        showToast("Failed to rename session", "error");
+        showToast("Не удалось переименовать диалог", "error");
       }
     },
     [showToast, loadStats],
@@ -1485,7 +1523,7 @@ export default function SessionsPage() {
         a.click();
         URL.revokeObjectURL(url);
       } catch {
-        showToast("Failed to export session", "error");
+        showToast("Не удалось скачать диалог", "error");
       }
     },
     [showToast],
@@ -1575,13 +1613,23 @@ export default function SessionsPage() {
     <div className="flex min-w-0 w-full max-w-full flex-col gap-4">
       <PluginSlot name="sessions:top" />
       <Toast toast={toast} />
-      <input
-        ref={importInputRef}
-        type="file"
-        accept=".json,.jsonl,application/json,application/x-ndjson"
-        className="hidden"
-        onChange={(event) => void handleImportSessions(event.currentTarget.files)}
-      />
+      {loadError && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+          <span>{loadError}</span>
+          <Button outlined size="sm" onClick={() => loadSessions(page)}>
+            Повторить
+          </Button>
+        </div>
+      )}
+      {!clientMode && (
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,.jsonl,application/json,application/x-ndjson"
+          className="hidden"
+          onChange={(event) => void handleImportSessions(event.currentTarget.files)}
+        />
+      )}
 
       <DeleteConfirmDialog
         open={sessionDelete.isOpen}
@@ -1596,34 +1644,38 @@ export default function SessionsPage() {
         loading={sessionDelete.isDeleting}
       />
 
-      <DeleteConfirmDialog
-        open={deleteEmptyOpen}
-        onCancel={() => setDeleteEmptyOpen(false)}
-        onConfirm={handleDeleteEmpty}
-        title={t.sessions.deleteEmptyConfirmTitle}
-        description={t.sessions.deleteEmptyConfirmMessage.replace(
-          "{count}",
-          String(emptyCount),
-        )}
-        loading={deletingEmpty}
-      />
+      {!clientMode && (
+        <DeleteConfirmDialog
+          open={deleteEmptyOpen}
+          onCancel={() => setDeleteEmptyOpen(false)}
+          onConfirm={handleDeleteEmpty}
+          title={t.sessions.deleteEmptyConfirmTitle}
+          description={t.sessions.deleteEmptyConfirmMessage.replace(
+            "{count}",
+            String(emptyCount),
+          )}
+          loading={deletingEmpty}
+        />
+      )}
 
-      <DeleteConfirmDialog
-        open={deleteSelectedOpen}
-        onCancel={() => setDeleteSelectedOpen(false)}
-        onConfirm={handleDeleteSelected}
-        title={t.sessions.deleteSelectedConfirmTitle.replace(
-          "{count}",
-          String(selectedIds.size),
-        )}
-        description={t.sessions.deleteSelectedConfirmMessage.replace(
-          "{count}",
-          String(selectedIds.size),
-        )}
-        loading={deletingSelected}
-      />
+      {!clientMode && (
+        <DeleteConfirmDialog
+          open={deleteSelectedOpen}
+          onCancel={() => setDeleteSelectedOpen(false)}
+          onConfirm={handleDeleteSelected}
+          title={t.sessions.deleteSelectedConfirmTitle.replace(
+            "{count}",
+            String(selectedIds.size),
+          )}
+          description={t.sessions.deleteSelectedConfirmMessage.replace(
+            "{count}",
+            String(selectedIds.size),
+          )}
+          loading={deletingSelected}
+        />
+      )}
 
-      <Dialog
+      {!clientMode && <Dialog
         open={pruneOpen}
         onOpenChange={(open) => {
           if (!pruning) setPruneOpen(open);
@@ -1631,10 +1683,10 @@ export default function SessionsPage() {
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Prune old sessions</DialogTitle>
+            <DialogTitle>Очистить старые сессии</DialogTitle>
             <DialogDescription>
-              Permanently remove archived sessions whose last activity is older
-              than the given number of days. Active sessions are never pruned.
+              Архивные сессии старше указанного срока будут удалены безвозвратно.
+              Активные сессии останутся без изменений.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-1.5">
@@ -1642,7 +1694,7 @@ export default function SessionsPage() {
               htmlFor="prune-days"
               className="text-xs font-medium text-muted-foreground"
             >
-              Older than (days)
+              Старше, дней
             </label>
             <Input
               id="prune-days"
@@ -1671,11 +1723,11 @@ export default function SessionsPage() {
               className="gap-1.5"
             >
               {pruning && <Spinner className="text-sm" />}
-              Prune
+              Очистить
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>}
 
       {stats && (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border border-border bg-background-base/40 px-4 py-3">
@@ -1683,32 +1735,32 @@ export default function SessionsPage() {
             <span className="text-lg font-semibold tabular-nums leading-none">
               {stats.total}
             </span>
-            <span className="text-xs text-muted-foreground">Total</span>
+            <span className="text-xs text-muted-foreground">Всего</span>
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-semibold tabular-nums leading-none text-success">
               {stats.active_store}
             </span>
-            <span className="text-xs text-muted-foreground">Active in store</span>
+            <span className="text-xs text-muted-foreground">Активные</span>
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-semibold tabular-nums leading-none">
               {stats.archived}
             </span>
-            <span className="text-xs text-muted-foreground">Archived</span>
+            <span className="text-xs text-muted-foreground">В архиве</span>
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-semibold tabular-nums leading-none">
               {stats.messages}
             </span>
-            <span className="text-xs text-muted-foreground">Messages</span>
+            <span className="text-xs text-muted-foreground">Сообщения</span>
           </div>
           {Object.keys(stats.by_source).length > 0 && (
             <div className="flex flex-col">
               <span className="text-lg font-semibold tabular-nums leading-none">
                 {Object.keys(stats.by_source).length}
               </span>
-              <span className="text-xs text-muted-foreground">Sources</span>
+              <span className="text-xs text-muted-foreground">Источники</span>
             </div>
           )}
         </div>
@@ -1939,7 +1991,7 @@ export default function SessionsPage() {
               </div>
             )}
 
-            {showList && emptyCount > 0 && !isSearching && (
+            {!clientMode && showList && emptyCount > 0 && !isSearching && (
               <Button
                 outlined
                 destructive
@@ -1956,19 +2008,19 @@ export default function SessionsPage() {
               </Button>
             )}
 
-            {!isSearching && (
+            {!clientMode && !isSearching && (
               <Button
                 outlined
                 size="sm"
                 className="shrink-0"
                 disabled={importingSessions}
                 onClick={() => importInputRef.current?.click()}
-                aria-label="Import exported sessions"
-                title="Import exported session JSON or JSONL"
+                aria-label="Импортировать сессии"
+                title="Импортировать сессии из JSON или JSONL"
                 prefix={importingSessions ? <Spinner /> : <Upload />}
               >
                 <span className="font-mondwest normal-case text-xs">
-                  Import sessions
+                  Импортировать сессии
                 </span>
               </Button>
             )}
@@ -1986,7 +2038,23 @@ export default function SessionsPage() {
         </div>
       ) : null}
 
-      {showList && selectedIds.size > 0 && (
+      {searchError && isSearching ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          role="alert"
+        >
+          <span>{searchError}</span>
+          <Button
+            outlined
+            size="sm"
+            onClick={() => setSearchRetry((value) => value + 1)}
+          >
+            Повторить поиск
+          </Button>
+        </div>
+      ) : null}
+
+      {!clientMode && showList && selectedIds.size > 0 && (
         <div
           className="flex flex-wrap items-center gap-2 border border-primary/30 bg-primary/[0.06] px-3 py-2"
           role="region"
@@ -2053,7 +2121,7 @@ export default function SessionsPage() {
 
       {showList ? (
         filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          searchError && isSearching ? null : <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
             <Clock className="h-8 w-8 mb-3 opacity-40" />
             <p className="text-sm font-medium">
               {search
@@ -2079,6 +2147,7 @@ export default function SessionsPage() {
                   searchQuery={search || undefined}
                   isExpanded={expandedId === s.id}
                   isSelected={selectedIds.has(s.id)}
+                  allowSelection={!clientMode}
                   onToggle={() =>
                     setExpandedId((prev) => (prev === s.id ? null : s.id))
                   }
@@ -2160,7 +2229,7 @@ export default function SessionsPage() {
                       className="shrink-0 self-start text-xs sm:self-center"
                     >
                       <Database className="mr-1 h-3 w-3" />
-                      {s.source ? sourceLabel(s.source) : "local"}
+                      {s.source ? sourceLabel(s.source) : "Локально"}
                     </Badge>
                   </div>
                 ))}
@@ -2176,6 +2245,7 @@ export default function SessionsPage() {
 }
 
 interface SessionRowProps {
+  allowSelection: boolean;
   isExpanded: boolean;
   isSelected: boolean;
   onDelete: () => void;

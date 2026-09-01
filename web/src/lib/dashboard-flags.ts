@@ -7,6 +7,19 @@ declare global {
      * it directly and for parity with the server's bootstrap script.
      */
     __HERMES_DASHBOARD_EMBEDDED_CHAT__?: boolean;
+    /** Bubble-chat takeover for the browser dashboard. */
+    __KORRA_DASHBOARD_CHAT__?: boolean;
+    /** The desktop fleet interface is enabled with KORRA_UI_MODE=fleet. */
+    __KORRA_UI_MODE__?: string;
+    /** IANA timezone configured for this isolated contour. */
+    __KORRA_OWNER_TIMEZONE__?: string;
+    /** IANA timezone used to interpret persisted schedule expressions. */
+    __KORRA_SCHEDULE_TIMEZONE__?: string;
+    /** Up to ten configured agent tabs, injected from the contour config. */
+    __KORRA_AGENT_TABS__?: Array<{
+      profile?: string;
+      label?: string;
+    }>;
   }
 }
 
@@ -21,4 +34,73 @@ declare global {
  */
 export function isDashboardEmbeddedChatEnabled(): boolean {
   return true;
+}
+
+export function isDashboardBubbleChatEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.__KORRA_DASHBOARD_CHAT__ === true ||
+    (window.__KORRA_UI_MODE__ ?? "").toLowerCase() === "fleet"
+  );
+}
+
+export type ProductUiMode = "fleet";
+
+export function productUiMode(): ProductUiMode | null {
+  if (typeof window === "undefined") return null;
+  const raw = (window.__KORRA_UI_MODE__ ?? "admin").toLowerCase();
+  return raw === "fleet" ? "fleet" : null;
+}
+
+export function isProductUiMode(): boolean {
+  return productUiMode() !== null;
+}
+
+/** Kept for source-compatible owner-facing helpers; fleet is intentionally not client mode. */
+export function isClientUiMode(): boolean {
+  return false;
+}
+
+export interface AgentTabConfig {
+  profile: string;
+  label: string;
+}
+
+/** Validated, stable agent-tab configuration for the current desktop session. */
+export function getAgentTabs(): AgentTabConfig[] {
+  if (typeof window === "undefined") return [{ profile: "", label: "Корра" }];
+  const configured = window.__KORRA_AGENT_TABS__;
+  if (!Array.isArray(configured)) return [{ profile: "", label: "Корра" }];
+
+  const result: AgentTabConfig[] = [];
+  const profiles = new Set<string>();
+  for (const item of configured) {
+    const profile = typeof item?.profile === "string" ? item.profile.trim() : "";
+    const label = typeof item?.label === "string" ? item.label.trim() : "";
+    if (!profile || !label || profiles.has(profile)) continue;
+    profiles.add(profile);
+    result.push({ profile, label });
+    if (result.length === 10) break;
+  }
+  return result.length > 0 ? result : [{ profile: "", label: "Корра" }];
+}
+
+export function getOwnerTimeZone(): string {
+  const configured =
+    typeof window === "undefined"
+      ? ""
+      : (window.__KORRA_OWNER_TIMEZONE__ ?? "").trim();
+  const fallback = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const candidate = configured || fallback;
+  try {
+    new Intl.DateTimeFormat("ru-RU", { timeZone: candidate }).format();
+    return candidate;
+  } catch {
+    return fallback;
+  }
+}
+
+export function getScheduleTimeZone(): string {
+  if (typeof window === "undefined") return "UTC";
+  return (window.__KORRA_SCHEDULE_TIMEZONE__ ?? "UTC").trim() || "UTC";
 }

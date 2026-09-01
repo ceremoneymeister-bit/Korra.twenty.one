@@ -24,6 +24,7 @@ import {
   Activity,
   BarChart3,
   BookOpen,
+  ChevronDown,
   Clock,
   Code,
   Cpu,
@@ -43,6 +44,7 @@ import {
   Plug,
   Puzzle,
   Radio,
+  RefreshCw,
   RotateCw,
   Settings,
   Shield,
@@ -79,6 +81,7 @@ import type { SystemAction } from "@/contexts/system-actions-context";
 // every admin surface (and heavy deps like xterm) up front.
 const ConfigPage = lazy(() => import("@/pages/ConfigPage"));
 const DocsPage = lazy(() => import("@/pages/DocsPage"));
+const ClientHelpPage = lazy(() => import("@/pages/ClientHelpPage"));
 const EnvPage = lazy(() => import("@/pages/EnvPage"));
 const FilesPage = lazy(() => import("@/pages/FilesPage"));
 const SessionsPage = lazy(() => import("@/pages/SessionsPage"));
@@ -96,6 +99,8 @@ const ChannelsPage = lazy(() => import("@/pages/ChannelsPage"));
 const WebhooksPage = lazy(() => import("@/pages/WebhooksPage"));
 const SystemPage = lazy(() => import("@/pages/SystemPage"));
 const ChatPage = lazy(() => import("@/pages/ChatPage"));
+const BubbleChatPage = lazy(() => import("@/pages/BubbleChatPage"));
+const AgentWorkbenchPage = lazy(() => import("@/pages/AgentWorkbenchPage"));
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useI18n } from "@/i18n";
@@ -103,8 +108,20 @@ import type { Translations } from "@/i18n/types";
 import { PluginPage, PluginSlot, usePlugins } from "@/plugins";
 import type { PluginManifest } from "@/plugins";
 import { useTheme } from "@/themes";
-import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
+import {
+  isDashboardBubbleChatEnabled,
+  isDashboardEmbeddedChatEnabled,
+  isProductUiMode,
+  productUiMode,
+} from "@/lib/dashboard-flags";
+import {
+  productHomePath,
+  selectProductNav,
+  selectProductSettingsNav,
+  selectServiceNav,
+} from "@/lib/product-nav";
 import { latchChatActivation } from "@/lib/chat-activation";
+import { isStaleBuild, loadedBuild } from "@/lib/build-version";
 import { api } from "@/lib/api";
 import type { StatusResponse, UpdateCheckResponse } from "@/lib/api";
 
@@ -123,8 +140,38 @@ function RouteFallback({ label = "Loading…" }: { label?: string }) {
   );
 }
 
+function StaleBuildNotice({ build }: { build?: string | null }) {
+  const [hidden, setHidden] = useState(false);
+  if (hidden || !isStaleBuild(loadedBuild(), build)) return null;
+  return (
+    <div
+      className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-primary/25 bg-primary/[0.06] px-4 py-3 text-sm"
+      role="status"
+    >
+      <span className="min-w-0 flex-1">
+        Интерфейс обновился. Перезагрузите страницу, чтобы увидеть новую версию.
+      </span>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-primary bg-primary px-4 py-2 font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <RefreshCw className="size-4" aria-hidden />
+        Обновить
+      </button>
+      <button
+        type="button"
+        onClick={() => setHidden(true)}
+        className="min-h-11 rounded-lg px-3 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        Позже
+      </button>
+    </div>
+  );
+}
+
 function RootRedirect() {
-  return <Navigate to="/sessions" replace />;
+  return <Navigate to={productHomePath(productUiMode())} replace />;
 }
 
 function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
@@ -132,7 +179,7 @@ function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
     // Render nothing during the plugin-load window — a spinner here would just flash.
     return null;
   }
-  return <Navigate to="/sessions" replace />;
+  return <Navigate to={productHomePath(productUiMode())} replace />;
 }
 
 const CHAT_NAV_ITEM: NavItem = {
@@ -155,6 +202,7 @@ const CHAT_NAV_ITEM: NavItem = {
  */
 const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
+  "/agents": AgentsRouteSink,
   "/sessions": SessionsPage,
   "/files": FilesPage,
   "/analytics": AnalyticsPage,
@@ -173,6 +221,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/config": ConfigPage,
   "/env": EnvPage,
   "/docs": DocsPage,
+  "/help": ClientHelpPage,
 };
 
 // Route placeholder for /chat.  The persistent ChatPage host (rendered
@@ -183,7 +232,14 @@ function ChatRouteSink() {
   return null;
 }
 
+// The workbench owns several live chat streams and therefore stays mounted
+// outside ProfileKeyedRoutes; this placeholder only claims the URL.
+function AgentsRouteSink() {
+  return null;
+}
+
 const BUILTIN_NAV_REST: NavItem[] = [
+  { path: "/agents", label: "Агенты", icon: Users },
   {
     path: "/sessions",
     labelKey: "sessions",
@@ -205,6 +261,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
   },
   { path: "/logs", labelKey: "logs", label: "Logs", icon: FileText },
   { path: "/cron", labelKey: "cron", label: "Cron", icon: Clock },
+  { path: "/help", label: "Помощь", icon: BookOpen },
   { path: "/skills", labelKey: "skills", label: "Skills", icon: Package },
   { path: "/plugins", labelKey: "plugins", label: "Plugins", icon: Puzzle },
   { path: "/mcp", label: "MCP", icon: Plug },
@@ -400,7 +457,10 @@ export default function App() {
   const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
+  const isAgentsRoute = normalizedPath === "/agents";
+  const isFullHeightRoute = isChatRoute || isAgentsRoute;
   const embeddedChat = isDashboardEmbeddedChatEnabled();
+  const bubbleChat = isDashboardBubbleChatEnabled();
   // Defer mounting the persistent chat host (and its xterm chunk) until the
   // user has actually opened /chat at least once. Sticky after that so the
   // PTY survives later tab switches.
@@ -409,12 +469,18 @@ export default function App() {
     setChatHostMounted((prev) => latchChatActivation(prev, isChatRoute));
   }, [isChatRoute]);
 
+  const [agentsHostMounted, setAgentsHostMounted] = useState(isAgentsRoute);
+  useEffect(() => {
+    setAgentsHostMounted((prev) => latchChatActivation(prev, isAgentsRoute));
+  }, [isAgentsRoute]);
+
   // `dashboard.show_token_analytics` gates the Analytics nav item.  The
   // page itself remains reachable by URL (it renders an explanation when
   // the flag is off — see AnalyticsPage), but hiding the nav entry avoids
   // surfacing misleading token/cost numbers in the sidebar.  Default off.
   const [showTokenAnalytics, setShowTokenAnalytics] = useState(false);
   useEffect(() => {
+    if (isProductUiMode()) return;
     api
       .getConfig()
       .then((cfg) => {
@@ -451,24 +517,47 @@ export default function App() {
   const builtinRoutes = useMemo(
     () => ({
       ...BUILTIN_ROUTES_CORE,
-      ...(embeddedChat ? { "/chat": ChatRouteSink } : {}),
+      ...(bubbleChat
+        ? { "/chat": BubbleChatPage }
+        : embeddedChat
+          ? { "/chat": ChatRouteSink }
+          : {}),
     }),
-    [embeddedChat],
+    [bubbleChat, embeddedChat],
   );
 
   const builtinNav = useMemo(() => {
     const base = embeddedChat
       ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
       : BUILTIN_NAV_REST;
-    return showTokenAnalytics
+    const withAnalytics = showTokenAnalytics
       ? base
       : base.filter((n) => n.path !== "/analytics");
-  }, [embeddedChat, showTokenAnalytics]);
+    const mode = productUiMode();
+    return mode ? selectProductNav(withAnalytics, mode) : withAnalytics;
+  }, [bubbleChat, embeddedChat, showTokenAnalytics]);
 
   const sidebarNav = useMemo(
     () => partitionSidebarNav(builtinNav, manifests),
     [builtinNav, manifests],
   );
+  const productSettingsNav = useMemo<NavItem[]>(() => {
+    if (!isProductUiMode()) return [];
+    const source = embeddedChat || bubbleChat
+      ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
+      : BUILTIN_NAV_REST;
+    return selectProductSettingsNav(source);
+  }, [bubbleChat, embeddedChat]);
+  const productServiceNav = useMemo<NavItem[]>(() => {
+    if (!isProductUiMode()) return [];
+    const source = embeddedChat || bubbleChat
+      ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
+      : BUILTIN_NAV_REST;
+    const pluginItems = partitionSidebarNav(source, manifests).pluginItems;
+    return [...selectServiceNav(source), ...pluginItems];
+  }, [bubbleChat, embeddedChat, manifests]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [serviceOpen, setServiceOpen] = useState(false);
   const routes = useMemo(
     () => buildRoutes(builtinRoutes, manifests),
     [builtinRoutes, manifests],
@@ -513,8 +602,15 @@ export default function App() {
     <ProfileProvider>
     <div
       data-layout-variant={layoutVariant}
+      data-client-ui={isProductUiMode() ? "true" : undefined}
       className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-background-base text-text-primary antialiased"
     >
+      <a
+        href="#main-content"
+        className="fixed left-3 top-3 z-[200] inline-flex min-h-[44px] -translate-y-20 items-center rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-lg transition-transform focus:translate-y-0"
+      >
+        К основному содержанию
+      </a>
       <SelectionSwitcher />
 
       <div
@@ -664,7 +760,7 @@ export default function App() {
                 ))}
               </ul>
 
-              {sidebarNav.pluginItems.length > 0 && (
+              {!isProductUiMode() && sidebarNav.pluginItems.length > 0 && (
                 <div
                   aria-labelledby="hermes-sidebar-plugin-nav-heading"
                   className="flex flex-col border-t border-current/10 pb-2"
@@ -693,6 +789,88 @@ export default function App() {
                       />
                     ))}
                   </ul>
+                </div>
+              )}
+
+              {productSettingsNav.length > 0 && (
+                <div className="flex flex-col border-t border-current/10 pb-2" role="group">
+                  <button
+                    type="button"
+                    onClick={() => setSettingsOpen((value) => !value)}
+                    aria-expanded={settingsOpen}
+                    className={cn(
+                      "flex items-center gap-2 px-5 pt-2.5 pb-1 text-left",
+                      "font-sans text-display text-xs tracking-[0.12em] text-text-tertiary",
+                      "hover:text-midground transition-colors",
+                      isDesktopCollapsed && "lg:justify-center lg:px-0",
+                    )}
+                  >
+                    <Settings className="h-4 w-4 shrink-0" aria-hidden />
+                    <span className={cn(isDesktopCollapsed && "lg:hidden")}>Настройки</span>
+                    <ChevronDown
+                      aria-hidden
+                      className={cn(
+                        "h-3 w-3 shrink-0 transition-transform",
+                        settingsOpen && "rotate-180",
+                        isDesktopCollapsed && "lg:hidden",
+                      )}
+                    />
+                  </button>
+                  {settingsOpen && (
+                    <ul className="flex flex-col">
+                      {productSettingsNav.map((item) => (
+                        <SidebarNavLink
+                          closeMobile={closeMobile}
+                          collapsed={isDesktopCollapsed}
+                          item={item}
+                          key={item.path}
+                          t={t}
+                          tooltipWarmRef={tooltipWarmRef}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {productServiceNav.length > 0 && (
+                <div className="flex flex-col border-t border-current/10 pb-2" role="group">
+                  <button
+                    type="button"
+                    onClick={() => setServiceOpen((value) => !value)}
+                    aria-expanded={serviceOpen}
+                    className={cn(
+                      "flex items-center gap-2 px-5 pt-2.5 pb-1 text-left",
+                      "font-sans text-display text-xs tracking-[0.12em] text-text-tertiary",
+                      "hover:text-midground transition-colors",
+                      isDesktopCollapsed && "lg:justify-center lg:px-0",
+                    )}
+                  >
+                    <Wrench className="h-4 w-4 shrink-0" aria-hidden />
+                    <span className={cn(isDesktopCollapsed && "lg:hidden")}>Служебное</span>
+                    <ChevronDown
+                      aria-hidden
+                      className={cn(
+                        "h-3 w-3 shrink-0 transition-transform",
+                        serviceOpen && "rotate-180",
+                        isDesktopCollapsed && "lg:hidden",
+                      )}
+                    />
+                  </button>
+                  {serviceOpen && (
+                    <ul className="flex flex-col">
+                      {productServiceNav.map((item) => (
+                        <SidebarNavLink
+                          closeMobile={closeMobile}
+                          collapsed={isDesktopCollapsed}
+                          item={item}
+                          key={item.path}
+                          t={t}
+                          tooltipWarmRef={tooltipWarmRef}
+                        />
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </nav>
@@ -753,22 +931,24 @@ export default function App() {
 
           <PageHeaderProvider pluginTabs={pluginTabMeta}>
             <div
+              id="main-content"
               className={cn(
                 "relative z-2 flex min-w-0 min-h-0 flex-1 flex-col",
                 "px-3 sm:px-6",
-                isChatRoute
+                isFullHeightRoute
                   ? "pb-0 pt-1 sm:pt-2 lg:pt-4"
                   : "pt-2 sm:pt-4 lg:pt-6",
                 isDocsRoute && "min-h-0 flex-1",
               )}
             >
               <PluginSlot name="pre-main" />
+              <StaleBuildNotice build={sidebarStatus?.build} />
               <div
                 className={cn(
                   "w-full min-w-0",
-                  !isChatRoute &&
+                  !isFullHeightRoute &&
                     "pb-[calc(2rem+env(safe-area-inset-bottom,0px))] lg:pb-8",
-                  (isDocsRoute || isChatRoute) &&
+                  (isDocsRoute || isFullHeightRoute) &&
                     "min-h-0 flex flex-1 flex-col",
                 )}
               >
@@ -789,6 +969,7 @@ export default function App() {
                 </ProfileKeyedRoutes>
 
                 {embeddedChat &&
+                  !bubbleChat &&
                   !chatOverriddenByPlugin &&
                   (pluginsLoading ? (
                     isChatRoute ? (
@@ -816,6 +997,27 @@ export default function App() {
                   ) : isChatRoute ? (
                     <RouteFallback label="Loading chat…" />
                   ) : null)}
+
+                {agentsHostMounted && (
+                  <div
+                    data-agents-active={isAgentsRoute ? "true" : "false"}
+                    className={cn(
+                      "min-h-0 min-w-0",
+                      isAgentsRoute ? "flex flex-1 flex-col" : "hidden",
+                    )}
+                    aria-hidden={!isAgentsRoute}
+                  >
+                    <Suspense
+                      fallback={
+                        isAgentsRoute ? (
+                          <RouteFallback label="Загрузка агентов…" />
+                        ) : null
+                      }
+                    >
+                      <AgentWorkbenchPage />
+                    </Suspense>
+                  </div>
+                )}
               </div>
               <PluginSlot name="post-main" />
             </div>
@@ -983,16 +1185,18 @@ function SidebarSystemActions({
     );
   }, [t.status.updateHermesConfirmMessage, updateConfirmInfo]);
 
-  const items: SystemActionItem[] = [
-    {
-      action: "restart",
-      icon: RotateCw,
-      label: t.status.restartGateway,
-      runningLabel: t.status.restartingGateway,
-      spin: true,
-    },
-  ];
-  if (canUpdateHermes) {
+  const items: SystemActionItem[] = isProductUiMode()
+    ? []
+    : [
+        {
+          action: "restart",
+          icon: RotateCw,
+          label: t.status.restartGateway,
+          runningLabel: t.status.restartingGateway,
+          spin: true,
+        },
+      ];
+  if (!isProductUiMode() && canUpdateHermes) {
     items.push({
       action: "update",
       icon: Download,

@@ -1,4 +1,6 @@
 import { useMemo, type ReactNode } from "react";
+import { isTableDelimiter, splitTableRow } from "@/lib/markdown-tables";
+import { cn } from "@/lib/utils";
 
 /**
  * Lightweight markdown renderer for LLM output.
@@ -13,20 +15,38 @@ export function Markdown({
   content,
   highlightTerms,
   streaming,
+  className,
+  variant = "message",
 }: {
   content: string;
   highlightTerms?: string[];
   streaming?: boolean;
+  className?: string;
+  /**
+   * `message` — реплика в чате: плотно, заголовки почти вровень с текстом.
+   * `document` — файл, который человек открыл, чтобы прочитать: заголовки
+   * должны быть видны как заголовки, иначе документ читается сплошняком.
+   */
+  variant?: "message" | "document";
 }) {
   const blocks = useMemo(() => parseBlocks(content), [content]);
   const caret = streaming ? <StreamingCaret /> : null;
 
   return (
-    <div className="text-sm text-foreground leading-relaxed space-y-2">
+    <div
+      className={cn(
+        "text-foreground",
+        variant === "document"
+          ? "space-y-4 text-[0.95rem] leading-7"
+          : "space-y-2 text-sm leading-relaxed",
+        className,
+      )}
+    >
       {blocks.map((block, i) => (
         <Block
           key={i}
           block={block}
+          variant={variant}
           highlightTerms={highlightTerms}
           caret={caret && i === blocks.length - 1 ? caret : null}
         />
@@ -54,6 +74,7 @@ type BlockNode =
   | { type: "heading"; level: number; content: string }
   | { type: "hr" }
   | { type: "list"; ordered: boolean; items: string[] }
+  | { type: "table"; header: string[]; rows: string[][] }
   | { type: "paragraph"; content: string };
 
 /* ------------------------------------------------------------------ */
@@ -92,6 +113,22 @@ function parseBlocks(text: string): BlockNode[] {
         content: headingMatch[2],
       });
       i++;
+      continue;
+    }
+
+    // Таблица: строка ячеек, под ней разделитель. Без разделителя это обычный
+    // текст с палками — превращать его в таблицу опаснее, чем оставить как есть.
+    if (line.includes("|") && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
+      const header = splitTableRow(line);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
+        const cells = splitTableRow(lines[i]);
+        while (cells.length < header.length) cells.push("");
+        rows.push(cells.slice(0, header.length));
+        i++;
+      }
+      blocks.push({ type: "table", header, rows });
       continue;
     }
 
@@ -139,7 +176,9 @@ function parseBlocks(text: string): BlockNode[] {
       !lines[i].match(/^#{1,4}\s/) &&
       !lines[i].match(/^[-*+]\s/) &&
       !lines[i].match(/^\d+[.)]\s/) &&
-      !lines[i].match(/^[-*_]{3,}\s*$/)
+      !lines[i].match(/^[-*_]{3,}\s*$/) &&
+      // Шапка таблицы, идущая сразу за абзацем, принадлежит таблице, а не ему.
+      !(lines[i].includes("|") && i + 1 < lines.length && isTableDelimiter(lines[i + 1]))
     ) {
       paraLines.push(lines[i]);
       i++;
@@ -160,10 +199,12 @@ function Block({
   block,
   highlightTerms,
   caret,
+  variant = "message",
 }: {
   block: BlockNode;
   highlightTerms?: string[];
   caret?: ReactNode;
+  variant?: "message" | "document";
 }) {
   switch (block.type) {
     case "code":
@@ -178,12 +219,21 @@ function Block({
 
     case "heading": {
       const Tag = `h${Math.min(block.level, 4)}` as "h1" | "h2" | "h3" | "h4";
-      const sizes: Record<string, string> = {
+      const messageSizes: Record<string, string> = {
         h1: "text-base font-bold",
         h2: "text-sm font-bold",
         h3: "text-sm font-semibold",
         h4: "text-sm font-medium",
       };
+      // В документе заголовок обязан читаться как заголовок: иначе длинный
+      // текст выглядит сплошной простынёй и его перестают читать.
+      const documentSizes: Record<string, string> = {
+        h1: "mt-2 text-2xl font-semibold tracking-tight",
+        h2: "mt-6 border-b border-border pb-2 text-xl font-semibold tracking-tight",
+        h3: "mt-4 text-lg font-semibold",
+        h4: "mt-3 text-base font-semibold",
+      };
+      const sizes = variant === "document" ? documentSizes : messageSizes;
       return (
         <Tag className={sizes[Tag]}>
           <InlineContent text={block.content} highlightTerms={highlightTerms} />
@@ -191,6 +241,35 @@ function Block({
         </Tag>
       );
     }
+
+    case "table":
+      return (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b border-border">
+                {block.header.map((cell, index) => (
+                  <th key={index} className="px-3 py-2 font-semibold">
+                    <InlineContent text={cell} highlightTerms={highlightTerms} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={rowIndex} className="border-b border-border/60 last:border-0">
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} className="px-3 py-2 align-top">
+                      <InlineContent text={cell} highlightTerms={highlightTerms} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {caret}
+        </div>
+      );
 
     case "hr":
       return (
@@ -205,7 +284,7 @@ function Block({
       const last = block.items.length - 1;
       return (
         <Tag
-          className={`space-y-0.5 ${block.ordered ? "list-decimal" : "list-disc"} pl-5 text-sm`}
+          className={`space-y-0.5 ${block.ordered ? "list-decimal" : "list-disc"} pl-5`}
         >
           {block.items.map((item, i) => (
             <li key={i}>

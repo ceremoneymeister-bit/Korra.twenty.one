@@ -127,8 +127,12 @@ const OVERRIDE_KEY_TO_VAR: Record<keyof ThemeColorOverrides, string> = {
   accentForeground: "--color-accent-foreground",
   destructive: "--color-destructive",
   destructiveForeground: "--color-destructive-foreground",
-  success: "--color-success",
-  warning: "--color-warning",
+  // Пишем в звено индирекции, а не в сам токен. Tailwind компилирует
+  // `.text-success` в `var(--success, …)`, потому что `--color-success`
+  // объявлен через него (index.css). Запись прямо в `--color-success` до
+  // утилиты не доходила — цвет оставался вшитым на сборке.
+  success: "--success",
+  warning: "--warning",
   border: "--color-border",
   input: "--color-input",
   ring: "--color-ring",

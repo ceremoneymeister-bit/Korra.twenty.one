@@ -7,6 +7,7 @@ import {
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { isProductUiMode } from "@/lib/dashboard-flags";
 
 /**
  * The machine dashboard's single write-target selector.
@@ -28,7 +29,7 @@ export function ProfileSwitcher({ collapsed }: ProfileSwitcherProps) {
     [currentProfile, t.app.currentProfileOption],
   );
 
-  if (profiles.length < 2) return null;
+  if (isProductUiMode() || profiles.length < 2) return null;
 
   const managed = profile || currentProfile || "default";
   const isOther = !!profile && profile !== currentProfile;

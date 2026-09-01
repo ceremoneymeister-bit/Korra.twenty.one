@@ -121,6 +121,8 @@ export function PageHeaderProvider({
         </header>
 
         <main
+          id="main-content"
+          tabIndex={-1}
           className={cn(
             "min-h-0 w-full min-w-0 flex-1 flex flex-col",
             // Bottom inset for scrolled pages lives on the route outlet wrapper in

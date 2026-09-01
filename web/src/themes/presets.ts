@@ -204,6 +204,12 @@ export const nousBlueTheme: DashboardTheme = {
     inputTokenAccent: "#001934",
     outputTokenAccent: "#0053fd",
   },
+  // The default success/warning colors target a dark canvas. Their darker
+  // pairs keep small status text readable on this light theme.
+  colorOverrides: {
+    success: "#047857",
+    warning: "#9a5b00",
+  },
   swatchColors: ["#170d02", "#0053FD", "#E8F2FD"],
 };
 

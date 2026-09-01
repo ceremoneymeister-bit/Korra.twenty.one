@@ -43,6 +43,7 @@ export const ru: Translations = {
     expand: "Развернуть",
     general: "Общие",
     messaging: "Мессенджеры",
+    gateway: "Шлюз",
     pluginLoadFailed:
       "Не удалось загрузить скрипт этого плагина. Проверьте вкладку «Сеть» (dashboard-plugins/…) и путь к плагинам на сервере.",
     pluginNotRegistered:
@@ -70,7 +71,7 @@ export const ru: Translations = {
       analytics: "Аналитика",
       chat: "Чат",
       config: "Конфигурация",
-      cron: "Cron",
+      cron: "Расписание",
       documentation: "Документация",
       keys: "Ключи",
       logs: "Журналы",

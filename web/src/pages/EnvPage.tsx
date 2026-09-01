@@ -39,6 +39,7 @@ import { Label } from "@nous-research/ui/ui/components/label";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { PluginSlot } from "@/plugins";
+import { isProductUiMode } from "@/lib/dashboard-flags";
 
 /* ------------------------------------------------------------------ */
 /*  Provider grouping                                                  */
@@ -261,7 +262,7 @@ function EnvVarRow({
               size="icon"
               onClick={() => onReveal(varKey)}
               title={isRevealed ? t.env.hideValue : t.env.showValue}
-              aria-label={isRevealed ? `Hide ${varKey}` : `Reveal ${varKey}`}
+              aria-label={isRevealed ? `Скрыть ${varKey}` : `Показать ${varKey}`}
             >
               {isRevealed ? <EyeOff /> : <Eye />}
             </Button>
@@ -335,6 +336,25 @@ function EnvVarRow({
 /* ------------------------------------------------------------------ */
 /*  ProviderGroupCard — groups API key + base URL per provider         */
 /* ------------------------------------------------------------------ */
+
+function formatKeysCount(template: string, count: number): string {
+  if (template.includes("ключ")) {
+    const lastTwo = count % 100;
+    const last = count % 10;
+    const word =
+      lastTwo >= 11 && lastTwo <= 14
+        ? "ключей"
+        : last === 1
+          ? "ключ"
+          : last >= 2 && last <= 4
+            ? "ключа"
+            : "ключей";
+    return `${count} ${word}`;
+  }
+  return template
+    .replace("{count}", String(count))
+    .replace("{s}", count === 1 ? "" : "s");
+}
 
 function ProviderGroupCard({
   group,
@@ -417,9 +437,7 @@ function ProviderGroupCard({
             </a>
           )}
           <span className="text-xs text-text-tertiary">
-            {t.env.keysCount
-              .replace("{count}", String(group.entries.length))
-              .replace("{s}", group.entries.length !== 1 ? "s" : "")}
+            {formatKeysCount(t.env.keysCount, group.entries.length)}
           </span>
         </div>
       </ListItem>
@@ -608,7 +626,9 @@ function CustomKeysCard({
 /* ------------------------------------------------------------------ */
 
 export default function EnvPage() {
+  const clientMode = isProductUiMode();
   const [vars, setVars] = useState<Record<string, EnvVarInfo> | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
@@ -617,25 +637,28 @@ export default function EnvPage() {
   const { t } = useI18n();
   const { setAfterTitle } = usePageHeader();
 
-  useEffect(() => {
-    api
-      .getEnvVars()
-      .then(setVars)
-      .catch(() => {});
+  const loadVars = useCallback(() => {
+    setLoadError(false);
+    setVars(null);
+    api.getEnvVars().then(setVars).catch(() => setLoadError(true));
   }, []);
+
+  useEffect(() => {
+    loadVars();
+  }, [loadVars]);
 
   // Scroll-to sub-nav in the page header
   const sections = useMemo(() => {
     const items: { id: string; label: string }[] = [
       { id: "section-oauth", label: "OAuth" },
-      { id: "section-providers", label: "Providers" },
+      { id: "section-providers", label: "Провайдеры" },
     ];
     if (vars) {
       const categories = ["tool", "messaging", "setting"];
       const CATEGORY_LABELS: Record<string, string> = {
-        tool: "Tools",
-        messaging: t.common.gateway ?? "Gateway",
-        setting: "Settings",
+        tool: "Инструменты",
+        messaging: t.common.gateway ?? "Шлюз",
+        setting: "Настройки",
       };
       for (const cat of categories) {
         const hasEntries = Object.values(vars).some(
@@ -645,11 +668,13 @@ export default function EnvPage() {
           items.push({ id: `section-${cat}`, label: CATEGORY_LABELS[cat] ?? cat });
         }
       }
-      // Custom keys section is always present (it carries the add-key form).
-      items.push({ id: "section-custom", label: t.env.customTitle });
+      if (!clientMode) {
+        // Arbitrary runtime keys are an operator surface, not an owner action.
+        items.push({ id: "section-custom", label: t.env.customTitle });
+      }
     }
     return items;
-  }, [vars, t]);
+  }, [clientMode, vars, t]);
 
   useLayoutEffect(() => {
     if (!vars) {
@@ -662,7 +687,7 @@ export default function EnvPage() {
     setAfterTitle(
       <nav
         className="flex shrink-0 flex-nowrap items-center gap-1"
-        aria-label="Jump to section"
+        aria-label="Перейти к разделу"
       >
         {sections.map((s) => (
           <button
@@ -709,7 +734,7 @@ export default function EnvPage() {
         delete n[key];
         return n;
       });
-      showToast(`${key} ${t.common.save.toLowerCase()}d`, "success");
+      showToast(`Ключ ${key} сохранён`, "success");
     } catch (e) {
       showToast(`${t.config.failedToSave} ${key}: ${e}`, "error");
     } finally {
@@ -877,6 +902,18 @@ export default function EnvPage() {
     };
   }, [vars, showAdvanced, t]);
 
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+        <p className="text-sm font-medium">Не удалось загрузить ключи</p>
+        <p className="max-w-md text-xs text-muted-foreground">
+          Проверьте соединение и попробуйте ещё раз.
+        </p>
+        <Button outlined size="sm" onClick={loadVars}>Повторить</Button>
+      </div>
+    );
+  }
+
   if (!vars) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -986,19 +1023,21 @@ export default function EnvPage() {
           />
         );
       })}
-      <CustomKeysCard
-        entries={customEntries}
-        edits={edits}
-        setEdits={setEdits}
-        revealed={revealed}
-        saving={saving}
-        onSave={handleSave}
-        onClear={keyClear.requestDelete}
-        onReveal={handleReveal}
-        onCancelEdit={cancelEdit}
-        onAddKey={handleAddKey}
-        clearDialogOpen={keyClear.isOpen}
-      />
+      {!clientMode && (
+        <CustomKeysCard
+          entries={customEntries}
+          edits={edits}
+          setEdits={setEdits}
+          revealed={revealed}
+          saving={saving}
+          onSave={handleSave}
+          onClear={keyClear.requestDelete}
+          onReveal={handleReveal}
+          onCancelEdit={cancelEdit}
+          onAddKey={handleAddKey}
+          clearDialogOpen={keyClear.isOpen}
+        />
+      )}
       <PluginSlot name="env:bottom" />
     </div>
   );

@@ -1,4 +1,6 @@
 import type { Translations } from "@/i18n/types";
+import { productUiMode } from "./dashboard-flags";
+import { productNavLabel } from "./product-nav";
 
 const BUILTIN: Record<string, keyof Translations["app"]["nav"]> = {
   "/chat": "chat",
@@ -39,6 +41,12 @@ export function resolvePageTitle(
   const plugin = pluginTabs.find((p) => p.path === normalized);
   if (plugin) {
     return plugin.label;
+  }
+  // Продуктовая подпись — раньше админской: в продукте у экрана своё имя, и
+  // заголовок обязан совпадать с пунктом меню, по которому на него пришли.
+  const product = productNavLabel(productUiMode(), normalized);
+  if (product) {
+    return product;
   }
   const key = BUILTIN[normalized];
   if (key) {

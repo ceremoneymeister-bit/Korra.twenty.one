@@ -39,6 +39,12 @@ describe("resolvePageTitle", () => {
     expect(resolvePageTitle("/files", t, [])).toBe("Files");
   });
 
+  it("uses the configured fleet label before the admin fallback", () => {
+    (globalThis as { window?: unknown }).window = { __KORRA_UI_MODE__: "fleet" };
+    expect(resolvePageTitle("/agents", t, [])).toBe("Агенты");
+    delete (globalThis as { window?: unknown }).window;
+  });
+
   it("prefers plugin tab labels", () => {
     expect(
       resolvePageTitle("/kanban", t, [{ path: "/kanban", label: "Kanban" }]),

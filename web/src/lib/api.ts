@@ -19,6 +19,11 @@ function readBasePath(): string {
 export const HERMES_BASE_PATH = readBasePath();
 const BASE = HERMES_BASE_PATH;
 
+/** Prefix a raw-fetch URL with the reverse-proxy-aware dashboard base path. */
+export function withBasePath(url: string): string {
+  return `${BASE}${url}`;
+}
+
 import type { DashboardTheme } from "@/themes/types";
 import {
   attemptDashboardTokenReloadOnce,
@@ -476,7 +481,21 @@ export const api = {
     fetchJSON<ManagedFileReadResponse>(
       `/api/files/read?path=${encodeURIComponent(path)}`,
     ),
-  uploadFile: (path: string, file: File, overwrite = true) => {
+  readFileText: (path: string, expectedSha256?: string | null) =>
+    fetchJSON<ManagedFileTextResponse>(
+      `/api/files/text?path=${encodeURIComponent(path)}${expectedSha256 ? `&expected_sha256=${encodeURIComponent(expectedSha256)}` : ""}`,
+    ),
+  writeFileText: (path: string, content: string, expectedSha256: string) =>
+    fetchJSON<ManagedFileTextResponse & { ok: true }>("/api/files/text", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path,
+        content,
+        expected_sha256: expectedSha256,
+      }),
+    }),
+  uploadFile: (path: string, file: File, overwrite = false) => {
     // Stream the raw bytes as multipart/form-data. Do NOT set Content-Type —
     // the browser adds the multipart boundary automatically. Sending the file
     // as base64 JSON (the old path) inflated the body ~33%, buffered the whole
@@ -503,6 +522,38 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, recursive }),
     }),
+  renameOwnerFile: (path: string, newName: string, expectedRevision: string) =>
+    fetchJSON<{ ok: true; entry: ManagedFileEntry }>("/api/owner/files/rename", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path,
+        new_name: newName,
+        expected_revision: expectedRevision,
+      }),
+    }),
+  trashOwnerFile: (path: string, expectedRevision: string) =>
+    fetchJSON<{ ok: true; trash_id: string; name: string }>("/api/owner/files/trash", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, expected_revision: expectedRevision }),
+    }),
+  listOwnerTrash: () =>
+    fetchJSON<{ entries: OwnerTrashEntry[] }>("/api/owner/files/trash"),
+  restoreOwnerTrash: (trashId: string) =>
+    fetchJSON<{ ok: true; name: string }>("/api/owner/files/trash/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trash_id: trashId }),
+    }),
+  purgeOwnerTrash: (trashId: string) =>
+    fetchJSON<{ ok: true; name: string }>("/api/owner/files/trash/purge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trash_id: trashId }),
+    }),
+  readOfficeFile: (path: string) =>
+    fetchJSON<OfficePreview>(`/api/files/office?path=${encodeURIComponent(path)}`),
   getLogs: (params: { file?: string; lines?: number; level?: string; component?: string }) => {
     const qs = new URLSearchParams();
     if (params.file) qs.set("file", params.file);
@@ -636,6 +687,40 @@ export const api = {
     fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/trigger?profile=${encodeURIComponent(profile)}`, { method: "POST" }),
   deleteCronJob: (id: string, profile = "default") =>
     fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${encodeURIComponent(id)}?profile=${encodeURIComponent(profile)}`, { method: "DELETE" }),
+  getOwnerCronJobs: () =>
+    fetchJSON<CronJob[]>("/api/owner/cron/jobs"),
+  getOwnerCronDeliveryTargets: () =>
+    fetchJSON<{ targets: CronDeliveryTarget[] }>("/api/owner/cron/delivery-targets"),
+  createOwnerCronJob: (job: OwnerCronJobCreate) =>
+    fetchJSON<CronJob>("/api/owner/cron/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(job),
+    }),
+  updateOwnerCronJob: (id: string, job: OwnerCronJobUpdate) =>
+    fetchJSON<CronJob>(`/api/owner/cron/jobs/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(job),
+    }),
+  pauseOwnerCronJob: (id: string, expectedRevision: string) =>
+    fetchJSON<CronJob>(`/api/owner/cron/jobs/${encodeURIComponent(id)}/pause`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+  resumeOwnerCronJob: (id: string, expectedRevision: string, confirmation: string) =>
+    fetchJSON<CronJob>(`/api/owner/cron/jobs/${encodeURIComponent(id)}/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_revision: expectedRevision, confirmation }),
+    }),
+  archiveOwnerCronJob: (id: string, expectedRevision: string) =>
+    fetchJSON<CronJob>(`/api/owner/cron/jobs/${encodeURIComponent(id)}/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
 
   // Automation Blueprints — parameterized automation blueprints
   getAutomationBlueprints: () =>
@@ -1863,6 +1948,8 @@ export interface PlatformStatus {
 
 export interface StatusResponse {
   active_sessions: number;
+  /** Build stamped into the currently running dashboard server. */
+  build?: string;
   /** Phase 7: ``true`` when the dashboard's OAuth gate is engaged
    * (public bind, no ``--insecure``). Read alongside ``auth_providers``
    * to render a "gated / loopback" badge. */
@@ -2074,6 +2161,32 @@ export interface ManagedFileEntry {
   size: number | null;
   mtime: number;
   mime_type: string | null;
+  revision?: string | null;
+  capabilities?: {
+    rename: boolean;
+    trash: boolean;
+  };
+}
+
+/** Запись корзины владельца: её можно вернуть или удалить окончательно. */
+export interface OwnerTrashEntry {
+  trash_id: string;
+  name: string;
+  trashed_at: string | null;
+  size: number | null;
+}
+
+/** Содержимое офисного файла, вынутое сервером: текст и таблицы, без вёрстки. */
+export interface OfficePreview {
+  name: string;
+  path: string;
+  kind: "docx" | "xlsx" | "pptx";
+  truncated: boolean;
+  blocks: Array<
+    | { type: "heading"; text: string }
+    | { type: "paragraph"; text: string }
+    | { type: "table"; rows: string[][] }
+  >;
 }
 
 export interface ManagedFilesResponse {
@@ -2091,6 +2204,22 @@ export interface ManagedFileReadResponse {
   size: number;
   mime_type: string;
   data_url: string;
+  root: string | null;
+  locked_root: string | null;
+  can_change_path: boolean;
+}
+
+export interface ManagedFileTextResponse {
+  name: string;
+  path: string;
+  size: number;
+  mime_type: string;
+  language: string;
+  text: string;
+  binary: boolean;
+  truncated: boolean;
+  sha256: string | null;
+  editable: boolean;
   root: string | null;
   locked_root: string | null;
   can_change_path: boolean;
@@ -2252,6 +2381,18 @@ export interface CronJobMutation {
   workdir?: string | null;
 }
 
+export interface OwnerCronJobCreate {
+  request_id: string;
+  name: string;
+  prompt: string;
+  schedule: string;
+  deliver: string;
+}
+
+export interface OwnerCronJobUpdate extends Omit<OwnerCronJobCreate, "request_id"> {
+  expected_revision: string;
+}
+
 export interface CronJob {
   id: string;
   profile?: string | null;
@@ -2280,6 +2421,8 @@ export interface CronJob {
   last_status?: string | null;
   last_error?: string | null;
   last_delivery_error?: string | null;
+  revision?: string | null;
+  archived_at?: string | null;
   last_fire_error?: { at?: string | null; detail?: string | null } | null;
 }
 

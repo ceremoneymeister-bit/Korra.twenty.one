@@ -1,0 +1,261 @@
+/**
+ * Показ артефакта в ленте: картинка — картинкой, документ — карточкой.
+ *
+ * До этого агент отдавал путь строкой, и владельцу приходилось идти в раздел
+ * «Материалы», искать файл и открывать его там. Для продукта, который меряет
+ * время владельца, это прямой расход лимита на навигацию.
+ */
+
+import { useState } from "react";
+import { Check, Clock, Download, ExternalLink, Pencil, X } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { artifactUrl, shortName, type ChatArtifact } from "@/lib/chat-artifacts";
+import { AttachmentCard } from "@/components/ChatAttachments";
+
+function Lightbox({
+  item,
+  onClose,
+}: {
+  item: ChatArtifact;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={item.name}
+    >
+      <img
+        src={artifactUrl(item.path)}
+        alt={item.name}
+        className="max-h-full max-w-full rounded-md object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 rounded-md bg-white/10 p-2 text-white hover:bg-white/20"
+        aria-label="Закрыть"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
+export type ArtifactDecision = "approve" | "change" | "defer";
+/** Возвращает false, если решение отправить не удалось — карточка тогда не
+ *  показывает «отправлено». */
+export type ArtifactDecisionHandler = (
+  kind: ArtifactDecision,
+  item: ChatArtifact,
+) => void | boolean | Promise<void | boolean>;
+
+/**
+ * Кнопки решения под артефактом.
+ *
+ * Это не украшение: именно они заменяют владельцу поход в таблицу. Решение
+ * уходит обычным сообщением в чат, агент подхватывает его штатным правилом
+ * «подтверждение → обновить статус → вернуть сводку».
+ */
+function DecisionRow({
+  item,
+  onDecision,
+  busy,
+  already,
+}: {
+  item: ChatArtifact;
+  onDecision: ArtifactDecisionHandler;
+  /** Идёт ответ агента: отправить решение сейчас нельзя. */
+  busy?: boolean;
+  /** Решение, уже принятое в этом разговоре — восстановлено из истории. */
+  already?: ArtifactDecision;
+}) {
+  const [sent, setSent] = useState<ArtifactDecision | null>(null);
+  const [failed, setFailed] = useState(false);
+  // Своё состояние живёт до перезагрузки, история — всегда. Показываем то, что
+  // знает история, если она знает.
+  const done = already ?? sent;
+
+  if (done === "approve" || done === "defer") {
+    return (
+      <div className="mt-1.5 text-[11px] text-muted-foreground font-sans normal-case tracking-normal">
+        {done === "approve" ? "Согласовано" : "Отложено"}
+      </div>
+    );
+  }
+
+  const btn =
+    "inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 " +
+    "text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground " +
+    "font-sans normal-case tracking-normal transition-colors";
+
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      <button
+        type="button"
+        className={cn(btn, "border-primary/40 text-primary hover:bg-primary/10")}
+        disabled={busy}
+        onClick={async () => {
+          // Помечаем только по факту доставки: send() возвращает false и при
+          // оборванной сети, и во время чужого потока. Карточка не должна
+          // рапортовать об успехе, которого не было.
+          setFailed(false);
+          const ok = await onDecision("approve", item);
+          if (ok === false) setFailed(true);
+          else setSent("approve");
+        }}
+      >
+        <Check size={12} aria-hidden /> Согласовать
+      </button>
+      <button
+        type="button"
+        className={btn}
+        disabled={busy}
+        onClick={() => void onDecision("change", item)}
+      >
+        <Pencil size={12} aria-hidden /> Изменить
+      </button>
+      <button
+        type="button"
+        className={btn}
+        disabled={busy}
+        onClick={async () => {
+          setFailed(false);
+          const ok = await onDecision("defer", item);
+          if (ok === false) setFailed(true);
+          else setSent("defer");
+        }}
+      >
+        <Clock size={12} aria-hidden /> Отложить
+      </button>
+      {failed && (
+        <span className="w-full text-[11px] text-destructive">
+          Решение не отправилось — попробуйте ещё раз
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function ChatArtifactView({
+  item,
+  onDecision,
+  busy,
+  decided,
+}: {
+  item: ChatArtifact;
+  onDecision?: ArtifactDecisionHandler;
+  busy?: boolean;
+  decided?: Map<string, ArtifactDecision>;
+}) {
+  const [zoom, setZoom] = useState(false);
+
+  if (item.isImage) {
+    return (
+      <>
+        <figure className="mt-2 mb-1">
+          <img
+            src={artifactUrl(item.path)}
+            alt={item.name}
+            loading="lazy"
+            onClick={() => setZoom(true)}
+            className={cn(
+              "max-h-[420px] w-auto max-w-full cursor-zoom-in rounded-md",
+              "border border-border object-contain bg-background",
+            )}
+          />
+          <figcaption className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground font-sans normal-case tracking-normal">
+            <span className="truncate">{shortName(item.name, 40)}</span>
+            <a
+              href={artifactUrl(item.path, false)}
+              className="inline-flex items-center gap-1 hover:text-foreground"
+              download
+            >
+              <Download size={11} aria-hidden /> скачать
+            </a>
+          </figcaption>
+          {onDecision && (
+            <DecisionRow
+              item={item}
+              onDecision={onDecision}
+              busy={busy}
+              already={decided?.get(item.path) ?? decided?.get(item.name)}
+            />
+          )}
+        </figure>
+        {zoom && <Lightbox item={item} onClose={() => setZoom(false)} />}
+      </>
+    );
+  }
+
+  return (
+    <div className="mt-2 mb-1">
+      <div className="flex items-center gap-2">
+      <AttachmentCard
+        item={{
+          key: item.path,
+          name: item.name,
+          kind: item.kind,
+          sizeLabel: "артефакт",
+        }}
+      />
+      <a
+        href={artifactUrl(item.path)}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 font-sans normal-case tracking-normal"
+        title="Открыть в новой вкладке"
+      >
+        <ExternalLink size={12} aria-hidden /> открыть
+      </a>
+      <a
+        href={artifactUrl(item.path, false)}
+        download
+        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 font-sans normal-case tracking-normal"
+        title="Скачать"
+      >
+        <Download size={12} aria-hidden /> скачать
+      </a>
+      </div>
+      {onDecision && (
+        <DecisionRow
+          item={item}
+          onDecision={onDecision}
+          busy={busy}
+          already={decided?.get(item.path) ?? decided?.get(item.name)}
+        />
+      )}
+    </div>
+  );
+}
+
+export function ChatArtifactList({
+  items,
+  onDecision,
+  busy,
+  decided,
+}: {
+  items: ChatArtifact[];
+  onDecision?: ArtifactDecisionHandler;
+  busy?: boolean;
+  decided?: Map<string, ArtifactDecision>;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-col">
+      {items.map((item) => (
+        <ChatArtifactView
+          key={item.path}
+          item={item}
+          onDecision={onDecision}
+          busy={busy}
+          decided={decided}
+        />
+      ))}
+    </div>
+  );
+}

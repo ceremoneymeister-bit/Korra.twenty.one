@@ -8,6 +8,7 @@ import {
 import { useLocation, useSearchParams } from "react-router";
 import { api, setManagementProfile } from "@/lib/api";
 import { ProfileContext } from "@/contexts/profile-context";
+import { isProductUiMode } from "@/lib/dashboard-flags";
 
 /**
  * Machine-level management-profile scope.
@@ -81,6 +82,10 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const urlProfile = searchParams.get("profile");
+
+    // Main fleet navigation uses the configured agent tabs and does not need
+    // the global management-profile selector during ordinary work.
+    if (isProductUiMode()) return;
 
     Promise.all([api.getProfiles(), api.getActiveProfile()])
       .then(([profilesRes, info]) => {

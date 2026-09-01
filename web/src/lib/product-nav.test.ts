@@ -1,0 +1,73 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  productHomePath,
+  selectProductNav,
+  selectProductSettingsNav,
+  selectServiceNav,
+  type NavEntry,
+} from "./product-nav";
+
+const ADMIN_NAV: NavEntry[] = [
+  { path: "/chat", labelKey: "chat", label: "Chat" },
+  { path: "/agents", label: "Agents" },
+  { path: "/sessions", labelKey: "sessions", label: "Sessions" },
+  { path: "/files", label: "Files" },
+  { path: "/models", labelKey: "models", label: "Models" },
+  { path: "/logs", labelKey: "logs", label: "Logs" },
+  { path: "/cron", labelKey: "cron", label: "Cron" },
+  { path: "/help", label: "Help" },
+  { path: "/skills", labelKey: "skills", label: "Skills" },
+  { path: "/plugins", labelKey: "plugins", label: "Plugins" },
+  { path: "/mcp", label: "MCP" },
+  { path: "/channels", label: "Channels" },
+  { path: "/webhooks", label: "Webhooks" },
+  { path: "/pairing", label: "Pairing" },
+  { path: "/profiles", labelKey: "profiles", label: "Profiles" },
+  { path: "/config", labelKey: "config", label: "Config" },
+  { path: "/env", labelKey: "keys", label: "Keys" },
+  { path: "/system", label: "System" },
+  { path: "/docs", labelKey: "documentation", label: "Documentation" },
+];
+
+describe("selectProductNav", () => {
+  it("оставляет пять рабочих экранов в заданном порядке", () => {
+    expect(selectProductNav(ADMIN_NAV, "fleet")).toEqual([
+      { path: "/chat", label: "Чат", labelKey: undefined },
+      { path: "/agents", label: "Агенты", labelKey: undefined },
+      { path: "/files", label: "Материалы", labelKey: undefined },
+      { path: "/sessions", label: "История", labelKey: undefined },
+      { path: "/cron", label: "Задачи", labelKey: undefined },
+    ]);
+  });
+});
+
+describe("secondary navigation", () => {
+  it("формирует настройки отдельно от служебных экранов", () => {
+    expect(selectProductSettingsNav(ADMIN_NAV).map((item) => item.path)).toEqual([
+      "/env",
+      "/models",
+      "/logs",
+      "/help",
+    ]);
+    expect(selectServiceNav(ADMIN_NAV).map((item) => item.path)).toEqual([
+      "/skills",
+      "/plugins",
+      "/mcp",
+      "/channels",
+      "/webhooks",
+      "/pairing",
+      "/profiles",
+      "/config",
+      "/system",
+      "/docs",
+    ]);
+  });
+});
+
+describe("productHomePath", () => {
+  it("делает чат домашним экраном", () => {
+    expect(productHomePath("fleet")).toBe("/chat");
+    expect(productHomePath(null)).toBe("/sessions");
+  });
+});

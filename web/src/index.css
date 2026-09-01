@@ -129,6 +129,87 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   overflow: hidden;
 }
 
+/* Owner-facing product polish. The upstream operator dashboard intentionally
+   uses an experimental display type system; Russian business workflows need
+   calmer sentence-case controls and predictable touch targets. */
+[data-client-ui="true"] button,
+[data-client-ui="true"] [role="button"] {
+  font-family: var(--theme-font-sans) !important;
+  letter-spacing: 0.01em !important;
+  text-transform: none !important;
+  line-height: 1.25 !important;
+}
+
+[data-client-ui="true"] .font-expanded,
+[data-client-ui="true"] .font-mondwest {
+  font-family: var(--theme-font-sans) !important;
+  letter-spacing: 0.02em !important;
+  text-transform: none !important;
+}
+
+/* Навигация — это ссылки, поэтому правило для кнопок выше её не касалось, и
+   меню продукта оставалось набранным капсом: «РАСЧЁТЧИКИ», «ЗАКАЗЫ». Капс в
+   каноне разрешён только короткой надписи-разделителю, а не пунктам меню. */
+[data-client-ui="true"] aside a,
+[data-client-ui="true"] aside a span,
+[data-client-ui="true"] aside nav button span,
+[data-client-ui="true"] aside > div span {
+  text-transform: none !important;
+  letter-spacing: 0.01em !important;
+}
+
+[data-client-ui="true"] button {
+  border-radius: 0.625rem;
+}
+
+[data-client-ui="true"] button:focus-visible,
+[data-client-ui="true"] a:focus-visible,
+[data-client-ui="true"] summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--midground-base) 62%, transparent);
+  outline-offset: 2px;
+}
+
+[data-client-ui="true"] .arc-border {
+  display: none;
+}
+
+/* Пол по размеру текста. Панель оператора ставит служебные подписи в 11 px —
+   оператор знает их наизусть и читает как иконки. Владелец продукта видит их
+   впервые, и «Изменено», «Размер», дату файла и шаг инструкции ему нужно
+   прочитать, а не угадать. Канон требует 15–16 px для основного текста;
+   13 px — граница, ниже которой не опускаемся нигде. */
+[data-client-ui="true"] .text-xs {
+  font-size: 0.875rem;
+}
+
+/* Touch target по канону — 44 px. Правило про палец, поэтому и включается
+   только там, где указатель грубый: на десктопе мышь попадает и в 38 px, и
+   раздувать ради неё интерфейс незачем. */
+@media (pointer: coarse) {
+  [data-client-ui="true"] aside a,
+  [data-client-ui="true"] aside button,
+  [data-client-ui="true"] header button,
+  [data-client-ui="true"] input:not([type="checkbox"]):not([type="radio"]),
+  [data-client-ui="true"] textarea,
+  [data-client-ui="true"] [role="combobox"] {
+    min-height: 44px;
+  }
+
+  /* Галочка и тумблер нажимаются всей своей подписью, поэтому цель пальца —
+     `label`, а не сам виджет 15 px. Раздувать виджет не надо, надо дать
+     строке высоту. */
+  [data-client-ui="true"] label {
+    min-height: 44px;
+  }
+
+  /* Строка списка — тоже кнопка: по ней открывают папку и файл. Правило выше
+     касалось только каркаса, а рабочие списки живут в основной области. */
+  [data-client-ui="true"] main button,
+  [data-client-ui="true"] main a[href] {
+    min-height: 44px;
+  }
+}
+
 @media (max-width: 768px) {
   html,
   body,
@@ -172,8 +253,13 @@ code { font-size: 0.875rem; }
   --color-accent-foreground: var(--midground);
   --color-destructive: #fb2c36;
   --color-destructive-foreground: #ffffff;
-  --color-success: #4ade80;
-  --color-warning: #ffbd38;
+  /* Через индирекцию — как у соседних токенов и как в globals.css кита.
+     Плоский hex Tailwind вшивает прямо в утилиту на сборке: `.text-success`
+     тогда навсегда `#4ade80`, и переопределение темы до него не доходит.
+     Видно это только на светлой теме — зелёный и янтарный подобраны под
+     тёмный фон и дают там 1,6 к единице, то есть подпись не читается вовсе. */
+  --color-success: var(--success, #4ade80);
+  --color-warning: var(--warning, #ffbd38);
   --color-border: color-mix(in srgb, var(--midground-base) 15%, transparent);
   --color-input: color-mix(in srgb, var(--midground-base) 15%, transparent);
   --color-ring: var(--midground);
@@ -252,4 +338,3 @@ code { font-size: 0.875rem; }
 html[dir="rtl"] {
   direction: rtl;
 }
-
