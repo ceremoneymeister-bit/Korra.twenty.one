@@ -1,8 +1,8 @@
 # Durable & Background Systems
 
 Four systems run alongside the main conversation loop. Quick reference
-here; full developer notes live in `AGENTS.md`, user-facing docs under
-`website/docs/user-guide/features/`.
+here; full developer notes live in `AGENTS.md`. Verify live behavior with
+`hermes <command> --help` and the installed source tree.
 
 ### Delegation (`delegate_task`)
 
@@ -42,7 +42,7 @@ the `cronjob` tool, the `hermes cron` CLI (`list`, `add`, `edit`,
   header/footer instead of being mirrored into the target gateway
   session (keeps role alternation intact).
 
-User docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/cron
+Source of truth: `hermes cron --help` and `cron/` in the installed build.
 
 ### Curator (skill lifecycle)
 
@@ -69,7 +69,7 @@ so nothing is lost.
 
 Config: `curator.*` (`enabled`, `interval_hours`, `min_idle_hours`,
 `stale_after_days`, `archive_after_days`, `backup.*`).
-User docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/curator
+Source of truth: `hermes curator --help` and the installed curator code.
 
 ### Kanban (multi-agent work queue)
 
@@ -98,4 +98,4 @@ sessions still have zero `kanban_*` schema footprint unless configured.
   `HERMES_KANBAN_BOARD` pinned in env); tenant is a soft namespace
   within a board for workspace-path + memory-key isolation.
 
-User docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban
+Source of truth: `hermes kanban --help` and the installed kanban plugin code.

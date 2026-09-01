@@ -83,7 +83,8 @@ hermes webhook subscribe todoist-hermes \
   --deliver telegram --deliver-chat-id "12345"
 ```
 
-Full filter syntax: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks#payload-filters
+For the filter syntax supported by this build, use `hermes webhook --help` and
+inspect the installed webhook adapter.
 
 ### List subscriptions
 ```bash

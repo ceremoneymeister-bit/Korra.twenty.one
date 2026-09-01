@@ -50,6 +50,57 @@ def test_no_upstream_hosts_in_model_catalog_chain():
         assert "nousresearch" not in url.lower(), f"источник апстрима в цепочке: {url}"
 
 
+def test_no_upstream_hosts_in_primary_catalog_urls():
+    """Аудит: первый сторож проверял только fallback-массив, а основной url
+    оставался апстримным и в коде, и в DEFAULT_CONFIG. Три двери, одна
+    охранялась.
+    """
+    from hermes_cli import model_catalog
+
+    assert "nousresearch" not in model_catalog.DEFAULT_CATALOG_URL.lower()
+    assert "nousresearch" not in DEFAULT_CONFIG["model_catalog"]["url"].lower()
+
+
+def test_catalog_config_fails_closed(monkeypatch):
+    """Аудит воспроизвёл: исключение при чтении config.yaml давало
+    enabled=True с url апстрима — сбой РАСШИРЯЛ сетевую поверхность.
+    Сломанный конфиг обязан оставлять каталог выключенным.
+    """
+    from hermes_cli import config as config_mod
+    from hermes_cli import model_catalog
+
+    def boom():
+        raise RuntimeError("битый config.yaml")
+
+    monkeypatch.setattr(config_mod, "load_config", boom)
+    cfg = model_catalog._load_catalog_config()
+    assert cfg["enabled"] is False
+    assert "nousresearch" not in cfg["url"].lower()
+
+
+def test_disabled_catalog_ignores_stale_cache(monkeypatch, tmp_path):
+    """Аудит воспроизвёл: при enabled=False старый дисковый кэш продолжал
+    подменять тихую дефолтную модель. Выключено — значит выключено.
+    """
+    import json
+
+    from hermes_cli import model_catalog
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "model_catalog.json").write_text(json.dumps({
+        "providers": {"openrouter": {"models": [
+            {"id": "stale/expensive", "default": True},
+        ]}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(model_catalog, "_cache_path", lambda: cache / "model_catalog.json")
+    monkeypatch.setattr(model_catalog, "_load_catalog_config", lambda: {
+        "enabled": False, "url": "", "ttl_hours": 1, "providers": {},
+    })
+    model_catalog.reset_cache()
+    assert model_catalog.get_default_model_from_cache("openrouter") is None
+
+
 def test_centralized_skills_index_is_off():
     """Индекс скиллов апстрима показывал их новые скиллы как «встроенные»
     и позволял поставить исполняемый код без нашего коммита.

@@ -1,6 +1,7 @@
 # Contributor Quick Reference
 
-For occasional contributors and PR authors. Full developer docs: https://hermes-agent.nousresearch.com/docs/developer-guide/
+For occasional contributors and PR authors. `AGENTS.md` and the checked-out
+source are the developer source of truth.
 
 ### Project Layout
 
@@ -21,8 +22,7 @@ hermes-agent/
 ├── gateway/              # Messaging gateway
 │   └── platforms/        # Platform adapters (telegram, discord, etc.)
 ├── cron/                 # Job scheduler
-├── tests/                # Extensive pytest suite (run via scripts/run_tests.sh)
-└── website/              # Docusaurus docs site
+└── tests/                # Extensive pytest suite (run via scripts/run_tests.sh)
 ```
 
 Config: `~/.hermes/config.yaml` (settings), `~/.hermes/.env` (API keys) — both under `$HERMES_HOME` when it is set.
@@ -60,7 +60,7 @@ registry.register(
 
 All handlers must return JSON strings. Use `get_hermes_home()` for paths,
 never hardcode `~/.hermes`. For custom/local-only tools, write a plugin in
-`~/.hermes/plugins/` instead of editing core — see the developer docs.
+`~/.hermes/plugins/` instead of editing core — see `AGENTS.md`.
 
 ### Adding a Slash Command
 

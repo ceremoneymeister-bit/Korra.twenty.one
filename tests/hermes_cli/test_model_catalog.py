@@ -446,12 +446,13 @@ class TestManifestMatchesInRepoLists:
         If this fails, run ``python scripts/build_model_catalog.py`` and
         commit the regenerated ``website/static/api/model-catalog.json``.
         """
-        # Resolve the repo root from this test file's location.
+        # Korra: манифест переехал из website/ в package-data движка.
+        # skip убран НАМЕРЕННО: аудит показал, что после удаления website/
+        # этот тест молча скипался, и расхождение манифеста с генератором
+        # оставило бы CI зелёным. Отсутствие файла — это падение, не skip.
         repo_root = Path(__file__).resolve().parents[2]
-        manifest_path = repo_root / "website" / "static" / "api" / "model-catalog.json"
-
-        if not manifest_path.exists():
-            pytest.skip(f"manifest missing at {manifest_path}")
+        manifest_path = repo_root / "hermes_cli" / "data" / "model-catalog.json"
+        assert manifest_path.exists(), f"поставляемый манифест отсутствует: {manifest_path}"
 
         # Build expected catalog using the same script CI would.
         import importlib.util
@@ -466,8 +467,8 @@ class TestManifestMatchesInRepoLists:
             actual = json.load(fh)
 
         assert self._strip_volatile(actual) == self._strip_volatile(expected), (
-            "website/static/api/model-catalog.json is out of sync with "
+            "hermes_cli/data/model-catalog.json is out of sync with "
             "_PROVIDER_MODELS['nous'] / OPENROUTER_MODELS. "
             "Run: python scripts/build_model_catalog.py && "
-            "git add website/static/api/model-catalog.json"
+            "git add hermes_cli/data/model-catalog.json"
         )

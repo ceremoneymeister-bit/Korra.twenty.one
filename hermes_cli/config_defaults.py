@@ -3068,7 +3068,10 @@ DEFAULT_CONFIG = {
     # Включать только вместе с подменой url на наш собственный манифест.
     "model_catalog": {
         "enabled": False,
-        "url": "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json",
+        # Пустой url намеренно: аудит нашёл, что при битом config.yaml парсер
+        # откатывался на зашитый url апстрима с enabled=True. Свой манифест —
+        # впишите url сюда И включите каталог осознанно.
+        "url": "",
         # Disk cache TTL in hours.  Beyond this, the CLI refetches on the
         # next /model or `hermes model` invocation; network failures
         # silently fall back to the stale cache.

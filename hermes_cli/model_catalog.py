@@ -62,9 +62,12 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_CATALOG_URL = (
-    "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json"
-)
+# Korra: URL апстрима убран и отсюда. Аудит показал, что при исключении в
+# load_config() парсер конфига откатывался на ЭТУ константу с enabled=True —
+# сломанный config.yaml молча возвращал сетевой каталог апстрима. Пустая
+# строка + fail-closed дефолт ниже закрывают этот путь. Включать каталог —
+# только вместе со своим собственным манифест-URL.
+DEFAULT_CATALOG_URL = ""
 # Korra: запасной URL на raw.githubusercontent апстрима убран. Это была вторая
 # дорога, по которой ЧУЖОЙ манифест мог сменить дефолтную модель на контуре
 # клиента — та же зависимость, что и основной URL, только в обход него.
@@ -102,7 +105,10 @@ def _load_catalog_config() -> dict[str, Any]:
         raw = {}
 
     return {
-        "enabled": bool(raw.get("enabled", True)),
+        # Korra: fail-closed. Апстримный дефолт True означал, что исключение
+        # при чтении конфига (битый YAML, недоступный диск) ВКЛЮЧАЛО сетевой
+        # каталог — сбой расширял поверхность вместо того, чтобы сужать её.
+        "enabled": bool(raw.get("enabled", False)),
         "url": str(raw.get("url") or DEFAULT_CATALOG_URL),
         "ttl_hours": float(raw.get("ttl_hours") or DEFAULT_TTL_HOURS),
         "providers": raw.get("providers") if isinstance(raw.get("providers"), dict) else {},
@@ -418,6 +424,12 @@ def get_default_model_from_cache(provider: str) -> str | None:
     when no cached manifest exists (fresh install, offline), returns None and
     the caller falls back to the in-repo constant.
     """
+    # Korra: выключенный каталог не имеет права решать и из кэша. Аудит
+    # воспроизвёл обход: при enabled=False старый дисковый кэш продолжал
+    # подменять тихую дефолтную модель (models.py использует этот аксессор).
+    # Выключено — значит выключено: решают только списки в коде.
+    if not _load_catalog_config()["enabled"]:
+        return None
     if _catalog_cache is not None:
         block = _catalog_cache.get("providers", {}).get(provider)
         found = _default_model_from_block(block)
@@ -446,6 +458,12 @@ def seed_cache_from_checkout(project_root: "Path | str") -> bool:
     as non-fatal — the network fetch path still applies on the next picker
     open).
     """
+    # Korra: при выключенном каталоге посев кэша не выполняется — иначе
+    # `hermes update` восстанавливал бы дисковый кэш, который читатели
+    # обязаны игнорировать (третий обход из аудита).
+    if not _load_catalog_config()["enabled"]:
+        logger.debug("model catalog disabled; seed from checkout skipped")
+        return False
     # Korra: манифест переехал из website/ (каталог удалён вместе с сайтом
     # апстрима) в package-data движка — hermes_cli/data/model-catalog.json.
     # Так он доступен и в контейнере, где чекаута репозитория нет вовсе,
