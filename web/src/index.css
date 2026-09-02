@@ -43,23 +43,25 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Hermes Agent — Nous DS with the LENS_0 (Hermes teal) palette applied
-   statically as the default dashboard theme. */
+/* Korra dashboard — neutral light palette applied statically so the first
+   paint matches the React theme provider's default. */
 /* ------------------------------------------------------------------ */
 
 :root {
-  /* LENS_0 — from design-language/src/ui/components/overlays/index.tsx.
-     These are the defaults for the `default` (Hermes Teal) dashboard theme;
-     ThemeProvider rewrites them as inline styles when a user switches themes. */
+  /* ThemeProvider rewrites these inline when the user selects dark mode. */
   --foreground: color-mix(in srgb, #ffffff 0%, transparent);
   --foreground-base: #ffffff;
   --foreground-alpha: 0;
-  --midground: color-mix(in srgb, #ffe6cb 100%, transparent);
-  --midground-base: #ffe6cb;
+  --midground: color-mix(in srgb, #202124 100%, transparent);
+  --midground-base: #202124;
   --midground-alpha: 1;
-  --background: color-mix(in srgb, #041c1c 100%, transparent);
-  --background-base: #041c1c;
+  --background: color-mix(in srgb, #f7f7f5 100%, transparent);
+  --background-base: #f7f7f5;
   --background-alpha: 1;
+
+  /* Light-theme semantic defaults used before ThemeProvider's first effect. */
+  --success: #047857;
+  --warning: #8a5200;
 
   /* Typography tokens — rewritten by ThemeProvider. Defaults match the
      system stack so themes that don't override look native. */
@@ -78,14 +80,9 @@
   --theme-spacing-mul: 1;
   --theme-density: comfortable;
 
-  /* Data-series accents — consumed by Analytics + Models pages for the
-     input-vs-output token visualisations (chart bars, table values,
-     legend swatches). Defaults are tuned for the Hermes-teal LENS_0
-     look: cream input + emerald-400 output read as warm/cool against
-     the dark canvas. Themes override via ThemeProvider, which emits
-     these as `--series-input-token` / `--series-output-token`. */
-  --series-input-token: #ffe6cb;
-  --series-output-token: #34d399;
+  /* Data-series accents — consumed by Analytics + Models pages. */
+  --series-input-token: #4f7900;
+  --series-output-token: #7c3aed;
 }
 
 /* Theme tokens cascade into the document root so every descendant inherits

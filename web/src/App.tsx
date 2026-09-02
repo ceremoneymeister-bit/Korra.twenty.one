@@ -61,7 +61,6 @@ import {
 import { Button } from "@nous-research/ui/ui/components/button";
 import { SelectionSwitcher } from "@nous-research/ui/ui/components/selection-switcher";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
-import { Typography } from "@nous-research/ui/ui/components/typography/index";
 import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { SidebarFooter } from "@/components/SidebarFooter";
@@ -103,6 +102,7 @@ const BubbleChatPage = lazy(() => import("@/pages/BubbleChatPage"));
 const AgentWorkbenchPage = lazy(() => import("@/pages/AgentWorkbenchPage"));
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import { KorraBrand } from "@/components/KorraBrand";
 import { useI18n } from "@/i18n";
 import type { Translations } from "@/i18n/types";
 import { PluginPage, PluginSlot, usePlugins } from "@/plugins";
@@ -456,6 +456,8 @@ export default function App() {
   const sidebarStatus = useSidebarStatus();
   const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
+  const uiMode = productUiMode();
+  const isFleetMode = uiMode === "fleet";
   const isChatRoute = normalizedPath === "/chat";
   const isAgentsRoute = normalizedPath === "/agents";
   const isFullHeightRoute = isChatRoute || isAgentsRoute;
@@ -517,13 +519,13 @@ export default function App() {
   const builtinRoutes = useMemo(
     () => ({
       ...BUILTIN_ROUTES_CORE,
-      ...(bubbleChat
+      ...(!isFleetMode && bubbleChat
         ? { "/chat": BubbleChatPage }
-        : embeddedChat
+        : !isFleetMode && embeddedChat
           ? { "/chat": ChatRouteSink }
           : {}),
     }),
-    [bubbleChat, embeddedChat],
+    [bubbleChat, embeddedChat, isFleetMode],
   );
 
   const builtinNav = useMemo(() => {
@@ -533,9 +535,8 @@ export default function App() {
     const withAnalytics = showTokenAnalytics
       ? base
       : base.filter((n) => n.path !== "/analytics");
-    const mode = productUiMode();
-    return mode ? selectProductNav(withAnalytics, mode) : withAnalytics;
-  }, [bubbleChat, embeddedChat, showTokenAnalytics]);
+    return uiMode ? selectProductNav(withAnalytics, uiMode) : withAnalytics;
+  }, [embeddedChat, showTokenAnalytics, uiMode]);
 
   const sidebarNav = useMemo(
     () => partitionSidebarNav(builtinNav, manifests),
@@ -558,10 +559,22 @@ export default function App() {
   }, [bubbleChat, embeddedChat, manifests]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [serviceOpen, setServiceOpen] = useState(false);
-  const routes = useMemo(
-    () => buildRoutes(builtinRoutes, manifests),
-    [builtinRoutes, manifests],
-  );
+  const routes = useMemo(() => {
+    const built = buildRoutes(builtinRoutes, manifests);
+    if (!isFleetMode) return built;
+
+    // /chat is deliberately unavailable in fleet, including when a plugin
+    // attempts to add or override it. Keep an explicit redirect so deep links
+    // and old bookmarks converge on the agents workbench.
+    return [
+      ...built.filter((route) => route.path !== "/chat"),
+      {
+        key: "fleet:/chat",
+        path: "/chat",
+        element: <RootRedirect />,
+      },
+    ];
+  }, [builtinRoutes, isFleetMode, manifests]);
   const pluginTabMeta = useMemo(
     () =>
       manifests
@@ -645,9 +658,7 @@ export default function App() {
           <Menu />
         </Button>
 
-        <Typography className="font-bold text-[0.95rem] leading-[0.95] tracking-[0.05em] text-midground">
-          {t.app.brand}
-        </Typography>
+        <KorraBrand themeName={theme.name} className="h-[18px]" />
       </header>
 
       {mobileOpen && (
@@ -707,11 +718,7 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
-                <Typography className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase">
-                  Hermes
-                  <br />
-                  Agent
-                </Typography>
+                <KorraBrand themeName={theme.name} />
               </div>
 
               <Button
@@ -1281,7 +1288,7 @@ function SidebarSystemActions({
       confirmLabel={t.status.restartGateway}
       description={
         t.status.restartGatewayConfirmMessage ??
-        "This restarts the Hermes gateway process. Connected channels and active sessions will reconnect afterward."
+        "This restarts the Korra gateway process. Connected channels and active sessions will reconnect afterward."
       }
       loading={pendingAction === "restart"}
       onCancel={() => setRestartConfirmOpen(false)}

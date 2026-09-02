@@ -19,13 +19,12 @@ export interface NavEntry {
 
 /** Что видит пользователь продукта. Порядок задаёт и порядок в сайдбаре. */
 const PRODUCT_NAV_PATHS: Record<ProductUiMode, string[]> = {
-  fleet: ["/chat", "/agents", "/files", "/sessions", "/cron"],
+  fleet: ["/agents", "/files", "/sessions", "/cron"],
 };
 
 /** Язык продукта, а не панели администратора. */
 const PRODUCT_NAV_LABELS: Record<ProductUiMode, Record<string, string>> = {
   fleet: {
-    "/chat": "Чат",
     "/agents": "Агенты",
     "/files": "Материалы",
     "/sessions": "История",
@@ -93,7 +92,7 @@ export function productNavLabel(
 
 /** Куда уводить `/` и неизвестный маршрут. */
 const PRODUCT_HOME_PATHS: Record<ProductUiMode, string> = {
-  fleet: "/chat",
+  fleet: "/agents",
 };
 
 /** Домашний экран режима; для админской панели (`null`) — прежние /sessions. */

@@ -31,9 +31,8 @@ const ADMIN_NAV: NavEntry[] = [
 ];
 
 describe("selectProductNav", () => {
-  it("оставляет пять рабочих экранов в заданном порядке", () => {
+  it("убирает отдельный чат и оставляет четыре рабочих экрана", () => {
     expect(selectProductNav(ADMIN_NAV, "fleet")).toEqual([
-      { path: "/chat", label: "Чат", labelKey: undefined },
       { path: "/agents", label: "Агенты", labelKey: undefined },
       { path: "/files", label: "Материалы", labelKey: undefined },
       { path: "/sessions", label: "История", labelKey: undefined },
@@ -66,8 +65,8 @@ describe("secondary navigation", () => {
 });
 
 describe("productHomePath", () => {
-  it("делает чат домашним экраном", () => {
-    expect(productHomePath("fleet")).toBe("/chat");
+  it("делает вкладку агентов домашним экраном fleet", () => {
+    expect(productHomePath("fleet")).toBe("/agents");
     expect(productHomePath(null)).toBe("/sessions");
   });
 });

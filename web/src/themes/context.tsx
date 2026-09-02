@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { BUILTIN_THEMES, defaultTheme } from "./presets";
+import { BUILTIN_THEMES, defaultTheme, migrateThemeName } from "./presets";
 import {
   FONT_CHOICES,
   THEME_DEFAULT_FONT_ID,
@@ -40,20 +40,13 @@ const STORAGE_KEY = "hermes-dashboard-theme";
  *  the React tree mounts (see `main.tsx`) to avoid a font flash. */
 const FONT_STORAGE_KEY = "hermes-dashboard-font";
 
-/** Renames of built-in theme keys we've shipped previously. Without this,
- *  users who saved one of the old names in localStorage (or had it
- *  persisted server-side) would silently fall back to `defaultTheme`
- *  because the lookup in `resolveTheme` no longer finds the stale key.
- *  Keep entries here until enough release cycles have passed that we can
- *  reasonably assume nobody still has the old value persisted. */
-const THEME_NAME_ALIASES: Record<string, string> = {
-  // Renamed during the LENS_5I port + Nous-blue rebrand.
-  "lens-5i": "nous-blue",
-};
-
-function migrateThemeName(name: string): string {
-  return THEME_NAME_ALIASES[name] ?? name;
-}
+const BUILTIN_THEME_ENTRIES: ThemeListEntry[] = Object.values(BUILTIN_THEMES).map(
+  (theme) => ({
+    name: theme.name,
+    label: theme.label,
+    description: theme.description,
+  }),
+);
 
 /** Tracks fontUrls we've already injected so multiple theme switches don't
  *  pile up <link> tags. Keyed by URL. */
@@ -356,9 +349,8 @@ function applyTheme(theme: DashboardTheme) {
   for (const cssVar of ALL_OVERRIDE_VARS) {
     root.style.removeProperty(cssVar);
   }
-  // Same clear-then-set for series colors so a theme that defines them
-  // (e.g. Nous Blue) doesn't leave its values behind when the user
-  // switches to a theme that inherits the `:root` defaults.
+  // Same clear-then-set for series colors so switches never carry stale
+  // chart accents from the previous palette.
   for (const cssVar of ALL_SERIES_VARS) {
     root.style.removeProperty(cssVar);
   }
@@ -413,10 +405,10 @@ function applyTheme(theme: DashboardTheme) {
 // ---------------------------------------------------------------------------
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  /** Name of the currently active theme (built-in id or user YAML name). */
+  /** Name of the currently active light/dark palette. */
   const [themeName, setThemeName] = useState<string>(() => {
-    if (typeof window === "undefined") return "default";
-    const stored = window.localStorage.getItem(STORAGE_KEY) ?? "default";
+    if (typeof window === "undefined") return "light";
+    const stored = window.localStorage.getItem(STORAGE_KEY);
     const migrated = migrateThemeName(stored);
     // Write the migrated name back so future reads converge on the new
     // key and we eventually retire the alias entry.
@@ -426,21 +418,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return migrated;
   });
 
-  /** All selectable themes (shown in the picker). Starts with just the
-   *  built-ins; the API call below merges in user themes. */
-  const [availableThemes, setAvailableThemes] = useState<ThemeListEntry[]>(() =>
-    Object.values(BUILTIN_THEMES).map((t) => ({
-      name: t.name,
-      label: t.label,
-      description: t.description,
-    })),
-  );
-
-  /** Full definitions for user themes keyed by name — the API provides
-   *  these so custom YAMLs apply without a client-side stub. */
-  const [userThemeDefs, setUserThemeDefs] = useState<
-    Record<string, DashboardTheme>
-  >({});
+  const availableThemes = BUILTIN_THEME_ENTRIES;
 
   /** Active font-override id (independent of theme). `THEME_DEFAULT_FONT_ID`
    *  = no override. Seeded from localStorage so it's applied flash-free. */
@@ -452,17 +430,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return valid;
   });
 
-  // Resolve a theme name to a full DashboardTheme, falling back to default
-  // only when neither a built-in nor a user theme is found.
+  // Theme names are normalized at every persistence boundary, but keep the
+  // resolver defensive so malformed external state can never break render.
   const resolveTheme = useCallback(
     (name: string): DashboardTheme => {
-      return (
-        BUILTIN_THEMES[name] ??
-        userThemeDefs[name] ??
-        defaultTheme
-      );
+      return BUILTIN_THEMES[migrateThemeName(name)] ?? defaultTheme;
     },
-    [userThemeDefs],
+    [],
   );
 
   // Apply the active theme (and re-assert the font override at its tail)
@@ -474,31 +448,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyTheme(resolveTheme(themeName));
   }, [themeName, resolveTheme, fontId]);
 
-  // Load server-side themes (built-ins + user YAMLs) once on mount.
+  // The server remains the cross-browser source of truth for dashboard.theme.
+  // Its old preset ids are collapsed to light/dark and written back once.
   useEffect(() => {
     let cancelled = false;
     api
       .getThemes()
       .then((resp) => {
         if (cancelled) return;
-        if (resp.themes?.length) {
-          setAvailableThemes(
-            resp.themes.map((t) => ({
-              name: t.name,
-              label: t.label,
-              description: t.description,
-              definition: t.definition,
-            })),
-          );
-          // Index any definitions the server shipped (user themes).
-          const defs: Record<string, DashboardTheme> = {};
-          for (const entry of resp.themes) {
-            if (entry.definition) {
-              defs[entry.name] = entry.definition;
-            }
-          }
-          if (Object.keys(defs).length > 0) setUserThemeDefs(defs);
-        }
         if (resp.active) {
           const migratedActive = migrateThemeName(resp.active);
           if (migratedActive !== themeName) {
@@ -546,20 +503,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setTheme = useCallback(
     (name: string) => {
-      // Accept any name the server told us exists OR any built-in.
-      const knownNames = new Set<string>([
-        ...Object.keys(BUILTIN_THEMES),
-        ...availableThemes.map((t) => t.name),
-        ...Object.keys(userThemeDefs),
-      ]);
-      const next = knownNames.has(name) ? name : "default";
+      const next = migrateThemeName(name);
       setThemeName(next);
       if (typeof window !== "undefined") {
         window.localStorage.setItem(STORAGE_KEY, next);
       }
       api.setTheme(next).catch(() => {});
     },
-    [availableThemes, userThemeDefs],
+    [],
   );
 
   const setFont = useCallback((id: string) => {
@@ -593,12 +544,8 @@ export function useTheme(): ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: defaultTheme,
-  themeName: "default",
-  availableThemes: Object.values(BUILTIN_THEMES).map((t) => ({
-    name: t.name,
-    label: t.label,
-    description: t.description,
-  })),
+  themeName: "light",
+  availableThemes: BUILTIN_THEME_ENTRIES,
   setTheme: () => {},
   fontId: THEME_DEFAULT_FONT_ID,
   fontChoices: FONT_CHOICES,
