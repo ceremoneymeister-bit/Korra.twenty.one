@@ -12,6 +12,17 @@
    Tailwind's JIT purge. */
 @source '../node_modules/@nous-research/ui/dist';
 
+/* Onest 2.001 — local variable font with full Cyrillic coverage. The file
+   and its SIL OFL 1.1 notice live under /public/fonts, so the Russian product
+   UI has deterministic typography without weakening the production CSP. */
+@font-face {
+  font-family: 'Onest';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Onest-Variable.woff2') format('woff2-variations');
+}
+
 /* ------------------------------------------------------------------ */
 /* JetBrains Mono — bundled for the embedded TUI (/chat tab).          */
 /* Gives the terminal a proper monospace font even on systems where    */
@@ -83,7 +94,7 @@
 
   /* Typography tokens — rewritten by ThemeProvider. Defaults match the
      system stack so themes that don't override look native. */
-  --theme-font-sans: system-ui, -apple-system, "Segoe UI", Roboto,
+  --theme-font-sans: "Onest", system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --theme-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo,
     Consolas, monospace;

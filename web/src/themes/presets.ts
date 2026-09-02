@@ -12,7 +12,7 @@ const SYSTEM_MONO =
   'ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace';
 
 const DEFAULT_TYPOGRAPHY: ThemeTypography = {
-  fontSans: SYSTEM_SANS,
+  fontSans: `"Onest", ${SYSTEM_SANS}`,
   fontMono: SYSTEM_MONO,
   baseSize: "15px",
   lineHeight: "1.55",
