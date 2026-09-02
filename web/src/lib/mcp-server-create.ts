@@ -47,15 +47,18 @@ function parseEnv(raw: string): Record<string, string> {
   return env;
 }
 
-export function buildMcpServerCreate(draft: McpServerDraft): McpServerCreate {
+export function buildMcpServerCreate(
+  draft: McpServerDraft,
+  translate: (message: string) => string = (message) => message,
+): McpServerCreate {
   const name = draft.name.trim();
-  if (!name) throw new Error("Name required");
+  if (!name) throw new Error(translate("Name required"));
 
   if (draft.transport === "http") {
     const url = draft.url.trim();
-    if (!url) throw new Error("URL required");
+    if (!url) throw new Error(translate("URL required"));
     if (draft.httpAuth === "header" && !draft.bearerToken.trim()) {
-      throw new Error("Bearer token required");
+      throw new Error(translate("Bearer token required"));
     }
 
     const server: McpServerCreate = { name, url };
@@ -67,7 +70,7 @@ export function buildMcpServerCreate(draft: McpServerDraft): McpServerCreate {
   }
 
   const command = draft.command.trim();
-  if (!command) throw new Error("Command required");
+  if (!command) throw new Error(translate("Command required"));
 
   const server: McpServerCreate = { name, command };
   const args = parseArgs(draft.args);

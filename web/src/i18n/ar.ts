@@ -1,6 +1,8 @@
 import { defineLocale } from "./define-locale";
+import { en } from "./en";
 
 export const ar = defineLocale({
+  dashboard: en.dashboard,
   common: {
     save: "حفظ",
     saving: "جاري الحفظ...",

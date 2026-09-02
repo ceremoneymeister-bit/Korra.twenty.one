@@ -1,6 +1,8 @@
 import type { Translations } from "./types";
+import { en } from "./en";
 
 export const hu: Translations = {
+  dashboard: en.dashboard,
   common: {
     save: "Mentés",
     saving: "Mentés...",

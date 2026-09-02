@@ -92,12 +92,24 @@ interface I18nContextValue {
   locale: Locale;
   setLocale: (l: Locale) => void;
   t: Translations;
+  tr: (key: string, values?: Record<string, string | number>) => string;
+}
+
+function interpolate(
+  message: string,
+  values?: Record<string, string | number>,
+): string {
+  for (const [name, replacement] of Object.entries(values ?? {})) {
+    message = message.replaceAll(`{${name}}`, String(replacement));
+  }
+  return message;
 }
 
 const I18nContext = createContext<I18nContextValue>({
   locale: "en",
   setLocale: () => {},
   t: en,
+  tr: (key, values) => interpolate(en.dashboard[key] ?? key, values),
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
@@ -118,10 +130,19 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     document.documentElement.dir = RTL_LOCALES.has(locale) ? "rtl" : "ltr";
   }, [locale]);
 
+  const translations = TRANSLATIONS[locale];
+  const tr = useCallback(
+    (key: string, values?: Record<string, string | number>) => {
+      return interpolate(translations.dashboard[key] ?? en.dashboard[key] ?? key, values);
+    },
+    [translations],
+  );
+
   const value: I18nContextValue = {
     locale,
     setLocale,
-    t: TRANSLATIONS[locale],
+    t: translations,
+    tr,
   };
 
   return (

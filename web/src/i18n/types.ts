@@ -591,6 +591,11 @@ export interface Translations {
     fontMono?: string;
   };
 
+  // Newer dashboard surfaces use English source messages as stable ids
+  // (gettext-style). This keeps the broad admin/fleet dictionary flat while
+  // still routing every owner-facing literal through the locale provider.
+  dashboard: Record<string, string>;
+
   // ── Achievements plugin (plugins/hermes-achievements) ──
   achievements: {
     hero: {

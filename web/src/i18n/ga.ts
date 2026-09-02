@@ -1,6 +1,8 @@
 import type { Translations } from "./types";
+import { en } from "./en";
 
 export const ga: Translations = {
+  dashboard: en.dashboard,
   common: {
     save: "Sábháil",
     saving: "Á shábháil...",

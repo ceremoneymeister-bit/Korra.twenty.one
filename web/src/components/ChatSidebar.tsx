@@ -40,6 +40,7 @@ import {
   EVENTS_DISCONNECTED_MESSAGE,
   EVENTS_MAX_RECONNECT_ATTEMPTS,
   eventsGaveUpMessage,
+  eventsFeedMessageForDisplay,
   eventsReconnectDelayMs,
   eventsReconnectingMessage,
   eventsRejectedMessage,
@@ -48,6 +49,7 @@ import {
   shouldRetryEventsClose,
 } from "@/lib/events-reconnect";
 import { titleFromSessionInfoPayload } from "@/lib/chat-title";
+import { useI18n } from "@/i18n";
 
 import { cn } from "@/lib/utils";
 import { AlertCircle, ChevronDown, RefreshCw } from "lucide-react";
@@ -116,6 +118,7 @@ export function ChatSidebar({
   onDashboardNewSessionRequest,
   onSessionTitleChange,
 }: ChatSidebarProps) {
+  const { tr } = useI18n();
   // `version` bumps on reconnect; gw is derived so we never call setState
   // for it inside an effect (React 19's set-state-in-effect rule). The
   // counter is the dependency on purpose — it's not read in the memo body,
@@ -448,7 +451,9 @@ export function ChatSidebar({
   // sidecar gateway session, so it's available whenever the sidebar is mounted.
   const modelName = effectiveModel || info.model || "—";
   const modelLabel = modelName.split("/").slice(-1)[0] ?? "—";
-  const banner = error ?? info.credential_warning ?? null;
+  const banner = error
+    ? eventsFeedMessageForDisplay(error, tr)
+    : info.credential_warning ?? null;
 
   return (
     <aside
@@ -460,7 +465,7 @@ export function ChatSidebar({
       <Card className="flex items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="text-display text-xs tracking-wider text-text-tertiary">
-            model
+            {tr("model")}
           </div>
 
           <Button
@@ -472,7 +477,7 @@ export function ChatSidebar({
               "self-start normal-case tracking-normal text-sm font-medium",
               "hover:underline disabled:no-underline",
             )}
-            title={modelName === "—" ? "switch model" : modelName}
+            title={modelName === "—" ? tr("switch model") : modelName}
           >
             <span className="flex min-w-0 max-w-full items-center gap-1">
               <span className="truncate">{modelLabel}</span>
@@ -483,7 +488,7 @@ export function ChatSidebar({
         </div>
 
         <Badge tone={STATE_TONE[state]} className="shrink-0">
-          {STATE_LABEL[state]}
+          {state === "open" ? tr("live") : tr(STATE_LABEL[state])}
         </Badge>
       </Card>
 
@@ -495,7 +500,7 @@ export function ChatSidebar({
             refreshKey={modelRefreshKey}
             onChanged={(effort) =>
               setModelNotice(
-                `Reasoning effort set to ${effort}. Run /new or refresh the page to apply it to this chat.`,
+                tr("Reasoning effort set to {effort}. Run /new or refresh the page to apply it to this chat.", { effort }),
               )
             }
           />
@@ -527,7 +532,7 @@ export function ChatSidebar({
                 onClick={reconnect}
                 prefix={<RefreshCw />}
               >
-                reconnect events feed
+                {tr("reconnect events feed")}
               </Button>
             )}
           </div>
@@ -575,7 +580,7 @@ export function ChatSidebar({
           const m = pendingReloadModel;
           setPendingReloadModel(null);
           setModelNotice(
-            `Model set to ${m}. Run /new or refresh the page to apply it to this chat.`,
+            tr("Model set to {model}. Run /new or refresh the page to apply it to this chat.", { model: m ?? "" }),
           );
         }}
       />

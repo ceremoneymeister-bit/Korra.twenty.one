@@ -70,6 +70,22 @@ export function eventsGaveUpMessage(): string {
   return `events feed disconnected — gave up after ${EVENTS_MAX_RECONNECT_ATTEMPTS} attempts, reload the page`;
 }
 
+type Translate = (message: string, values?: Record<string, string | number>) => string;
+
+/** Translate the stable reconnect diagnostics while keeping their internal
+ * English representation available to the reconnect state machine. */
+export function eventsFeedMessageForDisplay(message: string, translate: Translate): string {
+  if (message === EVENTS_DISCONNECTED_MESSAGE) return translate(EVENTS_DISCONNECTED_MESSAGE);
+  const reconnecting = message.match(/^events feed disconnected — reconnecting in (\d+)s…$/);
+  if (reconnecting) return translate("events feed disconnected — reconnecting in {seconds}s…", { seconds: reconnecting[1] });
+  const rejected = message.match(/^events feed rejected \((\d+)\) — reload the page$/);
+  if (rejected) return translate("events feed rejected ({code}) — reload the page", { code: rejected[1] });
+  if (message === eventsGaveUpMessage()) {
+    return translate("events feed disconnected — gave up after {count} attempts, reload the page", { count: EVENTS_MAX_RECONNECT_ATTEMPTS });
+  }
+  return translate(message);
+}
+
 /**
  * True when `message` is one this module produced, i.e. safe to clear on a
  * successful reconnect. Guards against stomping a `credential_warning` or a

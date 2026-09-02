@@ -1,6 +1,8 @@
 import type { Translations } from "./types";
+import { en } from "./en";
 
 export const ko: Translations = {
+  dashboard: en.dashboard,
   common: {
     save: "저장",
     saving: "저장 중...",

@@ -205,7 +205,7 @@ function ToolCallBlock({
   toolCall: { id: string; function: { name: string; arguments: string } };
 }) {
   const [open, setOpen] = useState(false);
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
 
   let args = toolCall.function.arguments;
   try {
@@ -218,7 +218,7 @@ function ToolCallBlock({
     <div className="mt-2 border border-warning/20 bg-warning/5">
       <ListItem
         onClick={() => setOpen(!open)}
-        aria-label={`${open ? t.common.collapse : t.common.expand} tool call ${toolCall.function.name}`}
+        aria-label={tr("{action} tool call {name}", { action: open ? t.common.collapse : t.common.expand, name: toolCall.function.name })}
         aria-expanded={open}
         className="px-3 py-2 text-xs text-warning hover:bg-warning/10 hover:text-warning"
       >
@@ -302,7 +302,7 @@ function MessageBubble({
   msg: SessionMessage;
   highlight?: string;
 }) {
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
 
   const ROLE_STYLES: Record<
     string,
@@ -409,7 +409,7 @@ function MessageBubble({
         )}
         {msg.timestamp && (
           <span className="text-xs text-text-tertiary">
-            {timeAgo(msg.timestamp)}
+            {timeAgo(msg.timestamp, tr)}
           </span>
         )}
       </div>
@@ -485,7 +485,7 @@ function SessionRow({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(session.title ?? "");
   const [renameSaving, setRenameSaving] = useState(false);
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -727,7 +727,7 @@ function SessionRow({
                   </>
                 )}
                 <span className="text-border">&#183;</span>
-                <span className="shrink-0">{timeAgo(session.last_active)}</span>
+                <span className="shrink-0">{timeAgo(session.last_active, tr)}</span>
               </div>
               {snippet && <SnippetHighlight snippet={snippet} />}
             </div>
@@ -881,7 +881,7 @@ export default function SessionsPage() {
   const [pruning, setPruning] = useState(false);
   const [importingSessions, setImportingSessions] = useState(false);
   const { toast, showToast } = useToast();
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
   const { activeAction, actionStatus, dismissLog } = useSystemActions();
   const resumeInChatEnabled = isDashboardEmbeddedChatEnabled();
@@ -1098,15 +1098,15 @@ export default function SessionsPage() {
       setImportingSessions(true);
       try {
         const text = await file.text();
-        const importedSessions = parseImportSessions(text);
+        const importedSessions = parseImportSessions(text, tr);
         const result = await api.importSessions(importedSessions);
-        showToast(`Import complete: ${importSummary(result)}`, "success");
+        showToast(tr("Import complete: {summary}", { summary: importSummary(result, tr) }), "success");
         clearSelection();
         loadSessions(page, true);
         loadStats();
         refreshEmptyCount();
       } catch (error) {
-        showToast(`Import failed: ${error}`, "error");
+        showToast(tr("Import failed: {error}", { error: String(error) }), "error");
       } finally {
         setImportingSessions(false);
         if (importInputRef.current) importInputRef.current.value = "";
@@ -1119,6 +1119,7 @@ export default function SessionsPage() {
       page,
       refreshEmptyCount,
       showToast,
+      tr,
     ],
   );
 
@@ -1532,7 +1533,7 @@ export default function SessionsPage() {
   const handlePrune = useCallback(async () => {
     const days = parseInt(pruneDays, 10);
     if (!Number.isFinite(days) || days < 0) {
-      showToast("Enter a valid number of days", "error");
+      showToast(tr("Enter a valid number of days"), "error");
       return;
     }
     setPruning(true);
@@ -1544,11 +1545,11 @@ export default function SessionsPage() {
       setPage(0);
       loadStats();
     } catch {
-      showToast("Failed to prune sessions", "error");
+      showToast(tr("Failed to prune sessions"), "error");
     } finally {
       setPruning(false);
     }
-  }, [pruneDays, showToast, loadSessions, loadStats]);
+  }, [pruneDays, showToast, loadSessions, loadStats, tr]);
 
   const pendingSession = sessionDelete.pendingId
     ? sessions.find((s) => s.id === sessionDelete.pendingId)
@@ -2214,7 +2215,7 @@ export default function SessionsPage() {
                           </>
                         )}
                         {s.message_count} {t.common.msgs} ·{" "}
-                        {timeAgo(s.last_active)}
+                        {timeAgo(s.last_active, tr)}
                       </span>
 
                       {s.preview && s.title && (

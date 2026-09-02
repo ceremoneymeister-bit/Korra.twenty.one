@@ -1,6 +1,8 @@
 import type { Translations } from "./types";
+import { en } from "./en";
 
 export const zhHant: Translations = {
+  dashboard: en.dashboard,
   common: {
     save: "儲存",
     saving: "儲存中...",

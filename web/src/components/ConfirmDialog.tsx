@@ -2,6 +2,7 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { AlertTriangle } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useI18n } from "@/i18n";
 import { cn, themedBody } from "@/lib/utils";
 
 interface ConfirmDialogProps {
@@ -17,8 +18,8 @@ interface ConfirmDialogProps {
 }
 
 export function ConfirmDialog({
-  cancelLabel = "Cancel",
-  confirmLabel = "Confirm",
+  cancelLabel,
+  confirmLabel,
   description,
   destructive = false,
   loading = false,
@@ -27,7 +28,10 @@ export function ConfirmDialog({
   open,
   title,
 }: ConfirmDialogProps) {
+  const { tr } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const resolvedCancelLabel = cancelLabel ?? tr("Cancel");
+  const resolvedConfirmLabel = confirmLabel ?? tr("Confirm");
 
   useEffect(() => {
     if (!open) return;
@@ -103,7 +107,7 @@ export function ConfirmDialog({
 
         <div className="flex items-center justify-end gap-2 p-3">
           <Button type="button" outlined onClick={onCancel} disabled={loading}>
-            {cancelLabel}
+            {resolvedCancelLabel}
           </Button>
           <Button
             data-confirm
@@ -112,7 +116,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={loading}
           >
-            {loading ? "…" : confirmLabel}
+            {loading ? "…" : resolvedConfirmLabel}
           </Button>
         </div>
       </div>

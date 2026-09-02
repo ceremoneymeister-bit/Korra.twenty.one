@@ -1,6 +1,8 @@
 import type { Translations } from "./types";
+import { en } from "./en";
 
 export const tr: Translations = {
+  dashboard: en.dashboard,
   common: {
     save: "Kaydet",
     saving: "Kaydediliyor...",

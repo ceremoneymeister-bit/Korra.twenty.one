@@ -18,22 +18,22 @@ import { isProductUiMode } from "@/lib/dashboard-flags";
  */
 export function ProfileSwitcher({ collapsed }: ProfileSwitcherProps) {
   const { profile, currentProfile, profiles, setProfile } = useProfileScope();
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
 
   const currentDashboardLabel = useMemo(
     () =>
-      (t.app.currentProfileOption ?? "this dashboard ({name})").replace(
+      (t.app.currentProfileOption ?? tr("this dashboard ({name})")).replace(
         "{name}",
         currentProfile || "default",
       ),
-    [currentProfile, t.app.currentProfileOption],
+    [currentProfile, t.app.currentProfileOption, tr],
   );
 
   if (isProductUiMode() || profiles.length < 2) return null;
 
   const managed = profile || currentProfile || "default";
   const isOther = !!profile && profile !== currentProfile;
-  const managingLabel = t.app.managingProfile ?? "Managing profile";
+  const managingLabel = t.app.managingProfile ?? tr("Managing profile");
 
   return (
     <div

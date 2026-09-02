@@ -259,7 +259,7 @@ export default function ProfilesPage() {
   const [activeInfo, setActiveInfo] = useState<ActiveProfileInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast, showToast } = useToast();
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
   const { setEnd } = usePageHeader();
   const { setProfile } = useProfileScope();
 
@@ -269,48 +269,48 @@ export default function ProfilesPage() {
   const L = useMemo(() => {
     const p = t.profiles;
     return {
-      activeProfile: p.activeProfile ?? "Active profile",
-      activeBadge: p.activeBadge ?? "active",
-      setActive: p.setActive ?? "Set as active",
-      activeSet: p.activeSet ?? "Active profile set",
-      gatewayRunning: p.gatewayRunning ?? "Gateway running",
-      gatewayStopped: p.gatewayStopped ?? "Gateway stopped",
+      activeProfile: p.activeProfile ?? tr("Active profile"),
+      activeBadge: p.activeBadge ?? tr("active"),
+      setActive: p.setActive ?? tr("Set as active"),
+      activeSet: p.activeSet ?? tr("Active profile set"),
+      gatewayRunning: p.gatewayRunning ?? tr("Gateway running"),
+      gatewayStopped: p.gatewayStopped ?? tr("Gateway stopped"),
       gatewayRunningWarning:
         p.gatewayRunningWarning ??
-        "This profile's gateway is running — it will be stopped.",
-      aliasBadge: p.aliasBadge ?? "alias",
-      description: p.description ?? "Description",
+        tr("This profile's gateway is running — it will be stopped."),
+      aliasBadge: p.aliasBadge ?? tr("alias"),
+      description: p.description ?? tr("Description"),
       descriptionPlaceholder:
         p.descriptionPlaceholder ??
-        "What is this profile good at? Used to route kanban tasks by role.",
-      noDescription: p.noDescription ?? "No description",
-      editDescription: p.editDescription ?? "Edit description",
-      descriptionSaved: p.descriptionSaved ?? "Description saved",
-      reviewBadge: p.reviewBadge ?? "review",
-      autoGenerate: p.autoGenerate ?? "Auto-generate",
-      generating: p.generating ?? "Generating…",
-      describeFailed: p.describeFailed ?? "Could not generate description",
-      distribution: p.distribution ?? "Distribution",
-      advancedOptions: p.advancedOptions ?? "Advanced options",
+        tr("What is this profile good at? Used to route kanban tasks by role."),
+      noDescription: p.noDescription ?? tr("No description"),
+      editDescription: p.editDescription ?? tr("Edit description"),
+      descriptionSaved: p.descriptionSaved ?? tr("Description saved"),
+      reviewBadge: p.reviewBadge ?? tr("review"),
+      autoGenerate: p.autoGenerate ?? tr("Auto-generate"),
+      generating: p.generating ?? tr("Generating…"),
+      describeFailed: p.describeFailed ?? tr("Could not generate description"),
+      distribution: p.distribution ?? tr("Distribution"),
+      advancedOptions: p.advancedOptions ?? tr("Advanced options"),
       cloneAll:
-        p.cloneAll ?? "Clone everything (memories, sessions, skills, state)",
-      noSkillsOption: p.noSkillsOption ?? "Don't seed bundled skills",
-      descriptionOptional: p.descriptionOptional ?? "Description (optional)",
-      modelOptional: p.modelOptional ?? "Model (optional)",
-      modelInherit: p.modelInherit ?? "Inherit from clone / default",
-      modelLoading: p.modelLoading ?? "Loading models…",
+        p.cloneAll ?? tr("Clone everything (memories, sessions, skills, state)"),
+      noSkillsOption: p.noSkillsOption ?? tr("Don't seed bundled skills"),
+      descriptionOptional: p.descriptionOptional ?? tr("Description (optional)"),
+      modelOptional: p.modelOptional ?? tr("Model (optional)"),
+      modelInherit: p.modelInherit ?? tr("Inherit from clone / default"),
+      modelLoading: p.modelLoading ?? tr("Loading models…"),
       modelNone:
-        p.modelNone ?? "No authenticated providers — set a key first",
-      editModel: p.editModel ?? "Change model",
-      modelSaved: p.modelSaved ?? "Model updated",
-      modelSelect: p.modelSelect ?? "Select a model",
-      actions: p.actions ?? "Actions",
-      manageSkills: p.manageSkills ?? "Manage skills & tools",
+        p.modelNone ?? tr("No authenticated providers — set a key first"),
+      editModel: p.editModel ?? tr("Change model"),
+      modelSaved: p.modelSaved ?? tr("Model updated"),
+      modelSelect: p.modelSelect ?? tr("Select a model"),
+      actions: p.actions ?? tr("Actions"),
+      manageSkills: p.manageSkills ?? tr("Manage skills & tools"),
       activeSetHint:
         p.activeSetHint ??
-        "Dashboard switched to manage {name}. New CLI/gateway runs will use this profile too.",
+        tr("Dashboard switched to manage {name}. New CLI/gateway runs will use this profile too."),
     };
-  }, [t.profiles]);
+  }, [t.profiles, tr]);
 
   // Create modal
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -450,7 +450,7 @@ export default function ProfilesPage() {
       showToast(`${t.profiles.created}: ${name}`, "success");
       if (picked && res.model_set === false) {
         showToast(
-          `Profile created, but the model could not be saved — set it from the profile editor.`,
+          tr("Profile created, but the model could not be saved — set it from the profile editor."),
           "error",
         );
       }
@@ -755,7 +755,7 @@ export default function ProfilesPage() {
           outlined
           onClick={() => navigate("/profiles/new")}
         >
-          Build
+          {tr("Build")}
         </Button>
         <Button
           className="uppercase"
@@ -769,7 +769,7 @@ export default function ProfilesPage() {
     return () => {
       setEnd(null);
     };
-  }, [setEnd, t.common.create, loading, navigate]);
+  }, [setEnd, t.common.create, loading, navigate, tr]);
 
   const cloning = cloneFrom !== null;
 
@@ -823,7 +823,7 @@ export default function ProfilesPage() {
               size="icon"
               onClick={() => setCreateModalOpen(false)}
               className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
-              aria-label="Close"
+              aria-label={t.common.close}
             >
               <X />
             </Button>
@@ -1248,7 +1248,7 @@ export default function ProfilesPage() {
               size="icon"
               onClick={closeEditor}
               className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
-              aria-label="Close"
+              aria-label={t.common.close}
             >
               <X />
             </Button>

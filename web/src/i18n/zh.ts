@@ -1,6 +1,8 @@
 import type { Translations } from "./types";
+import { en } from "./en";
 
 export const zh: Translations = {
+  dashboard: en.dashboard,
   common: {
     save: "保存",
     saving: "保存中...",

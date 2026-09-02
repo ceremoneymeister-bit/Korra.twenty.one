@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import { maybeReloadForLoopbackWsAuthFailure } from "@/lib/dashboard-auth-reload";
 import { cn, themedBody } from "@/lib/utils";
 import { useTheme } from "@/themes";
+import { useI18n } from "@/i18n";
 
 type ConsoleFrame =
   | {
@@ -99,6 +100,7 @@ function isPrintable(data: string): boolean {
 }
 
 export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
+  const { tr } = useI18n();
   const modalRef = useModalBehavior({ open, onClose });
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<XtermTerminal | null>(null);
@@ -179,11 +181,11 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
       setConnectionState("running");
       if (!sendFrame({ type: "input", line })) {
         activeCommandRef.current = false;
-        writeLine(term, "\x1b[31mConsole is not connected.\x1b[0m");
+        writeLine(term, `\x1b[31m${tr("Console is not connected.")}\x1b[0m`);
         showPrompt();
       }
     },
-    [cancelCommand, sendFrame, showPrompt],
+    [cancelCommand, sendFrame, showPrompt, tr],
   );
 
   const recallHistory = useCallback(
@@ -291,7 +293,7 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
       }
 
       if (frame.type === "error") {
-        writeLine(term, `\x1b[31m${frame.message || "Command failed."}\x1b[0m`);
+        writeLine(term, `\x1b[31m${frame.message || tr("Command failed.")}\x1b[0m`);
         return;
       }
 
@@ -302,7 +304,7 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
         if (frame.message) {
           writeLine(term, `\x1b[33m${frame.message}\x1b[0m`);
         }
-        inputPromptRef.current = "Confirm? [y/N] ";
+        inputPromptRef.current = tr("Confirm? [y/N] ");
         lineRef.current = "";
         term.write(inputPromptRef.current);
         return;
@@ -318,10 +320,10 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
           return;
         }
         if (frame.status === "timeout") {
-          writeLine(term, "\x1b[31mCommand timed out.\x1b[0m");
+          writeLine(term, `\x1b[31m${tr("Command timed out.")}\x1b[0m`);
         }
         if (frame.status === "cancelled") {
-          writeLine(term, "\x1b[33mCancelled.\x1b[0m");
+          writeLine(term, `\x1b[33m${tr("Cancelled.")}\x1b[0m`);
         }
         pendingCommandRef.current = null;
         setConnectionState("ready");
@@ -334,7 +336,7 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
         showPrompt();
       }
     },
-    [showPrompt],
+    [showPrompt, tr],
   );
 
   useEffect(() => {
@@ -395,7 +397,7 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
     setConnectionState("connecting");
     setConsoleProfile(profile || "current");
     hasReadyFrameRef.current = false;
-    writeLine(term, "\x1b[2mConnecting to Korra Console...\x1b[0m");
+    writeLine(term, `\x1b[2m${tr("Connecting to Korra Console...")}\x1b[0m`);
 
     void (async () => {
       try {
@@ -414,13 +416,13 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
             const frame = JSON.parse(String(ev.data)) as ConsoleFrame;
             handleFrame(frame);
           } catch {
-            writeLine(term, "\x1b[31mMalformed console frame.\x1b[0m");
+            writeLine(term, `\x1b[31m${tr("Malformed console frame.")}\x1b[0m`);
           }
         };
 
         ws.onerror = () => {
           setConnectionState("error");
-          writeLine(term, "\x1b[31mConsole websocket error.\x1b[0m");
+          writeLine(term, `\x1b[31m${tr("Console websocket error.")}\x1b[0m`);
         };
 
         ws.onclose = (ev) => {
@@ -435,14 +437,14 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
           const reason = ev.reason ? ` ${ev.reason}` : "";
           const message =
             ev.code === 1006 && !hasReadyFrameRef.current
-              ? "Console connection failed before the server handshake. Check that this dashboard is connected to a backend with /api/console."
-              : `Console closed (${ev.code}).${reason}`;
+              ? tr("Console connection failed before the server handshake. Check that this dashboard is connected to a backend with /api/console.")
+              : tr("Console closed ({code}).{reason}", { code: ev.code, reason });
           writeLine(term, `\x1b[31m${message}\x1b[0m`);
         };
       } catch (err) {
         if (cancelled) return;
         setConnectionState("error");
-        writeLine(term, `\x1b[31mConsole unavailable: ${err}\x1b[0m`);
+        writeLine(term, `\x1b[31m${tr("Console unavailable: {error}", { error: String(err) })}\x1b[0m`);
       }
     })();
 
@@ -460,7 +462,7 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
       activeCommandRef.current = false;
       hasReadyFrameRef.current = false;
     };
-  }, [handleFrame, handleInputData, open, profile, theme]);
+  }, [handleFrame, handleInputData, open, profile, theme, tr]);
 
   useEffect(() => {
     if (!open) return;
@@ -507,11 +509,11 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
               id="hermes-console-title"
               className="font-mondwest text-display text-base tracking-wider"
             >
-              Korra Console
+              {tr("Korra Console")}
             </h2>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Badge tone={statusTone}>{connectionState}</Badge>
-              <span className="font-mono">{consoleProfile}</span>
+              <Badge tone={statusTone}>{tr(connectionState)}</Badge>
+              <span className="font-mono">{consoleProfile === "current" ? tr("current") : consoleProfile}</span>
             </div>
           </div>
           <Button
@@ -519,7 +521,7 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
             size="icon"
             onClick={onClose}
             className="text-muted-foreground hover:text-foreground"
-            aria-label="Close console"
+            aria-label={tr("Close console")}
           >
             <X />
           </Button>

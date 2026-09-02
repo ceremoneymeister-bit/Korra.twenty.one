@@ -37,7 +37,7 @@ import {
  *    past it.
  */
 export function ScheduleBuilder({ onChange, value }: ScheduleBuilderProps) {
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
   const cronStrings = t.cron;
   const modeStrings = cronStrings.scheduleModes;
 
@@ -64,7 +64,7 @@ export function ScheduleBuilder({ onChange, value }: ScheduleBuilderProps) {
     <div className="grid gap-3">
       <div className="grid gap-2">
         <Label htmlFor="cron-schedule-mode">
-          {cronStrings.scheduleMode ?? "Schedule"}
+          {cronStrings.scheduleMode ?? tr("Schedule")}
         </Label>
         <Select
           id="cron-schedule-mode"

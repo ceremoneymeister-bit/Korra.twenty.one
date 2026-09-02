@@ -107,17 +107,25 @@ vi.mock("@/contexts/useProfileScope", () => ({
 vi.mock("@/themes", () => ({
   useTheme: () => ({ theme: { terminalBackground: "#000000" } }),
 }));
-vi.mock("@/i18n", () => ({
-  useI18n: () => ({
-    t: {
-      app: {
-        closeModelTools: "Close model tools",
-        modelToolsSheetSubtitle: "Tools",
-        modelToolsSheetTitle: "Model",
+vi.mock("@/i18n", () => {
+  const tr = (key: string, values?: Record<string, string | number>) =>
+    Object.entries(values ?? {}).reduce(
+      (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
+      key,
+    );
+  return {
+    useI18n: () => ({
+      tr,
+      t: {
+        app: {
+          closeModelTools: "Close model tools",
+          modelToolsSheetSubtitle: "Tools",
+          modelToolsSheetTitle: "Model",
+        },
       },
-    },
-  }),
-}));
+    }),
+  };
+});
 vi.mock("@/lib/dashboard-auth-reload", () => ({
   maybeReloadForLoopbackWsAuthFailure,
 }));

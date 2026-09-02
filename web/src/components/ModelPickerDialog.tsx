@@ -13,6 +13,7 @@ import { cn, themedBody } from "@/lib/utils";
 import { fuzzyRank } from "@/lib/fuzzy";
 import { queryMatchesProviderOnly } from "@/lib/model-picker-filter";
 import { modelSearchText } from "@/lib/model-search-text";
+import { useI18n } from "@/i18n";
 
 /**
  * Two-stage model picker modal.
@@ -91,6 +92,7 @@ interface Props {
 }
 
 export function ModelPickerDialog(props: Props) {
+  const { t, tr } = useI18n();
   const {
     gw,
     sessionId,
@@ -98,9 +100,10 @@ export function ModelPickerDialog(props: Props) {
     loader,
     onApply,
     onClose,
-    title = "Switch Model",
+    title,
     alwaysGlobal = false,
   } = props;
+  const dialogTitle = title ?? tr("Switch Model");
   const standalone = !!loader && !!onApply;
 
   const [providers, setProviders] = useState<ModelOptionProvider[]>([]);
@@ -158,7 +161,7 @@ export function ModelPickerDialog(props: Props) {
       })
       .catch((e) => {
         if (closedRef.current) return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(tr(e instanceof Error ? e.message : String(e)));
       })
       .finally(() => {
         if (closedRef.current) return;
@@ -177,7 +180,7 @@ export function ModelPickerDialog(props: Props) {
       })
       .catch((e) => {
         if (closedRef.current) return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(tr(e instanceof Error ? e.message : String(e)));
       })
       .finally(() => {
         if (closedRef.current) return;
@@ -292,13 +295,13 @@ export function ModelPickerDialog(props: Props) {
             message:
               result.confirm_message ||
               result.warning ||
-              "This model has unusually high known pricing.",
+              tr("This model has unusually high known pricing."),
           });
           return;
         }
         onClose();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(tr(e instanceof Error ? e.message : String(e)));
       } finally {
         setApplying(false);
       }
@@ -320,13 +323,13 @@ export function ModelPickerDialog(props: Props) {
             message:
               result.confirm_message ||
               result.warning ||
-              "This model has unusually high known pricing.",
+              tr("This model has unusually high known pricing."),
           });
           return;
         }
         onClose();
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(tr(e instanceof Error ? e.message : String(e)));
       } finally {
         setApplying(false);
       }
@@ -363,7 +366,7 @@ export function ModelPickerDialog(props: Props) {
           size="icon"
           onClick={onClose}
           className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
-          aria-label="Close"
+          aria-label={t.common.close}
         >
           <X />
         </Button>
@@ -373,10 +376,10 @@ export function ModelPickerDialog(props: Props) {
             id="model-picker-title"
             className="font-mondwest text-display text-base tracking-wider"
           >
-            {title}
+            {dialogTitle}
           </h2>
           <p className="text-xs text-muted-foreground mt-1 font-mono">
-            current: {currentModel || "(unknown)"}
+            {tr("current:")} {currentModel || tr("(unknown)")}
             {currentProviderSlug && ` · ${currentProviderSlug}`}
           </p>
         </header>
@@ -386,7 +389,7 @@ export function ModelPickerDialog(props: Props) {
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               autoFocus
-              placeholder="Filter providers and models…"
+              placeholder={tr("Filter providers and models…")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="pl-7 h-8 text-sm"
@@ -431,7 +434,7 @@ export function ModelPickerDialog(props: Props) {
         <footer className="border-t border-border p-3 flex items-center justify-between gap-3 flex-wrap">
           {alwaysGlobal ? (
             <span className="text-xs text-muted-foreground">
-              Saves to config.yaml — applies to new sessions.
+              {tr("Saves to config.yaml — applies to new sessions.")}
             </span>
           ) : (
             <div className="flex items-center gap-2">
@@ -447,7 +450,7 @@ export function ModelPickerDialog(props: Props) {
                 className="font-mondwest normal-case tracking-normal text-xs text-muted-foreground cursor-pointer"
                 htmlFor="model-picker-persist-global"
               >
-                Persist globally (otherwise this session only)
+                {tr("Persist globally (otherwise this session only)")}
               </Label>
             </div>
           )}
@@ -459,24 +462,24 @@ export function ModelPickerDialog(props: Props) {
               disabled={applying || loading || refreshing}
             >
               {refreshing ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Refresh Models
+              {tr("Refresh Models")}
             </Button>
             <Button outlined onClick={onClose} disabled={applying}>
-              Cancel
+              {t.common.cancel}
             </Button>
             <Button onClick={confirm} disabled={!canConfirm}>
-              {applying ? <Spinner /> : "Switch"}
+              {applying ? <Spinner /> : tr("Switch")}
             </Button>
           </div>
         </footer>
       </div>
       <ConfirmDialog
         open={!!pendingConfirm}
-        title="Expensive Model Warning"
+        title={tr("Expensive Model Warning")}
         description={pendingConfirm?.message}
         destructive
-        confirmLabel="Switch anyway"
-        cancelLabel="Cancel"
+        confirmLabel={tr("Switch anyway")}
+        cancelLabel={t.common.cancel}
         loading={applying}
         onCancel={() => setPendingConfirm(null)}
         onConfirm={() => {
@@ -512,11 +515,12 @@ function ProviderColumn({
   query: string;
   onSelect(slug: string): void;
 }) {
+  const { tr } = useI18n();
   return (
     <div className="border-r border-border overflow-y-auto">
       {loading && (
         <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
-          <Spinner className="text-xs" /> loading…
+          <Spinner className="text-xs" /> {tr("loading…")}
         </div>
       )}
 
@@ -525,10 +529,10 @@ function ProviderColumn({
       {!loading && !error && providers.length === 0 && (
         <div className="p-4 text-xs text-muted-foreground italic">
           {query
-            ? "no matches"
+            ? tr("no matches")
             : total === 0
-              ? "no authenticated providers"
-              : "no matches"}
+              ? tr("no authenticated providers")
+              : tr("no matches")}
         </div>
       )}
 
@@ -549,7 +553,7 @@ function ProviderColumn({
                 {p.is_current && <CurrentTag />}
               </div>
               <div className="text-xs text-text-secondary font-mono truncate">
-                {p.slug} · {p.total_models ?? p.models?.length ?? 0} models
+                {p.slug} · {tr("{count} models", { count: p.total_models ?? p.models?.length ?? 0 })}
               </div>
             </div>
           </ListItem>
@@ -582,11 +586,12 @@ function ModelColumn({
   onSelect(model: string): void;
   onConfirm(model: string): void;
 }) {
+  const { tr } = useI18n();
   if (!provider) {
     return (
       <div className="overflow-y-auto">
         <div className="p-4 text-xs text-muted-foreground italic">
-          pick a provider →
+          {tr("pick a provider →")}
         </div>
       </div>
     );
@@ -603,8 +608,8 @@ function ModelColumn({
       {models.length === 0 ? (
         <div className="p-4 text-xs text-muted-foreground italic">
           {allModels.length
-            ? "no models match your filter"
-            : "no models listed for this provider"}
+            ? tr("no models match your filter")
+            : tr("no models listed for this provider")}
         </div>
       ) : (
         models.map(({ model: m, positions }) => {
@@ -636,9 +641,10 @@ function ModelColumn({
 }
 
 function CurrentTag() {
+  const { tr } = useI18n();
   return (
     <span className="text-display text-xs tracking-wider text-primary shrink-0">
-      current
+      {tr("current")}
     </span>
   );
 }

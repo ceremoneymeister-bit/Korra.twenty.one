@@ -92,17 +92,20 @@ export function transferMayContainImage(data: DataTransfer | null): boolean {
   return false;
 }
 
-function fileToDataUrl(file: File): Promise<string> {
+function fileToDataUrl(
+  file: File,
+  translate: (message: string) => string,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () =>
-      reject(reader.error ?? new Error("image read failed"));
+      reject(reader.error ?? new Error(translate("image read failed")));
     reader.onload = () => {
       const result = reader.result;
       if (typeof result === "string") {
         resolve(result);
       } else {
-        reject(new Error("image read failed"));
+        reject(new Error(translate("image read failed")));
       }
     };
     reader.readAsDataURL(file);
@@ -122,11 +125,12 @@ function fileToDataUrl(file: File): Promise<string> {
 export async function uploadChatImage(
   blob: Blob,
   profile = "",
+  translate: (message: string, values?: Record<string, string | number>) => string = (message) => message,
 ): Promise<ChatImageUploadResult> {
-  if (blob.size === 0) throw new Error("clipboard image is empty");
+  if (blob.size === 0) throw new Error(translate("clipboard image is empty"));
   if (blob.size > MAX_IMAGE_BYTES) {
     const mb = Math.round(MAX_IMAGE_BYTES / (1024 * 1024));
-    throw new Error(`image too large (max ${mb} MB)`);
+    throw new Error(translate("image too large (max {size} MB)", { size: mb }));
   }
 
   const mime = blob.type || "image/png";
@@ -140,7 +144,7 @@ export async function uploadChatImage(
       ? blob
       : new File([blob], filename, { type: mime });
 
-  const dataUrl = await fileToDataUrl(file);
+  const dataUrl = await fileToDataUrl(file, translate);
   const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
   const res = await authedFetch(`/api/chat/image-upload${qs}`, {
     method: "POST",
@@ -158,7 +162,7 @@ export async function uploadChatImage(
 
   const uploaded = (await res.json()) as ChatImageUploadResult;
   if (!uploaded?.path) {
-    throw new Error("image upload did not return a path");
+    throw new Error(translate("image upload did not return a path"));
   }
   return uploaded;
 }

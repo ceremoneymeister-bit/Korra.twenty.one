@@ -56,7 +56,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
   const [loginFor, setLoginFor] = useState<OAuthProvider | null>(null);
   const [disconnectTarget, setDisconnectTarget] =
     useState<OAuthProvider | null>(null);
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
 
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -175,7 +175,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
                     </div>
                     {p.status.logged_in && p.status.token_preview && (
                       <span className="truncate text-xs font-mono-ui text-text-secondary">
-                        <span className="text-text-tertiary">token </span>
+                        <span className="text-text-tertiary">{tr("token")} </span>
                         {p.status.token_preview}
                         {p.status.source_label && (
                           <span className="text-text-tertiary">
@@ -220,7 +220,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex"
-                      title={`Open ${p.name} docs`}
+                            title={tr("Open {name} docs", { name: p.name })}
                     >
                       <Button ghost size="icon">
                         <ExternalLink />
@@ -278,7 +278,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
           if (disconnectTarget) void handleDisconnect(disconnectTarget);
         }}
         title={`${t.oauth.disconnect} ${disconnectTarget?.name ?? ""}?`}
-        description={`This will remove the stored OAuth tokens for ${disconnectTarget?.name ?? "this provider"}. You will need to re-authenticate to use it again.`}
+        description={tr("This will remove the stored OAuth tokens for {name}. You will need to re-authenticate to use it again.", { name: disconnectTarget?.name ?? tr("this provider") })}
         destructive
         confirmLabel={t.oauth.disconnect}
       />

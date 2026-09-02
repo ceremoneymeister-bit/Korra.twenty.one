@@ -9,7 +9,7 @@ import { useI18n } from "@/i18n";
  */
 export function ProfileScopeBanner() {
   const { profile, currentProfile } = useProfileScope();
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
 
   if (!profile || profile === currentProfile) return null;
 
@@ -19,7 +19,7 @@ export function ProfileScopeBanner() {
       <span>
         {(
           t.app.managingProfileBanner ??
-          "Managing profile “{name}” — config, keys, skills, MCPs, model, and new chats apply to that profile."
+          tr("Managing profile “{name}” — config, keys, skills, MCPs, model, and new chats apply to that profile.")
         ).replace("{name}", profile)}
       </span>
     </div>
