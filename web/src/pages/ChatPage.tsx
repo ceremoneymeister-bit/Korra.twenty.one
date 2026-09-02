@@ -40,6 +40,7 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { normalizeSessionTitle } from "@/lib/chat-title";
 import { createPtyCompositionForwarder } from "@/lib/pty-composition";
 import { PtyResumeSanitizer } from "@/lib/pty-resume-sanitizer";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 import {
   PTY_CONNECTING_TIMEOUT_MS,
   PTY_RECONNECT_INPUT_MESSAGE,
@@ -624,7 +625,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     const pasteDelay = () =>
       new Promise<void>((resolve) => window.setTimeout(resolve, 40));
     const reportImageUploadError = (err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = ownerFacingError(err, "Не удалось загрузить изображение.");
       console.warn("[dashboard chat] image upload failed:", message);
       setBanner(tr("Image upload failed: {error}", { error: message }));
     };
@@ -1353,7 +1354,10 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         setPtyState("closed");
         setBanner(
           ev.reason
-            ? tr("Auth failed ({reason}). Reload to refresh the session.", { reason: ev.reason })
+            ? ownerFacingError(
+                ev.reason,
+                "Не удалось подтвердить сессию. Перезагрузите страницу.",
+              )
             : tr("Auth failed. Reload the page to refresh the session token."),
         );
         return;
@@ -1363,7 +1367,10 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         setPtyState("closed");
         setBanner(
           ev.reason
-            ? tr("Refused: {reason}.", { reason: ev.reason })
+            ? ownerFacingError(
+                ev.reason,
+                "Запрос отклонён: адрес страницы не соответствует панели.",
+              )
             : tr("Refused: request host/origin doesn't match the dashboard."),
         );
         return;
@@ -1372,7 +1379,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         setPtyState("closed");
         setBanner(
           ev.reason
-            ? tr("Chat websocket unavailable: {reason}.", { reason: ev.reason })
+            ? ownerFacingError(ev.reason, "Чат недоступен на этом сервере.")
             : tr("Chat websocket unavailable on this server."),
         );
         return;
@@ -1381,7 +1388,10 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         setPtyState("closed");
         setBanner(
           ev.reason
-            ? tr("Refused: {reason}.", { reason: ev.reason })
+            ? ownerFacingError(
+                ev.reason,
+                "Подключение этого клиента запрещено настройками сервера.",
+              )
             : tr("Refused: your client isn't permitted (server bound to localhost only)."),
         );
         return;

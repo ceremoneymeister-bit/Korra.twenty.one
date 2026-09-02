@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@nous-research/ui/ui/components/dialog";
 import { useI18n } from "@/i18n";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 /* ------------------------------------------------------------------ */
 /*  SkillEditorDialog — create or edit a SKILL.md from the dashboard   */
@@ -86,7 +87,7 @@ function EditorBody({
     api
       .getSkillContent(editName, profile || undefined)
       .then((res) => !cancelled && setContent(res.content))
-      .catch((e) => !cancelled && setError(String(e)))
+      .catch((e) => !cancelled && setError(ownerFacingError(e, "Не удалось загрузить навык.")))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -122,7 +123,7 @@ function EditorBody({
       }
       onClose();
     } catch (e) {
-      setError(String(e));
+      setError(ownerFacingError(e, "Не удалось сохранить навык."));
     } finally {
       setSaving(false);
     }

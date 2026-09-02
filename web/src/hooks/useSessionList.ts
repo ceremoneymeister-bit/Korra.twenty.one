@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type SessionInfo } from "../lib/api";
+import { ownerFacingError } from "../lib/owner-facing-error";
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_OFFSET = 0;
@@ -24,7 +25,7 @@ function sortByLastActiveDesc(sessions: SessionInfo[]): SessionInfo[] {
 }
 
 function errorToMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return ownerFacingError(error, "Не удалось загрузить список диалогов.");
 }
 
 export function useSessionList(

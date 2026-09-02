@@ -87,6 +87,38 @@ describe("fetchJSON", () => {
 
     expect(reloadMocks.clearDashboardTokenReloadAttempt).toHaveBeenCalledTimes(1);
   });
+
+  it("does not expose English backend errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response('{"detail":"database connection failed"}', {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(fetchJSON("/api/status")).rejects.toThrow(
+      "500: Сервис временно недоступен. Повторите через минуту.",
+    );
+  });
+
+  it("preserves a Russian backend detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response('{"detail":"Сессия уже завершена"}', {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(fetchJSON("/api/status")).rejects.toThrow(
+      "409: Сессия уже завершена",
+    );
+  });
 });
 
 describe("api.getModelOptions", () => {

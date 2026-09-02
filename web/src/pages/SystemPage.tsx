@@ -46,6 +46,8 @@ import { HermesConsoleModal } from "@/components/HermesConsoleModal";
 import { cn, themedBody } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 import type {
   StatusResponse,
   MemoryStatus,
@@ -304,7 +306,7 @@ export default function SystemPage() {
       showToast(tr("Gateway {verb} started", { verb: tr(verb) }), "success");
       setTimeout(loadAll, 3000);
     } catch (e) {
-      showToast(tr("Gateway {verb} failed: {error}", { verb: tr(verb), error: String(e) }), "error");
+      showToast(tr("Gateway {verb} failed: {error}", { verb: tr(verb), error: ownerFacingError(e, "подробности недоступны") }), "error");
     }
   };
 
@@ -316,7 +318,7 @@ export default function SystemPage() {
       showToast(curator.paused ? tr("Curator resumed") : tr("Curator paused"), "success");
       loadAll();
     } catch (e) {
-      showToast(tr("Curator toggle failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Curator toggle failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     }
   };
 
@@ -334,7 +336,7 @@ export default function SystemPage() {
           showToast(tr("Reset: {items}", { items: res.deleted.join(", ") || tr("nothing") }), "success");
           loadAll();
         } catch (e) {
-          showToast(tr("Reset failed: {error}", { error: String(e) }), "error");
+          showToast(tr("Reset failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
           throw e;
         }
       },
@@ -360,7 +362,7 @@ export default function SystemPage() {
       setCredLabel("");
       loadAll();
     } catch (e) {
-      showToast(tr("Failed to add credential: {error}", { error: String(e) }), "error");
+      showToast(tr("Failed to add credential: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setAddingCred(false);
     }
@@ -375,7 +377,7 @@ export default function SystemPage() {
           showToast(tr("Credential removed"), "success");
           loadAll();
         } catch (e) {
-          showToast(tr("Failed to remove: {error}", { error: String(e) }), "error");
+          showToast(tr("Failed to remove: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
           throw e;
         }
       },
@@ -390,7 +392,7 @@ export default function SystemPage() {
       setActiveAction(res.name);
       showToast(tr("{label} started", { label }), "success");
     } catch (e) {
-      showToast(tr("{label} failed: {error}", { label, error: String(e) }), "error");
+      showToast(tr("{label} failed: {error}", { label, error: ownerFacingError(e, "подробности недоступны") }), "error");
     }
   };
 
@@ -402,7 +404,7 @@ export default function SystemPage() {
       setDownloadableBackupArchive(null);
       showToast(tr("Backup started"), "success");
     } catch (e) {
-      showToast(tr("Backup failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Backup failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     }
   };
 
@@ -437,7 +439,7 @@ export default function SystemPage() {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      showToast(tr("Download failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Download failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setDownloadingBackup(false);
     }
@@ -459,7 +461,7 @@ export default function SystemPage() {
       showToast(tr("Import started"), "success");
       if (target.kind === "upload") clearImportFile();
     } catch (e) {
-      showToast(tr("Import failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Import failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setImportingBackup(false);
     }
@@ -506,7 +508,7 @@ export default function SystemPage() {
         "success",
       );
     } catch (e) {
-      showToast(tr("Debug share failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Debug share failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setSharing(false);
     }
@@ -532,11 +534,14 @@ export default function SystemPage() {
           } else if (info.behind === 0) {
             showToast(tr("You're on the latest version"), "success");
           } else if (info.message) {
-            showToast(info.message, "error");
+            showToast(
+              ownerFacingError(info.message, "Не удалось проверить обновление."),
+              "error",
+            );
           }
         }
       } catch (e) {
-        showToast(tr("Update check failed: {error}", { error: String(e) }), "error");
+        showToast(tr("Update check failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
       } finally {
         setCheckingUpdate(false);
       }
@@ -559,8 +564,10 @@ export default function SystemPage() {
       const resp = await api.updateHermes();
       if (!resp.ok) {
         showToast(
-          resp.message ??
+          russianInterfaceText(
+            resp.message,
             tr("Updates don't apply from this dashboard."),
+          ),
           "success",
         );
         return;
@@ -568,7 +575,7 @@ export default function SystemPage() {
       setActiveAction(resp.name ?? "hermes-update");
       showToast(tr("Update started"), "success");
     } catch (e) {
-      showToast(tr("Update failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Update failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     }
   };
 
@@ -579,7 +586,7 @@ export default function SystemPage() {
         setActiveAction(res.name);
         showToast(tr("Checkpoint prune started"), "success");
       } catch (e) {
-        showToast(tr("Prune failed: {error}", { error: String(e) }), "error");
+        showToast(tr("Prune failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
         throw e;
       }
     }, [showToast, tr]),
@@ -607,7 +614,7 @@ export default function SystemPage() {
       setHookModalOpen(false);
       loadAll();
     } catch (e) {
-      showToast(tr("Failed to create hook: {error}", { error: String(e) }), "error");
+      showToast(tr("Failed to create hook: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setCreatingHook(false);
     }
@@ -624,7 +631,7 @@ export default function SystemPage() {
           showToast(tr("Hook removed"), "success");
           loadAll();
         } catch (e) {
-          showToast(tr("Failed to remove hook: {error}", { error: String(e) }), "error");
+          showToast(tr("Failed to remove hook: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
           throw e;
         }
       },
@@ -673,6 +680,7 @@ export default function SystemPage() {
             : tr("This will run 'hermes update' ({command}) and restart the gateway when it finishes.", { command: updateInfo?.update_command ?? "hermes update" })
         }
         confirmLabel={tr("Update now")}
+        cancelLabel={t.common.cancel}
       />
 
       <DeleteConfirmDialog
@@ -947,7 +955,10 @@ export default function SystemPage() {
                   )}
                 {updateInfo?.message && !updateInfo.update_available && (
                   <span className="text-xs text-muted-foreground">
-                    {updateInfo.message}
+                    {russianInterfaceText(
+                      updateInfo.message,
+                      "Сведения об обновлении сейчас недоступны.",
+                    )}
                   </span>
                 )}
               </div>
@@ -988,8 +999,20 @@ export default function SystemPage() {
                 </span>
                 {portal.features.map((f) => (
                   <div key={f.label} className="flex items-center justify-between text-sm">
-                    <span>{f.label}</span>
-                    <span className="text-muted-foreground">{f.state}</span>
+                    <span>{({
+                      "Web tools": "Интернет-инструменты",
+                      "Image generation": "Создание изображений",
+                      "Video generation": "Создание видео",
+                      "OpenAI TTS": "Синтез речи OpenAI",
+                      "Speech-to-text": "Распознавание речи",
+                      "Browser automation": "Автоматизация браузера",
+                      "Modal execution": "Выполнение в Modal",
+                    } as Record<string, string>)[f.label] ?? russianInterfaceText(f.label, "Возможность Nous Portal")}</span>
+                    <span className="text-muted-foreground">{({
+                      "via Nous Portal": "Через Nous Portal",
+                      active: "Активно",
+                      "not configured": "Не настроено",
+                    } as Record<string, string>)[f.state] ?? "Подключено"}</span>
                   </div>
                 ))}
               </div>
@@ -1181,10 +1204,21 @@ export default function SystemPage() {
                 </span>
                 {prov.entries.map((entry) => (
                   <div key={`${prov.provider}-${entry.index}`} className="flex items-center gap-3 border border-border bg-background/40 px-3 py-2">
-                    <span className="text-sm font-medium">{entry.label}</span>
+                    <span className="text-sm font-medium">
+                      {russianInterfaceText(entry.label, `Ключ ${entry.index}`)}
+                    </span>
                     <span className="font-mono text-xs text-muted-foreground">{entry.token_preview}</span>
                     <Badge tone="outline">{entry.auth_type}</Badge>
-                    {entry.last_status && <Badge tone="secondary">{entry.last_status}</Badge>}
+                    {entry.last_status && (
+                      <Badge tone="secondary">
+                        {({
+                          ok: "Работает",
+                          exhausted: "Лимит исчерпан",
+                          cooldown: "Пауза",
+                          error: "Ошибка",
+                        } as Record<string, string>)[entry.last_status] ?? "Статус обновлён"}
+                      </Badge>
+                    )}
                     <Button ghost size="icon" className="ml-auto text-destructive" aria-label={tr("Remove credential")} onClick={() => credDelete.requestDelete(`${prov.provider}|${entry.index}`)}>
                       <Trash2 />
                     </Button>

@@ -64,11 +64,11 @@ export const SERVICE_LABELS: Record<string, string> = {
   "/plugins": "Плагины",
   "/mcp": "MCP",
   "/channels": "Каналы",
-  "/webhooks": "Webhooks",
-  "/pairing": "Pairing",
+  "/webhooks": "Вебхуки",
+  "/pairing": "Подключения",
   "/profiles": "Мультиагенты",
   "/config": "Конфигурация",
-  "/system": "System",
+  "/system": "Система",
   "/docs": "Документация",
 };
 

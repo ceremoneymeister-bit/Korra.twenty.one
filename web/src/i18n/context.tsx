@@ -1,92 +1,14 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useEffect, type ReactNode } from "react";
 import type { Locale, Translations } from "./types";
-import { en } from "./en";
-import { zh } from "./zh";
-import { zhHant } from "./zh-hant";
-import { ja } from "./ja";
-import { de } from "./de";
-import { es } from "./es";
-import { fr } from "./fr";
-import { tr } from "./tr";
-import { uk } from "./uk";
-import { af } from "./af";
-import { ko } from "./ko";
-import { it } from "./it";
-import { ga } from "./ga";
-import { pt } from "./pt";
 import { ru } from "./ru";
-import { hu } from "./hu";
-import { ar } from "./ar";
 
-const TRANSLATIONS: Record<Locale, Translations> = {
-  en,
-  zh,
-  "zh-hant": zhHant,
-  ja,
-  de,
-  es,
-  fr,
-  tr,
-  uk,
-  af,
-  ko,
-  it,
-  ga,
-  pt,
-  ru,
-  hu,
-  ar,
-};
-
-// Locales whose script flows right-to-left. Consumed by the provider to set the
-// document direction so Tailwind's logical utilities (ms-/me-, ps-/pe-) flip.
-const RTL_LOCALES = new Set<Locale>(["ar"]);
-
-// Display metadata for the language picker — endonym (native name) so users
-// recognize their language even if they don't speak the current UI language.
-// Exposed as a constant so the LanguageSwitcher and any future settings page
-// can share the same list.
-//
-// We intentionally do NOT pair locales with country flags. Languages are not
-// countries (English ≠ GB, Portuguese ≠ PT, Spanish ≠ ES, Chinese variants ≠
-// any single jurisdiction). Endonyms are unambiguous and avoid the political
-// mismapping that flag pairings inevitably create.
-export const LOCALE_META: Record<Locale, { name: string }> = {
-  en: { name: "English" },
-  zh: { name: "简体中文" },
-  "zh-hant": { name: "繁體中文" },
-  ja: { name: "日本語" },
-  de: { name: "Deutsch" },
-  es: { name: "Español" },
-  fr: { name: "Français" },
-  tr: { name: "Türkçe" },
-  uk: { name: "Українська" },
-  af: { name: "Afrikaans" },
-  ko: { name: "한국어" },
-  it: { name: "Italiano" },
-  ga: { name: "Gaeilge" },
-  pt: { name: "Português" },
+// Public locale metadata follows the product contract: Korra 21 exposes only
+// Russian even if an old plugin still imports the legacy switcher component.
+export const LOCALE_META = {
   ru: { name: "Русский" },
-  hu: { name: "Magyar" },
-  ar: { name: "العربية" },
-};
+} as const;
 
-const SUPPORTED_LOCALES = Object.keys(TRANSLATIONS) as Locale[];
-const STORAGE_KEY = "hermes-locale";
-
-function isLocale(value: string): value is Locale {
-  return (SUPPORTED_LOCALES as string[]).includes(value);
-}
-
-function getInitialLocale(): Locale {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored && isLocale(stored)) return stored;
-  } catch {
-    // SSR or privacy mode
-  }
-  return "en";
-}
+const PRODUCT_LOCALE: Locale = "ru";
 
 interface I18nContextValue {
   locale: Locale;
@@ -99,49 +21,45 @@ function interpolate(
   message: string,
   values?: Record<string, string | number>,
 ): string {
-  for (const [name, replacement] of Object.entries(values ?? {})) {
-    message = message.replaceAll(`{${name}}`, String(replacement));
-  }
-  return message;
+  const replacements = values ?? {};
+  return message.replace(/\{([^{}]+)\}/g, (token, name: string) => {
+    if (!Object.prototype.hasOwnProperty.call(replacements, name)) return token;
+    return String(replacements[name]);
+  });
 }
 
 const I18nContext = createContext<I18nContextValue>({
-  locale: "en",
+  locale: PRODUCT_LOCALE,
   setLocale: () => {},
-  t: en,
-  tr: (key, values) => interpolate(en.dashboard[key] ?? key, values),
+  t: ru,
+  tr: (key, values) => interpolate(ru.dashboard[key] ?? key, values),
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(getInitialLocale);
-
-  const setLocale = useCallback((l: Locale) => {
-    setLocaleState(l);
-    try {
-      localStorage.setItem(STORAGE_KEY, l);
-    } catch {
-      // ignore
-    }
+  // Korra 21 is a Russian-only product. Keep the setter as a no-op for the
+  // stable plugin/i18n context contract, while preventing persisted legacy
+  // choices or browser preferences from changing the visible language.
+  const setLocale = useCallback((locale: Locale) => {
+    void locale;
   }, []);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    document.documentElement.lang = locale;
-    document.documentElement.dir = RTL_LOCALES.has(locale) ? "rtl" : "ltr";
-  }, [locale]);
+    document.documentElement.lang = PRODUCT_LOCALE;
+    document.documentElement.dir = "ltr";
+  }, []);
 
-  const translations = TRANSLATIONS[locale];
   const tr = useCallback(
     (key: string, values?: Record<string, string | number>) => {
-      return interpolate(translations.dashboard[key] ?? en.dashboard[key] ?? key, values);
+      return interpolate(ru.dashboard[key] ?? key, values);
     },
-    [translations],
+    [],
   );
 
   const value: I18nContextValue = {
-    locale,
+    locale: PRODUCT_LOCALE,
     setLocale,
-    t: translations,
+    t: ru,
     tr,
   };
 

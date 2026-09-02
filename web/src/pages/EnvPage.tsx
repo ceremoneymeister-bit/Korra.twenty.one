@@ -18,6 +18,8 @@ import {
 import { api } from "@/lib/api";
 import type { EnvVarInfo } from "@/lib/api";
 import { removeDeletedEnvVarFromState } from "@/lib/env-state";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
@@ -133,6 +135,10 @@ function EnvVarRow({
   const displayValue = isRevealed
     ? revealed[varKey]
     : (info.redacted_value ?? "---");
+  const description = russianInterfaceText(
+    info.description,
+    "Переменная окружения Korra.",
+  );
 
   // Compact inline row for unset, non-editing keys (used inside provider groups)
   if (compact && !info.is_set && !isEditing) {
@@ -143,7 +149,7 @@ function EnvVarRow({
             {varKey}
           </span>
           <span className="text-xs text-text-tertiary truncate hidden sm:block">
-            {info.description}
+            {description}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -179,7 +185,7 @@ function EnvVarRow({
             {varKey}
           </Label>
           <span className="text-xs text-text-tertiary truncate hidden sm:block">
-            {info.description}
+            {description}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -228,7 +234,7 @@ function EnvVarRow({
         )}
       </div>
 
-      <p className="text-xs text-muted-foreground">{info.description}</p>
+      <p className="text-xs text-muted-foreground">{description}</p>
 
       {info.tools.length > 0 && (
         <div className="flex flex-wrap gap-1">
@@ -736,7 +742,7 @@ export default function EnvPage() {
       });
       showToast(`Ключ ${key} сохранён`, "success");
     } catch (e) {
-      showToast(`${t.config.failedToSave} ${key}: ${e}`, "error");
+      showToast(`${t.config.failedToSave} ${key}: ${ownerFacingError(e, "подробности недоступны")}`, "error");
     } finally {
       setSaving(null);
     }
@@ -761,7 +767,7 @@ export default function EnvPage() {
           });
           showToast(`${key} ${t.common.removed}`, "success");
         } catch (e) {
-          showToast(`${t.common.failedToRemove} ${key}: ${e}`, "error");
+          showToast(`${t.common.failedToRemove} ${key}: ${ownerFacingError(e, "подробности недоступны")}`, "error");
           throw e;
         } finally {
           setSaving(null);
@@ -859,7 +865,7 @@ export default function EnvPage() {
     // settings and relabelled accordingly.
     const CATEGORY_META_LABELS: Record<string, string> = {
       tool: t.app.nav.keys,
-      messaging: t.common.gateway ?? "Gateway",
+      messaging: t.common.gateway ?? "Шлюз",
       setting: t.app.nav.config,
     };
     const CATEGORY_META_HINTS: Record<string, string | undefined> = {
@@ -927,7 +933,9 @@ export default function EnvPage() {
 
   const pendingClearKey = keyClear.pendingId;
   const pendingKeyDescription =
-    pendingClearKey && vars ? vars[pendingClearKey]?.description : undefined;
+    pendingClearKey && vars
+      ? russianInterfaceText(vars[pendingClearKey]?.description)
+      : undefined;
 
   return (
     <div className="flex flex-col gap-6">

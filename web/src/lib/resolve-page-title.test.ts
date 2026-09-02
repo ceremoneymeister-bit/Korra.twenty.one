@@ -32,11 +32,11 @@ describe("resolvePageTitle", () => {
   it("renders initialisms and literal labels correctly", () => {
     // Regression: the naive capitalize fallback produced "Mcp".
     expect(resolvePageTitle("/mcp", t, [])).toBe("MCP");
-    expect(resolvePageTitle("/system", t, [])).toBe("System");
-    expect(resolvePageTitle("/channels", t, [])).toBe("Channels");
-    expect(resolvePageTitle("/webhooks", t, [])).toBe("Webhooks");
-    expect(resolvePageTitle("/pairing", t, [])).toBe("Pairing");
-    expect(resolvePageTitle("/files", t, [])).toBe("Files");
+    expect(resolvePageTitle("/system", t, [])).toBe("Система");
+    expect(resolvePageTitle("/channels", t, [])).toBe("Каналы");
+    expect(resolvePageTitle("/webhooks", t, [])).toBe("Вебхуки");
+    expect(resolvePageTitle("/pairing", t, [])).toBe("Подключения");
+    expect(resolvePageTitle("/files", t, [])).toBe("Файлы");
   });
 
   it("uses the configured fleet label before the admin fallback", () => {
@@ -48,11 +48,11 @@ describe("resolvePageTitle", () => {
   it("prefers plugin tab labels", () => {
     expect(
       resolvePageTitle("/kanban", t, [{ path: "/kanban", label: "Kanban" }]),
-    ).toBe("Kanban");
+    ).toBe("Плагин Korra");
   });
 
   it("falls back to capitalized path segment for unknown routes", () => {
-    expect(resolvePageTitle("/whatever", t, [])).toBe("Whatever");
+    expect(resolvePageTitle("/whatever", t, [])).toBe("Раздел Korra");
   });
 
   it("treats root as sessions and trailing slashes as equivalent", () => {

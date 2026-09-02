@@ -6,7 +6,8 @@ import type { SSEChatChunkData, SSEEvent, SSEToolProgressData } from "./chat-typ
  * Recognised forms:
  *   - `data: [DONE]`                              → { type: "done" }
  *   - `data: {...}`                               → { type: "chunk", data: ... }
- *   - `event: korra.tool.progress\ndata: {...}`   → { type: "tool_progress", data: ... }
+ *   - `event: hermes.tool.progress\ndata: {...}`  → { type: "tool_progress", data: ... }
+ *   - `event: korra.tool.progress\ndata: {...}`   → legacy alias of the same event
  *
  * Returns null for empty blocks, malformed JSON, or unknown event types.
  * Unknown event types are silently ignored to remain forward-compatible.
@@ -37,12 +38,15 @@ export function parseSSEBlock(block: string): SSEEvent | null {
   }
 
   // Route by event type
-  if (eventType === "korra.tool.progress") {
+  if (
+    eventType === "hermes.tool.progress" ||
+    eventType === "korra.tool.progress"
+  ) {
     try {
       const parsed = JSON.parse(dataLine) as SSEToolProgressData;
       return { type: "tool_progress", data: parsed };
     } catch {
-      console.warn("[sse-parser] Malformed JSON in korra.tool.progress block:", dataLine);
+      console.warn("[sse-parser] Malformed JSON in tool progress block:", dataLine);
       return null;
     }
   }

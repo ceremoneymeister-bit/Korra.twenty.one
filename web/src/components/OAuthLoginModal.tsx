@@ -8,6 +8,7 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { Input } from "@nous-research/ui/ui/components/input";
 import { useI18n } from "@/i18n";
 import { cn, themedBody } from "@/lib/utils";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 interface Props {
   provider: OAuthProvider;
@@ -58,7 +59,7 @@ export function OAuthLoginModal({ provider, onClose, onSuccess }: Props) {
       .catch((e) => {
         if (!isMounted.current) return;
         setPhase("error");
-        setErrorMsg(tr("Failed to start login: {error}", { error: String(e) }));
+        setErrorMsg(ownerFacingError(e, "Не удалось начать вход."));
       });
     return () => {
       isMounted.current = false;
@@ -103,14 +104,16 @@ export function OAuthLoginModal({ provider, onClose, onSuccess }: Props) {
           window.setTimeout(() => isMounted.current && onClose(), 1500);
         } else if (resp.status !== "pending") {
           setPhase("error");
-          setErrorMsg(resp.error_message || tr("Login {status}", { status: resp.status }));
+          setErrorMsg(
+            ownerFacingError(resp.error_message, "Не удалось завершить вход."),
+          );
           if (pollTimer.current !== null)
             window.clearInterval(pollTimer.current);
         }
       } catch (e) {
         if (!isMounted.current) return;
         setPhase("error");
-        setErrorMsg(tr("Polling failed: {error}", { error: String(e) }));
+        setErrorMsg(ownerFacingError(e, "Не удалось проверить состояние входа."));
         if (pollTimer.current !== null) window.clearInterval(pollTimer.current);
       }
     }, 2000);
@@ -137,12 +140,12 @@ export function OAuthLoginModal({ provider, onClose, onSuccess }: Props) {
         window.setTimeout(() => isMounted.current && onClose(), 1500);
       } else {
         setPhase("error");
-        setErrorMsg(resp.message || tr("Token exchange failed"));
+        setErrorMsg(ownerFacingError(resp.message, tr("Token exchange failed")));
       }
     } catch (e) {
       if (!isMounted.current) return;
       setPhase("error");
-      setErrorMsg(tr("Submit failed: {error}", { error: String(e) }));
+      setErrorMsg(ownerFacingError(e, "Не удалось отправить код входа."));
     }
   };
 
@@ -379,7 +382,7 @@ export function OAuthLoginModal({ provider, onClose, onSuccess }: Props) {
                       .catch((e) => {
                         if (!isMounted.current) return;
                         setPhase("error");
-                        setErrorMsg(tr("Retry failed: {error}", { error: String(e) }));
+                        setErrorMsg(ownerFacingError(e, "Не удалось повторить вход."));
                       });
                   }}
                 >

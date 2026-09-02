@@ -181,9 +181,15 @@ class DeliveryLedger:
         )
 
 
-def request_fingerprint(body: dict[str, Any], session_id: str) -> str:
+def request_fingerprint(
+    body: dict[str, Any], session_id: str, target_profile: str = ""
+) -> str:
     canonical = json.dumps(
-        {"session_id": session_id, "body": body},
+        {
+            "session_id": session_id,
+            "target_profile": target_profile,
+            "body": body,
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

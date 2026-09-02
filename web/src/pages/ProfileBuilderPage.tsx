@@ -24,6 +24,8 @@ import {
 } from "@/lib/mcp-server-create";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 
 // Profile name rule mirrors the backend (`^[a-z0-9][a-z0-9_-]{0,63}$`).
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -168,12 +170,9 @@ export default function ProfileBuilderPage() {
   const addMcpDraft = () => {
     let entry: McpServerCreate;
     try {
-      entry = buildMcpServerCreate(mcpDraft);
+      entry = buildMcpServerCreate(mcpDraft, tr);
     } catch (error) {
-      showToast(
-        error instanceof Error ? error.message : tr("Invalid MCP server"),
-        "error",
-      );
+      showToast(ownerFacingError(error, tr("Invalid MCP server")), "error");
       return;
     }
     setMcpServers((prev) => [
@@ -266,7 +265,7 @@ export default function ProfileBuilderPage() {
       );
       navigate("/profiles");
     } catch (e) {
-      showToast(tr("Create failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Create failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setCreating(false);
     }
@@ -428,12 +427,12 @@ export default function ProfileBuilderPage() {
                             <span className="font-medium">{s.name}</span>
                             {s.category && (
                               <Badge tone="secondary" className="ml-2">
-                                {s.category}
+                                {russianInterfaceText(s.category, "Категория навыка")}
                               </Badge>
                             )}
                             {s.description && (
                               <span className="block text-xs text-muted-foreground">
-                                {s.description}
+                                {russianInterfaceText(s.description, "Навык Korra.")}
                               </span>
                             )}
                           </span>
@@ -480,7 +479,7 @@ export default function ProfileBuilderPage() {
                           </Badge>
                           {r.description && (
                             <span className="block text-xs text-muted-foreground">
-                              {r.description}
+                              {russianInterfaceText(r.description, "Навык из каталога.")}
                             </span>
                           )}
                         </span>

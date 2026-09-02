@@ -16,4 +16,9 @@ describe("ownerFacingError", () => {
     expect(ownerFacingError(new Error("500: sqlite database is locked")))
       .toBe("Сервис временно недоступен. Повторите через минуту.");
   });
+
+  it("does not expose mixed Russian and English internals", () => {
+    expect(ownerFacingError(new Error("Ошибка: Connection failed"), "Сбой"))
+      .toBe("Сбой");
+  });
 });

@@ -42,6 +42,8 @@ import { useI18n } from "@/i18n";
 import { PluginSlot } from "@/plugins";
 import { ModelPickerDialog } from "@/components/ModelPickerDialog";
 import { ModelReloadConfirm } from "@/components/ModelReloadConfirm";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 
 const PERIODS = [
   { label: "7d", days: 7 },
@@ -248,16 +250,17 @@ function UseAsMenu({
         setPendingConfirm({
           scope,
           task,
-          message:
-            result.confirm_message ||
+          message: russianInterfaceText(
+            result.confirm_message,
             "У этой модели необычно высокая стоимость.",
+          ),
         });
         return;
       }
       onAssigned();
       setOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(ownerFacingError(e, "Не удалось назначить модель."));
     } finally {
       setBusy(false);
     }
@@ -692,6 +695,7 @@ function AuxiliaryTasksModal({
           description="Для всех вспомогательных задач будет восстановлен автоматический выбор основной модели."
           destructive
           confirmLabel="Сбросить все"
+          cancelLabel="Отмена"
           loading={resetBusy}
         />
       </div>
@@ -750,7 +754,7 @@ function MoaModelsModal({
       onSaved(saved);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(ownerFacingError(e, "Не удалось сохранить настройки ансамбля моделей."));
     } finally {
       setBusy(false);
     }
@@ -1161,7 +1165,7 @@ export default function ModelsPage() {
         setData(models);
         setAux(auxData);
       })
-      .catch((err) => setError(String(err)))
+      .catch((err) => setError(ownerFacingError(err, "Не удалось загрузить данные моделей.")))
       .finally(() => setLoading(false));
   }, [days]);
 

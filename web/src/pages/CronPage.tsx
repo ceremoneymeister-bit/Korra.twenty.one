@@ -733,7 +733,7 @@ export default function CronPage() {
       .catch(() =>
         // Fall back to local-only so the modal still works if the endpoint fails.
         setDeliveryTargets([
-          { id: "local", name: "Local", home_target_set: true, home_env_var: null },
+          { id: "local", name: "Локально", home_target_set: true, home_env_var: null },
         ]),
       );
   }, [clientMode]);
@@ -816,12 +816,7 @@ export default function CronPage() {
       setCreateModalOpen(false);
       loadJobs(selectedProfile);
     } catch (e) {
-      showToast(
-        clientMode
-          ? ownerFacingError(e, "Не удалось добавить задачу.")
-          : `${t.config.failedToSave}: ${e}`,
-        "error",
-      );
+      showToast(ownerFacingError(e, "Не удалось добавить задачу."), "error");
     } finally {
       setCreating(false);
     }
@@ -872,12 +867,7 @@ export default function CronPage() {
       setEditJob(null);
       loadJobs(selectedProfile);
     } catch (e) {
-      showToast(
-        clientMode
-          ? ownerFacingError(e, "Не удалось сохранить изменения.")
-          : `${t.config.failedToSave}: ${e}`,
-        "error",
-      );
+      showToast(ownerFacingError(e, "Не удалось сохранить изменения."), "error");
     } finally {
       setSaving(false);
     }
@@ -914,12 +904,7 @@ export default function CronPage() {
       }
       loadJobs(selectedProfile);
     } catch (e) {
-      showToast(
-        clientMode
-          ? ownerFacingError(e, "Не удалось изменить состояние задачи.")
-          : `${t.status.error}: ${e}`,
-        "error",
-      );
+      showToast(ownerFacingError(e, "Не удалось изменить состояние задачи."), "error");
       if (clientMode) loadJobs(selectedProfile);
     }
   };
@@ -979,7 +964,7 @@ export default function CronPage() {
         triggerControllerRef.current === controller &&
         selectedProfileRef.current === viewProfile
       ) {
-        showToast(`${t.status.error}: ${e}`, "error");
+        showToast(ownerFacingError(e, "Не удалось запустить задачу."), "error");
       }
     }
   };
@@ -1004,17 +989,12 @@ export default function CronPage() {
           );
           loadJobs(selectedProfile);
         } catch (e) {
-          showToast(
-            clientMode
-              ? ownerFacingError(e, "Не удалось убрать задачу из расписания.")
-              : `${t.status.error}: ${e}`,
-            "error",
-          );
+          showToast(ownerFacingError(e, "Не удалось убрать задачу из расписания."), "error");
           if (clientMode) loadJobs(selectedProfile);
           throw e;
         }
       },
-      [clientMode, jobs, loadJobs, selectedProfile, showToast, t.common.delete, t.status.error],
+      [clientMode, jobs, loadJobs, selectedProfile, showToast, t.common.delete],
     ),
   });
 
@@ -1446,17 +1426,18 @@ export default function CronPage() {
                   {!clientMode && job.last_fire_error?.detail && (
                     <p className="text-xs text-destructive mt-1">
                       {tr("missed scheduled fire ({time}):", { time: formatTime(job.last_fire_error.at ?? null) })}{" "}
-                      {job.last_fire_error.detail}
+                      {ownerFacingError(
+                        job.last_fire_error.detail,
+                        "Запланированный запуск не состоялся.",
+                      )}
                     </p>
                   )}
                   {job.last_error && (
                     <p className="text-xs text-destructive mt-1">
-                      {clientMode
-                        ? ownerFacingError(
-                            job.last_error,
-                            "Задача завершилась с ошибкой. Повторите позже.",
-                          )
-                        : job.last_error}
+                      {ownerFacingError(
+                        job.last_error,
+                        "Задача завершилась с ошибкой. Повторите позже.",
+                      )}
                     </p>
                   )}
                 </div>

@@ -1,4 +1,5 @@
 import { authedFetch } from "@/lib/api";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 // Clipboard image MIME → file extension. Mirrors the set the TUI's /image
 // attach path and the gateway's image sniffer accept.
@@ -157,12 +158,15 @@ export async function uploadChatImage(
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new Error(ownerFacingError(
+      `${res.status}: ${text}`,
+      `Не удалось загрузить изображение (HTTP ${res.status}).`,
+    ));
   }
 
   const uploaded = (await res.json()) as ChatImageUploadResult;
   if (!uploaded?.path) {
-    throw new Error(translate("image upload did not return a path"));
+    throw new Error("Сервер не вернул путь к загруженному изображению.");
   }
   return uploaded;
 }

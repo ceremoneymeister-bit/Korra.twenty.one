@@ -11,6 +11,7 @@
 
 import { withBasePath } from "@/lib/api";
 import type { AttachmentDisplay } from "@/lib/chat-types";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 export interface UploadedAttachment {
   path: string;
@@ -130,16 +131,24 @@ export function splitAttachments(content: string): {
 /* ------------------------------------------------------------------ */
 
 /** XHR rather than fetch: we need real upload progress, not a spinner lie. */
+export function chatUploadPath(profile?: string): string {
+  const name = profile?.trim();
+  return name
+    ? `/api/chat/upload?profile=${encodeURIComponent(name)}`
+    : "/api/chat/upload";
+}
+
 export function uploadAttachment(
   file: File,
   onProgress: (percent: number) => void,
+  profile?: string,
 ): { promise: Promise<UploadedAttachment>; abort: () => void } {
   const xhr = new XMLHttpRequest();
   const promise = new Promise<UploadedAttachment>((resolve, reject) => {
     const form = new FormData();
     form.append("file", file, file.name);
 
-    xhr.open("POST", withBasePath("/api/chat/upload"));
+    xhr.open("POST", withBasePath(chatUploadPath(profile)));
     const token =
       typeof window !== "undefined" ? (window.__HERMES_SESSION_TOKEN__ ?? "") : "";
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
@@ -159,7 +168,10 @@ export function uploadAttachment(
       if (xhr.status >= 200 && xhr.status < 300 && payload.path) {
         resolve(payload as unknown as UploadedAttachment);
       } else {
-        reject(new Error(String(payload.detail || `Ошибка ${xhr.status}`)));
+        reject(new Error(ownerFacingError(
+          payload.detail,
+          `Не удалось загрузить вложение (HTTP ${xhr.status}).`,
+        )));
       }
     };
     xhr.onerror = () => reject(new Error("Сеть недоступна"));

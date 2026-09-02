@@ -55,9 +55,9 @@ const GF = (family: string): string =>
  */
 export const FONT_CHOICES: FontChoice[] = [
   // ── System (no webfont fetch) ──────────────────────────────────────────
-  { id: "system-sans", label: "System Sans", category: "sans", stack: SYSTEM_SANS },
-  { id: "system-serif", label: "System Serif", category: "serif", stack: SYSTEM_SERIF },
-  { id: "system-mono", label: "System Mono", category: "mono", stack: SYSTEM_MONO },
+  { id: "system-sans", label: "Системный без засечек", category: "sans", stack: SYSTEM_SANS },
+  { id: "system-serif", label: "Системный с засечками", category: "serif", stack: SYSTEM_SERIF },
+  { id: "system-mono", label: "Системный моноширинный", category: "mono", stack: SYSTEM_MONO },
 
   // ── Sans ────────────────────────────────────────────────────────────────
   {

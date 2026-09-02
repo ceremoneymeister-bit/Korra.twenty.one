@@ -55,7 +55,7 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
 
   const current = availableThemes.find((th) => th.name === themeName);
   const label = current?.label ?? themeName;
-  const sheetTitle = t.theme?.title ?? "Theme";
+  const sheetTitle = t.theme?.title ?? "Тема";
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -68,8 +68,8 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
             ? "text-text-secondary hover:text-foreground hover:bg-transparent"
             : "px-2 py-1 normal-case tracking-normal font-normal text-xs text-text-secondary hover:text-foreground",
         )}
-        title={`${t.theme?.switchTheme ?? "Switch theme"}: ${label}`}
-        aria-label={t.theme?.switchTheme ?? "Switch theme"}
+        title={`${t.theme?.switchTheme ?? "Сменить тему"}: ${label}`}
+        aria-label={t.theme?.switchTheme ?? "Сменить тему"}
         aria-expanded={open}
         aria-haspopup="listbox"
       >
@@ -210,14 +210,14 @@ function FontSection({ fontChoices, fontId, setFont }: FontSectionProps) {
   const { t } = useI18n();
   const order: FontChoice["category"][] = ["sans", "serif", "mono"];
   return (
-    <div aria-label={t.theme?.fontTitle ?? "Font"} role="listbox">
+    <div aria-label={t.theme?.fontTitle ?? "Шрифт"} role="listbox">
       <div className="mt-1 border-t border-current/20 px-3 pb-1 pt-2">
         <span className="inline-flex items-center gap-1.5">
           <Type className="h-3 w-3 text-text-tertiary" />
           <Typography
             className="text-display text-xs tracking-[0.12em] text-text-tertiary"
           >
-            {t.theme?.fontTitle ?? "Font"}
+            {t.theme?.fontTitle ?? "Шрифт"}
           </Typography>
         </span>
       </div>
@@ -233,10 +233,10 @@ function FontSection({ fontChoices, fontId, setFont }: FontSectionProps) {
         <span aria-hidden className="h-4 w-9 shrink-0" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <Typography className="truncate text-xs tracking-normal">
-            {t.theme?.fontDefault ?? "Theme default"}
+            {t.theme?.fontDefault ?? "Шрифт темы"}
           </Typography>
           <Typography className="truncate text-xs tracking-normal text-text-tertiary">
-            {t.theme?.fontDefaultHint ?? "Use the active theme's font"}
+            {t.theme?.fontDefaultHint ?? "Использовать шрифт активной темы"}
           </Typography>
         </div>
         <Check
@@ -250,7 +250,9 @@ function FontSection({ fontChoices, fontId, setFont }: FontSectionProps) {
       {order.map((cat) => {
         const fonts = fontChoices.filter((f) => f.category === cat);
         if (fonts.length === 0) return null;
-        const catLabel = t.theme?.[FONT_CATEGORY_LABEL_KEY[cat]] ?? cat;
+        const catLabel =
+          t.theme?.[FONT_CATEGORY_LABEL_KEY[cat]] ??
+          ({ sans: "Без засечек", serif: "С засечками", mono: "Моноширинный" } as const)[cat];
         return (
           <div key={cat}>
             <div className="px-3 pb-0.5 pt-1.5">

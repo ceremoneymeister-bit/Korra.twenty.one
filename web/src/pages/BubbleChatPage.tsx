@@ -57,6 +57,7 @@ import {
 } from "@/lib/chat-attachments";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/lib/chat-types";
 import { api, type SessionInfo } from "@/lib/api";
@@ -536,11 +537,9 @@ interface BubbleChatComposerProps {
   /** Текст, подставляемый в поле извне — кнопкой «Изменить» на артефакте. */
   prefill?: string | null;
   onPrefillConsumed?: () => void;
-  /** Вложения. Выключены на чатах, адресованных отдельному профилю: загрузка
-   *  (/api/chat/upload) кладёт файл в рабочую папку процесса панели, и агент
-   *  другого профиля этот путь не увидит. Скрепка, drag-and-drop и вставка
-   *  файлов из буфера гаснут вместе — обещать то, чего нет, хуже, чем не
-   *  показывать кнопку. */
+  /** Профиль передаётся и в upload, и в completion: путь файла проверяется
+   *  относительно дома того же агента. */
+  profile?: string;
   allowAttachments?: boolean;
 }
 
@@ -551,6 +550,7 @@ function BubbleChatComposer({
   onAbort,
   prefill,
   onPrefillConsumed,
+  profile,
   allowAttachments = true,
 }: BubbleChatComposerProps) {
   const [value, setValue] = useState("");
@@ -570,8 +570,10 @@ function BubbleChatComposer({
   const startUpload = useCallback(
     (item: PendingAttachment) => {
       patch(item.id, { status: "uploading", progress: 0, error: undefined });
-      const { promise, abort } = uploadAttachment(item.file, (percent) =>
-        patch(item.id, { progress: percent }),
+      const { promise, abort } = uploadAttachment(
+        item.file,
+        (percent) => patch(item.id, { progress: percent }),
+        profile,
       );
       abortsRef.current[item.id] = abort;
       promise
@@ -579,13 +581,16 @@ function BubbleChatComposer({
           patch(item.id, { status: "ready", progress: 100, uploaded }),
         )
         .catch((err: Error) =>
-          patch(item.id, { status: "error", error: err.message }),
+          patch(item.id, {
+            status: "error",
+            error: ownerFacingError(err, "Не удалось загрузить вложение."),
+          }),
         )
         .finally(() => {
           delete abortsRef.current[item.id];
         });
     },
-    [patch],
+    [patch, profile],
   );
 
   const addFiles = useCallback(
@@ -1143,6 +1148,7 @@ export default function BubbleChatPage({
           onPrefillConsumed={() => setPrefill(null)}
           streaming={isStreaming}
           onAbort={abort}
+          profile={agentProfile}
           allowAttachments
           // UI guard: disable Enter-key submits during streaming. The
           // composer also swaps the Send button for Stop, but a stray

@@ -35,6 +35,8 @@ import { ReasoningPicker } from "@/components/ReasoningPicker";
 import { GatewayClient, type ConnectionState } from "@/lib/gatewayClient";
 import { api, buildWsUrl } from "@/lib/api";
 import { maybeReloadForLoopbackWsAuthFailure } from "@/lib/dashboard-auth-reload";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 import {
   EVENTS_CONNECT_TIMEOUT_MS,
   EVENTS_DISCONNECTED_MESSAGE,
@@ -207,7 +209,7 @@ export function ChatSidebar({
       const message = ev.payload?.message;
 
       if (message) {
-        setError(message);
+        setError(ownerFacingError(message, "Шлюз сообщил об ошибке."));
       }
     });
 
@@ -226,7 +228,7 @@ export function ChatSidebar({
       })
       .catch((e: Error) => {
         if (!cancelled) {
-          setError(e.message);
+          setError(ownerFacingError(e, "Не удалось подключиться к шлюзу."));
         }
       });
 
@@ -453,7 +455,12 @@ export function ChatSidebar({
   const modelLabel = modelName.split("/").slice(-1)[0] ?? "—";
   const banner = error
     ? eventsFeedMessageForDisplay(error, tr)
-    : info.credential_warning ?? null;
+    : info.credential_warning
+      ? russianInterfaceText(
+          info.credential_warning,
+          "Провайдер требует настройки перед продолжением.",
+        )
+      : null;
 
   return (
     <aside

@@ -3,10 +3,11 @@ import { Switch } from "@nous-research/ui/ui/components/switch";
 import { Input } from "@nous-research/ui/ui/components/input";
 import { Label } from "@nous-research/ui/ui/components/label";
 import { useI18n } from "@/i18n";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 
 function FieldHint({ schema, schemaKey }: { schema: Record<string, unknown>; schemaKey: string }) {
   const keyPath = schemaKey.includes(".") ? schemaKey : "";
-  const description = schema.description ? String(schema.description) : "";
+  const description = russianInterfaceText(schema.description);
 
   if (!keyPath && !description) return null;
 
@@ -93,8 +94,7 @@ export function AutoField({
   onChange,
 }: AutoFieldProps) {
   const { tr } = useI18n();
-  const rawLabel = schemaKey.split(".").pop() ?? schemaKey;
-  const label = rawLabel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const label = russianInterfaceText(schema.title, schemaKey);
 
   if (isRecord(value) || (Array.isArray(value) && value.some((item) => isRecord(item)))) {
     return (

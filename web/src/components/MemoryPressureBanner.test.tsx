@@ -77,7 +77,7 @@ describe("MemoryPressureBanner", () => {
     await render(
       <MemoryPressureBanner status={statusWith({ pressure: "elevated" })} />,
     );
-    expect(banner()?.textContent).toContain("running low on memory");
+    expect(banner()?.textContent).toContain("У агента заканчивается память");
   });
 
   it("shows the OOM-restart notice even when current pressure is ok", async () => {
@@ -87,7 +87,7 @@ describe("MemoryPressureBanner", () => {
       />,
     );
     expect(banner()?.textContent).toContain(
-      "restarted unexpectedly, most likely because it ran out of memory",
+      "неожиданно перезапустился",
     );
   });
 
@@ -100,7 +100,7 @@ describe("MemoryPressureBanner", () => {
         })}
       />,
     );
-    expect(banner()?.textContent).toContain("almost out of memory");
+    expect(banner()?.textContent).toContain("почти закончилась память");
   });
 
   it("dismissal hides the banner and persists across re-renders", async () => {
@@ -130,7 +130,7 @@ describe("MemoryPressureBanner", () => {
     await rerender(
       <MemoryPressureBanner status={statusWith({ pressure: "critical" })} />,
     );
-    expect(banner()?.textContent).toContain("almost out of memory");
+    expect(banner()?.textContent).toContain("почти закончилась память");
   });
 
   it("a NEW OOM restart (different boot_id) re-opens a dismissed OOM notice", async () => {
@@ -169,7 +169,7 @@ describe("MemoryPressureBanner", () => {
         })}
       />,
     );
-    expect(banner()?.textContent).toContain("restarted unexpectedly");
+    expect(banner()?.textContent).toContain("неожиданно перезапустился");
   });
 
   it("a gateway reboot (boot_id change) re-opens a dismissed live-pressure banner", async () => {
@@ -210,7 +210,7 @@ describe("MemoryPressureBanner", () => {
         })}
       />,
     );
-    expect(banner()?.textContent).toContain("almost out of memory");
+    expect(banner()?.textContent).toContain("почти закончилась память");
   });
 
   it("recovery to ok resets a dismissed live-pressure banner for the next episode", async () => {
@@ -231,7 +231,7 @@ describe("MemoryPressureBanner", () => {
     await rerender(
       <MemoryPressureBanner status={statusWith({ pressure: "critical" })} />,
     );
-    expect(banner()?.textContent).toContain("almost out of memory");
+    expect(banner()?.textContent).toContain("почти закончилась память");
   });
 
   it("unknown pressure (stale heartbeat) does NOT reset live dismissals", async () => {
@@ -271,8 +271,8 @@ describe("MemoryPressureBanner", () => {
         status={statusWithDisk({ pressure: "critical", free_mb: 120 })}
       />,
     );
-    expect(banner()?.textContent).toContain("disk is almost full");
-    expect(banner()?.textContent).toContain("(120 MB free)");
+    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
+    expect(banner()?.textContent).toContain("(свободно 120 МБ)");
   });
 
   it("shows the disk-elevated warning", async () => {
@@ -281,7 +281,7 @@ describe("MemoryPressureBanner", () => {
         status={statusWithDisk({ pressure: "elevated", free_mb: 900 })}
       />,
     );
-    expect(banner()?.textContent).toContain("disk is filling up");
+    expect(banner()?.textContent).toContain("Диск агента заполняется");
   });
 
   it("disk critical outranks memory critical", async () => {
@@ -294,7 +294,7 @@ describe("MemoryPressureBanner", () => {
         )}
       />,
     );
-    expect(banner()?.textContent).toContain("disk is almost full");
+    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
   });
 
   it("memory OOM notice outranks disk elevated", async () => {
@@ -306,7 +306,7 @@ describe("MemoryPressureBanner", () => {
         )}
       />,
     );
-    expect(banner()?.textContent).toContain("restarted unexpectedly");
+    expect(banner()?.textContent).toContain("неожиданно перезапустился");
   });
 
   it("dismissing a disk warning does not mask a later memory warning", async () => {
@@ -328,7 +328,7 @@ describe("MemoryPressureBanner", () => {
         )}
       />,
     );
-    expect(banner()?.textContent).toContain("running low on memory");
+    expect(banner()?.textContent).toContain("У агента заканчивается память");
   });
 
   it("disk escalation to critical re-opens a dismissed disk banner", async () => {
@@ -347,7 +347,7 @@ describe("MemoryPressureBanner", () => {
         status={statusWithDisk({ pressure: "critical", free_mb: 150 })}
       />,
     );
-    expect(banner()?.textContent).toContain("disk is almost full");
+    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
   });
 
   it("disk recovery to ok resets disk dismissals for the next episode", async () => {
@@ -373,7 +373,7 @@ describe("MemoryPressureBanner", () => {
         status={statusWithDisk({ pressure: "critical", free_mb: 150 })}
       />,
     );
-    expect(banner()?.textContent).toContain("disk is almost full");
+    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
   });
 
   it("disk recovery does NOT reset memory dismissals (and vice versa)", async () => {
@@ -392,7 +392,7 @@ describe("MemoryPressureBanner", () => {
     // Trigger shown is memory critical (outranks disk elevated) — dismiss it.
     await act(async () => dismiss.click());
     // Disk warning is next in line and has its own key, so it surfaces...
-    expect(banner()?.textContent).toContain("disk is filling up");
+    expect(banner()?.textContent).toContain("Диск агента заполняется");
     const dismissDisk = container.querySelector(
       '[data-testid="memory-pressure-banner"] button',
     ) as HTMLButtonElement;
@@ -433,6 +433,6 @@ describe("MemoryPressureBanner", () => {
         )}
       />,
     );
-    expect(banner()?.textContent).toContain("disk is almost full");
+    expect(banner()?.textContent).toContain("Диск агента почти заполнен");
   });
 });

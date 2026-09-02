@@ -1,4 +1,5 @@
 import { buildHermesWebSocketUrl } from "@hermes/shared";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 
 // The dashboard can be served either at the root of its host (e.g.
 // https://kanban.tilos.com/) or under a URL prefix when reverse-proxied
@@ -186,9 +187,34 @@ export async function fetchJSON<T>(
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${text}`);
+    throw new Error(`${res.status}: ${safeApiErrorMessage(res.status, text)}`);
   }
   return res.json();
+}
+
+function safeApiErrorMessage(status: number, raw: string): string {
+  const candidates: unknown[] = [raw];
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    candidates.unshift(parsed.detail, parsed.message, parsed.error);
+  } catch {
+    // Plain-text response; it is checked below.
+  }
+  for (const candidate of candidates) {
+    const safe = russianInterfaceText(candidate);
+    if (safe) return safe;
+  }
+  if (status === 400) return "Запрос содержит некорректные данные.";
+  if (status === 401) return "Требуется повторный вход.";
+  if (status === 403) return "Для этого действия нет доступа.";
+  if (status === 404) return "Данные не найдены.";
+  if (status === 409) return "Данные уже изменились. Обновите экран и повторите.";
+  if (status === 410) return "Срок действия операции истёк.";
+  if (status === 413) return "Переданные данные слишком велики.";
+  if (status === 422) return "Данные не прошли проверку.";
+  if (status === 429) return "Слишком много запросов. Повторите чуть позже.";
+  if (status >= 500) return "Сервис временно недоступен. Повторите через минуту.";
+  return "Запрос завершился с ошибкой.";
 }
 
 /** Encode a plugin registry key for URL paths (preserves `/` segment separators). */

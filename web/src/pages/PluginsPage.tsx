@@ -17,7 +17,7 @@ import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Select, SelectOption } from "@nous-research/ui/ui/components/select";
 import { Switch } from "@nous-research/ui/ui/components/switch";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
-import { CommandBlock, CopyButton } from "@nous-research/ui/ui/components/command-block";
+import { CopyButton } from "@nous-research/ui/ui/components/command-block";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { Input } from "@nous-research/ui/ui/components/input";
@@ -27,6 +27,8 @@ import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useI18n } from "@/i18n";
 import { PluginSlot } from "@/plugins";
 import { cn } from "@/lib/utils";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 import { usePageHeader } from "@/contexts/usePageHeader";
 
 /** Select value for built-in memory (`config` uses empty string). Never use `""` — UI Select maps empty value to an empty label. */
@@ -80,11 +82,16 @@ function setupHasInstallableSteps(setup?: MemoryProviderSetupInfo) {
 }
 
 function SetupCommandBlock({ code, label }: { code: string; label: string }) {
+  const { tr } = useI18n();
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[0.6875rem] text-muted-foreground">{label}</span>
-        <CopyButton text={code} />
+        <CopyButton
+          text={code}
+          label={tr("Copy")}
+          copiedLabel={tr("Copied!")}
+        />
       </div>
       <div className="border border-border bg-background/40 px-3 py-2 font-mono text-[0.6875rem] leading-relaxed">
         <code className="break-all">{code}</code>
@@ -354,7 +361,7 @@ export default function PluginsPage() {
           if (!cancelled) {
             setMemoryConfig(null);
             setMemoryValues({});
-            showToast(e instanceof Error ? e.message : tr("Failed to load provider config"), "error");
+            showToast(ownerFacingError(e, tr("Failed to load provider config")), "error");
           }
         })
         .finally(() => {
@@ -381,13 +388,21 @@ export default function PluginsPage() {
         enable: installEnable,
       });
       showToast(tr("{name} installed", { name: r.plugin_name ?? id }), "success");
-      if ((r.warnings?.length ?? 0) > 0) showToast(r.warnings!.join(" "), "error");
+      if ((r.warnings?.length ?? 0) > 0) {
+        showToast(
+          russianInterfaceText(
+            r.warnings!.join(" "),
+            "Установка завершена с предупреждениями. Проверьте настройки плагина.",
+          ),
+          "error",
+        );
+      }
       if ((r.missing_env?.length ?? 0) > 0)
         showToast(`${t.pluginsPage.missingEnvWarn} ${r.missing_env!.join(", ")}`, "error");
       setInstallId("");
       await loadHub();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : tr("Install failed"), "error");
+      showToast(ownerFacingError(e, tr("Install failed")), "error");
     } finally {
       setInstallBusy(false);
     }
@@ -403,7 +418,7 @@ export default function PluginsPage() {
       );
       await loadHub();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : tr("Rescan failed"), "error");
+      showToast(ownerFacingError(e, tr("Rescan failed")), "error");
     } finally {
       setRescanBusy(false);
     }
@@ -443,7 +458,7 @@ export default function PluginsPage() {
       showToast(t.pluginsPage.savedProviders, "success");
       await loadHub();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : tr("Save failed"), "error");
+      showToast(ownerFacingError(e, tr("Save failed")), "error");
     } finally {
       setMemoryBusy(false);
     }
@@ -475,7 +490,7 @@ export default function PluginsPage() {
       }
       await loadHub(provider);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : tr("Provider setup failed"), "error");
+      showToast(ownerFacingError(e, tr("Provider setup failed")), "error");
     } finally {
       setMemorySetupBusy(false);
     }
@@ -488,7 +503,7 @@ export default function PluginsPage() {
       showToast(t.pluginsPage.savedProviders, "success");
       await loadHub();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : tr("Save failed"), "error");
+      showToast(ownerFacingError(e, tr("Save failed")), "error");
     } finally {
       setContextBusy(false);
     }
@@ -500,7 +515,7 @@ export default function PluginsPage() {
       await fn();
       await loadHub();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : tr("Failed"), "error");
+      showToast(ownerFacingError(e, tr("Failed")), "error");
     } finally {
       setRowBusy(null);
     }
@@ -584,7 +599,10 @@ export default function PluginsPage() {
 
                   {selectedMemoryName && selectedMemoryInfo?.description && (
                     <p className="text-xs text-muted-foreground">
-                      {selectedMemoryInfo.description}
+                      {russianInterfaceText(
+                        selectedMemoryInfo.description,
+                        "Провайдер долговременной памяти.",
+                      )}
                     </p>
                   )}
 
@@ -623,7 +641,9 @@ export default function PluginsPage() {
                         return (
                           <div key={field.key} className="grid gap-2 min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <Label htmlFor={`memory-${field.key}`}>{field.label}</Label>
+                              <Label htmlFor={`memory-${field.key}`}>
+                                {russianInterfaceText(field.label, field.key)}
+                              </Label>
                               {field.required && <Badge tone="outline">{tr("required")}</Badge>}
                               {field.kind === "secret" && field.is_set && !value && (
                                 <Badge tone="success">{tr("set")}</Badge>
@@ -651,7 +671,7 @@ export default function PluginsPage() {
                               >
                                 {field.options.map((option) => (
                                   <SelectOption key={option.value} value={option.value}>
-                                    {option.label}
+                                    {russianInterfaceText(option.label, option.value)}
                                   </SelectOption>
                                 ))}
                               </Select>
@@ -682,7 +702,7 @@ export default function PluginsPage() {
                                   placeholder={
                                     field.kind === "secret" && field.is_set
                                       ? tr("Leave blank to keep existing value")
-                                      : field.placeholder
+                                      : russianInterfaceText(field.placeholder, "Введите значение")
                                   }
                                   onChange={(event) =>
                                     setMemoryValues((current) => ({
@@ -714,7 +734,12 @@ export default function PluginsPage() {
                             )}
 
                             {field.description && (
-                              <p className="text-xs text-muted-foreground">{field.description}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {russianInterfaceText(
+                                  field.description,
+                                  "Параметр провайдера памяти.",
+                                )}
+                              </p>
                             )}
                           </div>
                         );
@@ -886,7 +911,10 @@ export default function PluginsPage() {
                 <li className="text-xs text-text-secondary" key={m.name}>
 
 
-                  {m.label ?? m.name} — {m.description || m.tab?.path}
+                  {russianInterfaceText(m.label, m.name)} — {russianInterfaceText(
+                    m.description,
+                    "Плагин панели Korra.",
+                  )}
 
 
                   {!m.tab?.hidden ? (
@@ -1080,7 +1108,7 @@ function PluginRowCard(props: PluginRowCardProps) {
 
         {row.description ? (
           <p className="min-w-0 w-full text-xs tracking-[0.06em] text-text-secondary break-words">
-            {row.description}
+            {russianInterfaceText(row.description, "Плагин Korra.")}
           </p>
         ) : null}
 
@@ -1092,7 +1120,7 @@ function PluginRowCard(props: PluginRowCardProps) {
         ) : null}
 
         {row.auth_required ? (
-          <CommandBlock
+          <SetupCommandBlock
             label={t.pluginsPage.authRequiredHint}
             code={row.auth_command}
           />
@@ -1121,6 +1149,7 @@ function PluginRowCard(props: PluginRowCardProps) {
         description={tr('This will remove the "{name}" plugin from your agent.', { name: row.name })}
         destructive
         confirmLabel={t.common.delete}
+        cancelLabel={t.common.cancel}
       />
     </Card>
   );

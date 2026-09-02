@@ -1271,172 +1271,169 @@ def _timezone_options() -> List[str]:
 _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "timezone": {
         "type": "select",
-        "description": "IANA timezone (e.g. America/New_York). Blank uses the system timezone.",
+        "description": "Часовой пояс IANA, например Asia/Novosibirsk. Пустое значение использует системный часовой пояс.",
         "options": _timezone_options(),
         "searchable": True,
         "clearable": True,
     },
     "memory.provider": {
         "type": "select",
-        "description": "Memory provider plugin",
+        "description": "Плагин провайдера памяти",
         "options": _memory_provider_options(),
     },
     "model": {
         "type": "string",
-        "description": "Default model (e.g. anthropic/claude-sonnet-4.6)",
+        "description": "Модель по умолчанию, например anthropic/claude-sonnet-4.6",
         "category": "general",
     },
     "model_context_length": {
         "type": "number",
-        "description": "Context window override (0 = auto-detect from model metadata)",
+        "description": "Размер окна контекста; 0 — определить автоматически по данным модели",
         "category": "general",
     },
     "terminal.backend": {
         "type": "select",
-        "description": "Terminal execution backend",
+        "description": "Среда выполнения команд терминала",
         "options": ["local", "docker", "ssh", "modal", "daytona", "vercel_sandbox", "singularity"],
     },
     "terminal.vercel_runtime": {
         "type": "select",
-        "description": "Vercel Sandbox runtime",
+        "description": "Среда выполнения Vercel Sandbox",
         "options": ["node24", "node22", "python3.13"],  # sync with _SUPPORTED_VERCEL_RUNTIMES in terminal_tool.py
     },
     "terminal.modal_mode": {
         "type": "select",
-        "description": "Modal sandbox mode",
+        "description": "Режим песочницы Modal",
         "options": ["sandbox", "function"],
     },
     "proxy.enabled": {
         "type": "boolean",
         "description": (
-            "Docker-only egress credential firewall. Requires `hermes egress setup` "
-            "and `hermes egress start`; Modal/SSH/Daytona are not wired yet."
+            "Защита исходящих учётных данных для Docker. Требует команд "
+            "`hermes egress setup` и `hermes egress start`; Modal, SSH и Daytona пока не подключены."
         ),
         "category": "security",
     },
     "proxy.credential_source": {
         "type": "select",
-        "description": "Where iron-proxy loads real upstream secrets at start time",
+        "description": "Источник секретов для iron-proxy при запуске",
         "options": ["env", "bitwarden"],
         "category": "security",
     },
     "proxy.enforce_on_docker": {
         "type": "boolean",
-        "description": "Refuse Docker sandboxes when egress is enabled but not configured/running",
+        "description": "Запрещать Docker-песочницы, если защита исходящих данных включена, но не настроена или не запущена",
         "category": "security",
     },
     "tts.provider": {
         "type": "select",
-        "description": "Text-to-speech provider",
+        "description": "Провайдер синтеза речи",
         "options": ["edge", "elevenlabs", "openai", "xai", "minimax", "mistral", "gemini", "neutts", "kittentts", "piper"],
     },
     "stt.provider": {
         "type": "select",
-        "description": "Speech-to-text provider",
+        "description": "Провайдер распознавания речи",
         # "mistral" temporarily removed — mistralai PyPI package quarantined
         # (malicious 2.4.6 release on 2026-05-12). Restore once available.
         "options": ["local", "groq", "openai", "xai", "elevenlabs"],
     },
     "stt.local.model": {
         "type": "select",
-        "description": "Local faster-whisper model size",
+        "description": "Размер локальной модели faster-whisper",
         "options": ["tiny", "base", "small", "medium", "large-v3"],
     },
     "stt.groq.model": {
         "type": "select",
-        "description": "Groq Whisper model",
+        "description": "Модель Groq Whisper",
         "options": ["whisper-large-v3-turbo", "whisper-large-v3", "distil-whisper-large-v3-en"],
     },
     "stt.openai.model": {
         "type": "select",
-        "description": "OpenAI transcription model",
+        "description": "Модель распознавания речи OpenAI",
         "options": ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe", "gpt-transcribe"],
     },
     "stt.elevenlabs.model_id": {
         "type": "select",
-        "description": "ElevenLabs Scribe model",
+        "description": "Модель ElevenLabs Scribe",
         "options": ["scribe_v2", "scribe_v1"],
     },
     "display.skin": {
         "type": "select",
-        "description": "CLI visual theme",
+        "description": "Визуальная тема командной строки",
         "options": ["default", "ares", "mono", "slate"],
     },
     "dashboard.theme": {
         "type": "select",
-        "description": "Web dashboard visual theme",
+        "description": "Визуальная тема веб-панели",
         "options": ["default", "midnight", "ember", "mono", "cyberpunk", "rose"],
     },
     "display.resume_display": {
         "type": "select",
-        "description": "How resumed sessions display history",
+        "description": "Отображение истории при возобновлении сессии",
         "options": ["minimal", "full", "off"],
     },
     "display.busy_input_mode": {
         "type": "select",
-        "description": "Input behavior while agent is running",
+        "description": "Поведение ввода во время работы агента",
         "options": ["interrupt", "queue", "steer"],
     },
     "approvals.mode": {
         "type": "select",
-        "description": "Dangerous command approval mode",
+        "description": "Режим подтверждения опасных команд",
         "options": ["manual", "smart", "off"],
     },
     "context.engine": {
         "type": "select",
-        "description": "Context management engine",
+        "description": "Движок управления контекстом",
         "options": ["default", "custom"],
     },
     "human_delay.mode": {
         "type": "select",
-        "description": "Simulated typing delay mode",
+        "description": "Режим имитации задержки набора текста",
         "options": ["off", "typing", "fixed"],
     },
     "logging.level": {
         "type": "select",
-        "description": "Log level for agent.log",
+        "description": "Уровень журналирования для agent.log",
         "options": ["DEBUG", "INFO", "WARNING", "ERROR"],
     },
     "agent.service_tier": {
         "type": "select",
-        "description": "API service tier (OpenAI/Anthropic)",
+        "description": "Уровень обслуживания API OpenAI или Anthropic",
         "options": ["", "auto", "default", "flex"],
     },
     "delegation.reasoning_effort": {
         "type": "select",
-        "description": "Reasoning effort for delegated subagents",
+        "description": "Глубина рассуждения делегированных субагентов",
         "options": ["", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
     },
     "updates.non_interactive_local_changes": {
         "type": "select",
         "description": (
-            "When the chat app / gateway updates Hermes (no terminal prompt), "
-            "what to do with uncommitted local source edits. 'stash' keeps them "
-            "and re-applies them after the update; 'discard' throws them away. "
-            "Terminal updates always ask, regardless of this setting."
+            "Действие с незакоммиченными правками при обновлении Korra из чата "
+            "или шлюза. Значение stash сохраняет и возвращает правки после обновления, "
+            "discard удаляет их. Обновление из терминала всегда запрашивает решение."
         ),
         "options": ["stash", "discard"],
     },
     "updates.refresh_cua_driver": {
         "type": "boolean",
         "description": (
-            "Refresh an already-installed cua-driver during hermes update. "
-            "Disable this on non-admin macOS accounts where /Applications is "
-            "not writable."
+            "Обновлять установленный cua-driver во время обновления Korra. "
+            "Отключите для учётных записей macOS без прав записи в /Applications."
         ),
     },
     "browser.headed": {
         "type": "boolean",
-        "description": "Run the local browser in headed mode (visible window). Also keeps the window open between turns; idle sessions are still reaped after browser.inactivity_timeout.",
+        "description": "Запускать локальный браузер с видимым окном и сохранять окно между ходами; неактивные сессии закрываются после browser.inactivity_timeout.",
     },
     "plugins.hook_callback_timeout": {
         "type": "number",
         "description": (
-            "Wall-clock cap (seconds) for timeout-bounded in-process Python "
-            "plugin hook callbacks (hot-path observers + pre_tool_call). "
-            "Timed-out pre_tool_call fails closed. 0 disables the cap; "
-            "values above 600 are clamped. Caller-thread hooks such as "
-            "subagent_stop are never moved onto a timeout worker."
+            "Ограничение времени в секундах для Python-хуков плагинов внутри процесса. "
+            "Превысивший лимит pre_tool_call завершается безопасным отказом. 0 отключает "
+            "лимит, значения выше 600 ограничиваются; хуки потока вызова, включая "
+            "subagent_stop, не переносятся в отдельный обработчик тайм-аута."
         ),
     },
 }
@@ -2741,6 +2738,7 @@ _API_SERVER_PROXY_TARGET = os.environ.get(
     "API_SERVER_PROXY_TARGET", "http://127.0.0.1:8642"
 )
 _CHAT_DELIVERY_TASKS: dict[str, "asyncio.Task[tuple[int, bytes, str]]"] = {}
+_CHAT_DELIVERY_STREAMS: dict[str, "_DurableBrowserChatStream"] = {}
 _CHAT_DELIVERY_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
 
 
@@ -2756,12 +2754,9 @@ async def _run_durable_browser_chat(
     upstream_url: str,
     body: dict[str, Any],
     headers: dict[str, str],
-    return_sse: bool,
 ) -> tuple[int, bytes, str]:
-    """Finish and record one owner message even if its browser disconnects."""
+    """Finish and record one non-streaming owner message after disconnect."""
     import httpx as _httpx
-
-    from hermes_cli.chat_delivery import openai_json_to_sse
 
     ledger = _chat_delivery_ledger()
     upstream_headers = {**headers, "Idempotency-Key": message_id}
@@ -2790,17 +2785,14 @@ async def _run_durable_browser_chat(
                 raw,
                 response.headers.get("content-type", "application/json"),
             )
-        downstream = openai_json_to_sse(raw) if return_sse else raw
-        content_type = "text/event-stream" if return_sse else response.headers.get(
-            "content-type", "application/json"
-        )
+        content_type = response.headers.get("content-type", "application/json")
         ledger.complete(
             message_id,
-            response_body=downstream,
+            response_body=raw,
             status_code=200,
             content_type=content_type,
         )
-        return 200, downstream, content_type
+        return 200, raw, content_type
     except Exception as exc:
         # An interrupted upstream connection is ambiguous: the agent may have
         # accepted the turn even though this proxy never received its reply.
@@ -2819,6 +2811,174 @@ async def _run_durable_browser_chat(
         return 502, payload, "application/json"
 
 
+class _DurableBrowserChatStream:
+    """In-memory live fan-out backed by the persistent delivery ledger."""
+
+    def __init__(self) -> None:
+        loop = asyncio.get_running_loop()
+        self.started: "asyncio.Future[tuple[int, str]]" = loop.create_future()
+        self.task: "asyncio.Task[tuple[int, bytes, str]] | None" = None
+        self.chunks: list[bytes] = []
+        self.total_bytes = 0
+        self.done = False
+        self.result: tuple[int, bytes, str] | None = None
+        self.condition = asyncio.Condition()
+
+    def mark_started(self, status_code: int, content_type: str) -> None:
+        if not self.started.done():
+            self.started.set_result((status_code, content_type))
+
+    async def publish(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        async with self.condition:
+            self.chunks.append(chunk)
+            self.total_bytes += len(chunk)
+            self.condition.notify_all()
+
+    async def finish(self, result: tuple[int, bytes, str]) -> None:
+        self.result = result
+        async with self.condition:
+            self.done = True
+            self.condition.notify_all()
+
+    async def subscribe(self):
+        """Replay buffered chunks, then follow new ones until the run ends."""
+        index = 0
+        while True:
+            async with self.condition:
+                await self.condition.wait_for(
+                    lambda: index < len(self.chunks) or self.done
+                )
+                batch = self.chunks[index:]
+                index = len(self.chunks)
+                done = self.done
+            for chunk in batch:
+                yield chunk
+            if done and index >= len(self.chunks):
+                return
+
+
+def _durable_stream_error_event(message: str) -> bytes:
+    payload = {
+        "id": "chatcmpl-korra-delivery-error",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": "korra-agent",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {},
+                "finish_reason": "error",
+            }
+        ],
+        "error": {"message": message},
+    }
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+
+
+def _sse_stream_has_done(raw: bytes) -> bool:
+    """Require the OpenAI terminal sentinel before committing a durable replay."""
+    return any(line.strip() == b"data: [DONE]" for line in raw.splitlines())
+
+
+async def _run_durable_browser_chat_stream(
+    *,
+    run: _DurableBrowserChatStream,
+    message_id: str,
+    upstream_url: str,
+    body: dict[str, Any],
+    headers: dict[str, str],
+) -> tuple[int, bytes, str]:
+    """Tee upstream SSE live to subscribers and persist it for exact replay."""
+    import httpx as _httpx
+
+    ledger = _chat_delivery_ledger()
+    upstream_headers = {**headers, "Idempotency-Key": message_id}
+    cancelled_payload = json.dumps(
+        {"detail": "Доставка прервана остановкой сервера; проверьте историю."},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    result: tuple[int, bytes, str] = (
+        503,
+        cancelled_payload,
+        "application/json",
+    )
+    try:
+        # A tool-heavy agent turn may legitimately stay silent for minutes.
+        # Bound connect/write/pool setup, but leave SSE reads unbounded; the
+        # upstream agent owns its turn deadline and the browser has Stop.
+        timeout = _httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+        async with _httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream(
+                "POST",
+                upstream_url,
+                json={**body, "stream": True},
+                headers=upstream_headers,
+            ) as response:
+                content_type = response.headers.get(
+                    "content-type", "text/event-stream"
+                )
+                run.mark_started(response.status_code, content_type)
+                if response.status_code >= 400:
+                    raw = await response.aread()
+                    if len(raw) > _CHAT_DELIVERY_RESPONSE_MAX_BYTES:
+                        raise RuntimeError(
+                            "Chat response exceeds the delivery ledger limit"
+                        )
+                    if response.status_code < 500:
+                        ledger.fail(message_id)
+                    result = (response.status_code, raw, content_type)
+                else:
+                    buffered: list[bytes] = []
+                    total = 0
+                    async for chunk in response.aiter_raw():
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        if total > _CHAT_DELIVERY_RESPONSE_MAX_BYTES:
+                            raise RuntimeError(
+                                "Chat response exceeds the delivery ledger limit"
+                            )
+                        buffered.append(chunk)
+                        await run.publish(chunk)
+                    raw = b"".join(buffered)
+                    if not _sse_stream_has_done(raw):
+                        raise RuntimeError(
+                            "Chat SSE stream ended before the [DONE] sentinel"
+                        )
+                    ledger.complete(
+                        message_id,
+                        response_body=raw,
+                        status_code=200,
+                        content_type="text/event-stream",
+                    )
+                    result = (200, raw, "text/event-stream")
+    except Exception as exc:
+        _log.error("durable browser chat stream failed for %s: %s", message_id, exc)
+        detail = (
+            "Доставка сообщения пока не подтверждена. "
+            "Проверьте историю перед новой отправкой."
+        )
+        payload = json.dumps({"detail": detail}, ensure_ascii=False).encode("utf-8")
+        result = (502, payload, "application/json")
+        if run.started.done():
+            await run.publish(_durable_stream_error_event(detail))
+        else:
+            run.mark_started(502, "application/json")
+    finally:
+        await run.finish(result)
+    return result
+
+
+def _delivery_state_for_status(status_code: int) -> str:
+    if status_code < 400:
+        return "delivered"
+    if status_code < 500:
+        return "failed"
+    return "pending"
+
+
 async def _durable_browser_chat_response(
     *,
     message_id_raw: str,
@@ -2827,6 +2987,7 @@ async def _durable_browser_chat_response(
     body: dict[str, Any],
     upstream_headers: dict[str, str],
     return_sse: bool,
+    target_profile: str = "",
 ) -> Response:
     from hermes_cli.chat_delivery import (
         DeliveryConflict,
@@ -2838,7 +2999,7 @@ async def _durable_browser_chat_response(
         message_id = validate_client_message_id(message_id_raw)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Некорректный ID сообщения") from exc
-    fingerprint = request_fingerprint(body, session_id)
+    fingerprint = request_fingerprint(body, session_id, target_profile)
     ledger = _chat_delivery_ledger()
     try:
         state, record = await run_in_threadpool(
@@ -2864,6 +3025,72 @@ async def _durable_browser_chat_response(
             },
         )
 
+    if return_sse:
+        from fastapi.responses import StreamingResponse
+
+        run = _CHAT_DELIVERY_STREAMS.get(task_key)
+        if state == "pending" and run is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Доставка ещё проверяется. "
+                    "Откройте историю перед повторной отправкой"
+                ),
+            )
+        if run is None:
+            run = _DurableBrowserChatStream()
+            task = asyncio.create_task(
+                _run_durable_browser_chat_stream(
+                    run=run,
+                    message_id=message_id,
+                    upstream_url=upstream_url,
+                    body=body,
+                    headers=upstream_headers,
+                )
+            )
+            run.task = task
+            _CHAT_DELIVERY_STREAMS[task_key] = run
+
+            def _forget_stream(
+                _done_task: "asyncio.Task[tuple[int, bytes, str]]",
+                *,
+                expected: _DurableBrowserChatStream = run,
+            ) -> None:
+                if _CHAT_DELIVERY_STREAMS.get(task_key) is expected:
+                    _CHAT_DELIVERY_STREAMS.pop(task_key, None)
+
+            task.add_done_callback(_forget_stream)
+
+        status_code, content_type = await asyncio.shield(run.started)
+        if status_code >= 400:
+            assert run.task is not None
+            status_code, response_body, content_type = await asyncio.shield(run.task)
+            return Response(
+                content=response_body,
+                status_code=status_code,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Korra-Client-Message-Id": message_id,
+                    "X-Korra-Delivery-State": _delivery_state_for_status(
+                        status_code
+                    ),
+                },
+            )
+        return StreamingResponse(
+            run.subscribe(),
+            status_code=status_code,
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-Korra-Client-Message-Id": message_id,
+                # The ledger flips to completed only after the terminal SSE
+                # byte is stored. Until then, "pending" is the honest state.
+                "X-Korra-Delivery-State": "pending",
+            },
+        )
+
     task = _CHAT_DELIVERY_TASKS.get(task_key)
     if state == "pending" and task is None:
         # The dashboard restarted while the upstream result was unknown. Never
@@ -2879,7 +3106,6 @@ async def _durable_browser_chat_response(
                 upstream_url=upstream_url,
                 body=body,
                 headers=upstream_headers,
-                return_sse=return_sse,
             )
         )
         _CHAT_DELIVERY_TASKS[task_key] = task
@@ -2900,13 +3126,18 @@ async def _durable_browser_chat_response(
         headers={
             "Cache-Control": "no-cache",
             "X-Korra-Client-Message-Id": message_id,
-            "X-Korra-Delivery-State": "delivered" if status_code < 400 else "failed",
+            "X-Korra-Delivery-State": _delivery_state_for_status(status_code),
         },
     )
 
 
+_CHAT_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
 @app.post("/api/chat/completions")
-async def chat_completions_proxy(request: Request) -> Response:
+async def chat_completions_proxy(
+    request: Request, profile: Optional[str] = None
+) -> Response:
     """Forward an OpenAI-compatible chat request to the Korra gateway API server.
 
     Thin pass-through (streaming SSE + non-streaming) behind the same loopback
@@ -2916,8 +3147,9 @@ async def chat_completions_proxy(request: Request) -> Response:
 
     SSE TOOL-PROGRESS CONTRACT (do not drop when wiring API_SERVER):
     the bubble-chat frontend renders live tool-progress from
-    ``event: korra.tool.progress`` blocks carrying a {tool, toolCallId, status}
-    payload, interleaved with standard OpenAI ``chat.completion.chunk`` data.
+    ``event: hermes.tool.progress`` blocks carrying tool progress payloads,
+    interleaved with standard OpenAI ``chat.completion.chunk`` data. The
+    frontend also accepts the legacy ``korra.tool.progress`` alias.
     This proxy forwards non-durable upstream SSE lines verbatim.
     """
     import time as _time
@@ -2931,8 +3163,28 @@ async def chat_completions_proxy(request: Request) -> Response:
         raise HTTPException(status_code=500, detail="API server key not configured")
 
     body = await request.json()
+    profile_name = (profile or "").strip()
+    if profile_name and not _CHAT_PROFILE_RE.fullmatch(profile_name):
+        raise HTTPException(status_code=400, detail="Некорректное имя профиля")
+    body_profile = str(body.pop("profile", "") or "").strip()
+    if body_profile:
+        if not _CHAT_PROFILE_RE.fullmatch(body_profile):
+            raise HTTPException(status_code=400, detail="Некорректное имя профиля")
+        if profile_name and body_profile != profile_name:
+            raise HTTPException(status_code=400, detail="Профили в адресе и теле не совпадают")
+        profile_name = body_profile
+
+    # Browser uploads arrive as a separate, owner-friendly array. Convert it
+    # to the durable text block understood by every agent/tool transport before
+    # fingerprinting and forwarding the OpenAI-compatible request.
+    _apply_chat_attachments(body, profile_name or None)
     do_stream = bool(body.get("stream", False))
-    upstream_url = f"{_API_SERVER_PROXY_TARGET}/v1/chat/completions"
+    upstream_path = (
+        f"/p/{urllib.parse.quote(profile_name, safe='')}/v1/chat/completions"
+        if profile_name
+        else "/v1/chat/completions"
+    )
+    upstream_url = f"{_API_SERVER_PROXY_TARGET}{upstream_path}"
     upstream_headers: dict[str, str] = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -2951,6 +3203,7 @@ async def chat_completions_proxy(request: Request) -> Response:
             body=body,
             upstream_headers=upstream_headers,
             return_sse=do_stream,
+            target_profile=profile_name,
         )
 
     if do_stream:
@@ -3005,6 +3258,275 @@ async def chat_completions_proxy(request: Request) -> Response:
         status_code=response.status_code,
         media_type=response.headers.get("content-type", "application/json"),
     )
+
+
+# --- Korra browser chat: owner file attachments ----------------------------
+_CHAT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+_CHAT_MAX_ATTACHMENTS = 5
+_CHAT_ATTACHMENT_READERS: dict[str, str] = {
+    ".txt": "read_file", ".md": "read_file", ".csv": "read_file",
+    ".json": "read_file", ".yaml": "read_file", ".yml": "read_file",
+    ".log": "read_file",
+    ".pdf": "pdf",
+    ".doc": "docx", ".docx": "docx", ".rtf": "docx",
+    ".xls": "xlsx", ".xlsx": "xlsx",
+    ".ppt": "powerpoint", ".pptx": "powerpoint",
+    ".png": "image", ".jpg": "image", ".jpeg": "image",
+    ".webp": "image", ".heic": "image", ".gif": "image",
+    ".ogg": "audio/transcribe", ".oga": "audio/transcribe",
+    ".m4a": "audio/transcribe", ".mp3": "audio/transcribe",
+    ".wav": "audio/transcribe", ".mp4": "audio/transcribe",
+    ".mov": "audio/transcribe",
+    ".zip": "archive",
+}
+_CHAT_DENIED_EXTENSIONS = frozenset({
+    ".exe", ".msi", ".bat", ".cmd", ".com", ".scr", ".ps1", ".vbs",
+    ".sh", ".bash", ".zsh", ".dll", ".so", ".dylib", ".jar", ".apk",
+})
+_CHAT_ATTACHMENT_MARKER_RE = re.compile(r"\[\s*вложения\s*\].*\Z", re.S | re.I)
+_CHAT_ATTACHMENT_NAME_UNSAFE = re.compile(
+    r"(?:читать\s*:)|[\r\n\u2028\u2029\u0085·/\\]", re.I
+)
+_CHAT_TRANSLIT = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e",
+    "ё": "e", "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k",
+    "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
+    "с": "s", "т": "t", "у": "u", "ф": "f", "х": "h", "ц": "c",
+    "ч": "ch", "ш": "sh", "щ": "sch", "ъ": "", "ы": "y", "ь": "",
+    "э": "e", "ю": "yu", "я": "ya",
+}
+
+
+def _chat_safe_stem(raw_name: str) -> str:
+    """Return a bounded ASCII filename stem while preserving display name."""
+    stem = Path(str(raw_name or "")).stem
+
+    def _map(character: str) -> str:
+        if character in _CHAT_TRANSLIT:
+            return _CHAT_TRANSLIT[character]
+        lowered = _CHAT_TRANSLIT.get(character.lower())
+        if lowered is None:
+            return character
+        return lowered.capitalize() if character.isupper() else lowered
+
+    value = "".join(_map(character) for character in stem)
+    value = re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-._")
+    return value[:60] or "file"
+
+
+def _chat_client_root(home: str | Path | None = None) -> Path:
+    """Keep uploaded chat files inside the same root as the Files screen."""
+    forced = os.environ.get(_MANAGED_FILES_ROOT_ENV, "").strip()
+    if forced:
+        base = Path(forced)
+    elif home:
+        base = Path(home)
+    elif _default_hermes_root_is_opt_data():
+        base = _HOSTED_MANAGED_FILES_ROOT
+    else:
+        base = Path(get_hermes_home())
+    return base / "client"
+
+
+def _chat_human_size(size: int) -> str:
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} МБ"
+    if size >= 1024:
+        return f"{size / 1024:.0f} КБ"
+    return f"{size} Б"
+
+
+@app.post("/api/chat/upload")
+async def upload_chat_file(
+    file: UploadFile = File(...), profile: Optional[str] = None
+):
+    """Store an owner attachment and return its agent-readable descriptor."""
+    profile_name = (profile or "").strip()
+    if profile_name and not _CHAT_PROFILE_RE.fullmatch(profile_name):
+        raise HTTPException(status_code=400, detail="Некорректное имя профиля")
+
+    original_name = str(file.filename or "").strip() or "file"
+    extension = Path(original_name).suffix.lower()
+    if extension in _CHAT_DENIED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400, detail=f"Файлы {extension} загружать нельзя"
+        )
+
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _CHAT_MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"Файл больше {_CHAT_MAX_UPLOAD_BYTES // (1024 * 1024)} МБ"
+                    ),
+                )
+            chunks.append(chunk)
+    finally:
+        await file.close()
+
+    data = b"".join(chunks)
+    if not data:
+        raise HTTPException(status_code=400, detail="Пустой файл")
+
+    profile_scope = (
+        contextlib.nullcontext(None)
+        if os.environ.get(_MANAGED_FILES_ROOT_ENV, "").strip()
+        else _profile_scope(profile_name or None)
+    )
+    with profile_scope as scoped_home:
+        day = datetime.now().strftime("%Y-%m-%d")
+        target_dir = _chat_client_root(scoped_home) / "inbox" / day
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Не удалось создать папку: {exc}"
+            ) from exc
+
+        target = target_dir / (
+            f"{secrets.token_hex(4)}-{_chat_safe_stem(original_name)}{extension}"
+        )
+        try:
+            target.write_bytes(data)
+            target.chmod(0o644)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Не удалось записать файл: {exc}"
+            ) from exc
+
+        if not os.access(target, os.R_OK):
+            with contextlib.suppress(OSError):
+                target.unlink()
+            raise HTTPException(
+                status_code=500, detail="Файл записан, но недоступен агенту"
+            )
+
+        digest = hashlib.sha256(data).hexdigest()
+        reader = _CHAT_ATTACHMENT_READERS.get(extension, "unknown")
+        metadata = {
+            "original_name": original_name,
+            "stored_path": str(target),
+            "bytes": total,
+            "sha256": digest,
+            "mime_type": file.content_type or mimetypes.guess_type(original_name)[0],
+            "reader": reader,
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with contextlib.suppress(OSError):
+            target.with_suffix(target.suffix + ".meta.json").write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+    return {
+        "ok": True,
+        "path": str(target),
+        "name": original_name,
+        "kind": extension.lstrip(".") or "bin",
+        "size": total,
+        "sha256": digest,
+        "reader": reader,
+    }
+
+
+def _apply_chat_attachments(
+    body: dict[str, Any], profile: Optional[str] = None
+) -> None:
+    """Append verified attachment paths to the final user message."""
+    raw = body.pop("attachments", None)
+
+    # Never trust a service block supplied as ordinary user text. Strip every
+    # forged marker even when this request carries no real attachments.
+    messages_all = body.get("messages")
+    if isinstance(messages_all, list):
+        for message in messages_all:
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                message["content"] = _CHAT_ATTACHMENT_MARKER_RE.sub(
+                    "", content
+                ).rstrip()
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        part["text"] = _CHAT_ATTACHMENT_MARKER_RE.sub(
+                            "", part["text"]
+                        ).rstrip()
+
+    if not raw:
+        return
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="Вложения должны быть списком")
+    if len(raw) > _CHAT_MAX_ATTACHMENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Не больше {_CHAT_MAX_ATTACHMENTS} файлов в одном сообщении",
+        )
+
+    if os.environ.get(_MANAGED_FILES_ROOT_ENV, "").strip():
+        root = _chat_client_root().resolve()
+    else:
+        with _profile_scope(profile) as scoped_home:
+            root = _chat_client_root(scoped_home).resolve()
+    lines: list[str] = []
+    for index, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="Некорректное вложение")
+        try:
+            target = Path(str(item.get("path", ""))).resolve()
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Некорректный путь вложения"
+            ) from exc
+        if not _path_is_under(root, target):
+            raise HTTPException(
+                status_code=400, detail="Вложение вне папки клиента"
+            )
+        if not target.is_file() or not os.access(target, os.R_OK):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Файл недоступен: {item.get('name') or target.name}",
+            )
+
+        name = _CHAT_ATTACHMENT_NAME_UNSAFE.sub(
+            " ", str(item.get("name") or target.name)
+        )
+        name = re.sub(r"\s{2,}", " ", name).strip()[:120] or target.name
+        kind = (
+            re.sub(r"[^0-9A-Za-z]", "", str(item.get("kind") or ""))[:16]
+            or target.suffix.lstrip(".")[:16]
+            or "bin"
+        )
+        reader = _CHAT_ATTACHMENT_READERS.get(target.suffix.lower(), "unknown")
+        size = _chat_human_size(target.stat().st_size)
+        lines.append(
+            f"{index}. {name} · {kind} · {size} · читать: {reader}\n   {target}"
+        )
+
+    block = "[вложения]\n" + "\n".join(lines)
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise HTTPException(status_code=400, detail="Нет сообщения для вложений")
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            content = message.get("content")
+            if isinstance(content, str):
+                message["content"] = (
+                    f"{content}\n\n{block}" if content.strip() else block
+                )
+            elif isinstance(content, list):
+                content.append({"type": "text", "text": block})
+            else:
+                message["content"] = block
+            return
+    raise HTTPException(status_code=400, detail="Нет пользовательского сообщения")
 
 
 _CHAT_IMAGE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
@@ -9254,14 +9776,14 @@ async def reveal_env_var(
 _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     "telegram": {
         "name": "Telegram",
-        "description": "Run Hermes from Telegram DMs, groups, and topics.",
+        "description": "Работа с Korra через личные сообщения, группы и темы Telegram.",
         "docs_url": "https://core.telegram.org/bots/features#botfather",
         "env_vars": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_PROXY"),
         "required_env": ("TELEGRAM_BOT_TOKEN",),
     },
     "discord": {
         "name": "Discord",
-        "description": "Connect Hermes to Discord DMs, channels, and threads.",
+        "description": "Подключение Korra к личным сообщениям, каналам и веткам Discord.",
         "docs_url": "https://discord.com/developers/applications",
         "env_vars": (
             "DISCORD_BOT_TOKEN",
@@ -9271,21 +9793,21 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     },
     "slack": {
         "name": "Slack",
-        "description": "Use Hermes from Slack via Socket Mode. Add allowed Slack member IDs so connected bots can respond.",
+        "description": "Работа с Korra в Slack через Socket Mode. Укажите ID пользователей, которым бот может отвечать.",
         "docs_url": "https://api.slack.com/apps",
         "env_vars": ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_ALLOWED_USERS"),
         "required_env": ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"),
     },
     "mattermost": {
         "name": "Mattermost",
-        "description": "Connect Hermes to Mattermost channels and direct messages.",
+        "description": "Подключение Korra к каналам и личным сообщениям Mattermost.",
         "docs_url": "https://mattermost.com/deploy/",
         "env_vars": ("MATTERMOST_URL", "MATTERMOST_TOKEN", "MATTERMOST_ALLOWED_USERS"),
         "required_env": ("MATTERMOST_URL", "MATTERMOST_TOKEN"),
     },
     "matrix": {
         "name": "Matrix",
-        "description": "Use Hermes in Matrix rooms and direct messages.",
+        "description": "Работа с Korra в комнатах и личных сообщениях Matrix.",
         "docs_url": "https://matrix.org/ecosystem/servers/",
         "env_vars": (
             "MATRIX_HOMESERVER",
@@ -9297,14 +9819,14 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     },
     "signal": {
         "name": "Signal",
-        "description": "Connect through a signal-cli REST bridge.",
+        "description": "Подключение через REST-мост signal-cli.",
         "docs_url": "https://github.com/bbernhard/signal-cli-rest-api",
         "env_vars": ("SIGNAL_HTTP_URL", "SIGNAL_ACCOUNT", "SIGNAL_ALLOWED_USERS"),
         "required_env": ("SIGNAL_HTTP_URL", "SIGNAL_ACCOUNT"),
     },
     "whatsapp": {
         "name": "WhatsApp",
-        "description": "Use Hermes through the bundled WhatsApp bridge with QR-based auth.",
+        "description": "Работа с Korra через встроенный мост WhatsApp с авторизацией по QR-коду.",
         "docs_url": "https://github.com/tulir/whatsmeow",
         "env_vars": (
             "WHATSAPP_ENABLED",
@@ -9316,14 +9838,14 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     },
     "homeassistant": {
         "name": "Home Assistant",
-        "description": "Control your smart home from Hermes via Home Assistant.",
+        "description": "Управление умным домом из Korra через Home Assistant.",
         "docs_url": "https://www.home-assistant.io/docs/authentication/",
         "env_vars": ("HASS_URL", "HASS_TOKEN"),
         "required_env": ("HASS_URL", "HASS_TOKEN"),
     },
     "email": {
-        "name": "Email",
-        "description": "Talk to Hermes through an IMAP/SMTP mailbox.",
+        "name": "Почта",
+        "description": "Общение с Korra через почтовый ящик IMAP/SMTP.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/",
         "env_vars": (
             "EMAIL_ADDRESS",
@@ -9340,21 +9862,21 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     },
     "sms": {
         "name": "SMS (Twilio)",
-        "description": "Send and receive text messages via Twilio.",
+        "description": "Отправка и получение SMS через Twilio.",
         "docs_url": "https://www.twilio.com/console",
         "env_vars": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"),
         "required_env": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"),
     },
     "dingtalk": {
         "name": "DingTalk",
-        "description": "Connect Hermes to DingTalk groups (钉钉).",
+        "description": "Подключение Korra к группам DingTalk (钉钉).",
         "docs_url": "https://open.dingtalk.com/document/orgapp/the-robot-development-process",
         "env_vars": ("DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET"),
         "required_env": ("DINGTALK_CLIENT_ID", "DINGTALK_CLIENT_SECRET"),
     },
     "feishu": {
         "name": "Feishu / Lark",
-        "description": "Use Hermes inside Feishu / Lark.",
+        "description": "Работа с Korra в Feishu / Lark.",
         "docs_url": "https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/intro",
         "env_vars": (
             "FEISHU_APP_ID",
@@ -9366,19 +9888,19 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     },
     "google_chat": {
         "name": "Google Chat",
-        "description": "Connect Hermes to Google Chat via Cloud Pub/Sub.",
+        "description": "Подключение Korra к Google Chat через Cloud Pub/Sub.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/google_chat",
     },
     "wecom": {
-        "name": "WeCom (group bot)",
-        "description": "Send-only WeCom group bot via webhook.",
+        "name": "WeCom (групповой бот)",
+        "description": "Групповой бот WeCom для исходящих сообщений через вебхук.",
         "docs_url": "https://developer.work.weixin.qq.com/document/path/91770",
         "env_vars": ("WECOM_BOT_ID", "WECOM_SECRET"),
         "required_env": ("WECOM_BOT_ID",),
     },
     "wecom_callback": {
-        "name": "WeCom (app)",
-        "description": "Two-way WeCom integration via callback app.",
+        "name": "WeCom (приложение)",
+        "description": "Двусторонняя интеграция WeCom через callback-приложение.",
         "docs_url": "https://developer.work.weixin.qq.com/document/path/90930",
         "env_vars": (
             "WECOM_CALLBACK_CORP_ID",
@@ -9394,15 +9916,15 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
         ),
     },
     "weixin": {
-        "name": "Weixin / WeChat (Personal)",
-        "description": "Connect a personal WeChat account through Tencent's iLink Bot API.",
+        "name": "Weixin / WeChat (личный)",
+        "description": "Подключение личной учётной записи WeChat через Tencent iLink Bot API.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/weixin/",
         "env_vars": ("WEIXIN_ACCOUNT_ID", "WEIXIN_TOKEN", "WEIXIN_BASE_URL"),
         "required_env": ("WEIXIN_ACCOUNT_ID", "WEIXIN_TOKEN"),
     },
     "bluebubbles": {
         "name": "BlueBubbles (iMessage)",
-        "description": "Use Hermes through iMessage via a BlueBubbles server.",
+        "description": "Работа с Korra в iMessage через сервер BlueBubbles.",
         "docs_url": "https://bluebubbles.app/",
         "env_vars": (
             "BLUEBUBBLES_SERVER_URL",
@@ -9413,7 +9935,7 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     },
     "qqbot": {
         "name": "QQ Bot",
-        "description": "Connect Hermes to a QQ Bot from the QQ Open Platform.",
+        "description": "Подключение Korra к QQ Bot из QQ Open Platform.",
         "docs_url": "https://q.qq.com",
         "env_vars": ("QQ_APP_ID", "QQ_CLIENT_SECRET", "QQ_ALLOWED_USERS"),
         "required_env": ("QQ_APP_ID", "QQ_CLIENT_SECRET"),
@@ -9422,45 +9944,45 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     # plugin registry. Only the docs link needs an override here so the
     # Channels page can point at the Microsoft Teams setup guide.
     "teams": {
-        "description": "Connect Hermes to Microsoft Teams chats via the Bot Framework.",
+        "description": "Подключение Korra к чатам Microsoft Teams через Bot Framework.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/teams",
     },
     # Bundled platform plugins: name comes from the plugin registry label;
     # give each a human description (the registry's install_hint is a
     # dependency note, not a description) and a docs link.
     "irc": {
-        "description": "Relay messages between an IRC channel (or DMs) and Hermes.",
+        "description": "Обмен сообщениями между Korra и каналом либо личными сообщениями IRC.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/irc",
     },
     "line": {
-        "description": "Use Hermes from LINE via the LINE Messaging API webhook.",
+        "description": "Работа с Korra в LINE через вебхук LINE Messaging API.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/line",
     },
     "ntfy": {
-        "description": "Chat with Hermes over ntfy push topics (ntfy.sh or self-hosted).",
+        "description": "Общение с Korra через push-темы ntfy (ntfy.sh или свой сервер).",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/ntfy",
     },
     "photon": {
-        "description": "Use Hermes through iMessage via Photon's managed Spectrum platform.",
+        "description": "Работа с Korra в iMessage через управляемую платформу Photon Spectrum.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/photon",
     },
     "raft": {
-        "description": "Join a Raft workspace as an external agent.",
+        "description": "Подключение к рабочему пространству Raft в роли внешнего агента.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/raft",
     },
     "simplex": {
-        "description": "Talk to Hermes over SimpleX Chat via a local simplex-chat daemon.",
+        "description": "Общение с Korra в SimpleX Chat через локальный демон simplex-chat.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/simplex",
     },
     "yuanbao": {
         "name": "Yuanbao (元宝)",
-        "description": "Connect Hermes to Tencent Yuanbao.",
+        "description": "Подключение Korra к Tencent Yuanbao.",
         "docs_url": "",
         "required_env": (),
     },
     "api_server": {
-        "name": "API server",
-        "description": "Expose Hermes as an OpenAI-compatible HTTP API for tools like Open WebUI.",
+        "name": "API-сервер",
+        "description": "Доступ к Korra через OpenAI-совместимый HTTP API для инструментов наподобие Open WebUI.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/",
         "env_vars": (
             "API_SERVER_ENABLED",
@@ -9472,26 +9994,26 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
         "required_env": (),
     },
     "webhook": {
-        "name": "Webhooks",
-        "description": "Receive events from GitHub, GitLab, and other webhook sources.",
+        "name": "Вебхуки",
+        "description": "Получение событий из GitHub, GitLab и других источников вебхуков.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/",
         "env_vars": ("WEBHOOK_ENABLED", "WEBHOOK_PORT", "WEBHOOK_SECRET"),
         "required_env": (),
     },
     "msgraph_webhook": {
         "name": "Microsoft Graph Webhook",
-        "description": "Receive Microsoft Graph change notifications (Teams meetings, Outlook, …).",
+        "description": "Получение уведомлений Microsoft Graph об изменениях в Teams, Outlook и других сервисах.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/msgraph-webhook",
         "required_env": (),
     },
     "whatsapp_cloud": {
         "name": "WhatsApp Cloud API",
-        "description": "Use Hermes via Meta's hosted WhatsApp Cloud API (no local bridge).",
+        "description": "Работа с Korra через облачный WhatsApp Cloud API от Meta.",
         "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/whatsapp-cloud",
     },
     "relay": {
-        "name": "Relay (experimental)",
-        "description": "Generic relay adapter fronted by the Hermes Relay connector.",
+        "name": "Relay (экспериментальный)",
+        "description": "Универсальный relay-адаптер через коннектор Korra Relay.",
         "docs_url": "",
         "required_env": (),
     },
@@ -9528,137 +10050,137 @@ _PLATFORM_ORDER: tuple[str, ...] = (
 # falls back here so the UI can still render a friendly label.
 _MESSAGING_ENV_FALLBACKS: dict[str, dict[str, Any]] = {
     "SIGNAL_HTTP_URL": {
-        "description": "signal-cli REST API base URL, e.g. http://127.0.0.1:8080",
-        "prompt": "Signal bridge URL",
+        "description": "Базовый адрес REST API signal-cli, например http://127.0.0.1:8080",
+        "prompt": "Адрес моста Signal",
         "url": "https://github.com/bbernhard/signal-cli-rest-api",
     },
     "SIGNAL_ACCOUNT": {
-        "description": "Signal account phone number registered with the bridge",
-        "prompt": "Signal account",
+        "description": "Номер телефона учётной записи Signal, зарегистрированной в мосте",
+        "prompt": "Учётная запись Signal",
     },
     "SIGNAL_ALLOWED_USERS": {
-        "description": "Comma-separated Signal users allowed to use the bot",
-        "prompt": "Allowed Signal users",
+        "description": "Пользователи Signal с доступом к боту, через запятую",
+        "prompt": "Разрешённые пользователи Signal",
     },
     "WHATSAPP_ENABLED": {
-        "description": "Enable the WhatsApp gateway adapter",
-        "prompt": "Enable WhatsApp",
+        "description": "Включить адаптер шлюза WhatsApp",
+        "prompt": "Включить WhatsApp",
         "advanced": True,
     },
     "WHATSAPP_MODE": {
-        "description": "WhatsApp bridge mode",
-        "prompt": "WhatsApp mode",
+        "description": "Режим моста WhatsApp",
+        "prompt": "Режим WhatsApp",
         "advanced": True,
     },
     "WHATSAPP_DM_POLICY": {
-        "description": "How WhatsApp direct messages are authorized",
-        "prompt": "WhatsApp DM policy",
+        "description": "Правило авторизации личных сообщений WhatsApp",
+        "prompt": "Доступ к личным сообщениям WhatsApp",
         "advanced": True,
     },
     "WHATSAPP_ALLOWED_USERS": {
-        "description": "Comma-separated WhatsApp users allowed to use the bot",
-        "prompt": "Allowed WhatsApp users",
+        "description": "Пользователи WhatsApp с доступом к боту, через запятую",
+        "prompt": "Разрешённые пользователи WhatsApp",
     },
     "HASS_URL": {
-        "description": "Home Assistant base URL, e.g. https://homeassistant.local:8123",
-        "prompt": "Home Assistant URL",
+        "description": "Базовый адрес Home Assistant, например https://homeassistant.local:8123",
+        "prompt": "Адрес Home Assistant",
     },
     "HASS_TOKEN": {
-        "description": "Long-lived access token from Home Assistant (Profile → Security)",
-        "prompt": "Home Assistant access token",
+        "description": "Долгосрочный токен Home Assistant из раздела «Профиль → Безопасность»",
+        "prompt": "Токен доступа Home Assistant",
         "password": True,
     },
     "EMAIL_ADDRESS": {
-        "description": "Email address to send and receive from",
-        "prompt": "Email address",
+        "description": "Адрес электронной почты для отправки и получения сообщений",
+        "prompt": "Адрес электронной почты",
     },
     "EMAIL_PASSWORD": {
-        "description": "Email account password or app password",
-        "prompt": "Email password",
+        "description": "Пароль почтовой учётной записи или пароль приложения",
+        "prompt": "Пароль электронной почты",
         "password": True,
     },
     "EMAIL_IMAP_HOST": {
-        "description": "IMAP server host (e.g. imap.gmail.com)",
-        "prompt": "IMAP host",
+        "description": "Адрес сервера IMAP, например imap.gmail.com",
+        "prompt": "Сервер IMAP",
     },
     "EMAIL_SMTP_HOST": {
-        "description": "SMTP server host (e.g. smtp.gmail.com)",
-        "prompt": "SMTP host",
+        "description": "Адрес сервера SMTP, например smtp.gmail.com",
+        "prompt": "Сервер SMTP",
     },
     "TWILIO_ACCOUNT_SID": {
-        "description": "Twilio Account SID",
-        "prompt": "Twilio Account SID",
+        "description": "Идентификатор учётной записи Twilio",
+        "prompt": "Идентификатор учётной записи Twilio",
         "url": "https://www.twilio.com/console",
     },
     "TWILIO_AUTH_TOKEN": {
-        "description": "Twilio Auth Token",
-        "prompt": "Twilio Auth Token",
+        "description": "Токен авторизации Twilio",
+        "prompt": "Токен авторизации Twilio",
         "password": True,
     },
-    "WECOM_BOT_ID": {"description": "WeCom group bot ID", "prompt": "WeCom Bot ID"},
+    "WECOM_BOT_ID": {"description": "Идентификатор группового бота WeCom", "prompt": "Идентификатор бота WeCom"},
     "WECOM_SECRET": {
-        "description": "WeCom group bot secret",
-        "prompt": "WeCom Secret",
+        "description": "Секрет группового бота WeCom",
+        "prompt": "Секрет WeCom",
         "password": True,
     },
     "WECOM_CALLBACK_CORP_ID": {
-        "description": "WeCom corp ID",
-        "prompt": "WeCom Corp ID",
+        "description": "Идентификатор организации WeCom",
+        "prompt": "Идентификатор организации WeCom",
     },
     "WECOM_CALLBACK_CORP_SECRET": {
-        "description": "WeCom app corp secret",
-        "prompt": "WeCom Corp Secret",
+        "description": "Корпоративный секрет приложения WeCom",
+        "prompt": "Корпоративный секрет WeCom",
         "password": True,
     },
     "WECOM_CALLBACK_AGENT_ID": {
-        "description": "WeCom app agent ID",
-        "prompt": "WeCom Agent ID",
+        "description": "Идентификатор агента приложения WeCom",
+        "prompt": "Идентификатор агента WeCom",
     },
     "WECOM_CALLBACK_TOKEN": {
-        "description": "WeCom callback verification token",
-        "prompt": "WeCom Token",
+        "description": "Токен проверки обратного вызова WeCom",
+        "prompt": "Токен WeCom",
     },
     "WECOM_CALLBACK_ENCODING_AES_KEY": {
-        "description": "WeCom callback AES encoding key",
-        "prompt": "WeCom AES Key",
+        "description": "Ключ AES для обратного вызова WeCom",
+        "prompt": "Ключ AES WeCom",
         "password": True,
     },
     "WEIXIN_ACCOUNT_ID": {
-        "description": "iLink Bot account ID obtained through QR login in hermes gateway setup",
-        "prompt": "iLink Bot account ID",
+        "description": "Идентификатор учётной записи iLink Bot, полученный после входа по QR-коду",
+        "prompt": "Идентификатор учётной записи iLink Bot",
     },
     "WEIXIN_TOKEN": {
-        "description": "iLink Bot token obtained through QR login in hermes gateway setup",
-        "prompt": "iLink Bot token",
+        "description": "Токен iLink Bot, полученный после входа по QR-коду",
+        "prompt": "Токен iLink Bot",
         "password": True,
     },
     "WEIXIN_BASE_URL": {
-        "description": "iLink API base URL saved by QR login (default: https://ilinkai.weixin.qq.com)",
-        "prompt": "iLink API base URL",
+        "description": "Базовый адрес API iLink, сохранённый после входа по QR-коду; по умолчанию https://ilinkai.weixin.qq.com",
+        "prompt": "Базовый адрес API iLink",
     },
-    "FEISHU_APP_ID": {"description": "Feishu / Lark app ID", "prompt": "App ID"},
+    "FEISHU_APP_ID": {"description": "Идентификатор приложения Feishu или Lark", "prompt": "Идентификатор приложения"},
     "FEISHU_APP_SECRET": {
-        "description": "Feishu / Lark app secret",
-        "prompt": "App secret",
+        "description": "Секрет приложения Feishu или Lark",
+        "prompt": "Секрет приложения",
         "password": True,
     },
     "FEISHU_ENCRYPT_KEY": {
-        "description": "Feishu / Lark encrypt key",
-        "prompt": "Encrypt key",
+        "description": "Ключ шифрования Feishu или Lark",
+        "prompt": "Ключ шифрования",
         "password": True,
     },
     "FEISHU_VERIFICATION_TOKEN": {
-        "description": "Feishu / Lark verification token",
-        "prompt": "Verification token",
+        "description": "Токен проверки Feishu или Lark",
+        "prompt": "Токен проверки",
         "password": True,
     },
     "DINGTALK_CLIENT_ID": {
-        "description": "DingTalk client ID (App key)",
-        "prompt": "Client ID",
+        "description": "Идентификатор клиента DingTalk — ключ приложения",
+        "prompt": "Идентификатор клиента",
     },
     "DINGTALK_CLIENT_SECRET": {
-        "description": "DingTalk client secret (App secret)",
-        "prompt": "Client secret",
+        "description": "Секрет клиента DingTalk — секрет приложения",
+        "prompt": "Секрет клиента",
         "password": True,
     },
 }
@@ -11097,7 +11619,9 @@ async def test_messaging_platform(platform_id: str, profile: Optional[str] = Non
 
     payload = await asyncio.to_thread(_run)
     if not payload["enabled"]:
-        message = f"{entry['name']} is disabled. Enable it, then restart the gateway."
+        message = (
+            f"{entry['name']} отключён. Включите его и перезапустите шлюз."
+        )
         return {"ok": False, "state": payload["state"], "message": message}
     if not payload["configured"]:
         missing = [
@@ -11106,22 +11630,22 @@ async def test_messaging_platform(platform_id: str, profile: Optional[str] = Non
             if field["required"] and not field["is_set"]
         ]
         message = (
-            f"Missing required setup: {', '.join(missing)}"
+            f"Не заполнены обязательные параметры: {', '.join(missing)}"
             if missing
-            else "Platform setup is incomplete."
+            else "Настройка платформы не завершена."
         )
         return {"ok": False, "state": payload["state"], "message": message}
     if not payload["gateway_running"]:
         return {
             "ok": False,
             "state": payload["state"],
-            "message": "Gateway is not running. Restart the gateway to connect this platform.",
+            "message": "Шлюз не запущен. Перезапустите его для подключения платформы.",
         }
     if payload["state"] == "connected":
         return {
             "ok": True,
             "state": payload["state"],
-            "message": f"{entry['name']} is connected.",
+            "message": f"{entry['name']} подключён.",
         }
     if payload.get("error_message"):
         return {
@@ -11132,7 +11656,7 @@ async def test_messaging_platform(platform_id: str, profile: Optional[str] = Non
     return {
         "ok": False,
         "state": payload["state"],
-        "message": "Setup looks complete, but the gateway has not reported a connection yet. Restart the gateway.",
+        "message": "Настройка заполнена, а шлюз ещё не подтвердил подключение. Перезапустите шлюз.",
     }
 
 

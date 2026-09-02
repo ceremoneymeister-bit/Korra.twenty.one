@@ -28,6 +28,7 @@ import { Label } from "@nous-research/ui/ui/components/label";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { cn, themedBody } from "@/lib/utils";
 import { useI18n } from "@/i18n";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 interface CreatedWebhook {
   url: string;
@@ -144,8 +145,9 @@ export default function WebhooksPage() {
       void watchRestartOutcome();
     } catch (e) {
       setRestartNeeded(true);
-      setRestartError(String(e));
-      showToast(tr("Failed to restart: {error}", { error: String(e) }), "error");
+      const message = ownerFacingError(e, "Не удалось перезапустить шлюз.");
+      setRestartError(message);
+      showToast(tr("Failed to restart: {error}", { error: message }), "error");
     } finally {
       setRestarting(false);
     }
@@ -164,14 +166,16 @@ export default function WebhooksPage() {
         setTimeout(() => void loadWebhooks(), 4000);
         void watchRestartOutcome();
       } else {
-        const detail = result.restart_error ? `: ${result.restart_error}` : ".";
+        const detail = result.restart_error
+          ? `: ${ownerFacingError(result.restart_error, "подробности недоступны")}`
+          : ".";
         setRestartMessage(null);
         setRestartNeeded(true);
         setRestartError(tr("Gateway restart failed{detail}", { detail }));
         showToast(tr("Webhooks enabled; gateway restart failed{detail}", { detail }), "error");
       }
     } catch (e) {
-      showToast(tr("Failed to enable webhooks: {error}", { error: String(e) }), "error");
+      showToast(tr("Failed to enable webhooks: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setEnabling(false);
     }
@@ -210,7 +214,7 @@ export default function WebhooksPage() {
       resetForm();
       loadWebhooks();
     } catch (e) {
-      showToast(tr("Failed to create: {error}", { error: String(e) }), "error");
+      showToast(tr("Failed to create: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setCreating(false);
     }
@@ -229,7 +233,7 @@ export default function WebhooksPage() {
         );
         loadWebhooks();
       } catch (e) {
-        showToast(tr("Error: {error}", { error: String(e) }), "error");
+        showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
       } finally {
         setTogglingName(null);
       }
@@ -245,7 +249,7 @@ export default function WebhooksPage() {
           showToast(tr("Deleted: “{name}”", { name }), "success");
           loadWebhooks();
         } catch (e) {
-          showToast(tr("Error: {error}", { error: String(e) }), "error");
+          showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
           throw e;
         }
       },

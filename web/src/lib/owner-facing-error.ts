@@ -1,3 +1,5 @@
+import { russianInterfaceText } from "./russian-interface-text";
+
 /** Turn transport/backend failures into concise Russian copy for product pages. */
 export function ownerFacingError(
   exception: unknown,
@@ -16,14 +18,14 @@ export function ownerFacingError(
   const payload = (statusMatch?.[2] ?? raw).trim();
   try {
     const parsed = JSON.parse(payload) as { detail?: unknown };
-    if (typeof parsed.detail === "string" && /[А-Яа-яЁё]/.test(parsed.detail)) {
-      return parsed.detail.trim();
-    }
+    const safeDetail = russianInterfaceText(parsed.detail);
+    if (safeDetail) return safeDetail;
   } catch {
     // Plain text is handled below.
   }
 
-  if (/[А-Яа-яЁё]/.test(payload)) return payload;
+  const safePayload = russianInterfaceText(payload);
+  if (safePayload) return safePayload;
   if (/file already exists/i.test(payload)) {
     return "Файл с таким именем уже есть. Переименуйте его и повторите загрузку.";
   }

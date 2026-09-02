@@ -14,6 +14,8 @@ import { fuzzyRank } from "@/lib/fuzzy";
 import { queryMatchesProviderOnly } from "@/lib/model-picker-filter";
 import { modelSearchText } from "@/lib/model-search-text";
 import { useI18n } from "@/i18n";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 
 /**
  * Two-stage model picker modal.
@@ -161,7 +163,7 @@ export function ModelPickerDialog(props: Props) {
       })
       .catch((e) => {
         if (closedRef.current) return;
-        setError(tr(e instanceof Error ? e.message : String(e)));
+        setError(ownerFacingError(e, "Не удалось обновить список моделей."));
       })
       .finally(() => {
         if (closedRef.current) return;
@@ -180,7 +182,7 @@ export function ModelPickerDialog(props: Props) {
       })
       .catch((e) => {
         if (closedRef.current) return;
-        setError(tr(e instanceof Error ? e.message : String(e)));
+        setError(ownerFacingError(e, "Не удалось загрузить список моделей."));
       })
       .finally(() => {
         if (closedRef.current) return;
@@ -292,16 +294,16 @@ export function ModelPickerDialog(props: Props) {
             provider: providerSlug,
             model,
             persistGlobal: shouldPersistGlobal,
-            message:
-              result.confirm_message ||
-              result.warning ||
+            message: russianInterfaceText(
+              result.confirm_message || result.warning,
               tr("This model has unusually high known pricing."),
+            ),
           });
           return;
         }
         onClose();
       } catch (e) {
-        setError(tr(e instanceof Error ? e.message : String(e)));
+        setError(ownerFacingError(e, "Не удалось выбрать модель."));
       } finally {
         setApplying(false);
       }
@@ -320,16 +322,16 @@ export function ModelPickerDialog(props: Props) {
             provider: providerSlug,
             model,
             persistGlobal: shouldPersistGlobal,
-            message:
-              result.confirm_message ||
-              result.warning ||
+            message: russianInterfaceText(
+              result.confirm_message || result.warning,
               tr("This model has unusually high known pricing."),
+            ),
           });
           return;
         }
         onClose();
       } catch (e) {
-        setError(tr(e instanceof Error ? e.message : String(e)));
+        setError(ownerFacingError(e, "Не удалось выбрать модель."));
       } finally {
         setApplying(false);
       }
@@ -601,7 +603,10 @@ function ModelColumn({
     <div className="overflow-y-auto">
       {provider.warning && (
         <div className="p-3 text-xs text-destructive border-b border-border">
-          {provider.warning}
+          {russianInterfaceText(
+            provider.warning,
+            "Провайдер требует настройки перед использованием.",
+          )}
         </div>
       )}
 

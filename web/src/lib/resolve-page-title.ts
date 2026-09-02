@@ -1,6 +1,7 @@
 import type { Translations } from "@/i18n/types";
 import { productUiMode } from "./dashboard-flags";
 import { productNavLabel } from "./product-nav";
+import { russianInterfaceText } from "./russian-interface-text";
 
 const BUILTIN: Record<string, keyof Translations["app"]["nav"]> = {
   "/chat": "chat",
@@ -21,12 +22,12 @@ const BUILTIN: Record<string, keyof Translations["app"]["nav"]> = {
 // sidebar labels in App.tsx — the naive capitalize fallback below mangles
 // initialisms ("/mcp" → "Mcp") and can't match multi-word labels.
 const BUILTIN_LITERAL: Record<string, string> = {
-  "/files": "Files",
+  "/files": "Файлы",
   "/mcp": "MCP",
-  "/channels": "Channels",
-  "/webhooks": "Webhooks",
-  "/pairing": "Pairing",
-  "/system": "System",
+  "/channels": "Каналы",
+  "/webhooks": "Вебхуки",
+  "/pairing": "Подключения",
+  "/system": "Система",
 };
 
 export function resolvePageTitle(
@@ -40,7 +41,7 @@ export function resolvePageTitle(
   }
   const plugin = pluginTabs.find((p) => p.path === normalized);
   if (plugin) {
-    return plugin.label;
+    return russianInterfaceText(plugin.label, "Плагин Korra");
   }
   // Продуктовая подпись — раньше админской: в продукте у экрана своё имя, и
   // заголовок обязан совпадать с пунктом меню, по которому на него пришли.
@@ -56,10 +57,6 @@ export function resolvePageTitle(
   if (literal) {
     return literal;
   }
-  // Derive title from pathname: "/profiles" → "Profiles"
-  const segment = normalized.slice(1);
-  if (segment) {
-    return segment.charAt(0).toUpperCase() + segment.slice(1);
-  }
+  if (normalized.slice(1)) return "Раздел Korra";
   return t.app.webUi;
 }

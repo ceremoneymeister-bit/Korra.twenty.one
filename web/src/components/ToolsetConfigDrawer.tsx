@@ -16,6 +16,8 @@ import { Switch } from "@nous-research/ui/ui/components/switch";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { cn, themedBody } from "@/lib/utils";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 import { useI18n } from "@/i18n";
 
 interface Props {
@@ -148,10 +150,7 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
       showToast(tr("Provider set to {name}", { name: provider.name }), "success");
       onChanged();
     } catch (e) {
-      showToast(
-        e instanceof Error ? e.message : tr("Failed to select provider"),
-        "error",
-      );
+      showToast(ownerFacingError(e, tr("Failed to select provider")), "error");
     } finally {
       setSelecting(null);
     }
@@ -185,10 +184,7 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
       );
       onChanged();
     } catch (e) {
-      showToast(
-        e instanceof Error ? e.message : tr("Failed to save keys"),
-        "error",
-      );
+      showToast(ownerFacingError(e, tr("Failed to save keys")), "error");
     } finally {
       setSavingProvider(null);
     }
@@ -205,15 +201,19 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
       setPostSetupTrigger((n) => n + 1);
     } catch (e) {
       setPostSetupRunning(false);
-      showToast(
-        e instanceof Error ? e.message : tr("Failed to start post-setup"),
-        "error",
-      );
+      showToast(ownerFacingError(e, tr("Failed to start post-setup")), "error");
     }
   };
 
-  const labelText = toolset.label?.trim() || toolset.name;
-  const platformText = toolset.platform_label?.trim() || toolset.platform;
+  const labelText = russianInterfaceText(toolset.label, toolset.name);
+  const descriptionText = russianInterfaceText(
+    toolset.description,
+    "Набор инструментов Korra.",
+  );
+  const platformText = russianInterfaceText(
+    toolset.platform_label,
+    toolset.platform,
+  );
 
   return createPortal(
     <div
@@ -249,7 +249,7 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            {toolset.description}
+            {descriptionText}
           </p>
           <div className="mt-3 flex items-center gap-2">
             <Switch
@@ -283,6 +283,8 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
           ) : (
             config.providers.map((provider) => {
               const isActive = provider.name === activeProvider;
+              const badgeText = russianInterfaceText(provider.badge);
+              const tagText = russianInterfaceText(provider.tag);
               return (
                 <div
                   key={provider.name}
@@ -296,9 +298,9 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
                       <span className="font-medium text-sm">
                         {provider.name}
                       </span>
-                      {provider.badge && (
+                      {badgeText && (
                         <Badge tone="secondary" className="text-xs">
-                          {provider.badge}
+                          {badgeText}
                         </Badge>
                       )}
                       {provider.requires_nous_auth && (
@@ -326,9 +328,9 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
                       </Button>
                     )}
                   </div>
-                  {provider.tag && (
+                  {tagText && (
                     <p className="text-xs text-muted-foreground mt-1">
-                      {provider.tag}
+                      {tagText}
                     </p>
                   )}
 
@@ -357,7 +359,7 @@ export function ToolsetConfigDrawer({ toolset, profile, onClose, onChanged }: Pr
                             placeholder={
                               isSet[ev.key]
                                 ? tr("•••••••• (saved — leave blank to keep)")
-                                : ev.prompt || ev.key
+                                : russianInterfaceText(ev.prompt, ev.key)
                             }
                             value={drafts[ev.key] ?? ""}
                             onChange={(e) =>

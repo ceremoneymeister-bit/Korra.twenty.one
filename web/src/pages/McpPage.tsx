@@ -28,6 +28,8 @@ import {
   type McpTransport,
 } from "@/lib/mcp-server-create";
 import { completeMcpDashboardOAuth } from "@/lib/mcp-dashboard-oauth";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 import { useI18n } from "@/i18n";
 
 function isHttpUrl(value: string): boolean {
@@ -100,7 +102,7 @@ export default function McpPage() {
     return api
       .getMcpServers()
       .then((res) => setServers(res.servers))
-      .catch((e) => showToast(tr("Error: {error}", { error: String(e) }), "error"));
+      .catch((e) => showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error"));
   }, [showToast, tr]);
 
   const loadCatalog = useCallback(() => {
@@ -110,7 +112,7 @@ export default function McpPage() {
         setCatalog(res.entries);
         setDiagnostics(res.diagnostics);
       })
-      .catch((e) => showToast(tr("Error: {error}", { error: String(e) }), "error"));
+      .catch((e) => showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error"));
   }, [showToast, tr]);
 
   useEffect(() => {
@@ -133,10 +135,7 @@ export default function McpPage() {
         env,
       }, tr);
     } catch (error) {
-      showToast(
-        error instanceof Error ? error.message : tr("Invalid MCP server"),
-        "error",
-      );
+      showToast(ownerFacingError(error, tr("Invalid MCP server")), "error");
       return;
     }
 
@@ -160,7 +159,7 @@ export default function McpPage() {
       setCreateModalOpen(false);
       loadServers();
     } catch (e) {
-      showToast(tr("Failed to add: {error}", { error: String(e) }), "error");
+      showToast(tr("Failed to add: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setCreating(false);
     }
@@ -174,10 +173,16 @@ export default function McpPage() {
       if (result.ok) {
         showToast(tr("{name}: {count} tool(s)", { name: server.name, count: result.tools.length }), "success");
       } else {
-        showToast(tr("{name}: {error}", { name: server.name, error: result.error ?? tr("Failed") }), "error");
+        showToast(
+          tr("{name}: {error}", {
+            name: server.name,
+            error: ownerFacingError(result.error, tr("Connection failed")),
+          }),
+          "error",
+        );
       }
     } catch (e) {
-      showToast(tr("Error: {error}", { error: String(e) }), "error");
+      showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setTesting(null);
     }
@@ -199,7 +204,7 @@ export default function McpPage() {
       }));
       showToast(tr("{name}: OAuth authentication complete", { name: server.name }), "success");
     } catch (e) {
-      showToast(tr("OAuth error: {error}", { error: String(e) }), "error");
+      showToast(tr("OAuth error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setAuthenticating(null);
     }
@@ -217,7 +222,7 @@ export default function McpPage() {
         tr("Enable/disable takes effect on the next gateway restart."),
       );
     } catch (e) {
-      showToast(tr("Error: {error}", { error: String(e) }), "error");
+      showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setTogglingName(null);
     }
@@ -236,7 +241,7 @@ export default function McpPage() {
           });
           loadServers();
         } catch (e) {
-          showToast(tr("Error: {error}", { error: String(e) }), "error");
+          showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
           throw e;
         }
       },
@@ -259,7 +264,7 @@ export default function McpPage() {
         setInstallEnv({});
         await Promise.all([loadServers(), loadCatalog()]);
       } catch (e) {
-        showToast(tr("Failed to install: {error}", { error: String(e) }), "error");
+        showToast(tr("Failed to install: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
       } finally {
         setInstallingName(null);
       }
@@ -286,7 +291,9 @@ export default function McpPage() {
       (item) => item.required && !(installEnv[item.name] ?? "").trim(),
     );
     if (missing.length > 0) {
-      showToast(tr("{field} is required", { field: missing[0].prompt }), "error");
+      showToast(tr("{field} is required", {
+        field: russianInterfaceText(missing[0].prompt, missing[0].name),
+      }), "error");
       return;
     }
     const envMap: Record<string, string> = {};
@@ -547,7 +554,7 @@ export default function McpPage() {
               {installEntry.required_env.map((item) => (
                 <div className="grid gap-2" key={item.name}>
                   <Label htmlFor={`install-env-${item.name}`}>
-                    {item.prompt}
+                    {russianInterfaceText(item.prompt, item.name)}
                     {item.required ? " *" : ""}
                   </Label>
                   <Input
@@ -667,7 +674,7 @@ export default function McpPage() {
                         </p>
                       ) : (
                         <p className="text-destructive">
-                          {result.error ?? tr("Connection failed")}
+                          {ownerFacingError(result.error, tr("Connection failed"))}
                         </p>
                       )}
                     </div>
@@ -800,7 +807,7 @@ export default function McpPage() {
                   </div>
                   {entry.description && (
                     <p className="text-xs text-muted-foreground">
-                      {entry.description}
+                      {russianInterfaceText(entry.description, "Готовая интеграция MCP.")}
                     </p>
                   )}
                   {/* Connection detail: what the agent actually talks to. */}
@@ -861,7 +868,10 @@ export default function McpPage() {
                         {tr("Setup notes")}
                       </summary>
                       <p className="mt-1 whitespace-pre-wrap">
-                        {entry.post_install.trim()}
+                        {russianInterfaceText(
+                          entry.post_install,
+                          "После установки проверьте настройки интеграции.",
+                        )}
                       </p>
                     </details>
                   )}
@@ -870,7 +880,10 @@ export default function McpPage() {
                       key={`${entry.name}-diag-${i}`}
                       className="text-xs text-warning mt-1"
                     >
-                      {d.message}
+                      {ownerFacingError(
+                        d.message,
+                        "Интеграция требует дополнительной настройки.",
+                      )}
                     </p>
                   ))}
                 </div>

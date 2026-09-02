@@ -198,7 +198,7 @@ describe("ChatSidebar event socket reconnect", () => {
 
     await advance(1_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(container.textContent).toContain("reconnecting in 2s");
+    expect(container.textContent).toContain("переподключение через 2 с");
 
     await advance(2_000);
     expect(FakeWebSocket.instances).toHaveLength(2);
@@ -223,7 +223,7 @@ describe("ChatSidebar event socket reconnect", () => {
 
     await advance(1_000 + EVENTS_CONNECT_TIMEOUT_MS);
     expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(container.textContent).toContain("reconnecting in 2s");
+    expect(container.textContent).toContain("переподключение через 2 с");
 
     // A late ticket response from the timed-out attempt must not create a
     // superseded socket alongside the scheduled replacement.
@@ -249,7 +249,7 @@ describe("ChatSidebar event socket reconnect", () => {
 
     await advance(EVENTS_CONNECT_TIMEOUT_MS);
     expect(FakeWebSocket.instances[1].closed).toBe(true);
-    expect(container.textContent).toContain("reconnecting in 2s");
+    expect(container.textContent).toContain("переподключение через 2 с");
 
     await advance(2_000);
     expect(FakeWebSocket.instances).toHaveLength(3);
@@ -355,7 +355,7 @@ describe("ChatSidebar event socket reconnect", () => {
     await act(async () => {
       FakeWebSocket.instances[0].emit("close", { code: 1006 });
     });
-    expect(container.textContent).toContain("events feed disconnected");
+    expect(container.textContent).toContain("Лента событий отключена");
 
     await advance(1_000);
     await act(async () => {
@@ -388,7 +388,7 @@ describe("ChatSidebar event socket reconnect", () => {
       FakeWebSocket.instances[1].emit("open", {});
     });
 
-    expect(container.textContent).toContain("ANTHROPIC_API_KEY is not set");
+    expect(container.textContent).toContain("Шлюз сообщил об ошибке.");
   });
 
   it("does not overwrite a sidecar error when the feed drops", async () => {
@@ -410,11 +410,11 @@ describe("ChatSidebar event socket reconnect", () => {
       FakeWebSocket.instances[0].emit("close", { code: 1006 });
     });
 
-    expect(container.textContent).toContain("ANTHROPIC_API_KEY is not set");
+    expect(container.textContent).toContain("Шлюз сообщил об ошибке.");
     // The disconnect message must not have replaced it. (Matching the
     // banner text specifically — "reconnect events feed" is the button
     // label, which is expected to be present whenever a banner shows.)
-    expect(container.textContent).not.toContain("events feed disconnected");
+    expect(container.textContent).not.toContain("Лента событий отключена");
   });
 
   it("still reconnects while a foreign banner suppresses its message", async () => {

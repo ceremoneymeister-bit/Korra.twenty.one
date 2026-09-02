@@ -36,6 +36,8 @@ import type {
 import { useModalBehavior } from "@/hooks/useModalBehavior";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { cn, themedBody } from "@/lib/utils";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 import { useI18n } from "@/i18n";
 
 // State → badge mapping. The backend emits a small, fixed vocabulary plus
@@ -55,7 +57,7 @@ const STATE_BADGE: Record<
 };
 
 function stateBadge(state: string) {
-  return STATE_BADGE[state] ?? { tone: "outline" as const, label: state };
+  return STATE_BADGE[state] ?? { tone: "outline" as const, label: "unknown" };
 }
 
 const TELEGRAM_USER_ID_RE = /^\d+$/;
@@ -89,7 +91,10 @@ function validateMessagingEnvField(field: MessagingPlatformEnvVar, value: string
 
   const expectedPrefix = SLACK_TOKEN_PREFIXES[field.key];
   if (expectedPrefix && !trimmed.startsWith(expectedPrefix)) {
-    return tr("{field} must start with {prefix}", { field: field.prompt || field.key, prefix: expectedPrefix });
+    return tr("{field} must start with {prefix}", {
+      field: russianInterfaceText(field.prompt, `Параметр ${field.key}`),
+      prefix: expectedPrefix,
+    });
   }
 
   if (field.key === "SLACK_ALLOWED_USERS") {
@@ -120,12 +125,12 @@ function formatExpiry(expiresAt: string): string {
 
 function isTerminalTelegramOnboardingError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /\b410\b/.test(message) && /\b(expired|claimed|gone)\b/i.test(message);
+  return /\b410\b/.test(message);
 }
 
 function isTerminalWhatsAppOnboardingError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /\b410\b/.test(message) && /\b(expired|gone)\b/i.test(message);
+  return /\b410\b/.test(message);
 }
 
 function normalizeWhatsAppMode(mode: unknown): "bot" | "self-chat" | null {
@@ -170,8 +175,10 @@ export default function ChannelsPage() {
         setEnvPath(res.env_path || "~/.hermes/.env");
         setGatewayStartCommand(res.gateway_start_command || "hermes gateway start");
       })
-      .catch((e) => showToast(tr("Error: {error}", { error: String(e) }), "error"));
-  }, [showToast, tr]);
+      .catch((e) =>
+        showToast(ownerFacingError(e, "Не удалось загрузить каналы."), "error"),
+      );
+  }, [showToast]);
 
   useEffect(() => {
     load().finally(() => setLoading(false));
@@ -203,7 +210,15 @@ export default function ChannelsPage() {
       (v) => v.required && !v.is_set && !env[v.key],
     );
     if (missing.length > 0) {
-      showToast(tr("{field} is required", { field: missing[0].prompt || missing[0].key }), "error");
+      showToast(
+        tr("{field} is required", {
+          field: russianInterfaceText(
+            missing[0].prompt,
+            `Параметр ${missing[0].key}`,
+          ),
+        }),
+        "error",
+      );
       return;
     }
     const nextFieldErrors: Record<string, string> = {};
@@ -225,7 +240,7 @@ export default function ChannelsPage() {
       setRestartNeeded(true);
       await load();
     } catch (e) {
-      showToast(tr("Failed to save: {error}", { error: String(e) }), "error");
+      showToast(ownerFacingError(e, "Не удалось сохранить настройки канала."), "error");
     } finally {
       setSaving(false);
     }
@@ -245,7 +260,7 @@ export default function ChannelsPage() {
       );
       setRestartNeeded(true);
     } catch (e) {
-      showToast(tr("Error: {error}", { error: String(e) }), "error");
+      showToast(ownerFacingError(e, "Не удалось изменить состояние канала."), "error");
     } finally {
       setTogglingId(null);
     }
@@ -255,9 +270,15 @@ export default function ChannelsPage() {
     setTestingId(platform.id);
     try {
       const res = await api.testMessagingPlatform(platform.id);
-      showToast(`${platform.name}: ${res.message}`, res.ok ? "success" : "error");
+      const message = res.ok
+        ? russianInterfaceText(res.message, "Подключение проверено успешно.")
+        : ownerFacingError(
+            new Error(res.message),
+            "Проверка подключения завершилась с ошибкой.",
+          );
+      showToast(`${platform.name}: ${message}`, res.ok ? "success" : "error");
     } catch (e) {
-      showToast(tr("Error: {error}", { error: String(e) }), "error");
+      showToast(ownerFacingError(e, "Не удалось проверить подключение."), "error");
     } finally {
       setTestingId(null);
     }
@@ -272,7 +293,7 @@ export default function ChannelsPage() {
       // Give the gateway a moment to come up, then refresh status.
       setTimeout(() => void load(), 4000);
     } catch (e) {
-      showToast(tr("Failed to restart: {error}", { error: String(e) }), "error");
+      showToast(ownerFacingError(e, "Не удалось перезапустить шлюз."), "error");
     } finally {
       setRestarting(false);
     }
@@ -444,21 +465,33 @@ export default function ChannelsPage() {
                 </div>
               )}
               <p className="text-xs text-muted-foreground">
-                {editing.description}
+                {russianInterfaceText(
+                  editing.description,
+                  `Настройки канала ${editing.name}.`,
+                )}
               </p>
               {editing.env_vars.map((field: MessagingPlatformEnvVar) => (
                 <div className="grid gap-1.5" key={field.key}>
                   <div className="flex items-center gap-1.5">
                     <Label htmlFor={`field-${field.key}`}>
-                      {field.prompt || field.key}
+                      {russianInterfaceText(
+                        field.prompt,
+                        `Параметр ${field.key}`,
+                      )}
                       {field.required ? " *" : ""}
                     </Label>
                     {field.help && (
                       <span
-                        aria-label={field.help}
+                        aria-label={russianInterfaceText(
+                          field.help,
+                          `Справка по параметру ${field.key}`,
+                        )}
                         className="inline-flex text-muted-foreground hover:text-foreground"
                         role="img"
-                        title={field.help}
+                        title={russianInterfaceText(
+                          field.help,
+                          `Справка по параметру ${field.key}`,
+                        )}
                       >
                         <Info className="h-3.5 w-3.5" />
                       </span>
@@ -466,7 +499,10 @@ export default function ChannelsPage() {
                   </div>
                   {field.description && (
                     <span className="text-xs text-muted-foreground">
-                      {field.description}
+                      {russianInterfaceText(
+                        field.description,
+                        `Настройка подключения: ${field.key}.`,
+                      )}
                     </span>
                   )}
                   <Input
@@ -558,11 +594,17 @@ export default function ChannelsPage() {
                         <Badge tone={badge.tone}>{tr(badge.label)}</Badge>
                       </div>
                       <span className="text-xs text-muted-foreground">
-                        {platform.description}
+                        {russianInterfaceText(
+                          platform.description,
+                          `Канал связи ${platform.name}.`,
+                        )}
                       </span>
                       {platform.error_message && (
                         <span className="text-xs text-destructive">
-                          {platform.error_message}
+                          {ownerFacingError(
+                            new Error(platform.error_message),
+                            "Не удалось подключить канал.",
+                          )}
                         </span>
                       )}
                     </div>
@@ -703,7 +745,9 @@ function WhatsAppOnboardingPanel({
           return;
         }
         if (status.status === "error") {
-          setError(status.error || tr("WhatsApp setup failed."));
+          setError(
+            ownerFacingError(status.error, tr("WhatsApp setup failed.")),
+          );
           setSetup(null);
           setQrDataUrl("");
           setPhase("idle");
@@ -723,7 +767,12 @@ function WhatsAppOnboardingPanel({
           setError(tr("WhatsApp QR setup expired. Start a new QR setup to try again."));
           return;
         }
-        setError(tr("Still waiting for WhatsApp. Retrying after: {error}", { error: String(pollError) }));
+        setError(
+          ownerFacingError(
+            pollError,
+            "WhatsApp ещё не ответил. Скоро повторю попытку.",
+          ),
+        );
         timeout = setTimeout(poll, 2000);
       }
     };
@@ -762,7 +811,7 @@ function WhatsAppOnboardingPanel({
         await updateQr(res.qr_payload);
       }
       if (res.status === "error") {
-        setError(res.error || tr("WhatsApp setup failed."));
+        setError(ownerFacingError(res.error, tr("WhatsApp setup failed.")));
         setSetup(null);
         setPhase("idle");
       } else {
@@ -770,7 +819,7 @@ function WhatsAppOnboardingPanel({
       }
     } catch (startError) {
       setPhase("idle");
-      setError(String(startError));
+      setError(ownerFacingError(startError, tr("WhatsApp setup failed.")));
     }
   };
 
@@ -822,13 +871,15 @@ function WhatsAppOnboardingPanel({
         void watchRestartOutcome();
       } else {
         onRestartNeeded();
-        const detail = result.restart_error ? `: ${result.restart_error}` : "";
+        const detail = result.restart_error
+          ? `: ${ownerFacingError(result.restart_error, "не удалось перезапустить шлюз")}`
+          : "";
         showToast(tr("WhatsApp saved; gateway restart failed{detail}", { detail }), "error");
       }
       await onChanged();
     } catch (applyError) {
       setPhase("connected");
-      setError(String(applyError));
+      setError(ownerFacingError(applyError, "Не удалось сохранить настройки WhatsApp."));
     }
   };
 
@@ -1110,7 +1161,12 @@ function TelegramOnboardingPanel({
           return;
         }
 
-        setError(tr("Still waiting for Telegram. Retrying after: {error}", { error: String(pollError) }));
+        setError(
+          ownerFacingError(
+            pollError,
+            "Telegram ещё не ответил. Скоро повторю попытку.",
+          ),
+        );
         timeout = setTimeout(poll, 2000);
       }
     };
@@ -1158,7 +1214,7 @@ function TelegramOnboardingPanel({
       setPhase("waiting");
     } catch (startError) {
       setPhase("idle");
-      setError(String(startError));
+      setError(ownerFacingError(startError, "Не удалось начать подключение Telegram."));
     }
   };
 
@@ -1236,17 +1292,27 @@ function TelegramOnboardingPanel({
           setTimeout(() => void onChanged(), 4000);
         } catch (restartError) {
           onRestartNeeded();
-          showToast(tr("Telegram saved; gateway restart failed: {error}", { error: String(restartError) }), "error");
+          showToast(
+            tr("Telegram saved; gateway restart failed: {error}", {
+              error: ownerFacingError(
+                restartError,
+                "не удалось перезапустить шлюз",
+              ),
+            }),
+            "error",
+          );
         }
       } else {
         onRestartNeeded();
-        const detail = result.restart_error ? `: ${result.restart_error}` : "";
+        const detail = result.restart_error
+          ? `: ${ownerFacingError(result.restart_error, "не удалось перезапустить шлюз")}`
+          : "";
         showToast(tr("Telegram saved; gateway restart failed{detail}", { detail }), "error");
       }
       await onChanged();
     } catch (applyError) {
       setPhase("ready");
-      setError(String(applyError));
+      setError(ownerFacingError(applyError, "Не удалось сохранить настройки Telegram."));
     }
   };
 

@@ -4,8 +4,8 @@ interface SessionPruneResult {
 }
 
 export function formatSessionPruneResult(result: SessionPruneResult): string {
-  const removed = `Pruned ${result.removed} session${result.removed === 1 ? '' : 's'}`
+  const removed = `Удалено диалогов: ${result.removed}`
   if (!result.skipped_open) return removed
 
-  return `${removed}. Skipped ${result.skipped_open} open session${result.skipped_open === 1 ? '' : 's'}; prune only removes ended sessions.`
+  return `${removed}. Пропущено открытых диалогов: ${result.skipped_open}; очистка удаляет только завершённые диалоги.`
 }

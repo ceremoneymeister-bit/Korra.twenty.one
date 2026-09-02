@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { shortName, splitAttachments, toDisplay } from "./chat-attachments";
+import {
+  chatUploadPath,
+  shortName,
+  splitAttachments,
+  toDisplay,
+} from "./chat-attachments";
 
 const BLOCK = `[вложения]
 1. Отчёт КЕДР.md · md · 197 Б · читать: read_file
@@ -72,5 +77,13 @@ describe("shortName", () => {
 
   it("leaves short names alone", () => {
     expect(shortName("a.pdf")).toBe("a.pdf");
+  });
+});
+
+describe("chatUploadPath", () => {
+  it("scopes uploads to the same profile as completions", () => {
+    expect(chatUploadPath("research & data"))
+      .toBe("/api/chat/upload?profile=research%20%26%20data");
+    expect(chatUploadPath()).toBe("/api/chat/upload");
   });
 });

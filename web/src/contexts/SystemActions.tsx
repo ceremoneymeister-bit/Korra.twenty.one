@@ -3,6 +3,8 @@ import { api } from "@/lib/api";
 import type { ActionStatusResponse } from "@/lib/api";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useI18n } from "@/i18n";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 import {
   SystemActionsContext,
   type SystemAction,
@@ -48,7 +50,7 @@ export function SystemActionsProvider({
             type: ok ? "success" : "error",
             message: ok
               ? t.status.actionFinished
-              : `${t.status.actionFailed} (exit ${resp.exit_code ?? "?"})`,
+              : `${t.status.actionFailed} (код ${resp.exit_code ?? "?"})`,
           });
           return;
         }
@@ -82,20 +84,19 @@ export function SystemActionsProvider({
             const cmd = resp.update_command ? `  ${resp.update_command}` : "";
             setToast({
               type: "success",
-              message:
-                (resp.message ??
-                  "Updates don't apply from this dashboard.") +
-                cmd,
+              message: russianInterfaceText(
+                resp.message,
+                "Обновление из этой панели недоступно.",
+              ) + cmd,
             });
             return;
           }
           setActiveAction(action);
         }
       } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
         setToast({
           type: "error",
-          message: `${t.status.actionFailed}: ${detail}`,
+          message: ownerFacingError(err, t.status.actionFailed),
         });
       } finally {
         setPendingAction(null);

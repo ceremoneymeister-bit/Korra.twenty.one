@@ -15,6 +15,7 @@ import { maybeReloadForLoopbackWsAuthFailure } from "@/lib/dashboard-auth-reload
 import { cn, themedBody } from "@/lib/utils";
 import { useTheme } from "@/themes";
 import { useI18n } from "@/i18n";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 type ConsoleFrame =
   | {
@@ -293,7 +294,7 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
       }
 
       if (frame.type === "error") {
-        writeLine(term, `\x1b[31m${frame.message || tr("Command failed.")}\x1b[0m`);
+        writeLine(term, `\x1b[31m${ownerFacingError(frame.message, tr("Command failed."))}\x1b[0m`);
         return;
       }
 
@@ -302,7 +303,7 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
         activeCommandRef.current = false;
         setConnectionState("ready");
         if (frame.message) {
-          writeLine(term, `\x1b[33m${frame.message}\x1b[0m`);
+          writeLine(term, `\x1b[33m${ownerFacingError(frame.message, "Требуется подтверждение действия.")}\x1b[0m`);
         }
         inputPromptRef.current = tr("Confirm? [y/N] ");
         lineRef.current = "";
@@ -434,7 +435,9 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
           pendingCommandRef.current = null;
           if (cancelled) return;
           setConnectionState(ev.code === 1000 ? "closed" : "error");
-          const reason = ev.reason ? ` ${ev.reason}` : "";
+          const reason = ev.reason
+            ? ` ${ownerFacingError(ev.reason, "Причина недоступна.")}`
+            : "";
           const message =
             ev.code === 1006 && !hasReadyFrameRef.current
               ? tr("Console connection failed before the server handshake. Check that this dashboard is connected to a backend with /api/console.")
@@ -444,7 +447,7 @@ export function HermesConsoleModal({ open, onClose }: HermesConsoleModalProps) {
       } catch (err) {
         if (cancelled) return;
         setConnectionState("error");
-        writeLine(term, `\x1b[31m${tr("Console unavailable: {error}", { error: String(err) })}\x1b[0m`);
+        writeLine(term, `\x1b[31m${tr("Console unavailable: {error}", { error: ownerFacingError(err, "подробности недоступны") })}\x1b[0m`);
       }
     })();
 

@@ -497,7 +497,7 @@ function SessionRow({
         if (!cancelled) setMessages(resp.messages);
       })
       .catch((err) => {
-        if (!cancelled) setError(String(err));
+        if (!cancelled) setError(ownerFacingError(err, "Не удалось загрузить диалог."));
       });
     return () => {
       cancelled = true;
@@ -1106,7 +1106,7 @@ export default function SessionsPage() {
         loadStats();
         refreshEmptyCount();
       } catch (error) {
-        showToast(tr("Import failed: {error}", { error: String(error) }), "error");
+        showToast(tr("Import failed: {error}", { error: ownerFacingError(error, "подробности недоступны") }), "error");
       } finally {
         setImportingSessions(false);
         if (importInputRef.current) importInputRef.current.value = "";
@@ -1584,7 +1584,9 @@ export default function SessionsPage() {
     if (status.gateway_state === "startup_failed") {
       alerts.push({
         message: t.status.gatewayFailedToStart,
-        detail: status.gateway_exit_reason ?? undefined,
+        detail: status.gateway_exit_reason
+          ? ownerFacingError(status.gateway_exit_reason, "Шлюз не запустился.")
+          : undefined,
       });
     }
     const failedPlatformEntries = platformEntries.filter(
@@ -1597,7 +1599,9 @@ export default function SessionsPage() {
           : t.status.platformDisconnected;
       alerts.push({
         message: `${name.charAt(0).toUpperCase() + name.slice(1)} ${stateLabel}`,
-        detail: info.error_message ?? undefined,
+        detail: info.error_message
+          ? ownerFacingError(info.error_message, "Канал временно недоступен.")
+          : undefined,
       });
     }
   }

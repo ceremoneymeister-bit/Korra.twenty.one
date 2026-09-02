@@ -7,6 +7,7 @@ import type {
 import { api, withBasePath, type SessionMessage } from "@/lib/api";
 import { splitSSEBuffer } from "@/lib/sse-parser";
 import { toDisplay, type UploadedAttachment } from "@/lib/chat-attachments";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 import {
   clearChatOutbox,
   loadChatOutbox,
@@ -338,10 +339,7 @@ export function useChatStream(
         });
       }
     } catch (err) {
-      const msg =
-        err instanceof Error
-          ? `Не удалось загрузить сессию: ${err.message}`
-          : "Не удалось загрузить сессию";
+      const msg = ownerFacingError(err, "Не удалось загрузить сессию.");
       dispatch({ type: "SET_ERROR", error: msg });
     }
   }, [profile]);
@@ -543,6 +541,7 @@ export function useChatStream(
         // assistant message — corrupting state (review #7 in disguise).
         let sawDone = false;
         let sawTerminalError = false;
+        let terminalErrorMessage = "";
         // Хоть одно событие от агента = сообщение до него доехало. Признак
         // нужен отдельно от `sawDone`: поток может оборваться после начала
         // ответа, и это уже не «не отправлено».
@@ -579,13 +578,8 @@ export function useChatStream(
                 dispatch({ type: "APPEND_DELTA", content });
               }
               if (choice?.finish_reason === "error") {
-                activeStreamIdRef.current = null;
-                streamingRef.current = false;
-                dispatch({
-                  type: "SET_ERROR",
-                  error: "Agent stream ended with an error",
-                });
                 sawTerminalError = true;
+                terminalErrorMessage = "Ответ агента завершился с ошибкой";
                 void reader.cancel();
                 break;
               }
@@ -624,13 +618,17 @@ export function useChatStream(
         if (mountedRef.current && activeStreamIdRef.current === localStreamId) {
           activeStreamIdRef.current = null;
           streamingRef.current = false;
-          dispatch({ type: "FINALIZE" });
+          if (sawTerminalError) {
+            dispatch({ type: "SET_ERROR", error: terminalErrorMessage });
+          } else {
+            dispatch({ type: "FINALIZE" });
+          }
           // Доставкой считаем только явное `[DONE]` или начавшийся ответ
           // агента. Прежде терминальное состояние читателя само по себе
           // означало успех — то есть оборванный на полпути поток докладывал
           // карточке «отправлено агенту», и владелец считал решение
           // принятым (находка ревью 20.08.2026).
-          delivered = sawDone || sawAgentOutput;
+          delivered = !sawTerminalError && (sawDone || sawAgentOutput);
           if (delivered) {
             clearChatOutbox(messageId);
             dispatch({ type: "MARK_DELIVERY", messageId, delivery: "delivered" });
@@ -638,7 +636,9 @@ export function useChatStream(
             saveChatOutbox({
               ...outboxRecord,
               status: "failed",
-              error: "Ответ завершился без подтверждения доставки",
+              error:
+                terminalErrorMessage ||
+                "Ответ завершился без подтверждения доставки",
             });
             dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed" });
           }

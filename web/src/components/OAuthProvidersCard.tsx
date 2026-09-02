@@ -21,6 +21,17 @@ import { Badge } from "@nous-research/ui/ui/components/badge";
 import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { OAuthLoginModal } from "@/components/OAuthLoginModal";
 import { useI18n } from "@/i18n";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+
+function oauthSourceLabel(value: string): string {
+  if (value === "Managed by the GitHub Copilot CLI") {
+    return "Управляется через GitHub Copilot CLI";
+  }
+  if (/^(?:[~/]|[A-Z][A-Z0-9_]+$)/.test(value) || /\.(?:json|ya?ml|toml)$/i.test(value)) {
+    return value;
+  }
+  return "Источник учётных данных";
+}
 
 interface Props {
   onError?: (msg: string) => void;
@@ -39,11 +50,11 @@ function formatExpiresAt(
     const diff = dt.getTime() - now;
     if (diff < 0) return "expired";
     const mins = Math.floor(diff / 60_000);
-    if (mins < 60) return expiresInTemplate.replace("{time}", `${mins}m`);
+    if (mins < 60) return expiresInTemplate.replace("{time}", `${mins} мин`);
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return expiresInTemplate.replace("{time}", `${hours}h`);
+    if (hours < 24) return expiresInTemplate.replace("{time}", `${hours} ч`);
     const days = Math.floor(hours / 24);
-    return expiresInTemplate.replace("{time}", `${days}d`);
+    return expiresInTemplate.replace("{time}", `${days} д`);
   } catch {
     return null;
   }
@@ -66,7 +77,11 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
     api
       .getOAuthProviders()
       .then((resp) => setProviders(resp.providers))
-      .catch((e) => onErrorRef.current?.(`Failed to load providers: ${e}`))
+      .catch((error) =>
+        onErrorRef.current?.(
+          ownerFacingError(error, "Не удалось загрузить провайдеров."),
+        ),
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -79,10 +94,12 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
     setDisconnectTarget(null);
     try {
       await api.disconnectOAuthProvider(provider.id);
-      onSuccess?.(`${provider.name} ${t.oauth.disconnect.toLowerCase()}ed`);
+      onSuccess?.(`${provider.name}: подключение отключено`);
       refresh();
-    } catch (e) {
-      onError?.(`${t.oauth.disconnect} failed: ${e}`);
+    } catch (error) {
+      onError?.(
+        ownerFacingError(error, "Не удалось отключить провайдера."),
+      );
     } finally {
       setBusyId(null);
     }
@@ -180,7 +197,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
                         {p.status.source_label && (
                           <span className="text-text-tertiary">
                             {" "}
-                            · {p.status.source_label}
+                            · {oauthSourceLabel(p.status.source_label)}
                           </span>
                         )}
                       </span>
@@ -207,7 +224,10 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
                     )}
                     {p.status.error && (
                       <span className="text-xs text-destructive">
-                        {p.status.error}
+                        {ownerFacingError(
+                          p.status.error,
+                          "Не удалось проверить состояние подключения.",
+                        )}
                       </span>
                     )}
                   </div>
@@ -281,6 +301,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
         description={tr("This will remove the stored OAuth tokens for {name}. You will need to re-authenticate to use it again.", { name: disconnectTarget?.name ?? tr("this provider") })}
         destructive
         confirmLabel={t.oauth.disconnect}
+        cancelLabel={t.common.cancel}
       />
     </Card>
   );

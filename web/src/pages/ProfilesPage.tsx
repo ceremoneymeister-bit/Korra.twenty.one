@@ -27,6 +27,7 @@ import { H2 } from "@nous-research/ui/ui/components/typography/h2";
 import { api } from "@/lib/api";
 import type { ActiveProfileInfo, ProfileInfo } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
@@ -399,9 +400,9 @@ export default function ProfilesPage() {
         setProfiles(res.profiles);
         setActiveInfo(active);
       })
-      .catch((e) => showToast(`${t.status.error}: ${e}`, "error"))
+      .catch((e) => showToast(ownerFacingError(e, "Не удалось загрузить профили."), "error"))
       .finally(() => setLoading(false));
-  }, [showToast, t.status.error]);
+  }, [showToast]);
 
   useEffect(() => {
     load();
@@ -463,7 +464,7 @@ export default function ProfilesPage() {
       setCreateModalOpen(false);
       load();
     } catch (e) {
-      showToast(`${t.status.error}: ${e}`, "error");
+      showToast(ownerFacingError(e, "Не удалось создать профиль."), "error");
     } finally {
       setCreating(false);
     }
@@ -488,7 +489,7 @@ export default function ProfilesPage() {
       setRenameTo("");
       load();
     } catch (e) {
-      showToast(`${t.status.error}: ${e}`, "error");
+      showToast(ownerFacingError(e, "Не удалось переименовать профиль."), "error");
     }
   };
 
@@ -507,7 +508,7 @@ export default function ProfilesPage() {
         prev ? { ...prev, active } : { active, current: active },
       );
     } catch (e) {
-      showToast(`${t.status.error}: ${e}`, "error");
+      showToast(ownerFacingError(e, "Не удалось изменить активный профиль."), "error");
     } finally {
       setSettingActive(null);
     }
@@ -542,11 +543,11 @@ export default function ProfilesPage() {
         }
       } catch (e) {
         if (activeSoulRequest.current === name) {
-          showToast(`${t.status.error}: ${e}`, "error");
+          showToast(ownerFacingError(e, "Не удалось загрузить инструкции профиля."), "error");
         }
       }
     },
-    [closeEditor, editingSoulFor, showToast, t.status.error],
+    [closeEditor, editingSoulFor, showToast],
   );
 
   const handleSaveSoul = async (name: string) => {
@@ -557,7 +558,7 @@ export default function ProfilesPage() {
       activeSoulRequest.current = null;
       setEditingSoulFor(null);
     } catch (e) {
-      showToast(`${t.status.error}: ${e}`, "error");
+      showToast(ownerFacingError(e, "Не удалось сохранить инструкции профиля."), "error");
     } finally {
       setSoulSaving(false);
     }
@@ -603,7 +604,7 @@ export default function ProfilesPage() {
       }
     } catch (e) {
       if (activeDescRequest.current === name) {
-        showToast(`${t.status.error}: ${e}`, "error");
+        showToast(ownerFacingError(e, "Не удалось создать описание профиля."), "error");
       }
     } finally {
       descSavingCount.current -= 1;
@@ -633,11 +634,11 @@ export default function ProfilesPage() {
         );
         if (current) showToast(`${L.descriptionSaved}: ${name}`, "success");
       } else if (current) {
-        showToast(`${L.describeFailed}: ${res.reason}`, "error");
+        showToast(ownerFacingError(res.reason, L.describeFailed), "error");
       }
     } catch (e) {
       if (activeDescRequest.current === name) {
-        showToast(`${t.status.error}: ${e}`, "error");
+        showToast(ownerFacingError(e, "Не удалось создать описание профиля."), "error");
       }
     } finally {
       describingCount.current -= 1;
@@ -680,7 +681,7 @@ export default function ProfilesPage() {
       );
       setEditingModelFor(null);
     } catch (e) {
-      showToast(`${t.status.error}: ${e}`, "error");
+      showToast(ownerFacingError(e, "Не удалось сохранить модель профиля."), "error");
     } finally {
       setModelSaving(false);
     }
@@ -707,7 +708,7 @@ export default function ProfilesPage() {
       const res = await api.getProfileSetupCommand(name);
       cmd = res.command;
     } catch (e) {
-      showToast(`${t.status.error}: ${e}`, "error");
+      showToast(ownerFacingError(e, "Не удалось подготовить команду профиля."), "error");
       return;
     }
     if (await copyTextToClipboard(cmd)) {
@@ -725,11 +726,11 @@ export default function ProfilesPage() {
           showToast(`${t.profiles.deleted}: ${name}`, "success");
           load();
         } catch (e) {
-          showToast(`${t.status.error}: ${e}`, "error");
+          showToast(ownerFacingError(e, "Не удалось удалить профиль."), "error");
           throw e;
         }
       },
-      [load, showToast, t.profiles.deleted, t.status.error],
+      [load, showToast, t.profiles.deleted],
     ),
   });
 

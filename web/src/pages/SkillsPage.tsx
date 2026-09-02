@@ -62,6 +62,8 @@ import { Input } from "@nous-research/ui/ui/components/input";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { PluginSlot } from "@/plugins";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 /* ------------------------------------------------------------------ */
 /*  Types & helpers                                                    */
@@ -69,14 +71,14 @@ import { PluginSlot } from "@/plugins";
 
 const CATEGORY_LABELS: Record<string, string> = {
   mlops: "MLOps",
-  "mlops/cloud": "MLOps / Cloud",
-  "mlops/evaluation": "MLOps / Evaluation",
-  "mlops/inference": "MLOps / Inference",
-  "mlops/models": "MLOps / Models",
-  "mlops/training": "MLOps / Training",
-  "mlops/vector-databases": "MLOps / Vector DBs",
+  "mlops/cloud": "MLOps / облако",
+  "mlops/evaluation": "MLOps / оценка",
+  "mlops/inference": "MLOps / инференс",
+  "mlops/models": "MLOps / модели",
+  "mlops/training": "MLOps / обучение",
+  "mlops/vector-databases": "MLOps / векторные БД",
   mcp: "MCP",
-  "red-teaming": "Red Teaming",
+  "red-teaming": "Проверка устойчивости",
   ocr: "OCR",
   p5js: "p5.js",
   ai: "AI",
@@ -90,10 +92,7 @@ function prettyCategory(
 ): string {
   if (!raw) return generalLabel;
   if (CATEGORY_LABELS[raw]) return CATEGORY_LABELS[raw];
-  return raw
-    .split(/[-_/]/)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  return russianInterfaceText(raw, generalLabel);
 }
 
 const TOOLSET_ICONS: Record<
@@ -475,11 +474,7 @@ export default function SkillsPage() {
                   </CardTitle>
                   <Badge tone="secondary" className="text-xs">
                     {t.skills.resultCount
-                      .replace("{count}", String(searchMatchedSkills.length))
-                      .replace(
-                        "{s}",
-                        searchMatchedSkills.length !== 1 ? "s" : "",
-                      )}
+                      .replace("{count}", String(searchMatchedSkills.length))}
                   </Badge>
                 </div>
               </CardHeader>
@@ -521,8 +516,7 @@ export default function SkillsPage() {
                   <div className="flex items-center gap-2">
                     <Badge tone="secondary" className="text-xs">
                       {t.skills.skillCount
-                        .replace("{count}", String(activeSkills.length))
-                        .replace("{s}", activeSkills.length !== 1 ? "s" : "")}
+                        .replace("{count}", String(activeSkills.length))}
                     </Badge>
                     <Button
                       size="sm"
@@ -579,7 +573,7 @@ export default function SkillsPage() {
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {filteredToolsets.map((ts) => {
                     const TsIcon = toolsetIcon(ts.name);
-                    const labelText = ts.label.trim() || ts.name;
+                    const labelText = russianInterfaceText(ts.label, ts.name);
 
                     return (
                       <Card key={ts.name} className="relative rounded-none">
@@ -601,7 +595,10 @@ export default function SkillsPage() {
                                 </Badge>
                               </div>
                               <p className="text-xs text-text-secondary mb-2">
-                                {ts.description}
+                                {russianInterfaceText(
+                                  ts.description,
+                                  "Набор инструментов Korra.",
+                                )}
                               </p>
                               {ts.enabled && !ts.configured && (
                                 <p className="text-xs text-amber-300 mb-2">
@@ -758,7 +755,7 @@ function SkillRow({
           </span>
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
-          {skill.description || noDescriptionLabel}
+          {russianInterfaceText(skill.description, noDescriptionLabel)}
         </p>
       </div>
       <Button
@@ -922,7 +919,7 @@ function HubBrowser({
       setTimedOut(r.timed_out || []);
       setInstalled((prev) => ({ ...prev, ...(r.installed || {}) }));
     } catch (e) {
-      showToast(tr("Hub search failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Hub search failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
       setResults([]);
       setSourceCounts({});
       setTimedOut([]);
@@ -973,7 +970,7 @@ function HubBrowser({
         setAction(res.name);
         setDetail(null);
       } catch (e) {
-        showToast(tr("Install failed: {error}", { error: String(e) }), "error");
+        showToast(tr("Install failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
       }
     },
     [showToast, profile, tr],
@@ -987,7 +984,7 @@ function HubBrowser({
       setActionRunning(true);
       setAction(res.name);
     } catch (e) {
-      showToast(tr("Update failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Update failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     }
   }, [showToast, profile, tr]);
 
@@ -1203,7 +1200,7 @@ function ConnectedHubs({
                   : undefined
             }
           >
-            {s.label}
+            {russianInterfaceText(s.label, s.id)}
             {s.id === "github" && s.rate_limited ? tr(" (rate-limited)") : ""}
           </Badge>
         );
@@ -1291,7 +1288,7 @@ function HubResultCard({
             )}
           </div>
           <p className="text-xs text-text-secondary line-clamp-2">
-            {result.description}
+            {russianInterfaceText(result.description, "Навык из каталога.")}
           </p>
           <div className="flex flex-wrap items-center gap-1 mt-1">
             {result.tags.slice(0, 5).map((tag) => (
@@ -1364,7 +1361,7 @@ function SkillDetailDialog({
       .previewSkillFromHub(result.identifier)
       .then((p) => !cancelled && setPreview(p))
       .catch((e) => {
-        if (!cancelled) showToast(tr("Preview failed: {error}", { error: String(e) }), "error");
+        if (!cancelled) showToast(tr("Preview failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
       })
       .finally(() => !cancelled && setPreviewLoading(false));
     return () => {
@@ -1379,7 +1376,7 @@ function SkillDetailDialog({
       const s = await api.scanSkillFromHub(result.identifier);
       setScan(s);
     } catch (e) {
-      showToast(tr("Scan failed: {error}", { error: String(e) }), "error");
+      showToast(tr("Scan failed: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setScanning(false);
     }
@@ -1410,7 +1407,9 @@ function SkillDetailDialog({
         </DialogHeader>
 
         <div className="mt-1 flex flex-col gap-1">
-          <p className="text-xs text-text-secondary">{result.description}</p>
+          <p className="text-xs text-text-secondary">
+            {russianInterfaceText(result.description, "Навык из каталога.")}
+          </p>
           <p className="text-xs font-mono text-text-tertiary truncate">
             {result.identifier}
           </p>
@@ -1606,7 +1605,12 @@ function ScanPanel({
         )}
       </div>
 
-      <p className="text-xs text-text-tertiary">{scan.policy_reason}</p>
+      <p className="text-xs text-text-tertiary">
+        {russianInterfaceText(
+          scan.policy_reason,
+          "Решение принято по результатам проверки безопасности.",
+        )}
+      </p>
 
       {/* Findings */}
       {scan.findings.length > 0 && (
@@ -1618,12 +1622,19 @@ function ScanPanel({
               </Badge>
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium">{f.category}</span>
+                  <span className="text-xs font-medium">
+                    {russianInterfaceText(f.category, "Проверка безопасности")}
+                  </span>
                   <span className="text-xs font-mono text-text-tertiary truncate">
                     {f.file}:{f.line}
                   </span>
                 </div>
-                <p className="text-xs text-text-secondary">{f.description}</p>
+                <p className="text-xs text-text-secondary">
+                  {russianInterfaceText(
+                    f.description,
+                    "Обнаружен потенциально рискованный фрагмент.",
+                  )}
+                </p>
               </div>
             </div>
           ))}

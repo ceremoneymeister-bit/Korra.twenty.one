@@ -100,7 +100,6 @@ const SystemPage = lazy(() => import("@/pages/SystemPage"));
 const ChatPage = lazy(() => import("@/pages/ChatPage"));
 const BubbleChatPage = lazy(() => import("@/pages/BubbleChatPage"));
 const AgentWorkbenchPage = lazy(() => import("@/pages/AgentWorkbenchPage"));
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { KorraBrand } from "@/components/KorraBrand";
 import { useI18n } from "@/i18n";
@@ -124,8 +123,9 @@ import { latchChatActivation } from "@/lib/chat-activation";
 import { isStaleBuild, loadedBuild } from "@/lib/build-version";
 import { api } from "@/lib/api";
 import type { StatusResponse, UpdateCheckResponse } from "@/lib/api";
+import { russianInterfaceText } from "@/lib/russian-interface-text";
 
-function RouteFallback({ label = "Loading…" }: { label?: string }) {
+function RouteFallback({ label = "Загрузка…" }: { label?: string }) {
   return (
     <div
       className="flex min-h-[12rem] flex-1 items-center justify-center"
@@ -243,39 +243,39 @@ const BUILTIN_NAV_REST: NavItem[] = [
   {
     path: "/sessions",
     labelKey: "sessions",
-    label: "Sessions",
+    label: "История",
     icon: MessageSquare,
   },
-  { path: "/files", label: "Files", icon: FolderOpen },
+  { path: "/files", label: "Файлы", icon: FolderOpen },
   {
     path: "/analytics",
     labelKey: "analytics",
-    label: "Analytics",
+    label: "Аналитика",
     icon: BarChart3,
   },
   {
     path: "/models",
     labelKey: "models",
-    label: "Models",
+    label: "Модели",
     icon: Cpu,
   },
-  { path: "/logs", labelKey: "logs", label: "Logs", icon: FileText },
-  { path: "/cron", labelKey: "cron", label: "Cron", icon: Clock },
+  { path: "/logs", labelKey: "logs", label: "Журналы", icon: FileText },
+  { path: "/cron", labelKey: "cron", label: "Расписание", icon: Clock },
   { path: "/help", label: "Помощь", icon: BookOpen },
-  { path: "/skills", labelKey: "skills", label: "Skills", icon: Package },
-  { path: "/plugins", labelKey: "plugins", label: "Plugins", icon: Puzzle },
+  { path: "/skills", labelKey: "skills", label: "Навыки", icon: Package },
+  { path: "/plugins", labelKey: "plugins", label: "Плагины", icon: Puzzle },
   { path: "/mcp", label: "MCP", icon: Plug },
-  { path: "/channels", label: "Channels", icon: Radio },
-  { path: "/webhooks", label: "Webhooks", icon: Webhook },
-  { path: "/pairing", label: "Pairing", icon: ShieldCheck },
-  { path: "/profiles", labelKey: "profiles", label: "Profiles", icon: Users },
-  { path: "/config", labelKey: "config", label: "Config", icon: Settings },
-  { path: "/env", labelKey: "keys", label: "Keys", icon: KeyRound },
-  { path: "/system", label: "System", icon: Wrench },
+  { path: "/channels", label: "Каналы", icon: Radio },
+  { path: "/webhooks", label: "Вебхуки", icon: Webhook },
+  { path: "/pairing", label: "Подключения", icon: ShieldCheck },
+  { path: "/profiles", labelKey: "profiles", label: "Профили", icon: Users },
+  { path: "/config", labelKey: "config", label: "Конфигурация", icon: Settings },
+  { path: "/env", labelKey: "keys", label: "Ключи", icon: KeyRound },
+  { path: "/system", label: "Система", icon: Wrench },
   {
     path: "/docs",
     labelKey: "documentation",
-    label: "Documentation",
+    label: "Документация",
     icon: BookOpen,
   },
 ];
@@ -322,7 +322,7 @@ function buildNavItems(
 
     const pluginItem: NavItem = {
       path: manifest.tab.path,
-      label: manifest.label,
+      label: russianInterfaceText(manifest.label, manifest.name),
       icon: resolveIcon(manifest.icon),
     };
 
@@ -581,7 +581,7 @@ export default function App() {
         .filter((m) => !m.tab.hidden)
         .map((m) => ({
           path: m.tab.override ?? m.tab.path,
-          label: m.label,
+          label: russianInterfaceText(m.label, m.name),
         })),
     [manifests],
   );
@@ -909,19 +909,12 @@ export default function App() {
 
                 <SidebarIconWithTooltip
                   collapsed={isDesktopCollapsed}
-                  label={t.theme?.switchTheme ?? "Switch theme"}
+                  label={t.theme?.switchTheme ?? "Сменить тему"}
                   tooltipWarmRef={tooltipWarmRef}
                 >
                   <ThemeSwitcher collapsed={isDesktopCollapsed} dropUp />
                 </SidebarIconWithTooltip>
 
-                <SidebarIconWithTooltip
-                  collapsed={isDesktopCollapsed}
-                  label={t.language.switchTo}
-                  tooltipWarmRef={tooltipWarmRef}
-                >
-                  <LanguageSwitcher collapsed={isDesktopCollapsed} dropUp />
-                </SidebarIconWithTooltip>
               </div>
             </div>
 
@@ -980,7 +973,7 @@ export default function App() {
                   !chatOverriddenByPlugin &&
                   (pluginsLoading ? (
                     isChatRoute ? (
-                      <RouteFallback label="Loading chat…" />
+                      <RouteFallback label="Загрузка чата…" />
                     ) : null
                   ) : chatHostMounted ? (
                     <div
@@ -994,7 +987,7 @@ export default function App() {
                       <Suspense
                         fallback={
                           isChatRoute ? (
-                            <RouteFallback label="Loading chat…" />
+                            <RouteFallback label="Загрузка чата…" />
                           ) : null
                         }
                       >
@@ -1002,7 +995,7 @@ export default function App() {
                       </Suspense>
                     </div>
                   ) : isChatRoute ? (
-                    <RouteFallback label="Loading chat…" />
+                    <RouteFallback label="Загрузка чата…" />
                   ) : null)}
 
                 {agentsHostMounted && (
@@ -1183,12 +1176,12 @@ function SidebarSystemActions({
     if (updateConfirmInfo?.behind && updateConfirmInfo.behind > 0) {
       const cmd = updateConfirmInfo.update_command;
       const n = updateConfirmInfo.behind;
-      return `This will run 'hermes update' (${cmd}) and pull ${n} new commit${n === 1 ? "" : "s"}. The gateway restarts when the update finishes; the current session keeps its prompt cache until then.`;
+      return `Будет выполнена команда hermes update (${cmd}) и загружено новых коммитов: ${n}. После обновления шлюз перезапустится; текущая сессия до этого сохранит кэш промпта.`;
     }
     const cmd = updateConfirmInfo?.update_command ?? "hermes update";
     return (
       t.status.updateHermesConfirmMessage ??
-      `This will run 'hermes update' (${cmd}) and restart the gateway when it finishes.`
+      `Будет выполнена команда hermes update (${cmd}), затем шлюз перезапустится.`
     );
   }, [t.status.updateHermesConfirmMessage, updateConfirmInfo]);
 
@@ -1288,7 +1281,7 @@ function SidebarSystemActions({
       confirmLabel={t.status.restartGateway}
       description={
         t.status.restartGatewayConfirmMessage ??
-        "This restarts the Korra gateway process. Connected channels and active sessions will reconnect afterward."
+        "Процесс шлюза Korra будет перезапущен. Каналы и активные сессии подключатся заново."
       }
       loading={pendingAction === "restart"}
       onCancel={() => setRestartConfirmOpen(false)}
@@ -1301,7 +1294,7 @@ function SidebarSystemActions({
 
     <ConfirmDialog
       cancelLabel={t.common.cancel}
-      confirmLabel={t.status.updateHermesConfirmNow ?? "Update now"}
+      confirmLabel={t.status.updateHermesConfirmNow ?? "Обновить сейчас"}
       description={
         updateConfirmChecking ? t.common.loading : updateConfirmDescription
       }

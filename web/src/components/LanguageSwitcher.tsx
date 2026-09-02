@@ -11,16 +11,9 @@ import type { Locale } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 /**
- * Language picker — shows the current language's endonym, opens a dropdown
- * of all supported locales when clicked.  Persists choice to localStorage via
- * the I18n context.
- *
- * Replaces the older two-state EN↔ZH toggle now that we ship 16 locales
- * (en, zh, zh-hant, ja, de, es, fr, tr, uk, af, ko, it, ga, pt, ru, hu).
- *
- * No country flags by design — languages aren't countries, and flag pairings
- * inevitably create political mismappings (e.g. Mandarin variants ≠ any single
- * jurisdiction, English ≠ GB, Portuguese ≠ PT). Endonyms are unambiguous.
+ * Compatibility component for plugins that still import the old picker.
+ * Korra 21 exposes a single Russian locale, and the main application does not
+ * mount this component.
  *
  * When placed at the bottom of the sidebar (next to ThemeSwitcher), pass
  * `dropUp` so the list opens above the trigger and avoids clipping below the
@@ -58,8 +51,8 @@ export function LanguageSwitcher({ collapsed = false, dropUp = false }: Language
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open, useMobileSheet]);
 
-  const current = LOCALE_META[locale];
-  const allLocales = Object.entries(LOCALE_META) as Array<[Locale, typeof current]>;
+  const current = LOCALE_META.ru;
+  const allLocales: Array<[Locale, { name: string }]> = [["ru", current]];
   const sheetTitle = t.language.switchTo;
 
   return (
@@ -80,7 +73,7 @@ export function LanguageSwitcher({ collapsed = false, dropUp = false }: Language
           <Typography
             className="hidden sm:inline text-display tracking-wide text-xs"
           >
-            {locale === "en" ? "EN" : current.name}
+            {current.name}
           </Typography>
         </span>
       </Button>
@@ -173,7 +166,7 @@ function LanguageSwitcherOptions({
 }
 
 interface LanguageSwitcherOptionsProps {
-  allLocales: Array<[Locale, (typeof LOCALE_META)[Locale]]>;
+  allLocales: Array<[Locale, { name: string }]>;
   locale: Locale;
   setLocale: (code: Locale) => void;
   setOpen: (open: boolean) => void;

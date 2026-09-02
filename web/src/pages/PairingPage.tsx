@@ -13,6 +13,7 @@ import { Toast } from "@nous-research/ui/ui/components/toast";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 function getUserKey(user: PairingUser): string {
   return `${user.platform}:${user.user_id}`;
@@ -65,7 +66,7 @@ export default function PairingPage() {
       showToast(tr('Approved: "{name}"', { name: getUserLabel(user) }), "success");
       loadPairing();
     } catch (e) {
-      showToast(tr("Error: {error}", { error: String(e) }), "error");
+      showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setApproving(null);
     }
@@ -79,7 +80,7 @@ export default function PairingPage() {
       showToast(tr("Cleared {count} pending requests", { count: res.cleared }), "success");
       loadPairing();
     } catch (e) {
-      showToast(tr("Error: {error}", { error: String(e) }), "error");
+      showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
     } finally {
       setClearing(false);
     }
@@ -98,7 +99,7 @@ export default function PairingPage() {
           );
           loadPairing();
         } catch (e) {
-          showToast(tr("Error: {error}", { error: String(e) }), "error");
+          showToast(tr("Error: {error}", { error: ownerFacingError(e, "подробности недоступны") }), "error");
           throw e;
         }
       },

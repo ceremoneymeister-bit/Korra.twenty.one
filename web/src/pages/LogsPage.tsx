@@ -21,6 +21,7 @@ import { PluginSlot } from "@/plugins";
 // structured level token and falls back to word-boundary matching so payload
 // text like "parse_errors=0" can't render an INFO line red.
 import { classifyLine } from "@/lib/log-classify";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 const FILES = ["agent", "errors", "gateway"] as const;
 const LEVELS = ["ALL", "DEBUG", "INFO", "WARNING", "ERROR"] as const;
@@ -72,7 +73,7 @@ export default function LogsPage() {
           }
         }, 50);
       })
-      .catch((err) => setError(String(err)))
+      .catch((err) => setError(ownerFacingError(err, "Не удалось загрузить журнал.")))
       .finally(() => setLoading(false));
   }, [file, lineCount, level, component]);
 

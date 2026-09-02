@@ -4,6 +4,7 @@ import { isoTimeAgo } from "@/lib/utils";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { useI18n } from "@/i18n";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 export function PlatformsCard({ platforms }: PlatformsCardProps) {
   const { t, tr } = useI18n();
@@ -32,7 +33,7 @@ export function PlatformsCard({ platforms }: PlatformsCardProps) {
         {platforms.map(([name, info]) => {
           const display = platformStateBadge[info.state] ?? {
             tone: "outline" as const,
-            label: info.state,
+            label: tr("unknown"),
           };
           const IconComponent =
             info.state === "connected"
@@ -74,7 +75,10 @@ export function PlatformsCard({ platforms }: PlatformsCardProps) {
                           : "text-destructive"
                       }`}
                     >
-                      {info.error_message}
+                      {ownerFacingError(
+                        info.error_message,
+                        "Платформа временно недоступна.",
+                      )}
                     </span>
                   )}
 
