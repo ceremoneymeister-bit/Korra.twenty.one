@@ -104,6 +104,7 @@ apps/desktop/src/**/*.d.ts
 /sqlite_leak_fix.png
 /*.png.bak
 /default.tar.gz
+/graphify-out/
 apps/shared/src/**/*.js
 apps/shared/src/**/*.js.map
 apps/shared/src/**/*.d.ts
