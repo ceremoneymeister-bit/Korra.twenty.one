@@ -71,7 +71,7 @@ class TestIsFreeTierQuotaError:
 
 
 class TestGeminiHttpErrorFreeTierGuidance:
-    """gemini_http_error should append free-tier guidance for free-tier 429s."""
+    """gemini_http_error should explain a free-tier 429 in interface Russian."""
 
     class _FakeResp:
         def __init__(self, status: int, text: str):
@@ -87,12 +87,12 @@ class TestGeminiHttpErrorFreeTierGuidance:
         )
         err = gemini_http_error(self._FakeResp(429, body))
         msg = str(err)
-        assert "free tier" in msg.lower()
+        assert "бесплатный тариф Gemini" in msg
+        assert "дождаться сброса лимита" in msg
         assert "aistudio.google.com/apikey" in msg
 
     def test_paid_429_has_no_billing_url(self):
         body = '{"error":{"code":429,"message":"Rate limited","status":"RESOURCE_EXHAUSTED"}}'
         err = gemini_http_error(self._FakeResp(429, body))
         assert "aistudio.google.com/apikey" not in str(err)
-
 
