@@ -563,7 +563,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             {sessions_html}
             
             <footer>
-                Built with ☤ Hermes Agent • Generated on {generated_at}
+                Создано в ☤ Korra • Дата экспорта: {generated_at}
             </footer>
         </div>
     </div>
@@ -654,7 +654,7 @@ def _escape_html(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
 
 def _format_timestamp(ts: float) -> str:
-    if not ts: return "N/A"
+    if not ts: return "Нет данных"
     return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
 
 def _generate_messages_html(messages: List[Dict[str, Any]]) -> str:
@@ -686,7 +686,7 @@ def _generate_messages_html(messages: List[Dict[str, Any]]) -> str:
                     if part.get("type") == "text":
                         content_parts.append(part.get("text", ""))
                     elif part.get("type") == "image_url":
-                        content_parts.append("[Image Attachment]")
+                        content_parts.append("[Вложенное изображение]")
                 else:
                     content_parts.append(str(part))
             content = "\n".join(content_parts)
@@ -698,7 +698,14 @@ def _generate_messages_html(messages: List[Dict[str, Any]]) -> str:
         #    so a crafted role can neither break out of the attribute nor split
         #    into several unintended classes. Real roles (user/assistant/system/
         #    tool) are unchanged, so the `.message-<role>` rules still match.
-        safe_role = _escape_html(role)
+        role_label = {
+            "user": "Пользователь",
+            "assistant": "Korra",
+            "system": "Система",
+            "tool": "Инструмент",
+            "unknown": "Неизвестная роль",
+        }.get(role, role)
+        safe_role = _escape_html(role_label)
         role_class = "".join(c if c.isalnum() or c in "-_" else "-" for c in str(role).lower())
         msg_class = f"message message-{role_class} active"
         # Delay animation for initial items
@@ -717,13 +724,13 @@ def _generate_messages_html(messages: List[Dict[str, Any]]) -> str:
         tool_calls = msg.get("tool_calls")
         if tool_calls:
             for tc in tool_calls:
-                fn_name = tc.get("function", {}).get("name", "unknown")
+                fn_name = tc.get("function", {}).get("name", "неизвестно")
                 args = tc.get("function", {}).get("arguments", "{}")
                 html += f'''
                 <div class="tool-call">
                     <div class="tool-call-header">
                         {ICON_CHEVRON_RIGHT.replace('class="', 'class="chevron ')}
-                        {ICON_WRENCH} Tool Call: {_escape_html(fn_name)}
+                        {ICON_WRENCH} Вызов инструмента: {_escape_html(fn_name)}
                     </div>
                     <div class="tool-call-content">
                         <pre><code>{_escape_html(args)}</code></pre>
@@ -745,7 +752,7 @@ def _generate_messages_html(messages: List[Dict[str, Any]]) -> str:
             <div class="reasoning">
                 <div class="reasoning-header">
                     {ICON_CHEVRON_RIGHT.replace('class="', 'class="chevron ')}
-                    {ICON_SPARKLES} Reasoning
+                    {ICON_SPARKLES} Рассуждение
                 </div>
                 <div class="reasoning-content">
                     <div class="content">{_escape_html(reasoning)}</div>
@@ -760,7 +767,7 @@ def _generate_messages_html(messages: List[Dict[str, Any]]) -> str:
 
 def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
     if not sessions:
-        return "<html><body><h1>No sessions to export.</h1></body></html>"
+        return "<html><body><h1>Нет сессий для экспорта.</h1></body></html>"
 
     is_multi = len(sessions) > 1
     generated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -772,7 +779,7 @@ def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
         for s in sessions:
             sid = str(s.get("id", "N/A"))
             escaped_sid = _escape_html(sid)
-            title = s.get("title") or s.get("preview") or "Untitled Session"
+            title = s.get("title") or s.get("preview") or "Сессия без названия"
             if len(title) > 50: title = title[:47] + "..."
             date = _format_timestamp(s.get("started_at", 0)).split(" ")[0]
             
@@ -791,11 +798,11 @@ def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-brand">
-                    {ICON_HERMES} Hermes History
+                    {ICON_HERMES} История Korra
                 </div>
                 <div class="search-container">
                     {ICON_SEARCH}
-                    <input type="text" id="session-search" placeholder="Search sessions...">
+                    <input type="text" id="session-search" placeholder="Поиск сессий…">
                 </div>
             </div>
             <div class="session-list">
@@ -809,8 +816,8 @@ def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
     for s in sessions:
         sid = str(s.get("id", "N/A"))
         escaped_sid = _escape_html(sid)
-        title = s.get("title") or "Korra Session"
-        model = s.get("model") or "Unknown"
+        title = s.get("title") or "Сессия Korra"
+        model = s.get("model") or "Не указана"
         started_at = _format_timestamp(s.get("started_at", 0))
         messages = s.get("messages", [])
         
@@ -828,7 +835,7 @@ def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
             <div class="system-prompt-section active">
                 <div class="system-prompt-header">
                     {ICON_CHEVRON_RIGHT.replace('class="', 'class="chevron ')}
-                    {ICON_SHIELD} System Prompt (Persona)
+                    {ICON_SHIELD} Системная инструкция (образ агента)
                 </div>
                 <div class="system-prompt-content">
                     <div class="content">{_escape_html(system_prompt)}</div>
@@ -842,8 +849,8 @@ def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
                 <h1>{_escape_html(title)}</h1>
                 <div class="meta">
                     <div class="meta-item"><strong>ID:</strong> {escaped_sid}</div>
-                    <div class="meta-item"><strong>Model:</strong> {_escape_html(model)}</div>
-                    <div class="meta-item"><strong>Started:</strong> {started_at}</div>
+                    <div class="meta-item"><strong>Модель:</strong> {_escape_html(model)}</div>
+                    <div class="meta-item"><strong>Начало:</strong> {started_at}</div>
                 </div>
                 {system_html}
             </header>
@@ -856,7 +863,7 @@ def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
 
     script_nonce = secrets.token_urlsafe(16)
     return HTML_TEMPLATE.format(
-        page_title="Korra Session Export" if is_multi else _escape_html(sessions[0].get("title") or "Korra Session"),
+        page_title="Экспорт сессий Korra" if is_multi else _escape_html(sessions[0].get("title") or "Сессия Korra"),
         sidebar_html=sidebar_html,
         sessions_html="\n".join(sessions_html_list),
         main_margin="var(--sidebar-width)" if is_multi else "0",

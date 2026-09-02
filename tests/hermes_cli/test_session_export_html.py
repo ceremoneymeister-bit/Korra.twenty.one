@@ -71,8 +71,21 @@ def test_single_session_untitled_coalesces_none_title_and_model():
     html = generate_html_export(session)
 
     # Browser-tab title falls back to the same default as the <h1> header.
-    assert "<title>Hermes Session</title>" in html
+    assert "<title>Сессия Korra</title>" in html
     assert "<title>None</title>" not in html
     # Model meta falls back instead of rendering the literal "None".
-    assert "<strong>Model:</strong> Unknown" in html
-    assert "<strong>Model:</strong> None" not in html
+    assert "<strong>Модель:</strong> Не указана" in html
+    assert "<strong>Модель:</strong> None" not in html
+
+
+def test_visible_export_labels_are_russian():
+    html = generate_html_export({
+        "id": "abc",
+        "messages": [{"role": "user", "content": [{"type": "image_url"}]}],
+        "system_prompt": "Будь полезной",
+    })
+
+    assert "Пользователь" in html
+    assert "Вложенное изображение" in html
+    assert "Системная инструкция" in html
+    assert "Начало:" in html
