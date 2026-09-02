@@ -115,7 +115,7 @@ class TestCreateProfile:
     """Tests for create_profile()."""
 
 
-    def test_seeds_placeholder_env_file(self, profile_env):
+    def test_seeds_placeholder_env_file_without_runtime_credentials(self, profile_env):
         """Fresh profiles get their own .env (owner-only) so channel/env
         writes are profile-scoped from day one instead of falling through
         to the shell environment / root install."""
@@ -131,6 +131,76 @@ class TestCreateProfile:
         )
         mode = stat.S_IMODE(env_path.stat().st_mode)
         assert mode == 0o600
+
+
+    def test_fresh_profile_inherits_only_active_runtime_credentials(self, profile_env):
+        """A fresh profile can use the shared multiplexer and its selected
+        model without inheriting unrelated channel or tool credentials."""
+        from agent.secret_scope import load_env_file
+
+        default_home = profile_env / ".hermes"
+        (default_home / "config.yaml").write_text(
+            "model:\n  provider: anthropic\n  default: claude-test\n"
+        )
+        (default_home / ".env").write_text(
+            "API_SERVER_KEY=gateway-key-0123456789abcdef\n"
+            "ANTHROPIC_API_KEY=model-key\n"
+            "TELEGRAM_BOT_TOKEN=channel-secret\n"
+            "EXA_API_KEY=tool-secret\n"
+        )
+
+        profile_dir = create_profile("coder", no_alias=True)
+
+        assert load_env_file(profile_dir / ".env") == {
+            "API_SERVER_KEY": "gateway-key-0123456789abcdef",
+            "ANTHROPIC_API_KEY": "model-key",
+        }
+
+
+    def test_fresh_profile_inherits_active_custom_provider_definition(self, profile_env):
+        """The copied model reference must keep its matching custom endpoint
+        and key slot, but no unrelated custom provider or credential."""
+        from agent.secret_scope import load_env_file
+        from hermes_cli.config import (
+            get_compatible_custom_providers,
+            read_user_config_raw,
+        )
+        from hermes_cli.providers import resolve_provider_full
+
+        default_home = profile_env / ".hermes"
+        (default_home / "config.yaml").write_text(
+            "model:\n"
+            "  provider: custom:dario\n"
+            "  default: claude-test\n"
+            "custom_providers:\n"
+            "  - name: dario\n"
+            "    base_url: http://127.0.0.1:3456\n"
+            "    key_env: DARIO_API_KEY\n"
+            "  - name: unused\n"
+            "    base_url: http://127.0.0.1:4567\n"
+            "    key_env: UNUSED_API_KEY\n"
+        )
+        (default_home / ".env").write_text(
+            "API_SERVER_KEY=gateway-key-0123456789abcdef\n"
+            "DARIO_API_KEY=dario-key\n"
+            "UNUSED_API_KEY=unused-key\n"
+        )
+
+        profile_dir = create_profile("coder", no_alias=True)
+
+        cfg = read_user_config_raw(profile_dir / "config.yaml")
+        resolved = resolve_provider_full(
+            cfg["model"]["provider"],
+            user_providers=cfg.get("providers"),
+            custom_providers=get_compatible_custom_providers(cfg),
+        )
+        assert resolved is not None
+        assert resolved.base_url == "http://127.0.0.1:3456"
+        assert resolved.api_key_env_vars == ("DARIO_API_KEY",)
+        assert load_env_file(profile_dir / ".env") == {
+            "API_SERVER_KEY": "gateway-key-0123456789abcdef",
+            "DARIO_API_KEY": "dario-key",
+        }
 
 
     def test_fresh_profile_inherits_a_usable_model(self, profile_env):
@@ -1175,5 +1245,4 @@ class TestResolveProfileEnvSpelling:
         # No HERMES_HOME: the platform default root applies (existing contract).
         monkeypatch.delenv("HERMES_HOME", raising=False)
         assert Path(resolve_profile_env("default")) == _get_default_hermes_home()
-
 

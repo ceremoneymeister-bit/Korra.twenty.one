@@ -770,7 +770,56 @@ def _read_config_model(profile_dir: Path) -> tuple:
         return None, None
 
 
-def _seed_model_config(profile_dir: Path) -> None:
+def _matching_model_provider_config(
+    source_config: Dict,
+    provider: str,
+) -> Dict:
+    """Return only the config row required by ``provider``.
+
+    A fresh profile must not copy every configured endpoint. It does need the
+    selected custom/user provider's URL and key slot, otherwise the copied
+    ``model.provider`` points at a definition that exists only in the source
+    profile. Prefer the modern ``providers:`` mapping when both schemas exist.
+    """
+    requested = str(provider or "").strip().lower()
+    if not requested:
+        return {}
+
+    try:
+        from hermes_cli.providers import custom_provider_aliases
+
+        providers = source_config.get("providers")
+        if isinstance(providers, dict):
+            for provider_key, entry in providers.items():
+                if not isinstance(entry, dict):
+                    continue
+                display_name = str(entry.get("name") or provider_key)
+                if requested in custom_provider_aliases(
+                    display_name,
+                    str(provider_key),
+                ):
+                    return {"providers": {str(provider_key): entry}}
+
+        custom_providers = source_config.get("custom_providers")
+        if isinstance(custom_providers, list):
+            for entry in custom_providers:
+                if not isinstance(entry, dict):
+                    continue
+                display_name = str(entry.get("name") or "")
+                provider_key = str(entry.get("provider_key") or "")
+                if requested in custom_provider_aliases(display_name, provider_key):
+                    return {"custom_providers": [entry]}
+    except Exception:
+        # The model block is still useful for built-in providers; a malformed
+        # optional provider row must not abort profile creation.
+        pass
+    return {}
+
+
+def _seed_model_config(
+    profile_dir: Path,
+    source_dir: Optional[Path] = None,
+) -> None:
     """Give a profile created without a clone source a usable model block.
 
     Such a profile gets its directory tree but no ``config.yaml`` at all, so it
@@ -790,19 +839,102 @@ def _seed_model_config(profile_dir: Path) -> None:
         from hermes_constants import get_hermes_home
         from hermes_cli.config import read_user_config_raw
 
-        source = get_hermes_home() / "config.yaml"
+        source = (source_dir or get_hermes_home()) / "config.yaml"
         if not source.is_file():
             return
-        model_cfg = read_user_config_raw(source).get("model")
+        source_config = read_user_config_raw(source)
+        model_cfg = source_config.get("model")
         if not model_cfg:
             return
+        seeded_config: Dict = {"model": model_cfg}
+        if isinstance(model_cfg, dict):
+            seeded_config.update(
+                _matching_model_provider_config(
+                    source_config,
+                    str(model_cfg.get("provider") or ""),
+                )
+            )
         config_path.write_text(
-            yaml.safe_dump({"model": model_cfg}, sort_keys=False),
+            yaml.safe_dump(seeded_config, sort_keys=False),
             encoding="utf-8",
         )
     except Exception:
         # Creation must not fail over this; `hermes model` still sets it later.
         pass
+
+
+def _seed_runtime_credentials(profile_dir: Path, source_dir: Path) -> None:
+    """Seed the minimum credentials a fresh profile needs for its first turn.
+
+    The multiplexer authenticates each ``/p/<profile>`` route against that
+    profile's own ``API_SERVER_KEY``. The model runner likewise resolves
+    secrets from the profile scope and must not borrow another profile's
+    process environment. Copy a snapshot of only those two dependencies:
+    the shared gateway key and the selected provider's key/base-URL slots.
+    Channel, tool, and unrelated provider credentials remain isolated.
+    """
+    env_path = profile_dir / ".env"
+    selected: Dict[str, str] = {}
+    try:
+        from agent.secret_scope import load_env_file
+        from hermes_cli.config import (
+            _quote_env_value,
+            get_compatible_custom_providers,
+            read_user_config_raw,
+        )
+        from hermes_cli.providers import resolve_provider_full
+
+        source_env = load_env_file(source_dir / ".env")
+        gateway_key = source_env.get("API_SERVER_KEY", "").strip()
+        if gateway_key:
+            selected["API_SERVER_KEY"] = gateway_key
+
+        source_config = read_user_config_raw(source_dir / "config.yaml")
+        model_cfg = source_config.get("model")
+        provider = (
+            str(model_cfg.get("provider") or "").strip()
+            if isinstance(model_cfg, dict)
+            else ""
+        )
+        provider_def = resolve_provider_full(
+            provider,
+            user_providers=source_config.get("providers"),
+            custom_providers=get_compatible_custom_providers(source_config),
+        )
+        if provider_def is not None:
+            credential_keys = list(provider_def.api_key_env_vars or ())
+            if provider_def.base_url_env_var:
+                credential_keys.append(provider_def.base_url_env_var)
+            for key in credential_keys:
+                value = source_env.get(key, "").strip()
+                if value:
+                    selected[key] = value
+
+        lines = [
+            "# Per-profile secrets for this Korra profile.",
+            "# Runtime credentials below were copied at profile creation.",
+            "# Channel and unrelated tool credentials remain isolated.",
+        ]
+        lines.extend(
+            f"{key}={_quote_env_value(value)}" for key, value in selected.items()
+        )
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.chmod(str(env_path), 0o600)
+    except OSError:
+        pass  # best-effort — save_env_value creates the file on demand
+    except Exception:
+        # Provider-catalog/plugin failures must not block profile creation.
+        # Preserve the isolation contract with a credential-free placeholder.
+        try:
+            env_path.write_text(
+                "# Per-profile secrets for this Korra profile.\n"
+                "# API keys and tokens set here override the shell environment.\n"
+                "# Behavioral settings belong in config.yaml, not here.\n",
+                encoding="utf-8",
+            )
+            os.chmod(str(env_path), 0o600)
+        except OSError:
+            pass
 
 
 def _check_gateway_running(profile_dir: Path) -> bool:
@@ -1236,6 +1368,7 @@ def create_profile(
 
     # Resolve clone source
     source_dir = None
+    fresh_source_dir = None
     if clone_from is not None or clone_all or clone_config:
         if clone_from is None:
             # Default: clone from active profile
@@ -1268,7 +1401,10 @@ def create_profile(
             (profile_dir / subdir).mkdir(parents=True, exist_ok=True)
 
         if source_dir is None:
-            _seed_model_config(profile_dir)
+            from hermes_constants import get_hermes_home
+
+            fresh_source_dir = get_hermes_home()
+            _seed_model_config(profile_dir, fresh_source_dir)
 
         # Clone config files from source
         if source_dir is not None:
@@ -1303,14 +1439,15 @@ def create_profile(
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dst)
 
-    # Seed an empty .env so the profile has its own credentials file from
-    # day one. Without it, profile-scoped env writes (dashboard Channels /
-    # Keys pages, `hermes -p <name> auth add`) had no file until first
-    # write, and the profile silently inherited API keys from the shell
-    # environment — users reasonably read that as "the new profile reads
-    # the root .env". Skipped when --clone/--clone-all already copied one.
+    # Seed a profile-scoped .env from day one. A fresh profile gets only the
+    # gateway + selected-model dependencies required for its first turn;
+    # clones keep the source .env. Without a file, dashboard/CLI writes had no
+    # profile target and the process environment could blur the isolation
+    # boundary.
     env_path = profile_dir / ".env"
-    if not env_path.exists():
+    if not env_path.exists() and fresh_source_dir is not None:
+        _seed_runtime_credentials(profile_dir, fresh_source_dir)
+    elif not env_path.exists():
         try:
             env_path.write_text(
                 "# Per-profile secrets for this Korra profile.\n"
