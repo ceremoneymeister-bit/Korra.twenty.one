@@ -105,19 +105,23 @@ jobs:
         #
         # No --files: the runner discovers the suite itself. The discovered
         # set is identical to the list the removed matrix job used to pass in.
-        # Korra: тесты бегут в приватных namespaces (net+mount+pid, свой
-        # /proc). На нашем self-hosted раннере живут боевые gateway-процессы
-        # и дашборд на 9119 — без изоляции update-реконсиляция видела 33
-        # живых PID, FTS-admission находил чужих держателей state.db, а
-        # dashboard-тесты падали на занятом порту (триаж 02.09.2026).
-        # Rootless unshare заблокирован AppArmor (apparmor_restrict_
-        # unprivileged_userns=1), поэтому namespaces создаёт sudo, поднимает
-        # lo и сразу сбрасывает привилегии обратно в ghrunner через setpriv.
+        # Korra: тесты бегут в приватных pid+mount namespaces (свой /proc).
+        # На нашем self-hosted раннере живут боевые gateway-процессы — без
+        # изоляции update-реконсиляция видела 33 живых PID, а FTS-admission
+        # находил чужих держателей state.db (триаж 02.09.2026). Сеть
+        # НАМЕРЕННО общая: net-ns без DNS ломал SSRF-проверки Slack/vision
+        # и telegram-тесты (второй триаж 02.09); занятый порт 9119 закрыт
+        # фикстурой в test_dashboard_auth_gate. Rootless unshare закрыт
+        # AppArmor (apparmor_restrict_unprivileged_userns=1), поэтому
+        # namespaces создаёт sudo и сразу сбрасывает привилегии обратно в
+        # ghrunner через setpriv. CI/GITHUB_ACTIONS прокинуты — часть
+        # сьютов калибрует таймауты по ним, как на hosted-раннерах.
         run: |
-          sudo unshare -n -m -p -f --mount-proc sh -c "
-            ip link set lo up && exec setpriv \
+          sudo unshare -m -p -f --mount-proc sh -c "
+            exec setpriv \
               --reuid=$(id -u) --regid=$(id -g) --init-groups \
               env HOME='$HOME' PATH='$PATH' \
+                  CI='$CI' GITHUB_ACTIONS='$GITHUB_ACTIONS' \
                   HERMES_TEST_WORKERS='$HERMES_TEST_WORKERS' \
                   OPENROUTER_API_KEY= OPENAI_API_KEY= NOUS_API_KEY= \
               sh -c 'cd \"$PWD\" && . .venv/bin/activate && scripts/run_tests.sh'
