@@ -260,6 +260,22 @@ export function FilePreviewDialog({
     }
   };
 
+  const reloadOffice = async () => {
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+    setOfficeFile(null);
+    try {
+      const payload = await api.readOfficeFile(file.path);
+      setOfficeFile(payload);
+      markReviewed();
+    } catch (exception) {
+      setError(ownerFacingError(exception, "Не удалось обновить файл."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const manualReviewRequired = Boolean(onReviewed) && (
     kind === "pdf" ||
     kind === "unsupported" ||
@@ -342,7 +358,7 @@ export function FilePreviewDialog({
           {loading ? (
             <div className="grid h-full min-h-64 place-items-center" role="status"><span className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Открываем файл…</span></div>
           ) : error ? (
-            <div className="grid h-full min-h-64 place-items-center p-6 text-center" role="alert"><div><FileQuestion className="mx-auto size-8 text-warning" /><p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">{error}</p><ActionButton className="mt-4" onClick={() => kind === "text" && void reloadText()}><RefreshCw className="size-4" />Повторить</ActionButton></div></div>
+            <div className="grid h-full min-h-64 place-items-center p-6 text-center" role="alert"><div><FileQuestion className="mx-auto size-8 text-warning" /><p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">{error}</p><ActionButton className="mt-4" onClick={() => { if (kind === "text") void reloadText(); else if (kind === "office") void reloadOffice(); }}><RefreshCw className="size-4" />Повторить</ActionButton></div></div>
           ) : kind === "text" && textFile?.binary ? (
             <div className="grid h-full min-h-64 place-items-center p-6 text-center" role="status"><div><FileQuestion className="mx-auto size-9 text-muted-foreground" /><h3 className="mt-3 font-semibold">Этот файл не является обычным текстом</h3><p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Откройте оригинал в приложении для этого формата.</p></div></div>
           ) : kind === "image" ? (

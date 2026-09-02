@@ -100,7 +100,8 @@ class AudioTranscriptionRequest(BaseModel):
 class ManagedFileUpload(BaseModel):
     path: str
     data_url: str
-    overwrite: bool = True
+    overwrite: bool = False
+    expected_revision: Optional[str] = None
 
 
 class ChatImageUpload(BaseModel):
@@ -112,9 +113,25 @@ class ManagedDirectoryCreate(BaseModel):
     path: str
 
 
-class ManagedFileDelete(BaseModel):
+class ManagedTextWrite(BaseModel):
     path: str
-    recursive: bool = False
+    content: str
+    expected_sha256: str
+
+
+class ManagedFileRename(BaseModel):
+    path: str
+    new_name: str
+    expected_revision: str
+
+
+class ManagedFileTrash(BaseModel):
+    path: str
+    expected_revision: str
+
+
+class ManagedTrashAction(BaseModel):
+    trash_id: str
 
 
 # --- from web_server.py (originally lines 1398-1491) ---
@@ -752,4 +769,3 @@ class _PluginProvidersPutBody(BaseModel):
 
 class _PluginVisibilityBody(BaseModel):
     hidden: bool
-

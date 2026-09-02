@@ -521,7 +521,12 @@ export const api = {
         expected_sha256: expectedSha256,
       }),
     }),
-  uploadFile: (path: string, file: File, overwrite = false) => {
+  uploadFile: (
+    path: string,
+    file: File,
+    overwrite = false,
+    expectedRevision?: string,
+  ) => {
     // Stream the raw bytes as multipart/form-data. Do NOT set Content-Type —
     // the browser adds the multipart boundary automatically. Sending the file
     // as base64 JSON (the old path) inflated the body ~33%, buffered the whole
@@ -530,6 +535,7 @@ export const api = {
     const form = new FormData();
     form.append("path", path);
     form.append("overwrite", String(overwrite));
+    if (expectedRevision) form.append("expected_revision", expectedRevision);
     form.append("file", file, file.name);
     return fetchJSON<ManagedFileWriteResponse>("/api/files/upload-stream", {
       method: "POST",
@@ -542,14 +548,8 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path }),
     }),
-  deleteFile: (path: string, recursive = false) =>
-    fetchJSON<{ ok: boolean; path: string }>("/api/files", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, recursive }),
-    }),
-  renameOwnerFile: (path: string, newName: string, expectedRevision: string) =>
-    fetchJSON<{ ok: true; entry: ManagedFileEntry }>("/api/owner/files/rename", {
+  renameFile: (path: string, newName: string, expectedRevision: string) =>
+    fetchJSON<{ ok: true; entry: ManagedFileEntry }>("/api/files/rename", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -558,22 +558,24 @@ export const api = {
         expected_revision: expectedRevision,
       }),
     }),
-  trashOwnerFile: (path: string, expectedRevision: string) =>
-    fetchJSON<{ ok: true; trash_id: string; name: string }>("/api/owner/files/trash", {
+  trashFile: (path: string, expectedRevision: string) =>
+    fetchJSON<{ ok: true; trash_id: string; name: string }>("/api/files/trash", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, expected_revision: expectedRevision }),
     }),
-  listOwnerTrash: () =>
-    fetchJSON<{ entries: OwnerTrashEntry[] }>("/api/owner/files/trash"),
-  restoreOwnerTrash: (trashId: string) =>
-    fetchJSON<{ ok: true; name: string }>("/api/owner/files/trash/restore", {
+  listTrash: (offset = 0, limit = 100) =>
+    fetchJSON<ManagedTrashResponse>(
+      `/api/files/trash?offset=${encodeURIComponent(offset)}&limit=${encodeURIComponent(limit)}`,
+    ),
+  restoreTrash: (trashId: string) =>
+    fetchJSON<{ ok: true; name: string }>("/api/files/trash/restore", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ trash_id: trashId }),
     }),
-  purgeOwnerTrash: (trashId: string) =>
-    fetchJSON<{ ok: true; name: string }>("/api/owner/files/trash/purge", {
+  purgeTrash: (trashId: string) =>
+    fetchJSON<{ ok: true; name: string }>("/api/files/trash/purge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ trash_id: trashId }),
@@ -2194,12 +2196,22 @@ export interface ManagedFileEntry {
   };
 }
 
-/** Запись корзины владельца: её можно вернуть или удалить окончательно. */
-export interface OwnerTrashEntry {
+/** Запись корзины файлового менеджера: её можно вернуть или удалить окончательно. */
+export interface ManagedTrashEntry {
   trash_id: string;
   name: string;
+  original_path: string;
   trashed_at: string | null;
+  is_directory: boolean;
   size: number | null;
+}
+
+export interface ManagedTrashResponse {
+  entries: ManagedTrashEntry[];
+  offset: number;
+  limit: number;
+  total: number;
+  has_more: boolean;
 }
 
 /** Содержимое офисного файла, вынутое сервером: текст и таблицы, без вёрстки. */

@@ -8,6 +8,9 @@ import {
 } from "react";
 import {
   ArrowUp,
+  CheckCircle2,
+  ChevronRight,
+  Copy,
   Download,
   Eye,
   FileIcon,
@@ -16,8 +19,11 @@ import {
   FolderPlus,
   Pencil,
   RefreshCw,
+  Search,
   Trash2,
   Upload,
+  X,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ProductButton";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
@@ -37,7 +43,7 @@ import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { FilePreviewDialog, type PreviewFile } from "@/components/FilePreviewDialog";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { api } from "@/lib/api";
-import type { ManagedFileEntry, ManagedFilesResponse, OwnerTrashEntry } from "@/lib/api";
+import type { ManagedFileEntry, ManagedFilesResponse, ManagedTrashEntry } from "@/lib/api";
 import {
   getOwnerTimeZone,
   isClientUiMode,
@@ -46,7 +52,27 @@ import {
 import { productNavLabel } from "@/lib/product-nav";
 import { artifactUrl } from "@/lib/chat-artifacts";
 import { ownerFacingError } from "@/lib/owner-facing-error";
+import {
+  availableCopyName,
+  buildFileBreadcrumbs,
+  filterAndSortFileEntries,
+  type FileSortMode,
+} from "@/lib/file-manager";
 import { PluginSlot } from "@/plugins";
+
+type UploadStatus = "waiting" | "uploading" | "choice" | "done" | "failed" | "cancelled";
+const TRASH_PAGE_SIZE = 50;
+
+interface UploadItem {
+  id: string;
+  file: File;
+  targetDirectory: string;
+  existingNames: string[];
+  existingRevision?: string;
+  status: UploadStatus;
+  uploadedName?: string;
+  message?: string;
+}
 
 function joinPath(base: string, name: string): string {
   const cleanName = name.trim().replace(/^[\\/]+/, "");
@@ -58,10 +84,10 @@ function joinPath(base: string, name: string): string {
 
 function formatBytes(size: number | null): string {
   if (size === null) return "-";
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (size < 1024) return `${size} Б`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} КБ`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} МБ`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} ГБ`;
 }
 
 function filesRootLabel(): string {
@@ -101,40 +127,68 @@ function clientEntryLabel(name: string): string {
 }
 
 /**
- * Корзина владельца.
+ * Корзина файлового менеджера.
  *
  * До этого файл уходил в `.trash` и исчезал из интерфейса навсегда: вернуть
  * его или удалить окончательно было нельзя ничем, кроме доступа к серверу.
  * «Удалить» без видимой корзины — это обещание, которое продукт не выполнял.
  */
-function OwnerTrash({ onRestored }: { onRestored: () => void }) {
-  const [entries, setEntries] = useState<OwnerTrashEntry[] | null>(null);
+function FileTrash({
+  onRestored,
+  refreshVersion,
+}: {
+  onRestored: () => void;
+  refreshVersion: number;
+}) {
+  const [entries, setEntries] = useState<ManagedTrashEntry[] | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [pendingPurge, setPendingPurge] = useState<OwnerTrashEntry | null>(null);
+  const [pendingPurge, setPendingPurge] = useState<ManagedTrashEntry | null>(null);
 
-  const reload = useCallback(() => {
-    api.listOwnerTrash()
-      .then((payload) => setEntries(payload.entries))
-      .catch((exception) => setError(ownerFacingError(exception, "Не удалось открыть корзину.")));
+  const reload = useCallback(async () => {
+    try {
+      const payload = await api.listTrash(0, TRASH_PAGE_SIZE);
+      setEntries(payload.entries);
+      setTotal(payload.total);
+      setError(null);
+    } catch (exception) {
+      setError(ownerFacingError(exception, "Не удалось открыть корзину."));
+    }
   }, []);
 
-  useEffect(() => {
-    reload();
-  }, [reload]);
+  const loadMore = async () => {
+    if (!entries || entries.length >= total || loadingMore) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const payload = await api.listTrash(entries.length, TRASH_PAGE_SIZE);
+      setEntries((current) => [...(current ?? []), ...payload.entries]);
+      setTotal(payload.total);
+    } catch (exception) {
+      setError(ownerFacingError(exception, "Не удалось загрузить остальные файлы."));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
-  const act = async (entry: OwnerTrashEntry, action: "restore" | "purge") => {
+  useEffect(() => {
+    void reload();
+  }, [reload, refreshVersion]);
+
+  const act = async (entry: ManagedTrashEntry, action: "restore" | "purge") => {
     setBusy(entry.trash_id);
     setError(null);
     try {
       if (action === "restore") {
-        await api.restoreOwnerTrash(entry.trash_id);
+        await api.restoreTrash(entry.trash_id);
         onRestored();
       } else {
-        await api.purgeOwnerTrash(entry.trash_id);
+        await api.purgeTrash(entry.trash_id);
       }
-      reload();
+      await reload();
     } catch (exception) {
       setError(
         ownerFacingError(
@@ -148,7 +202,8 @@ function OwnerTrash({ onRestored }: { onRestored: () => void }) {
     }
   };
 
-  if (!entries || entries.length === 0) return null;
+  if ((!entries || entries.length === 0) && !error) return null;
+  const trashCount = total;
 
   return (
     <Card className="min-w-0 max-w-full overflow-hidden rounded-xl">
@@ -162,7 +217,7 @@ function OwnerTrash({ onRestored }: { onRestored: () => void }) {
           <Trash2 className="size-4 text-muted-foreground" aria-hidden />
           <span className="flex-1 text-sm font-medium">Корзина</span>
           <span className="text-xs text-muted-foreground">
-            {entries.length === 1 ? "1 файл" : `${entries.length} файла(ов)`}
+            {trashCount === 0 ? "Нет данных" : trashCount === 1 ? "1 объект" : `${trashCount} объектов`}
           </span>
         </button>
         {open ? (
@@ -171,11 +226,14 @@ function OwnerTrash({ onRestored }: { onRestored: () => void }) {
               <p className="px-4 py-3 text-sm text-destructive" role="alert">{error}</p>
             ) : null}
             <p className="px-4 pt-3 text-xs text-muted-foreground">
-              Отсюда файл можно вернуть в «Мои загрузки» или удалить окончательно.
+              Объекты можно вернуть на прежнее место или удалить окончательно.
             </p>
-            {entries.map((entry) => (
+            {(entries ?? []).map((entry) => (
               <div key={entry.trash_id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <span className="min-w-0 flex-1 truncate text-sm">{entry.name}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{entry.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{entry.original_path}</span>
+                </span>
                 <Button
                   type="button"
                   size="xs"
@@ -197,6 +255,20 @@ function OwnerTrash({ onRestored }: { onRestored: () => void }) {
                 </Button>
               </div>
             ))}
+            {(entries?.length ?? 0) < total ? (
+              <div className="border-t border-border/60 px-4 py-3 text-center">
+                <Button
+                  type="button"
+                  size="xs"
+                  outlined
+                  disabled={loadingMore}
+                  onClick={() => void loadMore()}
+                  prefix={loadingMore ? <Spinner /> : undefined}
+                >
+                  Показать ещё
+                </Button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </CardContent>
@@ -204,7 +276,7 @@ function OwnerTrash({ onRestored }: { onRestored: () => void }) {
         open={Boolean(pendingPurge)}
         loading={busy !== null}
         onCancel={() => setPendingPurge(null)}
-        title="Удалить файл навсегда?"
+        title="Удалить навсегда?"
         description={`«${pendingPurge?.name ?? ""}» будет удалён без возможности восстановления.`}
         confirmLabel="Удалить навсегда"
         onConfirm={() => { if (pendingPurge) void act(pendingPurge, "purge"); }}
@@ -221,14 +293,20 @@ export default function FilesPage() {
   const { setAfterTitle, setEnd } = usePageHeader();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
+  const listRequestRef = useRef(0);
   const [currentPath, setCurrentPath] = useState<string | undefined>(() =>
     clientMode ? "client" : undefined,
   );
+  const currentPathRef = useRef(currentPath);
   const [pathInput, setPathInput] = useState("");
   const [listing, setListing] = useState<ManagedFilesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [resolvingCollision, setResolvingCollision] = useState(false);
+  const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortMode, setSortMode] = useState<FileSortMode>("name");
   const [creating, setCreating] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -239,6 +317,7 @@ export default function FilesPage() {
   const [renaming, setRenaming] = useState(false);
   const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [trashRefreshVersion, setTrashRefreshVersion] = useState(0);
   const dateFormat = useMemo(() => new Intl.DateTimeFormat("ru-RU", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -247,43 +326,69 @@ export default function FilesPage() {
 
   const activePath = listing?.path ?? currentPath ?? "";
   const canChangePath = listing?.can_change_path ?? false;
+  const managedRoot = listing?.locked_root ?? listing?.root;
+  const breadcrumbs = useMemo(
+    () => buildFileBreadcrumbs(managedRoot, activePath, filesRootLabel()),
+    [activePath, managedRoot],
+  );
   const rawHeaderPath = displayPath(listing?.locked_root ?? listing?.path ?? currentPath);
-  const headerPath = clientMode ? clientDisplayPath(activePath) : rawHeaderPath;
+  const headerPath = clientMode
+    ? clientDisplayPath(activePath)
+    : canChangePath
+      ? rawHeaderPath
+      : breadcrumbs.map((item) => item.label).join(" / ");
   const normalizedActivePath = activePath.replaceAll("\\", "/").replace(/\/$/, "");
   const isAtClientRoot =
     clientMode && /(?:^|\/)home\/client$/.test(normalizedActivePath);
   const isInClientInbox =
     clientMode && /(?:^|\/)home\/client\/inbox(?:\/|$)/.test(normalizedActivePath);
+  const currentCollision = uploadItems.find((item) => item.status === "choice") ?? null;
   const canUpload =
-    Boolean(activePath) && !uploading && (!clientMode || isInClientInbox);
-  const visibleEntries = listing?.entries.filter((entry) => {
+    Boolean(activePath) && !uploading && !currentCollision && (!clientMode || isInClientInbox);
+  const baseEntries = useMemo(() => (listing?.entries ?? []).filter((entry) => {
     if (!clientMode) return true;
     if (entry.name.startsWith(".") || entry.name.endsWith(".meta.json")) return false;
     return !isAtClientRoot || ["artifacts", "inbox"].includes(entry.name);
-  });
+  }), [clientMode, isAtClientRoot, listing?.entries]);
+  const visibleEntries = useMemo(
+    () => filterAndSortFileEntries(baseEntries, searchQuery, sortMode),
+    [baseEntries, searchQuery, sortMode],
+  );
+  const uploadActive = uploadItems.some((item) =>
+    ["waiting", "uploading", "choice"].includes(item.status),
+  );
+
+  const navigateTo = useCallback((path: string | undefined) => {
+    currentPathRef.current = path;
+    setCurrentPath(path);
+  }, []);
 
   const load = useCallback(
-    async (path = currentPath) => {
+    async (path?: string) => {
+      const requestedPath = path === undefined ? currentPathRef.current : path;
+      const requestId = ++listRequestRef.current;
       setLoading(true);
       setError(null);
       try {
-        const result = await api.listFiles(path);
+        const result = await api.listFiles(requestedPath);
+        if (requestId !== listRequestRef.current) return;
         setListing(result);
+        currentPathRef.current = result.path;
         setCurrentPath(result.path);
         setPathInput(result.path);
       } catch (e) {
+        if (requestId !== listRequestRef.current) return;
         setError(ownerFacingError(e, "Не удалось загрузить список файлов."));
       } finally {
-        setLoading(false);
+        if (requestId === listRequestRef.current) setLoading(false);
       }
     },
-    [currentPath],
+    [],
   );
 
   useEffect(() => {
     // Existing dashboard data pages fetch from effects; keep this local and explicit
     // until the shared lint profile is updated for async page loaders.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load(currentPath);
   }, [currentPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -291,7 +396,7 @@ export default function FilesPage() {
     // В корне путь совпадает с названием экрана, и бейдж рядом с заголовком
     // повторял «Файлы» вторым словом — шапка сообщала одно и то же дважды.
     // Показываем путь только когда человек ушёл вглубь.
-    const atRoot = clientMode && headerPath === filesRootLabel();
+    const atRoot = breadcrumbs.length === 1 && !canChangePath;
     setAfterTitle(
       atRoot ? null : (
         <span
@@ -320,11 +425,11 @@ export default function FilesPage() {
       setAfterTitle(null);
       setEnd(null);
     };
-  }, [clientMode, headerPath, load, loading, setAfterTitle, setEnd]);
+  }, [breadcrumbs.length, canChangePath, headerPath, load, loading, setAfterTitle, setEnd]);
 
   const openDirectory = (entry: ManagedFileEntry) => {
     if (entry.is_directory) {
-      setCurrentPath(entry.path);
+      navigateTo(entry.path);
     }
   };
 
@@ -363,31 +468,107 @@ export default function FilesPage() {
 
   const uploadFiles = async (files: FileList | null) => {
     if (!files?.length) return;
+    const uploadPath = activePath;
+    const batch = Array.from(files).map((file, index): UploadItem => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${index}`,
+      file,
+      targetDirectory: uploadPath,
+      existingNames: baseEntries.map((entry) => entry.name),
+      existingRevision: baseEntries.find((entry) => entry.name === file.name)?.revision ?? undefined,
+      status: "waiting",
+    }));
+    setUploadItems(batch);
     setUploading(true);
-    const succeeded: string[] = [];
-    const failed: string[] = [];
-    for (const file of Array.from(files)) {
+    let succeeded = 0;
+    for (const item of batch) {
+      setUploadItems((current) => current.map((candidate) =>
+        candidate.id === item.id ? { ...candidate, status: "uploading" } : candidate,
+      ));
       try {
-        await api.uploadFile(joinPath(activePath, file.name), file, !clientMode);
-        succeeded.push(file.name);
-      } catch {
-        failed.push(file.name);
+        await api.uploadFile(joinPath(uploadPath, item.file.name), item.file, false);
+        succeeded += 1;
+        setUploadItems((current) => current.map((candidate) =>
+          candidate.id === item.id
+            ? { ...candidate, status: "done", uploadedName: item.file.name }
+            : candidate,
+        ));
+      } catch (exception) {
+        const collision = exception instanceof Error && /^409:/.test(exception.message);
+        let existingRevision = item.existingRevision;
+        if (collision) {
+          try {
+            const freshListing = await api.listFiles(uploadPath);
+            existingRevision = freshListing.entries.find(
+              (entry) => entry.name === item.file.name,
+            )?.revision ?? undefined;
+          } catch {
+            // The collision remains actionable as cancel/copy. Replacement is
+            // refused server-side unless we have a fresh optimistic revision.
+          }
+        }
+        setUploadItems((current) => current.map((candidate) =>
+          candidate.id === item.id
+            ? {
+                ...candidate,
+                status: collision ? "choice" : "failed",
+                existingRevision,
+                message: collision
+                  ? "Файл с таким именем уже есть"
+                  : ownerFacingError(exception, "Не удалось загрузить файл."),
+              }
+            : candidate,
+        ));
       }
     }
     try {
-      if (succeeded.length > 0) {
-        showToast(`Загружено файлов: ${succeeded.length}`, "success");
-      }
-      if (failed.length > 0) {
-        showToast(
-          `Не загружено: ${failed.join(", ")}. Проверьте имена или совпадения.`,
-          "error",
-        );
-      }
+      if (succeeded > 0) showToast(`Загружено файлов: ${succeeded}`, "success");
       await load();
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const resolveCollision = async (action: "replace" | "copy" | "cancel") => {
+    if (!currentCollision || resolvingCollision) return;
+    if (action === "cancel") {
+      setUploadItems((current) => current.map((item) =>
+        item.id === currentCollision.id
+          ? { ...item, status: "cancelled", message: "Загрузка отменена" }
+          : item,
+      ));
+      return;
+    }
+    setResolvingCollision(true);
+    const knownNames = [
+      ...currentCollision.existingNames,
+      ...uploadItems.flatMap((item) => item.uploadedName ? [item.uploadedName] : []),
+    ];
+    const nextName = action === "copy"
+      ? availableCopyName(currentCollision.file.name, knownNames)
+      : currentCollision.file.name;
+    try {
+      await api.uploadFile(
+        joinPath(currentCollision.targetDirectory, nextName),
+        currentCollision.file,
+        action === "replace",
+        action === "replace" ? currentCollision.existingRevision : undefined,
+      );
+      setUploadItems((current) => current.map((item) =>
+        item.id === currentCollision.id
+          ? { ...item, status: "done", uploadedName: nextName, message: undefined }
+          : item,
+      ));
+      showToast(action === "replace" ? "Файл заменён" : `Сохранено как «${nextName}»`, "success");
+      await load();
+    } catch (exception) {
+      setUploadItems((current) => current.map((item) =>
+        item.id === currentCollision.id
+          ? { ...item, status: "failed", message: ownerFacingError(exception, "Не удалось загрузить файл.") }
+          : item,
+      ));
+    } finally {
+      setResolvingCollision(false);
     }
   };
 
@@ -437,23 +618,22 @@ export default function FilesPage() {
       name: clientEntryLabel(entry.name),
       path: entry.path,
       mimeType: entry.mime_type,
-      expectedSha256: entry.revision,
     });
   };
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
+    if (!pendingDelete.capabilities?.trash || !pendingDelete.revision) {
+      showToast("Этот объект нельзя переместить в корзину.", "error");
+      setPendingDelete(null);
+      return;
+    }
     setDeleting(true);
     try {
-      if (clientMode) {
-        if (!pendingDelete.revision) throw new Error("Обновите список и повторите.");
-        await api.trashOwnerFile(pendingDelete.path, pendingDelete.revision);
-        showToast("Файл перемещён в корзину", "success");
-      } else {
-        await api.deleteFile(pendingDelete.path, pendingDelete.is_directory);
-        showToast("Удалено", "success");
-      }
+      await api.trashFile(pendingDelete.path, pendingDelete.revision);
+      showToast("Перемещено в корзину", "success");
       setPendingDelete(null);
+      setTrashRefreshVersion((version) => version + 1);
       await load();
     } catch (e) {
       showToast(ownerFacingError(e, "Не удалось удалить файл."), "error");
@@ -471,8 +651,8 @@ export default function FilesPage() {
     }
     setRenaming(true);
     try {
-      await api.renameOwnerFile(renameEntry.path, nextName, renameEntry.revision);
-      showToast("Файл переименован", "success");
+      await api.renameFile(renameEntry.path, nextName, renameEntry.revision);
+      showToast(renameEntry.is_directory ? "Папка переименована" : "Файл переименован", "success");
       setRenameEntry(null);
       setRenameName("");
       await load();
@@ -516,9 +696,21 @@ export default function FilesPage() {
             </Button>
           </form>
         ) : (
-          <div className="min-w-0 truncate text-sm text-text-secondary" title={headerPath}>
-            {headerPath}
-          </div>
+          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm" aria-label="Путь к папке">
+            {breadcrumbs.map((item, index) => (
+              <span key={item.path} className="flex shrink-0 items-center gap-1">
+                {index > 0 ? <ChevronRight className="size-3.5 text-text-tertiary" aria-hidden /> : null}
+                <button
+                  type="button"
+                  onClick={() => navigateTo(item.path)}
+                  disabled={index === breadcrumbs.length - 1}
+                  className="min-h-9 rounded-md px-2 font-medium text-text-secondary hover:bg-background/45 hover:text-foreground disabled:text-foreground"
+                >
+                  {clientEntryLabel(item.label)}
+                </button>
+              </span>
+            ))}
+          </nav>
         )}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {(!clientMode || isInClientInbox) && (
@@ -572,8 +764,8 @@ export default function FilesPage() {
               <span className="block text-sm font-semibold text-foreground">
                 {uploading ? "Загрузка" : draggingFiles ? "Отпустите файлы" : "Перетащите файлы сюда"}
               </span>
-              <span className="block truncate text-xs text-text-secondary" title={clientDisplayPath(activePath)}>
-                {clientDisplayPath(activePath)}
+              <span className="block truncate text-xs text-text-secondary" title={headerPath}>
+                {headerPath} · до 100 МБ на файл
               </span>
             </span>
           </span>
@@ -590,7 +782,72 @@ export default function FilesPage() {
         </p>
       )}
 
-      {clientMode && isInClientInbox ? <OwnerTrash onRestored={() => void load()} /> : null}
+      {uploadItems.length > 0 ? (
+        <Card className="min-w-0 max-w-full overflow-hidden rounded-xl" aria-live="polite">
+          <CardContent className="p-0">
+            <div className="flex min-h-12 items-center justify-between gap-3 border-b border-border px-4 py-2">
+              <span className="text-sm font-semibold">Загрузки</span>
+              {!uploadActive ? (
+                <Button ghost size="icon" type="button" onClick={() => setUploadItems([])} aria-label="Скрыть список загрузок">
+                  <X />
+                </Button>
+              ) : null}
+            </div>
+            <div className="divide-y divide-border/60">
+              {uploadItems.map((item) => (
+                <div key={item.id} className="flex min-h-12 items-center gap-3 px-4 py-2 text-sm">
+                  {item.status === "done" ? (
+                    <CheckCircle2 className="size-4 shrink-0 text-success" aria-hidden />
+                  ) : item.status === "failed" || item.status === "cancelled" ? (
+                    <XCircle className="size-4 shrink-0 text-destructive" aria-hidden />
+                  ) : item.status === "uploading" ? (
+                    <Spinner />
+                  ) : (
+                    <Upload className="size-4 shrink-0 text-text-tertiary" aria-hidden />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{item.uploadedName ?? item.file.name}</span>
+                  <span className="shrink-0 text-xs text-text-secondary">
+                    {item.status === "waiting" ? "Ожидает" :
+                      item.status === "uploading" ? "Загружается" :
+                        item.status === "choice" ? "Нужен выбор" :
+                          item.status === "done" ? "Готово" : item.message ?? "Не загружено"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <FileTrash
+        onRestored={() => void load()}
+        refreshVersion={trashRefreshVersion}
+      />
+
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        <label className="relative min-w-0 flex-1">
+          <span className="sr-only">Поиск файлов</span>
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-tertiary" aria-hidden />
+          <Input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Найти файл или папку"
+            className="h-10 pl-9"
+          />
+        </label>
+        <label className="flex min-h-10 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm text-text-secondary">
+          <span>Сортировка</span>
+          <select
+            value={sortMode}
+            onChange={(event) => setSortMode(event.target.value as FileSortMode)}
+            className="min-h-8 rounded bg-transparent font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            <option value="name">По имени</option>
+            <option value="modified">Сначала новые</option>
+            <option value="size">По размеру</option>
+          </select>
+        </label>
+      </div>
 
       <Card className="min-w-0 max-w-full overflow-hidden rounded-xl">
         <CardContent className="p-0">
@@ -603,7 +860,7 @@ export default function FilesPage() {
             </div>
           )}
 
-          <div className="hidden grid-cols-[minmax(12rem,1fr)_7rem_10rem_8rem] items-center gap-3 border-b border-border px-4 py-3 text-xs font-semibold text-text-tertiary sm:grid">
+          <div className="hidden grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem] items-center gap-3 border-b border-border px-4 py-3 text-xs font-semibold text-text-tertiary md:grid">
             <span>Название</span>
             <span>Размер</span>
             <span>Изменено</span>
@@ -613,16 +870,16 @@ export default function FilesPage() {
           {listing?.parent && !isAtClientRoot && (
             <button
               type="button"
-              onClick={() => setCurrentPath(listing.parent ?? undefined)}
-              className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-left text-sm transition-colors hover:bg-background/40 sm:grid-cols-[minmax(12rem,1fr)_7rem_10rem_8rem]"
+              onClick={() => navigateTo(listing.parent ?? undefined)}
+              className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-left text-sm transition-colors hover:bg-background/40 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem]"
             >
               <span className="flex min-w-0 items-center gap-2 font-mono text-text-secondary">
                 <ArrowUp className="h-4 w-4 shrink-0 text-text-tertiary" />
                 ..
               </span>
-              <span className="hidden sm:block" />
-              <span className="hidden sm:block" />
-              <span className="hidden sm:block" />
+              <span className="hidden md:block" />
+              <span className="hidden md:block" />
+              <span className="hidden md:block" />
             </button>
           )}
 
@@ -631,17 +888,19 @@ export default function FilesPage() {
               <Spinner />
               Загрузка файлов...
             </div>
-          ) : !error && listing && visibleEntries?.length === 0 ? (
+          ) : !error && listing && visibleEntries.length === 0 ? (
             <div className="px-5 py-12 text-center text-sm text-muted-foreground">
-              {isInClientInbox
+              {searchQuery.trim()
+                ? `По запросу «${searchQuery.trim()}» ничего не найдено.`
+                : isInClientInbox
                 ? "Здесь появятся ваши исходники. Нажмите «Загрузить» или перетащите файлы в область выше."
-                : "Здесь появятся готовые материалы после следующей сборки Корры."}
+                : "Папка пуста. Загрузите файлы или создайте новую папку."}
             </div>
           ) : (
-            visibleEntries?.map((entry) => (
+            visibleEntries.map((entry) => (
               <div
                 key={entry.path}
-                className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-sm last:border-b-0 hover:bg-background/35 sm:grid-cols-[minmax(12rem,1fr)_7rem_10rem_8rem]"
+                className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-sm last:border-b-0 hover:bg-background/35 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem]"
               >
                 <button
                   type="button"
@@ -655,13 +914,13 @@ export default function FilesPage() {
                   )}
                   <span className="min-w-0">
                     <span className="block truncate font-medium">{clientEntryLabel(entry.name)}</span>
-                    <span className="mt-0.5 block truncate text-xs text-muted-foreground sm:hidden">
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground md:hidden">
                       {formatBytes(entry.size)} · {Number.isFinite(entry.mtime) ? dateFormat.format(entry.mtime * 1000) : "Дата неизвестна"}
                     </span>
                   </span>
                 </button>
-                <span className="hidden text-xs tabular-nums text-text-secondary sm:block">{formatBytes(entry.size)}</span>
-                <span className="hidden truncate text-xs text-text-secondary sm:block">
+                <span className="hidden text-xs tabular-nums text-text-secondary md:block">{formatBytes(entry.size)}</span>
+                <span className="hidden truncate text-xs text-text-secondary md:block">
                   {Number.isFinite(entry.mtime) ? dateFormat.format(entry.mtime * 1000) : "-"}
                 </span>
                 <span className="flex justify-end gap-1">
@@ -695,38 +954,36 @@ export default function FilesPage() {
                       >
                         <Download />
                       </Button>
-                      {clientMode && entry.capabilities?.rename && entry.revision && (
-                        <Button
-                          ghost
-                          size="icon"
-                          type="button"
-                          onClick={() => {
-                            setRenameEntry(entry);
-                            setRenameName(entry.name);
-                          }}
-                          aria-label={`Переименовать ${entry.name}`}
-                        >
-                          <Pencil />
-                        </Button>
-                      )}
                     </>
                   )}
-                  {(!clientMode || (entry.capabilities?.trash && entry.revision)) && (
+                  {entry.capabilities?.rename && entry.revision ? (
+                    <Button
+                      ghost
+                      size="icon"
+                      type="button"
+                      onClick={() => {
+                        setRenameEntry(entry);
+                        setRenameName(entry.name);
+                      }}
+                      aria-label={`Переименовать ${entry.name}`}
+                    >
+                      <Pencil />
+                    </Button>
+                  ) : null}
+                  {entry.capabilities?.trash && entry.revision ? (
                     <Button
                       ghost
                       size="icon"
                       type="button"
                       onClick={() => setPendingDelete(entry)}
-                      aria-label={
-                        clientMode
-                          ? `Переместить ${entry.name} в корзину`
-                          : `Удалить ${entry.name}`
-                      }
+                      aria-label={entry.capabilities?.trash
+                        ? `Переместить ${entry.name} в корзину`
+                        : `Удалить ${entry.name}`}
                       className="text-destructive hover:text-destructive"
                     >
                       <Trash2 />
                     </Button>
-                  )}
+                  ) : null}
                 </span>
               </div>
             ))
@@ -735,6 +992,48 @@ export default function FilesPage() {
       </Card>
 
       <PluginSlot name="files:bottom" />
+
+      <Dialog
+        open={Boolean(currentCollision)}
+        onOpenChange={(open) => {
+          if (!open && !resolvingCollision) void resolveCollision("cancel");
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Файл с таким именем уже есть</DialogTitle>
+            <DialogDescription>
+              {currentCollision?.existingRevision
+                ? `Выберите, что сделать с «${currentCollision.file.name}».`
+                : "Не удалось подтвердить текущую версию файла. Сохраните копию или отмените загрузку."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 p-4">
+            <Button
+              type="button"
+              outlined
+              disabled={resolvingCollision}
+              onClick={() => void resolveCollision("copy")}
+              prefix={<Copy />}
+            >
+              Сохранить копию
+            </Button>
+            <Button
+              type="button"
+              disabled={resolvingCollision || !currentCollision?.existingRevision}
+              onClick={() => void resolveCollision("replace")}
+              prefix={resolvingCollision ? <Spinner /> : <RefreshCw />}
+            >
+              Заменить файл
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button type="button" ghost disabled={resolvingCollision} onClick={() => void resolveCollision("cancel")}>
+              Отмена
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={createDialogOpen}
@@ -748,7 +1047,7 @@ export default function FilesPage() {
           <DialogHeader>
             <DialogTitle>Создать папку</DialogTitle>
             <DialogDescription>
-              Путь: {activePath || "Загрузка"}
+              В папке: {headerPath || filesRootLabel()}
             </DialogDescription>
           </DialogHeader>
           <div className="p-4">
@@ -792,23 +1091,9 @@ export default function FilesPage() {
         loading={deleting}
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => void confirmDelete()}
-        title={
-          clientMode
-            ? pendingDelete
-              ? `Убрать ${pendingDelete.name}?`
-              : "Убрать файл?"
-            : pendingDelete
-              ? `Удалить ${pendingDelete.name}?`
-              : "Удалить объект?"
-        }
-        description={
-          clientMode
-            ? "Файл пропадёт из «Моих загрузок», но не удалится: он останется в корзине, и его можно вернуть."
-            : pendingDelete?.is_directory
-            ? "Папка и всё её содержимое будут удалены."
-            : "Файл будет удалён."
-        }
-        confirmLabel={clientMode ? "Переместить в корзину" : undefined}
+        title={pendingDelete ? `Переместить «${pendingDelete.name}» в корзину?` : "Переместить объект?"}
+        description="Объект переместится в корзину. Его можно будет вернуть на прежнее место."
+        confirmLabel="Переместить в корзину"
       />
 
       <Dialog
@@ -821,14 +1106,16 @@ export default function FilesPage() {
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Переименовать файл</DialogTitle>
+            <DialogTitle>
+              {renameEntry?.is_directory ? "Переименовать папку" : "Переименовать файл"}
+            </DialogTitle>
             <DialogDescription>
-              Изменится только имя файла в «Моих загрузках».
+              Содержимое останется без изменений.
             </DialogDescription>
           </DialogHeader>
           <div className="p-4">
             <label htmlFor="rename-owner-file" className="sr-only">
-              Новое имя файла
+              Новое имя
             </label>
             <Input
               id="rename-owner-file"

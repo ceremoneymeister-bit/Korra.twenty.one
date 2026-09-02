@@ -52,6 +52,7 @@ from hermes_cli.install_identity import get_install_id as _shared_get_install_id
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
+from xml.etree import ElementTree as ET
 
 import yaml
 
@@ -1785,7 +1786,10 @@ from hermes_cli.web_models import (  # noqa: F401
     ManagedFileUpload,
     ChatImageUpload,
     ManagedDirectoryCreate,
-    ManagedFileDelete,
+    ManagedTextWrite,
+    ManagedFileRename,
+    ManagedFileTrash,
+    ManagedTrashAction,
     ModelAssignment,
     MoaModelSlot,
     _MoaReferenceControls,
@@ -2267,6 +2271,7 @@ _SENSITIVE_MANAGED_DIR_NAMES = frozenset({
     "mcp-tokens",
     "pairing",
 })
+_MANAGED_INTERNAL_NAMES = frozenset({".trash"})
 
 
 def _is_sensitive_filename(name: str) -> bool:
@@ -2312,6 +2317,13 @@ def _is_sensitive_path(path: Path) -> bool:
     return any(part.lower() in _SENSITIVE_MANAGED_DIR_NAMES for part in path.parts)
 
 
+def _is_private_managed_path(path: Path) -> bool:
+    """Credential paths and file-manager internals are never direct API data."""
+    return _is_sensitive_path(path) or any(
+        part in _MANAGED_INTERNAL_NAMES for part in path.parts
+    )
+
+
 _FS_DATA_URL_MAX_BYTES = 16 * 1024 * 1024
 _FS_TEXT_SOURCE_MAX_BYTES = 64 * 1024 * 1024
 _FS_TEXT_PREVIEW_MAX_BYTES = 512 * 1024
@@ -2353,6 +2365,19 @@ _FS_PREVIEW_LANGUAGE_BY_EXT = {
     ".yml": "yaml",
     ".zsh": "shell",
 }
+_MANAGED_TEXT_PREVIEW_EXTENSIONS = frozenset({
+    *_FS_PREVIEW_LANGUAGE_BY_EXT,
+    ".markdown",
+})
+_MANAGED_TEXT_EDIT_EXTENSIONS = frozenset({
+    ".csv",
+    ".json",
+    ".md",
+    ".markdown",
+    ".txt",
+    ".yaml",
+    ".yml",
+})
 _FS_MIME_TYPES = {
     ".avi": "video/x-msvideo",
     ".bmp": "image/bmp",
@@ -2682,6 +2707,23 @@ def _resolve_managed_path(
     if ".." in candidate.parts:
         raise HTTPException(status_code=400, detail="Path cannot contain '..'")
 
+    # A locked workspace must not turn a user-visible path into a different
+    # filesystem object through a symlink.  Keep the lexical path for this
+    # check: Path.resolve() below intentionally follows links and would erase
+    # the evidence that the request traversed one.
+    if root is not None:
+        lexical = Path(os.path.abspath(candidate))
+        if not _path_is_under(root, lexical):
+            raise HTTPException(status_code=403, detail="Path outside managed files root")
+        cursor = root
+        for part in lexical.relative_to(root).parts:
+            cursor = cursor / part
+            try:
+                if cursor.is_symlink():
+                    raise HTTPException(status_code=403, detail="Символические ссылки недоступны.")
+            except OSError:
+                raise HTTPException(status_code=400, detail="Invalid path")
+
     if for_write and not candidate.exists():
         parent = _canonical_path(candidate.parent)
         resolved = parent / candidate.name
@@ -2703,29 +2745,57 @@ def _managed_response_meta(policy: ManagedFilesPolicy) -> Dict[str, Any]:
     }
 
 
+def _managed_file_revision_from_stat(st: os.stat_result) -> str:
+    material = ":".join(
+        str(value)
+        for value in (
+            st.st_dev,
+            st.st_ino,
+            st.st_mode,
+            st.st_size,
+            st.st_mtime_ns,
+            st.st_ctime_ns,
+        )
+    )
+    return hashlib.sha256(material.encode("ascii")).hexdigest()
+
+
 def _managed_file_entry(policy: ManagedFilesPolicy, target: Path) -> Dict[str, Any]:
     try:
-        resolved = target.resolve()
+        parent = target.parent.resolve(strict=True)
     except (OSError, RuntimeError):
         raise HTTPException(status_code=400, detail="Invalid path")
-    if policy.locked_root is not None and not _path_is_under(policy.locked_root, resolved):
+    literal = parent / target.name
+    if policy.locked_root is not None and not _path_is_under(policy.locked_root, literal):
         raise HTTPException(status_code=403, detail="Path outside managed files root")
 
     try:
-        st = resolved.stat()
+        st = literal.lstat()
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Could not stat path: {exc}")
+    if stat.S_ISLNK(st.st_mode):
+        raise HTTPException(status_code=403, detail="Символические ссылки недоступны.")
 
-    is_dir = resolved.is_dir()
-    mime_type = None if is_dir else (mimetypes.guess_type(resolved.name)[0] or "application/octet-stream")
-    return {
-        "name": target.name or resolved.name or str(resolved),
-        "path": str(resolved),
+    is_dir = stat.S_ISDIR(st.st_mode)
+    mime_type = None if is_dir else (mimetypes.guess_type(literal.name)[0] or "application/octet-stream")
+    entry = {
+        "name": target.name or literal.name or str(literal),
+        "path": str(literal),
         "is_directory": is_dir,
         "size": None if is_dir else st.st_size,
         "mtime": st.st_mtime,
         "mime_type": mime_type,
     }
+    hidden = literal.name.startswith(".") or _is_private_managed_path(literal)
+    mutation_root = policy.locked_root or policy.default_path
+    mutable = (
+        not hidden
+        and literal != mutation_root
+        and _path_is_under(mutation_root, literal)
+    )
+    entry["revision"] = _managed_file_revision_from_stat(st)
+    entry["capabilities"] = {"rename": mutable, "trash": mutable}
+    return entry
 
 
 def _decode_data_url(data_url: str) -> tuple[bytes, str]:
@@ -3632,27 +3702,40 @@ async def upload_chat_image(payload: ChatImageUpload, profile: Optional[str] = N
     return await asyncio.to_thread(_run)
 
 
-@app.get("/api/files")
-async def list_managed_files(request: Request, path: Optional[str] = None):
-    policy, target, display_path = _resolve_managed_path(path, request)
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Path not found")
-    if not target.is_dir():
-        raise HTTPException(status_code=400, detail="Path is not a directory")
-
+def _scan_managed_directory(
+    policy: ManagedFilesPolicy,
+    target: Path,
+) -> List[Dict[str, Any]]:
     try:
         with os.scandir(target) as scan:
             entries = [
                 _managed_file_entry(policy, Path(entry.path))
                 for entry in scan
-                if not _is_sensitive_path(Path(entry.path))
+                if entry.name not in _MANAGED_INTERNAL_NAMES
+                and not entry.is_symlink()
+                and not _is_private_managed_path(Path(entry.path))
             ]
     except PermissionError:
         raise HTTPException(status_code=403, detail="Directory is not readable")
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Could not read directory: {exc}")
-
     entries.sort(key=lambda item: (not item["is_directory"], str(item["name"]).lower()))
+    return entries
+
+
+@app.get("/api/files")
+async def list_managed_files(request: Request, path: Optional[str] = None):
+    policy, target, display_path = _resolve_managed_path(path, request)
+    if _is_private_managed_path(target):
+        raise HTTPException(status_code=403, detail="Служебная папка недоступна.")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+
+    # os.scandir + stat on thousands of entries is blocking filesystem work;
+    # keep it off the FastAPI event loop so chat/status requests stay live.
+    entries = await run_in_threadpool(_scan_managed_directory, policy, target)
     locked_root = policy.locked_root
     parent = None
     if target.parent != target and (locked_root is None or target != locked_root):
@@ -3665,6 +3748,726 @@ async def list_managed_files(request: Request, path: Optional[str] = None):
     }
 
 
+_MANAGED_FILE_MUTATION_LOCK = threading.RLock()
+_OFFICE_KINDS = {".docx": "docx", ".xlsx": "xlsx", ".pptx": "pptx"}
+_OFFICE_MAX_BLOCKS = 400
+_OFFICE_MAX_TABLE_ROWS = 100
+_OFFICE_MAX_TABLE_COLS = 64
+_OFFICE_MAX_CELL_CHARS = 500
+_OFFICE_MAX_ARCHIVE_BYTES = 20 * 1024 * 1024
+_OFFICE_MAX_ARCHIVE_MEMBERS = 2_000
+_OFFICE_MAX_UNCOMPRESSED_BYTES = 16 * 1024 * 1024
+_OFFICE_MAX_MEMBER_BYTES = 8 * 1024 * 1024
+_OFFICE_MAX_OUTPUT_CHARS = 250_000
+_OFFICE_PREVIEW_SLOTS = threading.BoundedSemaphore(2)
+
+
+def _office_text(value: Any) -> str:
+    return " ".join(str(value if value is not None else "").split())[:_OFFICE_MAX_CELL_CHARS]
+
+
+def _validate_office_archive(target: Path) -> None:
+    """Reject oversized/encrypted OOXML containers before conversion.
+
+    DOCX/XLSX/PPTX are ZIP archives. Their compressed file size alone is not a
+    useful memory bound, so the file manager applies a stricter preview budget
+    to the archive directory before handing the document to the shared Korra
+    extractor.
+    """
+    try:
+        with zipfile.ZipFile(target) as archive:
+            members = archive.infolist()
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=422, detail="Файл не является корректным документом Office.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=422, detail=f"Не удалось прочитать документ: {exc}") from exc
+    if len(members) > _OFFICE_MAX_ARCHIVE_MEMBERS:
+        raise HTTPException(status_code=413, detail="В документе слишком много вложенных частей.")
+    unpacked = 0
+    for member in members:
+        if member.flag_bits & 0x1:
+            raise HTTPException(status_code=422, detail="Документ защищён паролем.")
+        if member.file_size > _OFFICE_MAX_MEMBER_BYTES:
+            raise HTTPException(status_code=413, detail="Одна из частей документа слишком большая.")
+        unpacked += member.file_size
+        if unpacked > _OFFICE_MAX_UNCOMPRESSED_BYTES:
+            raise HTTPException(status_code=413, detail="Документ слишком большой после распаковки.")
+
+
+def _office_blocks_from_text(text: str) -> Tuple[List[Dict[str, Any]], bool]:
+    source_truncated = len(text) > _OFFICE_MAX_OUTPUT_CHARS
+    lines = text[:_OFFICE_MAX_OUTPUT_CHARS].splitlines()
+    blocks: List[Dict[str, Any]] = []
+    table_rows: List[List[str]] = []
+
+    def flush_table() -> None:
+        nonlocal table_rows
+        if not table_rows or len(blocks) >= _OFFICE_MAX_BLOCKS:
+            table_rows = []
+            return
+        width = max(len(row) for row in table_rows)
+        blocks.append({
+            "type": "table",
+            "rows": [row + [""] * (width - len(row)) for row in table_rows],
+        })
+        table_rows = []
+
+    for raw_line in lines:
+        if len(blocks) >= _OFFICE_MAX_BLOCKS:
+            source_truncated = True
+            break
+        line = raw_line.strip()
+        if not line:
+            flush_table()
+            continue
+        if "\t" in raw_line:
+            if len(table_rows) < _OFFICE_MAX_TABLE_ROWS:
+                cells = raw_line.split("\t", _OFFICE_MAX_TABLE_COLS)
+                if len(cells) > _OFFICE_MAX_TABLE_COLS:
+                    source_truncated = True
+                table_rows.append([
+                    _office_text(cell)
+                    for cell in cells[:_OFFICE_MAX_TABLE_COLS]
+                ])
+            else:
+                source_truncated = True
+            continue
+        flush_table()
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip(" ─-")
+            heading = re.sub(r"^Sheet:\s*", "Лист: ", heading, flags=re.IGNORECASE)
+            if heading:
+                blocks.append({"type": "heading", "text": _office_text(heading)})
+        else:
+            blocks.append({"type": "paragraph", "text": _office_text(line)})
+    flush_table()
+    return blocks[:_OFFICE_MAX_BLOCKS], source_truncated or len(blocks) > _OFFICE_MAX_BLOCKS
+
+
+def _extract_pptx_text(target: Path) -> str:
+    """Extract slide text from bounded OOXML without optional/network tools."""
+    drawing_ns = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    slide_pattern = re.compile(r"^ppt/slides/slide([0-9]+)\.xml$")
+    lines: List[str] = []
+    output_chars = 0
+    try:
+        with zipfile.ZipFile(target) as archive:
+            slides = sorted(
+                (
+                    (int(match.group(1)), name)
+                    for name in archive.namelist()
+                    if (match := slide_pattern.fullmatch(name))
+                ),
+                key=lambda item: item[0],
+            )
+            for slide_number, name in slides:
+                try:
+                    root = ET.fromstring(archive.read(name))
+                except (KeyError, ET.ParseError) as exc:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Не удалось прочитать слайд {slide_number}.",
+                    ) from exc
+                slide_lines = []
+                for paragraph in root.iter(f"{drawing_ns}p"):
+                    text = _office_text(
+                        "".join(node.text or "" for node in paragraph.iter(f"{drawing_ns}t"))
+                    )
+                    if text:
+                        slide_lines.append(text)
+                if not slide_lines:
+                    continue
+                lines.append(f"# Слайд {slide_number}: {slide_lines[0]}")
+                lines.extend(slide_lines[1:])
+                output_chars += sum(len(line) for line in slide_lines)
+                if output_chars >= _OFFICE_MAX_OUTPUT_CHARS:
+                    break
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=422, detail="Файл не является корректной презентацией.") from exc
+    if not lines:
+        raise HTTPException(status_code=422, detail="В презентации не найден читаемый текст.")
+    return "\n".join(lines)
+
+
+def _read_office_blocks(target: Path) -> Tuple[List[Dict[str, Any]], bool]:
+    from tools.read_extract import ExtractionError, extract_document_text
+
+    if not _OFFICE_PREVIEW_SLOTS.acquire(blocking=False):
+        raise HTTPException(
+            status_code=429,
+            detail="Сейчас открываются другие документы. Повторите через несколько секунд.",
+        )
+    try:
+        _validate_office_archive(target)
+        if target.suffix.lower() == ".pptx":
+            return _office_blocks_from_text(_extract_pptx_text(target))
+        try:
+            text = extract_document_text(str(target))
+        except ExtractionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _office_blocks_from_text(text)
+    finally:
+        _OFFICE_PREVIEW_SLOTS.release()
+
+
+@app.get("/api/files/office")
+async def read_managed_office(request: Request, path: str):
+    policy, target, display_path = _resolve_managed_path(path, request)
+    if not target.is_file() or target.is_symlink():
+        raise HTTPException(status_code=404, detail="Файл не найден.")
+    if _is_private_managed_path(target):
+        raise HTTPException(status_code=403, detail="Служебный файл нельзя открыть.")
+    kind = _OFFICE_KINDS.get(target.suffix.lower())
+    if kind is None:
+        raise HTTPException(status_code=415, detail="Этот формат не открывается текстом.")
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Не удалось проверить файл: {exc}")
+    if size > _OFFICE_MAX_ARCHIVE_BYTES:
+        raise HTTPException(status_code=413, detail="Файл слишком большой для просмотра.")
+    try:
+        blocks, truncated = await run_in_threadpool(_read_office_blocks, target)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _log.warning("office preview failed for %s: %s", target.name, exc)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Не удалось прочитать файл: он повреждён, защищён паролем "
+                "или сохранён в старом формате."
+            ),
+        )
+    return {
+        "name": target.name,
+        "path": display_path,
+        "kind": kind,
+        "blocks": blocks,
+        "truncated": truncated,
+        **_managed_response_meta(policy),
+    }
+
+
+def _managed_file_sha256(target: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with target.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Файл недоступен для чтения.")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Не удалось прочитать файл: {exc}")
+    return digest.hexdigest()
+
+
+def _managed_text_payload(
+    policy: ManagedFilesPolicy,
+    target: Path,
+    display_path: str,
+) -> Dict[str, Any]:
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Файл не найден.")
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail="Указанный путь не является файлом.")
+    if _is_private_managed_path(target):
+        raise HTTPException(status_code=403, detail="Служебный файл нельзя открыть.")
+
+    try:
+        st = target.stat()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Не удалось проверить файл: {exc}")
+    suffix = target.suffix.lower()
+    mime_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    if not (mime_type.startswith("text/") or suffix in _MANAGED_TEXT_PREVIEW_EXTENSIONS):
+        raise HTTPException(status_code=415, detail="Для этого формата нет текстового просмотра.")
+    if st.st_size > _FS_TEXT_SOURCE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Файл слишком большой для текстового просмотра.")
+
+    try:
+        with target.open("rb") as handle:
+            data = handle.read(min(st.st_size, _FS_TEXT_PREVIEW_MAX_BYTES))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Файл недоступен для чтения.")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Не удалось прочитать файл: {exc}")
+
+    binary = _fs_looks_binary(data[:4096])
+    try:
+        text = data.decode("utf-8") if not binary else ""
+    except UnicodeDecodeError:
+        binary = True
+        text = ""
+    truncated = st.st_size > _FS_TEXT_PREVIEW_MAX_BYTES
+    sha256 = hashlib.sha256(data).hexdigest() if not truncated and not binary else None
+    return {
+        "name": target.name,
+        "path": display_path,
+        "size": st.st_size,
+        "mime_type": mime_type,
+        "language": _FS_PREVIEW_LANGUAGE_BY_EXT.get(suffix, "text"),
+        "text": text,
+        "binary": binary,
+        "truncated": truncated,
+        "sha256": sha256,
+        "editable": bool(
+            not truncated
+            and not binary
+            and suffix in _MANAGED_TEXT_EDIT_EXTENSIONS
+        ),
+        **_managed_response_meta(policy),
+    }
+
+
+@app.get("/api/files/text")
+async def read_managed_text(
+    request: Request,
+    path: str,
+    expected_sha256: Optional[str] = None,
+):
+    policy, target, display_path = _resolve_managed_path(path, request)
+    if expected_sha256 is not None:
+        expected = expected_sha256.strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise HTTPException(status_code=400, detail="Некорректная контрольная сумма файла.")
+        if not hmac.compare_digest(_managed_file_sha256(target), expected):
+            raise HTTPException(status_code=409, detail="Файл изменился. Обновите список и откройте его снова.")
+    return _managed_text_payload(policy, target, display_path)
+
+
+def _replace_managed_text_atomic(target: Path, data: bytes, mode: int) -> None:
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".edit", dir=str(target.parent)
+    )
+    tmp_path = Path(tmp_name)
+    replaced = False
+    try:
+        with os.fdopen(tmp_fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, target)
+        replaced = True
+    finally:
+        if not replaced:
+            tmp_path.unlink(missing_ok=True)
+
+
+def _write_managed_text_locked(
+    policy: ManagedFilesPolicy,
+    target: Path,
+    display_path: str,
+    encoded: bytes,
+    expected: str,
+) -> Dict[str, Any]:
+    with _MANAGED_FILE_MUTATION_LOCK:
+        try:
+            st = target.stat()
+            current = target.read_bytes()
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Файл не найден.")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Файл недоступен для записи.")
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Не удалось прочитать файл: {exc}")
+        if not stat.S_ISREG(st.st_mode):
+            raise HTTPException(status_code=400, detail="Указанный путь не является файлом.")
+        if len(current) > _FS_TEXT_PREVIEW_MAX_BYTES or _fs_looks_binary(current[:4096]):
+            raise HTTPException(status_code=415, detail="Этот файл нельзя редактировать как текст.")
+        try:
+            current.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=415, detail="Файл сохранён не в UTF-8.")
+        actual = hashlib.sha256(current).hexdigest()
+        if not hmac.compare_digest(actual, expected):
+            raise HTTPException(status_code=409, detail="Файл изменился. Обновите его перед сохранением.")
+        try:
+            _replace_managed_text_atomic(target, encoded, stat.S_IMODE(st.st_mode))
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Файл недоступен для записи.")
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Не удалось сохранить файл: {exc}")
+        return {"ok": True, **_managed_text_payload(policy, target, display_path)}
+
+
+@app.put("/api/files/text")
+async def write_managed_text(payload: ManagedTextWrite, request: Request):
+    policy, target, display_path = _resolve_managed_path(payload.path, request)
+    if _is_private_managed_path(target):
+        raise HTTPException(status_code=403, detail="Служебный файл нельзя изменять.")
+    if target.suffix.lower() not in _MANAGED_TEXT_EDIT_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Этот формат нельзя редактировать здесь.")
+    expected = payload.expected_sha256.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise HTTPException(status_code=400, detail="Некорректная контрольная сумма файла.")
+    encoded = payload.content.encode("utf-8")
+    if len(encoded) > _FS_TEXT_PREVIEW_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Текст слишком большой для редактора.")
+    return await run_in_threadpool(
+        _write_managed_text_locked,
+        policy,
+        target,
+        display_path,
+        encoded,
+        expected,
+    )
+
+
+def _managed_entry_name(value: str) -> str:
+    name = str(value or "").strip()
+    if (
+        not name
+        or name in {".", ".."}
+        or name.startswith(".")
+        or "/" in name
+        or "\\" in name
+        or "\x00" in name
+    ):
+        raise HTTPException(status_code=422, detail="Укажите обычное имя без пути.")
+    if len(name) > 255:
+        raise HTTPException(status_code=422, detail="Имя слишком длинное.")
+    return name
+
+
+def _managed_mutation_target(
+    request: Request,
+    raw_path: str,
+) -> Tuple[ManagedFilesPolicy, Path, Path]:
+    policy, target, _display_path = _resolve_managed_path(raw_path, request)
+    base = policy.locked_root or policy.default_path
+    base = _canonical_path(base, require_exists=True)
+    if not _path_is_under(base, target):
+        raise HTTPException(status_code=403, detail="Файл находится вне рабочей папки.")
+    if target == base:
+        raise HTTPException(status_code=400, detail="Рабочую папку нельзя изменить.")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Файл не найден.")
+    if target.name.startswith(".") or _is_private_managed_path(target):
+        raise HTTPException(status_code=403, detail="Служебный файл нельзя изменить.")
+    return policy, base, target
+
+
+def _require_managed_revision(target: Path, expected_revision: str) -> None:
+    expected = str(expected_revision or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise HTTPException(status_code=400, detail="Некорректная версия файла.")
+    try:
+        actual = _managed_file_revision_from_stat(target.stat())
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Файл не найден.")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Не удалось проверить файл: {exc}")
+    if not hmac.compare_digest(actual, expected):
+        raise HTTPException(status_code=409, detail="Файл изменился. Обновите список и повторите.")
+
+
+def _validate_managed_upload_destination(
+    target: Path,
+    *,
+    overwrite: bool,
+    expected_revision: Optional[str],
+) -> None:
+    """Validate a publication target while the mutation lock is held."""
+    if target.exists() and target.is_dir():
+        raise HTTPException(status_code=409, detail="По этому пути уже существует папка.")
+    if not target.exists():
+        if overwrite:
+            raise HTTPException(
+                status_code=409,
+                detail="Файл уже удалён. Обновите список перед заменой.",
+            )
+        return
+    if not overwrite:
+        raise HTTPException(status_code=409, detail="Файл с таким именем уже существует.")
+    if not expected_revision:
+        raise HTTPException(
+            status_code=409,
+            detail="Файл мог измениться. Обновите список перед заменой.",
+        )
+    _require_managed_revision(target, expected_revision)
+
+
+@app.post("/api/files/rename")
+async def rename_managed_file(payload: ManagedFileRename, request: Request):
+    policy, base, target = _managed_mutation_target(request, payload.path)
+    new_name = _managed_entry_name(payload.new_name)
+    destination = target.with_name(new_name)
+    if not _path_is_under(base, destination):
+        raise HTTPException(status_code=403, detail="Новое имя выходит за рабочую папку.")
+
+    def _run() -> Dict[str, Any]:
+        with _MANAGED_FILE_MUTATION_LOCK:
+            _require_managed_revision(target, payload.expected_revision)
+            if destination.exists():
+                raise HTTPException(status_code=409, detail="Файл или папка с таким именем уже существует.")
+            try:
+                os.replace(target, destination)
+            except PermissionError:
+                raise HTTPException(status_code=403, detail="Объект недоступен для переименования.")
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Не удалось переименовать объект: {exc}")
+        return {"ok": True, "entry": _managed_file_entry(policy, destination)}
+
+    return await run_in_threadpool(_run)
+
+
+_MANAGED_TRASH_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{10}$")
+
+
+def _managed_trash_paths(request: Request) -> Tuple[ManagedFilesPolicy, Path, Path]:
+    policy = _managed_files_policy(request)
+    base = _canonical_path(policy.locked_root or policy.default_path, require_exists=True)
+    trash_root = base / ".trash"
+    try:
+        with _MANAGED_FILE_MUTATION_LOCK:
+            try:
+                os.mkdir(trash_root, 0o700)
+            except FileExistsError:
+                pass
+            try:
+                trash_stat = trash_root.lstat()
+            except OSError as exc:
+                raise HTTPException(status_code=409, detail="Корзина недоступна.") from exc
+            if stat.S_ISLNK(trash_stat.st_mode) or not stat.S_ISDIR(trash_stat.st_mode):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Корзина имеет небезопасный тип или путь.",
+                )
+            try:
+                flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+                trash_fd = os.open(trash_root, flags)
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Корзина имеет небезопасный тип или путь.",
+                ) from exc
+            try:
+                if not stat.S_ISDIR(os.fstat(trash_fd).st_mode):
+                    raise HTTPException(status_code=409, detail="Корзина не является папкой.")
+                os.fchmod(trash_fd, 0o700)
+            finally:
+                os.close(trash_fd)
+    except HTTPException:
+        raise
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Корзина недоступна для записи.")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Не удалось открыть корзину: {exc}")
+    return policy, base, trash_root
+
+
+def _write_managed_trash_meta(path: Path, payload: Dict[str, Any]) -> None:
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    published = False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        published = True
+    finally:
+        if not published:
+            tmp.unlink(missing_ok=True)
+
+
+def _read_managed_trash_meta(path: Path) -> Dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Запись корзины не найдена.")
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Запись корзины повреждена.") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Запись корзины повреждена.")
+    return payload
+
+
+def _managed_trashed_item(trash_root: Path, trash_id: str) -> Path:
+    if not _MANAGED_TRASH_ID.fullmatch(trash_id):
+        raise HTTPException(status_code=422, detail="Некорректный идентификатор корзины.")
+    matches = [
+        child
+        for child in trash_root.iterdir()
+        if child.name.startswith(f"{trash_id}__")
+    ]
+    if len(matches) != 1:
+        raise HTTPException(status_code=404, detail="Запись корзины не найдена.")
+    return matches[0]
+
+
+@app.post("/api/files/trash")
+async def trash_managed_file(payload: ManagedFileTrash, request: Request):
+    def _run() -> Dict[str, Any]:
+        _policy, base, target = _managed_mutation_target(request, payload.path)
+        _policy, _trash_base, trash_root = _managed_trash_paths(request)
+        try:
+            relative = target.relative_to(base)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Файл находится вне рабочей папки.")
+        trash_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(5)}"
+        stored = trash_root / f"{trash_id}__{target.name}"
+        meta = trash_root / f"{trash_id}.meta.json"
+        with _MANAGED_FILE_MUTATION_LOCK:
+            _require_managed_revision(target, payload.expected_revision)
+            try:
+                st = target.stat()
+                os.replace(target, stored)
+                try:
+                    _write_managed_trash_meta(meta, {
+                        "trash_id": trash_id,
+                        "name": target.name,
+                        "original_path": relative.as_posix(),
+                        "trashed_at": datetime.now(timezone.utc).isoformat(),
+                        "is_directory": stat.S_ISDIR(st.st_mode),
+                        "size": None if stat.S_ISDIR(st.st_mode) else st.st_size,
+                    })
+                except Exception:
+                    os.replace(stored, target)
+                    raise
+            except HTTPException:
+                raise
+            except PermissionError:
+                raise HTTPException(status_code=403, detail="Объект недоступен для удаления.")
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Не удалось переместить объект в корзину: {exc}")
+        return {"ok": True, "trash_id": trash_id, "name": target.name}
+
+    return await run_in_threadpool(_run)
+
+
+def _scan_managed_trash(trash_root: Path) -> List[Dict[str, Any]]:
+    """Build the trash index in one pass, off the request event loop."""
+    meta_paths: Dict[str, Path] = {}
+    stored_paths: Dict[str, Path] = {}
+    try:
+        with os.scandir(trash_root) as scan:
+            for item in scan:
+                if item.is_symlink():
+                    continue
+                name = item.name
+                if name.endswith(".meta.json"):
+                    trash_id = name.removesuffix(".meta.json")
+                    if _MANAGED_TRASH_ID.fullmatch(trash_id):
+                        meta_paths[trash_id] = Path(item.path)
+                    continue
+                trash_id, separator, _original_name = name.partition("__")
+                if separator and _MANAGED_TRASH_ID.fullmatch(trash_id):
+                    stored_paths[trash_id] = Path(item.path)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Корзина недоступна для чтения.")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Не удалось открыть корзину: {exc}")
+
+    entries: List[Dict[str, Any]] = []
+    for trash_id in sorted(meta_paths, reverse=True):
+        stored = stored_paths.get(trash_id)
+        if stored is None:
+            continue
+        try:
+            payload = _read_managed_trash_meta(meta_paths[trash_id])
+            st = stored.lstat()
+        except (HTTPException, OSError):
+            continue
+        if stat.S_ISLNK(st.st_mode):
+            continue
+        entries.append({
+            "trash_id": trash_id,
+            "name": str(payload.get("name") or stored.name.partition("__")[2]),
+            "original_path": str(payload.get("original_path") or ""),
+            "trashed_at": payload.get("trashed_at"),
+            "is_directory": stat.S_ISDIR(st.st_mode),
+            "size": None if stat.S_ISDIR(st.st_mode) else st.st_size,
+        })
+    return entries
+
+
+@app.get("/api/files/trash")
+async def list_managed_trash(request: Request, offset: int = 0, limit: int = 100):
+    if offset < 0 or limit < 1 or limit > 200:
+        raise HTTPException(status_code=422, detail="Некорректная страница корзины.")
+
+    def _run() -> Tuple[List[Dict[str, Any]], int]:
+        _policy, _base, trash_root = _managed_trash_paths(request)
+        entries = _scan_managed_trash(trash_root)
+        return entries[offset:offset + limit], len(entries)
+
+    entries, total = await run_in_threadpool(_run)
+    return {
+        "entries": entries,
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "has_more": offset + len(entries) < total,
+    }
+
+
+def _managed_restore_destination(base: Path, payload: Dict[str, Any]) -> Path:
+    raw = str(payload.get("original_path") or "")
+    relative = Path(raw)
+    if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise HTTPException(status_code=422, detail="Запись корзины содержит небезопасный путь.")
+    _managed_entry_name(relative.name)
+    destination = (base / relative).resolve(strict=False)
+    if not _path_is_under(base, destination):
+        raise HTTPException(status_code=422, detail="Запись корзины содержит небезопасный путь.")
+    if not destination.parent.is_dir():
+        raise HTTPException(status_code=409, detail="Исходная папка больше не существует.")
+    return destination
+
+
+@app.post("/api/files/trash/restore")
+async def restore_managed_trash(payload: ManagedTrashAction, request: Request):
+    def _run() -> Dict[str, Any]:
+        _policy, base, trash_root = _managed_trash_paths(request)
+        trash_id = payload.trash_id.strip()
+        with _MANAGED_FILE_MUTATION_LOCK:
+            stored = _managed_trashed_item(trash_root, trash_id)
+            meta_path = trash_root / f"{trash_id}.meta.json"
+            meta = _read_managed_trash_meta(meta_path)
+            destination = _managed_restore_destination(base, meta)
+            if destination.exists():
+                raise HTTPException(status_code=409, detail="На исходном месте уже есть файл или папка.")
+            try:
+                os.replace(stored, destination)
+                meta_path.unlink()
+            except PermissionError:
+                raise HTTPException(status_code=403, detail="Объект не удалось восстановить.")
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Не удалось восстановить объект: {exc}")
+        return {"ok": True, "trash_id": trash_id, "name": destination.name}
+
+    return await run_in_threadpool(_run)
+
+
+@app.post("/api/files/trash/purge")
+async def purge_managed_trash(payload: ManagedTrashAction, request: Request):
+    def _run() -> Dict[str, Any]:
+        _policy, _base, trash_root = _managed_trash_paths(request)
+        trash_id = payload.trash_id.strip()
+        with _MANAGED_FILE_MUTATION_LOCK:
+            stored = _managed_trashed_item(trash_root, trash_id)
+            meta_path = trash_root / f"{trash_id}.meta.json"
+            meta = _read_managed_trash_meta(meta_path)
+            try:
+                if stored.is_dir():
+                    shutil.rmtree(stored)
+                else:
+                    stored.unlink()
+                meta_path.unlink(missing_ok=True)
+            except PermissionError:
+                raise HTTPException(status_code=403, detail="Запись корзины не удалось удалить.")
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Не удалось очистить запись корзины: {exc}")
+        return {"ok": True, "trash_id": trash_id, "name": str(meta.get("name") or stored.name)}
+
+    return await run_in_threadpool(_run)
+
+
 @app.get("/api/files/read")
 async def read_managed_file(request: Request, path: str):
     policy, target, display_path = _resolve_managed_path(path, request)
@@ -3672,7 +4475,7 @@ async def read_managed_file(request: Request, path: str):
         raise HTTPException(status_code=404, detail="File not found")
     if not target.is_file():
         raise HTTPException(status_code=400, detail="Path is not a file")
-    if _is_sensitive_path(target):
+    if _is_private_managed_path(target):
         raise HTTPException(status_code=403, detail="Access to sensitive files is not allowed")
 
     try:
@@ -3706,6 +4509,8 @@ def _managed_file_response(
     *,
     content_disposition_type: str,
     media_only: bool = False,
+    inline_requested: bool = False,
+    expected_sha256: Optional[str] = None,
 ) -> FileResponse:
     """Build a range-aware response after applying managed-file policy."""
     policy, target, _display_path = _resolve_managed_path(path, request)
@@ -3713,7 +4518,7 @@ def _managed_file_response(
         raise HTTPException(status_code=404, detail="File not found")
     if not target.is_file():
         raise HTTPException(status_code=400, detail="Path is not a file")
-    if _is_sensitive_path(target):
+    if _is_private_managed_path(target):
         raise HTTPException(status_code=403, detail="Access to sensitive files is not allowed")
     if media_only and target.suffix.lower() not in _STREAMABLE_MEDIA_EXTENSIONS:
         raise HTTPException(status_code=415, detail="Unsupported media type")
@@ -3727,17 +4532,42 @@ def _managed_file_response(
 
     mime_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
 
+    if expected_sha256 is not None:
+        expected = expected_sha256.strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise HTTPException(status_code=400, detail="Некорректная контрольная сумма файла.")
+        if not hmac.compare_digest(_managed_file_sha256(target), expected):
+            raise HTTPException(status_code=409, detail="Файл изменился. Обновите список и откройте его снова.")
+
+    inline_ok = inline_requested and (
+        mime_type.startswith("image/")
+        or mime_type == "application/pdf"
+        or mime_type.startswith("audio/")
+        or mime_type.startswith("video/")
+    )
+    disposition = "inline" if inline_ok else content_disposition_type
+
     return FileResponse(
         path=str(target),
         media_type=mime_type,
         filename=target.name,
-        content_disposition_type=content_disposition_type,
-        headers={"X-Content-Type-Options": "nosniff"} if media_only else None,
+        content_disposition_type=disposition,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+            "Referrer-Policy": "no-referrer",
+            "Content-Security-Policy": "sandbox; default-src 'none'",
+        },
     )
 
 
 @app.get("/api/files/download")
-async def download_managed_file(request: Request, path: str):
+async def download_managed_file(
+    request: Request,
+    path: str,
+    inline: bool = False,
+    expected_sha256: Optional[str] = None,
+):
     """Stream a managed file as an attachment download.
 
     Remote clients (desktop app, browser dashboard) open agent-written files
@@ -3758,6 +4588,8 @@ async def download_managed_file(request: Request, path: str):
         path,
         content_disposition_type="inline" if is_media_subresource else "attachment",
         media_only=is_media_subresource,
+        inline_requested=inline or is_media_subresource,
+        expected_sha256=expected_sha256,
     )
 
 
@@ -3777,25 +4609,49 @@ async def stream_managed_file(request: Request, path: str):
         path,
         content_disposition_type="inline",
         media_only=True,
+        inline_requested=True,
     )
 
 
 @app.post("/api/files/upload")
 async def upload_managed_file(payload: ManagedFileUpload, request: Request):
     policy, target, display_path = _resolve_managed_path(payload.path, request, for_write=True)
-    if target.exists() and target.is_dir():
-        raise HTTPException(status_code=409, detail="A directory already exists at that path")
-    if target.exists() and not payload.overwrite:
-        raise HTTPException(status_code=409, detail="File already exists")
-
+    if _is_private_managed_path(target):
+        raise HTTPException(status_code=403, detail="Служебный путь недоступен для загрузки.")
     data, _mime_type = _decode_data_url(payload.data_url)
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
-    except PermissionError:
-        raise HTTPException(status_code=403, detail="File is not writable")
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Could not write file: {exc}")
+
+    def _write() -> None:
+        tmp_path: Optional[Path] = None
+        published = False
+        with _MANAGED_FILE_MUTATION_LOCK:
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                _validate_managed_upload_destination(
+                    target,
+                    overwrite=payload.overwrite,
+                    expected_revision=payload.expected_revision,
+                )
+                tmp_fd, tmp_name = tempfile.mkstemp(
+                    prefix=f".{target.name}.", suffix=".upload", dir=str(target.parent)
+                )
+                tmp_path = Path(tmp_name)
+                with os.fdopen(tmp_fd, "wb") as handle:
+                    handle.write(data)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                _publish_managed_upload(tmp_path, target, overwrite=payload.overwrite)
+                published = True
+            except HTTPException:
+                raise
+            except PermissionError:
+                raise HTTPException(status_code=403, detail="Файл недоступен для записи.")
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Не удалось записать файл: {exc}")
+            finally:
+                if tmp_path is not None and not published:
+                    tmp_path.unlink(missing_ok=True)
+
+    await run_in_threadpool(_write)
 
     return {
         "ok": True,
@@ -3815,21 +4671,40 @@ async def upload_managed_file(payload: ManagedFileUpload, request: Request):
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
+def _publish_managed_upload(tmp_path: Path, target: Path, *, overwrite: bool) -> None:
+    """Publish a completed sibling upload without a no-overwrite race."""
+    if overwrite:
+        os.replace(tmp_path, target)
+        return
+    try:
+        # A hard link is an atomic create-if-absent on the same filesystem.
+        # The temp file is deliberately created beside the destination, so a
+        # successful link cannot cross devices and no half-written target is
+        # ever visible.
+        os.link(tmp_path, target)
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail="Файл с таким именем уже существует.")
+    tmp_path.unlink()
+
+
 @app.post("/api/files/upload-stream")
 async def upload_managed_file_stream(
     request: Request,
     file: UploadFile = File(...),
     path: str = Form(...),
-    overwrite: bool = Form(True),
+    overwrite: bool = Form(False),
+    expected_revision: Optional[str] = Form(None),
 ):
     policy, target, display_path = _resolve_managed_path(path, request, for_write=True)
-    if target.exists() and target.is_dir():
-        raise HTTPException(status_code=409, detail="A directory already exists at that path")
-    if target.exists() and not overwrite:
-        raise HTTPException(status_code=409, detail="File already exists")
+    if _is_private_managed_path(target):
+        raise HTTPException(status_code=403, detail="Служебный путь недоступен для загрузки.")
+
+    def _prepare_parent() -> None:
+        with _MANAGED_FILE_MUTATION_LOCK:
+            target.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
+        await run_in_threadpool(_prepare_parent)
     except PermissionError:
         raise HTTPException(status_code=403, detail="File is not writable")
     except OSError as exc:
@@ -3853,7 +4728,16 @@ async def upload_managed_file_stream(
                 if total > _MANAGED_FILE_MAX_BYTES:
                     raise HTTPException(status_code=413, detail="File is too large")
                 out.write(chunk)
-        os.replace(tmp_path, target)
+        def _publish() -> None:
+            with _MANAGED_FILE_MUTATION_LOCK:
+                _validate_managed_upload_destination(
+                    target,
+                    overwrite=overwrite,
+                    expected_revision=expected_revision,
+                )
+                _publish_managed_upload(tmp_path, target, overwrite=overwrite)
+
+        await run_in_threadpool(_publish)
         renamed = True
     except HTTPException:
         raise
@@ -3882,47 +4766,29 @@ async def upload_managed_file_stream(
 @app.post("/api/files/mkdir")
 async def create_managed_directory(payload: ManagedDirectoryCreate, request: Request):
     policy, target, display_path = _resolve_managed_path(payload.path, request, for_write=True)
-    if target.exists() and not target.is_dir():
-        raise HTTPException(status_code=409, detail="A file already exists at that path")
+    if _is_private_managed_path(target):
+        raise HTTPException(status_code=403, detail="Служебную папку нельзя создать.")
+    def _run() -> Dict[str, Any]:
+        try:
+            with _MANAGED_FILE_MUTATION_LOCK:
+                if target.exists():
+                    raise HTTPException(status_code=409, detail="Файл или папка с таким именем уже существует.")
+                target.mkdir(parents=True, exist_ok=False)
+        except HTTPException:
+            raise
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Directory is not writable")
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Could not create directory: {exc}")
 
-    try:
-        target.mkdir(parents=True, exist_ok=True)
-    except PermissionError:
-        raise HTTPException(status_code=403, detail="Directory is not writable")
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Could not create directory: {exc}")
+        return {
+            "ok": True,
+            "entry": _managed_file_entry(policy, target),
+            "path": display_path,
+            **_managed_response_meta(policy),
+        }
 
-    return {
-        "ok": True,
-        "entry": _managed_file_entry(policy, target),
-        "path": display_path,
-        **_managed_response_meta(policy),
-    }
-
-
-@app.delete("/api/files")
-async def delete_managed_file(payload: ManagedFileDelete, request: Request):
-    policy, target, display_path = _resolve_managed_path(payload.path, request)
-    if policy.locked_root is not None and target == policy.locked_root:
-        raise HTTPException(status_code=400, detail="Cannot delete the managed files root")
-    if target.parent == target:
-        raise HTTPException(status_code=400, detail="Cannot delete the filesystem root")
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Path not found")
-
-    try:
-        if target.is_dir():
-            if payload.recursive:
-                shutil.rmtree(target)
-            else:
-                target.rmdir()
-        else:
-            target.unlink()
-    except OSError as exc:
-        status_code = 409 if target.is_dir() and not payload.recursive else 500
-        raise HTTPException(status_code=status_code, detail=f"Could not delete path: {exc}")
-
-    return {"ok": True, "path": display_path, **_managed_response_meta(policy)}
+    return await run_in_threadpool(_run)
 
 
 @app.get("/api/fs/list")
@@ -19205,7 +20071,7 @@ async def set_dashboard_theme(body: ThemeSetBody):
 
 
 # Curated font-override ids. Kept in sync with FONT_CHOICES in
-# web/src/themes/fonts.ts — the frontend owns the stacks + webfont URLs;
+# web/src/themes/fonts.ts — the frontend owns the self-hosted font stacks;
 # the backend only needs the id allow-list so it can reject anything not
 # in the vetted catalog (the font's webfont URL is injected as a <link>,
 # so we never accept an arbitrary user-supplied id/URL here).
