@@ -207,7 +207,7 @@ def launch_lightpanda(
         if os.name == "nt":
             return None, (
                 "browser.engine is 'lightpanda' but Lightpanda has no Windows "
-                "build. Set browser.engine to auto (or run Hermes under WSL2)."
+                "build. Set browser.engine to auto (or run Korra under WSL2)."
             )
         return None, (
             "browser.engine is 'lightpanda' but no lightpanda binary was found "

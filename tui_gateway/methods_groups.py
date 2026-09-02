@@ -96,7 +96,7 @@ def get_hosted_room_service():
 
 
 _WORKER_UNAVAILABLE = (
-    "Group Chat worker is unavailable. Restart the Hermes gateway and try again."
+    "Group Chat worker is unavailable. Restart the Korra gateway and try again."
 )
 
 

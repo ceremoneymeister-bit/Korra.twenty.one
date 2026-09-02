@@ -187,11 +187,11 @@ def paused_reply() -> Optional[str]:
     reason = state.get("reason")
     if reason:
         return (
-            f"⏸️ Hermes is paused ({reason}). New work is on hold; "
+            f"⏸️ Korra is paused ({reason}). New work is on hold; "
             "run `hermes resume` to pick things back up."
         )
     return (
-        "⏸️ Hermes is paused. New work is on hold; "
+        "⏸️ Korra is paused. New work is on hold; "
         "run `hermes resume` to pick things back up."
     )
 

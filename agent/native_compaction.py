@@ -162,7 +162,7 @@ def _warn_native_compaction_suppressed_by_checkpoint_gate() -> None:
     logger.warning(
         "compression.checkpoint_required is enabled: server-side native "
         "compaction (context_management) is disabled for this agent so the "
-        "checkpoint-aware Hermes compressor stays authoritative."
+        "checkpoint-aware Korra compressor stays authoritative."
     )
 
 

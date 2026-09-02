@@ -2371,7 +2371,7 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
             "Scripts run in the session's working directory. Interpreter: "
             "the project's activated venv/conda python when one is active "
             "(VIRTUAL_ENV/CONDA_PREFIX — matches terminal()); otherwise "
-            "Hermes's own python (the common case — stdlib plus Hermes's "
+            "Korra's own python (the common case — stdlib plus Korra's "
             "deps; check `import x` before relying on project packages)."
         )
 
@@ -2381,7 +2381,7 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
     # a kernel fail open to per-call silently — not worth schema words;
     # the result's `kernel` field tells the truth per call.
     description = (
-        "Run Python that calls Hermes tools programmatically. Use when you "
+        "Run Python that calls Korra tools programmatically. Use when you "
         "need 3+ tool calls with logic between them: filtering/reducing "
         "large outputs before they enter context, branching, or loops "
         "(N pages/files, retry on failure). Use normal tool calls for "

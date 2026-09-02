@@ -1446,7 +1446,7 @@ def _gateway_liveness_notice(plural: bool = False) -> dict:
         return {
             "gateway_running": False,
             "warning": (
-                f"The Hermes gateway is not running — {subject} "
+                f"The Korra gateway is not running — {subject} "
                 "but will NOT fire until the gateway is started "
                 "(hermes gateway install / hermes gateway start). "
                 "Tell the user the task is scheduled but not active yet."

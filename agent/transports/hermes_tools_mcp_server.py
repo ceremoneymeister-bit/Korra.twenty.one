@@ -173,7 +173,7 @@ def _build_server() -> Any:
     mcp = MCPServer(
         "hermes-tools",
         instructions=(
-            "Hermes Agent's tool surface, exposed for use inside a Codex "
+            "Korra's tool surface, exposed for use inside a Codex "
             "session. Use these for capabilities Codex's built-in toolset "
             "doesn't cover: web search/extract, browser automation, "
             "subagent delegation, vision, image generation, persistent "
@@ -199,7 +199,7 @@ def _build_server() -> Any:
             )
             continue
 
-        description = spec.get("description") or f"Hermes {name} tool"
+        description = spec.get("description") or f"Korra {name} tool"
         params_schema = spec.get("parameters") or {"type": "object", "properties": {}}
 
         # The SDK wants a Python callable and derives the input schema from

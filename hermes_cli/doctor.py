@@ -91,7 +91,7 @@ def _sqlite_upgrade_hint(install_method: str | None = None) -> str:
     method = install_method or detect_install_method(PROJECT_ROOT)
     if method == "docker":
         command = recommended_update_command_for_method(method)
-        action = f"run `{command}`, then recreate all Hermes containers"
+        action = f"run `{command}`, then recreate all Korra containers"
     elif is_nix_install_method(method):
         # The Nix helper is prose guidance, not a literal shell command.
         action = recommended_update_command_for_method(method)
@@ -201,7 +201,7 @@ def _report_database_journal_modes(
     try:
         databases = _hermes_database_paths(home)
     except Exception as exc:
-        check_warn(f"Could not list Hermes databases: {exc}")
+        check_warn(f"Could not list Korra databases: {exc}")
         return
     exposed = []
     for name, path in databases:
@@ -1110,7 +1110,7 @@ def check_macos_tcc_grants() -> None:
         "If macOS still re-prompts for permissions (toggle shows ON): the stored "
         "grant is stale — run `tccutil reset ScreenCapture com.nousresearch.hermes` "
         "(repeat per affected service), toggle it ON in System Settings, then "
-        "fully quit & relaunch Hermes once."
+        "fully quit & relaunch Korra once."
     )
 
 
@@ -1279,7 +1279,7 @@ def run_doctor(args):
 
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.CYAN))
-    print(color("│                 🩺 Hermes Doctor                        │", Colors.CYAN))
+    print(color("│                 🩺 Korra Doctor                         │", Colors.CYAN))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.CYAN))
 
     _section("Security Advisories")
@@ -2004,15 +2004,14 @@ def run_doctor(args):
         else:
             check_info(f"{_DHH}/SOUL.md exists but is empty — edit it to customize personality")
     else:
-        check_warn(f"{_DHH}/SOUL.md not found", "(create it to give Hermes a custom personality)")
+        check_warn(f"{_DHH}/SOUL.md not found", "(create it to give Korra a custom personality)")
         if should_fix:
             soul_path.parent.mkdir(parents=True, exist_ok=True)
-            soul_path.write_text(
-                "# Hermes Agent Persona\n\n"
-                "<!-- Edit this file to customize how Hermes communicates. -->\n\n"
-                "You are Hermes, a helpful AI assistant.\n",
-                encoding="utf-8",
-            )
+            # Korra: сеем тот же канонический текст, что и первый запуск
+            # (_ensure_default_soul_md), а не отдельную персону «Hermes».
+            from hermes_cli.default_soul import DEFAULT_SOUL_MD
+
+            soul_path.write_text(DEFAULT_SOUL_MD + "\n", encoding="utf-8")
             check_ok(f"Created {_DHH}/SOUL.md with basic template")
             fixed_count += 1
     

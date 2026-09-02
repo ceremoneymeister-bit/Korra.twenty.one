@@ -962,7 +962,7 @@ def snapshot_real_profile(browser: str, src: str | None = None) -> tuple[str | N
         if _real_profile_autoclose():
             msg = (
                 f"{browser} is running and has its profile locked, so its login "
-                "data can't be copied yet. Hermes can close it for you "
+                "data can't be copied yet. Korra can close it for you "
                 "(this quits the browser — you'll lose unsaved tabs). Ask the "
                 "user to confirm, then close it and retry; if it's still locked "
                 "after that, they must fully quit it (including any "
@@ -974,7 +974,7 @@ def snapshot_real_profile(browser: str, src: str | None = None) -> tuple[str | N
                 "data can't be copied. Fully quit the browser (including any "
                 "background/tray instance) and retry, or turn "
                 "browser.use_real_profile off. (Enable "
-                "browser.real_profile_autoclose to let Hermes offer to close it "
+                "browser.real_profile_autoclose to let Korra offer to close it "
                 "for you.)"
             )
         return None, _PROFILE_LOCKED_PREFIX + msg

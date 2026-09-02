@@ -725,7 +725,7 @@ STEER_CHANNEL_NOTE = (
     # The former standalone historical-vs-new paragraph (#76805) is now
     # redundant with the marker's own replay clause and was removed.
     "## Mid-turn user steering\n"
-    "Mid-turn, the user can steer you: Hermes appends their message to the "
+    "Mid-turn, the user can steer you: Korra appends their message to the "
     "end of a tool result, wrapped exactly as:\n"
     f"{STEER_MARKER_OPEN}\n<their message>\n{STEER_MARKER_CLOSE}\n"
     "That marker is a genuine user message with the same authority as their "
@@ -768,10 +768,10 @@ def hud_surface_note(valid_tool_names: "set[str] | None" = None) -> str:
         return ""
 
     sentences = [
-        "[Note: this message came from HUD mode — a small floating Hermes "
+        "[Note: this message came from HUD mode — a small floating Korra "
         "window sitting over whatever the user is actually working in, so an "
         'unqualified "this" or "here" usually means the app behind the HUD '
-        "rather than anything inside Hermes. read_window_below identifies "
+        "rather than anything inside Korra. read_window_below identifies "
         "that app.",
         "They move the HUD from app to app mid-conversation, so one you "
         "identified on an earlier turn is still a live target: a reference "
@@ -912,7 +912,7 @@ PLATFORM_HINTS = {
     "tui": (
         # Same file-delivery reality as the CLI (maintainer-confirmed):
         # no MEDIA: interception in tui/ — tags would print literally.
-        "You are in the Hermes terminal UI (TUI). Files: there is no "
+        "You are in the Korra terminal UI (TUI). Files: there is no "
         "attachment channel and MEDIA:/path tags are NOT intercepted "
         "here (they print as literal text) — deliver a file by stating "
         "its absolute path or URL in plain text. "
@@ -929,7 +929,7 @@ PLATFORM_HINTS = {
         # Mechanics cited from inline-preview-directive.tsx. The setup_mcp
         # sentence moved out entirely — its tool schema teaches the same
         # trigger + consent-card + never-hand-edit rule on every call.
-        "You are chatting inside the Hermes desktop app, a graphical chat "
+        "You are chatting inside the Korra desktop app, a graphical chat "
         "surface. Markdown renders with full GitHub flavor (tables, "
         "syntax-highlighted code, math via $...$, task lists, callouts). "
         "Deliver files by writing MEDIA:/absolute/path/to/file — any file "
@@ -1403,8 +1403,8 @@ def build_environment_hints() -> str:
                 f"Terminal backend: {backend}. Your `terminal`, `read_file`, "
                 f"`write_file`, `patch`, and `search_files` tools all operate "
                 f"inside this {backend} environment — NOT on the machine "
-                f"where Hermes itself is running. The host OS, home, and cwd "
-                f"of the Hermes process are irrelevant; only the following "
+                f"where Korra itself is running. The host OS, home, and cwd "
+                f"of the Korra process are irrelevant; only the following "
                 f"backend state matters:\n{probe}"
             )
         else:
@@ -1416,7 +1416,7 @@ def build_environment_hints() -> str:
             hints.append(
                 f"Terminal backend: {backend}. Your `terminal`, `read_file`, "
                 f"`write_file`, `patch`, and `search_files` tools all operate "
-                f"inside {description} — NOT on the machine where Hermes "
+                f"inside {description} — NOT on the machine where Korra "
                 f"itself runs. The backend probe didn't respond at "
                 f"prompt-build time, so the sandbox's current user, $HOME, "
                 f"and working directory are unknown from here. If you need "

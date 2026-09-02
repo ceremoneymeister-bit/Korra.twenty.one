@@ -311,7 +311,7 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
         else:
             job_id = job.get("id") or "<job_id>"
             remediation = (
-                "On the host running Hermes, pin it explicitly: "
+                "On the host running Korra, pin it explicitly: "
                 f"`hermes cron edit {job_id} --provider <provider> "
                 "--model <model>`."
             )
@@ -6288,7 +6288,7 @@ def run_job(
                     )
                 else:
                     _remediation = (
-                        "To run on the new config, on the host running Hermes "
+                        "To run on the new config, on the host running Korra "
                         "pin it explicitly: "
                         f"`hermes cron edit {job_id} --provider <provider> "
                         "--model <model>` (or pin the original values to keep "

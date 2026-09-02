@@ -4327,11 +4327,11 @@ class GatewaySlashCommandsMixin:
                 adapter._busy_text_mode = self._effective_busy_text_mode(event.source)
 
             if arg == "queue":
-                behavior = "Messages will be queued for the next turn while Hermes is busy."
+                behavior = "Messages will be queued for the next turn while Korra is busy."
             elif arg == "steer":
                 behavior = "Messages will be steered into the current run (after the next tool call)."
             else:
-                behavior = "Messages will interrupt the current run while Hermes is busy."
+                behavior = "Messages will interrupt the current run while Korra is busy."
             return EphemeralReply(
                 f"Busy input mode set to **`{arg}`** (saved)." + "\n"
                 f"_{behavior}_"
@@ -6336,7 +6336,7 @@ class GatewaySlashCommandsMixin:
                 return t("gateway.update.platform_not_messaging")
 
         if is_managed():
-            return f"✗ {format_managed_message('update Hermes Agent')}"
+            return f"✗ {format_managed_message('update Korra')}"
 
         project_root = Path(__file__).parent.parent.resolve()
         git_dir = project_root / '.git'

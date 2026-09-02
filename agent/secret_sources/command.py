@@ -495,7 +495,7 @@ class CommandSource(SecretSource):
         if kind == ErrorKind.INTERNAL:
             return (
                 "Run the helper manually in a shell to see its real error — "
-                "Hermes discards helper stderr so diagnostics can't leak "
+                "Korra discards helper stderr so diagnostics can't leak "
                 "secret material."
             )
         return super().remediation(kind, cfg)

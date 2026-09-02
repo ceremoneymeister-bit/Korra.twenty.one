@@ -390,7 +390,7 @@ class TestImport:
         run_import(Namespace(zipfile=str(zip_path), force=True))
 
         out = capsys.readouterr().out
-        assert "Done. Your Hermes configuration has been restored." in out
+        assert "Done. Your Korra configuration has been restored." in out
         assert "hermes gateway install" in out
 
 

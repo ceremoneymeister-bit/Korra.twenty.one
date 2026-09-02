@@ -1004,7 +1004,7 @@ def _dynamic_schema_overrides() -> dict:
         props["local"] = {
             "type": "boolean",
             "description": (
-                "Drive the user's own local browser (a Hermes-managed copy of "
+                "Drive the user's own local browser (a Korra-managed copy of "
                 "their real default-Chromium profile, logins/cookies included) "
                 "instead of the configured cloud browser backend. Use when the "
                 "user asks to act as themselves — their accounts, their "

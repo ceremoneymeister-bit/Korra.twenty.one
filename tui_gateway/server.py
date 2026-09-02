@@ -632,7 +632,7 @@ def _notify_session_boundary(
 
 
 _SESSION_OWNERSHIP_UNAVAILABLE = (
-    "Hermes could not safely reserve this session. Try again."
+    "Korra could not safely reserve this session. Try again."
 )
 
 _AUTOMATIC_SESSION_END_REASONS = frozenset({
@@ -16160,7 +16160,7 @@ def _format_live_history_output(session: dict) -> str:
     lines = ["Conversation History", "────────────────────────────────────────"]
     for idx, message in enumerate(messages, start=1):
         role = str(message.get("role") or "unknown")
-        label = "You" if role == "user" else "Hermes" if role == "assistant" else role.title()
+        label = "You" if role == "user" else "Korra" if role == "assistant" else role.title()
         text = str(message.get("text") or message.get("context") or "").strip()
         if len(text) > 400:
             text = f"{text[:400]}..."

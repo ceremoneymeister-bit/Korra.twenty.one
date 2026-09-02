@@ -555,7 +555,7 @@ TOOL_CATEGORIES = {
         "name": "X (Twitter) Search",
         "setup_title": "Select xAI Credential Source",
         "setup_note": (
-            "Hermes routes X searches through xAI's built-in x_search "
+            "Korra routes X searches through xAI's built-in x_search "
             "Responses tool for read-only public X discovery. Use the xurl "
             "skill for authenticated X API reads and account actions. Both "
             "credential sources hit the same "
@@ -621,7 +621,7 @@ TOOL_CATEGORIES = {
             {
                 "name": "Lightpanda",
                 "badge": "free · local · no Chromium",
-                "tag": "Zig headless browser spawned by Hermes, text-only (no screenshots)",
+                "tag": "Zig headless browser spawned by Korra, text-only (no screenshots)",
                 "env_vars": [],
                 "browser_provider": "local",
                 "browser_engine": "lightpanda",
@@ -1120,7 +1120,7 @@ def install_cua_driver(
         version = contract.get("version") or "unknown version"
         reason = contract.get("reason") or "required runtime features are missing"
         _print_warning(
-            f"    Found cua-driver {version}, but Hermes cannot use its current "
+            f"    Found cua-driver {version}, but Korra cannot use its current "
             f"runtime contract: {reason}."
         )
         if os.environ.get("HERMES_CUA_DRIVER_CMD", "").strip():
@@ -1953,7 +1953,7 @@ def _run_cua_driver_installer(
                     _print_info("    IMPORTANT — grant macOS permissions now:")
                     _print_info("      System Settings > Privacy & Security > Accessibility")
                     _print_info("      System Settings > Privacy & Security > Screen Recording")
-                    _print_info("    Both must allow the terminal / Hermes process.")
+                    _print_info("    Both must allow the terminal / Korra process.")
             return True
         _print_warning(f"    cua-driver {label.lower()} did not complete. Re-run manually:")
         _print_info(f"      {manual_hint}")
@@ -2044,7 +2044,7 @@ def _run_post_setup(post_setup_key: str):
             )
             _print_info(f"    {LIGHTPANDA_INSTALL_HINT}")
             if os.name == "nt":
-                _print_info("    Lightpanda has no native Windows build; run Hermes under WSL2.")
+                _print_info("    Lightpanda has no native Windows build; run Korra under WSL2.")
         return
 
     if post_setup_key in {"agent_browser", "browserbase"}:
@@ -2341,7 +2341,7 @@ def _run_post_setup(post_setup_key: str):
         except Exception as exc:
             _print_warning(f"    Could not enable plugin automatically: {exc}")
             _print_info("    Run manually: hermes plugins enable observability/langfuse")
-        _print_info("    Restart Hermes for tracing to take effect.")
+        _print_info("    Restart Korra for tracing to take effect.")
         _print_info("    Verify: hermes plugins list")
 
     elif post_setup_key == "xai_grok":
@@ -5658,7 +5658,7 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
                 print(color("    (none enabled)", Colors.DIM))
         print()
         return
-    print(color("⚕ Hermes Tool Configuration", Colors.CYAN, Colors.BOLD))
+    print(color("⚕ Korra Tool Configuration", Colors.CYAN, Colors.BOLD))
     print(color("  Enable or disable tools per platform.", Colors.DIM))
     print(color("  Tools that need API keys will be configured when enabled.", Colors.DIM))
     print(color("  Guide: https://hermes-agent.nousresearch.com/docs/user-guide/features/tools", Colors.DIM))
