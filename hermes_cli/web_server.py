@@ -2631,6 +2631,18 @@ def _managed_files_policy(request: Request, *, create_root: bool = True) -> Mana
         root = _ensure_managed_root(raw_forced_root) if create_root else _canonical_path(Path(raw_forced_root))
         return ManagedFilesPolicy(default_path=root, locked_root=root, can_change_path=False)
 
+    # The fleet dashboard is an owner-facing product surface, not a server
+    # filesystem explorer. HERMES_HOME contains credentials, state databases,
+    # logs, and internal caches; exposing that root makes a successful Files
+    # request more dangerous than the 404 it replaced. Give fleet users a
+    # dedicated, persistent workspace while preserving the upstream admin/local
+    # dashboard policy below. Operators can still override this with the
+    # explicit HERMES_DASHBOARD_FILES_ROOT setting above.
+    if os.environ.get("KORRA_UI_MODE", "").strip().lower() == "fleet":
+        workspace = Path(get_hermes_home()) / "workspace"
+        root = _ensure_managed_root(workspace) if create_root else _canonical_path(workspace)
+        return ManagedFilesPolicy(default_path=root, locked_root=root, can_change_path=False)
+
     # Remote/OAuth access does not imply a hosted container. Users can expose a
     # local dashboard through the auth gate (for example a macOS launchd install)
     # and still expect the Files page to browse their local home directory. Lock

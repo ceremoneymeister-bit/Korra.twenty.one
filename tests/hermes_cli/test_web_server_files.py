@@ -375,3 +375,31 @@ def test_credential_dir_trees_blocked_on_subdir_descent(forced_files_client):
     assert [e["name"] for e in mcp_listing.json()["entries"]] == []
 
 
+def test_fleet_files_are_confined_to_a_dedicated_workspace(monkeypatch, tmp_path):
+    """Fleet users must never land in the credential-bearing HERMES_HOME root."""
+    hermes_home = tmp_path / "hermes-home"
+    hermes_home.mkdir()
+    (hermes_home / ".secrets").mkdir()
+    (hermes_home / ".secrets" / "provider-token").write_text("secret")
+    monkeypatch.delenv("HERMES_DASHBOARD_FILES_ROOT", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("KORRA_UI_MODE", "fleet")
+
+    client, prev_auth_required, prev_bound_host = _client_with_app_state()
+    try:
+        response = client.get("/api/files")
+        assert response.status_code == 200
+        payload = response.json()
+        workspace = hermes_home / "workspace"
+        assert payload["path"] == str(workspace)
+        assert payload["locked_root"] == str(workspace)
+        assert payload["can_change_path"] is False
+        assert payload["entries"] == []
+        assert workspace.is_dir()
+
+        escaped = client.get("/api/files", params={"path": str(hermes_home)})
+        assert escaped.status_code == 403
+    finally:
+        _close_client(client)
+        _restore_app_state(prev_auth_required, prev_bound_host)
+

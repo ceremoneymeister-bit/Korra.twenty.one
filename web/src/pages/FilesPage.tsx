@@ -40,7 +40,7 @@ import { api } from "@/lib/api";
 import type { ManagedFileEntry, ManagedFilesResponse, OwnerTrashEntry } from "@/lib/api";
 import {
   getOwnerTimeZone,
-  isProductUiMode,
+  isClientUiMode,
   productUiMode,
 } from "@/lib/dashboard-flags";
 import { productNavLabel } from "@/lib/product-nav";
@@ -214,7 +214,9 @@ function OwnerTrash({ onRestored }: { onRestored: () => void }) {
 }
 
 export default function FilesPage() {
-  const clientMode = isProductUiMode();
+  // Fleet is the full Korra workspace manager. The narrower client-mode
+  // inbox/artifacts rules belong to white-label owner cabinets only.
+  const clientMode = isClientUiMode();
   const { toast, showToast } = useToast();
   const { setAfterTitle, setEnd } = usePageHeader();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -270,7 +272,7 @@ export default function FilesPage() {
         setCurrentPath(result.path);
         setPathInput(result.path);
       } catch (e) {
-        setError(ownerFacingError(e, "Не удалось загрузить список материалов."));
+        setError(ownerFacingError(e, "Не удалось загрузить список файлов."));
       } finally {
         setLoading(false);
       }
@@ -308,7 +310,7 @@ export default function FilesPage() {
           type="button"
           onClick={() => void load()}
           disabled={loading}
-          aria-label="Обновить материалы"
+          aria-label="Обновить файлы"
         >
           {loading ? <Spinner /> : <RefreshCw />}
         </Button>
