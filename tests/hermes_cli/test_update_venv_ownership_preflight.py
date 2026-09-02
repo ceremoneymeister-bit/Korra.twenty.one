@@ -47,16 +47,15 @@ def test_all_owned_preflight_proceeds(tmp_path, monkeypatch, capsys):
 
 def test_foreign_owned_dist_info_child_detected(tmp_path, monkeypatch):
     venv = _make_fake_venv(tmp_path)
+    monkeypatch.setattr(update_cmd.os, "geteuid", lambda: 1000, raising=False)
     installer = str(
         venv / "lib" / "python3.12" / "site-packages"
         / "hermes_agent-1.0.0.dist-info" / "INSTALLER"
     )
-    real_uid = update_cmd._path_uid
-
     def fake_uid(path):
         if str(path) == installer:
             return 0  # simulate root-owned sudo-pip residue
-        return real_uid(path)
+        return 1000
 
     monkeypatch.setattr(update_cmd, "_path_uid", fake_uid)
     foreign = update_cmd._venv_foreign_owned_paths(venv)
@@ -65,12 +64,12 @@ def test_foreign_owned_dist_info_child_detected(tmp_path, monkeypatch):
 
 def test_foreign_owned_refuses_with_chown_hint(tmp_path, monkeypatch, capsys):
     venv = _make_fake_venv(tmp_path)
+    monkeypatch.setattr(update_cmd.os, "geteuid", lambda: 1000, raising=False)
     hermes_bin = str(venv / "bin" / "hermes")
-    real_uid = update_cmd._path_uid
     monkeypatch.setattr(
         update_cmd,
         "_path_uid",
-        lambda p: 0 if str(p) == hermes_bin else real_uid(p),
+        lambda p: 0 if str(p) == hermes_bin else 1000,
     )
     with pytest.raises(SystemExit) as exc:
         update_cmd._refuse_update_if_venv_foreign_owned(tmp_path)

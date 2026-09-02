@@ -1,6 +1,7 @@
 """Tests for ``hermes migrate xai`` — apply path with ruamel round-trip."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -187,6 +188,10 @@ class TestIdempotence:
 # ---------------------------------------------------------------------------
 
 class TestUnreadableExistingConfig:
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0,
+        reason="root ignores file permissions",
+    )
     def test_apply_refuses_to_overwrite_unreadable_config(self, trap_config: Path):
         """apply_migration must not clobber an existing config.yaml it can't
         read. It reads the file first (which raises on an unreadable file), and
