@@ -4690,7 +4690,13 @@ class PluginManager:
         cap at 2 so ``<root>/a/b/c/`` is ignored.
         """
         manifests: List[PluginManifest] = []
-        if not path.is_dir():
+        # Korra: is_dir() на недоступном чужом каталоге (0700) даёт EACCES,
+        # который pathlib не глотает — скан плагинов не должен падать от
+        # непрочитываемого пути. Пара к фиксу hermes_managed_node_tree_present.
+        try:
+            if not path.is_dir():
+                return manifests
+        except OSError:
             return manifests
 
         for child in sorted(path.iterdir()):

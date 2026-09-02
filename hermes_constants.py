@@ -511,9 +511,17 @@ def hermes_managed_node_tree_present(home: Path | None = None) -> bool:
     for directory in iter_hermes_node_dirs(home):
         for name in names:
             candidate = directory / name
-            if candidate.is_file() and (
-                sys.platform == "win32" or os.access(candidate, os.X_OK)
-            ):
+            # Korra: generate_systemd_unit пробует $HOME ЦЕЛЕВОГО
+            # пользователя; недоступный чужой хоум (0700, NFS root_squash)
+            # даёт EACCES, который pathlib не глотает. «Не прочитать» =
+            # «managed node не виден», а не краш. Кандидат в апстрим.
+            try:
+                present = candidate.is_file() and (
+                    sys.platform == "win32" or os.access(candidate, os.X_OK)
+                )
+            except OSError:
+                present = False
+            if present:
                 return True
     return False
 
