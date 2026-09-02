@@ -15,11 +15,6 @@ declare global {
     __KORRA_OWNER_TIMEZONE__?: string;
     /** IANA timezone used to interpret persisted schedule expressions. */
     __KORRA_SCHEDULE_TIMEZONE__?: string;
-    /** Up to ten configured agent tabs, injected from the contour config. */
-    __KORRA_AGENT_TABS__?: Array<{
-      profile?: string;
-      label?: string;
-    }>;
   }
 }
 
@@ -61,29 +56,8 @@ export function isClientUiMode(): boolean {
   return false;
 }
 
-export interface AgentTabConfig {
-  profile: string;
-  label: string;
-}
-
-/** Validated, stable agent-tab configuration for the current desktop session. */
-export function getAgentTabs(): AgentTabConfig[] {
-  if (typeof window === "undefined") return [{ profile: "", label: "Корра" }];
-  const configured = window.__KORRA_AGENT_TABS__;
-  if (!Array.isArray(configured)) return [{ profile: "", label: "Корра" }];
-
-  const result: AgentTabConfig[] = [];
-  const profiles = new Set<string>();
-  for (const item of configured) {
-    const profile = typeof item?.profile === "string" ? item.profile.trim() : "";
-    const label = typeof item?.label === "string" ? item.label.trim() : "";
-    if (!profile || !label || profiles.has(profile)) continue;
-    profiles.add(profile);
-    result.push({ profile, label });
-    if (result.length === 10) break;
-  }
-  return result.length > 0 ? result : [{ profile: "", label: "Корра" }];
-}
+// Вкладки агентов больше не приходят из bootstrap HTML: их состав — реальные
+// профили контура, см. lib/agent-tabs.ts и hooks/useAgentTabs.ts.
 
 export function getOwnerTimeZone(): string {
   const configured =

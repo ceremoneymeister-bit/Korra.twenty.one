@@ -14,36 +14,29 @@
  */
 
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
-import { useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 
 import BubbleChatPage from "@/pages/BubbleChatPage";
 import { cn } from "@/lib/utils";
-import { getAgentTabs } from "@/lib/dashboard-flags";
-
-/* ------------------------------------------------------------------ */
-/*  Состав рабочего места                                              */
-/* ------------------------------------------------------------------ */
-
-interface AgentTab {
-  /** Имя профиля Korra. Оно же уезжает в `?profile=` на каждом запросе. */
-  id: string;
-  /** Подпись на вкладке — человеческое имя, а не техническое имя профиля. */
-  title: string;
-}
-
-// Состав задаёт config.yaml контура и сервер вшивает его в bootstrap HTML.
-// Валидация и предел 10 сосредоточены в getAgentTabs().
-const AGENT_TABS: AgentTab[] = getAgentTabs().map(({ profile, label }) => ({
-  id: profile,
-  title: label,
-}));
+import { MAIN_AGENT_TAB } from "@/lib/agent-tabs";
+import { useAgentTabs } from "@/hooks/useAgentTabs";
 
 /* ------------------------------------------------------------------ */
 /*  AgentWorkbenchPage (default export)                                */
 /* ------------------------------------------------------------------ */
 
 export default function AgentWorkbenchPage() {
-  const [activeId, setActiveId] = useState<string>(AGENT_TABS[0].id);
+  // Состав вкладок — реальные профили контура (см. lib/agent-tabs.ts):
+  // главная «Корра» есть всегда, остальные приезжают из /api/profiles и
+  // подхватываются без перезагрузки страницы.
+  const { tabs, refresh } = useAgentTabs();
+  const [selectedId, setActiveId] = useState<string>(MAIN_AGENT_TAB.profile);
+  // Профиль удалили, пока его вкладка была выбрана, — показываем главную,
+  // иначе экран остался бы без единой панели. Производное значение, а не
+  // эффект: лишний каскад рендеров тут ни к чему.
+  const activeId = tabs.some((tab) => tab.profile === selectedId)
+    ? selectedId
+    : MAIN_AGENT_TAB.profile;
   const [streamingByProfile, setStreamingByProfile] = useState<
     Record<string, boolean>
   >({});
@@ -54,11 +47,26 @@ export default function AgentWorkbenchPage() {
     {},
   );
   const [searchParams, setSearchParams] = useSearchParams();
+  const { pathname } = useLocation();
+
+  // Экран смонтирован постоянно (см. App.tsx), поэтому возврат на него — это
+  // не монтирование, а смена маршрута. Владелец создал профиль на соседнем
+  // экране и вернулся сюда — вкладка должна быть уже здесь, а не через
+  // полминуты опроса.
+  useEffect(() => {
+    if ((pathname.replace(/\/$/, "") || "/") === "/agents") void refresh();
+  }, [pathname, refresh]);
 
   useEffect(() => {
     const agent = searchParams.get("agent")?.trim();
     const draft = searchParams.get("draft")?.trim();
-    if (!agent || !AGENT_TABS.some((tab) => tab.id === agent)) return;
+    if (!agent) return;
+    if (!tabs.some((tab) => tab.profile === agent)) {
+      // Диплинк на профиль, которого в составе ещё нет (только что создан):
+      // перечитываем список и оставляем параметры до его появления.
+      void refresh();
+      return;
+    }
     setActiveId(agent);
     if (draft) setDraftByProfile((previous) => ({ ...previous, [agent]: draft }));
     // Параметры снимаем сразу: иначе возврат на экран назад-вперёд подставил
@@ -72,7 +80,7 @@ export default function AgentWorkbenchPage() {
       },
       { replace: true },
     );
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, tabs, refresh]);
 
   const clearDraft = useCallback((profile: string) => {
     setDraftByProfile((previous) => {
@@ -100,22 +108,23 @@ export default function AgentWorkbenchPage() {
   // role="tablist" обещает управление стрелками — выполняем обещание, иначе
   // роль врёт скринридеру. Фокус ведём за активной вкладкой: панели всё равно
   // смонтированы, переключение бесплатно.
-  const onTabKeyDown = useCallback((event: KeyboardEvent) => {
-    const delta =
-      event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    if (delta === 0) return;
-    event.preventDefault();
-    setActiveId((current) => {
-      const index = AGENT_TABS.findIndex((tab) => tab.id === current);
-      const next =
-        AGENT_TABS[(index + delta + AGENT_TABS.length) % AGENT_TABS.length];
+  const onTabKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      const delta =
+        event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      if (delta === 0 || tabs.length === 0) return;
+      event.preventDefault();
+      const currentIndex = tabs.findIndex((tab) => tab.profile === activeId);
+      const index = currentIndex >= 0 ? currentIndex : 0;
+      const next = tabs[(index + delta + tabs.length) % tabs.length];
+      setActiveId(next.profile);
       // Фокус переносим на кнопку, к которой только что уехало выделение.
       window.requestAnimationFrame(() => {
-        document.getElementById(`agent-tab-${next.id}`)?.focus();
+        document.getElementById(`agent-tab-${next.profile}`)?.focus();
       });
-      return next.id;
-    });
-  }, []);
+    },
+    [activeId, tabs],
+  );
 
   return (
     // Ту же полную высоту, что и у одиночного чата, даёт обёртка в App.tsx
@@ -130,24 +139,26 @@ export default function AgentWorkbenchPage() {
           onKeyDown={onTabKeyDown}
           className="flex items-stretch gap-1 overflow-x-auto"
         >
-          {AGENT_TABS.map((tab) => {
-            const active = tab.id === activeId;
-            const streaming = streamingByProfile[tab.id] === true;
+          {tabs.map((tab) => {
+            const active = tab.profile === activeId;
+            const streaming = streamingByProfile[tab.profile] === true;
             return (
               <button
-                key={tab.id}
-                id={`agent-tab-${tab.id}`}
+                key={tab.profile}
+                id={`agent-tab-${tab.profile}`}
                 type="button"
                 role="tab"
                 aria-selected={active}
-                aria-controls={`agent-panel-${tab.id}`}
+                aria-controls={`agent-panel-${tab.profile}`}
                 tabIndex={active ? 0 : -1}
+                // Описание роли — подсказкой: на вкладке имя, не абзац.
+                title={tab.description}
                 // Точка на вкладке видна глазом, но не слышна: состояние
                 // проговариваем в имени кнопки.
                 aria-label={
-                  streaming ? `${tab.title} — агент отвечает` : undefined
+                  streaming ? `${tab.label} — агент отвечает` : undefined
                 }
-                onClick={() => setActiveId(tab.id)}
+                onClick={() => setActiveId(tab.profile)}
                 className={cn(
                   // 44 px по высоте и sentence case — канон продукта:
                   // вкладка агента это имя человека за работой, а не
@@ -168,7 +179,7 @@ export default function AgentWorkbenchPage() {
                     style={{ mixBlendMode: "plus-lighter" }}
                   />
                 )}
-                <span>{tab.title}</span>
+                <span>{tab.label}</span>
                 {streaming && (
                   <span
                     aria-hidden
@@ -183,22 +194,22 @@ export default function AgentWorkbenchPage() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {AGENT_TABS.map((tab) => (
+        {tabs.map((tab) => (
           <div
-            key={tab.id}
-            id={`agent-panel-${tab.id}`}
+            key={tab.profile}
+            id={`agent-panel-${tab.profile}`}
             role="tabpanel"
-            aria-labelledby={`agent-tab-${tab.id}`}
+            aria-labelledby={`agent-tab-${tab.profile}`}
             // display:none, а НЕ снятие с монтирования — на этом держится
             // весь экран (см. шапку файла).
-            style={{ display: tab.id === activeId ? undefined : "none" }}
+            style={{ display: tab.profile === activeId ? undefined : "none" }}
             className="flex min-h-0 flex-1 flex-col"
           >
             <BubbleChatPage
-              agentProfile={tab.id}
+              agentProfile={tab.profile}
               onStreamingChange={handleStreamingChange}
-              draft={draftByProfile[tab.id] ?? null}
-              onDraftConsumed={() => clearDraft(tab.id)}
+              draft={draftByProfile[tab.profile] ?? null}
+              onDraftConsumed={() => clearDraft(tab.profile)}
             />
           </div>
         ))}
