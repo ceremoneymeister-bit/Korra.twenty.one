@@ -1639,13 +1639,27 @@ def is_container() -> bool:
         pass
     # cgroup v2: /proc/1/cgroup is just "0::/" with no marker. The container
     # runtime still shows up in the mount table (overlay rootfs, runtime mount
-    # paths), so scan mountinfo as a last resort.
+    # paths), so inspect mountinfo as a last resort.
+    #
+    # Korra: сканировать ВСЮ таблицу маунтов нельзя — на docker-ХОСТЕ в ней
+    # сотни строк от РАБОТАЮЩИХ контейнеров (/run/containerd/..., оверлеи
+    # /var/lib/docker/...), и хост ложно опознавался как контейнер: doctor
+    # прятал секции бэкендов, voice объявлял «нет аудио» (триаж CI
+    # 02.09.2026). Смотрим только запись корня «/» (поле 5 mountinfo): у
+    # хоста это блочное устройство, у контейнера — overlay, чьи пути лежат
+    # в каталогах рантайма. Кандидат в апстрим.
     try:
         with open("/proc/self/mountinfo", "r", encoding="utf-8") as f:
-            mountinfo = f.read()
-            if any(marker in mountinfo for marker in ("kubepods", "containerd", "crio")):
-                _container_detected = True
-                return True
+            for line in f:
+                fields = line.split(" ")
+                if len(fields) > 4 and fields[4] == "/":
+                    if any(
+                        marker in line
+                        for marker in ("kubepods", "containerd", "crio", "docker")
+                    ):
+                        _container_detected = True
+                        return True
+                    break
     except OSError:
         pass
     _container_detected = False
