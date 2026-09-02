@@ -383,7 +383,7 @@ $script:ResolvedPathReport = @{
 # Configuration
 # ============================================================================
 
-# Korra: жёсткий форк — ставим свой движок, а не апстримный.
+# Korra: hard fork -- install our engine, not the upstream one.
 $RepoUrlSsh = "git@github.com:ceremoneymeister-bit/Korra.twenty.one.git"
 $RepoUrlHttps = "https://github.com/ceremoneymeister-bit/Korra.twenty.one.git"
 $PythonVersion = "3.11"

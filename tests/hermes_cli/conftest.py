@@ -54,3 +54,32 @@ def _suppress_concurrent_hermes_gate(request, monkeypatch):
         lambda *_a, **_k: [],
         raising=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def _korra_pin_english_ui(monkeypatch):
+    """Korra: дефолт интерфейса теперь ru, а тесты CLI исторически
+    ассертят английские строки (kanban_notify и др.).
+
+    Тесты этого пакета проверяют ЛОГИКУ команд, а не перевод. Язык
+    закрепляется через HERMES_LANGUAGE — приоритет №2 в agent/i18n.py,
+    выше config.yaml — чтобы тесты не зависели от смены канонического
+    дефолта форка. Зеркало одноимённой фикстуры в tests/gateway/conftest.py.
+
+    Русскость дефолта сторожат отдельно test_korra_canonical_defaults.py
+    (display.language == ru) и tests/agent/test_i18n.py (паритет локали).
+    """
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
+    try:
+        from agent import i18n
+        if hasattr(i18n, "reset_language_cache"):
+            i18n.reset_language_cache()
+    except Exception:
+        pass
+    yield
+    try:
+        from agent import i18n
+        if hasattr(i18n, "reset_language_cache"):
+            i18n.reset_language_cache()
+    except Exception:
+        pass
