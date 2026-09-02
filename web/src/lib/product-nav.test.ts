@@ -34,7 +34,7 @@ describe("selectProductNav", () => {
   it("убирает отдельный чат и оставляет четыре рабочих экрана", () => {
     expect(selectProductNav(ADMIN_NAV, "fleet")).toEqual([
       { path: "/agents", label: "Агенты", labelKey: undefined },
-      { path: "/files", label: "Материалы", labelKey: undefined },
+      { path: "/files", label: "Файлы", labelKey: undefined },
       { path: "/sessions", label: "История", labelKey: undefined },
       { path: "/cron", label: "Задачи", labelKey: undefined },
     ]);

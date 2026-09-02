@@ -26,7 +26,7 @@ const PRODUCT_NAV_PATHS: Record<ProductUiMode, string[]> = {
 const PRODUCT_NAV_LABELS: Record<ProductUiMode, Record<string, string>> = {
   fleet: {
     "/agents": "Агенты",
-    "/files": "Материалы",
+    "/files": "Файлы",
     "/sessions": "История",
     "/cron": "Задачи",
   },

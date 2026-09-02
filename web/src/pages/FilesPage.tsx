@@ -65,7 +65,7 @@ function formatBytes(size: number | null): string {
 }
 
 function filesRootLabel(): string {
-  return productNavLabel(productUiMode(), "/files") ?? "Материалы";
+  return productNavLabel(productUiMode(), "/files") ?? "Файлы";
 }
 
 function displayPath(path: string | null | undefined): string {

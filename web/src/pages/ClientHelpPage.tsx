@@ -16,7 +16,7 @@ import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 const SECTIONS = [
   ["#start", "С чего начать"],
   ["#agents", "Агенты"],
-  ["#files", "Материалы"],
+  ["#files", "Файлы"],
   ["#chat", "Чат и история"],
   ["#schedule", "Задачи"],
   ["#settings", "Настройки"],
@@ -111,7 +111,7 @@ export default function ClientHelpPage() {
       <section id="files" className="scroll-mt-20 space-y-4">
         <div className="flex items-center gap-3">
           <Upload className="size-5 text-primary" aria-hidden />
-          <h2 className="text-xl font-semibold">Материалы</h2>
+          <h2 className="text-xl font-semibold">Файлы</h2>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <Card className="rounded-xl"><CardContent className="p-5"><h3 className="font-semibold">Мои загрузки</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">Исходники попадают в отдельную входящую папку. Их можно переименовать или убрать в восстановимую корзину.</p></CardContent></Card>
