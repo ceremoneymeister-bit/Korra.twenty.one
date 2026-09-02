@@ -1,5 +1,5 @@
 import { Typography } from "@nous-research/ui/ui/components/typography/index";
-import type { StatusResponse } from "@/lib/api";
+import { withBasePath, type StatusResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 
@@ -14,11 +14,19 @@ export function SidebarFooter({ status }: SidebarFooterProps) {
         "border-t border-current/10",
       )}
     >
-      <Typography
-        className="font-mono-ui text-xs tabular-nums tracking-[0.08em] text-text-tertiary lowercase"
-      >
-        {status?.version != null ? `v${status.version}` : "—"}
-      </Typography>
+      <div className="flex min-w-0 items-center gap-2">
+        <Typography
+          className="font-mono-ui text-xs tabular-nums tracking-[0.08em] text-text-tertiary lowercase"
+        >
+          {status?.version != null ? `v${status.version}` : "—"}
+        </Typography>
+        <img
+          src={withBasePath("/korra-21.png")}
+          alt=""
+          aria-hidden="true"
+          className="h-4 w-auto shrink-0 object-contain opacity-65"
+        />
+      </div>
 
       <a
         href="https://nousresearch.com"

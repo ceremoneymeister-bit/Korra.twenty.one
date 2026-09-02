@@ -17754,7 +17754,7 @@ def _render_active_theme_bootstrap_css() -> str:
     """
     try:
         config = load_config()
-        active = cfg_get(config, "dashboard", "theme", default="default")
+        active = cfg_get(config, "dashboard", "theme", default="light")
         if not active or not isinstance(active, str):
             return ""
         # Built-in: the bundle already owns the definition, no flash.
@@ -18100,15 +18100,11 @@ def mount_spa(application: FastAPI):
 
 # Built-in dashboard themes — label + description only.  The actual color
 # definitions live in the frontend (web/src/themes/presets.ts).
+# Korra: ровно две темы (решение владельца 02.09.2026); фронтовые id и
+# миграция легаси-имён — web/src/themes/presets.ts (migrateThemeName).
 _BUILTIN_DASHBOARD_THEMES = [
-    {"name": "default",       "label": "Hermes Teal",         "description": "Classic dark teal — the canonical Hermes look"},
-    {"name": "default-large", "label": "Hermes Teal (Large)", "description": "Hermes Teal with bigger fonts and roomier spacing"},
-    {"name": "nous-blue",     "label": "Nous Blue",           "description": "Light mode — vivid Nous-blue accents on cream canvas"},
-    {"name": "midnight",      "label": "Midnight",            "description": "Deep blue-violet with cool accents"},
-    {"name": "ember",     "label": "Ember",          "description": "Warm crimson and bronze — forge vibes"},
-    {"name": "mono",      "label": "Mono",           "description": "Clean grayscale — minimal and focused"},
-    {"name": "cyberpunk", "label": "Cyberpunk",      "description": "Neon green on black — matrix terminal"},
-    {"name": "rose",      "label": "Rosé",           "description": "Soft pink and warm ivory — easy on the eyes"},
+    {"name": "light", "label": "Светлая", "description": "Чистая светлая тема Korra"},
+    {"name": "dark",  "label": "Тёмная",  "description": "Чернильно-фиолетовая тема Korra (#150B29)"},
 ]
 
 
@@ -18364,7 +18360,7 @@ async def get_dashboard_themes():
     """
     def _run():
         config = load_config()
-        active = cfg_get(config, "dashboard", "theme", default="default")
+        active = cfg_get(config, "dashboard", "theme", default="light")
         user_themes = _discover_user_themes()
         seen = set()
         themes = []
