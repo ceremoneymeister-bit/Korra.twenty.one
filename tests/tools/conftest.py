@@ -124,3 +124,25 @@ def disable_lazy_stt_install():
     """
     with patch("tools.transcription_tools._try_lazy_install_stt", return_value=False):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _korra_pin_english_ui(monkeypatch):
+    """Korra: дефолт интерфейса теперь ru, а тесты инструментов исторически
+    ассертят английские строки (approval-промпты и др.). Зеркало одноимённой
+    фикстуры в tests/gateway/conftest.py — тесты проверяют логику, не перевод.
+    Русскость дефолта сторожит test_korra_canonical_defaults.py."""
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
+    try:
+        from agent import i18n
+        if hasattr(i18n, "reset_language_cache"):
+            i18n.reset_language_cache()
+    except Exception:
+        pass
+    yield
+    try:
+        from agent import i18n
+        if hasattr(i18n, "reset_language_cache"):
+            i18n.reset_language_cache()
+    except Exception:
+        pass

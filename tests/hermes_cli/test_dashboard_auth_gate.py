@@ -18,6 +18,16 @@ from fastapi.testclient import TestClient
 from hermes_cli import web_server
 
 
+@pytest.fixture(autouse=True)
+def _korra_free_port_probe(monkeypatch):
+    """Korra: на нашем self-hosted раннере порт 9119 занят боевым дашбордом
+    хоста, и реальная проба _port_bind_conflict роняла start_server-тесты
+    (SystemExit 75). Тесты этого файла проверяют auth-гейт, а не занятость
+    порта — пробу закрепляем «свободно», как на hosted-раннерах GitHub.
+    Саму пробу сторожат её собственные тесты."""
+    monkeypatch.setattr(web_server, "_port_bind_conflict", lambda host, port: False)
+
+
 @pytest.fixture
 def client_loopback():
     # Pin the bound-host state for host_header_middleware so requests with
