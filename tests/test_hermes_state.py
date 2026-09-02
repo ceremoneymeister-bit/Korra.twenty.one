@@ -819,13 +819,25 @@ class TestFTS5Search:
         db.append_message("s1", role="assistant", content="projectionneedle")
         db.append_message("s1", role="user", content="after")
 
+        # Korra: под WAL search_messages берёт коннект через
+        # _checkout_read_conn (пул), а _get_read_conn открывает СВЕЖИЙ
+        # нерегистрируемый коннект — трассировка через него слепа, и
+        # enrichment-запросы были невидимы (латентный дефект теста апстрима,
+        # вскрылся на SQLite 3.53.1 раннера; на 3.50.4 WAL выключен и тест
+        # случайно зелёный). Трассируем сам checkout. Кандидат в апстрим.
         statements = []
-        read_conn = db._get_read_conn() or db._conn
-        traced_connections = [db._conn]
-        if read_conn is not db._conn:
-            traced_connections.append(read_conn)
-        for conn in traced_connections:
-            conn.set_trace_callback(statements.append)
+        db._conn.set_trace_callback(statements.append)
+        traced_read_conns = []
+        orig_checkout = db._checkout_read_conn
+
+        def _traced_checkout():
+            conn = orig_checkout()
+            if conn is not None and all(conn is not seen for seen in traced_read_conns):
+                traced_read_conns.append(conn)
+                conn.set_trace_callback(statements.append)
+            return conn
+
+        db._checkout_read_conn = _traced_checkout
 
         def context_query_count():
             normalized = (" ".join(sql.upper().split()) for sql in statements)
@@ -850,7 +862,9 @@ class TestFTS5Search:
             assert default[0]["context"]
             assert context_query_count() == 2
         finally:
-            for conn in traced_connections:
+            db._checkout_read_conn = orig_checkout
+            db._conn.set_trace_callback(None)
+            for conn in traced_read_conns:
                 conn.set_trace_callback(None)
 
     def test_sanitize_fts5_query_strips_dangerous_chars(self):

@@ -765,7 +765,7 @@ class TestSecondaryProfileConfigHandling:
 
     @pytest.mark.asyncio
     async def test_failed_photon_connect_releases_listener_for_later_profile(
-        self, monkeypatch
+        self, monkeypatch, tmp_path
     ):
         """A failed sidecar must not reserve an endpoint it never owned."""
         from gateway.config import GatewayConfig, Platform, PlatformConfig
@@ -793,6 +793,7 @@ class TestSecondaryProfileConfigHandling:
         runner._profile_adapters = {}
         runner.session_store = None
         runner._busy_text_mode = "queue"
+        runner._running = False
 
         photon = Platform("photon")
         profile_cfg = GatewayConfig(multiplex_profiles=True)
@@ -812,8 +813,15 @@ class TestSecondaryProfileConfigHandling:
             runner, "_make_adapter_auth_check", lambda p, **kwargs: None
         )
 
-        first = await runner._start_one_profile_adapters("broken", "/tmp/x", claimed)
-        second = await runner._start_one_profile_adapters("later", "/tmp/y", claimed)
+        # Korra: захардкоженные /tmp/x и /tmp/y коллидировали с чужими
+        # root-каталогами на self-hosted раннере (PermissionError в
+        # discover_plugins) — профильные дома должны жить в tmp_path теста.
+        first = await runner._start_one_profile_adapters(
+            "broken", str(tmp_path / "broken"), claimed
+        )
+        second = await runner._start_one_profile_adapters(
+            "later", str(tmp_path / "later"), claimed
+        )
 
         assert first == 0
         assert failed.disconnected is True
