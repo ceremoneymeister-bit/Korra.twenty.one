@@ -20,6 +20,7 @@ from agent.anthropic_adapter import (
     build_anthropic_kwargs,
     convert_messages_to_anthropic,
     convert_tools_to_anthropic,
+    create_anthropic_message,
     is_claude_code_token_valid,
     normalize_model_name,
     read_claude_code_credentials,
@@ -1903,3 +1904,233 @@ class TestFinalPayloadHasNoBlankTextBlocks:
         )
         image_blocks = [b for b in tool_result_block["content"] if b.get("type") == "image"]
         assert len(image_blocks) == 1
+
+
+class TestFable51RequestContract:
+    """Offline contract tests for Claude Fable 5.1 request construction."""
+
+    _TOOL = {
+        "type": "function",
+        "function": {
+            "name": "lookup",
+            "description": "Look up a value",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+    @classmethod
+    def _kwargs(
+        cls,
+        model="claude-fable-5-1",
+        *,
+        tool_choice="auto",
+        base_url=None,
+        reasoning_config=None,
+    ):
+        return build_anthropic_kwargs(
+            model=model,
+            messages=[{"role": "user", "content": "Find it"}],
+            tools=[cls._TOOL],
+            max_tokens=None,
+            reasoning_config=(
+                {"enabled": True, "effort": "medium"}
+                if reasoning_config is None
+                else reasoning_config
+            ),
+            tool_choice=tool_choice,
+            base_url=base_url,
+        )
+
+    def test_native_alias_uses_bound_adaptive_thinking(self):
+        kwargs = self._kwargs(model="anthropic/claude-fable-5.1")
+
+        assert kwargs["model"] == "claude-fable-5-1"
+        assert kwargs["thinking"] == {
+            "type": "adaptive",
+            "display": "summarized",
+            "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+        }
+        assert kwargs["output_config"] == {"effort": "medium"}
+        betas = kwargs["extra_headers"]["anthropic-beta"].split(",")
+        assert "thinking-binding-controls-2026-08-01" in betas
+        assert "interleaved-thinking-2025-05-14" in betas
+
+    @pytest.mark.parametrize("tool_choice", ["required", "lookup"])
+    def test_forced_tool_choice_fails_locally_with_migration_path(self, tool_choice):
+        with pytest.raises(ValueError, match="persistent instruction"):
+            self._kwargs(tool_choice=tool_choice)
+
+    def test_explicit_strict_schema_is_forwarded_and_stable_across_turns(self):
+        strict_tool = {
+            **self._TOOL,
+            "function": {**self._TOOL["function"], "strict": True},
+        }
+        first_messages = [{"role": "user", "content": "Find it"}]
+        second_messages = [
+            *first_messages,
+            {"role": "assistant", "content": "Which source?"},
+            {"role": "user", "content": "The repository"},
+        ]
+
+        first = build_anthropic_kwargs(
+            model="claude-fable-5-1",
+            messages=first_messages,
+            tools=[strict_tool],
+            max_tokens=None,
+            reasoning_config=None,
+            tool_choice="auto",
+        )
+        second = build_anthropic_kwargs(
+            model="claude-fable-5-1",
+            messages=second_messages,
+            tools=[strict_tool],
+            max_tokens=None,
+            reasoning_config=None,
+            tool_choice="auto",
+        )
+
+        assert first["tools"] == second["tools"]
+        assert first["tools"][0]["strict"] is True
+        assert second["messages"][0] == first["messages"][0]
+
+    def test_mandatory_thinking_cannot_be_disabled(self):
+        kwargs = self._kwargs(reasoning_config={"enabled": False})
+        assert kwargs["thinking"] == {
+            "type": "adaptive",
+            "display": "summarized",
+            "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+        }
+
+    def test_omitted_reasoning_config_still_enables_mandatory_thinking(self):
+        kwargs = build_anthropic_kwargs(
+            model="claude-fable-5-1",
+            messages=[{"role": "user", "content": "Work"}],
+            tools=[self._TOOL],
+            max_tokens=None,
+            reasoning_config=None,
+        )
+        assert kwargs["thinking"] == {
+            "type": "adaptive",
+            "display": "summarized",
+            "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+        }
+        assert "output_config" not in kwargs
+
+    def test_previous_fable_contract_is_unchanged(self):
+        kwargs = self._kwargs(model="claude-fable-5", tool_choice="required")
+        assert kwargs["tool_choice"] == {"type": "any"}
+        assert "block_binding" not in kwargs["thinking"]
+        assert "extra_headers" not in kwargs
+
+    @pytest.mark.parametrize(
+        ("model", "base_url"),
+        [
+            ("us.anthropic.claude-fable-5-1-v1:0", None),
+            ("claude-fable-5-1", "https://resource.openai.azure.com/anthropic"),
+            ("claude-fable-5-1", "https://us-east5-aiplatform.googleapis.com"),
+        ],
+    )
+    def test_documented_cloud_routes_receive_semantics_and_binding_beta(
+        self, model, base_url
+    ):
+        kwargs = self._kwargs(
+            model=model,
+            tool_choice="auto",
+            base_url=base_url,
+        )
+        assert kwargs["tool_choice"] == {"type": "auto"}
+        assert all("strict" not in tool for tool in kwargs["tools"])
+        assert kwargs["thinking"]["block_binding"] == {
+            "prefix_mismatch_behavior": "drop_block"
+        }
+        assert (
+            "thinking-binding-controls-2026-08-01"
+            in kwargs["extra_headers"]["anthropic-beta"].split(",")
+        )
+
+    def test_unknown_gateway_keeps_semantics_without_platform_beta(self):
+        kwargs = self._kwargs(
+            model="anthropic/claude-fable-5.1",
+            tool_choice="auto",
+            base_url="https://inference-api.nousresearch.com/v1/messages",
+        )
+        assert kwargs["tool_choice"] == {"type": "auto"}
+        assert all("strict" not in tool for tool in kwargs["tools"])
+        assert "block_binding" not in kwargs["thinking"]
+        assert "extra_headers" not in kwargs
+
+    def test_oauth_reconstructs_betas_and_preserves_stable_strict_schema(self):
+        strict_tool = {
+            **self._TOOL,
+            "function": {**self._TOOL["function"], "strict": True},
+        }
+        kwargs = build_anthropic_kwargs(
+            model="claude-fable-5-1",
+            messages=[{"role": "user", "content": "Look it up"}],
+            tools=[strict_tool],
+            max_tokens=None,
+            reasoning_config={"enabled": True, "effort": "high"},
+            tool_choice="auto",
+            is_oauth=True,
+        )
+
+        assert kwargs["tools"][0]["name"] == "mcp__lookup"
+        assert kwargs["tools"][0]["strict"] is True
+        betas = kwargs["extra_headers"]["anthropic-beta"].split(",")
+        assert "thinking-binding-controls-2026-08-01" in betas
+        assert "oauth-2025-04-20" in betas
+
+
+class TestAnthropicInputTransformations:
+    @pytest.mark.parametrize("response_path", ["stream-final", "non-stream-create"])
+    def test_transformations_are_exposed_and_logged(self, response_path, caplog):
+        response = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="done")],
+            stop_reason="end_turn",
+            input_transformations=[
+                {
+                    "type": "thinking_dropped",
+                    "path": "messages.1.content.0",
+                    "reason": "prefix_binding_mismatch",
+                }
+            ],
+        )
+
+        class _Stream:
+            def get_final_message(self):
+                return response
+
+        class _Manager:
+            def __enter__(self):
+                return _Stream()
+
+            def __exit__(self, *_args):
+                return None
+
+        if response_path == "stream-final":
+            messages_api = SimpleNamespace(stream=lambda **_kwargs: _Manager())
+            raw = create_anthropic_message(
+                SimpleNamespace(messages=messages_api),
+                {"model": "claude-fable-5-1"},
+            )
+        else:
+            messages_api = SimpleNamespace(create=lambda **_kwargs: response)
+            raw = create_anthropic_message(
+                SimpleNamespace(messages=messages_api),
+                {"model": "claude-fable-5-1"},
+                prefer_stream=False,
+            )
+
+        with caplog.at_level("WARNING", logger="agent.transports.anthropic"):
+            normalized = get_transport("anthropic_messages").normalize_response(raw)
+
+        assert normalized.input_transformations == [
+            {
+                "type": "thinking_dropped",
+                "path": "messages.1.content.0",
+                "reason": "prefix_binding_mismatch",
+            }
+        ]
+        assert "thinking_dropped" in caplog.text
+        assert "prefix_binding_mismatch" in caplog.text
+        assert "messages.1.content.0" in caplog.text

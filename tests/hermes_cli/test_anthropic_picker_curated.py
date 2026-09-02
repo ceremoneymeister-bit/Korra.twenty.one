@@ -19,6 +19,7 @@ from hermes_cli import models as M
 def test_anthropic_curated_alias_survives_when_live_omits_it():
     """A curated alias missing from /v1/models still surfaces (first)."""
     curated = M._PROVIDER_MODELS["anthropic"]
+    assert "claude-fable-5-1" in curated
     assert "claude-fable-5" in curated  # sanity: the alias is curated
     assert "claude-sonnet-5" in curated  # newest Sonnet alias is curated
 
@@ -27,6 +28,7 @@ def test_anthropic_curated_alias_survives_when_live_omits_it():
     with patch.object(M, "_fetch_anthropic_models", return_value=live):
         result = M.provider_model_ids("anthropic")
 
+    assert "claude-fable-5-1" in result
     assert "claude-fable-5" in result
     assert "claude-sonnet-5" in result
     # Curated order is preserved at the front.
@@ -57,4 +59,10 @@ def test_anthropic_falls_back_to_curated_when_live_unavailable():
         result = M.provider_model_ids("anthropic")
 
     assert result == list(M._PROVIDER_MODELS["anthropic"])
+    assert "claude-fable-5-1" in result
     assert "claude-fable-5" in result
+
+
+def test_fable_51_is_curated_on_aggregator_surfaces():
+    assert M.OPENROUTER_MODELS[0][0] == "anthropic/claude-fable-5.1"
+    assert "anthropic/claude-fable-5.1" in M._PROVIDER_MODELS["nous"]

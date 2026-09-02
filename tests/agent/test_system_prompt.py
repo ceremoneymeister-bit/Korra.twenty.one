@@ -763,3 +763,29 @@ class TestConversationStartedTwoLine:
         assert "Conversation started:" not in vol
         assert "as of the last context rebuild" not in vol
 
+
+class TestFable51OperationalGuidance:
+    def _stable(self, model):
+        return _stable_prompt(
+            _make_agent(valid_tool_names=["terminal", "web_search"], model=model)
+        )
+
+    def test_fable_51_aliases_receive_guidance(self):
+        from agent.prompt_builder import FABLE_51_OPERATIONAL_GUIDANCE
+
+        for model in (
+            "claude-fable-5-1",
+            "anthropic/claude-fable-5.1",
+        ):
+            assert FABLE_51_OPERATIONAL_GUIDANCE in self._stable(model)
+
+    def test_other_claude_models_do_not_receive_guidance(self):
+        from agent.prompt_builder import FABLE_51_OPERATIONAL_GUIDANCE
+
+        for model in (
+            "claude-fable-5",
+            "claude-fable-5-10",
+            "anthropic/claude-fable-5.10",
+            "anthropic/claude-opus-5",
+        ):
+            assert FABLE_51_OPERATIONAL_GUIDANCE not in self._stable(model)

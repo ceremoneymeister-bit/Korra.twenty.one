@@ -4,10 +4,14 @@ Delegates to the existing adapter functions in agent/anthropic_adapter.py.
 This transport owns format conversion and normalization — NOT client lifecycle.
 """
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from agent.transports.base import ProviderTransport
 from agent.transports.types import NormalizedResponse
+
+
+logger = logging.getLogger(__name__)
 
 
 class AnthropicTransport(ProviderTransport):
@@ -164,6 +168,34 @@ class AnthropicTransport(ProviderTransport):
         provider_data = {}
         if reasoning_details:
             provider_data["reasoning_details"] = reasoning_details
+        # Fable 5.1 can apply request-side recovery transformations (currently
+        # dropping a thinking block whose bound prefix no longer matches).
+        # Preserve the structured report and emit a concise warning so context
+        # churn is observable instead of silently degrading cache/reasoning.
+        raw_transformations = getattr(response, "input_transformations", None)
+        if raw_transformations:
+            input_transformations = _to_plain_data(raw_transformations)
+            provider_data["input_transformations"] = input_transformations
+            labels = []
+            transformation_items = (
+                input_transformations
+                if isinstance(input_transformations, list)
+                else [input_transformations]
+            )
+            for item in transformation_items:
+                if isinstance(item, dict):
+                    label = str(item.get("type") or "unknown")
+                    if item.get("reason"):
+                        label += f" reason={item['reason']}"
+                    if item.get("path"):
+                        label += f" path={item['path']}"
+                    labels.append(label)
+                else:
+                    labels.append(type(item).__name__)
+            logger.warning(
+                "Anthropic applied input transformation(s): %s",
+                ", ".join(labels) or "unknown",
+            )
         # Only worth carrying the ordered-blocks channel when the turn
         # actually interleaves signed thinking with tool_use — that's the
         # only shape the parallel lists reconstruct incorrectly. A turn that

@@ -171,6 +171,14 @@ def convert_tools_to_anthropic(tools: List[Dict]) -> List[Dict]:
                 fn.get("parameters", {"type": "object", "properties": {}})
             ),
         }
+        # Preserve an explicitly configured strict schema from the stable tool
+        # definition. Never toggle this per turn: Fable 5.1 binds thinking to
+        # the exact tools prefix, and transient strictness would invalidate it.
+        strict = fn.get("strict")
+        if strict is None:
+            strict = t.get("strict")
+        if isinstance(strict, bool):
+            anthropic_tool["strict"] = strict
         # Forward cache_control marker when present on the OpenAI-format
         # tool dict. Anthropic's tools array supports cache_control on the
         # last tool to cache the entire schema cross-session.
@@ -1222,4 +1230,3 @@ def convert_messages_to_anthropic(
     _scrub_blank_text_blocks(result)
 
     return system, result
-

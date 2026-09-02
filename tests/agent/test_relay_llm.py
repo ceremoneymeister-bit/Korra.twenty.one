@@ -416,6 +416,13 @@ def test_anthropic_stream_accumulator_merges_plain_provider_object():
             "role": "assistant",
             "model": "claude-test",
             "usage": {"input_tokens": 10},
+            "input_transformations": [
+                {
+                    "type": "thinking_dropped",
+                    "path": "messages.1.content.0",
+                    "reason": "prefix_binding_mismatch",
+                }
+            ],
         },
     })
     accumulator.observe({
@@ -439,6 +446,11 @@ def test_anthropic_stream_accumulator_merges_plain_provider_object():
     assert response.id == "message-1"
     assert response.content[0].text == "hello"
     assert response.usage.input_tokens == 10
+    assert len(response.input_transformations) == 1
+    transformation = response.input_transformations[0]
+    assert transformation.type == "thinking_dropped"
+    assert transformation.path == "messages.1.content.0"
+    assert transformation.reason == "prefix_binding_mismatch"
 
 
 def test_jsonable_does_not_probe_dynamic_attributes():

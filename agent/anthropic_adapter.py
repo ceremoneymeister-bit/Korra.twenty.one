@@ -225,6 +225,31 @@ def _is_claude_model(model: str | None) -> bool:
     return "claude" in (model or "").lower()
 
 
+def _uses_fable_51_semantics(model: str) -> bool:
+    """Match Fable 5.1 across direct, gateway, and partner-platform ids."""
+    normalized = (model or "").lower().replace(".", "-")
+    needle = "claude-fable-5-1"
+    _prefix, found, suffix = normalized.partition(needle)
+    return bool(found) and (not suffix or not suffix[0].isdigit())
+
+
+def _supports_fable_51_binding_beta(model: str, base_url: str | None) -> bool:
+    """Whether this platform documents Fable 5.1 thinking-binding controls."""
+    if not _uses_fable_51_semantics(model):
+        return False
+    if _is_bedrock_model_id(model):
+        # AnthropicBedrock converts ``anthropic-beta`` into the Bedrock
+        # ``anthropic_beta`` request field.
+        return True
+    if not _is_third_party_anthropic_endpoint(base_url):
+        return True
+    # Fable 5.1 runs on Anthropic infrastructure in Microsoft Foundry, and
+    # Anthropic documents the same beta names for Google Cloud.
+    return _is_azure_anthropic_endpoint(base_url) or base_url_host_matches(
+        base_url or "", "googleapis.com"
+    )
+
+
 _FAST_MODE_SUPPORTED_SUBSTRINGS = ("opus-4-6", "opus-4.6")
 
 # ── Max output token limits per Anthropic model ───────────────────────
@@ -467,6 +492,13 @@ _TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14"
 # 1M context beta. Native Anthropic does not get this by default because some
 # subscriptions reject it, but Bedrock/Azure still need it for 1M context.
 _CONTEXT_1M_BETA = "context-1m-2025-08-07"
+
+# Fable 5.1 thinking blocks are bound to the exact preceding system/tools/
+# message prefix. Context compaction legitimately rewrites that prefix, so ask
+# the API to discard only the now-invalid thinking block instead of failing the
+# whole turn. Source:
+# https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
+_THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01"
 
 # Fast mode beta — enables the ``speed: "fast"`` request parameter for
 # significantly higher output token throughput on Opus 4.6 (~2.5x).
@@ -990,16 +1022,31 @@ def build_anthropic_kwargs(
     if system:
         kwargs["system"] = system
 
+    fable_51_semantics = _uses_fable_51_semantics(model)
+    fable_51_binding = _supports_fable_51_binding_beta(model, base_url)
+
     if anthropic_tools:
         kwargs["tools"] = anthropic_tools
         # Map OpenAI tool_choice to Anthropic format
         if tool_choice == "auto" or tool_choice is None:
             kwargs["tool_choice"] = {"type": "auto"}
-        elif tool_choice == "required":
-            kwargs["tool_choice"] = {"type": "any"}
         elif tool_choice == "none":
             # Anthropic has no tool_choice "none" — omit tools entirely to prevent use
             kwargs.pop("tools", None)
+        elif fable_51_semantics:
+            # Fable 5.1 rejects both ``any`` and a named forced tool with 400.
+            # A transient adapter-only prompt/schema rewrite would disappear
+            # from the next replay and invalidate bound thinking. Fail locally
+            # so the caller can express the requirement persistently with auto
+            # + a stable strict schema or use structured output instead. Source:
+            # https://platform.claude.com/docs/en/models/fable-5-1/migration-guide
+            raise ValueError(
+                "Fable 5.1 does not support forced tool_choice. Use auto with "
+                "a persistent instruction and stable strict tool schema, or "
+                "use structured output when only schema-conformant JSON is required."
+            )
+        elif tool_choice == "required":
+            kwargs["tool_choice"] = {"type": "any"}
         elif isinstance(tool_choice, str):
             # Specific tool name
             kwargs["tool_choice"] = {"type": "tool", "name": tool_choice}
@@ -1039,6 +1086,10 @@ def build_anthropic_kwargs(
                     "type": "adaptive",
                     "display": "summarized",
                 }
+                if fable_51_binding:
+                    kwargs["thinking"]["block_binding"] = {
+                        "prefix_mismatch_behavior": "drop_block",
+                    }
                 adaptive_effort = ADAPTIVE_EFFORT_MAP.get(effort, "medium")
                 # Downgrade xhigh→max on models that don't list xhigh as a
                 # supported level (Opus/Sonnet 4.6). Opus 4.7+ keeps xhigh.
@@ -1052,6 +1103,20 @@ def build_anthropic_kwargs(
                 # Anthropic requires temperature=1 when thinking is enabled on older models
                 kwargs["temperature"] = 1
                 kwargs["max_tokens"] = max(effective_max_tokens, budget + 4096)
+
+    # Fable 5.1 has mandatory adaptive thinking. Even a legacy config that
+    # requests ``enabled: false`` (or omits reasoning_config) must still use
+    # adaptive thinking. Add binding recovery where the platform supports it;
+    # sending ``type: disabled`` would 400 everywhere Fable 5.1 is served.
+    if fable_51_semantics and "thinking" not in kwargs:
+        kwargs["thinking"] = {
+            "type": "adaptive",
+            "display": "summarized",
+        }
+        if fable_51_binding:
+            kwargs["thinking"]["block_binding"] = {
+                "prefix_mismatch_behavior": "drop_block",
+            }
 
     # ── Strip sampling params on 4.7+ ─────────────────────────────────
     # Opus 4.7 rejects any non-default temperature/top_p/top_k with a 400.
@@ -1068,21 +1133,28 @@ def build_anthropic_kwargs(
     # Opus 4.6 — Opus 4.7 and other models 400 on the speed parameter.
     # Only for native Anthropic endpoints — third-party providers would
     # reject the unknown beta header and speed parameter.
+    request_betas: list[str] = []
+    if fable_51_binding:
+        request_betas.append(_THINKING_BINDING_BETA)
+
     if (
         fast_mode
         and not _is_third_party_anthropic_endpoint(base_url)
         and _supports_fast_mode(model)
     ):
         kwargs.setdefault("extra_body", {})["speed"] = "fast"
-        # Build extra_headers with ALL applicable betas (the per-request
-        # extra_headers override the client-level anthropic-beta header).
+        request_betas.append(_FAST_MODE_BETA)
+
+    if request_betas:
+        # Per-request extra_headers override the client-level beta header, so
+        # reconstruct the full safe set before appending feature-specific betas.
         betas = list(_common_betas_for_base_url(
             base_url,
             drop_context_1m_beta=drop_context_1m_beta,
         ))
         if is_oauth:
             betas.extend(_OAUTH_ONLY_BETAS)
-        betas.append(_FAST_MODE_BETA)
+        betas.extend(request_betas)
         kwargs["extra_headers"] = {"anthropic-beta": ",".join(betas)}
 
     return kwargs

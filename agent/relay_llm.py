@@ -848,7 +848,14 @@ class AnthropicStreamAccumulator:
         if event_type == "message_start":
             message = payload.get("message")
             if isinstance(message, dict):
-                for key in ("id", "type", "role", "model", "usage"):
+                for key in (
+                    "id",
+                    "type",
+                    "role",
+                    "model",
+                    "usage",
+                    "input_transformations",
+                ):
                     if key in message:
                         self._message[key] = message[key]
             return

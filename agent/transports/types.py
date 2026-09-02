@@ -96,7 +96,7 @@ class NormalizedResponse:
 
     Response-level ``provider_data`` examples:
 
-    * Anthropic: ``{"reasoning_details": [...]}``
+    * Anthropic: ``{"reasoning_details": [...], "input_transformations": [...]}``
     * Codex: ``{"codex_reasoning_items": [...], "codex_message_items": [...]}``
     * Others: ``None``
     """
@@ -132,6 +132,12 @@ class NormalizedResponse:
         """
         pd = self.provider_data or {}
         return pd.get("anthropic_content_blocks")
+
+    @property
+    def input_transformations(self):
+        """Request-prefix recoveries reported by Anthropic's Messages API."""
+        pd = self.provider_data or {}
+        return pd.get("input_transformations")
 
     @property
     def codex_reasoning_items(self):

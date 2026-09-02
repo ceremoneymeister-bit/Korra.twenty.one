@@ -514,6 +514,31 @@ PARALLEL_TOOL_CALL_GUIDANCE = (
     "in doubt and the calls are independent, batch them."
 )
 
+# Fable 5.1 needs an explicit progress cadence and an extra verification nudge
+# at low effort. Keep this model-specific so other families do not pay prompt
+# tokens for behavior they already exhibit. Source:
+# https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1
+FABLE_51_OPERATIONAL_GUIDANCE = (
+    "# Fable 5.1 operating profile\n"
+    "For multi-step work, open with one short action-oriented status line. "
+    "After meaningful milestones, give a concise progress update, and finish "
+    "with the delivered result plus the checks that support it.\n"
+    "At low effort, still use search or repository lookups whenever a current, "
+    "ambiguous, or exact fact affects correctness. Do not fill a missing fact "
+    "from an unverified assumption.\n"
+    "Keep implementation tightly within the requested scope. Make targeted "
+    "edits, complete every in-scope deliverable, and report unrelated findings "
+    "separately instead of expanding the change."
+)
+
+
+def is_fable_51_model(model: Optional[str]) -> bool:
+    """Match direct and provider-prefixed Fable 5.1 aliases, not 5.10+."""
+    normalized = (model or "").lower().replace(".", "-")
+    needle = "claude-fable-5-1"
+    _prefix, found, suffix = normalized.partition(needle)
+    return bool(found) and (not suffix or not suffix[0].isdigit())
+
 # OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
 # where GPT models abandon work on partial results, skip prerequisite lookups,
 # hallucinate instead of using tools, and declare "done" without verification.
