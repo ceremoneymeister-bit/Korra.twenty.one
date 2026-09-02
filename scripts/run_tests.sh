@@ -108,8 +108,11 @@ if [ -f "$HOME/.hermes/pytest_live_guard.py" ]; then
 fi
 
 
-# ── Windows location variables (computed before we drop env) ───────────────
-# `env -i` forwards HOME, which is enough on POSIX. Native Windows CPython
+# ── Platform location variables (computed before we drop env) ──────────────
+# `env -i` forwards HOME, which is usually enough on POSIX. Preserve an
+# explicit TMPDIR as well: CI and local isolation runs may need a clean temp
+# root when the host /tmp contains unrelated repository markers/instructions.
+# Native Windows CPython
 # resolves Path.home() from USERPROFILE (or HOMEDRIVE+HOMEPATH), stdlib
 # platform paths come from LOCALAPPDATA/APPDATA, ssl/sockets need SYSTEMROOT,
 # and tempfile needs TEMP/TMP. Dropping them breaks collection on native
@@ -122,6 +125,11 @@ for _win_var in USERPROFILE HOMEDRIVE HOMEPATH LOCALAPPDATA APPDATA SYSTEMROOT T
     WIN_ENV+=("$_win_var=${!_win_var}")
   fi
 done
+
+TEMP_ENV=()
+if [ -n "${TMPDIR:-}" ]; then
+  TEMP_ENV+=("TMPDIR=$TMPDIR")
+fi
 
 # ── Test-runner knobs (computed before we drop env) ────────────────────────
 # The runner's own documented environment knobs must survive the hermetic
@@ -170,6 +178,7 @@ exec env -i \
   PATH="$PATH" \
   HOME="$HOME" \
   ${WIN_ENV[@]+"${WIN_ENV[@]}"} \
+  ${TEMP_ENV[@]+"${TEMP_ENV[@]}"} \
   ${TEST_ENV[@]+"${TEST_ENV[@]}"} \
   TZ=UTC \
   LANG=C.UTF-8 \

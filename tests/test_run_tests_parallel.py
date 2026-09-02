@@ -100,6 +100,38 @@ def test_progress_output_tolerates_legacy_stdout_encoding(tmp_path: Path) -> Non
     assert "1 tests passed" in proc.stdout
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell wrapper probe")
+def test_shell_wrapper_preserves_explicit_tmpdir(tmp_path: Path) -> None:
+    """The hermetic wrapper must retain an explicitly isolated temp root."""
+    repo_root = Path(__file__).resolve().parent.parent
+    wrapper = repo_root / "scripts" / "run_tests.sh"
+    clean_temp = tmp_path / "clean-temp"
+    clean_temp.mkdir()
+    probe = tmp_path / "test_tmpdir_probe.py"
+    probe.write_text(
+        "import os, tempfile\n\n"
+        "def test_tmpdir_is_preserved():\n"
+        "    assert tempfile.gettempdir() == os.environ['TMPDIR']\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["TMPDIR"] = str(clean_temp)
+
+    proc = subprocess.run(
+        ["bash", str(wrapper), str(probe), "-j", "1", "--file-timeout", "30"],
+        cwd=repo_root,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+
+    assert proc.returncode == 0, proc.stdout
+    assert "1 tests passed" in proc.stdout
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only probe")
 @pytest.mark.live_system_guard_bypass
 def test_grandchild_leak_is_killed_by_runner(tmp_path: Path) -> None:
