@@ -399,7 +399,11 @@ def _run_one_file_once(
     # One root for each subprocess removes the shared directory that the race
     # needs. The parent deletes the root after the attempt.
     env = os.environ.copy()
-    temproot = tempfile.mkdtemp(prefix="hermes-pytest-tmproot-")
+    # Korra: короткий префикс вместо hermes-pytest-tmproot-. AF_UNIX ограничен
+    # 107 байтами пути; у нашего раннера юзер ghrunner на 2 символа длиннее
+    # апстримного runner, и сокет-пути тестов (fly-api.sock и др.) выходили
+    # ровно в 108 байт (триаж 02.09.2026).
+    temproot = tempfile.mkdtemp(prefix="hpt-")
     env["PYTEST_DEBUG_TEMPROOT"] = temproot
 
     subproc_start = time.monotonic()

@@ -105,9 +105,23 @@ jobs:
         #
         # No --files: the runner discovers the suite itself. The discovered
         # set is identical to the list the removed matrix job used to pass in.
+        # Korra: тесты бегут в приватных namespaces (net+mount+pid, свой
+        # /proc). На нашем self-hosted раннере живут боевые gateway-процессы
+        # и дашборд на 9119 — без изоляции update-реконсиляция видела 33
+        # живых PID, FTS-admission находил чужих держателей state.db, а
+        # dashboard-тесты падали на занятом порту (триаж 02.09.2026).
+        # Rootless unshare заблокирован AppArmor (apparmor_restrict_
+        # unprivileged_userns=1), поэтому namespaces создаёт sudo, поднимает
+        # lo и сразу сбрасывает привилегии обратно в ghrunner через setpriv.
         run: |
-          source .venv/bin/activate
-          scripts/run_tests.sh
+          sudo unshare -n -m -p -f --mount-proc sh -c "
+            ip link set lo up && exec setpriv \
+              --reuid=$(id -u) --regid=$(id -g) --init-groups \
+              env HOME='$HOME' PATH='$PATH' \
+                  HERMES_TEST_WORKERS='$HERMES_TEST_WORKERS' \
+                  OPENROUTER_API_KEY= OPENAI_API_KEY= NOUS_API_KEY= \
+              sh -c 'cd \"$PWD\" && . .venv/bin/activate && scripts/run_tests.sh'
+          "
         env:
           # This is the maximum number of test FILES that run together.
           # run_tests_parallel.py starts one pytest subprocess for each file
@@ -129,7 +143,12 @@ jobs:
           # across a 6x range. The suite has sufficient concurrency at this
           # size. The remaining time is the slowest files plus the setup.
           # Workers above the core count only add contention.
-          HERMES_TEST_WORKERS: 96
+          #
+          # Korra: замер апстрима выше сделан на 96-ядерном EPYC. Наш
+          # self-hosted раннер — 8 vCPU, и «один воркер на ядро» здесь
+          # означает 8: на 96 воркерах 28 тайминговых тестов падали от
+          # 12-кратной переподписки CPU (триаж 02.09.2026).
+          HERMES_TEST_WORKERS: 8
           # Ensure tests don't accidentally call real APIs
           OPENROUTER_API_KEY: ""
           OPENAI_API_KEY: ""
