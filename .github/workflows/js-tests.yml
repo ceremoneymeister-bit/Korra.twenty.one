@@ -80,4 +80,9 @@ jobs:
       # not an empty run, because an empty run reports green after it checks
       # nothing.
       - name: Run all workspace checks
-        run: node .github/scripts/run-workspace-checks.mjs
+        # Korra: --concurrency 2 — дефолт скрипта берёт availableParallelism()
+        # и жарит ВСЕ воркспейс-проверки разом (tsc десктопа ×3 + vitest UI +
+        # web + ui-tui). На больших раннерах апстрима это ок; на нашем общем
+        # 8-ядерном/16Г сервере OOM-киллер снимает самые жирные процессы —
+        # desktop::lint и desktop::test:ui умирали по SIGTERM (143).
+        run: node .github/scripts/run-workspace-checks.mjs --concurrency 2
