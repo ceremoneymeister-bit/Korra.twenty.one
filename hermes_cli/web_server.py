@@ -17817,6 +17817,42 @@ def _render_active_theme_bootstrap_css() -> str:
 _IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
+# Korra (порт T4/T3 из feat/calc-v2-agent-tabs): флаг пузырькового чата панели.
+def _read_dashboard_bubble_chat_flag() -> bool:
+    """True when the dashboard should expose the Korra bubble chat.
+
+    Read from process env, then ``{HERMES_HOME}/.env`` (mounted), so the flag can
+    be flipped without recreating the container. In Server Admin Mode, also
+    enable it automatically when the local API server is configured.
+    """
+    from pathlib import Path
+
+    val = os.environ.get("KORRA_DASHBOARD_CHAT", "")
+    if val:
+        return val == "1" or val.lower() == "true"
+    env_path = Path(os.environ.get("HERMES_HOME", "/opt/data")) / ".env"
+    if env_path.exists():
+        try:
+            for raw in env_path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if line.startswith("#") or "=" not in line:
+                    continue
+                key, _, raw_val = line.partition("=")
+                if key.strip() != "KORRA_DASHBOARD_CHAT":
+                    continue
+                v = raw_val.strip().strip('"').strip("'")
+                return v == "1" or v.lower() == "true"
+        except OSError:
+            pass
+    api_enabled = os.environ.get("API_SERVER_ENABLED", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    return api_enabled and bool(os.environ.get("API_SERVER_KEY"))
+
+
 def mount_spa(application: FastAPI):
     """Mount the built SPA. Falls back to index.html for client-side routing.
 
@@ -17911,13 +17947,34 @@ def mount_spa(application: FastAPI):
                 status_code=404,
             )
         chat_js = "true" if _DASHBOARD_EMBEDDED_CHAT_ENABLED else "false"
+        # Korra (порт T4): продуктовая сборка панели — рабочие экраны вместо
+        # админского меню. Меню — не защита (маршруты режет периметр кабинета),
+        # а вопрос того, что владелец продукта должен видеть. Режимы:
+        # "client" — кабинет владельца, "calc" — рабочее место расчётчиков,
+        # "fleet" — основной флотовый интерфейс (решение Дмитрия 01.09).
+        # Неизвестное значение = админская панель.
+        bubble_js = "true" if _read_dashboard_bubble_chat_flag() else "false"
+        _ui_mode_env = os.environ.get("KORRA_UI_MODE", "").strip().lower()
+        ui_mode = _ui_mode_env if _ui_mode_env in ("client", "calc", "fleet") else "admin"
+        ui_mode_js = json.dumps(ui_mode)
+        owner_timezone_js = json.dumps(
+            os.environ.get("KORRA_OWNER_TIMEZONE", "").strip()
+            or os.environ.get("HERMES_TIMEZONE", "").strip()
+        )
+        schedule_timezone_js = json.dumps(
+            os.environ.get("HERMES_TIMEZONE", "").strip() or "UTC"
+        )
         gated = bool(getattr(app.state, "auth_required", False))
         gated_js = "true" if gated else "false"
         if gated:
             bootstrap_script = (
                 f"<script>"
                 f"window.__HERMES_DASHBOARD_EMBEDDED_CHAT__={chat_js};"
-                f'window.__HERMES_BASE_PATH__="{prefix}";'
+                f"window.__KORRA_DASHBOARD_CHAT__={bubble_js};"
+                f"window.__KORRA_UI_MODE__={ui_mode_js};"
+                f"window.__KORRA_OWNER_TIMEZONE__={owner_timezone_js};"
+                f"window.__KORRA_SCHEDULE_TIMEZONE__={schedule_timezone_js};"
+                f"window.__HERMES_BASE_PATH__=\"{prefix}\";"
                 f"window.__HERMES_AUTH_REQUIRED__={gated_js};"
                 f"</script>"
             )
@@ -17925,7 +17982,11 @@ def mount_spa(application: FastAPI):
             bootstrap_script = (
                 f'<script>window.__HERMES_SESSION_TOKEN__="{_SESSION_TOKEN}";'
                 f"window.__HERMES_DASHBOARD_EMBEDDED_CHAT__={chat_js};"
-                f'window.__HERMES_BASE_PATH__="{prefix}";'
+                f"window.__KORRA_DASHBOARD_CHAT__={bubble_js};"
+                f"window.__KORRA_UI_MODE__={ui_mode_js};"
+                f"window.__KORRA_OWNER_TIMEZONE__={owner_timezone_js};"
+                f"window.__KORRA_SCHEDULE_TIMEZONE__={schedule_timezone_js};"
+                f"window.__HERMES_BASE_PATH__=\"{prefix}\";"
                 f"window.__HERMES_AUTH_REQUIRED__={gated_js};"
                 f"</script>"
             )
