@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
+from agent.i18n import get_language
+
 
 NousAccountInfoSource = Literal["jwt", "account_api", "inference_key", "none", "error"]
 
@@ -191,6 +193,8 @@ def format_nous_portal_entitlement_message(
     never surfaced to the user.
     """
     billing_url = nous_portal_billing_url(account_info)
+    russian = get_language() == "ru"
+    capability_label = _russian_capability(capability) if russian else capability
 
     if account_info is not None:
         if coverage_category is not None:
@@ -200,6 +204,11 @@ def format_nous_portal_entitlement_message(
                 # Entitled overall (e.g. via the managed tool pool), but this
                 # specific capability isn't covered. Surface a neutral billing
                 # nudge without exposing pool-vs-paid internals to the user.
+                if russian:
+                    return (
+                        f"Текущий доступ Nous Portal не включает {capability_label}. "
+                        f"Добавьте средства или оформите подписку: {billing_url}."
+                    )
                 return (
                     f"{capability} isn't included with your current Nous Portal "
                     f"access. Add credits or a subscription to enable it at {billing_url}."
@@ -208,6 +217,11 @@ def format_nous_portal_entitlement_message(
             return None
 
     if account_info is None:
+        if russian:
+            return (
+                "Korra не удалось проверить доступ к Nous Portal. Обновите вход "
+                f"командой `korra model` или проверьте оплату: {billing_url}."
+            )
         return (
             f"Korra could not verify your Nous Portal entitlement, so {capability} "
             f"is unavailable. Run `hermes model` to refresh your login, or check "
@@ -216,11 +230,25 @@ def format_nous_portal_entitlement_message(
 
     if not account_info.logged_in:
         if account_info.inference_credential_present:
+            if russian:
+                return (
+                    "Ключ Nous inference настроен, но Korra не может подтвердить "
+                    "платный доступ к Nous Portal. Чтобы включить "
+                    f"{capability_label}, войдите "
+                    "командой `korra model`. Управление подпиской и кредитами: "
+                    f"{billing_url}."
+                )
             return (
                 f"Nous inference credentials are configured, but Korra cannot verify "
                 f"your Nous Portal paid access for {capability}. Log in with "
                 f"`hermes model` to enable Portal-managed features. Billing and "
                 f"credits are managed at {billing_url}."
+            )
+        if russian:
+            return (
+                f"Чтобы получить {capability_label}, войдите в Nous Portal "
+                "командой `korra model`. Управление оплатой и кредитами: "
+                f"{billing_url}."
             )
         return (
             f"Log in to Nous Portal to use {capability}: run `hermes model`. "
@@ -228,6 +256,16 @@ def format_nous_portal_entitlement_message(
         )
 
     if account_info.paid_service_access is None:
+        if russian:
+            detail = (
+                "Korra не удалось проверить платный доступ к Nous Portal, поэтому "
+                f"{capability_label} сейчас недоступен."
+            )
+            if account_info.error:
+                detail += f" Техническая причина: {account_info.error}."
+            if include_refresh_hint:
+                detail += " Обновите сессию командой `korra model`."
+            return detail + f" Проверьте оплату: {billing_url}."
         detail = (
             f"Korra could not verify your Nous Portal paid access, so {capability} "
             f"is unavailable."
@@ -242,6 +280,12 @@ def format_nous_portal_entitlement_message(
     access = account_info.paid_service_access_info
     reason = access.reason if access else None
     if reason == "account_missing":
+        if russian:
+            return (
+                "Для этих данных входа не найден аккаунт или организация Nous Portal. "
+                "Выполните `korra model` и войдите заново. Если ошибка повторится, "
+                "обратитесь в поддержку Nous."
+            )
         return (
             f"Korra could not find a Nous Portal account or organisation for this "
             f"login, so {capability} is unavailable. Run `hermes model` to "
@@ -251,13 +295,38 @@ def format_nous_portal_entitlement_message(
     if reason == "no_usable_credits" or account_info.paid_service_access is False:
         message = _no_paid_access_message(account_info, capability, billing_url)
         if include_refresh_hint and not account_info.fresh:
-            message += " If you recently bought credits, run `hermes model` to refresh Korra."
+            if russian:
+                message += (
+                    " Если вы недавно купили кредиты, выполните `korra model`, "
+                    "чтобы обновить данные."
+                )
+            else:
+                message += " If you recently bought credits, run `hermes model` to refresh Korra."
         return message
 
+    if russian:
+        return (
+            "Аккаунт Nous Portal сейчас не даёт платный доступ. Добавьте кредиты "
+            f"или обновите способ оплаты: {billing_url}."
+        )
     return (
         f"Your Nous Portal account does not currently have paid service access, "
         f"so {capability} is unavailable. Add credits or update billing at {billing_url}."
     )
+
+
+def _russian_capability(capability: str) -> str:
+    """Return a Russian label for common capability identifiers."""
+    normalized = capability.strip().lower()
+    if normalized in {"model access", "nous model access"}:
+        return "доступ к модели"
+    if normalized == "paid nous models":
+        return "доступ к платным моделям Nous"
+    if normalized == "this feature":
+        return "доступ к этой функции"
+    if normalized.startswith("managed "):
+        return "доступ к управляемым инструментам"
+    return "доступ к этой функции"
 
 
 def _no_paid_access_message(
@@ -265,6 +334,8 @@ def _no_paid_access_message(
     capability: str,
     billing_url: str,
 ) -> str:
+    russian = get_language() == "ru"
+    capability_label = _russian_capability(capability) if russian else capability
     access = account_info.paid_service_access_info
     has_active_subscription = access.has_active_subscription if access else None
     active_subscription_is_paid = access.active_subscription_is_paid if access else None
@@ -275,12 +346,32 @@ def _no_paid_access_message(
     if access and access.member_spend_cap_exceeded:
         cap = access.member_spend_cap_usd
         spent = access.member_spend_usd
-        credit_detail = _credit_detail(total_usable, subscription_credits, purchased_credits)
+        credit_detail = _credit_detail(
+            total_usable,
+            subscription_credits,
+            purchased_credits,
+            russian=russian,
+        )
         cap_detail = ""
         if cap is not None and spent is not None:
-            cap_detail = f" Your organisation's per-member spend cap is ${cap:.2f} and you've spent ${spent:.2f} of it."
+            if russian:
+                cap_detail = (
+                    f" Лимит составляет ${cap:.2f}, уже потрачено ${spent:.2f}."
+                )
+            else:
+                cap_detail = f" Your organisation's per-member spend cap is ${cap:.2f} and you've spent ${spent:.2f} of it."
         elif cap is not None:
-            cap_detail = f" Your organisation's per-member spend cap is ${cap:.2f}."
+            if russian:
+                cap_detail = f" Лимит составляет ${cap:.2f}."
+            else:
+                cap_detail = f" Your organisation's per-member spend cap is ${cap:.2f}."
+        if russian:
+            return (
+                "Доступ к Nous Portal приостановлен: превышен лимит расходов "
+                f"на участника, установленный вашей организацией.{cap_detail}"
+                f"{credit_detail} Попросите администратора увеличить лимит: "
+                f"{billing_url}. Затем выполните `korra model`."
+            )
         return (
             f"Your Nous Portal access is paused because you've exceeded the"
             f" per-member spend cap set by your organisation.{cap_detail}"
@@ -290,27 +381,66 @@ def _no_paid_access_message(
         )
 
     if has_active_subscription and active_subscription_is_paid:
-        credit_detail = _credit_detail(total_usable, subscription_credits, purchased_credits)
+        credit_detail = _credit_detail(
+            total_usable,
+            subscription_credits,
+            purchased_credits,
+            russian=russian,
+        )
+        if russian:
+            return (
+                f"Кредиты Nous Portal закончились{credit_detail}, поэтому "
+                f"{capability_label} сейчас недоступен. Пополните баланс или "
+                f"продлите подписку: {billing_url}."
+            )
         return (
             f"Your Nous Portal credits are exhausted{credit_detail}, so {capability} "
             f"is unavailable. Top up or renew credits at {billing_url}."
         )
 
     if has_active_subscription and active_subscription_is_paid is False:
+        if russian:
+            return (
+                "Текущий план Nous Portal не включает платный доступ, поэтому "
+                f"{capability_label} сейчас недоступен. Смените план или добавьте "
+                f"кредиты: {billing_url}."
+            )
         return (
             f"Your current Nous Portal plan does not include paid service access, "
             f"so {capability} is unavailable. Upgrade or add credits at {billing_url}."
         )
 
     if has_active_subscription is False:
-        credit_detail = _credit_detail(total_usable, subscription_credits, purchased_credits)
+        credit_detail = _credit_detail(
+            total_usable,
+            subscription_credits,
+            purchased_credits,
+            russian=russian,
+        )
+        if russian:
+            return (
+                f"В аккаунте Nous Portal нет активной подписки или доступных кредитов"
+                f"{credit_detail}, поэтому {capability_label} сейчас недоступен. "
+                f"Оформите подписку или добавьте кредиты: {billing_url}."
+            )
         return (
             f"Your Nous Portal account has no active subscription or usable credits"
             f"{credit_detail}, so {capability} is unavailable. Subscribe or add credits "
             f"at {billing_url}."
         )
 
-    credit_detail = _credit_detail(total_usable, subscription_credits, purchased_credits)
+    credit_detail = _credit_detail(
+        total_usable,
+        subscription_credits,
+        purchased_credits,
+        russian=russian,
+    )
+    if russian:
+        return (
+            f"В аккаунте Nous Portal нет доступных платных кредитов{credit_detail}, "
+            f"поэтому {capability_label} сейчас недоступен. Добавьте кредиты или "
+            f"обновите способ оплаты: {billing_url}."
+        )
     return (
         f"Your Nous Portal account has no usable paid credits{credit_detail}, so "
         f"{capability} is unavailable. Add credits or update billing at {billing_url}."
@@ -321,14 +451,19 @@ def _credit_detail(
     total_usable: Optional[float],
     subscription_credits: Optional[float],
     purchased_credits: Optional[float],
+    *,
+    russian: bool = False,
 ) -> str:
     parts: list[str] = []
     if total_usable is not None:
-        parts.append(f"usable ${total_usable:.2f}")
+        label = "доступно" if russian else "usable"
+        parts.append(f"{label} ${total_usable:.2f}")
     if subscription_credits is not None:
-        parts.append(f"subscription ${subscription_credits:.2f}")
+        label = "по подписке" if russian else "subscription"
+        parts.append(f"{label} ${subscription_credits:.2f}")
     if purchased_credits is not None:
-        parts.append(f"purchased ${purchased_credits:.2f}")
+        label = "куплено" if russian else "purchased"
+        parts.append(f"{label} ${purchased_credits:.2f}")
     if not parts:
         return ""
     return f" ({', '.join(parts)})"

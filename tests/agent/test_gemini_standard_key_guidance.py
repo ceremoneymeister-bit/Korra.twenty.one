@@ -69,7 +69,8 @@ class TestIsStandardKeyAuthError:
 
 
 class TestGeminiHttpErrorGuidance:
-    def test_guidance_appended_on_oauth_401_with_reason(self):
+    def test_guidance_appended_on_oauth_401_with_reason(self, monkeypatch):
+        monkeypatch.setenv("HERMES_LANGUAGE", "en")
         body = _google_error_body(
             401, GOOGLE_AUTH_MESSAGE, reason="ACCESS_TOKEN_TYPE_UNSUPPORTED"
         )
@@ -88,7 +89,8 @@ class TestGeminiHttpErrorGuidance:
         err = gemini_http_error(_mock_response(403, body))
         assert GUIDANCE_MARKER not in str(err)
 
-    def test_free_tier_429_unaffected(self):
+    def test_free_tier_429_unaffected(self, monkeypatch):
+        monkeypatch.setenv("HERMES_LANGUAGE", "en")
         body = json.dumps(
             {
                 "error": {
@@ -105,6 +107,45 @@ class TestGeminiHttpErrorGuidance:
         assert "free tier" in text
         assert GUIDANCE_MARKER not in text
 
+    def test_free_tier_429_explains_quota_and_billing_in_russian(self, monkeypatch):
+        monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+        body = json.dumps(
+            {
+                "error": {
+                    "code": 429,
+                    "message": (
+                        "Quota exceeded for metric: generativelanguage.googleapis.com/"
+                        "generate_content_free_tier_requests, limit: 20"
+                    ),
+                }
+            }
+        )
+
+        text = str(gemini_http_error(_mock_response(429, body)))
+
+        assert "бесплатн" in text.lower()
+        assert "лимит" in text.lower()
+        assert "дожд" in text.lower()
+        assert "подключите оплату" in text.lower()
+        assert "aistudio.google.com/apikey" in text
+        assert "дневн" not in text.lower()
+
+    def test_legacy_standard_key_guidance_is_russian(self, monkeypatch):
+        monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+        body = _google_error_body(
+            401,
+            GOOGLE_AUTH_MESSAGE,
+            reason="ACCESS_TOKEN_TYPE_UNSUPPORTED",
+        )
+
+        text = str(gemini_http_error(_mock_response(401, body)))
+
+        assert "google gemini отклонил" in text.lower()
+        assert "oauth не требуется" in text.lower()
+        assert "создайте новый ключ" in text.lower()
+        assert "настройках korra" in text.lower()
+        assert "~/.hermes" not in text
+
 
 
 class TestSummarizerPreservesGuidance:
@@ -116,9 +157,10 @@ class TestSummarizerPreservesGuidance:
     pre-existing free-tier 429 guidance.
     """
 
-    def test_standard_key_guidance_survives_summarizer(self):
+    def test_standard_key_guidance_survives_summarizer(self, monkeypatch):
         from run_agent import AIAgent
 
+        monkeypatch.setenv("HERMES_LANGUAGE", "en")
         body = _google_error_body(
             401, GOOGLE_AUTH_MESSAGE, reason="ACCESS_TOKEN_TYPE_UNSUPPORTED"
         )
@@ -127,9 +169,10 @@ class TestSummarizerPreservesGuidance:
         assert GUIDANCE_MARKER in summary
         assert "aistudio.google.com/api-keys" in summary
 
-    def test_free_tier_guidance_survives_summarizer(self):
+    def test_free_tier_guidance_survives_summarizer(self, monkeypatch):
         from run_agent import AIAgent
 
+        monkeypatch.setenv("HERMES_LANGUAGE", "en")
         body = json.dumps(
             {
                 "error": {

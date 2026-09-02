@@ -50,8 +50,9 @@ def test_empty_body_falls_back_to_response_json_error_message():
     ],
 )
 def test_network_resolution_failure_explains_that_the_user_may_be_offline(
-    technical_message,
+    technical_message, monkeypatch,
 ):
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
     error = OSError(-3, technical_message)
 
     summary = AIAgent._summarize_api_error(error)
@@ -63,7 +64,8 @@ def test_network_resolution_failure_explains_that_the_user_may_be_offline(
     assert "name resolution" not in summary.lower()
 
 
-def test_wrapped_dns_resolution_failure_gets_the_same_friendly_message():
+def test_wrapped_dns_resolution_failure_gets_the_same_friendly_message(monkeypatch):
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
     try:
         try:
             raise OSError(-3, "Temporary failure in name resolution")
@@ -74,6 +76,20 @@ def test_wrapped_dns_resolution_failure_gets_the_same_friendly_message():
 
     assert "You may be offline" in summary
     assert "Connection error" not in summary
+
+
+def test_network_resolution_failure_is_clear_in_russian(monkeypatch):
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+
+    summary = AIAgent._summarize_api_error(
+        OSError(-3, "Temporary failure in name resolution")
+    )
+
+    assert summary == (
+        "Korra не может подключиться к сервису модели. "
+        "Проверьте интернет-соединение и повторите попытку."
+    )
+    assert "name resolution" not in summary.lower()
 
 
 def test_unread_streaming_response_does_not_crash_and_falls_back_to_exception_message():

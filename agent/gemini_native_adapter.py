@@ -30,6 +30,7 @@ import httpx
 
 from agent.bounded_response import read_streaming_error_body
 from agent.gemini_schema import sanitize_gemini_tool_parameters
+from agent.i18n import get_language
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,18 @@ _FREE_TIER_GUIDANCE = (
 )
 
 
+def _free_tier_guidance() -> str:
+    if get_language() == "ru":
+        return (
+            "\n\nЭтот ключ Google API использует бесплатный тариф Gemini, и его "
+            "лимит достигнут. Можно дождаться сброса лимита. Для стабильной "
+            "агентской сессии подключите оплату в проекте Google Cloud и создайте "
+            "новый ключ в проекте с активным биллингом: "
+            "https://aistudio.google.com/apikey"
+        )
+    return _FREE_TIER_GUIDANCE
+
+
 def is_standard_key_auth_error(
     status: int, error_message: str, reason: str = ""
 ) -> bool:
@@ -223,6 +236,19 @@ _STANDARD_KEY_GUIDANCE = (
     "GOOGLE_API_KEY in ~/.hermes/.env and restart your session. "
     "Details: https://ai.google.dev/gemini-api/docs/api-key"
 )
+
+
+def _standard_key_guidance() -> str:
+    if get_language() == "ru":
+        return (
+            "\n\nGoogle Gemini отклонил тип этого API-ключа — OAuth не требуется. "
+            "Старые ключи типа Standard больше не подходят для Gemini API. "
+            "Откройте https://aistudio.google.com/api-keys, проверьте тип и "
+            "состояние ключа и создайте новый ключ Gemini API. Затем обновите "
+            "GEMINI_API_KEY или GOOGLE_API_KEY в настройках Korra и перезапустите "
+            "сессию. Подробнее: https://ai.google.dev/gemini-api/docs/api-key"
+        )
+    return _STANDARD_KEY_GUIDANCE
 
 
 class GeminiAPIError(Exception):
@@ -1050,13 +1076,13 @@ def gemini_http_error(
     # bypassed the setup wizard (direct GOOGLE_API_KEY in .env) still learn
     # that the free tier cannot sustain an agent session.
     if status == 429 and is_free_tier_quota_error(err_message or body_text):
-        message = message + _FREE_TIER_GUIDANCE
+        message = message + _free_tier_guidance()
 
     # Legacy "Standard" Google Cloud key rejection (June 19, 2026 onward) ->
     # Google's raw 401 misleadingly tells the user to use OAuth. Append the
     # actual fix (mint a new Gemini API key in AI Studio).
     if is_standard_key_auth_error(status, err_message or body_text, reason):
-        message = message + _STANDARD_KEY_GUIDANCE
+        message = message + _standard_key_guidance()
 
     return GeminiAPIError(
         message,

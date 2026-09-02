@@ -16,7 +16,15 @@ confirmed verdict keeps the assertive wording.
 """
 from __future__ import annotations
 
+import pytest
+
 from agent.conversation_loop import _billing_or_entitlement_message
+
+
+@pytest.fixture(autouse=True)
+def _english_messages_by_default(monkeypatch):
+    """Keep upstream wording assertions explicit; RU behavior has own tests."""
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
 
 
 def test_anthropic_subscription_exhausted_guidance():
@@ -127,3 +135,45 @@ def test_content_filter_caveat_is_anthropic_only():
     ).lower()
     assert "content filter" not in msg
     assert "hermes auth reset" not in msg
+
+
+def test_russian_confirmed_anthropic_message_covers_subscription_and_api_key(monkeypatch):
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+
+    msg = _anthropic_msg(unverified=False)
+
+    assert "лимит" in msg.lower()
+    assert "подписк" in msg.lower()
+    assert "api-ключ" in msg.lower()
+    assert "баланс" in msg.lower()
+    assert "claude.ai/settings/usage" in msg
+    assert "console.anthropic.com/settings/billing" in msg
+    assert "дождаться" in msg.lower()
+    assert "/model" in msg
+    assert "включая основную квоту" not in msg.lower()
+
+
+def test_russian_unverified_anthropic_message_does_not_claim_quota_is_gone(monkeypatch):
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+
+    msg = _anthropic_msg(unverified=True)
+
+    assert "не всегда означает" in msg.lower()
+    assert "фильтр" in msg.lower()
+    assert "korra auth reset anthropic" in msg
+
+
+def test_russian_generic_billing_message_names_quota_and_subscription(monkeypatch):
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+
+    msg = _billing_or_entitlement_message(
+        capability="model access",
+        provider="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        model="anthropic/claude-opus-4.7",
+    )
+
+    assert "закончилась квота" in msg.lower()
+    assert "подписк" in msg.lower()
+    assert "openrouter.ai/settings/credits" in msg
+    assert "/model" in msg

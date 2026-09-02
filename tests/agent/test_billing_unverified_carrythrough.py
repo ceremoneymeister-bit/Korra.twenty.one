@@ -15,6 +15,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from agent.conversation_loop import _billing_failure_result, _billing_terminal_label
 from agent.error_classifier import FailoverReason, classify_api_error
 
@@ -29,6 +31,12 @@ class MockAPIError(Exception):
 _EXTRA_USAGE_BODY = (
     "You're out of extra usage. Add more at claude.ai/settings/usage and keep going."
 )
+
+
+@pytest.fixture(autouse=True)
+def _english_messages_by_default(monkeypatch):
+    """Keep upstream wording assertions explicit; RU behavior has own tests."""
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
 
 
 def _classified_unverified():
@@ -117,6 +125,21 @@ class TestTerminalResponse:
         assert "unverified" in hedged
         assert "content-filter" in hedged
         assert not hedged.startswith("Billing or credits exhausted")
+
+    def test_russian_terminal_label_explains_confirmed_limit(self, monkeypatch):
+        monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+
+        label = _billing_terminal_label("HTTP 402", False)
+
+        assert label == "Закончилась квота или средства на балансе: HTTP 402"
+
+    def test_russian_unverified_label_keeps_the_alternative_cause(self, monkeypatch):
+        monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+
+        label = _billing_terminal_label("HTTP 400", True)
+
+        assert "не подтверждено" in label.lower()
+        assert "фильтр" in label.lower()
 
 
 # ── Credential-pool plumbing ─────────────────────────────────────────────────

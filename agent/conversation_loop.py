@@ -40,6 +40,7 @@ from agent.conversation_compression import (
 from agent.context_engine import automatic_compaction_status_message
 from agent.display import KawaiiSpinner
 from agent.error_classifier import FailoverReason, classify_api_error
+from agent.i18n import get_language
 from agent.message_metadata import append_message
 from agent.turn_context import (
     _compression_warrants_another_preflight_pass,
@@ -714,8 +715,13 @@ def _billing_or_entitlement_message(
     if _is_nous_inference_route(provider, base_url):
         return _nous_entitlement_message(capability)
 
-    provider_label = (provider or "").strip() or "the selected provider"
-    model_label = (model or "").strip() or "the selected model"
+    russian = get_language() == "ru"
+    provider_label = (provider or "").strip() or (
+        "выбранный провайдер" if russian else "the selected provider"
+    )
+    model_label = (model or "").strip() or (
+        "выбранная модель" if russian else "the selected model"
+    )
 
     # Anthropic Claude Pro/Max OAuth subscriptions surface exhaustion of the
     # metered "extra usage" bucket as a hard 400 ("You're out of extra
@@ -731,7 +737,40 @@ def _billing_or_entitlement_message(
         # diagnosis toward buying quota. Hedge the claim and name the other
         # cause. A confirmed verdict (e.g. a real 402 or an API-key credit
         # depletion) keeps the assertive wording.
-        if unverified:
+        if russian and unverified:
+            lines = [
+                (
+                    f"{provider_label} сообщает, что лимит вашей подписки Claude для "
+                    f"модели {model_label} мог закончиться. Однако это сообщение не "
+                    "всегда означает исчерпание квоты."
+                ),
+                "Если на https://claude.ai/settings/usage квота ещё осталась, причиной "
+                "может быть фильтр содержимого Anthropic: для OAuth-подписки сервис "
+                "возвращает такое же сообщение, когда отклоняет часть запроса.",
+                "Если лимит действительно исчерпан, дождитесь его сброса или подключите "
+                "дополнительное использование на https://claude.ai/settings/usage",
+                "Также можно выбрать API-ключ Anthropic или другого провайдера командой "
+                "/model <model> --provider <provider>.",
+                "Чтобы Korra запросила состояние заново, выполните "
+                "`korra auth reset anthropic`. До сброса Korra может повторно показать "
+                "сохранённую ошибку, не обращаясь к API.",
+            ]
+        elif russian:
+            lines = [
+                (
+                    f"{provider_label} сообщает: для модели {model_label} закончился "
+                    "доступ по текущей квоте или балансу. Тип авторизации из этой "
+                    "ошибки определить нельзя."
+                ),
+                "Если используется подписка Claude Pro/Max, проверьте лимит на "
+                "https://claude.ai/settings/usage — можно дождаться его сброса или "
+                "подключить Extra Usage.",
+                "Если используется API-ключ Anthropic, проверьте баланс и оплату на "
+                "https://console.anthropic.com/settings/billing",
+                "Также можно выбрать API-ключ Anthropic или другого провайдера командой "
+                "/model <model> --provider <provider>.",
+            ]
+        elif unverified:
             lines = [
                 (
                     f"{provider_label} reported that your Claude subscription usage may be "
@@ -778,16 +817,34 @@ def _billing_or_entitlement_message(
     except Exception:
         billing_url = None
 
-    lines = [
-        (
-            f"{provider_label} reported that billing, credits, or account "
-            f"entitlement is exhausted for {model_label}."
-        ),
-        "Add credits or update billing with that provider, then retry.",
-    ]
+    if russian:
+        lines = [
+            (
+                f"Провайдер {provider_label} сообщил: закончилась квота или средства "
+                f"на балансе, либо ваша подписка не даёт доступ к модели {model_label}."
+            ),
+            "Проверьте лимиты подписки и баланс в кабинете провайдера, затем повторите запрос.",
+        ]
+    else:
+        lines = [
+            (
+                f"{provider_label} reported that billing, credits, or account "
+                f"entitlement is exhausted for {model_label}."
+            ),
+            "Add credits or update billing with that provider, then retry.",
+        ]
     if billing_url:
-        lines.append(f"{provider_label} billing: {billing_url}")
-    lines.append("You can switch providers temporarily with /model <model> --provider <provider>.")
+        lines.append(
+            f"Оплата и лимиты {provider_label}: {billing_url}"
+            if russian
+            else f"{provider_label} billing: {billing_url}"
+        )
+    lines.append(
+        "Временно выбрать другую модель или провайдера: "
+        "/model <model> --provider <provider>."
+        if russian
+        else "You can switch providers temporarily with /model <model> --provider <provider>."
+    )
     return "\n".join(lines)
 
 
@@ -817,12 +874,84 @@ def _billing_terminal_label(summary: str, unverified: bool) -> str:
     content-filter rejection, so the terminal line must not assert billing
     exhaustion as fact.
     """
+    if get_language() == "ru":
+        if unverified:
+            return (
+                "Провайдер сообщил о возможном исчерпании лимита (не подтверждено: "
+                f"то же сообщение может означать срабатывание фильтра, а не проблему оплаты): {summary}"
+            )
+        return f"Закончилась квота или средства на балансе: {summary}"
     if unverified:
         return (
             "Provider reported usage/credit exhaustion (unverified — the same "
             f"error can be a content-filter rejection, not billing): {summary}"
         )
     return f"Billing or credits exhausted: {summary}"
+
+
+def _rate_limit_terminal_message(
+    *, summary: str, retries: int, provider: str, model: str
+) -> str:
+    """Human-readable terminal response for a retry-exhausted throttle."""
+    if get_language() != "ru":
+        return f"API call failed after {retries} retries: {summary}"
+    provider_label = (provider or "").strip() or "сервис модели"
+    model_label = (model or "").strip() or "выбранная модель"
+    return (
+        f"Достигнут временный лимит запросов к {provider_label} для модели "
+        f"{model_label}. Автоматические повторы ({retries}) не помогли. "
+        "Подождите до сброса лимита или выберите другую модель командой `/model`."
+        f"\n\nТехническая причина: {summary}"
+    )
+
+
+def _provider_recovery_status(kind: str, *, upstream: str = "") -> str:
+    """Short progress text while Korra activates a fallback provider."""
+    if get_language() == "ru":
+        messages = {
+            "billing": (
+                "⚠️ Закончилась квота или средства на балансе — "
+                "переключаюсь на резервного провайдера..."
+            ),
+            "billing_unverified": (
+                "⚠️ Провайдер сообщил об исчерпании лимита, но это сообщение может "
+                "быть неточным — переключаюсь на резервного провайдера..."
+            ),
+            "unreachable": (
+                "⚠️ Провайдер недоступен — переключаюсь на резервного провайдера..."
+            ),
+            "rate_limit": (
+                "⚠️ Достигнут лимит запросов — переключаюсь на резервного провайдера..."
+            ),
+            "auth": (
+                "🔐 Не удалось подтвердить доступ к провайдеру — "
+                "переключаюсь на резервного провайдера..."
+            ),
+            "upstream_rate_limit": (
+                f"⚠️ Сервис {upstream or 'модели'} недоступен из-за временного лимита — "
+                "переключаюсь на резервную модель..."
+            ),
+        }
+    else:
+        messages = {
+            "billing": "⚠️ Billing or credits exhausted — switching to fallback provider...",
+            "billing_unverified": (
+                "⚠️ Provider reported usage/credit exhaustion "
+                "(unverified — may be a content-filter rejection) "
+                "— switching to fallback provider..."
+            ),
+            "unreachable": "⚠️ Provider unreachable — switching to fallback provider...",
+            "rate_limit": "⚠️ Rate limited — switching to fallback provider...",
+            "auth": (
+                "🔐 Authentication failed and could not be refreshed — "
+                "switching to fallback provider..."
+            ),
+            "upstream_rate_limit": (
+                f"⚠️ Upstream {upstream or 'aggregator'} rate-limited — "
+                "switching to fallback model..."
+            ),
+        }
+    return messages.get(kind, messages["rate_limit"])
 
 
 def _billing_failure_result(
@@ -5615,27 +5744,26 @@ def run_conversation(
                                 "upstream_provider", "aggregator"
                             )
                             agent._buffer_status(
-                                f"⚠️ Upstream {_upstream_name} rate-limited — "
-                                "switching to fallback model..."
+                                _provider_recovery_status(
+                                    "upstream_rate_limit", upstream=str(_upstream_name)
+                                )
                             )
                         elif classified.reason == FailoverReason.billing:
                             if classified.billing_unverified:
                                 # Ambiguous body (#82154) — don't assert billing.
                                 agent._buffer_status(
-                                    "⚠️ Provider reported usage/credit exhaustion "
-                                    "(unverified — may be a content-filter rejection) "
-                                    "— switching to fallback provider..."
+                                    _provider_recovery_status("billing_unverified")
                                 )
                             else:
                                 agent._buffer_status(
-                                    "⚠️ Billing or credits exhausted — switching to fallback provider..."
+                                    _provider_recovery_status("billing")
                                 )
                         elif _is_transport_failure:
                             agent._buffer_status(
-                                "⚠️ Provider unreachable — switching to fallback provider..."
+                                _provider_recovery_status("unreachable")
                             )
                         else:
-                            agent._buffer_status("⚠️ Rate limited — switching to fallback provider...")
+                            agent._buffer_status(_provider_recovery_status("rate_limit"))
                         if agent._try_activate_fallback(reason=classified.reason):
                             active_system_prompt = _sync_failover_system_message(
                                 agent, api_messages, active_system_prompt)
@@ -5667,8 +5795,7 @@ def run_conversation(
                 ):
                     _retry.auth_failover_attempted = True
                     agent._buffer_status(
-                        "🔐 Authentication failed and could not be refreshed — "
-                        "switching to fallback provider..."
+                        _provider_recovery_status("auth")
                     )
                     if agent._try_activate_fallback(reason=classified.reason):
                         active_system_prompt = _sync_failover_system_message(
@@ -6566,14 +6693,9 @@ def run_conversation(
                     _final_summary = agent._summarize_api_error(api_error)
                     _billing_guidance = ""
                     if classified.reason == FailoverReason.billing:
-                        if classified.billing_unverified:
-                            # Ambiguous body (#82154) — hedge the terminal line.
-                            agent._emit_status(
-                                "❌ Provider reported usage/credit exhaustion "
-                                f"(unverified — may be a content-filter rejection) — {_final_summary}"
-                            )
-                        else:
-                            agent._emit_status(f"❌ Billing or credits exhausted — {_final_summary}")
+                        agent._emit_status(
+                            f"❌ {_billing_terminal_label(_final_summary, classified.billing_unverified)}"
+                        )
                         _billing_guidance = _billing_or_entitlement_message(
                             capability="model access",
                             provider=_provider,
@@ -6590,7 +6712,15 @@ def run_conversation(
                             unverified=classified.billing_unverified,
                         )
                     elif is_rate_limited:
-                        agent._emit_status(f"❌ Rate limited after {max_retries} retries — {_final_summary}")
+                        if get_language() == "ru":
+                            agent._emit_status(
+                                f"❌ Лимит запросов не сбросился после {max_retries} "
+                                f"повторов — {_final_summary}"
+                            )
+                        else:
+                            agent._emit_status(
+                                f"❌ Rate limited after {max_retries} retries — {_final_summary}"
+                            )
                     else:
                         agent._emit_status(f"❌ API failed after {max_retries} retries — {_final_summary}")
                     agent._vprint(f"{agent.log_prefix}   💀 Final error: {_final_summary}", force=True)
@@ -6707,6 +6837,13 @@ def run_conversation(
                         _billing_block = _billing_block_dict(
                             _provider, _base, _model, _billing_guidance,
                             unverified=_billing_unverified,
+                        )
+                    elif is_rate_limited:
+                        _final_response = _rate_limit_terminal_message(
+                            summary=_final_summary,
+                            retries=max_retries,
+                            provider=str(_provider),
+                            model=str(_model),
                         )
                     else:
                         _final_response = f"API call failed after {max_retries} retries: {_final_summary}"

@@ -1519,8 +1519,9 @@ DEFAULT_CONFIG = {
         "focus_saved_tool_progress": "all",
         "skin": "default",
         # UI language for static user-facing messages (approval prompts, a
-        # handful of gateway slash-command replies).  Does NOT affect agent
-        # responses, log lines, tool outputs, or slash-command descriptions.
+        # handful of gateway slash-command replies, concise provider-failure
+        # guidance). Does NOT affect agent-generated responses, raw provider
+        # diagnostics, log lines, tool outputs, or slash-command descriptions.
         #
         # Уточнение контракта (аудит, находка 12): канбан-«wake» инструкции
         # (gateway/kanban_watchers.py) локализуются ЭТИМ же ключом и уходят

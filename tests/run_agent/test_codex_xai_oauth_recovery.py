@@ -166,7 +166,7 @@ def test_codex_stream_wire_error_event_nested_envelope_attr_style():
 # ---------------------------------------------------------------------------
 
 
-def test_summarize_api_error_decorates_xai_entitlement_403():
+def test_summarize_api_error_decorates_xai_entitlement_403(monkeypatch):
     """xAI's OAuth 403 must surface the X Premium+ gotcha + neutral causes.
 
     Wording deliberately leads with the X Premium+ gotcha because that's
@@ -176,6 +176,8 @@ def test_summarize_api_error_decorates_xai_entitlement_403():
     quota) follow.
     """
     from run_agent import AIAgent
+
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
 
     error = RuntimeError(
         "HTTP 403: Error code: 403 - {'code': 'The caller does not have permission "
@@ -200,7 +202,7 @@ def test_summarize_api_error_decorates_xai_entitlement_403():
     assert "/model" in summary
 
 
-def test_summarize_api_error_does_not_accuse_subscribers():
+def test_summarize_api_error_does_not_accuse_subscribers(monkeypatch):
     """Hint must not confidently say the user has no subscription.
 
     Don Piedro reported his subscription is active. The hint must not
@@ -209,6 +211,8 @@ def test_summarize_api_error_does_not_accuse_subscribers():
     of accusing them of lying about having a subscription.
     """
     from run_agent import AIAgent
+
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
 
     error = RuntimeError(
         "HTTP 403: do not have an active Grok subscription"
@@ -219,6 +223,23 @@ def test_summarize_api_error_does_not_accuse_subscribers():
     assert "you are not subscribed" not in summary.lower()
     # MUST lead with the most-likely-but-non-accusatory cause.
     assert "X Premium+ does NOT include" in summary
+
+
+def test_summarize_api_error_explains_xai_subscription_limit_in_russian(monkeypatch):
+    from run_agent import AIAgent
+
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+    error = RuntimeError(
+        "HTTP 403: do not have an active Grok subscription; "
+        "Grok is out of available resources"
+    )
+
+    summary = AIAgent._summarize_api_error(error)
+
+    assert "X Premium+ не включает" in summary
+    assert "лимит подписки" in summary.lower()
+    assert "grok.com/?_s=usage" in summary
+    assert "/model" in summary
 
 
 

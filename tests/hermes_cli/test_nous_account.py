@@ -94,6 +94,85 @@ def _reset_cache():
     reset_nous_portal_account_info_cache()
 
 
+def _denied_account(**access_overrides: Any) -> NousPortalAccountInfo:
+    access_values: dict[str, Any] = {
+        "allowed": False,
+        "paid_access": False,
+        "reason": "no_usable_credits",
+        "has_active_subscription": True,
+        "active_subscription_is_paid": True,
+        "subscription_credits_remaining": 0,
+        "purchased_credits_remaining": 0,
+        "total_usable_credits": 0,
+    }
+    access_values.update(access_overrides)
+    return NousPortalAccountInfo(
+        logged_in=True,
+        source="account_api",
+        fresh=True,
+        portal_base_url="https://portal.example.test",
+        paid_service_access=False,
+        paid_service_access_info=NousPaidServiceAccessInfo(**access_values),
+    )
+
+
+def test_russian_nous_message_explains_exhausted_subscription(monkeypatch):
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+
+    message = format_nous_portal_entitlement_message(
+        _denied_account(),
+        capability="model access",
+    )
+
+    assert message is not None
+    assert "кредит" in message.lower()
+    assert "законч" in message.lower()
+    assert "подписк" in message.lower()
+    assert "portal.example.test/billing" in message
+    assert "model access" not in message
+
+
+def test_russian_nous_message_explains_organisation_spend_cap(monkeypatch):
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+
+    message = format_nous_portal_entitlement_message(
+        _denied_account(
+            reason="member_spend_cap_exceeded",
+            member_spend_cap_exceeded=True,
+            member_spend_cap_usd=500,
+            member_spend_usd=520.51,
+        ),
+        capability="model access",
+    )
+
+    assert message is not None
+    assert "лимит расходов" in message.lower()
+    assert "$500.00" in message
+    assert "$520.51" in message
+    assert "korra model" in message
+    assert "hermes model" not in message
+
+
+def test_russian_nous_message_explains_missing_login(monkeypatch):
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+    account = NousPortalAccountInfo(
+        logged_in=False,
+        source="none",
+        fresh=True,
+        portal_base_url="https://portal.example.test",
+    )
+
+    message = format_nous_portal_entitlement_message(
+        account,
+        capability="model access",
+    )
+
+    assert message is not None
+    assert "войдите" in message.lower()
+    assert "korra model" in message
+    assert "оплат" in message.lower()
+
+
 
 
 
@@ -334,7 +413,6 @@ def test_member_spend_cap_exceeded_without_amounts(monkeypatch):
 
 
 # ── org slug/name parsing + top-up URL builder ──────────────────────────────
-
 
 
 

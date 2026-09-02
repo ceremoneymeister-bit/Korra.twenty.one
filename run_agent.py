@@ -150,6 +150,7 @@ from tools.browser_tool import cleanup_browser
 from agent.memory_manager import sanitize_context
 from agent.memory_provider import is_trivial_prompt
 from agent.error_classifier import FailoverReason
+from agent.i18n import get_language
 from agent.redact import redact_sensitive_text
 from agent.message_content import flatten_message_text
 from agent.session_activity import ActivityProvenance
@@ -2694,17 +2695,29 @@ class AIAgent:
         )
         if not is_entitlement:
             return detail
-        hint = (
-            " — xAI rejected this OAuth account. NOTE: X Premium+ does NOT "
-            "include xAI API access — only standalone SuperGrok subscribers "
-            "can use this provider. Other possible causes: no Grok "
-            "subscription, your tier doesn't include this model, or your "
-            "quota is exhausted. Check https://grok.com/?_s=usage to see "
-            "which, or run `/model` to switch providers."
-        )
+        if get_language() == "ru":
+            hint = (
+                " — xAI отклонил эту OAuth-учётную запись. X Premium+ не включает "
+                "доступ к xAI API: для этого провайдера нужна отдельная подписка "
+                "SuperGrok. Возможны и другие причины: выбранная модель не входит "
+                "в ваш тариф или закончился лимит подписки. Проверьте состояние на "
+                "https://grok.com/?_s=usage либо выберите другого провайдера через `/model`."
+            )
+        else:
+            hint = (
+                " — xAI rejected this OAuth account. NOTE: X Premium+ does NOT "
+                "include xAI API access — only standalone SuperGrok subscribers "
+                "can use this provider. Other possible causes: no Grok "
+                "subscription, your tier doesn't include this model, or your "
+                "quota is exhausted. Check https://grok.com/?_s=usage to see "
+                "which, or run `/model` to switch providers."
+            )
         # Idempotency: detect prior decoration by a substring unique to the
         # hint (not present in xAI's own body text).
-        if "X Premium+ does NOT include" in detail:
+        if (
+            "X Premium+ does NOT include" in detail
+            or "X Premium+ не включает" in detail
+        ):
             return detail
         return f"{detail}{hint}"
 
@@ -2768,6 +2781,11 @@ class AIAgent:
                 marker in str(current).lower()
                 for marker in network_resolution_markers
             ):
+                if get_language() == "ru":
+                    return (
+                        "Korra не может подключиться к сервису модели. "
+                        "Проверьте интернет-соединение и повторите попытку."
+                    )
                 return (
                     "Hermes can't reach the model provider. You may be offline. "
                     "Check your internet connection and try again."
