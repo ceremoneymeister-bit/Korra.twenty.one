@@ -2736,6 +2736,277 @@ def _decode_data_url(data_url: str) -> tuple[bytes, str]:
     return data, mime_type
 
 
+# --- Korra bubble-chat overlay: OpenAI-compatible chat proxy ----------------
+_API_SERVER_PROXY_TARGET = os.environ.get(
+    "API_SERVER_PROXY_TARGET", "http://127.0.0.1:8642"
+)
+_CHAT_DELIVERY_TASKS: dict[str, "asyncio.Task[tuple[int, bytes, str]]"] = {}
+_CHAT_DELIVERY_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _chat_delivery_ledger():
+    from hermes_cli.chat_delivery import DeliveryLedger
+
+    return DeliveryLedger(Path(get_hermes_home()) / "state" / "browser-chat-delivery.sqlite3")
+
+
+async def _run_durable_browser_chat(
+    *,
+    message_id: str,
+    upstream_url: str,
+    body: dict[str, Any],
+    headers: dict[str, str],
+    return_sse: bool,
+) -> tuple[int, bytes, str]:
+    """Finish and record one owner message even if its browser disconnects."""
+    import httpx as _httpx
+
+    from hermes_cli.chat_delivery import openai_json_to_sse
+
+    ledger = _chat_delivery_ledger()
+    upstream_headers = {**headers, "Idempotency-Key": message_id}
+    try:
+        async with _httpx.AsyncClient(timeout=_httpx.Timeout(120.0)) as client:
+            response = await client.post(
+                upstream_url,
+                json={**body, "stream": False},
+                headers=upstream_headers,
+            )
+        raw = response.content
+        if len(raw) > _CHAT_DELIVERY_RESPONSE_MAX_BYTES:
+            raise RuntimeError("Chat response exceeds the delivery ledger limit")
+        if 400 <= response.status_code < 500:
+            ledger.fail(message_id)
+            return (
+                response.status_code,
+                raw,
+                response.headers.get("content-type", "application/json"),
+            )
+        if response.status_code >= 500:
+            # The agent may have performed a side effect before returning 5xx.
+            # Keep the claim pending so this message ID cannot run twice.
+            return (
+                response.status_code,
+                raw,
+                response.headers.get("content-type", "application/json"),
+            )
+        downstream = openai_json_to_sse(raw) if return_sse else raw
+        content_type = "text/event-stream" if return_sse else response.headers.get(
+            "content-type", "application/json"
+        )
+        ledger.complete(
+            message_id,
+            response_body=downstream,
+            status_code=200,
+            content_type=content_type,
+        )
+        return 200, downstream, content_type
+    except Exception as exc:
+        # An interrupted upstream connection is ambiguous: the agent may have
+        # accepted the turn even though this proxy never received its reply.
+        # Keep the claim pending so a later click cannot create a duplicate.
+        # The owner can verify the session history and then start a new intent.
+        _log.error("durable browser chat failed for %s: %s", message_id, exc)
+        payload = json.dumps(
+            {
+                "detail": (
+                    "Доставка сообщения пока не подтверждена. "
+                    "Проверьте историю перед новой отправкой."
+                )
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return 502, payload, "application/json"
+
+
+async def _durable_browser_chat_response(
+    *,
+    message_id_raw: str,
+    session_id: str,
+    upstream_url: str,
+    body: dict[str, Any],
+    upstream_headers: dict[str, str],
+    return_sse: bool,
+) -> Response:
+    from hermes_cli.chat_delivery import (
+        DeliveryConflict,
+        request_fingerprint,
+        validate_client_message_id,
+    )
+
+    try:
+        message_id = validate_client_message_id(message_id_raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Некорректный ID сообщения") from exc
+    fingerprint = request_fingerprint(body, session_id)
+    ledger = _chat_delivery_ledger()
+    try:
+        state, record = await run_in_threadpool(
+            ledger.claim, message_id, fingerprint, session_id
+        )
+    except DeliveryConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Этот ID сообщения уже относится к другому тексту",
+        ) from exc
+
+    task_key = f"{ledger.path}:{message_id}"
+    if state == "completed" and record.response_body is not None:
+        return Response(
+            content=record.response_body,
+            status_code=record.status_code or 200,
+            media_type=record.content_type
+            or ("text/event-stream" if return_sse else "application/json"),
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Korra-Client-Message-Id": message_id,
+                "X-Korra-Delivery-State": "replayed",
+            },
+        )
+
+    task = _CHAT_DELIVERY_TASKS.get(task_key)
+    if state == "pending" and task is None:
+        # The dashboard restarted while the upstream result was unknown. Never
+        # guess by sending a second agent turn; surface the ambiguity honestly.
+        raise HTTPException(
+            status_code=409,
+            detail="Доставка ещё проверяется. Откройте историю перед повторной отправкой",
+        )
+    if task is None:
+        task = asyncio.create_task(
+            _run_durable_browser_chat(
+                message_id=message_id,
+                upstream_url=upstream_url,
+                body=body,
+                headers=upstream_headers,
+                return_sse=return_sse,
+            )
+        )
+        _CHAT_DELIVERY_TASKS[task_key] = task
+
+        def _forget(done_task: "asyncio.Task[tuple[int, bytes, str]]") -> None:
+            if _CHAT_DELIVERY_TASKS.get(task_key) is done_task:
+                _CHAT_DELIVERY_TASKS.pop(task_key, None)
+
+        task.add_done_callback(_forget)
+
+    # Shield keeps the agent request alive if the browser tab closes. The
+    # completed response is persisted and the same ID can replay it on reload.
+    status_code, response_body, content_type = await asyncio.shield(task)
+    return Response(
+        content=response_body,
+        status_code=status_code,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Korra-Client-Message-Id": message_id,
+            "X-Korra-Delivery-State": "delivered" if status_code < 400 else "failed",
+        },
+    )
+
+
+@app.post("/api/chat/completions")
+async def chat_completions_proxy(request: Request) -> Response:
+    """Forward an OpenAI-compatible chat request to the Korra gateway API server.
+
+    Thin pass-through (streaming SSE + non-streaming) behind the same loopback
+    session-token gate as the rest of /api. Requires API_SERVER_KEY + a running
+    API server at API_SERVER_PROXY_TARGET — absent in a bare canary, so it
+    returns 500/502 until the API_SERVER layer + engine are wired.
+
+    SSE TOOL-PROGRESS CONTRACT (do not drop when wiring API_SERVER):
+    the bubble-chat frontend renders live tool-progress from
+    ``event: korra.tool.progress`` blocks carrying a {tool, toolCallId, status}
+    payload, interleaved with standard OpenAI ``chat.completion.chunk`` data.
+    This proxy forwards non-durable upstream SSE lines verbatim.
+    """
+    import time as _time
+
+    import httpx as _httpx
+    from fastapi.responses import StreamingResponse
+
+    t0 = _time.monotonic()
+    api_key = os.environ.get("API_SERVER_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="API server key not configured")
+
+    body = await request.json()
+    do_stream = bool(body.get("stream", False))
+    upstream_url = f"{_API_SERVER_PROXY_TARGET}/v1/chat/completions"
+    upstream_headers: dict[str, str] = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    for header_name in ("X-Hermes-Session-Id", "X-Hermes-Session-Key"):
+        value = request.headers.get(header_name)
+        if value is not None:
+            upstream_headers[header_name] = value
+
+    client_message_id = request.headers.get("X-Korra-Client-Message-Id", "").strip()
+    if client_message_id:
+        return await _durable_browser_chat_response(
+            message_id_raw=client_message_id,
+            session_id=request.headers.get("X-Hermes-Session-Id", "").strip(),
+            upstream_url=upstream_url,
+            body=body,
+            upstream_headers=upstream_headers,
+            return_sse=do_stream,
+        )
+
+    if do_stream:
+        try:
+            client_cm = _httpx.AsyncClient(timeout=_httpx.Timeout(120.0))
+            client = await client_cm.__aenter__()
+            stream_cm = client.stream(
+                "POST", upstream_url, json=body, headers=upstream_headers
+            )
+            response = await stream_cm.__aenter__()
+        except Exception as exc:
+            _log.error("chat_completions_proxy stream upstream error: %s", exc)
+            raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
+        if response.status_code >= 400:
+            error_body = await response.aread()
+            await stream_cm.__aexit__(None, None, None)
+            await client_cm.__aexit__(None, None, None)
+            return Response(
+                content=error_body,
+                status_code=response.status_code,
+                media_type=response.headers.get("content-type", "application/json"),
+            )
+
+        async def _stream_generator():
+            try:
+                async for line in response.aiter_lines():
+                    yield (line + "\n").encode()
+            finally:
+                await stream_cm.__aexit__(None, None, None)
+                await client_cm.__aexit__(None, None, None)
+
+        _log.info(
+            "chat_completions_proxy stream started: %.3fs",
+            _time.monotonic() - t0,
+        )
+        return StreamingResponse(
+            _stream_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    try:
+        async with _httpx.AsyncClient(timeout=_httpx.Timeout(120.0)) as client:
+            response = await client.post(
+                upstream_url, json=body, headers=upstream_headers
+            )
+    except Exception as exc:
+        _log.error("chat_completions_proxy upstream error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        media_type=response.headers.get("content-type", "application/json"),
+    )
+
+
 _CHAT_IMAGE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 _CHAT_IMAGE_ALLOWED_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
 _CHAT_IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
