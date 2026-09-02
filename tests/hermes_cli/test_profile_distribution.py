@@ -163,7 +163,7 @@ class TestVersionRequires:
         if ok:
             check_hermes_requires(spec, cur)
         else:
-            with pytest.raises(DistributionError, match="requires Hermes"):
+            with pytest.raises(DistributionError, match="requires Korra"):
                 check_hermes_requires(spec, cur)
 
     def test_parse_semver_handles_prerelease(self):
@@ -354,7 +354,7 @@ class TestInstall:
 
 
     def test_install_enforces_hermes_requires(self, profile_env, monkeypatch):
-        # Pin current Hermes version to something well below the requirement
+        # Pin current Korra version to something well below the requirement
         import hermes_cli
         monkeypatch.setattr(hermes_cli, "__version__", "0.1.0", raising=False)
 
@@ -364,7 +364,7 @@ class TestInstall:
             hermes_requires=">=99.0.0",
         )
         staged = _make_staging_dir(profile_env, "future", manifest=mf)
-        with pytest.raises(DistributionError, match="requires Hermes"):
+        with pytest.raises(DistributionError, match="requires Korra"):
             install_distribution(str(staged), name="future")
 
 
@@ -758,4 +758,3 @@ class TestManifestCrashDurability:
 
         mode = stat.S_IMODE(mf.stat().st_mode)
         assert mode == 0o644, f"new manifest created as {oct(mode)}"
-

@@ -32,7 +32,7 @@ class TestDoctorPlatformHints:
         hint = doctor._sqlite_upgrade_hint()
 
         assert "docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest" in hint
-        assert "recreate all Hermes containers" in hint
+        assert "recreate all Korra containers" in hint
         assert "hermes update" not in hint
 
     def test_sqlite_upgrade_hint_keeps_git_runtime_repair(self):

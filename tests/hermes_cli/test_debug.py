@@ -171,7 +171,7 @@ class TestMissingLogNote:
         snap = _capture_log_snapshot("desktop", tail_lines=10)
         assert snap.full_text is None
         assert "not on this host" in snap.tail_text
-        assert "Hermes Desktop" in snap.tail_text
+        assert "Korra Desktop" in snap.tail_text
         # The reader needs the path to collect by hand on the client machine.
         assert str(hermes_home / "logs" / "desktop.log") in snap.tail_text
 
@@ -1098,4 +1098,3 @@ class TestShareConsentGate:
 
         mock_upload.assert_not_called()
         assert "Aborted" not in capsys.readouterr().out
-

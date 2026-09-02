@@ -59,7 +59,7 @@ class TestHolderMessage:
 
     def test_serve_gets_backend_hint(self):
         message = self._msg(r"python -m hermes_cli.main serve --host 127.0.0.1 --port 0")
-        assert "Hermes backend" in message
+        assert "Korra backend" in message
 
     def test_gateway_hint(self):
         message = self._msg(r"python -m hermes_cli.main gateway run")
