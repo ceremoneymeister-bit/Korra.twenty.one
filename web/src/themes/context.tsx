@@ -17,7 +17,6 @@ import {
 import type {
   DashboardTheme,
   ThemeAssets,
-  ThemeColorOverrides,
   ThemeComponentStyles,
   ThemeDensity,
   ThemeLayer,
@@ -28,10 +27,14 @@ import type {
   ThemeSeriesColors,
   ThemeTypography,
 } from "./types";
+import {
+  COLOR_OVERRIDE_CSS_VARS,
+  colorOverrideVars,
+} from "./semantic-colors";
 import { api } from "@/lib/api";
 
-/** LocalStorage key — pre-applied before the React tree mounts to avoid
- *  a visible flash of the default palette on theme-overridden installs. */
+/** LocalStorage key used to seed the first React render. The static CSS uses
+ *  light defaults until ThemeProvider's first effect applies a stored theme. */
 const STORAGE_KEY = "hermes-dashboard-theme";
 
 /** LocalStorage key for the font override (independent of theme). Holds a
@@ -102,51 +105,6 @@ function layoutVars(layout: ThemeLayout): Record<string, string> {
     "--theme-spacing-mul": DENSITY_MULTIPLIERS[layout.density] ?? "1",
     "--theme-density": layout.density,
   };
-}
-
-/** Map a color-overrides key (camelCase) to its `--color-*` CSS var. */
-const OVERRIDE_KEY_TO_VAR: Record<keyof ThemeColorOverrides, string> = {
-  card: "--color-card",
-  cardForeground: "--color-card-foreground",
-  popover: "--color-popover",
-  popoverForeground: "--color-popover-foreground",
-  primary: "--color-primary",
-  primaryForeground: "--color-primary-foreground",
-  secondary: "--color-secondary",
-  secondaryForeground: "--color-secondary-foreground",
-  muted: "--color-muted",
-  mutedForeground: "--color-muted-foreground",
-  accent: "--color-accent",
-  accentForeground: "--color-accent-foreground",
-  destructive: "--color-destructive",
-  destructiveForeground: "--color-destructive-foreground",
-  // Пишем в звено индирекции, а не в сам токен. Tailwind компилирует
-  // `.text-success` в `var(--success, …)`, потому что `--color-success`
-  // объявлен через него (index.css). Запись прямо в `--color-success` до
-  // утилиты не доходила — цвет оставался вшитым на сборке.
-  success: "--success",
-  warning: "--warning",
-  border: "--color-border",
-  input: "--color-input",
-  ring: "--color-ring",
-};
-
-/** Keys we might have written on a previous theme — needed to know which
- *  properties to clear when a theme with fewer overrides replaces one
- *  with more. */
-const ALL_OVERRIDE_VARS = Object.values(OVERRIDE_KEY_TO_VAR);
-
-function overrideVars(
-  overrides: ThemeColorOverrides | undefined,
-): Record<string, string> {
-  if (!overrides) return {};
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(overrides)) {
-    if (!value) continue;
-    const cssVar = OVERRIDE_KEY_TO_VAR[key as keyof ThemeColorOverrides];
-    if (cssVar) out[cssVar] = value;
-  }
-  return out;
 }
 
 /** Map data-series accents to their CSS vars. Themes omit either field to
@@ -346,7 +304,7 @@ function applyTheme(theme: DashboardTheme) {
   const root = document.documentElement;
 
   // Clear any overrides from a previous theme before applying the new set.
-  for (const cssVar of ALL_OVERRIDE_VARS) {
+  for (const cssVar of COLOR_OVERRIDE_CSS_VARS) {
     root.style.removeProperty(cssVar);
   }
   // Same clear-then-set for series colors so switches never carry stale
@@ -372,7 +330,7 @@ function applyTheme(theme: DashboardTheme) {
     ...paletteVars(theme.palette),
     ...typographyVars(theme.typography),
     ...layoutVars(theme.layout),
-    ...overrideVars(theme.colorOverrides),
+    ...colorOverrideVars(theme.colorOverrides),
     ...seriesColorVars(theme.seriesColors),
     ...assetMap,
     ...componentMap,
@@ -421,7 +379,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const availableThemes = BUILTIN_THEME_ENTRIES;
 
   /** Active font-override id (independent of theme). `THEME_DEFAULT_FONT_ID`
-   *  = no override. Seeded from localStorage so it's applied flash-free. */
+   *  = no override. Seeded from localStorage before the first effect. */
   const [fontId, setFontId] = useState<string>(() => {
     if (typeof window === "undefined") return THEME_DEFAULT_FONT_ID;
     const stored = window.localStorage.getItem(FONT_STORAGE_KEY);

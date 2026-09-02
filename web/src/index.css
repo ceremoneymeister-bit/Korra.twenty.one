@@ -59,9 +59,27 @@
   --background-base: #f7f7f5;
   --background-alpha: 1;
 
-  /* Light-theme semantic defaults used before ThemeProvider's first effect. */
+  /* Light-theme semantic defaults used before ThemeProvider's first effect.
+     Keep in sync with lightTheme.colorOverrides in themes/presets.ts. */
+  --card: #ffffff;
+  --card-foreground: #202124;
+  --popover: #ffffff;
+  --popover-foreground: #202124;
+  --primary: #4f7900;
+  --primary-foreground: #ffffff;
+  --secondary: #efefec;
+  --secondary-foreground: #202124;
+  --muted: #e7e7e3;
+  --muted-foreground: #667085;
+  --accent: #eaf7d3;
+  --accent-foreground: #304a00;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
   --success: #047857;
   --warning: #8a5200;
+  --border: #cfd1cc;
+  --input: #b8bbb4;
+  --ring: #4f7900;
 
   /* Typography tokens — rewritten by ThemeProvider. Defaults match the
      system stack so themes that don't override look native. */
@@ -159,10 +177,31 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   border-radius: 0.625rem;
 }
 
+/* The package's default Button calls its filled action `midground`. In the
+   product shell that action is semantic `primary`: route only that exact
+   variant through the theme accent, leaving text, ghost and disabled chrome
+   on the neutral midground palette. */
+[data-client-ui="true"] button.group.grid.bg-midground.text-background-base:not(:disabled) {
+  background-color: var(--primary, var(--midground));
+  color: var(--primary-foreground, var(--background-base));
+}
+
+/* Package Input still uses midground for its border. The product layer gives
+   fields the promised semantic input token without changing checkbox/radio
+   geometry or introducing borders where a control has none. */
+[data-client-ui="true"] input:not([type="checkbox"]):not([type="radio"]),
+[data-client-ui="true"] textarea,
+[data-client-ui="true"] [role="combobox"] {
+  border-color: var(--input, color-mix(in srgb, var(--midground-base) 15%, transparent));
+}
+
 [data-client-ui="true"] button:focus-visible,
 [data-client-ui="true"] a:focus-visible,
+[data-client-ui="true"] input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+[data-client-ui="true"] textarea:focus-visible,
+[data-client-ui="true"] [role="combobox"]:focus-visible,
 [data-client-ui="true"] summary:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--midground-base) 62%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--ring, var(--midground-base)) 62%, transparent);
   outline-offset: 2px;
 }
 
@@ -234,22 +273,25 @@ code { font-size: 0.875rem; }
      stay visible — in LENS_0, `--foreground` itself has alpha 0. */
   --color-foreground: var(--midground);
 
-  --color-card: color-mix(in srgb, var(--midground-base) 4%, var(--background-base));
-  --color-card-foreground: var(--midground);
-  --color-primary: var(--midground);
-  --color-primary-foreground: var(--background-base);
-  --color-secondary: color-mix(in srgb, var(--midground-base) 6%, var(--background-base));
-  --color-secondary-foreground: var(--midground);
-  --color-muted: color-mix(in srgb, var(--midground-base) 8%, var(--background-base));
+  /* Every shadcn-compatible token keeps a non-`--color-*` indirection.
+     `@theme inline` substitutes the expression into generated utilities;
+     ThemeProvider can then switch the inner variable at runtime. */
+  --color-card: var(--card, color-mix(in srgb, var(--midground-base) 4%, var(--background-base)));
+  --color-card-foreground: var(--card-foreground, var(--midground));
+  --color-primary: var(--primary, var(--midground));
+  --color-primary-foreground: var(--primary-foreground, var(--background-base));
+  --color-secondary: var(--secondary, color-mix(in srgb, var(--midground-base) 6%, var(--background-base)));
+  --color-secondary-foreground: var(--secondary-foreground, var(--midground));
+  --color-muted: var(--muted, color-mix(in srgb, var(--midground-base) 8%, var(--background-base)));
   /* Routes the shadcn `muted-foreground` slot through the DS semantic
      text-secondary token (defaults to midground 80%) so legacy call
      sites that use `text-muted-foreground` get a readable color
      instead of the old 55%-transparent default. */
-  --color-muted-foreground: var(--color-text-secondary);
-  --color-accent: color-mix(in srgb, var(--midground-base) 10%, var(--background-base));
-  --color-accent-foreground: var(--midground);
-  --color-destructive: #fb2c36;
-  --color-destructive-foreground: #ffffff;
+  --color-muted-foreground: var(--muted-foreground, var(--color-text-secondary));
+  --color-accent: var(--accent, color-mix(in srgb, var(--midground-base) 10%, var(--background-base)));
+  --color-accent-foreground: var(--accent-foreground, var(--midground));
+  --color-destructive: var(--destructive, #fb2c36);
+  --color-destructive-foreground: var(--destructive-foreground, #ffffff);
   /* Через индирекцию — как у соседних токенов и как в globals.css кита.
      Плоский hex Tailwind вшивает прямо в утилиту на сборке: `.text-success`
      тогда навсегда `#4ade80`, и переопределение темы до него не доходит.
@@ -257,11 +299,11 @@ code { font-size: 0.875rem; }
      тёмный фон и дают там 1,6 к единице, то есть подпись не читается вовсе. */
   --color-success: var(--success, #4ade80);
   --color-warning: var(--warning, #ffbd38);
-  --color-border: color-mix(in srgb, var(--midground-base) 15%, transparent);
-  --color-input: color-mix(in srgb, var(--midground-base) 15%, transparent);
-  --color-ring: var(--midground);
-  --color-popover: color-mix(in srgb, var(--midground-base) 4%, var(--background-base));
-  --color-popover-foreground: var(--midground);
+  --color-border: var(--border, color-mix(in srgb, var(--midground-base) 15%, transparent));
+  --color-input: var(--input, color-mix(in srgb, var(--midground-base) 15%, transparent));
+  --color-ring: var(--ring, var(--midground));
+  --color-popover: var(--popover, color-mix(in srgb, var(--midground-base) 4%, var(--background-base)));
+  --color-popover-foreground: var(--popover-foreground, var(--midground));
 
   --radius-sm: calc(var(--theme-radius) - 4px);
   --radius-md: calc(var(--theme-radius) - 2px);
