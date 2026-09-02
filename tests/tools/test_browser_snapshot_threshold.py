@@ -1,6 +1,9 @@
 """Behavior tests for config-driven browser snapshot thresholds."""
 
+import itertools
 import json
+import os
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -23,11 +26,21 @@ def isolated_snapshot_threshold(tmp_path, monkeypatch):
     browser_tool._snapshot_threshold_resolved = original_resolved
 
 
+_mtime_bump = itertools.count(1)
+
+
 def _write_threshold(hermes_home, value):
-    (hermes_home / "config.yaml").write_text(
+    path = hermes_home / "config.yaml"
+    path.write_text(
         f"browser:\n  snapshot_threshold: {value}\n",
         encoding="utf-8",
     )
+    # Korra: кэш read_raw_config ключуется (st_mtime_ns, st_size). Две записи
+    # одинаковой длины в один тик часов коллидируют по ключу, и вторая правка
+    # невидима (дефект теста апстрима, кандидат в ENGINE_PUSH_QUEUE). Каждой
+    # записи — строго возрастающий mtime.
+    t = time.time() + next(_mtime_bump)
+    os.utime(path, (t, t))
 
 
 def _long_snapshot(chars: int) -> str:

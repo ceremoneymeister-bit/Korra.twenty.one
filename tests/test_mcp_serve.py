@@ -1179,6 +1179,13 @@ class TestEventBridgePollE2E:
             {"role": "user", "content": "Hello", "timestamp": "2026-03-29T15:00:01"},
         ])
 
+        # Korra: наш SQLite (3.50.4, обход WAL-бага) при ПЕРВОМ открытии
+        # state.db переписывает journal_mode — файл меняет mtime прямо во
+        # время первого опроса, и «неизменность» между опросами ложно
+        # нарушается. Греем открытие заранее, чтобы замер шёл со
+        # стабильного mtime.
+        mcp_serve._load_sessions_index()
+
         class TestDB:
             def __init__(self):
                 self.call_count = 0
@@ -1374,7 +1381,12 @@ class TestEventBridgePollE2E:
             "id": 2, "role": "assistant", "content": "arrived after start",
             "timestamp": "2026-03-29T15:05:00",
         })
-        os.utime(db_path, None)  # bump mtime so the poll gate opens
+        # Korra: os.utime(..., None) может попасть в тот же тик часов ядра,
+        # что и запись файла — mtime не меняется и mtime-гейт _poll_once не
+        # открывается (гонка быстрых машин, дефект теста апстрима, кандидат
+        # в ENGINE_PUSH_QUEUE). Двигаем mtime явно на строго большее значение.
+        _t = db_path.stat().st_mtime + 1
+        os.utime(db_path, (_t, _t))
         bridge._poll_once(DB())
         events = bridge.poll_events(after_cursor=0)["events"]
         assert len(events) == 1
@@ -1412,7 +1424,12 @@ class TestEventBridgePollE2E:
             "id": 1, "role": "user", "content": "hello after baseline",
             "timestamp": "2026-03-29T15:10:00",
         }]
-        os.utime(db_path, None)
+        # Korra: os.utime(..., None) может попасть в тот же тик часов ядра,
+        # что и запись файла — mtime не меняется и mtime-гейт _poll_once не
+        # открывается (гонка быстрых машин, дефект теста апстрима, кандидат
+        # в ENGINE_PUSH_QUEUE). Двигаем mtime явно на строго большее значение.
+        _t = db_path.stat().st_mtime + 1
+        os.utime(db_path, (_t, _t))
         bridge._poll_once(DB())
 
         events = bridge.poll_events(after_cursor=0)["events"]

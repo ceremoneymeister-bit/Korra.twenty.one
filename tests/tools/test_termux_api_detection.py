@@ -161,6 +161,12 @@ class TestDetectAudioEnvironmentTermuxFallback:
     def test_inconclusive_probes_with_binary_does_not_emit_app_warning(
         self, monkeypatch
     ):
+        # Korra: на docker-хосте эвристика is_container() ложно срабатывает
+        # (маркеры containerd в mountinfo от ЧУЖИХ работающих контейнеров) и
+        # уводит детект в ветку «в контейнере нет аудио» вместо Termux-ветки.
+        # Тест — про Termux-пробы, контейнер-детект здесь закрепляется.
+        import hermes_constants
+        monkeypatch.setattr(hermes_constants, "_container_detected", False)
         monkeypatch.setenv("TERMUX_VERSION", "0.118.3")
         monkeypatch.setenv("PREFIX", "/data/data/com.termux/files/usr")
         monkeypatch.delenv("SSH_CLIENT", raising=False)
