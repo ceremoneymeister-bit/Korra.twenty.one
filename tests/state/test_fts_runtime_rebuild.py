@@ -250,6 +250,8 @@ class TestRuntimeFtsRebuild:
         def _listdir(path):
             if isinstance(path, str):
                 path = path.replace("/proc", str(proc_root))
+            if os.fspath(path) == os.fspath(proc_root / "222" / "fd"):
+                raise PermissionError(13, "Permission denied", os.fspath(path))
             return real_listdir(path)
         monkeypatch.setattr(hermes_state.os, "listdir", _listdir)
         # _read_proc_cmdline opens /proc/<pid>/cmdline directly; redirect

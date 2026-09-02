@@ -91,6 +91,10 @@ class TestAbiStamp:
         assert stamp.read_text().strip() == ld._python_abi_tag()
 
 
+    @pytest.mark.skipif(
+        hasattr(os, "geteuid") and os.geteuid() == 0,
+        reason="root ignores directory write permissions",
+    )
     def test_readonly_target_reports_error(self, tmp_path):
         # A path under a non-writable parent should surface a clean error,
         # not raise.

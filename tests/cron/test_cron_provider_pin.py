@@ -113,7 +113,7 @@ class TestProviderDriftGuard:
         assert "44585" in blob
 
         delivered = _summarize_cron_failure_for_delivery(job, error).lower()
-        assert "host running hermes" in delivered
+        assert "host running korra" in delivered
         assert "hermes cron edit pin-test --provider <provider> --model <model>" in delivered
         assert "cronjob action=update" not in delivered
 

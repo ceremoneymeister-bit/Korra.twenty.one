@@ -67,6 +67,7 @@ def _setup_update_mocks(monkeypatch, tmp_path):
     monkeypatch.setattr(hermes_config, "migrate_config", lambda **kw: {"env_added": [], "config_added": []})
     monkeypatch.setattr(hermes_main, "_upgrade_pip_before_lazy_refresh", lambda *a, **kw: None)
     monkeypatch.setattr(hermes_main, "_refresh_active_lazy_features", lambda *a, **kw: True)
+    monkeypatch.setattr(hermes_main, "_purge_stale_hermes_modules", lambda: None)
 
 
 
@@ -477,7 +478,7 @@ def test_restore_rejects_invalid_python_and_keeps_clean_updated_tree(
     assert git("status", "--porcelain").stdout == ""
     assert git("stash", "list").stdout.strip()
     output = capsys.readouterr().out
-    assert "made the Hermes agent unexecutable" in output
+    assert "made the Korra agent unexecutable" in output
     assert "gateway was not restarted" in output
     assert f"git stash apply {stash_ref}" in output
 
