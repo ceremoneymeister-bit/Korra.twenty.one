@@ -546,11 +546,26 @@ def get_provider(name: str, *, allow_network: bool = True) -> Optional[ProviderD
 
     if overlay is not None:
         # Hermes-only provider (not in models.dev)
+        #
+        # Korra: overlay.extra_env_vars — ДОПОЛНЕНИЕ к списку из models.dev, а
+        # не полный список. Когда каталог недоступен (нет сети и нет кэша —
+        # обычное состояние свежей установки, а у нас каталог ещё и выключен
+        # fail-closed), этот путь оставался единственным и терял канонический
+        # слот `<PROVIDER>_API_KEY`. Наследование ключей в новый профиль тогда
+        # молча пропускало ANTHROPIC_API_KEY, и созданный агент не мог
+        # обратиться к модели. Добавляем канонический слот В КОНЕЦ: первый
+        # элемент списка пять мест (мастер настройки, инвентарь, выбор модели)
+        # трактуют как ГЛАВНОЕ имя ключа, и для провайдеров вроде
+        # github-copilot синтезированное имя увело бы мастер не туда.
+        fallback_env_vars = list(overlay.extra_env_vars or ())
+        canonical_key_env = canonical.upper().replace("-", "_") + "_API_KEY"
+        if canonical_key_env not in fallback_env_vars:
+            fallback_env_vars.append(canonical_key_env)
         return ProviderDef(
             id=canonical,
             name=_LABEL_OVERRIDES.get(canonical, canonical),
             transport=overlay.transport,
-            api_key_env_vars=overlay.extra_env_vars,
+            api_key_env_vars=tuple(fallback_env_vars),
             base_url=overlay.base_url_override,
             base_url_env_var=overlay.base_url_env_var,
             is_aggregator=overlay.is_aggregator,

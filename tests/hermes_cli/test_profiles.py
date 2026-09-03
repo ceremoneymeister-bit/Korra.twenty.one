@@ -1246,3 +1246,43 @@ class TestResolveProfileEnvSpelling:
         monkeypatch.delenv("HERMES_HOME", raising=False)
         assert Path(resolve_profile_env("default")) == _get_default_hermes_home()
 
+
+
+class TestOfflineProviderKeySlots:
+    """Каталог моделей у форка выключен fail-closed, а свежая установка вдобавок
+    может не иметь ни сети, ни кэша. В этом состоянии определение провайдера
+    собиралось только из hermes-оверлея, который является ДОПОЛНЕНИЕМ к
+    models.dev, — и терял канонический слот `<PROVIDER>_API_KEY`. Следствием
+    было молчаливое непопадание ANTHROPIC_API_KEY в новый профиль: агент
+    создавался, но не мог обратиться к модели.
+    """
+
+    def test_overlay_only_definition_keeps_canonical_key_slot(self, monkeypatch):
+        from hermes_cli import providers as P
+
+        # Каталог недоступен — единственным источником остаётся оверлей.
+        monkeypatch.setattr(P, "get_provider_info", lambda *a, **k: None, raising=False)
+
+        definition = P.resolve_provider_full(
+            "anthropic", user_providers=None, custom_providers=[]
+        )
+
+        assert definition is not None
+        assert "ANTHROPIC_API_KEY" in definition.api_key_env_vars
+
+    def test_overlay_only_definition_keeps_its_primary_key_name(self, monkeypatch):
+        """Первый элемент трактуется как ГЛАВНОЕ имя ключа (мастер настройки,
+        инвентарь, выбор модели) — синтезированное имя не должно его вытеснять.
+        """
+        from hermes_cli import providers as P
+
+        monkeypatch.setattr(P, "get_provider_info", lambda *a, **k: None, raising=False)
+
+        definition = P.resolve_provider_full(
+            "github-copilot", user_providers=None, custom_providers=[]
+        )
+
+        assert definition is not None
+        # Синтезированное каноническое имя не должно вытеснять настоящее
+        # главное имя ключа — инвариант держится на обоих путях разбора.
+        assert definition.api_key_env_vars[0] != "GITHUB_COPILOT_API_KEY"
