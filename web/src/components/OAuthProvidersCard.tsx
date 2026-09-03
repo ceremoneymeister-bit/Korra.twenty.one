@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { KorraLoader } from "@/components/KorraLoader";
 import {
   ShieldCheck,
   ShieldOff,
@@ -9,7 +10,7 @@ import {
 import { api, type OAuthProvider } from "@/lib/api";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { CopyButton } from "@nous-research/ui/ui/components/command-block";
-import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import {
   Card,
   CardContent,
@@ -138,9 +139,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
       </CardHeader>
       <CardContent>
         {loading && providers === null && (
-          <div className="flex items-center justify-center py-8">
-            <Skeleton className="h-20 w-full" />
-          </div>
+          <KorraLoader className="py-8" />
         )}
         {providers && providers.length === 0 && (
           <p className="text-sm text-muted-foreground text-center py-8">

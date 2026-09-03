@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { KorraLoader } from "@/components/KorraLoader";
 import {
   ArrowDown,
   ArrowUp,
@@ -18,7 +19,7 @@ import type {
 } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
 import { Button } from "@nous-research/ui/ui/components/button";
-import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Stats } from "@nous-research/ui/ui/components/stats";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { usePageHeader } from "@/contexts/usePageHeader";
@@ -512,9 +513,7 @@ export default function AnalyticsPage() {
       )}
 
       {showTokens && loading && !data && (
-        <div className="flex items-center justify-center py-24">
-          <Skeleton className="h-28 w-full max-w-2xl" />
-        </div>
+        <KorraLoader className="py-24" />
       )}
 
       {showTokens && error && (

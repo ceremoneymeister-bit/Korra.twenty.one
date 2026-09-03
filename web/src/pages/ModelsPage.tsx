@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { KorraLoader } from "@/components/KorraLoader";
 import { createPortal } from "react-dom";
 import {
   Brain,
@@ -30,7 +31,7 @@ import {
 } from "@/lib/dashboard-modal-shell";
 import { formatTokenCount } from "@/lib/format";
 import { Button } from "@nous-research/ui/ui/components/button";
-import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Stats } from "@nous-research/ui/ui/components/stats";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { Badge } from "@nous-research/ui/ui/components/badge";
@@ -1318,9 +1319,7 @@ export default function ModelsPage() {
       </div>
 
       {loading && !data && (
-        <div className="flex items-center justify-center py-24">
-          <Skeleton className="h-28 w-full max-w-2xl" />
-        </div>
+        <KorraLoader className="py-24" />
       )}
 
       {error && (

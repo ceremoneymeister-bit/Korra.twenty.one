@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { KorraLoader } from "@/components/KorraLoader";
 import {
   AlertTriangle,
   Bot,
@@ -21,7 +22,7 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { Input } from "@nous-research/ui/ui/components/input";
 import { Label } from "@nous-research/ui/ui/components/label";
-import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Switch } from "@nous-research/ui/ui/components/switch";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
@@ -322,9 +323,7 @@ export default function ChannelsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Skeleton className="h-28 w-full max-w-2xl" />
-      </div>
+      <KorraLoader className="py-24" />
     );
   }
 
@@ -1071,7 +1070,7 @@ function WhatsAppOnboardingPanel({
                 </div>
               ) : (
                 <div className="flex h-60 w-60 flex-col items-center justify-center gap-3 border border-border bg-background/50 p-4 text-center">
-                  <Skeleton className="h-40 w-40" />
+                  <KorraLoader showLabel={false} />
                   <div className="text-xs text-muted-foreground">
                     {tr("Waiting for WhatsApp to provide a QR code…")}
                   </div>

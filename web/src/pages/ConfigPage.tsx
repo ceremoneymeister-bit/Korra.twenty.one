@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useMemo } from "react";
+import { KorraLoader } from "@/components/KorraLoader";
 import {
   Code,
   Download,
@@ -43,7 +44,6 @@ import { Toast } from "@nous-research/ui/ui/components/toast";
 import { AutoField } from "@/components/AutoField";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
-import { Skeleton } from "@nous-research/ui/ui/components/spinner";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { Input } from "@nous-research/ui/ui/components/input";
@@ -370,9 +370,7 @@ export default function ConfigPage() {
   /* ---- Loading ---- */
   if (!config || !schema) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Skeleton className="h-28 w-full max-w-2xl" />
-      </div>
+      <KorraLoader className="py-24" />
     );
   }
 
@@ -534,9 +532,7 @@ export default function ConfigPage() {
           </CardHeader>
           <CardContent className="p-0">
             {yamlLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Skeleton className="h-48 w-full" />
-              </div>
+              <KorraLoader className="py-12" />
             ) : (
               <textarea
                 className="flex min-h-[600px] w-full bg-transparent px-4 py-3 text-sm font-mono leading-relaxed placeholder:text-muted-foreground focus-visible:outline-none border-t border-border"

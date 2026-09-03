@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useState, useMemo, useCallback } from "react";
+import { KorraLoader } from "@/components/KorraLoader";
 import { useNavigate } from "react-router";
 import {
   Package,
@@ -48,7 +49,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/c
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
-import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Switch } from "@nous-research/ui/ui/components/switch";
 import {
   Dialog,
@@ -370,9 +371,7 @@ export default function SkillsPage() {
   /* ---- Loading ---- */
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Skeleton className="h-28 w-full max-w-2xl" />
-      </div>
+      <KorraLoader className="py-24" />
     );
   }
 
@@ -1071,9 +1070,7 @@ function HubBrowser({
       {showLanding && (
         <>
           {sourcesLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Skeleton className="h-24 w-full" />
-            </div>
+            <KorraLoader className="py-12" />
           ) : featured.length > 0 ? (
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2 px-1">
@@ -1107,9 +1104,7 @@ function HubBrowser({
 
       {/* ── Searching spinner ── */}
       {searching && (
-        <div className="flex items-center justify-center py-8">
-          <Skeleton className="h-24 w-full" />
-        </div>
+        <KorraLoader className="py-8" />
       )}
 
       {/* ── Search results ── */}
@@ -1472,9 +1467,7 @@ function SkillDetailDialog({
         <div className="mt-3 max-h-[55vh] overflow-auto">
           {tab === "readme" ? (
             previewLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Skeleton className="h-40 w-full" />
-              </div>
+              <KorraLoader className="py-12" />
             ) : preview ? (
               <div className="flex flex-col gap-2.5">
                 {preview.tags.length > 0 && (

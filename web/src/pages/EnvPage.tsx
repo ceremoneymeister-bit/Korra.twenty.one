@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { KorraLoader } from "@/components/KorraLoader";
 import {
   Eye,
   EyeOff,
@@ -27,7 +28,6 @@ import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { OAuthProvidersCard } from "@/components/OAuthProvidersCard";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
-import { Skeleton } from "@nous-research/ui/ui/components/spinner";
 import {
   Card,
   CardContent,
@@ -922,9 +922,7 @@ export default function EnvPage() {
 
   if (!vars) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Skeleton className="h-28 w-full max-w-2xl" />
-      </div>
+      <KorraLoader className="py-24" />
     );
   }
 

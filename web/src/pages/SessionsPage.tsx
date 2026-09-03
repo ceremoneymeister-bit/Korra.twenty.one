@@ -1,3 +1,4 @@
+import { KorraLoader } from "@/components/KorraLoader";
 import {
   useEffect,
   useLayoutEffect,
@@ -54,7 +55,7 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { Checkbox } from "@nous-research/ui/ui/components/checkbox";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
 import { Segmented } from "@nous-research/ui/ui/components/segmented";
-import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
@@ -746,9 +747,7 @@ function SessionRow({
       {isExpanded && (
         <div className="min-w-0 border-t border-border bg-background/50 p-4">
           {messages === null && !error && (
-            <div className="flex items-center justify-center py-8">
-              <Skeleton className="h-32 w-full" />
-            </div>
+            <KorraLoader className="py-8" />
           )}
           {error && (
             <p className="text-sm text-destructive py-4 text-center">{error}</p>
@@ -1608,9 +1607,7 @@ export default function SessionsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Skeleton className="h-28 w-full max-w-2xl" />
-      </div>
+      <KorraLoader className="py-24" />
     );
   }
 
