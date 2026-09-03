@@ -35,6 +35,10 @@ class DeliveryRecord:
     status_code: int | None
     content_type: str | None
     updated_at: float
+    # Идентификатор процесса панели, который последним брал запись в работу.
+    # Нужен, чтобы отличить «панель перезапустилась, прогон точно умер» от
+    # «прогон оборвался в этом же процессе, ответ мог дойти».
+    boot_id: str | None = None
 
 
 class DeliveryConflict(RuntimeError):
@@ -80,6 +84,13 @@ class DeliveryLedger:
                         )
                         """
                     )
+                    columns = {
+                        row[1] for row in connection.execute("PRAGMA table_info(browser_chat_delivery)")
+                    }
+                    if "boot_id" not in columns:
+                        connection.execute(
+                            "ALTER TABLE browser_chat_delivery ADD COLUMN boot_id TEXT"
+                        )
                     connection.commit()
                     _INITIALIZED_PATHS.add(path_key)
         except Exception:
@@ -98,27 +109,30 @@ class DeliveryLedger:
             status_code=int(row[5]) if row[5] is not None else None,
             content_type=str(row[6]) if row[6] is not None else None,
             updated_at=float(row[7]),
+            boot_id=str(row[8]) if len(row) > 8 and row[8] is not None else None,
         )
 
-    def claim(self, message_id: str, fingerprint: str, session_id: str) -> tuple[str, DeliveryRecord]:
+    def claim(
+        self, message_id: str, fingerprint: str, session_id: str, boot_id: str | None = None
+    ) -> tuple[str, DeliveryRecord]:
         now = time.time()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """SELECT message_id, fingerprint, session_id, status,
-                          response_body, status_code, content_type, updated_at
+                          response_body, status_code, content_type, updated_at, boot_id
                      FROM browser_chat_delivery WHERE message_id = ?""",
                 (message_id,),
             ).fetchone()
             if row is None:
                 connection.execute(
                     """INSERT INTO browser_chat_delivery
-                       (message_id, fingerprint, session_id, status, updated_at)
-                       VALUES (?, ?, ?, 'pending', ?)""",
-                    (message_id, fingerprint, session_id, now),
+                       (message_id, fingerprint, session_id, status, updated_at, boot_id)
+                       VALUES (?, ?, ?, 'pending', ?, ?)""",
+                    (message_id, fingerprint, session_id, now, boot_id),
                 )
                 record = DeliveryRecord(
-                    message_id, fingerprint, session_id, "pending", None, None, None, now
+                    message_id, fingerprint, session_id, "pending", None, None, None, now, boot_id
                 )
                 return "new", record
             record = self._row(row)
@@ -128,14 +142,23 @@ class DeliveryLedger:
                 connection.execute(
                     """UPDATE browser_chat_delivery
                           SET status='pending', response_body=NULL, status_code=NULL,
-                              content_type=NULL, updated_at=?
+                              content_type=NULL, updated_at=?, boot_id=?
                         WHERE message_id=?""",
-                    (now, message_id),
+                    (now, boot_id, message_id),
                 )
                 return "retry", DeliveryRecord(
-                    message_id, fingerprint, session_id, "pending", None, None, None, now
+                    message_id, fingerprint, session_id, "pending", None, None, None, now, boot_id
                 )
             return record.status, record
+
+    def reclaim_after_restart(self, message_id: str, boot_id: str | None) -> None:
+        """Запись «в работе» осталась от прежнего процесса панели — берём её себе."""
+        with self._connect() as connection:
+            connection.execute(
+                """UPDATE browser_chat_delivery
+                      SET updated_at=?, boot_id=? WHERE message_id=? AND status='pending'""",
+                (time.time(), boot_id, message_id),
+            )
 
     def complete(
         self,
@@ -181,6 +204,21 @@ class DeliveryLedger:
         )
 
 
+def _last_user_turn(body: dict[str, Any]) -> Any:
+    """Последнее сообщение пользователя (текст + вложения) — единица идемпотентности.
+
+    Раньше отпечаток считался от всего тела запроса вместе с историей; после
+    перезагрузки страницы история восстанавливается иначе, отпечаток «Повторить»
+    не сходился, и панель отвечала вечным 409 «другому тексту».
+    """
+    messages = body.get("messages") if isinstance(body, dict) else None
+    if isinstance(messages, list):
+        for item in reversed(messages):
+            if isinstance(item, dict) and item.get("role") == "user":
+                return {"content": item.get("content"), "attachments": body.get("attachments")}
+    return body
+
+
 def request_fingerprint(
     body: dict[str, Any], session_id: str, target_profile: str = ""
 ) -> str:
@@ -188,7 +226,7 @@ def request_fingerprint(
         {
             "session_id": session_id,
             "target_profile": target_profile,
-            "body": body,
+            "body": _last_user_turn(body),
         },
         ensure_ascii=False,
         sort_keys=True,

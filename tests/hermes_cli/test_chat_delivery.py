@@ -713,3 +713,26 @@ def test_upstream_500_stays_pending_and_never_recomputes(monkeypatch, tmp_path):
     assert first.headers["x-korra-delivery-state"] == "pending"
     assert second.status_code == 409
     assert calls == 1
+
+
+def test_claim_records_boot_id_and_reclaim_moves_it(tmp_path):
+    ledger = DeliveryLedger(tmp_path / "ledger.sqlite3")
+    fp = request_fingerprint({"messages": [{"role": "user", "content": "привет"}]}, "s-1")
+    state, record = ledger.claim("msg-boot-0000000001", fp, "s-1", "boot-A")
+    assert (state, record.boot_id) == ("new", "boot-A")
+    state, record = ledger.claim("msg-boot-0000000001", fp, "s-1", "boot-B")
+    assert (state, record.boot_id) == ("pending", "boot-A")
+    ledger.reclaim_after_restart("msg-boot-0000000001", "boot-B")
+    state, record = ledger.claim("msg-boot-0000000001", fp, "s-1", "boot-B")
+    assert (state, record.boot_id) == ("pending", "boot-B")
+
+
+def test_fingerprint_depends_on_last_user_turn_only():
+    a = request_fingerprint(
+        {"messages": [{"role": "user", "content": "раньше"}, {"role": "assistant", "content": "ответ"}, {"role": "user", "content": "вопрос"}]},
+        "s-1",
+    )
+    b = request_fingerprint({"messages": [{"role": "user", "content": "вопрос"}]}, "s-1")
+    c = request_fingerprint({"messages": [{"role": "user", "content": "другой"}]}, "s-1")
+    assert a == b and a != c
+

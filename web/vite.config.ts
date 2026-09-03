@@ -117,9 +117,16 @@ export default defineConfig({
   experimental: {
     renderBuiltUrl(filename, { hostType }) {
       if (hostType === "js") {
+        // Если маркера /assets/ в адресе модуля нет — считаем от самого модуля,
+        // а не от пустой строки (иначе new URL бросит исключение на старте).
         return {
-          runtime: `new URL(${JSON.stringify(filename)}, import.meta.url.slice(0, import.meta.url.lastIndexOf("/assets/") + 1)).href`,
+          runtime: `((u, i) => new URL(${JSON.stringify(filename)}, i < 0 ? u : u.slice(0, i + 1)).href)(import.meta.url, import.meta.url.lastIndexOf("/assets/"))`,
         };
+      }
+      if (hostType === "css") {
+        // url(...) в CSS — относительно самого CSS-файла, чтобы шрифты под
+        // префиксом кабинета не уходили в корень домена.
+        return { relative: true };
       }
       return undefined;
     },

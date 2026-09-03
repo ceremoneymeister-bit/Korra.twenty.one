@@ -76,10 +76,25 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const selectedProfile = route
     ? (urlProfile !== null ? urlProfile.trim() : readStoredProfile(route))
     : "";
+  // Удалённый профиль не должен оставаться целью запросов раздела: пока
+  // список не загружен — верим сохранённому, потом сверяем с реальными.
+  const selectionKnown =
+    !selectedProfile ||
+    profiles.length === 0 ||
+    profiles.some((item) => item.name === selectedProfile);
   const profile =
-    selectedProfile && selectedProfile !== currentProfile
+    selectionKnown && selectedProfile && selectedProfile !== currentProfile
       ? selectedProfile
       : "";
+  useEffect(() => {
+    if (route && selectedProfile && !selectionKnown && typeof localStorage !== "undefined") {
+      try {
+        localStorage.removeItem(profileScopeStorageKey(route));
+      } catch {
+        // storage может быть недоступен — просто не запоминаем
+      }
+    }
+  }, [route, selectedProfile, selectionKnown]);
 
   // This must happen during the provider render: child page effects in the
   // same commit immediately issue their profile-scoped reads.

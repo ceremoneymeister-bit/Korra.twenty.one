@@ -192,7 +192,16 @@ export function useAgentTabs(): UseAgentTabsReturn {
   const updateDisplayName = useCallback(
     async (profile: string, displayName: string): Promise<void> => {
       const cleaned = displayName.trim();
-      await api.updateProfileDisplayName(profile || "default", cleaned);
+      let target = profile;
+      if (!target) {
+        // Главная вкладка — профиль самой панели, он не всегда «default».
+        try {
+          target = (await api.getActiveProfile()).current || "default";
+        } catch {
+          target = "default";
+        }
+      }
+      await api.updateProfileDisplayName(target, cleaned);
       if (!mountedRef.current) return;
       setAllTabs((previous) =>
         previous.map((tab) =>

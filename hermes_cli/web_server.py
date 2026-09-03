@@ -2819,6 +2819,10 @@ def _decode_data_url(data_url: str) -> tuple[bytes, str]:
 _API_SERVER_PROXY_TARGET = os.environ.get(
     "API_SERVER_PROXY_TARGET", "http://127.0.0.1:8642"
 )
+# Идентификатор этого процесса панели для реестра доставки: запись «в работе»
+# с чужим boot_id — след умершего процесса, её можно перезапустить; со своим —
+# ответ ещё может идти, второй прогон агента запускать нельзя.
+_CHAT_DELIVERY_BOOT_ID = __import__("uuid").uuid4().hex
 _CHAT_DELIVERY_TASKS: dict[str, "asyncio.Task[tuple[int, bytes, str]]"] = {}
 _CHAT_DELIVERY_STREAMS: dict[str, "_DurableBrowserChatStream"] = {}
 _CHAT_DELIVERY_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
@@ -3085,7 +3089,7 @@ async def _durable_browser_chat_response(
     ledger = _chat_delivery_ledger()
     try:
         state, record = await run_in_threadpool(
-            ledger.claim, message_id, fingerprint, session_id
+            ledger.claim, message_id, fingerprint, session_id, _CHAT_DELIVERY_BOOT_ID
         )
     except DeliveryConflict as exc:
         raise HTTPException(
@@ -3112,21 +3116,24 @@ async def _durable_browser_chat_response(
 
         run = _CHAT_DELIVERY_STREAMS.get(task_key)
         if state == "pending" and run is None:
-            # Запись «в работе», а живого прогона нет: панель перезапустилась
-            # посреди ответа. Свежую (< 30 с) запись не трогаем — это может
-            # быть параллельная отправка того же сообщения. Старую перезапускаем:
-            # раньше здесь был вечный 409, и владелец после рестарта не мог
-            # отправить ни одно сообщение ни в одном чате (03.09.2026).
-            if time.time() - float(getattr(record, "updated_at", 0) or 0) < 30:
+            # Запись «в работе», а живого прогона нет. Если её брал этот же
+            # процесс — ответ мог дойти до истории, второй прогон агента был бы
+            # дублем (ревью 03.09 доказало это прогоном). Если запись от прежнего
+            # процесса — панель перезапустилась посреди ответа, прогон точно
+            # умер, перезапускаем (раньше здесь был вечный 409).
+            if getattr(record, "boot_id", None) == _CHAT_DELIVERY_BOOT_ID:
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        "Доставка ещё проверяется. "
-                        "Откройте историю перед повторной отправкой"
+                        "Ответ на это сообщение ещё может идти. Откройте историю: "
+                        "если ответа там нет — уберите сообщение и отправьте заново"
                     ),
                 )
+            await run_in_threadpool(
+                ledger.reclaim_after_restart, message_id, _CHAT_DELIVERY_BOOT_ID
+            )
             _log.warning(
-                "chat delivery %s: pending without a live run — rerunning after restart",
+                "chat delivery %s: pending from a previous dashboard process — rerunning",
                 message_id,
             )
         if run is None:
@@ -3185,16 +3192,20 @@ async def _durable_browser_chat_response(
 
     task = _CHAT_DELIVERY_TASKS.get(task_key)
     if state == "pending" and task is None:
-        # Панель перезапустилась посреди ответа. Свежую запись (< 30 с) не
-        # трогаем — это может быть параллельная отправка; старую перезапускаем
-        # (см. SSE-ветку выше).
-        if time.time() - float(getattr(record, "updated_at", 0) or 0) < 30:
+        # См. SSE-ветку выше: перезапуск только для записи чужого процесса.
+        if getattr(record, "boot_id", None) == _CHAT_DELIVERY_BOOT_ID:
             raise HTTPException(
                 status_code=409,
-                detail="Доставка ещё проверяется. Откройте историю перед повторной отправкой",
+                detail=(
+                    "Ответ на это сообщение ещё может идти. Откройте историю: "
+                    "если ответа там нет — уберите сообщение и отправьте заново"
+                ),
             )
+        await run_in_threadpool(
+            ledger.reclaim_after_restart, message_id, _CHAT_DELIVERY_BOOT_ID
+        )
         _log.warning(
-            "chat delivery %s: pending without a live task — rerunning after restart",
+            "chat delivery %s: pending from a previous dashboard process — rerunning",
             message_id,
         )
     if task is None:

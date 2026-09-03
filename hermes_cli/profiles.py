@@ -871,6 +871,40 @@ def _seed_model_config(
         pass
 
 
+def _pin_api_server_off_under_multiplex(profile_dir: Path, source_dir: Optional[Path]) -> None:
+    """Прописать ``platforms.api_server.enabled: false`` профилю, если источник мультиплексирует."""
+    if source_dir is None:
+        return
+    try:
+        import yaml
+
+        from hermes_cli.config import read_user_config_raw
+
+        source_cfg = source_dir / "config.yaml"
+        if not source_cfg.is_file():
+            return
+        gateway_cfg = read_user_config_raw(source_cfg).get("gateway")
+        if not (isinstance(gateway_cfg, dict) and gateway_cfg.get("multiplex_profiles")):
+            return
+        config_path = profile_dir / "config.yaml"
+        cfg: Dict = read_user_config_raw(config_path) if config_path.is_file() else {}
+        platforms = cfg.get("platforms")
+        if not isinstance(platforms, dict):
+            platforms = {}
+        api_server = platforms.get("api_server")
+        if not isinstance(api_server, dict):
+            api_server = {}
+        if api_server.get("enabled") is False:
+            return
+        api_server["enabled"] = False
+        platforms["api_server"] = api_server
+        cfg["platforms"] = platforms
+        config_path.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    except Exception:
+        # Пин — страховка, создание профиля из-за него не падает.
+        pass
+
+
 def _seed_runtime_credentials(profile_dir: Path, source_dir: Path) -> None:
     """Seed the minimum credentials a fresh profile needs for its first turn.
 
@@ -996,7 +1030,11 @@ def seed_provider_credentials_from_root(
                 value = root_env.get(key, "").strip()
                 if not value:
                     continue
-                save_env_value(key, value)
+                try:
+                    save_env_value(key, value)
+                except Exception:
+                    # Частичный результат честнее пустого: что успели — вернём.
+                    break
                 copied.append(key)
         finally:
             reset_hermes_home_override(token)
@@ -1580,6 +1618,13 @@ def create_profile(
     # / launchd / windows) this is a no-op — the existing per-profile
     # unit-generation paths handle gateway lifecycle.
     _maybe_register_gateway_service(canon)
+
+    # Korra: под мультиплексом ни один вторичный профиль не должен объявлять
+    # свой api_server — иначе движок пропускает все его адаптеры. Для свежего
+    # профиля это делает _seed_model_config, для клона config.yaml копируется
+    # целиком и позже мигрируется — поэтому пин ставим последним шагом
+    # (ревью 03.09: путь панели «клонировать из default» ронял адаптеры).
+    _pin_api_server_off_under_multiplex(profile_dir, source_dir or fresh_source_dir)
 
     return profile_dir
 

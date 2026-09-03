@@ -29,7 +29,8 @@ const TRIGGER_CN =
  * заголовков и карточек с overflow оно обрезалось (владелец 03.09,
  * переключатель профиля в шапке раздела). */
 const LISTBOX_CN =
-  'nous-ui-select-menu fixed z-[70] max-h-60 overflow-auto origin-top ' +
+  // z выше модалок (они fixed inset-0 z-[100]) — иначе список открывается за подложкой диалога.
+  'nous-ui-select-menu fixed z-[120] max-h-60 overflow-auto origin-top ' +
   'neo-select-menu p-1.5'
 
 type MenuState = 'closed' | 'closing' | 'open'
@@ -58,18 +59,19 @@ export function Select({
   const containerRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const closeTimerRef = useRef<number | null>(null)
-  const [menuBox, setMenuBox] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [menuBox, setMenuBox] = useState<{ top?: number; bottom?: number; left: number; width: number } | null>(null)
 
   const measureMenu = useCallback(() => {
     const el = containerRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
     const gap = 6
-    const estimated = 240
     const below = window.innerHeight - rect.bottom - gap
     const openUp = below < 160 && rect.top > below
     setMenuBox({
-      top: openUp ? Math.max(8, rect.top - gap - Math.min(estimated, rect.top - gap)) : rect.bottom + gap,
+      ...(openUp
+        ? { bottom: window.innerHeight - rect.top + gap }
+        : { top: rect.bottom + gap }),
       left: rect.left,
       width: Math.max(rect.width, 176),
     })
@@ -208,6 +210,8 @@ export function Select({
       case 'Escape':
         if (open) {
           e.preventDefault()
+          // Escape закрывает только меню, а не диалог вокруг него.
+          e.stopPropagation()
           close()
         }
         break
@@ -264,7 +268,7 @@ export function Select({
           }}
           ref={listRef}
           role="listbox"
-          style={menuBox ? { top: menuBox.top, left: menuBox.left, width: menuBox.width } : undefined}
+          style={menuBox ? { top: menuBox.top, bottom: menuBox.bottom, left: menuBox.left, width: menuBox.width } : undefined}
         >
           {options.map((opt, i) => {
             const isSelected = opt.value === value

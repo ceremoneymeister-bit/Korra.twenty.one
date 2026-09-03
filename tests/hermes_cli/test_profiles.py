@@ -1352,3 +1352,14 @@ class TestMultiplexSeedsApiServerOff:
         cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
         assert "platforms" not in cfg
 
+    def test_clone_also_gets_api_server_pinned_off(self, profile_env):
+        default_home = profile_env / ".hermes"
+        (default_home / "config.yaml").write_text(
+            "model:\n  provider: anthropic\n  default: claude-test\n"
+            "gateway:\n  multiplex_profiles: true\n"
+        )
+        (default_home / ".env").write_text("API_SERVER_KEY=gateway-key-0123456789abcdef\n")
+        profile_dir = create_profile("clone", clone_from="default", no_alias=True)
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert cfg["platforms"]["api_server"]["enabled"] is False
+
