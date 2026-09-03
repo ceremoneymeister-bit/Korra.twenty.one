@@ -108,6 +108,22 @@ export default defineConfig({
       "gsap",
     ],
   },
+  // Панель живёт и от корня (127.0.0.1:9123), и под префиксом кабинета
+  // (/c/<slug>/). index.html движок переписывает под префикс сам, а вот
+  // предзагрузка зависимостей ленивых кусков строилась от `base` ("/") и шла
+  // на корень домена, тогда как сами import() шли с префиксом — каждый кусок
+  // качался ДВАЖДЫ (03.09.2026: ~650 КБ лишних на входе и удвоение на каждом
+  // переходе). Адреса из JS теперь считаются от URL текущего модуля.
+  experimental: {
+    renderBuiltUrl(filename, { hostType }) {
+      if (hostType === "js") {
+        return {
+          runtime: `new URL(${JSON.stringify(filename)}, import.meta.url.slice(0, import.meta.url.lastIndexOf("/assets/") + 1)).href`,
+        };
+      }
+      return undefined;
+    },
+  },
   build: {
     outDir: "../hermes_cli/web_dist",
     emptyOutDir: true,
