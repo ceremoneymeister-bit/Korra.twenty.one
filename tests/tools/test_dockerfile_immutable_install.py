@@ -20,20 +20,40 @@ def test_dockerfile_makes_opt_hermes_readonly_for_hermes_user() -> None:
     assert "COPY --link --chmod=a+rX,go-w . ." in text
     # The old tree-walking passes must not be present.
     #
-    # Korra: проверка стала точной по пути. Запрещён проход по ВСЕМУ дереву
-    # установки (~30k файлов, #49113) — а substring-совпадение заодно
-    # запрещало любой вложенный каталог, включая /opt/hermes/models/whisper,
-    # где лежат четыре файла весов whisper. Смысл гейта — стоимость обхода
-    # дерева, а не само слово chmod, поэтому совпадение прибито к концу пути.
-    root = r"/opt/hermes/?(?![\w/])"
-    # Гейт должен по-прежнему кусаться: обе формы корня — запрещённые.
-    assert re.search(rf"chmod\s+-R\s+a\+rX\s+{root}", "RUN chmod -R a+rX /opt/hermes && x")
-    assert re.search(rf"chmod\s+-R\s+a\+rX\s+{root}", "RUN chmod -R a+rX /opt/hermes/ && x")
-    assert not re.search(rf"chmod\s+-R\s+a\+rX\s+{root}", "RUN chmod -R a+rX /opt/hermes/models")
+    # Korra: проверка стала точной по пути. Раньше здесь стояло совпадение по
+    # подстроке, и оно запрещало ЛЮБОЙ путь с префиксом /opt/hermes — включая
+    # /opt/hermes/models, где лежат четыре файла весов whisper. Гейт написан
+    # про стоимость обхода дерева (~30k файлов, #49113), а не про слово chmod,
+    # поэтому запрет выражен по смыслу:
+    #
+    #   запрещено  — корень дерева установки и его тяжёлые подкаталоги
+    #                (.venv, .playwright, node_modules и прочие дот-каталоги);
+    #                именно они и дают те самые тридцать тысяч файлов;
+    #   разрешено  — маленькие целевые подкаталоги вроде /opt/hermes/models.
+    #
+    # Дот-каталоги под запретом СОЗНАТЕЛЬНО: это те же тяжёлые деревья, что
+    # перечислены поимённо в test_dockerfile_does_not_chown_install_trees_to_hermes.
+    # Сосед по префиксу (/opt/hermes-cache) под запрет не попадает: это другой
+    # путь, а не дерево установки.
+    heavy = r"/opt/hermes(?:/(?:\.[\w.-]+|node_modules|ui-tui|gateway))?/?(?=[\s;&|)]|$)"
 
-    assert not re.search(rf"chown\s+-R\s+root:root\s+{root}", text)
-    assert not re.search(rf"chmod\s+-R\s+a\+rX\s+{root}", text)
-    assert not re.search(rf"chmod\s+-R\s+a-w\s+{root}", text)
+    # Гейт обязан кусаться ровно там, где задумано, и молчать там, где нет.
+    # Без этих строк регулярка тихо разъедется при следующей правке путей.
+    def _bites(path: str) -> bool:
+        return bool(re.search(rf"chmod\s+-R\s+a\+rX\s+{heavy}", f"RUN chmod -R a+rX {path} && x"))
+
+    assert _bites("/opt/hermes")                    # корень
+    assert _bites("/opt/hermes/")                   # корень со слешем
+    assert _bites("/opt/hermes/.venv")              # тяжёлое дерево
+    assert _bites("/opt/hermes/.playwright")        # тяжёлое дерево
+    assert _bites("/opt/hermes/node_modules")       # тяжёлое дерево
+    assert not _bites("/opt/hermes/models")         # четыре файла весов
+    assert not _bites("/opt/hermes/models/whisper")
+    assert not _bites("/opt/hermes-cache")          # другой путь, не дерево установки
+
+    assert not re.search(rf"chown\s+-R\s+root:root\s+{heavy}", text)
+    assert not re.search(rf"chmod\s+-R\s+a\+rX\s+{heavy}", text)
+    assert not re.search(rf"chmod\s+-R\s+a-w\s+{heavy}", text)
 
 
 def test_dockerfile_does_not_chown_install_trees_to_hermes() -> None:
