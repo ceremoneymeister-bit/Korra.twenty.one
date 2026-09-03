@@ -1,0 +1,224 @@
+/* Bubble chat composer -------------------------------------------------
+ *
+ * This surface deliberately follows the same semantic form tokens as the
+ * vendored Nous controls.  Motion is opt-in, and the streaming beam is a
+ * local CSS treatment: no unlicensed demo code is copied into the project.
+ */
+
+@property --korra-composer-beam-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.korra-chat-composer__dropzone {
+  position: relative;
+}
+
+.korra-chat-attachment-preview {
+  outline: 1px solid color-mix(in srgb, var(--midground-base) 10%, transparent);
+  outline-offset: -1px;
+}
+
+.korra-chat-composer__surface {
+  position: relative;
+  isolation: isolate;
+  border: 1px solid var(--input, var(--border));
+  border-radius: var(--theme-radius);
+  background: var(--card, var(--background-base));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--midground-base) 6%, transparent);
+}
+
+.korra-chat-composer__surface > * {
+  position: relative;
+  z-index: 1;
+}
+
+.korra-chat-composer__surface::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(
+    from var(--korra-composer-beam-angle),
+    transparent 0deg 284deg,
+    color-mix(in srgb, var(--primary) 28%, transparent) 306deg,
+    var(--primary) 328deg,
+    transparent 350deg 360deg
+  );
+  -webkit-mask:
+    linear-gradient(var(--midground-base) 0 0) content-box,
+    linear-gradient(var(--midground-base) 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(var(--midground-base) 0 0) content-box,
+    linear-gradient(var(--midground-base) 0 0);
+  mask-composite: exclude;
+}
+
+.korra-chat-composer__surface:focus-within {
+  border-color: var(--ring, var(--midground-base));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring) 28%, transparent);
+}
+
+.korra-chat-composer__surface:has(.korra-chat-composer__textarea:focus-visible) {
+  outline: 2px solid var(--ring, var(--midground-base));
+  outline-offset: 2px;
+}
+
+.korra-chat-composer__surface[data-state='disabled'] {
+  cursor: not-allowed;
+  opacity: 0.56;
+  background: color-mix(in srgb, var(--muted) 36%, var(--card));
+}
+
+.korra-chat-composer__surface[data-state='sending'],
+.korra-chat-composer__surface[data-state='streaming'] {
+  border-color: color-mix(in srgb, var(--primary) 58%, var(--input));
+  background: color-mix(in srgb, var(--primary) 3%, var(--card));
+}
+
+.korra-chat-composer__surface[data-state='streaming']::before {
+  opacity: 1;
+}
+
+.korra-chat-composer__textarea {
+  min-height: 24px;
+  max-height: 160px;
+  overflow-y: hidden;
+}
+
+.korra-chat-composer__surface .korra-chat-composer__textarea:focus-visible {
+  outline: none;
+}
+
+.korra-chat-composer__hint {
+  opacity: 0;
+}
+
+.korra-chat-composer__surface:focus-within .korra-chat-composer__hint {
+  opacity: 1;
+}
+
+.korra-chat-composer__status-label[data-streaming='true'] {
+  color: var(--muted-foreground);
+}
+
+.korra-chat-composer__drop-overlay {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 2px dashed var(--primary);
+  /* The overlay sits one composer-padding (1rem) outside the field. */
+  border-radius: calc(var(--theme-radius) + 1rem);
+  pointer-events: none;
+  opacity: 0;
+  color: var(--accent-foreground, var(--primary));
+  background: color-mix(in srgb, var(--accent) 92%, transparent);
+}
+
+.korra-chat-composer__dropzone[data-dragging='true']
+  .korra-chat-composer__drop-overlay {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .korra-chat-composer__surface:not([data-state='disabled']):not(:focus-within):hover {
+    border-color: color-mix(in srgb, var(--primary) 45%, var(--input));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .korra-chat-composer__surface {
+    transition-duration: var(--duration-quick);
+    transition-property: background-color, border-color, box-shadow, opacity;
+    transition-timing-function: var(--ease-out);
+  }
+
+  .korra-chat-composer__surface::before {
+    transition: opacity var(--duration-quick) var(--ease-out);
+  }
+
+  .korra-chat-composer__surface[data-state='streaming']::before {
+    animation: korra-composer-beam var(--think-shimmer) var(--ease-linear) infinite;
+  }
+
+  .korra-chat-composer__textarea {
+    transition: height var(--duration-fast) var(--ease-smooth-out);
+  }
+
+  .korra-chat-composer__hint,
+  .korra-chat-composer__drop-overlay {
+    transition: opacity var(--duration-quick) var(--ease-out);
+  }
+
+  .korra-chat-composer__status-label[data-streaming='true'] {
+    background-image: linear-gradient(
+      90deg,
+      var(--muted-foreground) 0%,
+      var(--muted-foreground) 40%,
+      var(--card-foreground) 50%,
+      var(--muted-foreground) 60%,
+      var(--muted-foreground) 100%
+    );
+    background-repeat: no-repeat;
+    background-size: 400% 100%;
+    background-clip: text;
+    color: transparent;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: korra-composer-status-shimmer var(--think-shimmer)
+      var(--ease-linear) infinite;
+  }
+}
+
+@keyframes korra-composer-beam {
+  to {
+    --korra-composer-beam-angle: 360deg;
+  }
+}
+
+@keyframes korra-composer-status-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .korra-chat-composer__surface::before {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .korra-chat-composer__surface,
+  .korra-chat-composer__surface:focus-within {
+    border-color: ButtonText;
+    box-shadow: none;
+  }
+
+  .korra-chat-composer__surface:has(.korra-chat-composer__textarea:focus-visible) {
+    outline-color: Highlight;
+  }
+
+  .korra-chat-composer__drop-overlay {
+    border-color: Highlight;
+  }
+
+  .korra-chat-composer__status-label[data-streaming='true'] {
+    color: CanvasText;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}

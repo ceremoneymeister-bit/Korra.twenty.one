@@ -68,7 +68,14 @@ const KIND_TONE: Record<string, string> = {
 function IconFor({ kind }: { kind: string }) {
   const lower = kind.toLowerCase();
   const Icon = isImageKind(lower) ? FileImage : (KIND_ICON[lower] ?? FileIcon);
-  return <Icon size={18} className={cn("shrink-0", KIND_TONE[lower] ?? "text-muted-foreground")} />;
+  return (
+    <Icon
+      size={18}
+      strokeWidth={1.5}
+      className={cn("shrink-0", KIND_TONE[lower] ?? "text-muted-foreground")}
+      aria-hidden="true"
+    />
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -87,18 +94,19 @@ export function AttachmentChip({
   const failed = item.status === "error";
   return (
     <div
+      role="listitem"
       className={cn(
-        "group relative flex items-center gap-2 rounded-md border px-2 py-1.5",
-        "bg-card font-sans normal-case tracking-normal",
-        failed ? "border-destructive/60" : "border-border",
+        "group relative flex min-h-11 items-center gap-2 rounded-lg border py-1 ps-2 pe-1",
+        "bg-background/60 font-sans normal-case tracking-normal",
+        failed ? "border-destructive/60" : "border-input",
       )}
-      title={item.name}
+      title={failed ? item.error ?? item.name : item.name}
     >
       {item.previewUrl ? (
         <img
           src={item.previewUrl}
           alt=""
-          className="size-8 rounded object-cover shrink-0"
+          className="korra-chat-attachment-preview size-8 shrink-0 rounded-md object-cover"
         />
       ) : (
         <IconFor kind={item.kind} />
@@ -111,10 +119,10 @@ export function AttachmentChip({
         <div className="text-[11px] leading-tight text-muted-foreground">
           {failed ? (
             <span className="text-destructive inline-flex items-center gap-1">
-              <AlertCircle size={11} /> {item.error ?? "Не загрузился"}
+              <AlertCircle size={11} aria-hidden="true" /> Не загрузился · {formatSize(item.size)}
             </span>
           ) : item.status === "uploading" ? (
-            `${item.progress}%`
+            `Загрузка ${item.progress}% · ${formatSize(item.size)}`
           ) : (
             `${item.kind.toUpperCase()} · ${formatSize(item.size)}`
           )}
@@ -122,9 +130,16 @@ export function AttachmentChip({
       </div>
 
       {item.status === "uploading" && (
-        <div className="absolute inset-x-0 bottom-0 h-0.5 bg-muted/40 rounded-b-md overflow-hidden">
+        <div
+          className="absolute inset-x-0 bottom-0 h-0.5 bg-muted/40 rounded-b-md overflow-hidden"
+          role="progressbar"
+          aria-label={`Загрузка ${item.name}`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={item.progress}
+        >
           <div
-            className="h-full bg-primary transition-[width] duration-150"
+            className="h-full bg-primary motion-safe:transition-[width] motion-safe:duration-[var(--duration-quick)]"
             style={{ width: `${item.progress}%` }}
           />
         </div>
@@ -134,21 +149,21 @@ export function AttachmentChip({
         <button
           type="button"
           onClick={onRetry}
-          className="shrink-0 rounded p-1 hover:bg-muted/40 text-muted-foreground"
-          aria-label="Повторить загрузку"
+          className="flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          aria-label={`Повторить загрузку ${item.name}`}
           title="Повторить"
         >
-          <RotateCw size={12} />
+          <RotateCw size={14} aria-hidden="true" />
         </button>
       )}
       <button
         type="button"
         onClick={onRemove}
-        className="shrink-0 rounded p-1 hover:bg-muted/40 text-muted-foreground"
+        className="flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         aria-label={`Убрать ${item.name}`}
         title="Убрать"
       >
-        <X size={12} />
+        <X size={14} aria-hidden="true" />
       </button>
     </div>
   );

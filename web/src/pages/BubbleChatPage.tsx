@@ -14,7 +14,14 @@
  * demo sessions for visual orientation.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "react-router";
 import {
   Plus,
@@ -30,6 +37,7 @@ import {
   Check,
   Paperclip,
   RotateCcw,
+  LoaderCircle,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -64,6 +72,7 @@ import { api, type SessionInfo } from "@/lib/api";
 import { useChatStream } from "@/hooks/useChatStream";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
+import "./bubble-chat-composer.css";
 
 /* ------------------------------------------------------------------ */
 /*  Re-exports                                                         */
@@ -532,7 +541,13 @@ function BubbleChatTranscript({
 interface BubbleChatComposerProps {
   disabled?: boolean;
   streaming?: boolean;
-  onSend: (text: string, attachments: UploadedAttachment[]) => void;
+  /** Поток уже прислал текст или событие инструмента. До этого честнее
+   *  показывать «Отправляется», хотя остановка уже доступна. */
+  responding?: boolean;
+  onSend: (
+    text: string,
+    attachments: UploadedAttachment[],
+  ) => boolean | void | Promise<boolean | void>;
   onAbort?: () => void;
   /** Текст, подставляемый в поле извне — кнопкой «Изменить» на артефакте. */
   prefill?: string | null;
@@ -543,9 +558,13 @@ interface BubbleChatComposerProps {
   allowAttachments?: boolean;
 }
 
-function BubbleChatComposer({
+const TEXTAREA_MIN_HEIGHT = 24;
+const TEXTAREA_MAX_HEIGHT = 160;
+
+export function BubbleChatComposer({
   disabled,
   streaming,
+  responding,
   onSend,
   onAbort,
   prefill,
@@ -557,9 +576,13 @@ function BubbleChatComposer({
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const abortsRef = useRef<Record<string, () => void>>({});
+  const textareaId = useId();
+  const shortcutId = useId();
+  const attachmentHelpId = useId();
 
   const patch = useCallback((id: string, next: Partial<PendingAttachment>) => {
     setAttachments((list) =>
@@ -661,6 +684,32 @@ function BubbleChatComposer({
     [],
   );
 
+  const resizeTextarea = useCallback((el: HTMLTextAreaElement) => {
+    const previousHeight = Math.min(
+      Math.max(
+        Number.parseFloat(el.style.height) ||
+          el.getBoundingClientRect().height ||
+          TEXTAREA_MIN_HEIGHT,
+        TEXTAREA_MIN_HEIGHT,
+      ),
+      TEXTAREA_MAX_HEIGHT,
+    );
+
+    // A pixel start and end are required because CSS cannot interpolate from
+    // `auto`. Collapse only for measurement, then restore the current height
+    // before releasing the transition toward the new content height.
+    el.style.height = "0px";
+    const naturalHeight = el.scrollHeight;
+    const nextHeight = Math.min(
+      Math.max(naturalHeight, TEXTAREA_MIN_HEIGHT),
+      TEXTAREA_MAX_HEIGHT,
+    );
+    el.style.height = `${previousHeight}px`;
+    void el.offsetHeight;
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = naturalHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
+  }, []);
+
   // «Изменить» на артефакте подставляет заготовку и отдаёт курсор владельцу:
   // отправлять за него нельзя — он ещё не сказал, что менять.
   useEffect(() => {
@@ -672,34 +721,35 @@ function BubbleChatComposer({
       if (!el) return;
       el.focus();
       el.setSelectionRange(el.value.length, el.value.length);
-      el.style.height = "auto";
-      el.style.height = Math.min(el.scrollHeight, 24 * 6 + 16) + "px";
+      resizeTextarea(el);
     });
-  }, [prefill, onPrefillConsumed]);
+  }, [prefill, onPrefillConsumed, resizeTextarea]);
 
   const uploading = attachments.some((item) => item.status === "uploading");
   const failed = attachments.some((item) => item.status === "error");
   const ready = attachments.filter((item) => item.status === "ready");
-
-  const autoresize = useCallback(() => {
-    const el = taRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    // Cap at ~6 rows (text-sm line-height ~20px + py-2 → ~24px per row)
-    const max = 24 * 6 + 16;
-    el.style.height = Math.min(el.scrollHeight, max) + "px";
-  }, []);
 
   const submit = useCallback(() => {
     const text = value.trim();
     // Sending while a file is still uploading would hand the agent a message
     // whose attachments do not exist yet — the exact failure this feature is
     // meant to prevent. The button is disabled too; this is the second gate.
-    if (disabled || uploading || failed) return;
+    if (disabled || submitting || uploading || failed) return;
     if (!text && ready.length === 0) return;
-    onSend(
-      text,
-      ready.map((item) => item.uploaded!).filter(Boolean),
+    setSubmitting(true);
+    let result: boolean | void | Promise<boolean | void>;
+    try {
+      result = onSend(
+        text,
+        ready.map((item) => item.uploaded!).filter(Boolean),
+      );
+    } catch (error) {
+      setSubmitting(false);
+      throw error;
+    }
+    void Promise.resolve(result).then(
+      () => setSubmitting(false),
+      () => setSubmitting(false),
     );
     setValue("");
     attachments.forEach((item) => {
@@ -707,22 +757,58 @@ function BubbleChatComposer({
     });
     setAttachments([]);
     setAttachError(null);
-    // Reset textarea height after send
+    // Let React paint the empty value, then animate back to the minimum.
     requestAnimationFrame(() => {
       const el = taRef.current;
-      if (el) el.style.height = "auto";
+      if (el) resizeTextarea(el);
     });
-  }, [value, disabled, onSend, uploading, failed, ready, attachments]);
+  }, [
+    value,
+    disabled,
+    submitting,
+    onSend,
+    uploading,
+    failed,
+    ready,
+    attachments,
+    resizeTextarea,
+  ]);
+
+  const canSend =
+    !disabled &&
+    !submitting &&
+    !uploading &&
+    !failed &&
+    Boolean(value.trim() || ready.length > 0);
+  const activity = streaming
+    ? responding
+      ? "Корра отвечает"
+      : "Отправляется"
+    : submitting
+      ? "Отправляется"
+      : uploading
+        ? "Файлы загружаются"
+        : "";
+  const composerState = streaming
+    ? "streaming"
+    : submitting
+      ? "sending"
+      : disabled
+        ? "disabled"
+        : "idle";
+
+  const hasDraggedFiles = (types: readonly string[]) => types.includes("Files");
 
   return (
     // No bg- override on the composer wrap either — only border-t separates
     // the input area from the transcript. The textarea + send button retain
     // their own bg-card (it's a real container, not a background overlay).
     <div
-      className="border-t border-border"
+      className="korra-chat-composer border-t border-border"
       onDragOver={
         allowAttachments
           ? (e) => {
+              if (!hasDraggedFiles(Array.from(e.dataTransfer.types))) return;
               e.preventDefault();
               setDragging(true);
             }
@@ -741,6 +827,7 @@ function BubbleChatComposer({
       onDrop={
         allowAttachments
           ? (e) => {
+              if (!hasDraggedFiles(Array.from(e.dataTransfer.types))) return;
               e.preventDefault();
               setDragging(false);
               if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
@@ -748,13 +835,25 @@ function BubbleChatComposer({
           : undefined
       }
     >
-      <div className="max-w-3xl mx-auto px-4 py-3">
+      <div
+        className="korra-chat-composer__dropzone max-w-3xl mx-auto rounded-xl px-4 py-3"
+        data-dragging={dragging ? "true" : "false"}
+      >
+        <div className="korra-chat-composer__drop-overlay" aria-hidden="true">
+          <Paperclip size={18} />
+          <span className="font-sans text-sm font-medium normal-case tracking-normal">
+            Отпустите файлы, чтобы прикрепить
+          </span>
+        </div>
+
         {allowAttachments && (
           <input
             ref={fileRef}
+            id={`${textareaId}-files`}
             type="file"
             multiple
             className="hidden"
+            tabIndex={-1}
             onChange={(e) => {
               if (e.target.files?.length) addFiles(e.target.files);
               e.target.value = "";
@@ -762,142 +861,216 @@ function BubbleChatComposer({
           />
         )}
 
-        {attachments.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {attachments.map((item) => (
-              <AttachmentChip
-                key={item.id}
-                item={item}
-                onRemove={() => removeAttachment(item.id)}
-                onRetry={() => startUpload(item)}
-              />
-            ))}
-          </div>
-        )}
-
-        {attachError && (
-          <div className="mb-2 text-xs text-destructive font-sans normal-case tracking-normal">
-            {attachError}
-          </div>
-        )}
-
         <div
+          role="group"
+          aria-label="Сообщение и вложения"
+          aria-busy={streaming || submitting || uploading}
+          aria-describedby={
+            allowAttachments
+              ? `${shortcutId} ${attachmentHelpId}`
+              : shortcutId
+          }
+          data-state={composerState}
           className={cn(
-            "flex items-end gap-2 rounded-md border bg-card px-2 py-1.5",
-            dragging ? "border-primary border-dashed" : "border-border",
-            // a11y: visible focus indicator when textarea inside is focused.
-            // Restored after Codex review caught its absence. Uses midground
-            // (Korra's mid neutral) rather than primary so it doesn't scream;
-            // ring-2 + offset matches the focus-visible pattern used in
-            // SidebarNavLink / SidebarFooter elsewhere in the dashboard.
-            "transition-[box-shadow,border-color]",
-            "focus-within:ring-2 focus-within:ring-midground/50",
-            "focus-within:ring-offset-0 focus-within:border-midground/60",
+            "korra-chat-composer__surface overflow-hidden",
           )}
         >
-          {allowAttachments && (
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
-              className={cn(
-                "shrink-0 size-[44px] rounded-lg border border-border",
-                "flex items-center justify-center text-muted-foreground",
-                "hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed",
-                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground",
-              )}
-              aria-label="Прикрепить файл"
-              title="Прикрепить файл"
+          {attachments.length > 0 && (
+            <div
+              className="flex flex-wrap gap-1.5 border-b border-border/70 px-2.5 py-2"
+              role="list"
+              aria-label="Прикреплённые файлы"
             >
-              <Paperclip size={14} aria-hidden />
-            </button>
+              {attachments.map((item) => (
+                <AttachmentChip
+                  key={item.id}
+                  item={item}
+                  onRemove={() => removeAttachment(item.id)}
+                  onRetry={() => startUpload(item)}
+                />
+              ))}
+            </div>
           )}
-          <textarea
-            ref={taRef}
-            rows={1}
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              autoresize();
-            }}
-            onPaste={
-              allowAttachments
-                ? (e) => {
-                    const files = Array.from(e.clipboardData?.files ?? []);
-                    if (files.length) {
-                      e.preventDefault();
-                      addFiles(files);
-                    }
-                  }
-                : undefined
-            }
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder="Напишите сообщение… (Enter — отправить, Shift+Enter — перенос)"
-            disabled={disabled}
-            className={cn(
-              "flex-1 resize-none bg-transparent outline-none",
-              "text-sm leading-6 placeholder:text-muted-foreground/60",
-              "min-h-[24px] max-h-[160px] px-2 py-1",
-              "disabled:opacity-60",
-              // Composer input is real prose, not UI label — opt out of UPPERCASE.
-              "font-sans normal-case tracking-normal",
+
+          {attachError && (
+            <p
+              role="alert"
+              className="px-3 pt-2 text-xs text-destructive font-sans normal-case tracking-normal"
+            >
+              {attachError}
+            </p>
+          )}
+
+          <div className="flex items-end gap-2 px-2 pt-2">
+            {allowAttachments && (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={
+                  disabled || submitting || attachments.length >= MAX_ATTACHMENTS
+                }
+                className={cn(
+                  "flex size-11 shrink-0 items-center justify-center rounded-lg",
+                  "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  "disabled:cursor-not-allowed disabled:opacity-40",
+                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                )}
+                aria-label="Прикрепить файл"
+                title="Прикрепить файл"
+              >
+                <Paperclip size={18} strokeWidth={1.5} aria-hidden />
+              </button>
             )}
-            aria-label="Сообщение"
-          />
-          {streaming ? (
-            <button
-              type="button"
-              onClick={onAbort}
-              className={cn(
-                "shrink-0 size-8 rounded-md",
-                "bg-destructive/10 text-destructive hover:bg-destructive/20",
-                "flex items-center justify-center transition-opacity",
-              )}
-              aria-label="Остановить"
-            >
-              <Square size={14} aria-hidden />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={submit}
-              disabled={
-                disabled ||
-                uploading ||
-                failed ||
-                (!value.trim() && ready.length === 0)
+
+            <label htmlFor={textareaId} className="sr-only">
+              Сообщение Корре
+            </label>
+            <textarea
+              ref={taRef}
+              id={textareaId}
+              rows={1}
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                resizeTextarea(e.currentTarget);
+              }}
+              onPaste={
+                allowAttachments
+                  ? (e) => {
+                      const files = Array.from(e.clipboardData?.files ?? []);
+                      if (files.length) {
+                        e.preventDefault();
+                        addFiles(files);
+                      }
+                    }
+                  : undefined
               }
-              title={
-                uploading
-                  ? "Файлы ещё загружаются"
-                  : failed
-                    ? "Уберите или повторите неудачное вложение"
-                    : "Отправить"
-              }
+              onKeyDown={(e) => {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder="Напишите Корре…"
+              disabled={disabled || submitting}
               className={cn(
-                "shrink-0 size-[44px] rounded-lg border border-border",
-                "bg-primary/10 text-primary hover:bg-primary/20",
-                "disabled:opacity-40 disabled:cursor-not-allowed",
-                "flex items-center justify-center transition-opacity",
+                "korra-chat-composer__textarea flex-1 resize-none bg-transparent",
+                "text-sm leading-6 placeholder:text-muted-foreground",
+                "px-2 py-1 disabled:cursor-not-allowed disabled:opacity-55",
+                // Composer input is real prose, not UI label — opt out of UPPERCASE.
+                "font-sans normal-case tracking-normal",
               )}
-              aria-label="Отправить"
+              aria-describedby={shortcutId}
+            />
+
+            {streaming ? (
+              <button
+                type="button"
+                onClick={onAbort}
+                disabled={!onAbort}
+                className={cn(
+                  "flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-lg px-3",
+                  "bg-destructive/10 text-destructive hover:bg-destructive/20",
+                  "disabled:cursor-not-allowed disabled:opacity-40",
+                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-destructive",
+                )}
+                aria-label="Остановить генерацию"
+                title="Остановить генерацию"
+              >
+                <Square size={15} fill="currentColor" aria-hidden />
+                <span className="hidden sm:inline">Остановить</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={submit}
+                disabled={!canSend}
+                title={
+                  uploading
+                    ? "Дождитесь загрузки файлов"
+                    : failed
+                      ? "Повторите загрузку или уберите файл"
+                      : submitting
+                        ? "Отправляется"
+                        : "Отправить"
+                }
+                className={cn(
+                  "flex size-11 shrink-0 items-center justify-center rounded-lg",
+                  canSend
+                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                    : "bg-muted/55 text-muted-foreground",
+                  "disabled:cursor-not-allowed disabled:opacity-55",
+                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                )}
+                aria-label={submitting ? "Отправляется" : "Отправить"}
+                aria-busy={submitting}
+              >
+                {submitting ? (
+                  <LoaderCircle
+                    size={18}
+                    strokeWidth={1.5}
+                    className="motion-safe:animate-spin"
+                    aria-hidden
+                  />
+                ) : (
+                  <Send size={18} strokeWidth={1.5} aria-hidden />
+                )}
+              </button>
+            )}
+          </div>
+
+          <div className="flex min-h-7 items-center justify-between gap-3 px-3 pb-2 pt-0.5">
+            <span
+              role="status"
+              aria-live="polite"
+              className="inline-flex min-w-0 items-center gap-1.5 font-sans text-xs normal-case tracking-normal text-muted-foreground"
             >
-              <Send size={18} aria-hidden />
-            </button>
-          )}
+              {activity && (
+                <>
+                  <LoaderCircle
+                    size={13}
+                    strokeWidth={1.5}
+                    className="shrink-0 motion-safe:animate-spin"
+                    aria-hidden
+                  />
+                  <span
+                    className="korra-chat-composer__status-label"
+                    data-streaming={streaming ? "true" : "false"}
+                  >
+                    {activity}
+                  </span>
+                </>
+              )}
+            </span>
+            <span
+              id={shortcutId}
+              className="korra-chat-composer__hint hidden shrink-0 font-sans text-xs normal-case tracking-normal text-muted-foreground sm:block"
+            >
+              Enter — отправить · Shift+Enter — новая строка
+            </span>
+          </div>
         </div>
-        {/* Подпись фазы разработки владельцу продукта ни о чём не говорит;
-            подсказка про Enter уже есть в placeholder поля ввода. */}
+
         {allowAttachments && attachments.length === 0 && (
-          <p className="mt-2 text-center font-sans text-sm normal-case tracking-normal text-text-secondary">
-            Можно прикрепить файл — перетащите его сюда или нажмите скрепку
+          <p
+            id={attachmentHelpId}
+            className="mt-2 text-center font-sans text-xs normal-case tracking-normal text-muted-foreground"
+          >
+            Добавьте файлы скрепкой или перетащите сюда
           </p>
         )}
+        {attachments.length > 0 && (
+          <span id={attachmentHelpId} className="sr-only">
+            Прикреплено файлов: {attachments.length}
+          </span>
+        )}
+        <span className="sr-only" role="status" aria-live="polite">
+          {dragging ? "Отпустите файлы, чтобы прикрепить" : ""}
+        </span>
       </div>
     </div>
   );
@@ -1147,6 +1320,12 @@ export default function BubbleChatPage({
           prefill={prefill}
           onPrefillConsumed={() => setPrefill(null)}
           streaming={isStreaming}
+          responding={Boolean(
+            isStreaming &&
+              messages[messages.length - 1]?.role === "assistant" &&
+              (messages[messages.length - 1]?.content.trim() ||
+                messages[messages.length - 1]?.toolCalls?.length),
+          )}
           onAbort={abort}
           profile={agentProfile}
           allowAttachments
