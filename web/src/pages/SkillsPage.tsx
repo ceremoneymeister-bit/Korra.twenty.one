@@ -62,6 +62,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@nous-research/ui/ui/components/input";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
 import { russianInterfaceText } from "@/lib/russian-interface-text";
 import { ownerFacingError } from "@/lib/owner-facing-error";
@@ -142,12 +143,10 @@ export default function SkillsPage() {
   const { setAfterTitle, setEnd } = usePageHeader();
 
   // ── Profile scoping ──
-  // The write target comes from the GLOBAL profile switcher (sidebar) via
-  // ProfileContext — one selector for the whole dashboard, deep-linkable
-  // as ?profile=<name>. This page just consumes it: the fetchJSON layer
-  // appends the param automatically; we still pass it explicitly where the
-  // call signature supports it (clearer, and robust if a caller bypasses
-  // the auto-injection).
+  // The write target comes from this section's header chip via ProfileContext.
+  // The fetchJSON layer appends it automatically; we still pass it explicitly
+  // where the call signature supports it (clearer, and robust if a caller
+  // bypasses the auto-injection).
   const {
     profile: selectedProfile,
   } = useProfileScope();
@@ -310,39 +309,41 @@ export default function SkillsPage() {
   const enabledCount = skills.filter((s) => s.enabled).length;
 
   useLayoutEffect(() => {
-    if (loading) {
-      setAfterTitle(null);
-      setEnd(null);
-      return;
-    }
     setAfterTitle(
-      <span className="flex items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
-        {t.skills.enabledOf
-          .replace("{enabled}", String(enabledCount))
-          .replace("{total}", String(skills.length))}
-      </span>,
+      <div className="flex items-center gap-2">
+        <ProfileScopeChip />
+        {!loading ? (
+          <span className="whitespace-nowrap text-xs text-muted-foreground">
+            {t.skills.enabledOf
+              .replace("{enabled}", String(enabledCount))
+              .replace("{total}", String(skills.length))}
+          </span>
+        ) : null}
+      </div>,
     );
     setEnd(
-      <div className="relative w-full min-w-0 sm:max-w-xs">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-        <Input
-          className="h-8 rounded-none pl-8 pr-7 text-xs"
-          placeholder={t.common.search}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {search && (
-          <Button
-            ghost
-            size="xs"
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            onClick={() => setSearch("")}
-            aria-label={t.common.clear}
-          >
-            <X />
-          </Button>
-        )}
-      </div>,
+      loading ? null : (
+        <div className="relative w-full min-w-0 sm:max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            className="h-8 rounded-none pl-8 pr-7 text-xs"
+            placeholder={t.common.search}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <Button
+              ghost
+              size="xs"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              onClick={() => setSearch("")}
+              aria-label={t.common.clear}
+            >
+              <X />
+            </Button>
+          )}
+        </div>
+      ),
     );
     return () => {
       setAfterTitle(null);

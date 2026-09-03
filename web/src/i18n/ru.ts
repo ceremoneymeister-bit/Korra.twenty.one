@@ -91,6 +91,7 @@ export const ru: Translations = {
     statusOverview: "Обзор статуса",
     system: "Система",
     webUi: "Веб-интерфейс",
+    profileScopeLabel: "Профиль: {name}",
   },
 
   status: {
@@ -1301,7 +1302,7 @@ export const ru: Translations = {
     "Change model": "Сменить модель",
     "Clone everything (memories, sessions, skills, state)": "Клонировать всё (память, сессии, навыки и состояние)",
     "Could not generate description": "Не удалось создать описание",
-    "Dashboard switched to manage {name}. New CLI/gateway runs will use this profile too.": "Панель переключена на управление профилем {name}. Новые запуски CLI и шлюза тоже будут использовать этот профиль.",
+    "Dashboard switched to manage {name}. New CLI/gateway runs will use this profile too.": "Новые запуски CLI и шлюза будут использовать профиль {name}.",
     "Description saved": "Описание сохранено",
     "Distribution": "Дистрибутив",
     "Don't seed bundled skills": "Не добавлять встроенные навыки",

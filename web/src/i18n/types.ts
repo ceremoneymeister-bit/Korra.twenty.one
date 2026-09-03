@@ -115,6 +115,7 @@ export interface Translations {
     managingProfile?: string;
     currentProfileOption?: string;
     managingProfileBanner?: string;
+    profileScopeLabel?: string;
     /** NS-656 memory-pressure banner — optional, English fallback. */
     memoryOomRestartBanner?: string;
     memoryCriticalBanner?: string;

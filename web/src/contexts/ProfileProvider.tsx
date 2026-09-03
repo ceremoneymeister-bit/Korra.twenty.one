@@ -7,128 +7,135 @@ import {
 } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import { api, setManagementProfile } from "@/lib/api";
+import type { ProfileInfo } from "@/lib/api";
 import { ProfileContext } from "@/contexts/profile-context";
-import { isProductUiMode } from "@/lib/dashboard-flags";
 
 /**
- * Machine-level management-profile scope.
+ * Routes whose data belongs to one isolated agent home. Deliberately excludes
+ * Agents (each tab supplies an explicit profile), Files, System and Channels.
+ */
+const PROFILE_SCOPED_ROUTES = new Set([
+  "/analytics",
+  "/config",
+  "/cron",
+  "/env",
+  "/mcp",
+  "/models",
+  "/pairing",
+  "/sessions",
+  "/skills",
+]);
+
+const PROFILE_SCOPE_STORAGE_PREFIX = "korra.profileScope.";
+
+function normalizedProfileRoute(pathname: string): string | null {
+  const route = pathname.replace(/\/+$/, "") || "/";
+  return PROFILE_SCOPED_ROUTES.has(route) ? route : null;
+}
+
+function profileScopeStorageKey(route: string): string {
+  return `${PROFILE_SCOPE_STORAGE_PREFIX}${route}`;
+}
+
+function readStoredProfile(route: string | null): string {
+  if (!route || typeof localStorage === "undefined") return "";
+  try {
+    return localStorage.getItem(profileScopeStorageKey(route))?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function storeProfile(route: string, profile: string): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(profileScopeStorageKey(route), profile);
+  } catch {
+    // Storage can be unavailable in privacy mode; the URL still preserves
+    // the selection for this visit.
+  }
+}
+
+/**
+ * Per-section management-profile scope.
  *
- * One switcher (rendered in the sidebar) decides which profile every
- * management page reads/writes. React STATE is the source of truth; the
- * URL (`?profile=<name>`) is a synchronized projection of it so deep links
- * land scoped and refresh survives. The selection is mirrored into the api
- * module so `fetchJSON` transparently appends it to the profile-scoped
- * endpoint families. "" = the dashboard's own profile.
- *
- * Why state-first instead of URL-first: sidebar nav links are bare paths
- * (`/config`, `/skills`). A URL-derived scope would silently reset to the
- * dashboard's own profile on every nav click — the switcher would LOOK
- * global while normal navigation dropped the write target. With state as
- * truth, the effect below re-asserts `?profile=` onto the new location
- * after each navigation, so the scope survives nav and stays deep-linkable.
- *
- * This exists because "Set as active" on the Profiles page historically only
- * flipped the sticky active_profile file (future CLI/gateway runs). The
- * switcher is the dashboard's write-target selector for Chat and management
- * pages. We now sync the switcher when the sticky active profile differs from
- * the dashboard process on load, and ProfilesPage updates the switcher when
- * you click "Set as active".
+ * The active route synchronously resolves its own saved profile before child
+ * effects run, then mirrors that target into the API module. Bare navigation
+ * therefore restores the destination section's choice instead of carrying
+ * the previous section's target across the dashboard. "" means the dashboard
+ * process's own profile. An explicit `?profile=` remains a deep-link override
+ * and is saved for that section.
  */
 export function ProfileProvider({ children }: { children: ReactNode }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const { pathname } = useLocation();
-  const [profiles, setProfiles] = useState<string[]>([]);
+  const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   const [currentProfile, setCurrentProfile] = useState("default");
+  const route = normalizedProfileRoute(pathname);
+  const urlProfile = route ? searchParams.get("profile") : null;
+  const selectedProfile = route
+    ? (urlProfile !== null ? urlProfile.trim() : readStoredProfile(route))
+    : "";
+  const profile =
+    selectedProfile && selectedProfile !== currentProfile
+      ? selectedProfile
+      : "";
 
-  // Initial value comes from the URL (deep link / refresh / unified-launch
-  // preselect); afterwards state leads and the URL follows.
-  const [profile, setProfileState] = useState(
-    () => searchParams.get("profile") ?? "",
-  );
-
-  // Mirror into the api module synchronously on every render where it
-  // changed, so fetches fired by child effects in the same commit see it.
+  // This must happen during the provider render: child page effects in the
+  // same commit immediately issue their profile-scoped reads.
   setManagementProfile(profile);
 
-  // A profile param arriving via in-app navigation (e.g. the Profiles
-  // page's "Manage skills & tools" linking to /skills?profile=X) must win
-  // over current state — it's an explicit scope request.
-  const urlProfile = searchParams.get("profile");
+  // Deep links become the remembered choice for this section.
   useEffect(() => {
-    if (urlProfile !== null && urlProfile !== profile) {
-      setManagementProfile(urlProfile);
-      setProfileState(urlProfile);
+    if (route && urlProfile?.trim()) {
+      storeProfile(route, urlProfile.trim());
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlProfile]);
-
-  // Re-assert ?profile= after navigations that dropped it (bare nav links).
-  // Runs on every pathname/profile change; no-ops when already in sync.
-  useEffect(() => {
-    const inUrl = searchParams.get("profile") ?? "";
-    if ((profile || "") === inUrl) return;
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (profile) next.set("profile", profile);
-        else next.delete("profile");
-        return next;
-      },
-      { replace: true },
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, profile]);
+  }, [route, urlProfile]);
 
   useEffect(() => {
     let cancelled = false;
-    const urlProfile = searchParams.get("profile");
 
-    // Main fleet navigation uses the configured agent tabs and does not need
-    // the global management-profile selector during ordinary work.
-    if (isProductUiMode()) return;
-
-    Promise.all([api.getProfiles(), api.getActiveProfile()])
-      .then(([profilesRes, info]) => {
+    api
+      .getProfiles()
+      .then((profilesRes) => {
         if (cancelled) return;
+        setProfiles(profilesRes.profiles);
+      })
+      .catch(() => {});
 
-        setProfiles(profilesRes.profiles.map((p) => p.name));
-
-        const current = info.current || "default";
-        const active = info.active || "default";
-        setCurrentProfile(current);
-
-        // Deep links (?profile=) win. Otherwise align the switcher with the
-        // sticky active profile so Chat and management pages match what the
-        // Profiles page shows as "active" (machine dashboard runs as
-        // `current`, usually default).
-        if (urlProfile === null && active !== current) {
-          setManagementProfile(active);
-          setProfileState(active);
-        }
+    api
+      .getActiveProfile()
+      .then((info) => {
+        if (cancelled) return;
+        setCurrentProfile(info.current || "default");
       })
       .catch(() => {});
 
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setProfile = useCallback(
     (name: string) => {
-      setManagementProfile(name);
-      setProfileState(name);
+      if (!route) return;
+      const nextProfile = name.trim();
+      if (!nextProfile) return;
+
+      storeProfile(route, nextProfile);
+      setManagementProfile(
+        nextProfile === currentProfile ? "" : nextProfile,
+      );
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          if (name) next.set("profile", name);
-          else next.delete("profile");
+          next.set("profile", nextProfile);
           return next;
         },
         { replace: true },
       );
     },
-    [setSearchParams],
+    [currentProfile, route, setSearchParams],
   );
 
   const value = useMemo(

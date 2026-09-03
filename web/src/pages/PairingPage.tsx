@@ -13,6 +13,7 @@ import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { useI18n } from "@/i18n";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 
@@ -37,8 +38,13 @@ export default function PairingPage() {
   const [approving, setApproving] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const { toast, showToast } = useToast();
-  const { setEnd } = usePageHeader();
+  const { setAfterTitle, setEnd } = usePageHeader();
   const { tr } = useI18n();
+
+  useLayoutEffect(() => {
+    setAfterTitle(<ProfileScopeChip />);
+    return () => setAfterTitle(null);
+  }, [setAfterTitle]);
 
   const loadPairing = useCallback(() => {
     api

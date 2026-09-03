@@ -47,6 +47,8 @@ import { Input } from "@nous-research/ui/ui/components/input";
 import { Label } from "@nous-research/ui/ui/components/label";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { useProfileScope } from "@/contexts/useProfileScope";
+import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
 import { Segmented } from "@nous-research/ui/ui/components/segmented";
 import { AutomationBlueprints } from "@/components/AutomationBlueprints";
@@ -591,13 +593,19 @@ export default function CronPage() {
     };
   }, []);
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
-  const [selectedProfile, setSelectedProfile] = useState("all");
   const [view, setView] = useState<"jobs" | "blueprints">("jobs");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toast, showToast } = useToast();
   const { t, locale, tr } = useI18n();
-  const { setEnd } = usePageHeader();
+  const { setAfterTitle, setEnd } = usePageHeader();
+  const { profile: scopedProfile, currentProfile } = useProfileScope();
+  const selectedProfile = scopedProfile || currentProfile || "default";
+
+  useLayoutEffect(() => {
+    setAfterTitle(<ProfileScopeChip />);
+    return () => setAfterTitle(null);
+  }, [setAfterTitle]);
 
   // Translation surface for the human-readable schedule describer.
   // English ordinals are a special case ("1st", "2nd", "23rd"); every
@@ -751,8 +759,8 @@ export default function CronPage() {
   }, [loadJobs, selectedProfile]);
 
   // Load resources from the profile the create/edit form actually targets.
-  // Pass "default" explicitly so the global dashboard profile switch cannot
-  // redirect a default-profile cron form to some other profile.
+  // Cron endpoints take an explicit profile, so resource lookup and the job
+  // mutation always agree with the form/job target.
   useEffect(() => {
     if (clientMode) return;
     let cancelled = false;
@@ -1300,23 +1308,6 @@ export default function CronPage() {
             {t.cron.scheduledJobs} ({jobs.length})
           </H2>
 
-          {!clientMode && (
-            <div className="grid gap-1 min-w-[220px]">
-              <Label htmlFor="cron-profile-filter">Профиль</Label>
-              <Select
-                id="cron-profile-filter"
-                value={selectedProfile}
-                onValueChange={(v) => setSelectedProfile(v)}
-              >
-                <SelectOption value="all">Все профили</SelectOption>
-                {profiles.map((profile) => (
-                  <SelectOption key={profile.name} value={profile.name}>
-                    {profileLabel(profile.name)}
-                  </SelectOption>
-                ))}
-              </Select>
-            </div>
-          )}
         </div>
 
         {!error && jobs.length === 0 && (

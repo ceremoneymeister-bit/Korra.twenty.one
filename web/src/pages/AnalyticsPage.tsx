@@ -23,6 +23,7 @@ import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Stats } from "@nous-research/ui/ui/components/stats";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { useI18n } from "@/i18n";
 import { PluginSlot } from "@/plugins";
 import { ownerFacingError } from "@/lib/owner-facing-error";
@@ -445,32 +446,35 @@ export default function AnalyticsPage() {
     // the far-right `end` slot. The active period is conveyed by the
     // filled (non-outlined) button — no redundant period badge.
     setAfterTitle(
-      showTokens === false ? null : (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {PERIODS.map((p) => (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <ProfileScopeChip />
+        {showTokens !== false ? (
+          <>
+            {PERIODS.map((p) => (
+              <Button
+                key={p.label}
+                type="button"
+                size="sm"
+                outlined={days !== p.days}
+                onClick={() => setDays(p.days)}
+              >
+                {p.label}
+              </Button>
+            ))}
             <Button
-              key={p.label}
               type="button"
-              size="sm"
-              outlined={days !== p.days}
-              onClick={() => setDays(p.days)}
+              ghost
+              size="icon"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={load}
+              disabled={loading}
+              aria-label={t.common.refresh}
             >
-              {p.label}
+              {loading ? <Spinner /> : <RefreshCw />}
             </Button>
-          ))}
-          <Button
-            type="button"
-            ghost
-            size="icon"
-            className="text-muted-foreground hover:text-foreground"
-            onClick={load}
-            disabled={loading}
-            aria-label={t.common.refresh}
-          >
-            {loading ? <Spinner /> : <RefreshCw />}
-          </Button>
-        </div>
-      ),
+          </>
+        ) : null}
+      </div>,
     );
     setEnd(null);
     return () => {

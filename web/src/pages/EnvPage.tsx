@@ -40,6 +40,7 @@ import { Input } from "@nous-research/ui/ui/components/input";
 import { Label } from "@nous-research/ui/ui/components/label";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
 import { isProductUiMode } from "@/lib/dashboard-flags";
 
@@ -683,29 +684,30 @@ export default function EnvPage() {
   }, [clientMode, vars, t]);
 
   useLayoutEffect(() => {
-    if (!vars) {
-      setAfterTitle(null);
-      return;
-    }
     const scrollTo = (id: string) => {
       document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
     };
     setAfterTitle(
-      <nav
-        className="flex shrink-0 flex-nowrap items-center gap-1"
-        aria-label="Перейти к разделу"
-      >
-        {sections.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => scrollTo(s.id)}
-            className="shrink-0 cursor-pointer px-2 py-0.5 font-mondwest text-display text-xs tracking-wider text-text-secondary hover:text-foreground border border-border/50 hover:border-foreground/30 transition-colors"
+      <div className="flex min-w-0 flex-nowrap items-center gap-2">
+        <ProfileScopeChip />
+        {vars ? (
+          <nav
+            className="flex shrink-0 flex-nowrap items-center gap-1"
+            aria-label="Перейти к разделу"
           >
-            {s.label}
-          </button>
-        ))}
-      </nav>,
+            {sections.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => scrollTo(s.id)}
+                className="shrink-0 cursor-pointer px-2 py-0.5 font-mondwest text-display text-xs tracking-wider text-text-secondary hover:text-foreground border border-border/50 hover:border-foreground/30 transition-colors"
+              >
+                {s.label}
+              </button>
+            ))}
+          </nav>
+        ) : null}
+      </div>,
     );
     return () => {
       setAfterTitle(null);

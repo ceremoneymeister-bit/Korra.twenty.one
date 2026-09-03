@@ -51,6 +51,7 @@ import { Badge } from "@nous-research/ui/ui/components/badge";
 import { useI18n } from "@/i18n";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
 
 /* ------------------------------------------------------------------ */
@@ -124,7 +125,12 @@ export default function ConfigPage() {
   const { toast, showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { t, tr } = useI18n();
-  const { setEnd } = usePageHeader();
+  const { setAfterTitle, setEnd } = usePageHeader();
+
+  useLayoutEffect(() => {
+    setAfterTitle(<ProfileScopeChip />);
+    return () => setAfterTitle(null);
+  }, [setAfterTitle]);
 
   useLayoutEffect(() => {
     if (!config || !schema) {
@@ -190,7 +196,7 @@ export default function ConfigPage() {
     // getConfigRaw is profile-scoped (fetchJSON appends ?profile=), so its
     // `path` reflects the switched profile's config.yaml. /api/status's
     // config_path is machine-global (the dashboard's own profile) — wrong
-    // header under the global profile switcher, so it's only a fallback.
+    // when this section targets another profile, so it's only a fallback.
     api
       .getConfigRaw()
       .then((resp) => {

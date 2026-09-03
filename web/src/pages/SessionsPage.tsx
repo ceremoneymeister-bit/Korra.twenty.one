@@ -73,6 +73,7 @@ import { useSystemActions } from "@/contexts/useSystemActions";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
 import {
   isProductUiMode,
@@ -1004,14 +1005,15 @@ export default function SessionsPage() {
   }, []);
 
   useLayoutEffect(() => {
-    if (loading) {
-      setAfterTitle(null);
-      return;
-    }
     setAfterTitle(
-      <Badge tone="secondary" className="text-xs tabular-nums">
-        {total}
-      </Badge>,
+      <div className="flex items-center gap-2">
+        <ProfileScopeChip />
+        {!loading ? (
+          <Badge tone="secondary" className="text-xs tabular-nums">
+            {total}
+          </Badge>
+        ) : null}
+      </div>,
     );
     return () => {
       setAfterTitle(null);

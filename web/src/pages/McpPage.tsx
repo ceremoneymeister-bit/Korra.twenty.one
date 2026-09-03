@@ -23,6 +23,7 @@ import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { Input } from "@nous-research/ui/ui/components/input";
 import { Label } from "@nous-research/ui/ui/components/label";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { cn, themedBody } from "@/lib/utils";
 import {
   buildMcpServerCreate,
@@ -54,7 +55,12 @@ export default function McpPage() {
   const [diagnostics, setDiagnostics] = useState<McpCatalogDiagnostic[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast, showToast } = useToast();
-  const { setEnd } = usePageHeader();
+  const { setAfterTitle, setEnd } = usePageHeader();
+
+  useLayoutEffect(() => {
+    setAfterTitle(<ProfileScopeChip />);
+    return () => setAfterTitle(null);
+  }, [setAfterTitle]);
 
   // Add server modal state
   const [createModalOpen, setCreateModalOpen] = useState(false);

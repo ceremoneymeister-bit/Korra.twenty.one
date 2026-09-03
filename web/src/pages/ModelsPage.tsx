@@ -39,6 +39,7 @@ import { Switch } from "@nous-research/ui/ui/components/switch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useModalBehavior } from "@/hooks/useModalBehavior";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { useI18n } from "@/i18n";
 import { PluginSlot } from "@/plugins";
 import { ModelPickerDialog } from "@/components/ModelPickerDialog";
@@ -1190,6 +1191,7 @@ export default function ModelsPage() {
     // filled (non-outlined) button — no redundant period badge.
     setAfterTitle(
       <div className="flex flex-wrap items-center gap-1.5">
+        <ProfileScopeChip />
         {PERIODS.map((p) => (
           <Button
             key={p.label}
