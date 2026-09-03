@@ -26,7 +26,7 @@ export function Toast({ toast }: ToastProps) {
     <div
       aria-live="polite"
       className={cn(
-        'neo-toast fixed top-16 right-4 z-50 px-4 py-3 font-courier text-xs tracking-wider uppercase'
+        'neo-toast fixed top-16 right-4 z-50 px-5 py-3.5 text-sm'
       )}
       data-tone={current.type}
       data-visible={visible}

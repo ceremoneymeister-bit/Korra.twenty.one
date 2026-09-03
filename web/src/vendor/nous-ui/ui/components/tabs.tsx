@@ -40,7 +40,7 @@ export function TabsTrigger({
   return (
     <button
       className={cn(
-        'neo-tab relative inline-flex items-center justify-center whitespace-nowrap px-3 py-1.5',
+        'neo-tab relative inline-flex items-center justify-center whitespace-nowrap px-4 py-2',
         'font-mondwest text-display text-xs tracking-[0.1em] cursor-pointer',
         className
       )}

@@ -82,7 +82,7 @@ describe("vendored Nous UI form controls", () => {
     );
   });
 
-  it("renders Input as a 40px native field with an announced error state", async () => {
+  it("renders Input as a 44px native field with an announced error state", async () => {
     await render(
       <>
         <label htmlFor="name-input">Name</label>
@@ -99,7 +99,7 @@ describe("vendored Nous UI form controls", () => {
     const input = container.querySelector("input");
     expect(input).not.toBeNull();
     expect(input?.labels?.[0]?.textContent).toBe("Name");
-    expect(input?.className).toContain("min-h-10");
+    expect(input?.className).toContain("min-h-11");
     expect(input?.className).toContain("rounded-lg");
     expect(input?.getAttribute("aria-invalid")).toBe("true");
     expect(input?.getAttribute("aria-describedby")).toBe("name-error");
@@ -172,7 +172,7 @@ describe("vendored Nous UI form controls", () => {
       'button[role="combobox"]',
     );
     expect(control?.labels?.[0]?.textContent).toBe("Model");
-    expect(control?.className).toContain("min-h-10");
+    expect(control?.className).toContain("min-h-11");
 
     await act(async () =>
       control?.dispatchEvent(

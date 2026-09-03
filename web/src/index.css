@@ -91,7 +91,7 @@
   --warning: #8a5200;
   --border: #bebebe;
   --input: #bebebe;
-  --ring: #567a00;
+  --ring: #1f1f1f;
 
   /* Typography tokens — rewritten by ThemeProvider. Defaults match the
      system stack so themes that don't override look native. */
@@ -133,7 +133,7 @@
   --toggle-ease: cubic-bezier(0.34, 1.35, 0.64, 1);
 
   /* Data-series accents — consumed by Analytics + Models pages. */
-  --series-input-token: #567a00;
+  --series-input-token: #1f1f1f;
   --series-output-token: #5c5c5c;
 }
 
@@ -195,6 +195,27 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
 [data-client-ui="true"] .font-mondwest {
   font-family: var(--theme-font-sans) !important;
   letter-spacing: 0.02em !important;
+  text-transform: none !important;
+}
+
+/* Решение владельца 03.09: один шрифт на весь интерфейс. «Курьер» набора
+   Hermes в полях, списках, значках и уведомлениях снимается; моноширинный
+   остаётся только у кода, команд и терминала. */
+[data-client-ui="true"] .font-courier,
+[data-client-ui="true"] .font-compressed {
+  font-family: var(--theme-font-sans) !important;
+  letter-spacing: normal !important;
+}
+
+[data-client-ui="true"] code.font-courier,
+[data-client-ui="true"] pre.font-courier,
+[data-client-ui="true"] .font-courier code,
+[data-client-ui="true"] .font-courier pre {
+  font-family: var(--theme-font-mono) !important;
+}
+
+[data-client-ui="true"] .text-display {
+  letter-spacing: normal !important;
   text-transform: none !important;
 }
 

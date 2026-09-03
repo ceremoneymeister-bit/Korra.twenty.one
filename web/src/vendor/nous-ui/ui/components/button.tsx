@@ -25,7 +25,7 @@ const buttonVariants = cva(
       invert: { true: '' },
       outlined: { true: '' },
       size: {
-        default: 'px-[.9em_.75em] py-[1.25em]',
+        default: 'min-h-11 px-[1.7em] py-[0.7em]',
         icon: 'p-2 aspect-square grid-cols-1 place-items-center [&>svg]:size-3.5',
         sm: 'px-3 py-1.5 text-[0.7rem] tracking-[0.15em] [&>svg]:size-3',
         xs: 'p-1 aspect-square grid-cols-1 place-items-center [&>svg]:size-3'

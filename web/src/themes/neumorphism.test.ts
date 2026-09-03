@@ -21,7 +21,7 @@ describe("Korra neumorphism tokens", () => {
       "--neo-text-primary": "#1f1f1f",
       "--neo-text-secondary": "#5c5c5c",
       "--neo-accent": BRAND_LIME,
-      "--neo-accent-line": "#567a00",
+      "--neo-accent-line": "#1f1f1f",
       "--neo-accent-foreground": "#1f1f1f",
     });
     expect(dark["--neo-accent"]).toBe(BRAND_LIME);

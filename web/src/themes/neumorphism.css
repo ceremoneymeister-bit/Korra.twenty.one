@@ -10,33 +10,33 @@
   --neo-text-primary: #1f1f1f;
   --neo-text-secondary: #5c5c5c;
   --neo-accent: #9ede01;
-  --neo-accent-line: #567a00;
+  --neo-accent-line: #1f1f1f;
   --neo-accent-foreground: #1f1f1f;
 
+  /* Шкала глубины по эталону владельца (кнопка uiverse ke1221):
+     покой 6/12, нажатие inset 4/12. Меньше объёма, без «ваты». */
   --neo-depth-1:
-    4px 4px 8px var(--neo-shadow),
-    -4px -4px 8px var(--neo-highlight);
+    3px 3px 6px var(--neo-shadow),
+    -3px -3px 6px var(--neo-highlight);
   --neo-depth-2:
-    8px 8px 16px var(--neo-shadow),
-    -8px -8px 16px var(--neo-highlight);
+    6px 6px 12px var(--neo-shadow),
+    -6px -6px 12px var(--neo-highlight);
   --neo-depth-3:
-    12px 12px 24px var(--neo-shadow),
-    -12px -12px 24px var(--neo-highlight);
+    10px 10px 20px var(--neo-shadow),
+    -10px -10px 20px var(--neo-highlight);
   --neo-inset:
-    inset 6px 6px 12px var(--neo-shadow),
-    inset -6px -6px 12px var(--neo-highlight);
+    inset 4px 4px 12px var(--neo-shadow),
+    inset -4px -4px 12px var(--neo-highlight);
   --neo-inset-compact:
-    inset 3px 3px 6px var(--neo-shadow),
-    inset -3px -3px 6px var(--neo-highlight);
-  --neo-focus:
-    var(--neo-inset),
-    inset 0 2px 0 var(--neo-accent-line);
-  --neo-focus-visible:
-    var(--neo-inset),
-    inset 0 3px 0 var(--neo-accent-line);
+    inset 2px 2px 5px var(--neo-shadow),
+    inset -2px -2px 5px var(--neo-highlight);
+  /* Решение владельца 03.09: никаких кромок и рамок ни в нажатом состоянии,
+     ни на фокусе. Состояние выражает только глубина. */
+  --neo-focus: var(--neo-inset);
+  --neo-focus-visible: var(--neo-inset);
   --neo-error:
-    var(--neo-inset),
-    inset 0 3px 0 var(--destructive);
+    inset 4px 4px 12px color-mix(in srgb, var(--destructive) 42%, var(--neo-shadow)),
+    inset -4px -4px 12px var(--neo-highlight);
 
   --neo-radius-control: 1rem;
   --neo-radius-card: 1.5rem;
@@ -104,23 +104,24 @@
 
   .neo-button:not(:disabled):is(:active, [data-demo-state='pressed']),
   [data-demo-state='pressed'] .neo-button:not(:disabled) {
-    box-shadow: var(--neo-focus);
-    transform: translateY(1px);
+    box-shadow: var(--neo-inset);
+    color: var(--neo-text-secondary);
+    transform: none;
   }
 
   .neo-button:not(:disabled):is(:focus-visible, [data-demo-state='focus']),
   [data-demo-state='focus'] .neo-button:not(:disabled) {
     box-shadow: var(--neo-focus-visible);
-    transform: translateY(1px);
+    transform: none;
   }
 
   .neo-button[data-neo-variant='primary']:not(:disabled):is(:active, :focus-visible, [data-demo-state='pressed'], [data-demo-state='focus']),
   [data-demo-state='pressed'] .neo-button[data-neo-variant='primary']:not(:disabled),
   [data-demo-state='focus'] .neo-button[data-neo-variant='primary']:not(:disabled) {
     box-shadow:
-      inset 6px 6px 12px color-mix(in srgb, var(--neo-accent-foreground) 32%, transparent),
-      inset -6px -6px 12px color-mix(in srgb, var(--neo-highlight) 48%, transparent),
-      inset 0 3px 0 var(--neo-accent-foreground);
+      inset 4px 4px 12px color-mix(in srgb, var(--neo-accent-foreground) 26%, var(--neo-accent)),
+      inset -4px -4px 12px color-mix(in srgb, #ffffff 42%, var(--neo-accent));
+    color: var(--neo-accent-foreground);
   }
 
   .neo-button:is([aria-invalid='true'], [data-demo-state='error']),
@@ -145,7 +146,7 @@
     outline: 0;
     background: var(--neo-surface);
     box-shadow: var(--neo-inset);
-    caret-color: var(--neo-accent-line);
+    caret-color: var(--neo-text-primary);
     color: var(--neo-text-primary);
     transition:
       box-shadow var(--neo-duration-state) var(--neo-ease-out),
@@ -162,8 +163,8 @@
   .neo-select-trigger:not(:disabled):is(:hover, [data-demo-state='hover']),
   [data-demo-state='hover'] .neo-select-trigger:not(:disabled) {
     box-shadow:
-      inset 8px 8px 16px var(--neo-shadow),
-      inset -8px -8px 16px var(--neo-highlight);
+      inset 5px 5px 14px var(--neo-shadow),
+      inset -5px -5px 14px var(--neo-highlight);
   }
 
   .neo-field:is(:focus, [data-demo-state='pressed']),
@@ -203,49 +204,46 @@
     box-shadow: none;
   }
 
+  /* Тумблер по эталону владельца (uiverse mobinkakei / kandalgaonkarshubham):
+     жёлоб 60×30 с наружной тенью и вдавленностью, внутри бегунок шириной
+     200 %, который выезжает на 25 % — видна только его скруглённая кромка.
+     Включён = бегунок лаймовый. Без обводок. */
   .neo-switch-track {
     border: 0;
     background: var(--neo-surface);
-    box-shadow: var(--neo-inset-compact);
-    transition:
-      box-shadow var(--neo-duration-state) var(--neo-ease-out),
-      background-color var(--neo-duration-state) var(--neo-ease-out);
+    box-shadow:
+      -5px -3px 7px 0 var(--neo-highlight),
+      5px 3px 9px 0 var(--neo-shadow),
+      inset 3px 3px 4px 0 var(--neo-shadow),
+      inset -3px -3px 4px 0 var(--neo-highlight);
+    transition: box-shadow var(--neo-duration-state) var(--neo-ease-out);
   }
 
   .neo-switch-thumb {
     background: var(--neo-surface);
-    box-shadow: var(--neo-depth-1);
+    box-shadow:
+      -5px -3px 7px 0 var(--neo-highlight),
+      5px 3px 9px 0 var(--neo-shadow);
+    transform: translate3d(-75%, 0, 0);
     transition:
       transform var(--neo-duration-control) var(--neo-ease-toggle),
-      background-color var(--neo-duration-state) var(--neo-ease-out),
-      box-shadow var(--neo-duration-state) var(--neo-ease-out);
-  }
-
-  .neo-switch[data-state='checked'] .neo-switch-track {
-    box-shadow:
-      var(--neo-inset-compact),
-      inset 0 0 0 2px var(--neo-accent-line);
+      background-color var(--neo-duration-state) var(--neo-ease-out);
   }
 
   .neo-switch[data-state='checked'] .neo-switch-thumb {
-    background: var(--neo-accent-line);
-  }
-
-  .neo-switch:not(:disabled):hover .neo-switch-track,
-  [data-demo-state='hover'] .neo-switch:not(:disabled) .neo-switch-track {
-    box-shadow:
-      inset 5px 5px 10px var(--neo-shadow),
-      inset -5px -5px 10px var(--neo-highlight);
+    background: var(--neo-accent);
+    transform: translate3d(25%, 0, 0);
   }
 
   .neo-switch:is(:active, [data-demo-state='pressed']) .neo-switch-track,
-  [data-demo-state='pressed'] .neo-switch .neo-switch-track {
-    box-shadow: var(--neo-focus);
-  }
-
+  [data-demo-state='pressed'] .neo-switch .neo-switch-track,
   .neo-switch:is(:focus-visible, [data-demo-state='focus']) .neo-switch-track,
   [data-demo-state='focus'] .neo-switch .neo-switch-track {
-    box-shadow: var(--neo-focus-visible);
+    box-shadow:
+      -5px -3px 7px 0 var(--neo-highlight),
+      5px 3px 9px 0 var(--neo-shadow),
+      inset 4px 4px 6px 0 var(--neo-shadow),
+      inset -4px -4px 6px 0 var(--neo-highlight);
   }
 
   .neo-switch[aria-invalid='true'] .neo-switch-track,
@@ -269,7 +267,7 @@
   }
 
   .neo-checkbox-indicator {
-    color: var(--neo-accent-line);
+    color: var(--neo-accent-foreground);
     opacity: 0;
     transform: scale(0.72);
     transition:
@@ -287,6 +285,12 @@
   .neo-checkbox[data-state='indeterminate'] .neo-checkbox-indicator {
     opacity: 1;
     transform: scale(1);
+  }
+
+  .neo-checkbox[data-state='checked'] .neo-checkbox-frame,
+  .neo-checkbox[data-state='indeterminate'] .neo-checkbox-frame {
+    background: var(--neo-accent);
+    box-shadow: var(--neo-depth-1);
   }
 
   .neo-checkbox[data-state='checked'] .neo-checkbox-path,
@@ -339,10 +343,9 @@
   }
 
   .neo-select-option[aria-selected='true'] {
-    box-shadow:
-      inset 3px 0 0 var(--neo-accent-line),
-      var(--neo-inset-compact);
+    box-shadow: var(--neo-inset-compact);
     color: var(--neo-text-primary);
+    font-weight: 600;
   }
 
   .neo-card {
@@ -415,11 +418,9 @@
 
   .neo-list-item:is([data-active='true'], :active, [data-demo-state='pressed']),
   [data-demo-state='pressed'] .neo-list-item {
-    box-shadow:
-      inset 3px 0 0 var(--neo-accent-line),
-      var(--neo-inset-compact);
+    box-shadow: var(--neo-inset-compact);
     color: var(--neo-text-primary);
-    transform: translateY(1px);
+    transform: none;
   }
 
   .neo-list-item:is(:focus-visible, [data-demo-state='focus']),
@@ -501,11 +502,11 @@
 
   .neo-tab:not(:disabled):hover { color: var(--neo-text-primary); }
 
+  /* Активная вкладка — выпуклая кнопка в жёлобе, без подчёркивания. */
   .neo-tab:is([data-active='true'], :active, [data-demo-state='pressed']),
   [data-demo-state='pressed'] .neo-tab {
-    box-shadow:
-      inset 0 -3px 0 var(--neo-accent-line),
-      var(--neo-inset-compact);
+    background: var(--neo-surface);
+    box-shadow: var(--neo-depth-1);
     color: var(--neo-text-primary);
   }
 
@@ -523,7 +524,7 @@
     align-items: center;
     justify-content: center;
     gap: 0.18em;
-    color: var(--neo-accent-line);
+    color: var(--neo-accent);
   }
 
   .neo-spinner-dot {

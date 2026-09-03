@@ -9,7 +9,7 @@ export function Input({
   return (
     <input
       className={cn(
-        'neo-field nous-ui-input flex h-10 min-h-10 w-full rounded-lg px-3.5 py-2 font-courier text-sm',
+        'neo-field nous-ui-input flex h-11 min-h-11 w-full rounded-lg px-4 py-2 text-sm',
         className
       )}
       {...props}

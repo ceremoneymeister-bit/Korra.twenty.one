@@ -16,17 +16,18 @@
 }
 
 .korra-chat-attachment-preview {
-  outline: 1px solid color-mix(in srgb, var(--midground-base) 10%, transparent);
-  outline-offset: -1px;
+  outline: 0;
+  box-shadow: var(--neo-depth-1);
 }
 
 .korra-chat-composer__surface {
   position: relative;
   isolation: isolate;
-  border: 1px solid var(--input, var(--border));
-  border-radius: var(--theme-radius);
-  background: var(--card, var(--background-base));
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--midground-base) 6%, transparent);
+  /* Поле — «колодец» в поверхности: без рамки, только вдавленность. */
+  border: 0;
+  border-radius: var(--neo-radius-control);
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset);
 }
 
 .korra-chat-composer__surface > * {
@@ -60,15 +61,8 @@
   mask-composite: exclude;
 }
 
-.korra-chat-composer__surface:focus-within {
-  border-color: var(--ring, var(--midground-base));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring) 28%, transparent);
-}
-
-.korra-chat-composer__surface:has(.korra-chat-composer__textarea:focus-visible) {
-  outline: 2px solid var(--ring, var(--midground-base));
-  outline-offset: 2px;
-}
+/* Решение владельца 03.09: активная зона ввода не подсвечивается — ни
+   рамкой, ни кольцом, ни сменой глубины. Курсор в поле и так виден. */
 
 .korra-chat-composer__surface[data-state='disabled'] {
   cursor: not-allowed;
@@ -78,8 +72,7 @@
 
 .korra-chat-composer__surface[data-state='sending'],
 .korra-chat-composer__surface[data-state='streaming'] {
-  border-color: color-mix(in srgb, var(--primary) 58%, var(--input));
-  background: color-mix(in srgb, var(--primary) 3%, var(--card));
+  background: color-mix(in srgb, var(--primary) 4%, var(--neo-surface));
 }
 
 .korra-chat-composer__surface[data-state='streaming']::before {
@@ -130,16 +123,10 @@
   opacity: 1;
 }
 
-@media (hover: hover) {
-  .korra-chat-composer__surface:not([data-state='disabled']):not(:focus-within):hover {
-    border-color: color-mix(in srgb, var(--primary) 45%, var(--input));
-  }
-}
-
 @media (prefers-reduced-motion: no-preference) {
   .korra-chat-composer__surface {
     transition-duration: var(--duration-quick);
-    transition-property: background-color, border-color, box-shadow, opacity;
+    transition-property: background-color, opacity;
     transition-timing-function: var(--ease-out);
   }
 

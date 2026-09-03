@@ -12,7 +12,9 @@ export const lightNeumorphism: ThemeNeumorphism = {
   textPrimary: "#1f1f1f",
   textSecondary: "#5c5c5c",
   accent: BRAND_LIME,
-  accentLine: "#567a00",
+  /* Владелец: никакого затемнённого «болотного» лайма. Лайм живёт только
+   * заливками; тонкие метки и текст в роли акцента на светлом — чернила. */
+  accentLine: "#1f1f1f",
   accentForeground: "#1f1f1f",
 };
 

@@ -1,7 +1,7 @@
 import { cn } from '../../utils'
 
 const BASE_CN =
-  'neo-badge inline-flex items-center gap-1.5 font-compressed text-display px-2.5 py-1.5 leading-none tracking-[0.12em]'
+  'neo-badge inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium leading-none'
 
 const TONE_CLASSES: Record<Exclude<Tone, 'default'>, string> = {
   destructive: '',

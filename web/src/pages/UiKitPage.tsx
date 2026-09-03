@@ -67,7 +67,7 @@ export default function UiKitPage() {
   const [toast, setToast] = useState<{
     message: string;
     type: "error" | "success";
-  } | null>({ message: "Настройки сохранены", type: "success" });
+  } | null>(null);
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("theme");
@@ -82,14 +82,14 @@ export default function UiKitPage() {
       data-theme={themeName}
       data-testid="korra-ui-kit"
     >
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-12 pb-20">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-16 pb-24">
         <header className="flex flex-wrap items-start justify-between gap-6">
           <div>
             <p className="mb-2 text-sm text-[var(--neo-accent-line)]">Korra 21</p>
             <h1 className="text-3xl font-semibold">Неоморфный UI-набор</h1>
             <p className="mt-2 max-w-2xl text-[var(--neo-text-secondary)]">
-              Реальные компоненты панели, интерактивные состояния и
-              клавиатурный фокус. Нажимайте Tab для проверки маршрута фокуса.
+              Реальные компоненты панели в шести состояниях. Форму задаёт
+              только глубина: рамок, обводок и подсветки фокуса нет.
             </p>
           </div>
           <div aria-label="Тема витрины" className="flex gap-3">
@@ -137,7 +137,7 @@ export default function UiKitPage() {
         </ShowcaseSection>
 
         <ShowcaseSection
-          description="Inset-глубина вместо рамки; ошибка и клавиатурный фокус — внутренний цветной край."
+          description="Поле — колодец в поверхности; ошибка подкрашивает глубину, фокус ничего не подсвечивает."
           title="Input и Textarea"
         >
           <StateGrid>
@@ -171,7 +171,7 @@ export default function UiKitPage() {
         </ShowcaseSection>
 
         <ShowcaseSection
-          description="Тонкие индикаторы используют accentLine: затемнённый лайм в светлой теме."
+          description="Включённое состояние — лаймовая заливка бегунка и галочки; линий и обводок нет."
           title="Switch и Checkbox"
         >
           <StateGrid>
@@ -420,7 +420,7 @@ function ShowcaseSection({
   title: string;
 }) {
   return (
-    <section className="space-y-6">
+    <section className="space-y-8">
       <div>
         <h2 className="text-xl font-semibold">{title}</h2>
         {description && (
@@ -436,7 +436,7 @@ function ShowcaseSection({
 
 function StateGrid({ children }: { children: ReactNode }) {
   return (
-    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       {children}
     </div>
   );

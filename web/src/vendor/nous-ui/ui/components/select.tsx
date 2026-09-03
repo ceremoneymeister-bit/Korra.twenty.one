@@ -20,8 +20,8 @@ import { cn } from '../../utils'
 import './form-controls.css'
 
 const TRIGGER_CN =
-  'neo-select-trigger flex h-10 min-h-10 w-full items-center justify-between gap-2 ' +
-  'px-3.5 py-2 font-courier text-sm text-left cursor-pointer touch-manipulation'
+  'neo-select-trigger flex h-11 min-h-11 w-full items-center justify-between gap-2 ' +
+  'px-4 py-2 text-sm text-left cursor-pointer touch-manipulation'
 
 const LISTBOX_CN =
   'nous-ui-select-menu absolute z-50 mt-1.5 w-full max-h-60 overflow-auto origin-top ' +
@@ -239,7 +239,7 @@ export function Select({
                 aria-selected={isSelected}
                 className={cn(
                   'neo-select-option nous-ui-select-option flex min-h-10 cursor-pointer touch-manipulation items-center gap-2 px-3 py-2',
-                  'font-courier text-sm',
+                  'text-sm',
                   isSelected && 'font-medium'
                 )}
                 data-highlighted={isHighlighted || undefined}

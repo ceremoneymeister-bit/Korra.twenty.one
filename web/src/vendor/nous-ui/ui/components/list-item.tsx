@@ -12,8 +12,8 @@ export const ListItem = forwardRef<HTMLButtonElement, ListItemProps>(
     return (
       <button
         className={cn(
-          'neo-list-item group relative flex w-full items-center gap-2 px-3 py-2 text-left',
-          'font-courier text-sm cursor-pointer',
+          'neo-list-item group relative flex w-full items-center gap-3 px-4 py-2.5 text-left',
+          'text-sm cursor-pointer',
           className
         )}
         data-active={active || undefined}

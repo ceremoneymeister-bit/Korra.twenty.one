@@ -47,7 +47,7 @@ describe("built-in dashboard themes", () => {
       textPrimary: "#1f1f1f",
       textSecondary: "#5c5c5c",
       accent: BRAND_LIME,
-      accentLine: "#567a00",
+      accentLine: "#1f1f1f",
       accentForeground: "#1f1f1f",
     });
     expect(darkTheme.neumorphism).toEqual({

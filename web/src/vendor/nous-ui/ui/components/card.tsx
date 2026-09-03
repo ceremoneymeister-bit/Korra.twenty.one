@@ -42,7 +42,7 @@ export function CardHeader({
   return (
     <div
       className={cn(
-        'neo-card-header flex flex-col gap-1.5 p-4',
+        'neo-card-header flex flex-col gap-2 p-5',
         className
       )}
       {...props}
@@ -57,7 +57,7 @@ export function CardTitle({
   return (
     <h3
       className={cn(
-        'font-expanded text-sm font-bold tracking-[0.08em] uppercase',
+        'text-base font-semibold',
         className
       )}
       {...props}
@@ -81,5 +81,5 @@ export function CardContent({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('p-4', className)} {...props} />
+  return <div className={cn('p-5', className)} {...props} />
 }
