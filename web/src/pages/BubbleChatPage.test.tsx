@@ -91,9 +91,88 @@ describe("BubbleChatComposer", () => {
     expect(textarea.placeholder).toBe("Напишите Корре…");
     expect(textarea.labels?.[0]?.textContent).toBe("Сообщение Корре");
     expect(send.disabled).toBe(true);
+    expect(send.className).toContain("korra-chat-composer__submit");
+
+    const surface = container.querySelector<HTMLElement>(
+      ".korra-chat-composer__surface",
+    )!;
+    const controls = container.querySelector<HTMLElement>(
+      ".korra-chat-composer__controls",
+    )!;
+    expect(surface.dataset.expanded).toBe("false");
+    expect(controls.dataset.wide).toBe("false");
+    expect(container.textContent).not.toContain(
+      "Добавьте файлы скрепкой или перетащите сюда",
+    );
+
+    const shortcut = document.getElementById(
+      textarea.getAttribute("aria-describedby")!,
+    )!;
+    expect(shortcut.className).toBe("sr-only");
+    expect(shortcut.textContent).toContain("Shift+Enter — новая строка");
 
     await enterText(textarea, "Привет, Корра");
     expect(send.disabled).toBe(false);
+  });
+
+  it("keeps the compact composer disabled without an active profile", async () => {
+    await render(<BubbleChatComposer onSend={vi.fn()} disabled />);
+
+    const surface = container.querySelector<HTMLElement>(
+      ".korra-chat-composer__surface",
+    )!;
+    expect(surface.dataset.state).toBe("disabled");
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(
+      true,
+    );
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Прикрепить файл"]',
+      )?.disabled,
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Отправить"]',
+      )?.disabled,
+    ).toBe(true);
+  });
+
+  it("moves the field to its own row when text wraps or has a newline", async () => {
+    await render(<BubbleChatComposer onSend={vi.fn()} />);
+    const textarea = container.querySelector("textarea")!;
+    const controls = container.querySelector<HTMLElement>(
+      ".korra-chat-composer__controls",
+    )!;
+    const surface = container.querySelector<HTMLElement>(
+      ".korra-chat-composer__surface",
+    )!;
+    const measure = container.querySelector<HTMLElement>(
+      ".korra-chat-composer__measure",
+    )!;
+
+    Object.defineProperty(controls, "clientWidth", {
+      configurable: true,
+      value: 280,
+    });
+    Object.defineProperty(measure, "scrollWidth", {
+      configurable: true,
+      value: 400,
+    });
+
+    await enterText(textarea, "Строка, которая не помещается рядом с кнопками");
+    expect(controls.dataset.wide).toBe("true");
+    expect(surface.dataset.expanded).toBe("true");
+
+    Object.defineProperty(measure, "scrollWidth", {
+      configurable: true,
+      value: 40,
+    });
+    await enterText(textarea, "Первая\nвторая");
+    expect(controls.dataset.wide).toBe("true");
+
+    await enterText(textarea, "Коротко");
+    expect(controls.dataset.wide).toBe("false");
+    expect(surface.dataset.expanded).toBe("false");
   });
 
   it("sends with Enter and leaves Shift+Enter for a new line", async () => {
@@ -172,7 +251,12 @@ describe("BubbleChatComposer", () => {
     const remove = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Убрать смета.txt"]',
     )!;
-    expect(remove.className).toContain("size-10");
+    expect(remove.className).toBe("korra-chat-attachment-chip__action");
+    expect(
+      container.querySelector(".korra-chat-composer__surface")?.getAttribute(
+        "data-expanded",
+      ),
+    ).toBe("true");
     await act(async () => remove.click());
     expect(container.querySelector('[role="listitem"]')).toBeNull();
   });
@@ -256,7 +340,8 @@ describe("BubbleChatComposer", () => {
       '[role="group"][aria-label="Сообщение и вложения"]',
     )!;
     expect(stop.disabled).toBe(false);
-    expect(stop.className).toContain("min-h-11");
+    expect(stop.className).toContain("korra-chat-composer__submit");
+    expect(stop.textContent).toBe("");
     expect(surface.dataset.state).toBe("streaming");
     expect(surface.getAttribute("aria-busy")).toBe("true");
     expect(container.querySelector("textarea")?.disabled).toBe(true);

@@ -18,6 +18,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -560,6 +561,8 @@ interface BubbleChatComposerProps {
 
 const TEXTAREA_MIN_HEIGHT = 24;
 const TEXTAREA_MAX_HEIGHT = 160;
+const COMPOSER_CONTROL_SIZE = 32;
+const COMPOSER_COLUMN_GAP = 4;
 
 export function BubbleChatComposer({
   disabled,
@@ -577,12 +580,14 @@ export function BubbleChatComposer({
   const [dragging, setDragging] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [wide, setWide] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const controlsRef = useRef<HTMLDivElement | null>(null);
+  const measureRef = useRef<HTMLSpanElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const abortsRef = useRef<Record<string, () => void>>({});
   const textareaId = useId();
   const shortcutId = useId();
-  const attachmentHelpId = useId();
 
   const patch = useCallback((id: string, next: Partial<PendingAttachment>) => {
     setAttachments((list) =>
@@ -710,6 +715,45 @@ export function BubbleChatComposer({
     el.style.overflowY = naturalHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
   }, []);
 
+  const updateComposerLayout = useCallback(() => {
+    const input = taRef.current;
+    const controls = controlsRef.current;
+    const measure = measureRef.current;
+    if (!input || !controls || !measure) return;
+
+    const fixedControlsWidth =
+      COMPOSER_CONTROL_SIZE +
+      (allowAttachments ? COMPOSER_CONTROL_SIZE : 0);
+    const gapCount = allowAttachments ? 2 : 1;
+    const inlineInputWidth =
+      controls.clientWidth -
+      fixedControlsWidth -
+      gapCount * COMPOSER_COLUMN_GAP;
+    const measuredTextWidth = measure.scrollWidth;
+    const needsFullWidth =
+      value.includes("\n") ||
+      input.scrollHeight > TEXTAREA_MIN_HEIGHT ||
+      (controls.clientWidth > 0 &&
+        measuredTextWidth + 8 > inlineInputWidth);
+
+    setWide((current) =>
+      current === needsFullWidth ? current : needsFullWidth,
+    );
+    resizeTextarea(input);
+  }, [allowAttachments, resizeTextarea, value]);
+
+  useLayoutEffect(() => {
+    updateComposerLayout();
+  }, [updateComposerLayout, wide]);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateComposerLayout);
+    observer.observe(controls);
+    return () => observer.disconnect();
+  }, [updateComposerLayout]);
+
   // «Изменить» на артефакте подставляет заготовку и отдаёт курсор владельцу:
   // отправлять за него нельзя — он ещё не сказал, что менять.
   useEffect(() => {
@@ -757,7 +801,7 @@ export function BubbleChatComposer({
     });
     setAttachments([]);
     setAttachError(null);
-    // Let React paint the empty value, then animate back to the minimum.
+    // Let React paint the empty value, then return to the compact row.
     requestAnimationFrame(() => {
       const el = taRef.current;
       if (el) resizeTextarea(el);
@@ -800,11 +844,8 @@ export function BubbleChatComposer({
   const hasDraggedFiles = (types: readonly string[]) => types.includes("Files");
 
   return (
-    // No bg- override on the composer wrap either — only border-t separates
-    // the input area from the transcript. The textarea + send button retain
-    // their own bg-card (it's a real container, not a background overlay).
     <div
-      className="korra-chat-composer border-t border-border"
+      className="korra-chat-composer"
       onDragOver={
         allowAttachments
           ? (e) => {
@@ -836,7 +877,7 @@ export function BubbleChatComposer({
       }
     >
       <div
-        className="korra-chat-composer__dropzone max-w-3xl mx-auto rounded-xl px-4 py-3"
+        className="korra-chat-composer__dropzone mx-auto max-w-3xl px-4"
         data-dragging={dragging ? "true" : "false"}
       >
         <div className="korra-chat-composer__drop-overlay" aria-hidden="true">
@@ -865,19 +906,18 @@ export function BubbleChatComposer({
           role="group"
           aria-label="Сообщение и вложения"
           aria-busy={streaming || submitting || uploading}
-          aria-describedby={
-            allowAttachments
-              ? `${shortcutId} ${attachmentHelpId}`
-              : shortcutId
-          }
+          aria-describedby={shortcutId}
           data-state={composerState}
-          className={cn(
-            "korra-chat-composer__surface overflow-hidden",
-          )}
+          data-expanded={
+            wide || attachments.length > 0 || Boolean(attachError)
+              ? "true"
+              : "false"
+          }
+          className="korra-chat-composer__surface overflow-hidden"
         >
           {attachments.length > 0 && (
             <div
-              className="flex flex-wrap gap-1.5 border-b border-border/70 px-2.5 py-2"
+              className="korra-chat-composer__attachments flex flex-wrap gap-1.5"
               role="list"
               aria-label="Прикреплённые файлы"
             >
@@ -895,13 +935,18 @@ export function BubbleChatComposer({
           {attachError && (
             <p
               role="alert"
-              className="px-3 pt-2 text-xs text-destructive font-sans normal-case tracking-normal"
+              className="korra-chat-composer__error font-sans text-xs normal-case tracking-normal"
             >
               {attachError}
             </p>
           )}
 
-          <div className="flex items-end gap-2 px-2 pt-2">
+          <div
+            ref={controlsRef}
+            className="korra-chat-composer__controls"
+            data-wide={wide ? "true" : "false"}
+            data-attachments={allowAttachments ? "true" : "false"}
+          >
             {allowAttachments && (
               <button
                 type="button"
@@ -909,12 +954,7 @@ export function BubbleChatComposer({
                 disabled={
                   disabled || submitting || attachments.length >= MAX_ATTACHMENTS
                 }
-                className={cn(
-                  "flex size-11 shrink-0 items-center justify-center rounded-lg",
-                  "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                  "disabled:cursor-not-allowed disabled:opacity-40",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                )}
+                className="korra-chat-composer__control korra-chat-composer__attach"
                 aria-label="Прикрепить файл"
                 title="Прикрепить файл"
               >
@@ -932,7 +972,6 @@ export function BubbleChatComposer({
               value={value}
               onChange={(e) => {
                 setValue(e.target.value);
-                resizeTextarea(e.currentTarget);
               }}
               onPaste={
                 allowAttachments
@@ -957,32 +996,27 @@ export function BubbleChatComposer({
               }}
               placeholder="Напишите Корре…"
               disabled={disabled || submitting}
-              className={cn(
-                "korra-chat-composer__textarea flex-1 resize-none bg-transparent",
-                "text-sm leading-6 placeholder:text-muted-foreground",
-                "px-2 py-1 disabled:cursor-not-allowed disabled:opacity-55",
-                // Composer input is real prose, not UI label — opt out of UPPERCASE.
-                "font-sans normal-case tracking-normal",
-              )}
+              className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent font-sans text-sm leading-6 normal-case tracking-normal"
               aria-describedby={shortcutId}
             />
+            <span
+              ref={measureRef}
+              className="korra-chat-composer__measure font-sans text-sm leading-6 normal-case tracking-normal"
+              aria-hidden="true"
+            >
+              {value}
+            </span>
 
             {streaming ? (
               <button
                 type="button"
                 onClick={onAbort}
                 disabled={!onAbort}
-                className={cn(
-                  "flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-lg px-3",
-                  "bg-destructive/10 text-destructive hover:bg-destructive/20",
-                  "disabled:cursor-not-allowed disabled:opacity-40",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-destructive",
-                )}
+                className="korra-chat-composer__control korra-chat-composer__submit"
                 aria-label="Остановить генерацию"
                 title="Остановить генерацию"
               >
                 <Square size={15} fill="currentColor" aria-hidden />
-                <span className="hidden sm:inline">Остановить</span>
               </button>
             ) : (
               <button
@@ -998,14 +1032,7 @@ export function BubbleChatComposer({
                         ? "Отправляется"
                         : "Отправить"
                 }
-                className={cn(
-                  "flex size-11 shrink-0 items-center justify-center rounded-lg",
-                  canSend
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "bg-muted/55 text-muted-foreground",
-                  "disabled:cursor-not-allowed disabled:opacity-55",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                )}
+                className="korra-chat-composer__control korra-chat-composer__submit"
                 aria-label={submitting ? "Отправляется" : "Отправить"}
                 aria-busy={submitting}
               >
@@ -1023,51 +1050,14 @@ export function BubbleChatComposer({
             )}
           </div>
 
-          <div className="flex min-h-7 items-center justify-between gap-3 px-3 pb-2 pt-0.5">
-            <span
-              role="status"
-              aria-live="polite"
-              className="inline-flex min-w-0 items-center gap-1.5 font-sans text-xs normal-case tracking-normal text-muted-foreground"
-            >
-              {activity && (
-                <>
-                  <LoaderCircle
-                    size={13}
-                    strokeWidth={1.5}
-                    className="shrink-0 motion-safe:animate-spin"
-                    aria-hidden
-                  />
-                  <span
-                    className="korra-chat-composer__status-label"
-                    data-streaming={streaming ? "true" : "false"}
-                  >
-                    {activity}
-                  </span>
-                </>
-              )}
-            </span>
-            <span
-              id={shortcutId}
-              className="korra-chat-composer__hint hidden shrink-0 font-sans text-xs normal-case tracking-normal text-muted-foreground sm:block"
-            >
-              Enter — отправить · Shift+Enter — новая строка
-            </span>
-          </div>
+          <span className="sr-only" role="status" aria-live="polite">
+            {activity}
+          </span>
+          <span id={shortcutId} className="sr-only">
+            Enter — отправить · Shift+Enter — новая строка
+          </span>
         </div>
 
-        {allowAttachments && attachments.length === 0 && (
-          <p
-            id={attachmentHelpId}
-            className="mt-2 text-center font-sans text-xs normal-case tracking-normal text-muted-foreground"
-          >
-            Добавьте файлы скрепкой или перетащите сюда
-          </p>
-        )}
-        {attachments.length > 0 && (
-          <span id={attachmentHelpId} className="sr-only">
-            Прикреплено файлов: {attachments.length}
-          </span>
-        )}
         <span className="sr-only" role="status" aria-live="polite">
           {dragging ? "Отпустите файлы, чтобы прикрепить" : ""}
         </span>

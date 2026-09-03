@@ -95,30 +95,27 @@ export function AttachmentChip({
   return (
     <div
       role="listitem"
-      className={cn(
-        "group relative flex min-h-11 items-center gap-2 rounded-lg border py-1 ps-2 pe-1",
-        "bg-background/60 font-sans normal-case tracking-normal",
-        failed ? "border-destructive/60" : "border-input",
-      )}
+      className="korra-chat-attachment-chip font-sans normal-case tracking-normal"
+      data-status={item.status}
       title={failed ? item.error ?? item.name : item.name}
     >
       {item.previewUrl ? (
         <img
           src={item.previewUrl}
           alt=""
-          className="korra-chat-attachment-preview size-8 shrink-0 rounded-md object-cover"
+          className="korra-chat-attachment-preview korra-chat-attachment-chip__preview shrink-0 object-cover"
         />
       ) : (
         <IconFor kind={item.kind} />
       )}
 
-      <div className="min-w-0">
-        <div className="text-xs leading-tight truncate max-w-[180px]">
+      <div className="flex min-w-0 items-baseline gap-1.5 whitespace-nowrap">
+        <span className="max-w-[180px] truncate text-xs leading-none">
           {shortName(item.name)}
-        </div>
-        <div className="text-[11px] leading-tight text-muted-foreground">
+        </span>
+        <span className="shrink-0 text-[11px] leading-none text-muted-foreground">
           {failed ? (
-            <span className="text-destructive inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-1 text-destructive">
               <AlertCircle size={11} aria-hidden="true" /> Не загрузился · {formatSize(item.size)}
             </span>
           ) : item.status === "uploading" ? (
@@ -126,12 +123,12 @@ export function AttachmentChip({
           ) : (
             `${item.kind.toUpperCase()} · ${formatSize(item.size)}`
           )}
-        </div>
+        </span>
       </div>
 
       {item.status === "uploading" && (
         <div
-          className="absolute inset-x-0 bottom-0 h-0.5 bg-muted/40 rounded-b-md overflow-hidden"
+          className="korra-chat-attachment-chip__progress"
           role="progressbar"
           aria-label={`Загрузка ${item.name}`}
           aria-valuemin={0}
@@ -139,7 +136,7 @@ export function AttachmentChip({
           aria-valuenow={item.progress}
         >
           <div
-            className="h-full bg-primary motion-safe:transition-[width] motion-safe:duration-[var(--duration-quick)]"
+            className="korra-chat-attachment-chip__progress-value"
             style={{ width: `${item.progress}%` }}
           />
         </div>
@@ -149,7 +146,7 @@ export function AttachmentChip({
         <button
           type="button"
           onClick={onRetry}
-          className="flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="korra-chat-attachment-chip__action"
           aria-label={`Повторить загрузку ${item.name}`}
           title="Повторить"
         >
@@ -159,7 +156,7 @@ export function AttachmentChip({
       <button
         type="button"
         onClick={onRemove}
-        className="flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="korra-chat-attachment-chip__action"
         aria-label={`Убрать ${item.name}`}
         title="Убрать"
       >
