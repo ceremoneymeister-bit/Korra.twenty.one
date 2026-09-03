@@ -13,20 +13,20 @@
   --neo-accent-line: #1f1f1f;
   --neo-accent-foreground: #1f1f1f;
 
-  /* Шкала глубины по эталону владельца (кнопка uiverse ke1221):
-     покой 6/12, нажатие inset 4/12. Меньше объёма, без «ваты». */
+  /* Шкала глубины: второй отзыв владельца 03.09 «ещё чуть-чуть поменьше»:
+     мелкое 2/5, контрол 5/10, карточка 8/16, нажатие inset 3/8. */
   --neo-depth-1:
-    3px 3px 6px var(--neo-shadow),
-    -3px -3px 6px var(--neo-highlight);
+    2px 2px 5px var(--neo-shadow),
+    -2px -2px 5px var(--neo-highlight);
   --neo-depth-2:
-    6px 6px 12px var(--neo-shadow),
-    -6px -6px 12px var(--neo-highlight);
+    5px 5px 10px var(--neo-shadow),
+    -5px -5px 10px var(--neo-highlight);
   --neo-depth-3:
-    10px 10px 20px var(--neo-shadow),
-    -10px -10px 20px var(--neo-highlight);
+    8px 8px 16px var(--neo-shadow),
+    -8px -8px 16px var(--neo-highlight);
   --neo-inset:
-    inset 4px 4px 12px var(--neo-shadow),
-    inset -4px -4px 12px var(--neo-highlight);
+    inset 3px 3px 8px var(--neo-shadow),
+    inset -3px -3px 8px var(--neo-highlight);
   --neo-inset-compact:
     inset 2px 2px 5px var(--neo-shadow),
     inset -2px -2px 5px var(--neo-highlight);
@@ -358,7 +358,9 @@
 
   /* Карточки в сетке: глубина контрола и зазор ≥ 2×размытия, иначе блик
      соседа ложится на карточку и «ломает» её угол (замечание владельца 03.09). */
-  .neo-card[data-depth='2'] {
+  .neo-card[data-depth='2'],
+  .neo-card .neo-card,
+  [class*='grid'] > .neo-card {
     box-shadow: var(--neo-depth-2);
   }
 

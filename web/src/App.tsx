@@ -558,8 +558,25 @@ export default function App() {
     const pluginItems = partitionSidebarNav(source, manifests).pluginItems;
     return [...selectServiceNav(source), ...pluginItems];
   }, [bubbleChat, embeddedChat, manifests]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [serviceOpen, setServiceOpen] = useState(false);
+  // Группы сайдбара — аккордеон (решение владельца 03.09): открыта одна,
+  // клик по другой переключает, клик вне сайдбара закрывает.
+  const [openGroup, setOpenGroup] = useState<"settings" | "service" | null>(null);
+  const settingsOpen = openGroup === "settings";
+  const serviceOpen = openGroup === "service";
+  const toggleGroup = useCallback(
+    (group: "settings" | "service") =>
+      setOpenGroup((current) => (current === group ? null : group)),
+    [],
+  );
+  useEffect(() => {
+    if (!openGroup) return;
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest?.("aside")) setOpenGroup(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
+  }, [openGroup]);
   const routes = useMemo(() => {
     const built = buildRoutes(builtinRoutes, manifests);
     if (!isFleetMode) return built;
@@ -804,7 +821,7 @@ export default function App() {
                 <div className="flex flex-col border-t border-current/10 pb-2" role="group">
                   <button
                     type="button"
-                    onClick={() => setSettingsOpen((value) => !value)}
+                    onClick={() => toggleGroup("settings")}
                     aria-expanded={settingsOpen}
                     className={cn(
                       "flex items-center gap-2 px-5 pt-2.5 pb-1 text-left",
@@ -845,7 +862,7 @@ export default function App() {
                 <div className="flex flex-col border-t border-current/10 pb-2" role="group">
                   <button
                     type="button"
-                    onClick={() => setServiceOpen((value) => !value)}
+                    onClick={() => toggleGroup("service")}
                     aria-expanded={serviceOpen}
                     className={cn(
                       "flex items-center gap-2 px-5 pt-2.5 pb-1 text-left",
