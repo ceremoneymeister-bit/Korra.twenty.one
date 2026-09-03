@@ -1025,7 +1025,7 @@ export default function ProfilesPage() {
           </Card>
         )}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 xl:grid-cols-3">
           {profiles.map((p) => {
             const isRenaming = renamingFrom === p.name;
             const isEditingSoul = editingSoulFor === p.name;
@@ -1033,7 +1033,7 @@ export default function ProfilesPage() {
             const isEditingModel = editingModelFor === p.name;
             const active = isActive(p);
             return (
-              <Card key={p.name} className="h-full">
+              <Card key={p.name} className="h-full" data-depth="2">
                 <CardContent className="flex h-full flex-col gap-2 py-4">
                   {isRenaming ? (
                     <div className="flex flex-col gap-2">

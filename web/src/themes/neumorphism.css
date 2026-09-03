@@ -356,6 +356,12 @@
     color: var(--neo-text-primary);
   }
 
+  /* Карточки в сетке: глубина контрола и зазор ≥ 2×размытия, иначе блик
+     соседа ложится на карточку и «ломает» её угол (замечание владельца 03.09). */
+  .neo-card[data-depth='2'] {
+    box-shadow: var(--neo-depth-2);
+  }
+
   .neo-card-header,
   .neo-dialog-header {
     border: 0;

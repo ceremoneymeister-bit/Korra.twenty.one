@@ -14,8 +14,9 @@ export function ProfileScopeBanner() {
   if (!profile || profile === currentProfile) return null;
 
   return (
-    <div className="flex items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-300">
-      <Users className="h-3.5 w-3.5 shrink-0" />
+    <div className="flex items-center gap-2.5 bg-[var(--neo-surface)] px-4 py-2 text-sm text-[var(--neo-text-secondary)] shadow-[var(--neo-inset-compact)]">
+      <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--neo-accent)]" />
+      <Users className="h-4 w-4 shrink-0" />
       <span>
         {(
           t.app.managingProfileBanner ??
