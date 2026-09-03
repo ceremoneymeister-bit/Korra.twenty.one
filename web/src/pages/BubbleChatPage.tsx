@@ -824,6 +824,23 @@ export function BubbleChatComposer({
   const failed = attachments.some((item) => item.status === "error");
   const ready = attachments.filter((item) => item.status === "ready");
 
+  const acceptedRef = useRef(false);
+  const clearComposer = useCallback(() => {
+    setValue("");
+    setAttachments((current) => {
+      current.forEach((item) => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      });
+      return [];
+    });
+    setComposerError(null);
+    // Let React paint the empty value, then return to the resting height.
+    requestAnimationFrame(() => {
+      const el = taRef.current;
+      if (el) resizeTextarea(el);
+    });
+  }, [resizeTextarea]);
+
   const submit = useCallback(() => {
     const text = value.trim();
     // Sending while a file is still uploading would hand the agent a message
@@ -832,6 +849,7 @@ export function BubbleChatComposer({
     if (disabled || submitting || uploading || failed) return;
     if (!text && ready.length === 0) return;
     setSubmitting(true);
+    acceptedRef.current = false;
     let result: boolean | void | Promise<boolean | void>;
     try {
       result = onSend(
@@ -842,23 +860,14 @@ export function BubbleChatComposer({
       setSubmitting(false);
       throw error;
     }
-    // Поле очищается только когда отправка принята: отказ (например, черновик
-    // той же сессии ждёт решения) не должен стирать набранный текст.
+    // Поле очищается, как только отправка принята — сообщение легло в
+    // переписку и пошёл стрим (см. эффект на `streaming` ниже), а не после
+    // всего ответа агента (владелец 03.09). Отказ до отправки (черновик той
+    // же сессии ждёт решения) текст не стирает.
     void Promise.resolve(result).then(
       (ok) => {
         setSubmitting(false);
-        if (ok === false) return;
-        setValue("");
-        attachments.forEach((item) => {
-          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
-        });
-        setAttachments([]);
-        setComposerError(null);
-        // Let React paint the empty value, then return to the resting height.
-        requestAnimationFrame(() => {
-          const el = taRef.current;
-          if (el) resizeTextarea(el);
-        });
+        if (ok !== false && !acceptedRef.current) clearComposer();
       },
       () => setSubmitting(false),
     );
@@ -870,9 +879,23 @@ export function BubbleChatComposer({
     uploading,
     failed,
     ready,
-    attachments,
-    resizeTextarea,
+    clearComposer,
   ]);
+
+  useEffect(() => {
+    if (submitting && streaming && !acceptedRef.current) {
+      acceptedRef.current = true;
+      clearComposer();
+    }
+  }, [submitting, streaming, clearComposer]);
+
+  // Красная строка ошибки не должна висеть вечно: гаснет сама через 8 с
+  // и при следующем наборе текста (владелец 03.09: «остаётся висеть»).
+  useEffect(() => {
+    if (!composerError) return;
+    const timer = window.setTimeout(() => setComposerError(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [composerError]);
 
   const canSend =
     !disabled &&
