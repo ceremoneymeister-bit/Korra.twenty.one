@@ -9536,6 +9536,17 @@ def _apply_model_assignment_sync(
 
         save_config(cfg)
 
+        # Korra: профилю, которому сменили провайдера, подкладываем его ключи
+        # из корневого .env, если своих нет — иначе новый агент молчит.
+        try:
+            from hermes_cli.profiles import seed_provider_credentials_from_root
+
+            seeded = seed_provider_credentials_from_root(provider, cfg)
+            if seeded:
+                _log.info("model/set: seeded %s for profile from root .env", ", ".join(seeded))
+        except Exception:
+            _log.debug("seed_provider_credentials_from_root skipped", exc_info=True)
+
         # Register a named ``custom_providers`` entry for a custom/local
         # endpoint, mirroring the ``hermes model`` custom flow
         # (_save_custom_provider). Without this the endpoint only lives in

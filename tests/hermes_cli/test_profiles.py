@@ -1286,3 +1286,46 @@ class TestOfflineProviderKeySlots:
         # Синтезированное каноническое имя не должно вытеснять настоящее
         # главное имя ключа — инвариант держится на обоих путях разбора.
         assert definition.api_key_env_vars[0] != "GITHUB_COPILOT_API_KEY"
+
+
+class TestSeedProviderCredentialsFromRoot:
+    """Смена провайдера у профиля подкладывает его ключи из корневого .env."""
+
+    def test_copies_missing_provider_keys_only_for_a_profile(self, profile_env):
+        from agent.secret_scope import load_env_file
+        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+        from hermes_cli.profiles import seed_provider_credentials_from_root
+
+        default_home = profile_env / ".hermes"
+        (default_home / ".env").write_text(
+            "API_SERVER_KEY=gateway-key-0123456789abcdef\n"
+            "ANTHROPIC_API_KEY=root-anthropic\n"
+            "TELEGRAM_BOT_TOKEN=channel-secret\n"
+        )
+        profile_dir = create_profile("coder", no_alias=True)
+        assert "ANTHROPIC_API_KEY" not in load_env_file(profile_dir / ".env")
+
+        token = set_hermes_home_override(profile_dir)
+        try:
+            copied = seed_provider_credentials_from_root(
+                "anthropic", {"model": {"provider": "anthropic", "default": "claude-test"}}
+            )
+            again = seed_provider_credentials_from_root(
+                "anthropic", {"model": {"provider": "anthropic", "default": "claude-test"}}
+            )
+        finally:
+            reset_hermes_home_override(token)
+
+        assert copied == ["ANTHROPIC_API_KEY"]
+        assert again == []
+        env = load_env_file(profile_dir / ".env")
+        assert env["ANTHROPIC_API_KEY"] == "root-anthropic"
+        assert "TELEGRAM_BOT_TOKEN" not in env
+
+    def test_root_profile_is_left_alone(self, profile_env):
+        from hermes_cli.profiles import seed_provider_credentials_from_root
+
+        default_home = profile_env / ".hermes"
+        (default_home / ".env").write_text("ANTHROPIC_API_KEY=root-anthropic\n")
+        assert seed_provider_credentials_from_root("anthropic", {"model": {}}) == []
+

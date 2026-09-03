@@ -937,6 +937,57 @@ def _seed_runtime_credentials(profile_dir: Path, source_dir: Path) -> None:
             pass
 
 
+def seed_provider_credentials_from_root(provider: str, cfg: Dict) -> List[str]:
+    """Подложить профилю ключи провайдера из корневого ``.env``, если своих нет.
+
+    Korra 21, решение владельца 03.09.2026: все профили контура принадлежат
+    одному владельцу, и новый агент, которому в конструкторе выбрали другого
+    провайдера, не должен молчать с «No credentials found». При смене модели
+    у профиля (``POST /api/model/set?profile=…``) слоты ключа/base_url этого
+    провайдера копируются из корневого ``.env`` в ``profiles/<name>/.env`` —
+    только пустые и только этого провайдера; каналы и инструменты не трогаем.
+    Для корневого профиля — ничего не делает. Возвращает список скопированных
+    имён (для журнала).
+    """
+    try:
+        from hermes_constants import get_hermes_home, get_process_hermes_home
+
+        home = Path(get_hermes_home()).resolve()
+        root = Path(get_process_hermes_home()).resolve()
+        if home == root:
+            return []
+        from agent.secret_scope import load_env_file
+        from hermes_cli.config import get_compatible_custom_providers, save_env_value
+        from hermes_cli.providers import resolve_provider_full
+
+        provider_def = resolve_provider_full(
+            (provider or "").strip(),
+            user_providers=cfg.get("providers") if isinstance(cfg, dict) else None,
+            custom_providers=get_compatible_custom_providers(cfg) if isinstance(cfg, dict) else None,
+        )
+        if provider_def is None:
+            return []
+        keys = list(provider_def.api_key_env_vars or ())
+        if provider_def.base_url_env_var:
+            keys.append(provider_def.base_url_env_var)
+        profile_env = load_env_file(home / ".env")
+        root_env = load_env_file(root / ".env")
+        copied: List[str] = []
+        for key in keys:
+            if profile_env.get(key, "").strip():
+                continue
+            value = root_env.get(key, "").strip()
+            if not value:
+                continue
+            save_env_value(key, value)
+            copied.append(key)
+        return copied
+    except Exception:
+        # Подстановка ключей — удобство, а не контракт: смена модели не должна
+        # падать из-за неё.
+        return []
+
+
 def _check_gateway_running(profile_dir: Path) -> bool:
     """Check if a gateway is running for a given profile directory.
 
