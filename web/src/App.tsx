@@ -60,7 +60,8 @@ import {
 } from "lucide-react";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { SelectionSwitcher } from "@nous-research/ui/ui/components/selection-switcher";
-import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { KorraLoader } from "@/components/KorraLoader";
 import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { SidebarFooter } from "@/components/SidebarFooter";
@@ -133,12 +134,7 @@ function RouteFallback({ label = "Загрузка…" }: { label?: string }) {
       aria-busy="true"
       aria-live="polite"
     >
-      <div className="w-full max-w-2xl space-y-4">
-        <span className="sr-only">{label}</span>
-        <Skeleton className="h-6 max-w-xs" />
-        <Skeleton className="h-28" />
-        <Skeleton className="h-20" />
-      </div>
+      <KorraLoader label={label} />
     </div>
   );
 }
