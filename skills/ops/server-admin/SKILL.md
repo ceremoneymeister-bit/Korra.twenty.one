@@ -1,6 +1,6 @@
 ---
 name: server-admin
-description: "Администрирование сервера: root в контейнере через sudo, хост через ssh host, docker, systemd, журналы."
+description: "Администрирование сервера: sudo в контейнере, хост по ssh."
 version: 1.0.0
 author: Korra
 license: MIT
