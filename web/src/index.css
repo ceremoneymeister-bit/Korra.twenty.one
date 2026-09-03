@@ -214,6 +214,17 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   font-family: var(--theme-font-mono) !important;
 }
 
+/* Встроенный код (`/opt/data/.env`) в наборе Hermes красился цветом выделения —
+   в тёмной теме это фиолетовая плашка из старого дизайна. Теперь — вдавленный
+   чип на поверхности. */
+[data-client-ui="true"] code:not(pre code) {
+  background: var(--neo-surface);
+  color: var(--neo-text-primary);
+  box-shadow: var(--neo-inset-compact);
+  border-radius: 0.45rem;
+  padding: 0.1em 0.5em;
+}
+
 [data-client-ui="true"] .text-display {
   letter-spacing: normal !important;
   text-transform: none !important;

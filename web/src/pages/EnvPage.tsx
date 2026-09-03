@@ -49,9 +49,12 @@ import { isProductUiMode } from "@/lib/dashboard-flags";
 /* ------------------------------------------------------------------ */
 
 /** Map env-var key prefixes to a human-friendly provider name + ordering. */
+/* Решение владельца 03.09: в интерфейсе — без «hermes». Реальное имя переменной
+ * остаётся в подсказке и в .env; переименование в движке (359 имён) — отдельная
+ * задача с алиасами. */
+const displayKey = (key: string) => key.replace(/^HERMES_/, "KORRA_");
+
 const PROVIDER_GROUPS: { prefix: string; name: string; priority: number }[] = [
-  // Nous Portal first
-  { prefix: "NOUS_", name: "Nous Portal", priority: 0 },
   // Then alphabetical by display name
   { prefix: "ANTHROPIC_", name: "Anthropic", priority: 1 },
   { prefix: "DASHSCOPE_", name: "DashScope (Qwen)", priority: 2 },
@@ -147,7 +150,7 @@ function EnvVarRow({
       <div className="flex items-center justify-between gap-3 py-1.5 min-w-0 overflow-hidden text-text-secondary hover:text-foreground transition-colors">
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-mono-ui text-xs">
-            {varKey}
+            <span title={varKey}>{displayKey(varKey)}</span>
           </span>
           <span className="text-xs text-text-tertiary truncate hidden sm:block">
             {description}
@@ -183,7 +186,7 @@ function EnvVarRow({
       <div className="flex items-center justify-between gap-3 border border-border/50 px-4 py-2.5 min-w-0 overflow-hidden text-text-secondary hover:text-foreground transition-colors">
         <div className="flex items-center gap-3 min-w-0">
           <Label className="font-mono-ui text-xs">
-            {varKey}
+            <span title={varKey}>{displayKey(varKey)}</span>
           </Label>
           <span className="text-xs text-text-tertiary truncate hidden sm:block">
             {description}
@@ -218,7 +221,7 @@ function EnvVarRow({
     <div className="grid gap-2 border border-border p-4 min-w-0 overflow-hidden">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
-          <Label className="font-mono-ui text-xs">{varKey}</Label>
+          <Label className="font-mono-ui text-xs" title={varKey}>{displayKey(varKey)}</Label>
           <Badge tone={info.is_set ? "success" : "outline"}>
             {info.is_set ? t.common.set : t.env.notSet}
           </Badge>
@@ -647,7 +650,13 @@ export default function EnvPage() {
   const loadVars = useCallback(() => {
     setLoadError(false);
     setVars(null);
-    api.getEnvVars().then(setVars).catch(() => setLoadError(true));
+    api
+      .getEnvVars()
+      // Nous Portal — не часть Korra: его переменные не показываем вовсе.
+      .then((all) =>
+        setVars(Object.fromEntries(Object.entries(all).filter(([key]) => !key.startsWith("NOUS_")))),
+      )
+      .catch(() => setLoadError(true));
   }, []);
 
   useEffect(() => {
@@ -958,7 +967,7 @@ export default function EnvPage() {
       <div className="flex items-center justify-between">
         <div className="flex flex-col gap-1">
           <p className="text-sm text-muted-foreground">
-            {t.env.description} <code>~/.hermes/.env</code>
+            {t.env.description} <code>.env</code> в папке данных Korra
           </p>
           <p className="text-xs text-text-tertiary">
             {t.env.changesNote}
