@@ -115,6 +115,25 @@ if [ -n "${HERMES_GID:-}" ] && validate_uid_gid "$HERMES_GID" && [ "$HERMES_GID"
     groupmod -o -g "$HERMES_GID" hermes 2>/dev/null || true
 fi
 
+# --- Дельта Korra 21: выключатель sudo для агента ---
+# В образе Korra 21 лежит /etc/sudoers.d/010-korra-agent — sudo без пароля
+# для пользователя движка (см. Dockerfile). Это осознанный дефолт: владелец
+# администрирует свой сервер прямо из панели. Но контур клиента разворачивают
+# по принципу наименьших прав, поэтому нужен способ отключить право root, не
+# пересобирая образ: KORRA_AGENT_SUDO=0 в docker run/compose.
+#
+# Правило удаляется, а не переписывается: половинчатый sudoers (например
+# только чтение журналов) даёт ложное чувство ограничения — почти любая
+# разрешённая команда на этом образе доводится до полного root.
+case "${KORRA_AGENT_SUDO:-1}" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off)
+        if [ -f /etc/sudoers.d/010-korra-agent ]; then
+            echo "[stage2] KORRA_AGENT_SUDO=${KORRA_AGENT_SUDO} — removing passwordless sudo for hermes"
+            rm -f /etc/sudoers.d/010-korra-agent
+        fi
+        ;;
+esac
+
 # --- Docker socket group membership (docker-in-docker / DooD) ---
 # When the user bind-mounts the host Docker daemon socket
 # (`-v /var/run/docker.sock:/var/run/docker.sock`) to use the `docker`
@@ -394,6 +413,31 @@ as_hermes mkdir -p \
     "$HERMES_HOME/pairing" \
     "$HERMES_HOME/platforms/pairing" \
     "$HERMES_HOME/lazy-packages"
+
+# --- Дельта Korra 21: каталог ssh для администрирования хоста ---
+# У движка HOME=/opt/data (docker/main-wrapper.sh), поэтому штатный путь ssh
+# для него — $HERMES_HOME/.ssh. Каталог заводится на загрузке, чтобы оператору
+# оставалось только положить туда ключ и config с алиасом `host`: тогда
+# `ssh host <команда>` работает без флага -F и переживает пересоздание
+# контейнера, так как /opt/data — том с данными.
+#
+# ssh отказывается работать с ключом, если каталог или ключ доступны группе
+# или всем, поэтому режим выставляется явно и на каждой загрузке: том с
+# данными приезжает с хоста, где umask мог быть любым.
+#
+# Каталог сознательно НЕ добавлен в список рекурсивного chown выше: там
+# приватный ключ, и лишний обход дерева ему не нужен — mkdir от имени hermes
+# уже создаёт его с правильным владельцем.
+#
+# Символьная ссылка на этом пути отклоняется тем же стражем, что и остальные
+# правки прав в этом файле: chmod по ссылке сменил бы режим её цели, а целью
+# здесь может оказаться чужой каталог с хоста.
+if refuse_symlinked_path "seed/chmod" "$HERMES_HOME/.ssh"; then
+    :
+else
+    as_hermes mkdir -p "$HERMES_HOME/.ssh"
+    chmod 700 "$HERMES_HOME/.ssh" 2>/dev/null || true
+fi
 
 # --- Install-method stamp ---
 # The 'docker' stamp is baked into the immutable install tree at

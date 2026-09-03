@@ -70,7 +70,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 # hermes process, the dashboard, and per-profile gateways.
 RUN apt-get -o Acquire::Retries=3 update && \
     apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg gcc g++ make cmake python3-dev python3-venv libffi-dev libolm-dev libatomic1 procps git openssh-client docker-cli xz-utils && \
+    ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg gcc g++ make cmake python3-dev python3-venv libffi-dev libolm-dev libatomic1 procps git openssh-client docker-cli sudo xz-utils && \
     rm -rf /var/lib/apt/lists/*
 
 # Prefer the fixed SQLite over Debian's vulnerable libsqlite3.so.0. Keep the
@@ -148,6 +148,36 @@ COPY --chmod=0755 docker/tini-shim.sh /usr/bin/tini
 
 # Non-root user for runtime; UID can be overridden via HERMES_UID at runtime
 RUN useradd -u 10000 -m -d /opt/data hermes
+
+# ---------- Дельта Korra 21: администрирование сервера из коробки ----------
+# Агент Korra 21 должен уметь администрировать свой контейнер прямо из панели
+# и чата. Движок при этом СОЗНАТЕЛЬНО остаётся под непривилегированным uid
+# 10000 (см. s6-setuidgid в docker/main-wrapper.sh): если процесс работает как
+# root, всё, что он пишет в /opt/data, становится root-owned, а это ровно тот
+# класс аварий, ради которого stage2-hook.sh выравнивает владельца при каждой
+# загрузке (профили и cron, испорченные `docker exec` без -u, ломали
+# reconciler и давали respawn-storm). Поэтому право root даётся не сменой uid
+# процесса, а sudo без пароля: файлы в данных по-прежнему принадлежат hermes,
+# а `sudo <команда>` доступна в любой момент.
+#
+# Правило именное (`hermes`), а не по uid, поэтому оно переживает подмену
+# HERMES_UID/PUID через usermod в stage2-hook.sh — понижение остаётся рабочим.
+#
+# secure_path переопределён: базовый secure_path Debian вырезает venv, и под
+# sudo пропадали бы `hermes`, `python` и весь /opt/hermes/bin.
+#
+# tools/terminal_tool.py:_sudo_nopasswd_works() пробует `sudo -n true` перед
+# каждой командой и при успехе НЕ переписывает `sudo` в `sudo -S`, так что
+# пароль не запрашивается и hardline-страж «подбор пароля через stdin»
+# (tools/approval.py:_check_sudo_stdin_guard) не срабатывает.
+#
+# Выключается на загрузке через KORRA_AGENT_SUDO=0 — см. docker/stage2-hook.sh.
+RUN printf '%s\n' \
+    'Defaults:hermes secure_path="/opt/hermes/bin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
+    'hermes ALL=(ALL:ALL) NOPASSWD: ALL' \
+    > /etc/sudoers.d/010-korra-agent && \
+    chmod 0440 /etc/sudoers.d/010-korra-agent && \
+    visudo -c -f /etc/sudoers.d/010-korra-agent
 
 COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
 
