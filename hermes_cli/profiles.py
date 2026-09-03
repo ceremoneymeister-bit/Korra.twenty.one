@@ -862,6 +862,12 @@ def _seed_model_config(
         gateway_cfg = source_config.get("gateway")
         if isinstance(gateway_cfg, dict) and gateway_cfg.get("multiplex_profiles"):
             seeded_config["platforms"] = {"api_server": {"enabled": False}}
+        # Korra: распознавание речи — общее решение контура (правило флота:
+        # только Deepgram, никакого локального whisper). Новый профиль получает
+        # секцию stt от источника, иначе движок тихо уходит в whisper по умолчанию.
+        stt_cfg = source_config.get("stt")
+        if isinstance(stt_cfg, dict) and stt_cfg:
+            seeded_config["stt"] = stt_cfg
         config_path.write_text(
             yaml.safe_dump(seeded_config, sort_keys=False),
             encoding="utf-8",

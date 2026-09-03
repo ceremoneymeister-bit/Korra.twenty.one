@@ -1363,3 +1363,13 @@ class TestMultiplexSeedsApiServerOff:
         cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
         assert cfg["platforms"]["api_server"]["enabled"] is False
 
+    def test_fresh_profile_inherits_stt_section(self, profile_env):
+        default_home = profile_env / ".hermes"
+        (default_home / "config.yaml").write_text(
+            "model:\n  provider: anthropic\n  default: claude-test\n"
+            "stt:\n  provider: deepgram\n  deepgram:\n    type: command\n    command: echo hi\n"
+        )
+        profile_dir = create_profile("voice", no_alias=True)
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert cfg["stt"]["provider"] == "deepgram"
+
