@@ -7,6 +7,7 @@
    stack (Tabs, Segmented, Typography, Buttons, etc. all look unstyled). */
 @import '@nous-research/ui/styles/fonts.css';
 @import '@nous-research/ui/styles/globals.css';
+@import './themes/neumorphism.css';
 
 /* Scan the vendored design-system source so its utility classes survive
    Tailwind's JIT purge. Vite resolves the unchanged package imports here. */
@@ -63,34 +64,34 @@
   --foreground: color-mix(in srgb, #ffffff 0%, transparent);
   --foreground-base: #ffffff;
   --foreground-alpha: 0;
-  --midground: color-mix(in srgb, #202124 100%, transparent);
-  --midground-base: #202124;
+  --midground: color-mix(in srgb, #1f1f1f 100%, transparent);
+  --midground-base: #1f1f1f;
   --midground-alpha: 1;
-  --background: color-mix(in srgb, #f7f7f5 100%, transparent);
-  --background-base: #f7f7f5;
+  --background: color-mix(in srgb, #e8e8e8 100%, transparent);
+  --background-base: #e8e8e8;
   --background-alpha: 1;
 
   /* Light-theme semantic defaults used before ThemeProvider's first effect.
      Keep in sync with lightTheme.colorOverrides in themes/presets.ts. */
-  --card: #ffffff;
-  --card-foreground: #202124;
-  --popover: #ffffff;
-  --popover-foreground: #202124;
-  --primary: #4f7900;
-  --primary-foreground: #ffffff;
-  --secondary: #efefec;
-  --secondary-foreground: #202124;
-  --muted: #e7e7e3;
-  --muted-foreground: #667085;
-  --accent: #eaf7d3;
-  --accent-foreground: #304a00;
+  --card: #e0e0e0;
+  --card-foreground: #1f1f1f;
+  --popover: #e0e0e0;
+  --popover-foreground: #1f1f1f;
+  --primary: #9ede01;
+  --primary-foreground: #1f1f1f;
+  --secondary: #e0e0e0;
+  --secondary-foreground: #1f1f1f;
+  --muted: #dcdcdc;
+  --muted-foreground: #5c5c5c;
+  --accent: #9ede01;
+  --accent-foreground: #1f1f1f;
   --destructive: #b42318;
   --destructive-foreground: #ffffff;
   --success: #047857;
   --warning: #8a5200;
-  --border: #cfd1cc;
-  --input: #b8bbb4;
-  --ring: #4f7900;
+  --border: #bebebe;
+  --input: #bebebe;
+  --ring: #567a00;
 
   /* Typography tokens — rewritten by ThemeProvider. Defaults match the
      system stack so themes that don't override look native. */
@@ -105,7 +106,7 @@
 
   /* Layout tokens. */
   --radius: 0.5rem;
-  --theme-radius: 0.5rem;
+  --theme-radius: 1rem;
   --theme-spacing-mul: 1;
   --theme-density: comfortable;
 
@@ -132,8 +133,8 @@
   --toggle-ease: cubic-bezier(0.34, 1.35, 0.64, 1);
 
   /* Data-series accents — consumed by Analytics + Models pages. */
-  --series-input-token: #4f7900;
-  --series-output-token: #7c3aed;
+  --series-input-token: #567a00;
+  --series-output-token: #5c5c5c;
 }
 
 /* Theme tokens cascade into the document root so every descendant inherits
@@ -150,6 +151,8 @@ html {
 
 body {
   font-family: var(--theme-font-sans);
+  background: var(--neo-background);
+  color: var(--neo-text-primary);
   min-height: 0;
   height: 100%;
   margin: 0;
@@ -223,27 +226,46 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
    fields the promised semantic input token without changing checkbox/radio
    geometry or introducing borders where a control has none. */
 [data-client-ui="true"] input:not([type="checkbox"]):not([type="radio"]),
-[data-client-ui="true"] textarea,
+[data-client-ui="true"] textarea:not(.korra-chat-composer__textarea),
 [data-client-ui="true"] [role="combobox"] {
-  border-color: var(--input, color-mix(in srgb, var(--midground-base) 15%, transparent));
+  border: 0;
+  outline: 0;
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset);
+  color: var(--neo-text-primary);
 }
 
 [data-client-ui="true"] input:not([type="checkbox"]):not([type="radio"])[aria-invalid="true"] {
-  border-color: var(--destructive);
+  box-shadow: var(--neo-error);
 }
 
-[data-client-ui="true"] button:focus-visible,
+[data-client-ui="true"] button:not(.neo-button):focus-visible,
 [data-client-ui="true"] a:focus-visible,
-[data-client-ui="true"] input:not([type="checkbox"]):not([type="radio"]):focus-visible,
-[data-client-ui="true"] textarea:focus-visible,
-[data-client-ui="true"] [role="combobox"]:focus-visible,
+[data-client-ui="true"] input:not(.neo-field):not([type="checkbox"]):not([type="radio"]):focus-visible,
+[data-client-ui="true"] textarea:not(.neo-field):not(.korra-chat-composer__textarea):focus-visible,
+[data-client-ui="true"] [role="combobox"]:not(.neo-select-trigger):focus-visible,
 [data-client-ui="true"] summary:focus-visible {
-  outline: 2px solid var(--ring, var(--midground-base));
-  outline-offset: 2px;
+  outline: 0;
+  box-shadow: var(--neo-focus-visible);
 }
 
 [data-client-ui="true"] .arc-border {
   display: none;
+}
+
+/* Raw interactive elements that have not yet moved to a vendored primitive
+   still get the same depth-based keyboard focus. Chat composer and xterm own
+   their specialized focus behavior and are deliberately excluded. */
+:where(
+  button:not(.neo-button),
+  a[href],
+  input:not(.neo-field):not([type="checkbox"]):not([type="radio"]),
+  textarea:not(.neo-field):not(.korra-chat-composer__textarea):not(.xterm-helper-textarea),
+  summary,
+  [role="button"]:not(.neo-button)
+):focus-visible {
+  outline: 0;
+  box-shadow: var(--neo-focus-visible);
 }
 
 /* Пол по размеру текста. Панель оператора ставит служебные подписи в 11 px —
@@ -317,6 +339,7 @@ code { font-size: 0.875rem; }
   --color-card-foreground: var(--card-foreground, var(--midground));
   --color-primary: var(--primary, var(--midground));
   --color-primary-foreground: var(--primary-foreground, var(--background-base));
+  --color-accent-line: var(--neo-accent-line);
   --color-secondary: var(--secondary, color-mix(in srgb, var(--midground-base) 6%, var(--background-base)));
   --color-secondary-foreground: var(--secondary-foreground, var(--midground));
   --color-muted: var(--muted, color-mix(in srgb, var(--midground-base) 8%, var(--background-base)));
@@ -346,6 +369,55 @@ code { font-size: 0.875rem; }
   --radius-md: calc(var(--theme-radius) - 2px);
   --radius-lg: var(--theme-radius);
   --radius-xl: calc(var(--theme-radius) + 4px);
+}
+
+/* `primary` is also the filled-action background, so legacy
+   `text-primary`/border utilities cannot safely consume the same lime in
+   the light palette. Route thin marks through the dedicated contrast token
+   while leaving every bg-primary fill on the pure brand lime. */
+:where(
+  .text-primary,
+  [class~="text-primary/80"],
+  [class~="text-primary/90"]
+) {
+  color: var(--neo-accent-line);
+}
+
+:where(
+  [class~="border-primary"],
+  [class~="border-primary/20"],
+  [class~="border-primary/25"],
+  [class~="border-primary/30"],
+  [class~="border-primary/40"],
+  [class~="border-primary/45"],
+  [class~="border-primary/60"],
+  [class~="border-primary/70"]
+) {
+  border-color: var(--neo-accent-line);
+}
+
+:where(
+  [class~="hover:border-primary"],
+  [class~="hover:border-primary/40"],
+  [class~="hover:border-primary/45"],
+  [class~="hover:border-primary/60"]
+):hover {
+  border-color: var(--neo-accent-line);
+}
+
+:where(
+  [class~="decoration-primary/30"],
+  [class~="decoration-primary/60"]
+) {
+  text-decoration-color: var(--neo-accent-line);
+}
+
+:where([class~="ring-primary/40"], [class~="ring-primary/25"]) {
+  --tw-ring-color: var(--neo-accent-line);
+}
+
+button[class~="bg-primary"] {
+  border: 0;
 }
 
 

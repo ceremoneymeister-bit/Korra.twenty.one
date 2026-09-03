@@ -23,6 +23,7 @@ export { GitHubIcon } from './ui/components/icons/github'
 export { ImageDistortion } from './ui/components/image-distortion'
 export type { AutoPlayPattern } from './ui/components/image-distortion'
 export { Input } from './ui/components/input'
+export { Textarea } from './ui/components/textarea'
 export { Label } from './ui/components/label'
 export { LevaClient } from './ui/components/leva-client'
 export { ListItem } from './ui/components/list-item'
@@ -73,13 +74,19 @@ export { Scramble } from './ui/components/scramble'
 export { Select, SelectOption } from './ui/components/select'
 export { SelectionSwitcher } from './ui/components/selection-switcher'
 export { Separator } from './ui/components/separator'
-export { Spinner } from './ui/components/spinner'
+export { Skeleton, Spinner } from './ui/components/spinner'
 export { Stats } from './ui/components/stats'
 export { TerminalDemo } from './ui/components/terminal-demo'
 export type { TerminalDemoStep } from './ui/components/terminal-demo'
 export { ThemeToggle } from './ui/components/theme-toggle'
 export { TierCard } from './ui/components/tier-card'
 export { Toast } from './ui/components/toast'
+export {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from './ui/components/tooltip'
 export type { TierCardPrice, TierCardProps } from './ui/components/tier-card'
 export { TV } from './ui/components/tv'
 export { Watchlist } from './ui/components/watchlist'

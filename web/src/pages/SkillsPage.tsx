@@ -48,7 +48,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/c
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
-import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Switch } from "@nous-research/ui/ui/components/switch";
 import {
   Dialog,
@@ -371,7 +371,7 @@ export default function SkillsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Spinner className="text-2xl text-primary" />
+        <Skeleton className="h-28 w-full max-w-2xl" />
       </div>
     );
   }
@@ -1072,7 +1072,7 @@ function HubBrowser({
         <>
           {sourcesLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Spinner className="text-xl text-primary" />
+              <Skeleton className="h-24 w-full" />
             </div>
           ) : featured.length > 0 ? (
             <div className="flex flex-col gap-2">
@@ -1108,7 +1108,7 @@ function HubBrowser({
       {/* ── Searching spinner ── */}
       {searching && (
         <div className="flex items-center justify-center py-8">
-          <Spinner className="text-xl text-primary" />
+          <Skeleton className="h-24 w-full" />
         </div>
       )}
 
@@ -1473,7 +1473,7 @@ function SkillDetailDialog({
           {tab === "readme" ? (
             previewLoading ? (
               <div className="flex items-center justify-center py-12">
-                <Spinner className="text-xl text-primary" />
+                <Skeleton className="h-40 w-full" />
               </div>
             ) : preview ? (
               <div className="flex flex-col gap-2.5">

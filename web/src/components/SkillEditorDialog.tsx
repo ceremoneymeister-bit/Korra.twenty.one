@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { Input } from "@nous-research/ui/ui/components/input";
 import { Label } from "@nous-research/ui/ui/components/label";
-import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
 import {
   Dialog,
   DialogContent,
@@ -173,7 +173,7 @@ function EditorBody({
           <Label htmlFor="skill-editor-content">SKILL.md</Label>
           {loading ? (
             <div className="flex items-center justify-center py-16">
-              <Spinner className="text-xl text-primary" />
+              <Skeleton className="h-40 w-full" />
             </div>
           ) : (
             <textarea

@@ -153,6 +153,24 @@ export interface ThemeColorOverrides {
   ring?: string;
 }
 
+/** Korra Soft UI palette. Geometry and motion are shared CSS tokens so both
+ * built-in themes expose the same semantic names without duplicating values. */
+export interface ThemeNeumorphism {
+  /** Page canvas. In the light theme it is one step lighter than `surface`
+   *  (two levels, per the owner's reference); in the dark theme they match. */
+  background: string;
+  /** Cards and controls sit on this colour; shadows are cast from it. */
+  surface: string;
+  shadow: string;
+  highlight: string;
+  textPrimary: string;
+  textSecondary: string;
+  accent: string;
+  /** High-contrast accent used by thin edges, checks and small glyphs. */
+  accentLine: string;
+  accentForeground: string;
+}
+
 export interface DashboardTheme {
   description: string;
   label: string;
@@ -172,6 +190,8 @@ export interface DashboardTheme {
   /** Per-component CSS-var overrides. See `ThemeComponentStyles`. */
   componentStyles?: ThemeComponentStyles;
   colorOverrides?: ThemeColorOverrides;
+  /** Korra Soft UI tokens mapped to --neo-* by ThemeProvider. */
+  neumorphism?: ThemeNeumorphism;
   /** Data-series accent colors for Analytics/Models token charts. */
   seriesColors?: ThemeSeriesColors;
   /** Explicit 3-color swatch override for the theme picker. Order matches the

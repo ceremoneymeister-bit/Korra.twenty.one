@@ -9,7 +9,7 @@ import {
 import { api, type OAuthProvider } from "@/lib/api";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { CopyButton } from "@nous-research/ui/ui/components/command-block";
-import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
 import {
   Card,
   CardContent,
@@ -139,7 +139,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
       <CardContent>
         {loading && providers === null && (
           <div className="flex items-center justify-center py-8">
-            <Spinner className="text-xl text-primary" />
+            <Skeleton className="h-20 w-full" />
           </div>
         )}
         {providers && providers.length === 0 && (

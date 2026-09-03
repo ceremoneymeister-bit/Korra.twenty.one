@@ -30,26 +30,6 @@ function contrast(first: string, second: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-function hueAndLightness(hex: string): { hue: number; lightness: number } {
-  const [red, green, blue] = hex
-    .slice(1)
-    .match(/.{2}/g)!
-    .map((part) => Number.parseInt(part, 16) / 255);
-  const max = Math.max(red, green, blue);
-  const min = Math.min(red, green, blue);
-  const delta = max - min;
-  let hue = 0;
-  if (delta > 0) {
-    if (max === red) hue = 60 * (((green - blue) / delta) % 6);
-    if (max === green) hue = 60 * ((blue - red) / delta + 2);
-    if (max === blue) hue = 60 * ((red - green) / delta + 4);
-  }
-  return {
-    hue: hue < 0 ? hue + 360 : hue,
-    lightness: (max + min) / 2,
-  };
-}
-
 describe("built-in dashboard themes", () => {
   it("exposes exactly the light and dark palettes and defaults to light", () => {
     expect(Object.keys(BUILTIN_THEMES)).toEqual(["light", "dark"]);
@@ -58,18 +38,30 @@ describe("built-in dashboard themes", () => {
     expect(darkTheme.label).toBe("Тёмная");
   });
 
-  it("uses the required ink-purple dark canvas and Korra lime accent", () => {
-    expect(darkTheme.palette.background.hex.toLowerCase()).toBe("#150b29");
-    expect(darkTheme.colorOverrides?.primary).toBe(BRAND_LIME);
-    expect(darkTheme.colorOverrides?.ring).toBe(BRAND_LIME);
-  });
-
-  it("keeps dark cards on the canvas hue and 4–8% lighter", () => {
-    const canvas = hueAndLightness(darkTheme.palette.background.hex);
-    const card = hueAndLightness(darkTheme.colorOverrides!.card!);
-    expect(Math.abs(card.hue - canvas.hue)).toBeLessThan(3);
-    expect(card.lightness - canvas.lightness).toBeGreaterThanOrEqual(0.04);
-    expect(card.lightness - canvas.lightness).toBeLessThanOrEqual(0.08);
+  it("uses the owner-approved neutral tokens without the retired purple", () => {
+    expect(lightTheme.neumorphism).toEqual({
+      background: "#e8e8e8",
+      surface: "#e0e0e0",
+      shadow: "#bebebe",
+      highlight: "#ffffff",
+      textPrimary: "#1f1f1f",
+      textSecondary: "#5c5c5c",
+      accent: BRAND_LIME,
+      accentLine: "#567a00",
+      accentForeground: "#1f1f1f",
+    });
+    expect(darkTheme.neumorphism).toEqual({
+      background: "#212121",
+      surface: "#212121",
+      shadow: "#191919",
+      highlight: "#3c3c3c",
+      textPrimary: "#e8e8e8",
+      textSecondary: "#9a9a9a",
+      accent: BRAND_LIME,
+      accentLine: BRAND_LIME,
+      accentForeground: "#1f1f1f",
+    });
+    expect(JSON.stringify(BUILTIN_THEMES).toLowerCase()).not.toContain("#150b29");
   });
 
   it("keeps filled primary controls AA-readable in both palettes", () => {
@@ -85,6 +77,16 @@ describe("built-in dashboard themes", () => {
         darkTheme.colorOverrides!.primaryForeground!,
       ),
     ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("keeps text and thin accents readable against each surface", () => {
+    for (const theme of [lightTheme, darkTheme]) {
+      const neo = theme.neumorphism!;
+      expect(contrast(neo.textPrimary, neo.surface)).toBeGreaterThanOrEqual(7);
+      expect(contrast(neo.textSecondary, neo.surface)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(neo.accentLine, neo.surface)).toBeGreaterThanOrEqual(3);
+      expect(contrast(neo.accent, neo.accentForeground)).toBeGreaterThanOrEqual(7);
+    }
   });
 });
 

@@ -28,10 +28,7 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Overlay
       className={cn(
-        'fixed inset-0 z-50',
-        'bg-black/60 backdrop-blur-sm',
-        'data-[state=open]:animate-in data-[state=open]:fade-in-0',
-        'data-[state=closed]:animate-out data-[state=closed]:fade-out-0',
+        'neo-overlay fixed inset-0 z-50',
         className
       )}
       data-slot="dialog-overlay"
@@ -54,12 +51,8 @@ function DialogContent({
 
       <DialogPrimitive.Content
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
+          'neo-dialog fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
           'grid w-full max-w-md gap-0',
-          'border border-midground/15 bg-background-base text-foreground-base shadow-lg outline-none',
-          'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
-          'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
-          'duration-150',
           className
         )}
         data-slot="dialog-content"
@@ -70,10 +63,8 @@ function DialogContent({
         {showCloseButton && (
           <DialogPrimitive.Close
             className={cn(
-              'absolute top-3 right-3',
-              'flex h-6 w-6 items-center justify-center',
-              'text-midground/50 transition-colors hover:text-midground',
-              'focus:outline-none focus-visible:ring-1 focus-visible:ring-midground/30',
+              'neo-dialog-close absolute top-3 right-3',
+              'flex h-8 w-8 items-center justify-center',
               'disabled:pointer-events-none'
             )}
             data-slot="dialog-close"
@@ -91,7 +82,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       className={cn(
-        'flex flex-col gap-1 p-4 border-b border-midground/15',
+        'neo-dialog-header flex flex-col gap-1 p-5',
         className
       )}
       data-slot="dialog-header"
@@ -136,7 +127,7 @@ function DialogDescription({
   return (
     <DialogPrimitive.Description
       className={cn(
-        'font-mondwest text-xs text-midground/60 leading-relaxed',
+        'neo-dialog-description font-mondwest text-xs leading-relaxed',
         className
       )}
       data-slot="dialog-description"

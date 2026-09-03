@@ -26,17 +26,11 @@ export function Toast({ toast }: ToastProps) {
     <div
       aria-live="polite"
       className={cn(
-        'fixed top-16 right-4 z-50 border px-4 py-2.5 font-courier text-xs tracking-wider uppercase backdrop-blur-sm',
-        current.type === 'success'
-          ? 'bg-success/15 text-success border-success/30'
-          : 'bg-destructive/15 text-destructive border-destructive/30'
+        'neo-toast fixed top-16 right-4 z-50 px-4 py-3 font-courier text-xs tracking-wider uppercase'
       )}
+      data-tone={current.type}
+      data-visible={visible}
       role="status"
-      style={{
-        animation: visible
-          ? 'toast-in 200ms ease-out forwards'
-          : 'toast-out 200ms ease-in forwards'
-      }}
     >
       {current.message}
     </div>,

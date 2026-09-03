@@ -20,17 +20,12 @@ import { cn } from '../../utils'
 import './form-controls.css'
 
 const TRIGGER_CN =
-  'flex h-10 min-h-10 w-full items-center justify-between gap-2 rounded-lg ' +
-  'border border-input bg-background/60 px-3.5 py-2 shadow-sm ' +
-  'font-courier text-sm text-left text-midground ' +
-  'hover:border-primary/45 ' +
-  'focus-visible:border-ring focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ' +
-  'disabled:cursor-not-allowed disabled:opacity-50 ' +
-  'cursor-pointer touch-manipulation'
+  'neo-select-trigger flex h-10 min-h-10 w-full items-center justify-between gap-2 ' +
+  'px-3.5 py-2 font-courier text-sm text-left cursor-pointer touch-manipulation'
 
 const LISTBOX_CN =
   'nous-ui-select-menu absolute z-50 mt-1.5 w-full max-h-60 overflow-auto origin-top ' +
-  'rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl'
+  'neo-select-menu p-1.5'
 
 type MenuState = 'closed' | 'closing' | 'open'
 
@@ -211,13 +206,13 @@ export function Select({
         role="combobox"
         type="button"
       >
-        <span className={cn('truncate', !selected && 'text-muted-foreground')}>
+        <span className={cn('truncate', !selected && 'text-[var(--neo-text-secondary)]')}>
           {displayLabel}
         </span>
 
         <ChevronDownGlyph
           className={cn(
-            'nous-ui-select-chevron size-3 shrink-0 text-muted-foreground',
+            'nous-ui-select-chevron size-3 shrink-0 text-[var(--neo-text-secondary)]',
             open && 'rotate-180'
           )}
         />
@@ -243,11 +238,11 @@ export function Select({
               <div
                 aria-selected={isSelected}
                 className={cn(
-                  'nous-ui-select-option flex min-h-10 cursor-pointer touch-manipulation items-center gap-2 rounded-md px-3 py-2',
-                  'font-courier text-sm outline-none',
-                  isHighlighted && 'bg-accent text-accent-foreground',
-                  isSelected ? 'font-medium text-foreground' : 'text-muted-foreground'
+                  'neo-select-option nous-ui-select-option flex min-h-10 cursor-pointer touch-manipulation items-center gap-2 px-3 py-2',
+                  'font-courier text-sm',
+                  isSelected && 'font-medium'
                 )}
+                data-highlighted={isHighlighted || undefined}
                 id={`${listboxId}-option-${i}`}
                 key={opt.value}
                 onClick={() => {
@@ -260,7 +255,7 @@ export function Select({
               >
                 <CheckGlyph
                   className={cn(
-                    'nous-ui-select-check size-3 shrink-0 text-primary',
+                    'nous-ui-select-check size-3 shrink-0 text-accent-line',
                     isSelected ? 'opacity-100' : 'opacity-0'
                   )}
                 />

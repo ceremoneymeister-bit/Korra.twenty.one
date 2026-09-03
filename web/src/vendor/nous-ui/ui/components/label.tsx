@@ -7,7 +7,7 @@ export function Label({
   return (
     <label
       className={cn(
-        'font-mondwest text-xs tracking-[0.1em] uppercase leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
+        'neo-label font-mondwest text-xs tracking-[0.1em] uppercase leading-none',
         className
       )}
       {...props}

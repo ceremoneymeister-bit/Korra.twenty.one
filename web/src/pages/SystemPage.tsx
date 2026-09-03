@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@nous-research/ui/ui/components/button";
-import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
 import { H2 } from "@nous-research/ui/ui/components/typography/h2";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import { Checkbox } from "@nous-research/ui/ui/components/checkbox";
@@ -642,7 +642,7 @@ export default function SystemPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Spinner className="text-2xl text-primary" />
+        <Skeleton className="h-28 w-full max-w-2xl" />
       </div>
     );
   }

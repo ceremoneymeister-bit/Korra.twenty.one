@@ -12,10 +12,10 @@ import { cn } from '../../utils'
  * All are optional — unset vars compute to their CSS initial value.
  */
 const CARD_STYLE: React.CSSProperties = {
-  background: 'var(--component-card-background)',
-  borderImage: 'var(--component-card-border-image)',
-  boxShadow: 'var(--component-card-box-shadow)',
-  clipPath: 'var(--component-card-clip-path)'
+  background: 'var(--component-card-background, var(--neo-surface))',
+  borderImage: 'var(--component-card-border-image, none)',
+  boxShadow: 'var(--component-card-box-shadow, var(--neo-depth-3))',
+  clipPath: 'var(--component-card-clip-path, none)'
 }
 
 export function Card({
@@ -26,7 +26,7 @@ export function Card({
   return (
     <div
       className={cn(
-        'border border-midground/15 bg-background-base/80 text-midground w-full',
+        'neo-card w-full',
         className
       )}
       style={{ ...CARD_STYLE, ...style }}
@@ -42,7 +42,7 @@ export function CardHeader({
   return (
     <div
       className={cn(
-        'flex flex-col gap-1.5 p-4 border-b border-midground/15',
+        'neo-card-header flex flex-col gap-1.5 p-4',
         className
       )}
       {...props}
@@ -71,7 +71,7 @@ export function CardDescription({
 }: React.HTMLAttributes<HTMLParagraphElement>) {
   return (
     <p
-      className={cn('font-mondwest text-xs text-midground/60', className)}
+      className={cn('neo-card-description font-mondwest text-xs', className)}
       {...props}
     />
   )

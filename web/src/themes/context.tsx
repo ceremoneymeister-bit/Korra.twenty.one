@@ -31,6 +31,7 @@ import {
   COLOR_OVERRIDE_CSS_VARS,
   colorOverrideVars,
 } from "./semantic-colors";
+import { NEUMORPHISM_CSS_VARS, neumorphismVars } from "./neumorphism";
 import { api } from "@/lib/api";
 
 /** LocalStorage key used to seed the first React render. The static CSS uses
@@ -307,6 +308,9 @@ function applyTheme(theme: DashboardTheme) {
   for (const cssVar of COLOR_OVERRIDE_CSS_VARS) {
     root.style.removeProperty(cssVar);
   }
+  for (const cssVar of NEUMORPHISM_CSS_VARS) {
+    root.style.removeProperty(cssVar);
+  }
   // Same clear-then-set for series colors so switches never carry stale
   // chart accents from the previous palette.
   for (const cssVar of ALL_SERIES_VARS) {
@@ -331,6 +335,7 @@ function applyTheme(theme: DashboardTheme) {
     ...typographyVars(theme.typography),
     ...layoutVars(theme.layout),
     ...colorOverrideVars(theme.colorOverrides),
+    ...neumorphismVars(theme.neumorphism),
     ...seriesColorVars(theme.seriesColors),
     ...assetMap,
     ...componentMap,

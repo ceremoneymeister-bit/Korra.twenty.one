@@ -14,17 +14,15 @@ export const Checkbox = forwardRef<
   return (
     <CheckboxPrimitive.Root
       className={cn(
-        'nous-ui-checkbox peer relative flex h-10 min-h-10 w-10 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-lg bg-transparent',
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-        'disabled:cursor-not-allowed disabled:opacity-50',
+        'neo-checkbox nous-ui-checkbox peer relative flex h-10 min-h-10 w-10 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-lg',
         className
       )}
       ref={ref}
       {...props}
     >
-      <span aria-hidden className="nous-ui-checkbox-frame pointer-events-none size-5 rounded-md border" />
+      <span aria-hidden className="neo-checkbox-frame nous-ui-checkbox-frame pointer-events-none size-5 rounded-md" />
       <CheckboxPrimitive.Indicator
-        className="nous-ui-checkbox-indicator pointer-events-none absolute inset-0 flex items-center justify-center"
+        className="neo-checkbox-indicator nous-ui-checkbox-indicator pointer-events-none absolute inset-0 flex items-center justify-center"
         forceMount
       >
         <svg
@@ -35,7 +33,7 @@ export const Checkbox = forwardRef<
           viewBox="0 0 12 12"
         >
           <path
-            className="nous-ui-checkbox-path"
+            className="neo-checkbox-path nous-ui-checkbox-path"
             d="m2.25 6.25 2.15 2.15 5.35-5.35"
             pathLength="1"
             stroke="currentColor"

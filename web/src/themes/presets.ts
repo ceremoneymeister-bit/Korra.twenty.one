@@ -1,4 +1,9 @@
 import type { DashboardTheme, ThemeLayout, ThemeTypography } from "./types";
+import {
+  BRAND_LIME,
+  darkNeumorphism,
+  lightNeumorphism,
+} from "./neumorphism";
 
 /** The two palette ids supported by the Korra dashboard. */
 export type BuiltinThemeName = "light" | "dark";
@@ -8,7 +13,7 @@ export type BuiltinThemeName = "light" | "dark";
  *  #9BE424, а в светлой теме он ещё и затемнялся до болотного #4F7900 ради
  *  белого текста на кнопке (1.63:1 — нечитаемо). Правильный размен: лайм
  *  оставляем фирменным, текст на нём делаем тёмным (11.61:1). */
-export const BRAND_LIME = "#9EDE01";
+export { BRAND_LIME } from "./neumorphism";
 
 const SYSTEM_SANS =
   'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
@@ -24,103 +29,99 @@ const DEFAULT_TYPOGRAPHY: ThemeTypography = {
 };
 
 const DEFAULT_LAYOUT: ThemeLayout = {
-  radius: "0.625rem",
+  radius: "1rem",
   density: "comfortable",
 };
 
-/**
- * Neutral light palette. The logo lime is darkened for filled controls so
- * white text reaches WCAG AA contrast; decorative accents keep the original
- * #9BE424 brand color.
- */
+/** Owner-approved neutral light palette. */
 export const lightTheme: DashboardTheme = {
   name: "light",
   label: "Светлая",
   description: "Светлый нейтральный интерфейс",
   palette: {
-    background: { hex: "#F7F7F5", alpha: 1 },
-    midground: { hex: "#202124", alpha: 1 },
-    foreground: { hex: "#FFFFFF", alpha: 0 },
-    warmGlow: "rgba(155, 228, 36, 0.16)",
+    background: { hex: lightNeumorphism.background, alpha: 1 },
+    midground: { hex: lightNeumorphism.textPrimary, alpha: 1 },
+    foreground: { hex: lightNeumorphism.highlight, alpha: 0 },
+    warmGlow: "transparent",
     noiseOpacity: 0,
   },
   typography: DEFAULT_TYPOGRAPHY,
   layout: DEFAULT_LAYOUT,
-  terminalBackground: "#FFFFFF",
-  terminalForeground: "#202124",
+  neumorphism: lightNeumorphism,
+  terminalBackground: lightNeumorphism.surface,
+  terminalForeground: lightNeumorphism.textPrimary,
   seriesColors: {
-    inputTokenAccent: "#4F7900",
-    outputTokenAccent: "#7C3AED",
+    inputTokenAccent: lightNeumorphism.accentLine,
+    outputTokenAccent: lightNeumorphism.textSecondary,
   },
   colorOverrides: {
-    card: "#FFFFFF",
-    cardForeground: "#202124",
-    popover: "#FFFFFF",
-    popoverForeground: "#202124",
+    card: lightNeumorphism.surface,
+    cardForeground: lightNeumorphism.textPrimary,
+    popover: lightNeumorphism.surface,
+    popoverForeground: lightNeumorphism.textPrimary,
     primary: BRAND_LIME,
-    primaryForeground: "#150B29",
-    secondary: "#EFEFEC",
-    secondaryForeground: "#202124",
-    muted: "#E7E7E3",
-    mutedForeground: "#667085",
-    accent: "#EAF7D3",
-    accentForeground: "#304A00",
+    primaryForeground: lightNeumorphism.accentForeground,
+    secondary: lightNeumorphism.surface,
+    secondaryForeground: lightNeumorphism.textPrimary,
+    // Одобренное превью: приглушённый фон на шаг темнее поверхности.
+    muted: "#DCDCDC",
+    mutedForeground: lightNeumorphism.textSecondary,
+    accent: BRAND_LIME,
+    accentForeground: lightNeumorphism.accentForeground,
     destructive: "#B42318",
     destructiveForeground: "#FFFFFF",
     success: "#047857",
     warning: "#8A5200",
-    border: "#CFD1CC",
-    input: "#B8BBB4",
-    ring: "#4F7900",
+    border: lightNeumorphism.shadow,
+    input: lightNeumorphism.shadow,
+    ring: lightNeumorphism.accentLine,
   },
-  swatchColors: ["#F7F7F5", "#1A1A18", BRAND_LIME],
+  swatchColors: [lightNeumorphism.background, lightNeumorphism.textPrimary, BRAND_LIME],
 };
 
-/**
- * Deep ink-purple palette. Surfaces stay on the base hue and rise by roughly
- * five to ten lightness points; the unmodified logo lime is the accent.
- */
+/** Owner-approved neutral dark palette. */
 export const darkTheme: DashboardTheme = {
   name: "dark",
   label: "Тёмная",
-  description: "Глубокий фиолетовый интерфейс",
+  description: "Тёмный нейтральный интерфейс",
   palette: {
-    background: { hex: "#150B29", alpha: 1 },
-    midground: { hex: "#F4EFFA", alpha: 1 },
-    foreground: { hex: "#FFFFFF", alpha: 0 },
-    warmGlow: "rgba(155, 228, 36, 0.18)",
+    background: { hex: darkNeumorphism.background, alpha: 1 },
+    midground: { hex: darkNeumorphism.textPrimary, alpha: 1 },
+    foreground: { hex: darkNeumorphism.highlight, alpha: 0 },
+    warmGlow: "transparent",
     noiseOpacity: 0,
   },
   typography: DEFAULT_TYPOGRAPHY,
   layout: DEFAULT_LAYOUT,
-  terminalBackground: "#150B29",
-  terminalForeground: "#F4EFFA",
+  neumorphism: darkNeumorphism,
+  terminalBackground: darkNeumorphism.surface,
+  terminalForeground: darkNeumorphism.textPrimary,
   seriesColors: {
-    inputTokenAccent: "#9BE424",
-    outputTokenAccent: "#C6A7FF",
+    inputTokenAccent: darkNeumorphism.accentLine,
+    outputTokenAccent: darkNeumorphism.textSecondary,
   },
   colorOverrides: {
-    card: "#20123A",
-    cardForeground: "#F4EFFA",
-    popover: "#20123A",
-    popoverForeground: "#F4EFFA",
+    card: darkNeumorphism.surface,
+    cardForeground: darkNeumorphism.textPrimary,
+    popover: darkNeumorphism.surface,
+    popoverForeground: darkNeumorphism.textPrimary,
     primary: BRAND_LIME,
-    primaryForeground: "#150B29",
-    secondary: "#25173F",
-    secondaryForeground: "#F4EFFA",
-    muted: "#271B41",
-    mutedForeground: "#B9ACC9",
-    accent: "#324719",
-    accentForeground: "#E3F8C0",
+    primaryForeground: darkNeumorphism.accentForeground,
+    secondary: darkNeumorphism.surface,
+    secondaryForeground: darkNeumorphism.textPrimary,
+    muted: "#2B2B2B",
+    mutedForeground: darkNeumorphism.textSecondary,
+    accent: BRAND_LIME,
+    accentForeground: darkNeumorphism.accentForeground,
     destructive: "#FF6B74",
-    destructiveForeground: "#150B29",
+    destructiveForeground: darkNeumorphism.surface,
     success: "#83D95B",
     warning: "#F6C453",
-    border: "#493568",
-    input: "#493568",
-    ring: BRAND_LIME,
+    border: darkNeumorphism.shadow,
+    input: darkNeumorphism.shadow,
+    ring: darkNeumorphism.accentLine,
   },
-  swatchColors: ["#150B29", "#20123A", BRAND_LIME],
+  swatchColors: [darkNeumorphism.background, darkNeumorphism.textPrimary, BRAND_LIME],
 };
 
 /** The default is deliberately the light palette. */

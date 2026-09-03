@@ -1,15 +1,24 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { act, type ReactNode, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Checkbox } from "@nous-research/ui/ui/components/checkbox";
+import { Button } from "@nous-research/ui/ui/components/button";
 import { Input } from "@nous-research/ui/ui/components/input";
 import {
   Select,
   SelectOption,
 } from "@nous-research/ui/ui/components/select";
 import { Switch } from "@nous-research/ui/ui/components/switch";
+import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Textarea } from "@nous-research/ui/ui/components/textarea";
+
+const neoCss = readFileSync(
+  "src/themes/neumorphism.css",
+  "utf8",
+);
 
 let container: HTMLDivElement;
 let root: Root;
@@ -46,6 +55,33 @@ afterEach(async () => {
 });
 
 describe("vendored Nous UI form controls", () => {
+  it("routes button variants through semantic depth states without changing props", async () => {
+    await render(
+      <>
+        <Button>Primary</Button>
+        <Button outlined>Neutral</Button>
+        <Button ghost>Ghost</Button>
+        <Button destructive>Destructive</Button>
+        <Button disabled>Disabled</Button>
+      </>,
+    );
+
+    const buttons = [...container.querySelectorAll("button")];
+    expect(buttons.map((button) => button.dataset.neoVariant)).toEqual([
+      "primary",
+      "neutral",
+      "ghost",
+      "destructive",
+      "primary",
+    ]);
+    expect(buttons.every((button) => button.classList.contains("neo-button"))).toBe(
+      true,
+    );
+    expect(buttons.some((button) => /(?:outline|ring)-/.test(button.className))).toBe(
+      false,
+    );
+  });
+
   it("renders Input as a 40px native field with an announced error state", async () => {
     await render(
       <>
@@ -162,5 +198,32 @@ describe("vendored Nous UI form controls", () => {
     );
     expect(control?.textContent).toContain("Gamma");
     expect(control?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("provides native textarea, compact activity and block skeleton primitives", async () => {
+    await render(
+      <>
+        <Textarea aria-invalid="true" aria-label="Description" />
+        <Spinner aria-label="Loading" role="status" />
+        <Skeleton className="h-20" />
+      </>,
+    );
+
+    expect(container.querySelector("textarea")?.classList.contains("neo-field")).toBe(
+      true,
+    );
+    expect(container.querySelectorAll(".neo-spinner-dot")).toHaveLength(3);
+    expect(container.querySelector(".neo-skeleton")?.className).toContain("h-20");
+  });
+
+  it("defines keyboard, pointer, error and disabled states using depth tokens", () => {
+    expect(neoCss).toContain(".neo-button:not(:disabled):is(:focus-visible");
+    expect(neoCss).toContain("[data-demo-state='pressed']");
+    expect(neoCss).toContain("[data-demo-state='error']");
+    expect(neoCss).toContain(".neo-button:disabled");
+    expect(neoCss).toContain("box-shadow: var(--neo-focus-visible)");
+    expect(neoCss).toContain(
+      "--neo-ease-toggle: cubic-bezier(0.85, 0.05, 0.18, 1.35)",
+    );
   });
 });

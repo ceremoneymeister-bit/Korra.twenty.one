@@ -43,7 +43,7 @@ import { Toast } from "@nous-research/ui/ui/components/toast";
 import { AutoField } from "@/components/AutoField";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
-import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Skeleton } from "@nous-research/ui/ui/components/spinner";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { Input } from "@nous-research/ui/ui/components/input";
@@ -371,7 +371,7 @@ export default function ConfigPage() {
   if (!config || !schema) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Spinner className="text-2xl text-primary" />
+        <Skeleton className="h-28 w-full max-w-2xl" />
       </div>
     );
   }
@@ -535,7 +535,7 @@ export default function ConfigPage() {
           <CardContent className="p-0">
             {yamlLoading ? (
               <div className="flex items-center justify-center py-12">
-                <Spinner className="text-xl text-primary" />
+                <Skeleton className="h-48 w-full" />
               </div>
             ) : (
               <textarea

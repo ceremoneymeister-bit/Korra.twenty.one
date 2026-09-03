@@ -1,41 +1,3 @@
-.nous-ui-checkbox-frame {
-  background-color: var(--background-base);
-  border-color: var(--input, var(--midground));
-}
-
-.nous-ui-checkbox-indicator {
-  color: var(--primary-foreground, var(--background-base));
-  opacity: 0;
-  transform: scale(0.8);
-}
-
-.nous-ui-checkbox-path {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-}
-
-.nous-ui-checkbox[data-state='checked'] .nous-ui-checkbox-frame,
-.nous-ui-checkbox[data-state='indeterminate'] .nous-ui-checkbox-frame {
-  background-color: var(--primary, var(--midground));
-  border-color: var(--primary, var(--midground));
-}
-
-.nous-ui-checkbox[data-state='checked'] .nous-ui-checkbox-indicator,
-.nous-ui-checkbox[data-state='indeterminate'] .nous-ui-checkbox-indicator {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.nous-ui-checkbox[data-state='checked'] .nous-ui-checkbox-path,
-.nous-ui-checkbox[data-state='indeterminate'] .nous-ui-checkbox-path {
-  stroke-dashoffset: 0;
-}
-
-.nous-ui-checkbox[aria-invalid='true'] .nous-ui-checkbox-frame {
-  border-color: var(--destructive);
-  border-width: 2px;
-}
-
 .nous-ui-select-menu[data-state='open'] {
   opacity: 1;
   transform: scale(1);
@@ -47,74 +9,22 @@
   transform: scale(var(--dropdown-closing-scale));
 }
 
-@media (hover: hover) {
-  .nous-ui-checkbox:not(:disabled):hover .nous-ui-checkbox-frame {
-    border-color: var(--primary, var(--midground));
-  }
-}
-
 @media (prefers-reduced-motion: no-preference) {
-  .nous-ui-input {
-    transition-duration: var(--duration-quick);
-    transition-property: background-color, border-color, box-shadow;
-    transition-timing-function: var(--ease-out);
-  }
-
-  .nous-ui-switch-track {
-    transition-duration: var(--toggle-track);
-    transition-property: background-color, border-color;
-    transition-timing-function: var(--toggle-ease);
-  }
-
-  .nous-ui-switch-thumb {
-    transition-duration: var(--toggle-dur);
-    transition-property: transform, translate;
-    transition-timing-function: var(--toggle-ease);
-  }
-
-  .nous-ui-checkbox-frame {
-    transition-duration: var(--check-box);
-    transition-property: background-color, border-color;
-    transition-timing-function: var(--check-ease);
-  }
-
-  .nous-ui-checkbox-indicator {
-    transition-duration: var(--check-uncheck);
-    transition-property: opacity, transform;
-    transition-timing-function: var(--check-ease);
-  }
-
-  .nous-ui-checkbox-path {
-    transition: stroke-dashoffset var(--check-uncheck) var(--check-ease);
-  }
-
-  .nous-ui-checkbox[data-state='checked'] .nous-ui-checkbox-path,
-  .nous-ui-checkbox[data-state='indeterminate'] .nous-ui-checkbox-path {
-    transition: stroke-dashoffset var(--check-draw) var(--check-ease)
-      var(--check-delay);
-  }
-
   .nous-ui-select-menu[data-state='open'] {
-    animation: nous-ui-select-open var(--dropdown-open-dur)
-      var(--dropdown-ease) both;
+    animation: nous-ui-select-open var(--neo-duration-state)
+      var(--neo-ease-out) both;
   }
 
   .nous-ui-select-menu[data-state='closing'] {
-    animation: nous-ui-select-close var(--dropdown-close-dur)
-      var(--dropdown-ease) both;
+    animation: nous-ui-select-close var(--neo-duration-quick)
+      var(--neo-ease-out) both;
   }
 
   .nous-ui-select-chevron,
   .nous-ui-select-check {
-    transition-duration: var(--duration-quick);
+    transition-duration: var(--neo-duration-quick);
     transition-property: opacity, transform;
-    transition-timing-function: var(--ease-out);
-  }
-
-  .nous-ui-select-option {
-    transition-duration: var(--duration-micro);
-    transition-property: background-color, color;
-    transition-timing-function: var(--ease-out);
+    transition-timing-function: var(--neo-ease-out);
   }
 }
 
@@ -123,37 +33,11 @@
     opacity: 0;
     transform: scale(var(--dropdown-pre-scale));
   }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
 }
 
 @keyframes nous-ui-select-close {
-  from {
-    opacity: 1;
-    transform: scale(1);
-  }
   to {
     opacity: 0;
     transform: scale(var(--dropdown-closing-scale));
-  }
-}
-
-@media (forced-colors: active) {
-  .nous-ui-checkbox-frame,
-  .nous-ui-switch-track {
-    border-color: ButtonText;
-  }
-
-  .nous-ui-checkbox[data-state='checked'] .nous-ui-checkbox-frame,
-  .nous-ui-checkbox[data-state='indeterminate'] .nous-ui-checkbox-frame,
-  [role='switch'][aria-checked='true'] .nous-ui-switch-track {
-    background-color: Highlight;
-    border-color: Highlight;
-  }
-
-  .nous-ui-checkbox-indicator {
-    color: HighlightText;
   }
 }

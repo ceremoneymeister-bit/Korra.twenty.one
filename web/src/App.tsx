@@ -60,7 +60,7 @@ import {
 } from "lucide-react";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { SelectionSwitcher } from "@nous-research/ui/ui/components/selection-switcher";
-import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
 import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { SidebarFooter } from "@/components/SidebarFooter";
@@ -100,6 +100,7 @@ const SystemPage = lazy(() => import("@/pages/SystemPage"));
 const ChatPage = lazy(() => import("@/pages/ChatPage"));
 const BubbleChatPage = lazy(() => import("@/pages/BubbleChatPage"));
 const AgentWorkbenchPage = lazy(() => import("@/pages/AgentWorkbenchPage"));
+const UiKitPage = lazy(() => import("@/pages/UiKitPage"));
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { KorraBrand } from "@/components/KorraBrand";
 import { useI18n } from "@/i18n";
@@ -132,9 +133,11 @@ function RouteFallback({ label = "Загрузка…" }: { label?: string }) {
       aria-busy="true"
       aria-live="polite"
     >
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner />
-        <span>{label}</span>
+      <div className="w-full max-w-2xl space-y-4">
+        <span className="sr-only">{label}</span>
+        <Skeleton className="h-6 max-w-xs" />
+        <Skeleton className="h-28" />
+        <Skeleton className="h-20" />
       </div>
     </div>
   );
@@ -222,6 +225,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/env": EnvPage,
   "/docs": DocsPage,
   "/help": ClientHelpPage,
+  "/ui-kit": UiKitPage,
 };
 
 // Route placeholder for /chat.  The persistent ChatPage host (rendered
@@ -460,7 +464,8 @@ export default function App() {
   const isFleetMode = uiMode === "fleet";
   const isChatRoute = normalizedPath === "/chat";
   const isAgentsRoute = normalizedPath === "/agents";
-  const isFullHeightRoute = isChatRoute || isAgentsRoute;
+  const isFullHeightRoute =
+    isChatRoute || isAgentsRoute || normalizedPath === "/ui-kit";
   const embeddedChat = isDashboardEmbeddedChatEnabled();
   const bubbleChat = isDashboardBubbleChatEnabled();
   // Defer mounting the persistent chat host (and its xterm chunk) until the
@@ -1518,9 +1523,8 @@ function SidebarTooltip({ anchor, label, warmRef }: SidebarTooltipProps) {
   return createPortal(
     <span
       className={cn(
-        "fixed z-[100] pointer-events-none",
+        "neo-tooltip fixed z-[100] pointer-events-none",
         "px-2 py-1",
-        "bg-background-base border border-current/20 shadow-lg",
         "font-sans text-display text-xs tracking-[0.1em] text-midground uppercase",
       )}
       style={{

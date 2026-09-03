@@ -7,7 +7,7 @@ import { Clock, Pause, Pencil, Play, Trash2, X, Zap } from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Button } from "@/components/ProductButton";
 import { Select, SelectOption } from "@nous-research/ui/ui/components/select";
-import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
 import { H2 } from "@nous-research/ui/ui/components/typography/h2";
 import { api } from "@/lib/api";
 import type {
@@ -1019,9 +1019,9 @@ export default function CronPage() {
 
   if (loading && jobs.length === 0 && !error) {
     return (
-      <div className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground" role="status">
-        <Spinner className="text-2xl text-primary" />
-        Загружаем расписание…
+      <div className="flex items-center justify-center py-24" role="status">
+        <span className="sr-only">Загружаем расписание…</span>
+        <Skeleton className="h-28 w-full max-w-2xl" />
       </div>
     );
   }

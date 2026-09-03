@@ -49,24 +49,17 @@ export function ConfirmDialog({
       <AlertDialogPrimitive.Portal>
         <AlertDialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 z-50',
-            'bg-black/60 backdrop-blur-sm',
-            'data-[state=open]:animate-in data-[state=open]:fade-in-0',
-            'data-[state=closed]:animate-out data-[state=closed]:fade-out-0'
+            'neo-overlay fixed inset-0 z-50'
           )}
         />
 
         <AlertDialogPrimitive.Content
           className={cn(
-            'fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
+            'neo-dialog fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
             'w-[calc(100%-2rem)] max-w-md',
-            'border border-midground/15 bg-background-base text-foreground-base shadow-lg outline-none',
-            'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
-            'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
-            'duration-150'
           )}
         >
-          <div className="flex items-start gap-3 p-4 border-b border-midground/15">
+          <div className="neo-dialog-header flex items-start gap-3 p-5">
             {destructive && (
               <div aria-hidden className="mt-0.5 shrink-0 text-destructive">
                 <WarningTriangle className="h-4 w-4" />
@@ -82,7 +75,7 @@ export function ConfirmDialog({
 
               {description && (
                 <AlertDialogPrimitive.Description
-                  className="font-mondwest text-xs text-midground/60 leading-relaxed"
+                  className="neo-dialog-description font-mondwest text-xs leading-relaxed"
                 >
                   {description}
                 </AlertDialogPrimitive.Description>

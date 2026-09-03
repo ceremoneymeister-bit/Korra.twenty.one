@@ -15,9 +15,7 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
       {...props}
       aria-checked={checked}
       className={cn(
-        'peer relative inline-flex h-10 min-h-10 w-12 shrink-0 cursor-pointer touch-manipulation items-center rounded-full bg-transparent',
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-        'disabled:cursor-not-allowed disabled:opacity-50',
+        'neo-switch peer relative inline-flex h-10 min-h-10 w-14 shrink-0 cursor-pointer touch-manipulation items-center rounded-full',
         className
       )}
       data-state={checked ? 'checked' : 'unchecked'}
@@ -34,19 +32,14 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
       <span
         aria-hidden
         className={cn(
-          'nous-ui-switch-track pointer-events-none absolute left-0.5 top-2 h-6 w-11 rounded-full border',
-          checked
-            ? 'border-primary/70 bg-primary'
-            : 'border-input bg-muted'
+          'neo-switch-track nous-ui-switch-track pointer-events-none absolute left-0.5 top-1.5 h-7 w-13 rounded-full'
         )}
       />
       <span
         aria-hidden
         className={cn(
-          'nous-ui-switch-thumb pointer-events-none absolute left-1.5 top-3 size-4 rounded-full shadow-sm',
-          checked
-            ? 'translate-x-5 bg-primary-foreground'
-            : 'translate-x-0 bg-background-base'
+          'neo-switch-thumb nous-ui-switch-thumb pointer-events-none absolute left-1.5 top-2.5 size-5 rounded-full',
+          checked ? 'translate-x-6' : 'translate-x-0'
         )}
       />
     </button>

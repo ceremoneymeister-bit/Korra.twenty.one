@@ -2,24 +2,15 @@
 
 import {
   type CSSProperties,
-  type HTMLAttributes,
-  useEffect,
-  useState
+  type HTMLAttributes
 } from 'react'
-import spinners, { type BrailleSpinnerName } from 'unicode-animations'
+import type { BrailleSpinnerName } from 'unicode-animations'
 
 import { cn } from '../../utils'
 
 /**
- * Braille unicode spinner. Renders the active frame of a `unicode-animations`
- * sequence inside an inline `<span>`, advancing on the spinner's own interval.
- *
- * Inherits font color and font size from its parent — apply Tailwind utilities
- * (e.g. `text-warning`, `text-base`) via `className` to style.
- *
- * Decorative by default. Pass `aria-label` (and optionally `role="status"`) when
- * the spinner has no surrounding loading text and screen readers need to know
- * something is loading.
+ * Compact loading activity. `name` remains accepted for API compatibility;
+ * Korra intentionally renders one consistent depth-based motion language.
  */
 export function Spinner({
   className,
@@ -27,29 +18,32 @@ export function Spinner({
   style,
   ...props
 }: SpinnerProps) {
-  const [frame, setFrame] = useState(0)
-  const animation = spinners[name]
-
-  useEffect(() => {
-    const id = setInterval(
-      () => setFrame(f => (f + 1) % animation.frames.length),
-      animation.interval
-    )
-    return () => clearInterval(id)
-  }, [animation.frames.length, animation.interval])
-
   return (
     <span
       aria-hidden={props['aria-label'] ? undefined : true}
-      className={cn(
-        'font-mono inline-block leading-none tabular-nums',
-        className
-      )}
+      className={cn('neo-spinner leading-none', className)}
+      data-spinner-name={name}
       style={style}
       {...props}
     >
-      {animation.frames[frame]}
+      <span aria-hidden className="neo-spinner-dot" />
+      <span aria-hidden className="neo-spinner-dot" />
+      <span aria-hidden className="neo-spinner-dot" />
     </span>
+  )
+}
+
+/** Block-loading placeholder; callers choose its dimensions with className. */
+export function Skeleton({
+  className,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      aria-hidden
+      className={cn('neo-skeleton min-h-4 w-full', className)}
+      {...props}
+    />
   )
 }
 

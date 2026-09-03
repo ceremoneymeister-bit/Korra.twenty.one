@@ -30,7 +30,7 @@ import {
 } from "@/lib/dashboard-modal-shell";
 import { formatTokenCount } from "@/lib/format";
 import { Button } from "@nous-research/ui/ui/components/button";
-import { Spinner } from "@nous-research/ui/ui/components/spinner";
+import { Skeleton, Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Stats } from "@nous-research/ui/ui/components/stats";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { Badge } from "@nous-research/ui/ui/components/badge";
@@ -1319,7 +1319,7 @@ export default function ModelsPage() {
 
       {loading && !data && (
         <div className="flex items-center justify-center py-24">
-          <Spinner className="text-2xl text-primary" />
+          <Skeleton className="h-28 w-full max-w-2xl" />
         </div>
       )}
 

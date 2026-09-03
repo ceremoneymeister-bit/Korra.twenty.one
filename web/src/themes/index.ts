@@ -1,4 +1,9 @@
 export { ThemeProvider, useTheme } from "./context";
+export {
+  darkNeumorphism,
+  lightNeumorphism,
+  neumorphismVars,
+} from "./neumorphism";
 export { BUILTIN_THEMES, defaultTheme } from "./presets";
 export {
   FONT_CHOICES,

@@ -23,7 +23,7 @@ export function TabsList({ className, ...props }: HTMLAttributes<HTMLDivElement>
   return (
     <div
       className={cn(
-        'inline-flex h-9 items-center justify-start border-b border-midground/15 text-text-secondary',
+        'neo-tabs-list inline-flex h-10 items-center justify-start p-1',
         className
       )}
       {...props}
@@ -40,14 +40,11 @@ export function TabsTrigger({
   return (
     <button
       className={cn(
-        'relative inline-flex items-center justify-center whitespace-nowrap px-3 py-1.5',
-        'font-mondwest text-display text-xs tracking-[0.1em] transition-all cursor-pointer',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground/30',
-        active
-          ? 'text-midground after:absolute after:bottom-0 after:left-0 after:right-0 after:h-px after:bg-midground'
-          : 'text-text-secondary hover:text-midground',
+        'neo-tab relative inline-flex items-center justify-center whitespace-nowrap px-3 py-1.5',
+        'font-mondwest text-display text-xs tracking-[0.1em] cursor-pointer',
         className
       )}
+      data-active={active || undefined}
       type="button"
       {...props}
     />
