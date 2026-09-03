@@ -44,6 +44,7 @@ import type { ComponentType } from "react";
 import { Markdown } from "@/components/Markdown";
 import { AgentTrace } from "@/components/chat/AgentTrace";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
+import { loadChatOutbox, type ChatOutboxRecord } from "@/lib/chat-outbox";
 import {
   ChatArtifactList,
   type ArtifactDecisionHandler,
@@ -449,7 +450,10 @@ function BubbleChatTranscript({
   decided,
   onRetry,
   onDiscard,
+  pendingElsewhere,
 }: {
+  /** Черновик этого профиля из другого чата — напоминаем баннером. */
+  pendingElsewhere?: ChatOutboxRecord | null;
   messages: ChatMessage[];
   streaming?: boolean;
   error?: string | null;
@@ -481,6 +485,23 @@ function BubbleChatTranscript({
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
       <div className="px-4">
         <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-7 pt-6">
+          {pendingElsewhere && (
+            <div
+              role="status"
+              className="flex flex-wrap items-center gap-3 rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-4 py-3 text-sm shadow-[var(--neo-inset-compact)]"
+            >
+              <span className="min-w-0 flex-1 text-[var(--neo-text-secondary)]">
+                Неотправленное сообщение в другом чате: «{pendingElsewhere.text.slice(0, 80)}
+                {pendingElsewhere.text.length > 80 ? "…" : ""}»
+              </span>
+              <Button size="sm" onClick={onRetry}>
+                Повторить
+              </Button>
+              <Button ghost size="sm" onClick={onDiscard}>
+                Убрать
+              </Button>
+            </div>
+          )}
           {messages.length === 0 ? (
             <div className="flex min-h-[40vh] items-center justify-center">
               <p className="text-base text-muted-foreground">
@@ -751,21 +772,26 @@ export function BubbleChatComposer({
       setSubmitting(false);
       throw error;
     }
+    // Поле очищается только когда отправка принята: отказ (например, черновик
+    // той же сессии ждёт решения) не должен стирать набранный текст.
     void Promise.resolve(result).then(
-      () => setSubmitting(false),
+      (ok) => {
+        setSubmitting(false);
+        if (ok === false) return;
+        setValue("");
+        attachments.forEach((item) => {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+        });
+        setAttachments([]);
+        setAttachError(null);
+        // Let React paint the empty value, then return to the resting height.
+        requestAnimationFrame(() => {
+          const el = taRef.current;
+          if (el) resizeTextarea(el);
+        });
+      },
       () => setSubmitting(false),
     );
-    setValue("");
-    attachments.forEach((item) => {
-      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
-    });
-    setAttachments([]);
-    setAttachError(null);
-    // Let React paint the empty value, then return to the resting height.
-    requestAnimationFrame(() => {
-      const el = taRef.current;
-      if (el) resizeTextarea(el);
-    });
   }, [
     value,
     disabled,
@@ -1021,6 +1047,8 @@ export function BubbleChatComposer({
 /* ------------------------------------------------------------------ */
 
 export interface BubbleChatPageProps {
+  /** Вкладка видна: скрытые вкладки не опрашивают список чатов. */
+  active?: boolean;
   /** Профиль агента, которому адресован ЭТОТ экземпляр чата. Задан — все
    *  запросы (чат, список сессий, история, удаление) уезжают с
    *  `?profile=<agentProfile>`, и страницу можно смонтировать несколько раз
@@ -1055,6 +1083,7 @@ export default function BubbleChatPage({
   draft: draftFromOwner,
   onDraftConsumed,
   newChatRequest = 0,
+  active,
 }: BubbleChatPageProps = {}) {
   // Live SSE state from useChatStream. Sends POST to /api/chat/completions
   // and streams response chunks back into messages[]. Tool progress events
@@ -1071,6 +1100,13 @@ export default function BubbleChatPage({
     loadSession,
     reset,
   } = useChatStream({ profile: agentProfile });
+  // Черновик недоставленного сообщения этого профиля из ДРУГОГО чата: пузырь
+  // с «Повторить» есть только в своём чате, здесь напоминает баннер.
+  const pendingElsewhere = useMemo(() => {
+    const pending = loadChatOutbox(agentProfile ?? "");
+    return pending && pending.sessionId !== sessionId ? pending : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentProfile, sessionId, messages, error, isStreaming]);
 
   // Решение владельца по артефакту уходит ОБЫЧНЫМ сообщением в чат, а не в
   // отдельный журнал. Так агент видит его штатно — у него в регламенте уже
@@ -1132,7 +1168,7 @@ export default function BubbleChatPage({
   // Live sidebar — real /api/sessions list (TG + web combined). Poll every
   // 15s so sessions started elsewhere (Telegram bot, CLI) show up here too.
   const sessionList = useSessionList({
-    pollIntervalMs: 15_000,
+    pollIntervalMs: active === false ? 0 : 15_000,
     profile: agentProfile,
   });
 
@@ -1266,6 +1302,7 @@ export default function BubbleChatPage({
           decided={decidedArtifacts}
           onRetry={() => void retryPending()}
           onDiscard={discardPending}
+          pendingElsewhere={pendingElsewhere}
         />
         <BubbleChatComposer
           onSend={send}

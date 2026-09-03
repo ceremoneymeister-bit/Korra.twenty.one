@@ -90,18 +90,16 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
 
     case "RESTORE_PENDING": {
       // Та же сессия — сообщение добавляется к переписке, а не заменяет её
-      // (владелец 03.09: «ошибка возникла и исчезла переписка»).
-      const sameSession =
-        state.sessionId === action.sessionId && state.messages.length > 0;
+      // (владелец 03.09: «ошибка возникла и исчезла переписка»). Другая
+      // открытая сессия — переписку не трогаем, о черновике скажет баннер.
       const alreadyShown = state.messages.some(
         (message) => message.clientMessageId === action.userMsg.clientMessageId,
       );
+      if (state.messages.length > 0 && state.sessionId !== action.sessionId) {
+        return { ...state, isStreaming: false, error: action.error };
+      }
       return {
-        messages: sameSession
-          ? alreadyShown
-            ? state.messages
-            : [...state.messages, action.userMsg]
-          : [action.userMsg],
+        messages: alreadyShown ? state.messages : [...state.messages, action.userMsg],
         sessionId: action.sessionId,
         isStreaming: false,
         error: action.error,
@@ -387,10 +385,8 @@ export function useChatStream(
   }, []);
 
   useEffect(() => {
-    const pending = loadChatOutbox();
+    const pending = loadChatOutbox(profile ?? "");
     if (!pending) return;
-    // Черновик другой вкладки-профиля этой вкладке не принадлежит.
-    if ((pending.profile ?? "") !== (profile ?? "")) return;
     const restored: ChatOutboxRecord = {
       ...pending,
       status: "failed",
@@ -411,7 +407,7 @@ export function useChatStream(
       },
       error: "Сообщение сохранилось в черновиках. Проверьте доставку кнопкой «Повторить».",
     });
-  }, []);
+  }, [profile]);
 
   const abort = useCallback(() => {
     abortControllerRef.current?.abort();
@@ -477,8 +473,10 @@ export function useChatStream(
       // This ref-based guard is the source of truth.
       if (streamingRef.current) return false;
       if (!retryRecord) {
-        const pending = loadChatOutbox();
-        if (pending && (pending.profile ?? "") === (profile ?? "")) {
+        // Блокирует только черновик ТОЙ ЖЕ сессии; черновик другого чата
+        // этого профиля показывает баннер и не мешает писать здесь.
+        const pending = loadChatOutbox(profile ?? "");
+        if (pending && pending.sessionId === state.sessionId) {
           dispatch({
             type: "RESTORE_PENDING",
             sessionId: pending.sessionId,
@@ -746,7 +744,7 @@ export function useChatStream(
           // принятым (находка ревью 20.08.2026).
           delivered = !sawTerminalError && (sawDone || sawAgentOutput);
           if (delivered) {
-            clearChatOutbox(messageId);
+            clearChatOutbox(messageId, profile ?? "");
             dispatch({ type: "MARK_DELIVERY", messageId, delivery: "delivered" });
           } else {
             saveChatOutbox({
@@ -808,20 +806,27 @@ export function useChatStream(
   );
 
   const retryPending = useCallback(async (): Promise<boolean> => {
-    const pending = loadChatOutbox();
+    const pending = loadChatOutbox(profile ?? "");
     if (!pending || streamingRef.current) return false;
-    if ((pending.profile ?? "") !== (profile ?? "")) return false;
+    // Черновик из другого чата: сначала открываем тот чат, потом повторяем —
+    // иначе сообщение оказалось бы в чужой переписке.
+    if (pending.sessionId !== state.sessionId) {
+      try {
+        await loadSession(pending.sessionId);
+      } catch {
+        // Сессия могла так и не появиться на сервере — send создаст её.
+      }
+    }
     return await send(pending.text, pending.attachments, pending);
-  }, [send]);
+  }, [send, loadSession, profile, state.sessionId]);
 
   const discardPending = useCallback(() => {
     if (streamingRef.current) return;
-    const pending = loadChatOutbox();
+    const pending = loadChatOutbox(profile ?? "");
     if (!pending) return;
-    if ((pending.profile ?? "") !== (profile ?? "")) return;
-    clearChatOutbox(pending.messageId);
+    clearChatOutbox(pending.messageId, profile ?? "");
     dispatch({ type: "DISCARD_PENDING", messageId: pending.messageId });
-  }, []);
+  }, [profile]);
 
   return {
     messages: state.messages,

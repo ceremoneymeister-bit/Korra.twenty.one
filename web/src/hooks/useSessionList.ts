@@ -82,6 +82,8 @@ export function useSessionList(
     if (pollIntervalMs <= 0) return;
 
     const intervalId = window.setInterval(() => {
+      // Скрытая вкладка браузера не опрашивает сервер.
+      if (typeof document !== "undefined" && document.hidden) return;
       void refresh();
     }, pollIntervalMs);
 

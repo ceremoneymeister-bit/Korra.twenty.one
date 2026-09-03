@@ -568,6 +568,7 @@ export default function AgentWorkbenchPage() {
           >
             <BubbleChatPage
               agentProfile={tab.profile}
+              active={tab.profile === activeId}
               onStreamingChange={handleStreamingChange}
               draft={draftByProfile[tab.profile] ?? null}
               onDraftConsumed={() => clearDraft(tab.profile)}

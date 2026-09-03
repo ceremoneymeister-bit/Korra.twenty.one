@@ -1,7 +1,14 @@
 import { HERMES_BASE_PATH } from "@/lib/api";
 import type { UploadedAttachment } from "@/lib/chat-attachments";
 
-const STORAGE_KEY = `korra-browser-chat-outbox-v1:${HERMES_BASE_PATH || "root"}`;
+/* v2: запись на профиль (вкладку агента), а не одна на всю панель — иначе
+ * отправка во вкладке B затирала упавшее сообщение вкладки A (ревью 03.09).
+ * Старые v1-записи не читаем: у них нет профиля, и повтор ушёл бы не туда. */
+const STORAGE_PREFIX = `korra-browser-chat-outbox-v2:${HERMES_BASE_PATH || "root"}`;
+
+function storageKey(profile: string | undefined): string {
+  return `${STORAGE_PREFIX}:${profile || "main"}`;
+}
 
 export interface ChatOutboxRecord {
   messageId: string;
@@ -42,13 +49,13 @@ function validRecord(value: unknown): value is ChatOutboxRecord {
   );
 }
 
-export function loadChatOutbox(): ChatOutboxRecord | null {
+export function loadChatOutbox(profile = ""): ChatOutboxRecord | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey(profile));
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    if (!validRecord(parsed)) {
-      localStorage.removeItem(STORAGE_KEY);
+    if (!validRecord(parsed) || (parsed.profile ?? "") !== profile) {
+      localStorage.removeItem(storageKey(profile));
       return null;
     }
     return parsed;
@@ -59,24 +66,24 @@ export function loadChatOutbox(): ChatOutboxRecord | null {
 
 export function saveChatOutbox(record: ChatOutboxRecord): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(record));
+    localStorage.setItem(storageKey(record.profile ?? ""), JSON.stringify(record));
     return true;
   } catch {
     return false;
   }
 }
 
-export function clearChatOutbox(messageId: string): void {
+export function clearChatOutbox(messageId: string, profile = ""): void {
   try {
-    const current = loadChatOutbox();
+    const current = loadChatOutbox(profile);
     if (!current || current.messageId === messageId) {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(storageKey(profile));
     }
   } catch {
     // Private browsing or a full storage quota must not break the chat.
   }
 }
 
-export function chatOutboxStorageKeyForTests(): string {
-  return STORAGE_KEY;
+export function chatOutboxStorageKeyForTests(profile = ""): string {
+  return storageKey(profile);
 }
