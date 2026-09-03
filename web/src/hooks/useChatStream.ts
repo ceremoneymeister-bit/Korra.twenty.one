@@ -475,8 +475,10 @@ export function useChatStream(
       if (!retryRecord) {
         // Блокирует только черновик ТОЙ ЖЕ сессии; черновик другого чата
         // этого профиля показывает баннер и не мешает писать здесь.
-        const pending = loadChatOutbox(profile ?? "");
-        if (pending && pending.sessionId === state.sessionId) {
+        const pending = state.sessionId
+          ? loadChatOutbox(profile ?? "", state.sessionId)
+          : null;
+        if (pending) {
           dispatch({
             type: "RESTORE_PENDING",
             sessionId: pending.sessionId,

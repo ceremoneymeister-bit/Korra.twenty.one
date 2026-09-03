@@ -1,13 +1,27 @@
 import { HERMES_BASE_PATH } from "@/lib/api";
 import type { UploadedAttachment } from "@/lib/chat-attachments";
 
-/* v2: запись на профиль (вкладку агента), а не одна на всю панель — иначе
- * отправка во вкладке B затирала упавшее сообщение вкладки A (ревью 03.09).
+/* v2: запись на чат (профиль + сессия), а не одна на всю панель — иначе
+ * отправка в другом чате затирала упавшее сообщение (ревью 03.09).
  * Старые v1-записи не читаем: у них нет профиля, и повтор ушёл бы не туда. */
 const STORAGE_PREFIX = `korra-browser-chat-outbox-v2:${HERMES_BASE_PATH || "root"}`;
 
-function storageKey(profile: string | undefined): string {
-  return `${STORAGE_PREFIX}:${profile || "main"}`;
+function profilePrefix(profile: string | undefined): string {
+  return `${STORAGE_PREFIX}:${profile || "main"}:`;
+}
+
+function storageKey(profile: string | undefined, sessionId: string): string {
+  return `${profilePrefix(profile)}${sessionId}`;
+}
+
+function profileKeys(profile: string | undefined): string[] {
+  const prefix = profilePrefix(profile);
+  const keys: string[] = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && key.startsWith(prefix)) keys.push(key);
+  }
+  return keys;
 }
 
 export interface ChatOutboxRecord {
@@ -49,16 +63,26 @@ function validRecord(value: unknown): value is ChatOutboxRecord {
   );
 }
 
-export function loadChatOutbox(profile = ""): ChatOutboxRecord | null {
+function readRecord(key: string, profile: string): ChatOutboxRecord | null {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  const parsed: unknown = JSON.parse(raw);
+  if (!validRecord(parsed) || (parsed.profile ?? "") !== profile) {
+    localStorage.removeItem(key);
+    return null;
+  }
+  return parsed;
+}
+
+/** Черновик конкретного чата, либо — без sessionId — самый старый черновик профиля. */
+export function loadChatOutbox(profile = "", sessionId?: string): ChatOutboxRecord | null {
   try {
-    const raw = localStorage.getItem(storageKey(profile));
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (!validRecord(parsed) || (parsed.profile ?? "") !== profile) {
-      localStorage.removeItem(storageKey(profile));
-      return null;
-    }
-    return parsed;
+    if (sessionId) return readRecord(storageKey(profile, sessionId), profile);
+    const records = profileKeys(profile)
+      .map((key) => readRecord(key, profile))
+      .filter((record): record is ChatOutboxRecord => record !== null)
+      .sort((a, b) => a.createdAt - b.createdAt);
+    return records[0] ?? null;
   } catch {
     return null;
   }
@@ -66,7 +90,7 @@ export function loadChatOutbox(profile = ""): ChatOutboxRecord | null {
 
 export function saveChatOutbox(record: ChatOutboxRecord): boolean {
   try {
-    localStorage.setItem(storageKey(record.profile ?? ""), JSON.stringify(record));
+    localStorage.setItem(storageKey(record.profile ?? "", record.sessionId), JSON.stringify(record));
     return true;
   } catch {
     return false;
@@ -75,15 +99,15 @@ export function saveChatOutbox(record: ChatOutboxRecord): boolean {
 
 export function clearChatOutbox(messageId: string, profile = ""): void {
   try {
-    const current = loadChatOutbox(profile);
-    if (!current || current.messageId === messageId) {
-      localStorage.removeItem(storageKey(profile));
+    for (const key of profileKeys(profile)) {
+      const record = readRecord(key, profile);
+      if (!record || record.messageId === messageId) localStorage.removeItem(key);
     }
   } catch {
     // Private browsing or a full storage quota must not break the chat.
   }
 }
 
-export function chatOutboxStorageKeyForTests(profile = ""): string {
-  return storageKey(profile);
+export function chatOutboxStorageKeyForTests(profile = "", sessionId = ""): string {
+  return storageKey(profile, sessionId);
 }
