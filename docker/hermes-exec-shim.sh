@@ -40,7 +40,13 @@
 
 set -e
 
+# Korra: шим вызывается и как `hermes`, и как `korra` (симлинк в /opt/hermes/bin).
+# Исполняем одноимённую точку входа venv, чтобы argparse видел своё имя
+# (`usage: korra …`), а не всегда `hermes`; при отсутствии — прежний бинарь.
 REAL=/opt/hermes/.venv/bin/hermes
+case "$(basename "$0")" in
+    korra) [ -x /opt/hermes/.venv/bin/korra ] && REAL=/opt/hermes/.venv/bin/korra ;;
+esac
 
 # Defensive: if the venv binary is missing (corrupted image, partial
 # install), fail loudly rather than silently masking it.
