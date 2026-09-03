@@ -1921,11 +1921,23 @@ DEFAULT_CONFIG = {
         # the raw transcript is also echoed back to the user as a 🎙️ message.
         # Set false to keep STT for the agent while suppressing that user-facing echo.
         "echo_transcripts": True,
-        # NOTE: no seeded "provider" key. Strict selection semantics treat a
-        # stored stt.provider as an explicit user pick; seeding "local" here
-        # made a fresh install indistinguishable from a user choice. The
-        # autodetect ladder covers unset. Valid values when set:
-        # "local" (free, faster-whisper) | "groq" | "openai" (Whisper API) | "mistral" (Voxtral Transcribe) | "elevenlabs" (Scribe) | "deepinfra"
+        # Upstream не сеет "provider": строгая семантика считает записанное
+        # значение выбором человека, и на свежей установке "local" из дефолтов
+        # было не отличить от осознанного выбора.
+        #
+        # Korra 21 сеет — потому что решение владельца (04.09.2026) описывает
+        # не один провайдер, а правило: Deepgram, когда выдан ключ, иначе
+        # локальный whisper, вшитый в образ. Правило выражается парой
+        # provider + fallback и работает из коробки, без правки конфига.
+        # Ключ не подключён — распознавание всё равно есть, локальное.
+        # Валидные значения: "local" (faster-whisper из образа) | "deepgram" |
+        # "groq" | "openai" | "mistral" | "elevenlabs" | "deepinfra"
+        "provider": "deepgram",
+        # Куда уходить, когда выбранный провайдер не готов (нет ключа из его
+        # requires_env, не установлен пакет, не найден бинарь). Строка или
+        # список по порядку; "" или отсутствие ключа = поведение апстрима,
+        # то есть честный отказ выбранного провайдера без подмены.
+        "fallback": "local",
         # Global language hint applied to EVERY provider unless a per-provider
         # language overrides it. Whisper auto-detection frequently misidentifies
         # short/accented clips, which reads as "STT transcribed the wrong
@@ -1946,7 +1958,19 @@ DEFAULT_CONFIG = {
         "cloud_trim_threshold_db": -40,  # audio quieter than this counts as silence
         "cloud_trim_keep_ms": 300,  # how much of each pause survives (keeps natural pacing)
         "local": {
-            "model": "base",  # tiny, base, small, medium, large-v3
+            # Korra: "medium" вместо апстримного "base" — решение владельца
+            # 04.09.2026 («не самый маленький, а хотя бы средний»). Веса
+            # medium вшиты в образ (см. Dockerfile, HERMES_STT_MODELS_DIR), в
+            # рантайме ничего не качается. На исходной установке без образа
+            # первое распознавание скачает ~1,5 ГБ с Hugging Face.
+            "model": "medium",  # tiny, base, small, medium, large-v3
+            # int8 на CPU: сервера контуров без GPU, и это единственный режим,
+            # который там реально считает. Веса на диске лежат во float16,
+            # ctranslate2 квантует их при загрузке.
+            "compute_type": "int8",
+            # 4 потока: распознавание на общей машине не должно душить сам
+            # агент. 0 = отдать решение ctranslate2 (все ядра).
+            "cpu_threads": 4,
             "language": "",  # auto-detect by default; set to "en", "es", "fr", etc. to force
             "initial_prompt": "",
             # Anti-hallucination hardening (faster-whisper decodes junk tokens
@@ -1981,6 +2005,32 @@ DEFAULT_CONFIG = {
         "deepinfra": {
             "model": "",  # empty = first stt-tagged model from the live catalog
             # "base_url": "",  # override DEEPINFRA_BASE_URL for STT only
+        },
+        # Korra: Deepgram как command-провайдер — у движка нет для него
+        # родного бэкенда, а curl-шаблон закрывает вопрос без питоновского
+        # плагина. Секция сеется в дефолтах, чтобы «выдать ключ» было
+        # единственным действием: положить DEEPGRAM_API_KEY в .env контура и
+        # перезапустить. Пока ключа нет, requires_env уводит выбор на
+        # stt.fallback (локальный whisper), и распознавание работает всё
+        # равно. Контур может переопределить любое поле в своём config.yaml —
+        # дефолты сливаются вглубь, а не заменяют секцию целиком.
+        "deepgram": {
+            "type": "command",
+            "format": "txt",
+            "timeout": 90,
+            # Без этих ключей провайдер считается неготовым ДО запуска
+            # команды — иначе выбор запасного был бы уже невозможен.
+            "requires_env": ["DEEPGRAM_API_KEY"],
+            # Дочерний процесс чистится от секретов; ключ возвращаем явно.
+            "env_passthrough": ["DEEPGRAM_API_KEY"],
+            "command": (
+                'test -n "$DEEPGRAM_API_KEY" || { echo "DEEPGRAM_API_KEY not set" >&2; exit 3; }; '
+                'curl -sS --fail-with-body -X POST '
+                '"https://api.deepgram.com/v1/listen?model=nova-2&language={language}&smart_format=true" '
+                '-H "Authorization: Token $DEEPGRAM_API_KEY" --data-binary @{input_path} '
+                "| python3 -c 'import sys,json; d=json.load(sys.stdin); "
+                'print(d["results"]["channels"][0]["alternatives"][0]["transcript"])\''
+            ),
         },
     },
 

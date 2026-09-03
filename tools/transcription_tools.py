@@ -109,6 +109,17 @@ _HAS_PILK = _safe_find_spec("pilk")
 DEFAULT_PROVIDER = "local"
 DEFAULT_LOCAL_MODEL = "base"
 DEFAULT_LOCAL_STT_LANGUAGE = "en"
+
+# Korra: веса локального whisper вшиты в образ, чтобы распознавание речи
+# работало сразу после установки и НИЧЕГО не тянуло из сети в рантайме
+# (/opt/hermes в опубликованном образе смонтирован только на чтение — скачать
+# туда модель на первом голосовом всё равно нельзя). Каталог задаётся
+# переменной HERMES_STT_MODELS_DIR, внутри — подкаталог на размер модели:
+# ``<каталог>/medium/model.bin``. Если каталога нет (исходная установка, а не
+# образ), имя размера уходит в faster-whisper как раньше и модель качается с
+# Hugging Face — поведение апстрима сохранено.
+LOCAL_STT_MODELS_DIR_ENV = "HERMES_STT_MODELS_DIR"
+DEFAULT_LOCAL_STT_MODELS_DIR = "/opt/hermes/models/whisper"
 DEFAULT_STT_MODEL = os.getenv("STT_OPENAI_MODEL", "whisper-1")
 DEFAULT_GROQ_STT_MODEL = os.getenv("STT_GROQ_MODEL", "whisper-large-v3-turbo")
 DEFAULT_MISTRAL_STT_MODEL = os.getenv("STT_MISTRAL_MODEL", "voxtral-mini-latest")
@@ -332,6 +343,43 @@ def _normalize_local_model(model_name: Optional[str]) -> str:
 
 def _normalize_local_command_model(model_name: Optional[str]) -> str:
     return _normalize_local_model(model_name)
+
+
+def _resolve_local_model_source(model_name: str) -> str:
+    """Подменить имя размера модели на путь к весам, вшитым в образ.
+
+    Вызывается только на пути faster-whisper (провайдер ``local``): для
+    ``local_command`` внешнему бинарю whisper нужно именно имя размера, а не
+    каталог. Имя, которое уже выглядит как путь или как repo-id Hugging Face
+    (в обоих случаях есть ``/``), возвращается нетронутым.
+    """
+    name = str(model_name or "").strip()
+    if not name or "/" in name or os.sep in name:
+        return model_name
+    root = str(os.getenv(LOCAL_STT_MODELS_DIR_ENV) or DEFAULT_LOCAL_STT_MODELS_DIR).strip()
+    if not root:
+        return model_name
+    try:
+        candidate = Path(root) / name
+        if (candidate / "model.bin").is_file():
+            return str(candidate)
+    except OSError:
+        pass
+    return model_name
+
+
+def _get_local_cpu_threads(local_cfg: Dict[str, Any]) -> int:
+    """Число потоков CPU для faster-whisper (``stt.local.cpu_threads``).
+
+    0 — решение остаётся за ctranslate2 (все ядра или OMP_NUM_THREADS). На
+    общей машине это плохой дефолт: распознавание съедает всю машину и душит
+    сам агент, поэтому контурный шаблон ставит 4.
+    """
+    try:
+        value = int(local_cfg.get("cpu_threads", 0))
+    except (TypeError, ValueError):
+        return 0
+    return max(value, 0)
 
 
 def _try_lazy_install_stt() -> bool:
@@ -1012,7 +1060,83 @@ def _transcribe_command_stt(
     }
 
 
+def _stt_missing_required_env(provider: str, stt_config: Dict[str, Any]) -> list:
+    """Ключи из ``requires_env`` провайдера *provider*, которых нет в окружении.
+
+    Korra: апстрим узнаёт об отсутствующем ключе только когда команда уже
+    запустилась и вышла с ошибкой — выбрать другой провайдер на этом этапе
+    поздно. ``requires_env`` объявляет требование заранее, чтобы
+    :func:`_get_provider` мог уйти на запасной провайдер ДО запуска команды.
+    Пустой/необъявленный ``requires_env`` = требований нет (поведение
+    апстрима не меняется).
+    """
+    config = _get_named_stt_provider_config(stt_config, str(provider or "").strip().lower())
+    raw = config.get("requires_env")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    missing = []
+    for item in raw:
+        key = str(item or "").strip()
+        if key and not str(get_env_value(key) or "").strip():
+            missing.append(key)
+    return missing
+
+
+def _stt_fallback_candidates(stt_config: Dict[str, Any]) -> list:
+    """Запасные провайдеры из ``stt.fallback`` (строка или список), по порядку."""
+    raw = stt_config.get("fallback") if isinstance(stt_config, dict) else None
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
 def _get_provider(stt_config: dict) -> str:
+    """Determine which STT provider to use, honouring ``stt.fallback``.
+
+    Korra: у апстрима ``stt.provider`` — жёсткий выбор без цепочки, и контур
+    без ключа облачного провайдера просто теряет распознавание речи. Решение
+    владельца 04.09.2026 другое: Deepgram, когда ключ выдан, и локальный
+    whisper из образа, когда ключа нет. Механика объявляется конфигом::
+
+        stt:
+          provider: deepgram
+          fallback: local
+          deepgram:
+            requires_env: [DEEPGRAM_API_KEY]
+
+    Выбранный провайдер проверяется на готовность (для встроенных — как
+    раньше, для остальных — по ``requires_env``); если он не готов,
+    перебираются кандидаты из ``stt.fallback``. Когда ни один не готов,
+    возвращается исходный выбор: его собственная ошибка («DEEPGRAM_API_KEY not
+    set») точнее общей «No STT provider available».
+    """
+    provider = _resolve_selected_provider(stt_config)
+    if provider != "none" and not _stt_missing_required_env(provider, stt_config):
+        return provider
+
+    for candidate in _stt_fallback_candidates(stt_config):
+        key = candidate.lower()
+        if key in {"none", str(provider or "").lower()}:
+            continue
+        probe = dict(stt_config)
+        probe["provider"] = candidate
+        resolved = _resolve_selected_provider(probe)
+        if resolved == "none" or _stt_missing_required_env(resolved, probe):
+            continue
+        logger.info(
+            "STT: провайдер '%s' недоступен, работаем через запасной '%s' (stt.fallback)",
+            provider, resolved,
+        )
+        return resolved
+
+    return provider
+
+
+def _resolve_selected_provider(stt_config: dict) -> str:
     """Determine which STT provider to use.
 
     When ``stt.provider`` is explicitly set in config, that choice is
@@ -1758,7 +1882,12 @@ def _touch_transcription_time() -> None:
     _last_transcription_time = time.monotonic()
 
 
-def _load_local_whisper_model(model_name: str, device: str = "auto", compute_type: str = "auto"):
+def _load_local_whisper_model(
+    model_name: str,
+    device: str = "auto",
+    compute_type: str = "auto",
+    cpu_threads: int = 0,
+):
     """Load faster-whisper with graceful CUDA → CPU fallback.
 
     faster-whisper's ``device="auto"`` picks CUDA when the ctranslate2 wheel
@@ -1771,10 +1900,16 @@ def _load_local_whisper_model(model_name: str, device: str = "auto", compute_typ
     ``device`` / ``compute_type`` default to ``"auto"`` so the historical
     behaviour is unchanged; pass explicit values from ``stt.local.device`` /
     ``stt.local.compute_type`` to pin a configuration (#9088).
+    ``cpu_threads`` (0 = решение ctranslate2) приходит из
+    ``stt.local.cpu_threads``.
 
     We try the requested config first (fast CUDA path when it works), and on
     any CUDA library load failure fall back to CPU + int8.
+
+    Korra: имя размера здесь же превращается в путь к весам, вшитым в образ
+    (:func:`_resolve_local_model_source`) — загрузка не ходит в сеть.
     """
+    model_name = _resolve_local_model_source(model_name)
     force_cpu = _should_force_faster_whisper_cpu()
     if force_cpu:
         # Importing ctranslate2/faster-whisper itself can abort on some
@@ -1789,10 +1924,17 @@ def _load_local_whisper_model(model_name: str, device: str = "auto", compute_typ
             "Apple Silicon/Rosetta detected — loading faster-whisper on CPU "
             "(int8) to avoid native device autodetection crashes"
         )
-        return WhisperModel(model_name, device="cpu", compute_type="int8")
+        return WhisperModel(
+            model_name, device="cpu", compute_type="int8", cpu_threads=cpu_threads,
+        )
 
     try:
-        return WhisperModel(model_name, device=device, compute_type=compute_type)
+        return WhisperModel(
+            model_name,
+            device=device,
+            compute_type=compute_type,
+            cpu_threads=cpu_threads,
+        )
     except Exception as exc:
         if not _looks_like_cuda_lib_error(exc):
             raise
@@ -1801,7 +1943,9 @@ def _load_local_whisper_model(model_name: str, device: str = "auto", compute_typ
             "Install the NVIDIA CUDA runtime (libcublas/libcudnn) to use GPU.",
             exc,
         )
-        return WhisperModel(model_name, device="cpu", compute_type="int8")
+        return WhisperModel(
+            model_name, device="cpu", compute_type="int8", cpu_threads=cpu_threads,
+        )
 
 
 # Silence-hallucination hardening defaults for local faster-whisper.
@@ -1968,6 +2112,7 @@ def _transcribe_local(
                         model_name,
                         device=local_cfg.get("device", "auto"),
                         compute_type=local_cfg.get("compute_type", "auto"),
+                        cpu_threads=_get_local_cpu_threads(local_cfg),
                     )
                     _local_model_name = model_name
                 model = _local_model
@@ -2005,7 +2150,12 @@ def _transcribe_local(
                 exc,
             )
             from faster_whisper import WhisperModel
-            model = WhisperModel(model_name, device="cpu", compute_type="int8")
+            model = WhisperModel(
+                _resolve_local_model_source(model_name),
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=_get_local_cpu_threads(local_cfg),
+            )
             with _local_model_lock:
                 _local_model = model
                 _local_model_name = model_name

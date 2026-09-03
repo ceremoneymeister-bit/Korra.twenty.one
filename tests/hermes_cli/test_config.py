@@ -888,7 +888,14 @@ class TestConfigSupportFloor:
         "model": {"default": "openai/gpt-5.4", "provider": "openrouter"},
         "model_catalog": {"ttl_hours": 1},
         "plugins": {"enabled": []},
-        "stt": {"provider": "local"},
+        # Korra: миграция v13→14 переносит плоский stt.model в stt.local.model,
+        # а _persist_migration пишет на диск только то, что отличается от
+        # дефолта схемы. У апстрима дефолт был "base" — ровно то же значение,
+        # поэтому ключ вычищался. В форке дефолт "medium" (решение владельца
+        # 04.09.2026), и "base" из старого конфига теперь остаётся записанным
+        # явно. Это правильная сторона инварианта: контур, который когда-то
+        # выбрал base, не должен молча переехать на medium при обновлении.
+        "stt": {"provider": "local", "local": {"model": "base"}},
     }
 
     _V20_FIXTURE = {

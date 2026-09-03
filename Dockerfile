@@ -261,10 +261,54 @@ RUN cd plugins/platforms/photon/sidecar && \
 # avoids the cross-platform failures that kept [matrix] out of [all]
 # while still making Matrix work in the published container. Fixes #30399.
 #
+# Korra: [voice] (faster-whisper) тоже вшивается в образ. Апстрим держит его
+# в lazy-install, но в опубликованном образе lazy-install выключен
+# (HERMES_DISABLE_LAZY_INSTALLS=1) и /opt/hermes только на чтение — то есть
+# «поставится при первом голосовом» там не работает никогда. Решение
+# владельца 04.09.2026: распознавание речи должно работать из коробки, без
+# ключей. Тянет ctranslate2/av/onnxruntime (CPU-колёса, ~390 МБ) — torch и
+# CUDA не тянет и не должен: на серверах контуров GPU нет.
+#
 # The editable link is created after the source copy below.
 COPY pyproject.toml uv.lock ./
 RUN touch ./README.md
-RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra otlp --extra anthropic --extra bedrock --extra azure-identity --extra hindsight --extra matrix
+RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra otlp --extra anthropic --extra bedrock --extra azure-identity --extra hindsight --extra matrix --extra voice
+
+# ---------- Веса локального whisper (вшиты в образ) ----------
+# Модель кладётся в образ ОДИН раз на сборке, а не качается в рантайме:
+# /opt/hermes в опубликованном образе смонтирован только на чтение, поэтому
+# скачивание на первом голосовом сообщении не просто медленное — оно падает.
+# Каталог читает tools/transcription_tools.py по HERMES_STT_MODELS_DIR:
+# имя размера из stt.local.model превращается в <каталог>/<размер>.
+#
+# Ревизия репозитория закреплена: без неё сборка не воспроизводима, а новый
+# коммит у Systran молча поменял бы веса под тем же тегом. Обе ARG можно
+# переопределить (--build-arg) — например, чтобы собрать образ с small или из
+# локального зеркала, если huggingface.co недоступен с машины сборки.
+#
+# Слой стоит сразу за uv sync и до COPY исходников: правка кода его не
+# инвалидирует, скачивание 1,5 ГБ повторяется только при смене ARG.
+ARG WHISPER_MODEL_SIZE=medium
+ARG WHISPER_MODEL_REPO=Systran/faster-whisper-medium
+ARG WHISPER_MODEL_REVISION=08e178d48790749d25932bbc082711ddcfdfbc4f
+ENV HERMES_STT_MODELS_DIR=/opt/hermes/models/whisper
+RUN set -eu; \
+    WHISPER_MODEL_SIZE="${WHISPER_MODEL_SIZE}" \
+    WHISPER_MODEL_REPO="${WHISPER_MODEL_REPO}" \
+    WHISPER_MODEL_REVISION="${WHISPER_MODEL_REVISION}" \
+    /opt/hermes/.venv/bin/python -c 'import os, shutil; \
+from huggingface_hub import snapshot_download; \
+dest = os.path.join("/opt/hermes/models/whisper", os.environ["WHISPER_MODEL_SIZE"]); \
+snapshot_download(repo_id=os.environ["WHISPER_MODEL_REPO"], revision=os.environ["WHISPER_MODEL_REVISION"], local_dir=dest, allow_patterns=["config.json", "model.bin", "tokenizer.json", "vocabulary.txt", "preprocessor_config.json"]); \
+shutil.rmtree(os.path.join(dest, ".cache"), ignore_errors=True)'; \
+    chmod -R a+rX /opt/hermes/models; \
+    WHISPER_MODEL_SIZE="${WHISPER_MODEL_SIZE}" HF_HUB_OFFLINE=1 \
+    /opt/hermes/.venv/bin/python -c 'import os; \
+from faster_whisper import WhisperModel; \
+path = os.path.join("/opt/hermes/models/whisper", os.environ["WHISPER_MODEL_SIZE"]); \
+WhisperModel(path, device="cpu", compute_type="int8", cpu_threads=2); \
+print("whisper loaded offline from " + path)'; \
+    du -sh /opt/hermes/models/whisper
 
 # ---------- Frontend build (cached independently from Python source) ----------
 # Copy only the frontend source trees first so that Python-only changes don't

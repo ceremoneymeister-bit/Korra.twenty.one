@@ -862,9 +862,14 @@ def _seed_model_config(
         gateway_cfg = source_config.get("gateway")
         if isinstance(gateway_cfg, dict) and gateway_cfg.get("multiplex_profiles"):
             seeded_config["platforms"] = {"api_server": {"enabled": False}}
-        # Korra: распознавание речи — общее решение контура (правило флота:
-        # только Deepgram, никакого локального whisper). Новый профиль получает
-        # секцию stt от источника, иначе движок тихо уходит в whisper по умолчанию.
+        # Korra: распознавание речи — общее решение контура, а не профиля.
+        # Правило образа (решение владельца 04.09.2026): Deepgram, когда выдан
+        # DEEPGRAM_API_KEY, иначе локальный whisper, вшитый в образ; пара
+        # provider + fallback лежит в дефолтах движка, так что профиль без
+        # секции stt ведёт себя ровно как контур. Копируем секцию от источника
+        # только когда она там есть: контур мог переопределить модель, язык
+        # или сам выбор провайдера, и новый профиль должен унаследовать это,
+        # а не молча вернуться к дефолту.
         stt_cfg = source_config.get("stt")
         if isinstance(stt_cfg, dict) and stt_cfg:
             seeded_config["stt"] = stt_cfg

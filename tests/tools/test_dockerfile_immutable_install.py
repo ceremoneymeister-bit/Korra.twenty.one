@@ -19,9 +19,21 @@ def test_dockerfile_makes_opt_hermes_readonly_for_hermes_user() -> None:
     # of a separate chmod -R pass (which walked ~30k files — #49113).
     assert "COPY --link --chmod=a+rX,go-w . ." in text
     # The old tree-walking passes must not be present.
-    assert "chown -R root:root /opt/hermes" not in text
-    assert "chmod -R a+rX /opt/hermes" not in text
-    assert "chmod -R a-w /opt/hermes" not in text
+    #
+    # Korra: проверка стала точной по пути. Запрещён проход по ВСЕМУ дереву
+    # установки (~30k файлов, #49113) — а substring-совпадение заодно
+    # запрещало любой вложенный каталог, включая /opt/hermes/models/whisper,
+    # где лежат четыре файла весов whisper. Смысл гейта — стоимость обхода
+    # дерева, а не само слово chmod, поэтому совпадение прибито к концу пути.
+    root = r"/opt/hermes/?(?![\w/])"
+    # Гейт должен по-прежнему кусаться: обе формы корня — запрещённые.
+    assert re.search(rf"chmod\s+-R\s+a\+rX\s+{root}", "RUN chmod -R a+rX /opt/hermes && x")
+    assert re.search(rf"chmod\s+-R\s+a\+rX\s+{root}", "RUN chmod -R a+rX /opt/hermes/ && x")
+    assert not re.search(rf"chmod\s+-R\s+a\+rX\s+{root}", "RUN chmod -R a+rX /opt/hermes/models")
+
+    assert not re.search(rf"chown\s+-R\s+root:root\s+{root}", text)
+    assert not re.search(rf"chmod\s+-R\s+a\+rX\s+{root}", text)
+    assert not re.search(rf"chmod\s+-R\s+a-w\s+{root}", text)
 
 
 def test_dockerfile_does_not_chown_install_trees_to_hermes() -> None:

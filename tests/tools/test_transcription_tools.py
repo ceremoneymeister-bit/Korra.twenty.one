@@ -416,7 +416,12 @@ class TestTranscribeLocalExtended:
             result = _transcribe_local(str(audio), "base")
 
         assert result["success"] is True
-        mock_whisper_cls.assert_called_once_with("base", device="cpu", compute_type="float32")
+        # Korra: к паре device/compute_type добавился cpu_threads из
+        # stt.local.cpu_threads. В этом конфиге ключа нет, значит 0 —
+        # «сколько потоков, решает ctranslate2», то есть поведение апстрима.
+        mock_whisper_cls.assert_called_once_with(
+            "base", device="cpu", compute_type="float32", cpu_threads=0,
+        )
 
 
     def test_cuda_out_of_memory_does_not_trigger_cpu_fallback(self, tmp_path):
@@ -1060,7 +1065,8 @@ class TestLocalModelLock:
         load_count = 0
         load_started = threading.Event()
 
-        def slow_load(model_name, device="auto", compute_type="auto"):
+        # Korra: cpu_threads добавлен в сигнатуру загрузчика (stt.local.cpu_threads).
+        def slow_load(model_name, device="auto", compute_type="auto", cpu_threads=0):
             nonlocal load_count
             load_count += 1
             load_started.set()
