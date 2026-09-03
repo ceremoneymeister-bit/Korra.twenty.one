@@ -1979,7 +1979,14 @@ DEFAULT_CONFIG = {
             "vad_min_silence_ms": 500,  # min silence (ms) that splits speech chunks when vad is on
             "no_speech_prob_threshold": 0.6,  # drop a segment only if no_speech_prob is ABOVE this...
             "logprob_threshold": -1.0,  # ...AND its avg_logprob is BELOW this (both must hit)
-            "unload_after_idle_seconds": 0,  # 0=never (default); e.g. 300 releases the model after 5min idle
+            # Korra: 300 вместо апстримного 0 («не выгружать никогда»).
+            # Апстримный дефолт писался под модель base (~150 МБ) — её
+            # не жалко держать в резиденте вечно. Korra 21 держит medium,
+            # а это порядка гигабайта на VPS, который тем же гигабайтом
+            # обслуживает сам агент. Цена выгрузки — 1,5 с повторной
+            # загрузки на следующем голосовом, и она платится с диска
+            # образа, без сети. 0 возвращает поведение апстрима.
+            "unload_after_idle_seconds": 300,
         },
         "groq": {
             "model": "whisper-large-v3-turbo",  # whisper-large-v3, whisper-large-v3-turbo, distil-whisper-large-v3-en

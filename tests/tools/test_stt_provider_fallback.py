@@ -255,6 +255,19 @@ class TestConfigTemplate:
         assert local["compute_type"] == "int8"
         assert local["cpu_threads"] == 4
 
+    def test_defaults_release_the_model_after_five_idle_minutes(self):
+        """Medium весит около гигабайта в резиденте, и на VPS он делит память
+        с самим агентом. Апстримный 0 («не выгружать никогда») писался под
+        base в 150 МБ; здесь модель отпускается, а следующее голосовое платит
+        полторы секунды повторной загрузки с диска образа, без сети."""
+        from hermes_cli.config_defaults import DEFAULT_CONFIG
+        from tools.transcription_tools import _get_idle_unload_seconds
+
+        local = DEFAULT_CONFIG["stt"]["local"]
+        assert local["unload_after_idle_seconds"] == 300
+        # Значение должно быть не просто записано, а понято резолвером таймера.
+        assert _get_idle_unload_seconds(local) == 300
+
     def test_fresh_defaults_select_deepgram_and_fall_back_without_a_key(self):
         """Свежая установка без ключей: правило владельца работает как есть."""
         from hermes_cli.config_defaults import DEFAULT_CONFIG
