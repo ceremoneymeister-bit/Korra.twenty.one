@@ -517,6 +517,14 @@ function BubbleChatTranscript({
           )
         )}
         {error && (
+          <div
+            role="alert"
+            className="mx-auto max-w-[85%] rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-4 py-3 text-sm text-[var(--destructive)] shadow-[var(--neo-inset-compact)]"
+          >
+            Корра не смогла ответить: {error}
+          </div>
+        )}
+        {error && (
           <div className="flex justify-center">
             <p
               role="alert"

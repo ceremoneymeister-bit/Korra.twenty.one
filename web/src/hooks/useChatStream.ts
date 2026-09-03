@@ -579,7 +579,11 @@ export function useChatStream(
               }
               if (choice?.finish_reason === "error") {
                 sawTerminalError = true;
-                terminalErrorMessage = "Ответ агента завершился с ошибкой";
+                // Сервер кладёт текст ошибки в content этого же чанка
+                // («HTTP 401: invalid x-api-key», «No credentials…») — показываем
+                // его человеку, а не общую фразу.
+                terminalErrorMessage =
+                  content.trim() || "Ответ агента завершился с ошибкой";
                 void reader.cancel();
                 break;
               }
