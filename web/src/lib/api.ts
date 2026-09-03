@@ -809,6 +809,15 @@ export const api = {
         body: JSON.stringify({ description }),
       },
     ),
+  updateProfileDisplayName: (name: string, displayName: string) =>
+    fetchJSON<{ ok: boolean; display_name: string }>(
+      `/api/profiles/${encodeURIComponent(name)}/display-name`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: displayName }),
+      },
+    ),
   describeProfileAuto: (name: string, overwrite = true) =>
     fetchJSON<ProfileDescribeAutoResult>(
       `/api/profiles/${encodeURIComponent(name)}/describe-auto`,

@@ -1,51 +1,79 @@
-/* Compact prompt bar for the bubble chat. The resting surface is a 48px
- * neumorphic well; multiline text and attachments expand it deliberately. */
+/* Floating two-row prompt card for the bubble chat. The textarea always owns
+ * the first row; attachment/dictation/send controls always own the last. */
 
-@property --korra-composer-beam-angle {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
+.korra-chat-transcript__content {
+  padding-bottom: 28px;
 }
 
 .korra-chat-composer {
-  --neo-duration-composer-pop: calc(
-    var(--neo-duration-micro) + var(--neo-duration-micro)
-  );
-  --neo-duration-composer-beam: calc(
-    var(--neo-duration-control) + var(--neo-duration-control) +
-      var(--neo-duration-control) + var(--neo-duration-control) +
-      var(--neo-duration-control)
-  );
-  --neo-ease-composer-pop: cubic-bezier(0.23, 1, 0.32, 1);
+  flex-shrink: 0;
+  padding: 0 16px 22px;
 }
 
 .korra-chat-composer__dropzone {
   position: relative;
-}
-
-.korra-chat-attachment-preview {
-  outline: 0;
-  box-shadow: var(--neo-depth-1);
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
 }
 
 .korra-chat-composer__surface {
   position: relative;
   isolation: isolate;
   display: flex;
-  min-height: 48px;
+  min-height: 120px;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  gap: 8px;
+  padding: 8px 12px;
   overflow: hidden;
   border: 0;
-  border-radius: var(--neo-radius-round);
+  border-radius: var(--neo-radius-card);
   outline: 0;
+  color: var(--neo-text-primary);
   background: var(--neo-surface);
-  box-shadow: var(--neo-inset);
+  box-shadow: var(--neo-depth-3);
 }
 
-.korra-chat-composer__surface[data-expanded='true'] {
-  border-radius: var(--neo-radius-card);
+/* The caret is the only focus cue inside the prompt card. */
+.korra-chat-composer__surface:focus-within {
+  border: 0;
+  outline: 0;
+  box-shadow: var(--neo-depth-3);
+}
+
+.korra-chat-composer__surface[data-state='disabled'] {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.korra-chat-composer__textarea {
+  box-sizing: border-box;
+  min-height: 56px;
+  max-height: 200px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: hidden;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  caret-color: var(--neo-text-primary);
+  color: var(--neo-text-primary);
+}
+
+.korra-chat-composer__textarea::placeholder {
+  color: var(--neo-text-secondary);
+  opacity: 1;
+}
+
+.korra-chat-composer__textarea:focus,
+.korra-chat-composer__textarea:focus-visible {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+
+.korra-chat-composer__textarea:disabled {
+  cursor: not-allowed;
 }
 
 .korra-chat-composer__attachments,
@@ -65,151 +93,24 @@
   color: var(--destructive);
 }
 
-.korra-chat-composer__surface::before {
-  content: '';
-  position: absolute;
-  z-index: 0;
-  inset: -1px;
-  padding: 1px;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0;
-  background: conic-gradient(
-    from var(--korra-composer-beam-angle),
-    transparent 0deg 284deg,
-    color-mix(in srgb, var(--neo-accent) 28%, transparent) 306deg,
-    var(--neo-accent) 328deg,
-    transparent 350deg 360deg
-  );
-  -webkit-mask:
-    linear-gradient(var(--neo-surface) 0 0) content-box,
-    linear-gradient(var(--neo-surface) 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(var(--neo-surface) 0 0) content-box,
-    linear-gradient(var(--neo-surface) 0 0);
-  mask-composite: exclude;
-}
-
-/* Focus does not alter the well: the caret is the only input-focus cue. */
-.korra-chat-composer__surface:focus-within {
-  border: 0;
-  outline: 0;
-  box-shadow: var(--neo-inset);
-}
-
-.korra-chat-composer__surface[data-state='disabled'] {
-  cursor: not-allowed;
-  opacity: 0.56;
-}
-
-.korra-chat-composer__surface[data-state='streaming']::before {
-  opacity: 1;
-}
-
 .korra-chat-composer__controls {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 32px;
-  gap: 4px;
+  display: flex;
+  min-height: 40px;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.korra-chat-composer__controls[data-attachments='false'] {
-  grid-template-columns: minmax(0, 1fr) 32px;
-}
-
-.korra-chat-composer__attach {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.korra-chat-composer__textarea {
-  grid-column: 2;
-  grid-row: 1;
-  box-sizing: border-box;
-  min-height: 24px;
-  max-height: 160px;
-  margin: 0;
-  padding: 0 4px;
-  overflow-y: hidden;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  caret-color: var(--neo-text-primary);
-  color: var(--neo-text-primary);
-}
-
-.korra-chat-composer__textarea::placeholder {
-  color: var(--neo-text-secondary);
-  opacity: 1;
-}
-
-.korra-chat-composer__textarea:focus,
-.korra-chat-composer__textarea:focus-visible {
-  border: 0;
-  outline: 0;
-}
-
-.korra-chat-composer__textarea:disabled {
-  cursor: not-allowed;
-}
-
-.korra-chat-composer__measure {
-  position: absolute;
-  width: max-content;
-  padding-inline: 4px;
-  visibility: hidden;
-  white-space: pre;
-  pointer-events: none;
-}
-
-.korra-chat-composer__submit {
-  grid-column: 3;
-  grid-row: 1;
-}
-
-.korra-chat-composer__controls[data-attachments='false']
-  .korra-chat-composer__textarea {
-  grid-column: 1;
-}
-
-.korra-chat-composer__controls[data-attachments='false']
-  .korra-chat-composer__submit {
-  grid-column: 2;
-}
-
-.korra-chat-composer__controls[data-wide='true'] {
-  align-items: end;
-  row-gap: 4px;
-}
-
-.korra-chat-composer__controls[data-wide='true']
-  .korra-chat-composer__textarea {
-  grid-column: 1 / -1;
-  grid-row: 1;
-}
-
-.korra-chat-composer__controls[data-wide='true']
-  .korra-chat-composer__attach {
-  grid-column: 1;
-  grid-row: 2;
-}
-
-.korra-chat-composer__controls[data-wide='true']
-  .korra-chat-composer__submit {
-  grid-column: 3;
-  grid-row: 2;
-}
-
-.korra-chat-composer__controls[data-wide='true'][data-attachments='false']
-  .korra-chat-composer__submit {
-  grid-column: 2;
+.korra-chat-composer__left-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .korra-chat-composer__control {
   display: flex;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
@@ -218,8 +119,8 @@
   border-radius: var(--neo-radius-round);
   outline: 0;
   color: var(--neo-text-secondary);
-  background: transparent;
-  box-shadow: none;
+  background: var(--neo-surface);
+  box-shadow: var(--neo-depth-1);
 }
 
 .korra-chat-composer__control:focus,
@@ -228,37 +129,48 @@
   outline: 0;
 }
 
-.korra-chat-composer__attach:not(:disabled):hover {
+.korra-chat-composer__control:not(:disabled):hover {
   color: var(--neo-text-primary);
+  box-shadow: var(--neo-depth-2);
+  transform: translateY(-1px);
 }
 
-.korra-chat-composer__attach:not(:disabled):active {
+.korra-chat-composer__control:not(:disabled):active {
   color: var(--neo-text-primary);
   box-shadow: var(--neo-inset-compact);
-  transform: scale(0.94);
+  transform: none;
 }
 
 .korra-chat-composer__submit:not(:disabled) {
   color: var(--neo-accent-foreground);
   background: var(--neo-accent);
+  box-shadow: var(--neo-depth-1);
 }
 
-.korra-chat-composer__submit:not(:disabled):active {
-  transform: scale(0.94);
+.korra-chat-composer__submit:not(:disabled):hover {
+  color: var(--neo-accent-foreground);
 }
 
 .korra-chat-composer__control:disabled {
   cursor: not-allowed;
 }
 
-.korra-chat-composer__attach:disabled {
-  opacity: 0.4;
+.korra-chat-composer__microphone:disabled {
+  color: var(--neo-text-secondary);
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset-compact);
+  opacity: 0.62;
 }
 
 .korra-chat-composer__submit:disabled {
   color: var(--neo-text-secondary);
   background: var(--neo-surface);
   box-shadow: var(--neo-inset-compact);
+}
+
+.korra-chat-attachment-preview {
+  outline: 0;
+  box-shadow: var(--neo-depth-1);
 }
 
 .korra-chat-attachment-chip {
@@ -337,12 +249,13 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 2px dashed var(--neo-accent);
+  border: 0;
   border-radius: var(--neo-radius-card);
   pointer-events: none;
   opacity: 0;
   color: var(--neo-accent-foreground);
   background: color-mix(in srgb, var(--neo-accent) 92%, transparent);
+  box-shadow: var(--neo-inset);
 }
 
 .korra-chat-composer__dropzone[data-dragging='true']
@@ -352,18 +265,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .korra-chat-composer__surface {
-    transition:
-      border-radius var(--neo-duration-state) var(--neo-ease-out),
-      opacity var(--neo-duration-quick) var(--neo-ease-out);
-  }
-
-  .korra-chat-composer__surface::before {
     transition: opacity var(--neo-duration-quick) var(--neo-ease-out);
-  }
-
-  .korra-chat-composer__surface[data-state='streaming']::before {
-    animation: korra-composer-beam var(--neo-duration-composer-beam)
-      var(--neo-ease-out) infinite;
   }
 
   .korra-chat-composer__textarea {
@@ -374,13 +276,14 @@
   .korra-chat-attachment-chip__action {
     transition:
       color var(--neo-duration-quick) var(--neo-ease-out),
-      box-shadow var(--neo-duration-quick) var(--neo-ease-out),
+      background-color var(--neo-duration-quick) var(--neo-ease-out),
+      box-shadow var(--neo-duration-state) var(--neo-ease-out),
       transform var(--neo-duration-micro) var(--neo-ease-out);
   }
 
   .korra-chat-attachment-chip {
-    animation: korra-composer-pop-in var(--neo-duration-composer-pop)
-      var(--neo-ease-composer-pop) both;
+    animation: korra-composer-pop-in var(--neo-duration-state)
+      var(--neo-ease-out) both;
   }
 
   .korra-chat-attachment-chip__progress-value {
@@ -389,12 +292,6 @@
 
   .korra-chat-composer__drop-overlay {
     transition: opacity var(--neo-duration-quick) var(--neo-ease-out);
-  }
-}
-
-@keyframes korra-composer-beam {
-  to {
-    --korra-composer-beam-angle: 360deg;
   }
 }
 
@@ -409,19 +306,9 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .korra-chat-composer__surface::before {
-    display: none;
-  }
-}
-
 @media (forced-colors: active) {
   .korra-chat-composer__surface,
   .korra-chat-composer__surface:focus-within {
     box-shadow: none;
-  }
-
-  .korra-chat-composer__drop-overlay {
-    border-color: var(--neo-accent);
   }
 }

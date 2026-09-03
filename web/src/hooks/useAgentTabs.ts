@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import {
   buildAgentTabs,
+  MAIN_AGENT_TAB,
   sameAgentTabs,
   type AgentTabConfig,
 } from "@/lib/agent-tabs";
@@ -16,6 +17,8 @@ export interface UseAgentTabsReturn {
   /** Перечитать профили сейчас — например, при возврате на экран агентов
    *  после создания профиля. */
   refresh: () => Promise<void>;
+  /** Сохранить человекочитаемое имя и сразу обновить подпись вкладки. */
+  updateDisplayName: (profile: string, displayName: string) => Promise<void>;
 }
 
 /**
@@ -79,5 +82,26 @@ export function useAgentTabs(): UseAgentTabsReturn {
     };
   }, [refresh]);
 
-  return { tabs, refresh };
+  const updateDisplayName = useCallback(
+    async (profile: string, displayName: string): Promise<void> => {
+      const cleaned = displayName.trim();
+      await api.updateProfileDisplayName(profile || "default", cleaned);
+      if (!mountedRef.current) return;
+      setTabs((previous) =>
+        previous.map((tab) =>
+          tab.profile === profile
+            ? {
+                ...tab,
+                // Главный профиль не превращаем в технический `default`:
+                // его продуктовая подпись по-прежнему «Корра».
+                label: profile ? cleaned || profile : MAIN_AGENT_TAB.label,
+              }
+            : tab,
+        ),
+      );
+    },
+    [],
+  );
+
+  return { tabs, refresh, updateDisplayName };
 }

@@ -99,8 +99,20 @@ describe("BubbleChatComposer", () => {
     const controls = container.querySelector<HTMLElement>(
       ".korra-chat-composer__controls",
     )!;
-    expect(surface.dataset.expanded).toBe("false");
-    expect(controls.dataset.wide).toBe("false");
+    expect(textarea.rows).toBe(2);
+    expect(surface.contains(textarea)).toBe(true);
+    expect(surface.contains(controls)).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Диктовка — скоро"]',
+      )?.disabled,
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Диктовка — скоро"]',
+      )?.title,
+    ).toBe("Скоро");
+    expect(send.querySelector(".lucide-arrow-up")).not.toBeNull();
     expect(container.textContent).not.toContain(
       "Добавьте файлы скрепкой или перетащите сюда",
     );
@@ -115,7 +127,7 @@ describe("BubbleChatComposer", () => {
     expect(send.disabled).toBe(false);
   });
 
-  it("keeps the compact composer disabled without an active profile", async () => {
+  it("keeps the two-row composer disabled without an active profile", async () => {
     await render(<BubbleChatComposer onSend={vi.fn()} disabled />);
 
     const surface = container.querySelector<HTMLElement>(
@@ -137,7 +149,7 @@ describe("BubbleChatComposer", () => {
     ).toBe(true);
   });
 
-  it("moves the field to its own row when text wraps or has a newline", async () => {
+  it("always keeps the field above the controls", async () => {
     await render(<BubbleChatComposer onSend={vi.fn()} />);
     const textarea = container.querySelector("textarea")!;
     const controls = container.querySelector<HTMLElement>(
@@ -146,33 +158,16 @@ describe("BubbleChatComposer", () => {
     const surface = container.querySelector<HTMLElement>(
       ".korra-chat-composer__surface",
     )!;
-    const measure = container.querySelector<HTMLElement>(
-      ".korra-chat-composer__measure",
-    )!;
 
-    Object.defineProperty(controls, "clientWidth", {
-      configurable: true,
-      value: 280,
-    });
-    Object.defineProperty(measure, "scrollWidth", {
-      configurable: true,
-      value: 400,
-    });
+    expect(textarea.parentElement).toBe(surface);
+    expect(controls.parentElement).toBe(surface);
+    expect(
+      textarea.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
-    await enterText(textarea, "Строка, которая не помещается рядом с кнопками");
-    expect(controls.dataset.wide).toBe("true");
-    expect(surface.dataset.expanded).toBe("true");
-
-    Object.defineProperty(measure, "scrollWidth", {
-      configurable: true,
-      value: 40,
-    });
     await enterText(textarea, "Первая\nвторая");
-    expect(controls.dataset.wide).toBe("true");
-
-    await enterText(textarea, "Коротко");
-    expect(controls.dataset.wide).toBe("false");
-    expect(surface.dataset.expanded).toBe("false");
+    expect(textarea.rows).toBe(2);
+    expect(controls.dataset.attachments).toBe("true");
   });
 
   it("sends with Enter and leaves Shift+Enter for a new line", async () => {
@@ -201,7 +196,7 @@ describe("BubbleChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Проверь расчёт", []);
   });
 
-  it("grows smoothly to 160px, then scrolls, and can shrink again", async () => {
+  it("grows smoothly from 56px to 200px, then scrolls", async () => {
     await render(<BubbleChatComposer onSend={vi.fn()} />);
     const textarea = container.querySelector("textarea")!;
     let scrollHeight = 88;
@@ -216,12 +211,12 @@ describe("BubbleChatComposer", () => {
 
     scrollHeight = 240;
     await enterText(textarea, "Очень\nдлинный\nтекст\nна\nмного\nстрок\nниже");
-    expect(textarea.style.height).toBe("160px");
+    expect(textarea.style.height).toBe("200px");
     expect(textarea.style.overflowY).toBe("auto");
 
     scrollHeight = 40;
     await enterText(textarea, "Коротко");
-    expect(textarea.style.height).toBe("40px");
+    expect(textarea.style.height).toBe("56px");
     expect(textarea.style.overflowY).toBe("hidden");
   });
 
@@ -243,20 +238,19 @@ describe("BubbleChatComposer", () => {
     });
 
     expect(paste.defaultPrevented).toBe(true);
-    const list = container.querySelector('[role="list"]');
-    expect(list?.getAttribute("aria-label")).toBe("Прикреплённые файлы");
-    expect(list?.textContent).toContain("смета.txt");
-    expect(list?.textContent).toContain("TXT · 2 КБ");
+    const list = container.querySelector('[role="list"]')!;
+    expect(list.getAttribute("aria-label")).toBe("Прикреплённые файлы");
+    expect(list.textContent).toContain("смета.txt");
+    expect(list.textContent).toContain("TXT · 2 КБ");
 
     const remove = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Убрать смета.txt"]',
     )!;
     expect(remove.className).toBe("korra-chat-attachment-chip__action");
+    const controls = container.querySelector(".korra-chat-composer__controls")!;
     expect(
-      container.querySelector(".korra-chat-composer__surface")?.getAttribute(
-        "data-expanded",
-      ),
-    ).toBe("true");
+      list.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     await act(async () => remove.click());
     expect(container.querySelector('[role="listitem"]')).toBeNull();
   });

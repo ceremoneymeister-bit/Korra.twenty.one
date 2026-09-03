@@ -13,10 +13,30 @@
  * переключённая на середине ответа, потеряла бы ответ целиком.
  */
 
-import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
-import { useLocation, useSearchParams } from "react-router";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
+import { createPortal } from "react-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
+import {
+  Check,
+  MessageSquarePlus,
+  MoreVertical,
+  Pencil,
+  Settings,
+  X,
+} from "lucide-react";
+import { Toast } from "@nous-research/ui/ui/components/toast";
+import { useToast } from "@nous-research/ui/hooks/use-toast";
 
 import BubbleChatPage from "@/pages/BubbleChatPage";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import { MAIN_AGENT_TAB } from "@/lib/agent-tabs";
 import { useAgentTabs } from "@/hooks/useAgentTabs";
@@ -29,8 +49,22 @@ export default function AgentWorkbenchPage() {
   // Состав вкладок — реальные профили контура (см. lib/agent-tabs.ts):
   // главная «Корра» есть всегда, остальные приезжают из /api/profiles и
   // подхватываются без перезагрузки страницы.
-  const { tabs, refresh } = useAgentTabs();
+  const { tabs, refresh, updateDisplayName } = useAgentTabs();
   const [selectedId, setActiveId] = useState<string>(MAIN_AGENT_TAB.profile);
+  const [newChatByProfile, setNewChatByProfile] = useState<
+    Record<string, number>
+  >({});
+  const [openMenu, setOpenMenu] = useState<{
+    profile: string;
+    top: number;
+    right: number;
+  } | null>(null);
+  const [renamingProfile, setRenamingProfile] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const navigate = useNavigate();
+  const { toast, showToast } = useToast();
   // Профиль удалили, пока его вкладка была выбрана, — показываем главную,
   // иначе экран остался бы без единой панели. Производное значение, а не
   // эффект: лишний каскад рендеров тут ни к чему.
@@ -48,6 +82,40 @@ export default function AgentWorkbenchPage() {
   );
   const [searchParams, setSearchParams] = useSearchParams();
   const { pathname } = useLocation();
+
+  useEffect(() => {
+    if (!openMenu) return;
+    const closeFromOutside = (event: PointerEvent) => {
+      const target = event.target as Element;
+      if (
+        menuRef.current?.contains(target) ||
+        target.closest("[data-agent-tab-menu-trigger]")
+      ) {
+        return;
+      }
+      setOpenMenu(null);
+      setRenamingProfile(null);
+    };
+    const closeFromKeyboard = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpenMenu(null);
+      setRenamingProfile(null);
+    };
+    const closeFromViewport = () => {
+      setOpenMenu(null);
+      setRenamingProfile(null);
+    };
+    document.addEventListener("pointerdown", closeFromOutside);
+    document.addEventListener("keydown", closeFromKeyboard);
+    window.addEventListener("resize", closeFromViewport);
+    window.addEventListener("scroll", closeFromViewport, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromKeyboard);
+      window.removeEventListener("resize", closeFromViewport);
+      window.removeEventListener("scroll", closeFromViewport, true);
+    };
+  }, [openMenu]);
 
   // Экран смонтирован постоянно (см. App.tsx), поэтому возврат на него — это
   // не монтирование, а смена маршрута. Владелец создал профиль на соседнем
@@ -105,11 +173,68 @@ export default function AgentWorkbenchPage() {
     [],
   );
 
+  const toggleTabMenu = useCallback(
+    (event: MouseEvent<HTMLButtonElement>, profile: string) => {
+      event.stopPropagation();
+      if (openMenu?.profile === profile) {
+        setOpenMenu(null);
+        setRenamingProfile(null);
+        return;
+      }
+      const rect = event.currentTarget.getBoundingClientRect();
+      setOpenMenu({
+        profile,
+        top: rect.bottom + 8,
+        right: Math.max(12, window.innerWidth - rect.right),
+      });
+      setRenamingProfile(null);
+    },
+    [openMenu],
+  );
+
+  const startNewChat = useCallback((profile: string) => {
+    setActiveId(profile);
+    setNewChatByProfile((previous) => ({
+      ...previous,
+      [profile]: (previous[profile] ?? 0) + 1,
+    }));
+    setOpenMenu(null);
+    setRenamingProfile(null);
+  }, []);
+
+  const submitDisplayName = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const profile = renamingProfile;
+      const displayName = renameValue.trim();
+      if (profile === null || !displayName || savingName) return;
+      setSavingName(true);
+      try {
+        await updateDisplayName(profile, displayName);
+        setOpenMenu(null);
+        setRenamingProfile(null);
+      } catch (error) {
+        const isMissingEndpoint =
+          error instanceof Error && /^404(?:\s|:)/.test(error.message);
+        showToast(
+          isMissingEndpoint
+            ? "Переименование появится после обновления движка"
+            : ownerFacingError(error, "Не удалось переименовать агента."),
+          "error",
+        );
+      } finally {
+        setSavingName(false);
+      }
+    },
+    [renameValue, renamingProfile, savingName, showToast, updateDisplayName],
+  );
+
   // role="tablist" обещает управление стрелками — выполняем обещание, иначе
   // роль врёт скринридеру. Фокус ведём за активной вкладкой: панели всё равно
   // смонтированы, переключение бесплатно.
   const onTabKeyDown = useCallback(
     (event: KeyboardEvent) => {
+      if ((event.target as HTMLElement).getAttribute("role") !== "tab") return;
       const delta =
         event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
       if (delta === 0 || tabs.length === 0) return;
@@ -126,72 +251,161 @@ export default function AgentWorkbenchPage() {
     [activeId, tabs],
   );
 
+  const menuTab = openMenu
+    ? tabs.find((tab) => tab.profile === openMenu.profile)
+    : undefined;
+
   return (
     // Ту же полную высоту, что и у одиночного чата, даёт обёртка в App.tsx
     // (маршрут /agents получает `flex flex-1 flex-col` и `pb-0`).
     <div className="flex h-full min-h-0 flex-col">
       {/* Полоса вкладок тянется от края до края — отрицательные поля гасят
           горизонтальный padding обёртки, внутренние возвращают его тексту. */}
-      <div className="shrink-0 -mx-3 border-b border-border px-3 sm:-mx-6 sm:px-6">
+      <div className="shrink-0 -mx-3 px-3 py-2 sm:-mx-6 sm:px-6">
         <div
           role="tablist"
           aria-label="Агенты"
           onKeyDown={onTabKeyDown}
-          className="flex items-stretch gap-1 overflow-x-auto"
+          className="neo-tabs-list flex min-h-11 items-center gap-1 overflow-x-auto p-1"
         >
           {tabs.map((tab) => {
             const active = tab.profile === activeId;
             const streaming = streamingByProfile[tab.profile] === true;
             return (
-              <button
+              <div
                 key={tab.profile}
-                id={`agent-tab-${tab.profile}`}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                aria-controls={`agent-panel-${tab.profile}`}
-                tabIndex={active ? 0 : -1}
-                // Описание роли — подсказкой: на вкладке имя, не абзац.
-                title={tab.description}
-                // Точка на вкладке видна глазом, но не слышна: состояние
-                // проговариваем в имени кнопки.
-                aria-label={
-                  streaming ? `${tab.label} — агент отвечает` : undefined
-                }
-                onClick={() => setActiveId(tab.profile)}
-                className={cn(
-                  // 44 px по высоте и sentence case — канон продукта:
-                  // вкладка агента это имя человека за работой, а не
-                  // системный ярлык.
-                  "relative flex min-h-[44px] items-center gap-2 px-4 py-2.5",
-                  "font-sans text-[0.9375rem] leading-snug",
-                  "whitespace-nowrap cursor-pointer transition-colors",
-                  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground",
-                  active
-                    ? "font-semibold text-midground"
-                    : "text-text-secondary hover:text-text-primary",
-                )}
+                role="presentation"
+                className="relative flex shrink-0 items-center"
               >
-                {active && (
-                  <span
-                    aria-hidden
-                    className="absolute inset-x-0 bottom-0 h-px bg-midground"
-                    style={{ mixBlendMode: "plus-lighter" }}
-                  />
-                )}
-                <span>{tab.label}</span>
-                {streaming && (
-                  <span
-                    aria-hidden
-                    title="Агент отвечает"
-                    className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse"
-                  />
-                )}
-              </button>
+                <button
+                  id={`agent-tab-${tab.profile}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-controls={`agent-panel-${tab.profile}`}
+                  tabIndex={active ? 0 : -1}
+                  title={tab.description}
+                  aria-label={
+                    streaming ? `${tab.label} — агент отвечает` : undefined
+                  }
+                  data-active={active ? "true" : undefined}
+                  onClick={() => setActiveId(tab.profile)}
+                  className={cn(
+                    "neo-tab flex min-h-9 items-center gap-2 px-3 py-2",
+                    "font-sans text-[0.9375rem] leading-snug normal-case tracking-normal",
+                    "whitespace-nowrap cursor-pointer",
+                    active && "font-semibold",
+                  )}
+                >
+                  <span>{tab.label}</span>
+                  {streaming && (
+                    <span
+                      aria-hidden
+                      title="Агент отвечает"
+                      className="size-1.5 shrink-0 rounded-full bg-[var(--neo-accent)] animate-pulse"
+                    />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="neo-tab ml-0.5 flex size-8 items-center justify-center p-0"
+                  aria-label={`Меню агента «${tab.label}»`}
+                  aria-haspopup="menu"
+                  aria-expanded={openMenu?.profile === tab.profile}
+                  data-agent-tab-menu-trigger
+                  onClick={(event) => toggleTabMenu(event, tab.profile)}
+                >
+                  <MoreVertical size={17} aria-hidden />
+                </button>
+              </div>
             );
           })}
         </div>
       </div>
+
+      {openMenu && menuTab &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label={`Действия агента «${menuTab.label}»`}
+            className="neo-select-menu fixed z-50 min-w-[250px] p-1.5"
+            style={{ top: openMenu.top, right: openMenu.right }}
+          >
+            {renamingProfile === menuTab.profile ? (
+              <form onSubmit={submitDisplayName} className="flex items-center gap-1.5 p-1">
+                <label htmlFor={`agent-display-name-${menuTab.profile}`} className="sr-only">
+                  Новое имя агента «{menuTab.label}»
+                </label>
+                <input
+                  id={`agent-display-name-${menuTab.profile}`}
+                  autoFocus
+                  required
+                  value={renameValue}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  className="neo-field h-9 min-w-0 flex-1 px-3 font-sans text-sm normal-case tracking-normal"
+                />
+                <button
+                  type="submit"
+                  disabled={!renameValue.trim() || savingName}
+                  className="neo-tab flex size-9 items-center justify-center p-0"
+                  aria-label="Сохранить имя"
+                  title="Сохранить"
+                >
+                  <Check size={16} aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className="neo-tab flex size-9 items-center justify-center p-0"
+                  aria-label="Отменить переименование"
+                  title="Отменить"
+                  onClick={() => setRenamingProfile(null)}
+                >
+                  <X size={16} aria-hidden />
+                </button>
+              </form>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
+                  onClick={() => {
+                    setRenameValue(menuTab.label);
+                    setRenamingProfile(menuTab.profile);
+                  }}
+                >
+                  <Pencil size={15} aria-hidden />
+                  Переименовать
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
+                  onClick={() => {
+                    setOpenMenu(null);
+                    navigate("/profiles");
+                  }}
+                >
+                  <Settings size={15} aria-hidden />
+                  Открыть настройки профиля
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
+                  onClick={() => startNewChat(menuTab.profile)}
+                >
+                  <MessageSquarePlus size={15} aria-hidden />
+                  Новый чат
+                </button>
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
+
+      <Toast toast={toast} />
 
       <div className="flex min-h-0 flex-1 flex-col">
         {tabs.map((tab) => (
@@ -210,6 +424,7 @@ export default function AgentWorkbenchPage() {
               onStreamingChange={handleStreamingChange}
               draft={draftByProfile[tab.profile] ?? null}
               onDraftConsumed={() => clearDraft(tab.profile)}
+              newChatRequest={newChatByProfile[tab.profile] ?? 0}
             />
           </div>
         ))}

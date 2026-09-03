@@ -7,10 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentTabs, type UseAgentTabsReturn } from "./useAgentTabs";
 
 const getProfiles = vi.fn();
+const updateProfileDisplayName = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
     getProfiles: () => getProfiles(),
+    updateProfileDisplayName: (name: string, displayName: string) =>
+      updateProfileDisplayName(name, displayName),
   },
 }));
 
@@ -41,6 +44,11 @@ async function mount() {
 
 beforeEach(() => {
   getProfiles.mockReset();
+  updateProfileDisplayName.mockReset();
+  updateProfileDisplayName.mockResolvedValue({
+    ok: true,
+    display_name: "",
+  });
 });
 
 afterEach(async () => {
@@ -61,6 +69,45 @@ describe("useAgentTabs", () => {
     expect(current.tabs).toEqual([
       { profile: "", label: "Корра" },
       { profile: "raschet", label: "Расчётчик" },
+    ]);
+  });
+
+  it("берёт подпись из display_name, а без него оставляет name", async () => {
+    getProfiles.mockResolvedValue({
+      profiles: [
+        {
+          name: "analyst",
+          is_default: false,
+          display_name: "  Аналитик  ",
+        },
+        { name: "writer", is_default: false, display_name: "" },
+      ],
+    });
+    await mount();
+    await act(async () => {});
+
+    expect(current.tabs).toEqual([
+      { profile: "", label: "Корра" },
+      { profile: "analyst", label: "Аналитик" },
+      { profile: "writer", label: "writer" },
+    ]);
+  });
+
+  it("сохраняет display_name и обновляет подпись без перемонтирования вкладки", async () => {
+    getProfiles.mockResolvedValue({
+      profiles: [{ name: "writer", is_default: false }],
+    });
+    await mount();
+    await act(async () => {});
+
+    await act(async () => {
+      await current.updateDisplayName("writer", "  Редактор  ");
+    });
+
+    expect(updateProfileDisplayName).toHaveBeenCalledWith("writer", "Редактор");
+    expect(current.tabs).toEqual([
+      { profile: "", label: "Корра" },
+      { profile: "writer", label: "Редактор" },
     ]);
   });
 

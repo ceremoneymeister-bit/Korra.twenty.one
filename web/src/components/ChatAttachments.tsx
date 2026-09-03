@@ -95,7 +95,7 @@ export function AttachmentChip({
   return (
     <div
       role="listitem"
-      className="korra-chat-attachment-chip font-sans normal-case tracking-normal"
+      className="korra-chat-attachment-chip normal-case tracking-normal"
       data-status={item.status}
       title={failed ? item.error ?? item.name : item.name}
     >

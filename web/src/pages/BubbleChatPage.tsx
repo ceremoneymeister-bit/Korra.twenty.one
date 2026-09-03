@@ -18,7 +18,6 @@ import {
   useCallback,
   useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -26,7 +25,7 @@ import {
 import { useSearchParams } from "react-router";
 import {
   Plus,
-  Send,
+  ArrowUp,
   MessageSquare,
   MessageCircle,
   Terminal,
@@ -38,7 +37,7 @@ import {
   Check,
   Paperclip,
   RotateCcw,
-  LoaderCircle,
+  Mic,
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -65,6 +64,7 @@ import {
   type UploadedAttachment,
 } from "@/lib/chat-attachments";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { Button } from "@nous-research/ui/ui/components/button";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
@@ -322,20 +322,15 @@ function BubbleChatSidebar({
     // Only border-r separates the sidebar from the transcript area.
     <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-border">
       <div className="p-2 border-b border-border">
-        <button
+        <Button
           type="button"
           onClick={onNewChat}
-          className={cn(
-            "w-full min-h-[44px] flex items-center justify-center gap-2 px-3 py-2",
-            "rounded-lg border border-border bg-background",
-            "hover:opacity-90 active:opacity-100",
-            "font-sans text-sm",
-            "transition-opacity",
-          )}
+          outlined
+          prefix={<Plus size={16} aria-hidden />}
+          className="w-full"
         >
-          <Plus size={16} aria-hidden />
           <span>Новый чат</span>
-        </button>
+        </Button>
       </div>
       <nav
         aria-label="Список чатов"
@@ -462,10 +457,8 @@ function BubbleChatTranscript({
   // Autoscroll to the bottom whenever a new message is added or the last
   // message's content grows during streaming. We scroll the container
   // directly — scrollIntoView's "closest scrollable ancestor" search was
-  // unreliable in our flex layout. useLayoutEffect runs synchronously
-  // AFTER the DOM is updated but BEFORE the browser paints, so we always
-  // see the newest scrollHeight (no need for requestAnimationFrame, which
-  // additionally was flaky in headless Chromium during tests).
+  // unreliable in our flex layout. The effect sees the updated scrollHeight
+  // after React has committed the newest message to the DOM.
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastContentLen = messages[lastIdx]?.content.length ?? 0;
   useEffect(() => {
@@ -476,7 +469,7 @@ function BubbleChatTranscript({
 
   return (
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-4 py-4 space-y-3">
+      <div className="korra-chat-transcript__content max-w-3xl mx-auto px-4 pt-4 space-y-3">
         {messages.length === 0 ? (
           <div className="flex items-center justify-center min-h-[40vh]">
 <p className="text-base text-muted-foreground">
@@ -567,10 +560,8 @@ interface BubbleChatComposerProps {
   allowAttachments?: boolean;
 }
 
-const TEXTAREA_MIN_HEIGHT = 24;
-const TEXTAREA_MAX_HEIGHT = 160;
-const COMPOSER_CONTROL_SIZE = 32;
-const COMPOSER_COLUMN_GAP = 4;
+const TEXTAREA_MIN_HEIGHT = 56;
+const TEXTAREA_MAX_HEIGHT = 200;
 
 export function BubbleChatComposer({
   disabled,
@@ -588,10 +579,7 @@ export function BubbleChatComposer({
   const [dragging, setDragging] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [wide, setWide] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
-  const controlsRef = useRef<HTMLDivElement | null>(null);
-  const measureRef = useRef<HTMLSpanElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const abortsRef = useRef<Record<string, () => void>>({});
   const textareaId = useId();
@@ -723,44 +711,10 @@ export function BubbleChatComposer({
     el.style.overflowY = naturalHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
   }, []);
 
-  const updateComposerLayout = useCallback(() => {
-    const input = taRef.current;
-    const controls = controlsRef.current;
-    const measure = measureRef.current;
-    if (!input || !controls || !measure) return;
-
-    const fixedControlsWidth =
-      COMPOSER_CONTROL_SIZE +
-      (allowAttachments ? COMPOSER_CONTROL_SIZE : 0);
-    const gapCount = allowAttachments ? 2 : 1;
-    const inlineInputWidth =
-      controls.clientWidth -
-      fixedControlsWidth -
-      gapCount * COMPOSER_COLUMN_GAP;
-    const measuredTextWidth = measure.scrollWidth;
-    const needsFullWidth =
-      value.includes("\n") ||
-      input.scrollHeight > TEXTAREA_MIN_HEIGHT ||
-      (controls.clientWidth > 0 &&
-        measuredTextWidth + 8 > inlineInputWidth);
-
-    setWide((current) =>
-      current === needsFullWidth ? current : needsFullWidth,
-    );
-    resizeTextarea(input);
-  }, [allowAttachments, resizeTextarea, value]);
-
-  useLayoutEffect(() => {
-    updateComposerLayout();
-  }, [updateComposerLayout, wide]);
-
   useEffect(() => {
-    const controls = controlsRef.current;
-    if (!controls || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(updateComposerLayout);
-    observer.observe(controls);
-    return () => observer.disconnect();
-  }, [updateComposerLayout]);
+    const input = taRef.current;
+    if (input) resizeTextarea(input);
+  }, [resizeTextarea, value]);
 
   // «Изменить» на артефакте подставляет заготовку и отдаёт курсор владельцу:
   // отправлять за него нельзя — он ещё не сказал, что менять.
@@ -809,7 +763,7 @@ export function BubbleChatComposer({
     });
     setAttachments([]);
     setAttachError(null);
-    // Let React paint the empty value, then return to the compact row.
+    // Let React paint the empty value, then return to the resting height.
     requestAnimationFrame(() => {
       const el = taRef.current;
       if (el) resizeTextarea(el);
@@ -885,12 +839,12 @@ export function BubbleChatComposer({
       }
     >
       <div
-        className="korra-chat-composer__dropzone mx-auto max-w-3xl px-4"
+        className="korra-chat-composer__dropzone"
         data-dragging={dragging ? "true" : "false"}
       >
         <div className="korra-chat-composer__drop-overlay" aria-hidden="true">
           <Paperclip size={18} />
-          <span className="font-sans text-sm font-medium normal-case tracking-normal">
+          <span className="text-sm font-medium normal-case tracking-normal">
             Отпустите файлы, чтобы прикрепить
           </span>
         </div>
@@ -916,13 +870,46 @@ export function BubbleChatComposer({
           aria-busy={streaming || submitting || uploading}
           aria-describedby={shortcutId}
           data-state={composerState}
-          data-expanded={
-            wide || attachments.length > 0 || Boolean(attachError)
-              ? "true"
-              : "false"
-          }
           className="korra-chat-composer__surface overflow-hidden"
         >
+          <label htmlFor={textareaId} className="sr-only">
+            Сообщение Корре
+          </label>
+          <textarea
+            ref={taRef}
+            id={textareaId}
+            rows={2}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+            }}
+            onPaste={
+              allowAttachments
+                ? (e) => {
+                    const files = Array.from(e.clipboardData?.files ?? []);
+                    if (files.length) {
+                      e.preventDefault();
+                      addFiles(files);
+                    }
+                  }
+                : undefined
+            }
+            onKeyDown={(e) => {
+              if (
+                e.key === "Enter" &&
+                !e.shiftKey &&
+                !e.nativeEvent.isComposing
+              ) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="Напишите Корре…"
+            disabled={disabled || submitting}
+            className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent text-sm leading-6 normal-case tracking-normal"
+            aria-describedby={shortcutId}
+          />
+
           {attachments.length > 0 && (
             <div
               className="korra-chat-composer__attachments flex flex-wrap gap-1.5"
@@ -943,77 +930,43 @@ export function BubbleChatComposer({
           {attachError && (
             <p
               role="alert"
-              className="korra-chat-composer__error font-sans text-xs normal-case tracking-normal"
+              className="korra-chat-composer__error text-xs normal-case tracking-normal"
             >
               {attachError}
             </p>
           )}
 
           <div
-            ref={controlsRef}
             className="korra-chat-composer__controls"
-            data-wide={wide ? "true" : "false"}
             data-attachments={allowAttachments ? "true" : "false"}
           >
-            {allowAttachments && (
+            <div className="korra-chat-composer__left-controls">
+              {allowAttachments && (
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={
+                    disabled ||
+                    submitting ||
+                    attachments.length >= MAX_ATTACHMENTS
+                  }
+                  className="korra-chat-composer__control korra-chat-composer__attach"
+                  aria-label="Прикрепить файл"
+                  title="Прикрепить файл"
+                >
+                  <Plus size={20} strokeWidth={1.5} aria-hidden />
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={
-                  disabled || submitting || attachments.length >= MAX_ATTACHMENTS
-                }
-                className="korra-chat-composer__control korra-chat-composer__attach"
-                aria-label="Прикрепить файл"
-                title="Прикрепить файл"
+                disabled
+                className="korra-chat-composer__control korra-chat-composer__microphone"
+                aria-label="Диктовка — скоро"
+                title="Скоро"
               >
-                <Paperclip size={18} strokeWidth={1.5} aria-hidden />
+                <Mic size={18} strokeWidth={1.5} aria-hidden />
               </button>
-            )}
-
-            <label htmlFor={textareaId} className="sr-only">
-              Сообщение Корре
-            </label>
-            <textarea
-              ref={taRef}
-              id={textareaId}
-              rows={1}
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-              }}
-              onPaste={
-                allowAttachments
-                  ? (e) => {
-                      const files = Array.from(e.clipboardData?.files ?? []);
-                      if (files.length) {
-                        e.preventDefault();
-                        addFiles(files);
-                      }
-                    }
-                  : undefined
-              }
-              onKeyDown={(e) => {
-                if (
-                  e.key === "Enter" &&
-                  !e.shiftKey &&
-                  !e.nativeEvent.isComposing
-                ) {
-                  e.preventDefault();
-                  submit();
-                }
-              }}
-              placeholder="Напишите Корре…"
-              disabled={disabled || submitting}
-              className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent font-sans text-sm leading-6 normal-case tracking-normal"
-              aria-describedby={shortcutId}
-            />
-            <span
-              ref={measureRef}
-              className="korra-chat-composer__measure font-sans text-sm leading-6 normal-case tracking-normal"
-              aria-hidden="true"
-            >
-              {value}
-            </span>
+            </div>
 
             {streaming ? (
               <button
@@ -1044,16 +997,7 @@ export function BubbleChatComposer({
                 aria-label={submitting ? "Отправляется" : "Отправить"}
                 aria-busy={submitting}
               >
-                {submitting ? (
-                  <LoaderCircle
-                    size={18}
-                    strokeWidth={1.5}
-                    className="motion-safe:animate-spin"
-                    aria-hidden
-                  />
-                ) : (
-                  <Send size={18} strokeWidth={1.5} aria-hidden />
-                )}
+                <ArrowUp size={20} strokeWidth={2} aria-hidden />
               </button>
             )}
           </div>
@@ -1102,6 +1046,9 @@ export interface BubbleChatPageProps {
   /** Позвать, когда черновик доехал до поля: хозяин экрана гасит его у себя,
    *  иначе возврат на вкладку подставлял бы тот же текст поверх набранного. */
   onDraftConsumed?: () => void;
+  /** Счётчик команд «Новый чат» из вкладки агента. Изменение значения
+   *  сбрасывает только этот постоянно смонтированный экземпляр чата. */
+  newChatRequest?: number;
 }
 
 export default function BubbleChatPage({
@@ -1109,6 +1056,7 @@ export default function BubbleChatPage({
   onStreamingChange,
   draft: draftFromOwner,
   onDraftConsumed,
+  newChatRequest = 0,
 }: BubbleChatPageProps = {}) {
   // Live SSE state from useChatStream. Sends POST to /api/chat/completions
   // and streams response chunks back into messages[]. Tool progress events
@@ -1132,6 +1080,14 @@ export default function BubbleChatPage({
   // сводку», — и решение остаётся в истории разговора наравне со всем
   // остальным, переживая перезагрузку.
   const [prefill, setPrefill] = useState<string | null>(null);
+  const handledNewChatRequestRef = useRef(newChatRequest);
+
+  useEffect(() => {
+    if (handledNewChatRequestRef.current === newChatRequest) return;
+    handledNewChatRequestRef.current = newChatRequest;
+    reset();
+  }, [newChatRequest, reset]);
+
   const handleDecision = useCallback<ArtifactDecisionHandler>(
     async (kind, item) => {
       if (kind === "change") {
