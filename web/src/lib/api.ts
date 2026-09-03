@@ -30,6 +30,7 @@ import {
   attemptDashboardTokenReloadOnce,
   clearDashboardTokenReloadAttempt,
 } from "@/lib/dashboard-auth-reload";
+import { ownerFacingError } from "@/lib/owner-facing-error";
 
 // Ephemeral session token for protected endpoints.
 // Injected into index.html by the server — never fetched via API.
@@ -333,6 +334,113 @@ function appendProfileParam(url: string, profile?: string): string {
 function appendQueryParam(url: string, key: string, value?: string): string {
   if (!value) return url;
   return `${url}${url.includes("?") ? "&" : "?"}${key}=${encodeURIComponent(value)}`;
+}
+
+/* ── Диктовка: распознавание речи ─────────────────────────────────── */
+
+/** Приёмник читает base64 и держит потолок в 25 МБ уже раскодированного
+ *  звука (`_MAX_TRANSCRIPTION_UPLOAD_BYTES`, hermes_cli/web_server.py). */
+const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
+
+/** Ответ `POST /api/audio/transcribe` (`transcribe_audio_upload`). Тишина —
+ *  это `ok: true` с пустым `transcript`, а не ошибка. */
+export interface AudioTranscriptionResponse {
+  ok: boolean;
+  transcript: string;
+  provider?: string | null;
+}
+
+/** Отказы вида «провайдер речи на контуре не настроен».
+ *
+ *  Движок отвечает 400 с английским текстом от `tools/transcription_tools.py`:
+ *  общий «No STT provider available…», отказ незарегистрированного плагина
+ *  («no built-in, command, or plugin provider registered that name» — так
+ *  выглядит именно случай `stt.provider = deepgram` без плагина) или жалоба
+ *  на отсутствующий ключ. Владельцу все три означают одно и то же. */
+const STT_NOT_CONFIGURED =
+  /no stt provider available|no built-in, command, or plugin|not configured|api[\s_-]?key|unauthorized/i;
+
+const STT_NOT_CONFIGURED_MESSAGE =
+  "Распознавание речи не настроено: нужен ключ Deepgram в разделе «Ключи».";
+
+const AUDIO_TOO_LONG_MESSAGE = "Запись слишком длинная. Скажите короче и повторите.";
+
+function audioToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Не удалось прочитать запись с микрофона."));
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        resolve(result);
+      } else {
+        reject(new Error("Не удалось прочитать запись с микрофона."));
+      }
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Распознать запись с микрофона голосом профиля `profile`.
+ *
+ * Эндпоинт ждёт НЕ multipart, а JSON `{data_url, mime_type}`, где `data_url`
+ * — base64 (`data:audio/webm;codecs=opus;base64,…`); тот же контракт, что у
+ * загрузки картинки из буфера. Возвращает распознанный текст; пустая строка
+ * значит «речи не слышно» — сервер отвечает на тишину успехом.
+ *
+ * Ошибки прилетают человеку уже по-русски: `fetchJSON` для этого не годится,
+ * он прогоняет `detail` через `russianInterfaceText` и любой английский
+ * текст движка схлопывает в «Запрос содержит некорректные данные» — вместе с
+ * единственным признаком, по которому видно ненастроенный STT.
+ */
+export async function transcribeAudio(
+  blob: Blob,
+  mimeType?: string,
+  profile?: string,
+): Promise<string> {
+  if (blob.size === 0) {
+    throw new Error("Запись пустая — микрофон ничего не услышал.");
+  }
+  if (blob.size > MAX_TRANSCRIPTION_BYTES) {
+    throw new Error(AUDIO_TOO_LONG_MESSAGE);
+  }
+
+  const dataUrl = await audioToDataUrl(blob);
+  const res = await authedFetch(
+    appendProfileParam("/api/audio/transcribe", profile),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        data_url: dataUrl,
+        mime_type: mimeType || blob.type || undefined,
+      }),
+    },
+  );
+
+  if (!res.ok) {
+    const raw = await res.text().catch(() => res.statusText);
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: unknown };
+      if (typeof parsed.detail === "string") detail = parsed.detail;
+    } catch {
+      // Сервер ответил простым текстом — разбирать нечего.
+    }
+    if (STT_NOT_CONFIGURED.test(detail)) throw new Error(STT_NOT_CONFIGURED_MESSAGE);
+    if (res.status === 413) throw new Error(AUDIO_TOO_LONG_MESSAGE);
+    throw new Error(
+      ownerFacingError(
+        `${res.status}: ${detail}`,
+        "Не удалось распознать речь. Повторите попытку.",
+      ),
+    );
+  }
+
+  const payload = (await res.json()) as AudioTranscriptionResponse;
+  return typeof payload?.transcript === "string" ? payload.transcript : "";
 }
 
 export interface SessionQueryOptions {

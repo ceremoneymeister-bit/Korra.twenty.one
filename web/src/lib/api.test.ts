@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, fetchJSON, setManagementProfile } from "./api";
+import { api, fetchJSON, setManagementProfile, transcribeAudio } from "./api";
 
 const reloadMocks = vi.hoisted(() => ({
   attemptDashboardTokenReloadOnce: vi.fn(() => false),
@@ -230,5 +230,104 @@ describe("api OAuth helpers", () => {
       "/api/providers/oauth/anthropic/poll/oauth-session?profile=worker",
       "/api/providers/oauth/sessions/oauth-session?profile=worker",
     ]);
+  });
+});
+
+describe("transcribeAudio", () => {
+  const recording = () => new Blob(["звук"], { type: "audio/webm;codecs=opus" });
+
+  function transcribeFetchMock(body: unknown, status = 200) {
+    return vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify(body), {
+          headers: { "Content-Type": "application/json" },
+          status,
+        }),
+    );
+  }
+
+  it("шлёт base64 в JSON, а не multipart, и адресует запись профилю", async () => {
+    const fetchMock = transcribeFetchMock({ ok: true, transcript: "смета" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      transcribeAudio(recording(), "audio/webm;codecs=opus", "raschet"),
+    ).resolves.toBe("смета");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/audio/transcribe?profile=raschet");
+    expect(init?.method).toBe("POST");
+    const body = JSON.parse(String(init?.body)) as {
+      data_url: string;
+      mime_type: string;
+    };
+    expect(body.data_url.startsWith("data:audio/webm")).toBe(true);
+    expect(body.data_url).toContain(";base64,");
+    expect(body.mime_type).toBe("audio/webm;codecs=opus");
+  });
+
+  it("тишину отдаёт пустой строкой, а не отказом", async () => {
+    vi.stubGlobal(
+      "fetch",
+      transcribeFetchMock({ ok: true, transcript: "", provider: "deepgram" }),
+    );
+    await expect(transcribeAudio(recording())).resolves.toBe("");
+  });
+
+  it("ненастроенный STT переводит на человеческий и называет ключ", async () => {
+    vi.stubGlobal(
+      "fetch",
+      transcribeFetchMock(
+        {
+          detail:
+            "No STT provider available. Install faster-whisper for free local " +
+            "transcription, set GROQ_API_KEY for free Groq Whisper.",
+        },
+        400,
+      ),
+    );
+
+    await expect(transcribeAudio(recording())).rejects.toThrowError(
+      "Распознавание речи не настроено: нужен ключ Deepgram в разделе «Ключи».",
+    );
+  });
+
+  it("незарегистрированный плагин deepgram читается так же", async () => {
+    vi.stubGlobal(
+      "fetch",
+      transcribeFetchMock(
+        {
+          detail:
+            "stt.provider='deepgram' is set but no built-in, command, or plugin " +
+            "provider registered that name.",
+        },
+        400,
+      ),
+    );
+
+    await expect(transcribeAudio(recording())).rejects.toThrowError(
+      "Распознавание речи не настроено: нужен ключ Deepgram в разделе «Ключи».",
+    );
+  });
+
+  it("отказ движка не утекает английским текстом", async () => {
+    vi.stubGlobal(
+      "fetch",
+      transcribeFetchMock({ detail: "Transcription failed: boom" }, 500),
+    );
+
+    await expect(transcribeAudio(recording())).rejects.toThrowError(
+      "Сервис временно недоступен. Повторите через минуту.",
+    );
+  });
+
+  it("пустую запись до сервера не тащит", async () => {
+    const fetchMock = transcribeFetchMock({ ok: true, transcript: "" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      transcribeAudio(new Blob([], { type: "audio/webm" })),
+    ).rejects.toThrowError("Запись пустая — микрофон ничего не услышал.");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

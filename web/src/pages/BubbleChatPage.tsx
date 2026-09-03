@@ -40,6 +40,7 @@ import {
   Mic,
 } from "lucide-react";
 import type { ComponentType } from "react";
+import { ThinkingOrb } from "thinking-orbs";
 
 import { Markdown } from "@/components/Markdown";
 import { AgentTrace } from "@/components/chat/AgentTrace";
@@ -72,8 +73,10 @@ import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/lib/chat-types";
 import { api, type SessionInfo } from "@/lib/api";
 import { useChatStream } from "@/hooks/useChatStream";
+import { useDictation, type DictationState } from "@/hooks/useDictation";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
+import { useTheme } from "@/themes";
 import "./bubble-chat-composer.css";
 
 /* ------------------------------------------------------------------ */
@@ -582,6 +585,14 @@ interface BubbleChatComposerProps {
 const TEXTAREA_MIN_HEIGHT = 56;
 const TEXTAREA_MAX_HEIGHT = 200;
 
+/** Подписи кнопки-микрофона по состоянию диктовки. */
+const DICTATION_LABEL: Record<DictationState, string> = {
+  idle: "Надиктовать сообщение",
+  starting: "Включаю микрофон",
+  recording: "Остановить запись",
+  transcribing: "Распознаю речь",
+};
+
 export function BubbleChatComposer({
   disabled,
   streaming,
@@ -596,13 +607,16 @@ export function BubbleChatComposer({
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [attachError, setAttachError] = useState<string | null>(null);
+  // Одна строка отказа на весь композер: вложения и диктовка спорить за неё
+  // не могут — обе операции запускает владелец, по одной за раз.
+  const [composerError, setComposerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const abortsRef = useRef<Record<string, () => void>>({});
   const textareaId = useId();
   const shortcutId = useId();
+  const { themeName } = useTheme();
 
   const patch = useCallback((id: string, next: Partial<PendingAttachment>) => {
     setAttachments((list) =>
@@ -640,21 +654,21 @@ export function BubbleChatComposer({
     (files: FileList | File[]) => {
       const incoming = Array.from(files);
       if (incoming.length === 0) return;
-      setAttachError(null);
+      setComposerError(null);
 
       setAttachments((list) => {
         const room = MAX_ATTACHMENTS - list.length;
         if (room <= 0) {
-          setAttachError(`Не больше ${MAX_ATTACHMENTS} файлов в сообщении`);
+          setComposerError(`Не больше ${MAX_ATTACHMENTS} файлов в сообщении`);
           return list;
         }
         if (incoming.length > room) {
-          setAttachError(`Не больше ${MAX_ATTACHMENTS} файлов в сообщении`);
+          setComposerError(`Не больше ${MAX_ATTACHMENTS} файлов в сообщении`);
         }
         const accepted: PendingAttachment[] = [];
         for (const file of incoming.slice(0, room)) {
           if (file.size > MAX_ATTACHMENT_BYTES) {
-            setAttachError(`«${file.name}» больше 50 МБ`);
+            setComposerError(`«${file.name}» больше 50 МБ`);
             continue;
           }
           const kind = kindOf(file.name);
@@ -750,6 +764,55 @@ export function BubbleChatComposer({
     });
   }, [prefill, onPrefillConsumed, resizeTextarea]);
 
+  // Курсор в конец и фокус в поле — общий финал для подстановки текста
+  // извне: и «Изменить» на артефакте, и диктовка возвращают владельцу
+  // готовую к правке строку, а не готовую к отправке.
+  const focusEnd = useCallback(() => {
+    requestAnimationFrame(() => {
+      const el = taRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+      resizeTextarea(el);
+    });
+  }, [resizeTextarea]);
+
+  // Надиктованное дописывается к набранному, а не затирает его: владелец мог
+  // начать печатать и договорить голосом. Отправку не запускаем — решение
+  // «отправлять» остаётся нажатием.
+  const appendDictated = useCallback(
+    (text: string) => {
+      setValue((prev) =>
+        prev && !/\s$/.test(prev) ? `${prev} ${text}` : `${prev}${text}`,
+      );
+      setComposerError(null);
+      focusEnd();
+    },
+    [focusEnd],
+  );
+
+  // Тишина — не отказ: сервер отвечает успехом и пустой строкой, и владельцу
+  // честнее сказать «не расслышала», чем молча ничего не вставить.
+  const reportSilence = useCallback(
+    () => setComposerError("Ничего не расслышала. Попробуйте ещё раз."),
+    [],
+  );
+
+  const dictation = useDictation({
+    profile,
+    onText: appendDictated,
+    onError: setComposerError,
+    onEmpty: reportSilence,
+  });
+
+  // Пока идёт ответ агента или уходит сообщение, поле принадлежит не
+  // владельцу: недописанную запись бросаем, чтобы текст не прилетел в уже
+  // очищенное поле.
+  const cancelDictation = dictation.cancel;
+  useEffect(() => {
+    if (disabled || submitting) cancelDictation();
+  }, [cancelDictation, disabled, submitting]);
+
   const uploading = attachments.some((item) => item.status === "uploading");
   const failed = attachments.some((item) => item.status === "error");
   const ready = attachments.filter((item) => item.status === "ready");
@@ -783,7 +846,7 @@ export function BubbleChatComposer({
           if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
         });
         setAttachments([]);
-        setAttachError(null);
+        setComposerError(null);
         // Let React paint the empty value, then return to the resting height.
         requestAnimationFrame(() => {
           const el = taRef.current;
@@ -810,6 +873,14 @@ export function BubbleChatComposer({
     !uploading &&
     !failed &&
     Boolean(value.trim() || ready.length > 0);
+  const recording = dictation.state === "recording";
+  // «Включаю микрофон» и «Распознаю речь» — короткие ожидания, на них кнопка
+  // занята: второе нажатие в этот момент означало бы отмену, а отменять
+  // владелец собирался запись, которой уже нет.
+  const dictationBusy =
+    dictation.state === "starting" || dictation.state === "transcribing";
+  const micDisabled =
+    !dictation.supported || Boolean(disabled) || submitting || dictationBusy;
   const activity = streaming
     ? responding
       ? "Корра отвечает"
@@ -818,7 +889,11 @@ export function BubbleChatComposer({
       ? "Отправляется"
       : uploading
         ? "Файлы загружаются"
-        : "";
+        : recording
+          ? "Идёт запись"
+          : dictation.state === "transcribing"
+            ? "Распознаю речь"
+            : "";
   const composerState = streaming
     ? "streaming"
     : submitting
@@ -928,7 +1003,7 @@ export function BubbleChatComposer({
                 submit();
               }
             }}
-            placeholder="Напишите Корре…"
+            placeholder={recording ? "Слушаю…" : "Напишите Корре…"}
             disabled={disabled || submitting}
             className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent text-sm leading-6 normal-case tracking-normal"
             aria-describedby={shortcutId}
@@ -951,12 +1026,12 @@ export function BubbleChatComposer({
             </div>
           )}
 
-          {attachError && (
+          {composerError && (
             <p
               role="alert"
               className="korra-chat-composer__error text-xs normal-case tracking-normal"
             >
-              {attachError}
+              {composerError}
             </p>
           )}
 
@@ -983,12 +1058,35 @@ export function BubbleChatComposer({
               )}
               <button
                 type="button"
-                disabled
+                onClick={dictation.toggle}
+                disabled={micDisabled}
+                data-state={dictation.state}
+                aria-pressed={recording}
                 className="korra-chat-composer__control korra-chat-composer__microphone"
-                aria-label="Диктовка — скоро"
-                title="Скоро"
+                aria-label={
+                  dictation.supported
+                    ? DICTATION_LABEL[dictation.state]
+                    : "Диктовка недоступна"
+                }
+                title={
+                  dictation.supported
+                    ? DICTATION_LABEL[dictation.state]
+                    : (dictation.unavailableReason ?? "Диктовка недоступна")
+                }
               >
-                <Mic size={18} strokeWidth={1.5} aria-hidden />
+                {recording ? (
+                  <Square size={15} fill="currentColor" aria-hidden />
+                ) : dictationBusy ? (
+                  <ThinkingOrb
+                    state="working"
+                    size={20}
+                    speed={1.3}
+                    theme={themeName === "dark" ? "dark" : "light"}
+                    aria-label={DICTATION_LABEL[dictation.state]}
+                  />
+                ) : (
+                  <Mic size={18} strokeWidth={1.5} aria-hidden />
+                )}
               </button>
             </div>
 

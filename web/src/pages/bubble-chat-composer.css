@@ -162,6 +162,36 @@
   opacity: 0.62;
 }
 
+/* Диктовка. Кнопка держит иконку/орбиту над ореолом записи, поэтому
+   собственный слой: ореол — псевдоэлемент, ему нужен свой порядок. */
+.korra-chat-composer__microphone {
+  position: relative;
+  isolation: isolate;
+}
+
+.korra-chat-composer__microphone > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Запись — лаймовый круг с «стоп». */
+.korra-chat-composer__microphone[data-state='recording'] {
+  color: var(--neo-accent-foreground);
+  background: var(--neo-accent);
+  box-shadow: var(--neo-depth-1);
+}
+
+.korra-chat-composer__microphone[data-state='recording']:hover {
+  color: var(--neo-accent-foreground);
+}
+
+/* Ожидание микрофона и распознавание: кнопка занята, но орбиту внутри
+   гасить нельзя — она и есть ответ на вопрос «что сейчас происходит». */
+.korra-chat-composer__microphone:disabled[data-state='starting'],
+.korra-chat-composer__microphone:disabled[data-state='transcribing'] {
+  opacity: 1;
+}
+
 .korra-chat-composer__submit:disabled {
   color: var(--neo-text-secondary);
   background: var(--neo-surface);
@@ -292,6 +322,31 @@
 
   .korra-chat-composer__drop-overlay {
     transition: opacity var(--neo-duration-quick) var(--neo-ease-out);
+  }
+
+  /* Мягкий пульс на время записи. Ореол существует только здесь: при
+     отключённой анимации статичное лаймовое пятно поверх кнопки не
+     сообщало бы ничего — состояние и так читается цветом и иконкой. */
+  .korra-chat-composer__microphone[data-state='recording']::after {
+    content: '';
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    border-radius: inherit;
+    animation: korra-composer-mic-pulse 1.8s var(--neo-ease-out) infinite;
+    pointer-events: none;
+    background: var(--neo-accent);
+  }
+}
+
+@keyframes korra-composer-mic-pulse {
+  from {
+    opacity: 0.34;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.4);
   }
 }
 
