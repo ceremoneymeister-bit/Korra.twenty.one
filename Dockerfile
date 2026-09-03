@@ -172,6 +172,16 @@ RUN useradd -u 10000 -m -d /opt/data hermes
 # (tools/approval.py:_check_sudo_stdin_guard) не срабатывает.
 #
 # Выключается на загрузке через KORRA_AGENT_SUDO=0 — см. docker/stage2-hook.sh.
+#
+# ЧЕМ ЗА ЭТО ПЛАТИМ. NOPASSWD sudo обнуляет инвариант неизменяемого
+# /opt/hermes: дерево установки root-owned и не пишется агентом именно
+# затем, чтобы сессия не могла переписать сам движок, venv или узел
+# гейта и окирпичить контур. С sudo агент может сделать chown или
+# переписать что угодно там, и никакой рантайм-страж этого не остановит.
+# Инвариант держится теперь не правами, а тем, что агенту незачем туда
+# лезть. Это осознанное решение владельца для его собственного контура,
+# где он и есть тот, кто администрирует сервер из панели.
+# Для клиентских контуров дефолт другой: KORRA_AGENT_SUDO=0.
 RUN printf '%s\n' \
     'Defaults:hermes secure_path="/opt/hermes/bin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
     'hermes ALL=(ALL:ALL) NOPASSWD: ALL' \
@@ -511,6 +521,22 @@ RUN ln -sf hermes /opt/hermes/bin/korra
 ENV PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:${PATH}"
 RUN mkdir -p /opt/data
 VOLUME [ "/opt/data" ]
+
+# ---------- Дельта Korra 21: эталон suid/sgid ----------
+# Выключатель KORRA_AGENT_SUDO=0 (docker/stage2-hook.sh) снимает suid и sgid
+# со всего, чего нет в этом эталоне. Эталон снимается здесь, с чистого
+# образа, а не задаётся списком имён: список имён приходится угадывать, и
+# замер на реальном образе это подтвердил — кроме очевидных sudo/su/mount
+# бит штатно стоит на unix_chkpwd (проверка паролей через PAM),
+# s6-overlay-suexec (узел дерева супервизии s6) и sgid-бинарях shadow и ssh.
+# Слепой список имён снял бы их и окирпичил контейнер вместо понижения прав.
+#
+# Снимается последним шагом, чтобы попали все слои, включая пакеты, которые
+# доставляют соседние блоки этого файла.
+RUN find / -xdev -type f -perm /6000 -perm /0111 2>/dev/null | sort \
+    > /opt/hermes/.suid-baseline && \
+    chmod 0444 /opt/hermes/.suid-baseline && \
+    wc -l < /opt/hermes/.suid-baseline
 
 # The image ENTRYPOINT is a tiny dispatcher rather than `/init` directly.
 # When the image really owns PID 1 (normal Docker / Podman), the dispatcher

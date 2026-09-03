@@ -125,12 +125,98 @@ fi
 # Правило удаляется, а не переписывается: половинчатый sudoers (например
 # только чтение журналов) даёт ложное чувство ограничения — почти любая
 # разрешённая команда на этом образе доводится до полного root.
+#
+# ГРАНИЦЫ ЭТОГО ВЫКЛЮЧАТЕЛЯ. Слой контейнера переживает `docker restart`, а
+# агент, у которого root был на прошлой загрузке, мог оставить себе задел:
+# положить своё правило в /etc/sudoers.d под любым именем, дописать строку в
+# /etc/sudoers, повесить suid на свой бинарь. Поэтому выключатель снимает все
+# три следа, а не только наш файл.
+#
+# Но ГАРАНТИЮ ДАЁТ ТОЛЬКО ПЕРЕСОЗДАНИЕ КОНТЕЙНЕРА с чистым слоем. Следы
+# бывают и вне этих трёх мест: правка /etc/passwd или /etc/group, дописанный
+# профильный скрипт или хук, файловые capabilities (setcap, они не suid),
+# подменённый бинарь на PATH, задел на смонтированном томе — по томам обход
+# сознательно не идёт, см. -xdev ниже. Если контур переводят на наименьшие
+# права всерьёз, это `docker rm` и запуск заново, а не рестарт.
+korra_revoke_agent_sudo() {
+    _agent_user=hermes
+    # uid и gid берём ПОСЛЕ remap выше: на контуре с HERMES_UID мы иначе
+    # искали бы правила не того пользователя.
+    _agent_uid="$(id -u "$_agent_user" 2>/dev/null || echo 10000)"
+    _agent_gid="$(id -g "$_agent_user" 2>/dev/null || echo 10000)"
+
+    # Упоминанием пользователя движка считаем все формы, которыми sudoers
+    # умеет его назвать: имя, #uid, %группа, %#gid. Слева и справа требуем
+    # не-путевой символ, иначе `/opt/hermes/bin` в secure_path чужого правила
+    # выглядел бы как упоминание пользователя и файл снесло бы напрасно.
+    _agent_re="(^|[^/[:alnum:]_-])(${_agent_user}|#${_agent_uid}|%${_agent_user}|%#${_agent_gid})([^/[:alnum:]_-]|$)"
+
+    # 1. Drop-in файлы. Удаляем целиком любой, который упоминает пользователя
+    #    движка, а не только наш 010-korra-agent: имя файла агент выбирает
+    #    сам. Целиком, а не построчно, потому что право могло быть выражено
+    #    через User_Alias — вырезание одной строки оставило бы алиас живым.
+    if [ -d /etc/sudoers.d ]; then
+        for _f in /etc/sudoers.d/*; do
+            [ -f "$_f" ] || continue
+            if grep -Eq "$_agent_re" "$_f" 2>/dev/null; then
+                echo "[stage2] KORRA_AGENT_SUDO=0 — removing sudoers drop-in $_f"
+                rm -f "$_f"
+            fi
+        done
+    fi
+
+    # 2. /etc/sudoers. Файл общий, поэтому вырезаем строки, а не файл.
+    #    Результат обязательно проверяем visudo: сломанный sudoers лишает
+    #    прав не только агента, но и оператора, и чинить это будет уже нечем.
+    #    Запись через `cat >` в тот же inode — права и владелец сохраняются.
+    if [ -f /etc/sudoers ] && grep -Eq "$_agent_re" /etc/sudoers 2>/dev/null; then
+        grep -Ev "$_agent_re" /etc/sudoers > /etc/sudoers.korra-new 2>/dev/null || true
+        chmod 0440 /etc/sudoers.korra-new 2>/dev/null || true
+        if visudo -c -f /etc/sudoers.korra-new >/dev/null 2>&1; then
+            cat /etc/sudoers.korra-new > /etc/sudoers
+            echo "[stage2] KORRA_AGENT_SUDO=0 — stripped ${_agent_user} rules from /etc/sudoers"
+        else
+            echo "[stage2] Warning: /etc/sudoers without ${_agent_user} rules fails visudo — left unchanged"
+        fi
+        rm -f /etc/sudoers.korra-new
+    fi
+
+    # 3. suid/sgid вне эталона образа. Эталон снят на сборке с чистого образа
+    #    (см. /opt/hermes/.suid-baseline в Dockerfile), а не задан списком
+    #    имён: список имён приходится угадывать, и замер это подтвердил —
+    #    помимо очевидных sudo/su/mount suid и sgid штатно стоят на
+    #    unix_chkpwd (проверка паролей через PAM), s6-overlay-suexec (узел
+    #    дерева супервизии s6) и sgid-бинарях shadow/ssh. Снять их значит
+    #    окирпичить контейнер, а не понизить права агента.
+    #
+    #    Список имён остался вторым рубежом на случай образа без эталона:
+    #    старый образ и откат не должны превращать выключатель в поломку.
+    #
+    #    -xdev держит обход в слое контейнера: смонтированные тома это данные
+    #    клиента, ходить по ним и менять там права не наше дело — и именно
+    #    поэтому задел, оставленный на томе, выключатель переживёт.
+    _keep="sudo su passwd mount umount chsh chfn newgrp gpasswd ssh-keysign"
+    _keep="$_keep unix_chkpwd s6-overlay-suexec chage expiry ssh-agent"
+    _baseline=/opt/hermes/.suid-baseline
+    find / -xdev -type f -user root -perm /6000 -perm /0111 2>/dev/null | \
+    while IFS= read -r _p; do
+        if [ -f "$_baseline" ] && grep -Fxq "$_p" "$_baseline" 2>/dev/null; then
+            continue
+        fi
+        _b="${_p##*/}"
+        for _k in $_keep; do
+            [ "$_b" = "$_k" ] && continue 2
+        done
+        echo "[stage2] KORRA_AGENT_SUDO=0 — stripping suid/sgid from $_p"
+        chmod -s "$_p" 2>/dev/null || true
+    done || true
+}
+
 case "${KORRA_AGENT_SUDO:-1}" in
     0|false|FALSE|False|no|NO|No|off|OFF|Off)
-        if [ -f /etc/sudoers.d/010-korra-agent ]; then
-            echo "[stage2] KORRA_AGENT_SUDO=${KORRA_AGENT_SUDO} — removing passwordless sudo for hermes"
-            rm -f /etc/sudoers.d/010-korra-agent
-        fi
+        echo "[stage2] KORRA_AGENT_SUDO=${KORRA_AGENT_SUDO} — revoking agent root inside the container"
+        korra_revoke_agent_sudo
+        echo "[stage2] KORRA_AGENT_SUDO=0 — done; only recreating the container guarantees a clean layer"
         ;;
 esac
 
