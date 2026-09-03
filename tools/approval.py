@@ -272,11 +272,30 @@ def _is_cron_approval_context() -> bool:
 #: (default deny), mirroring ``approvals.cron_mode`` — never by an
 #: interactive round-trip that would block for the full approval timeout
 #: with nobody to answer (#37284, #87509).
+#:
+#: Членство в этом множестве — не приговор: сессия считается unattended, пока
+#: её слушатель не заявил маршрут ответа (``attended=True`` при регистрации).
+#: См. ``_is_unattended_platform_approval_context``.
 _UNATTENDED_APPROVAL_PLATFORMS = frozenset({
     "webhook",
     "msgraph_webhook",
     "api_server",
 })
+
+
+def _has_attended_approval_surface() -> bool:
+    """True, когда слушатель этой сессии заявил замкнутый круг вопрос→ответ.
+
+    Намеренно НЕ «есть ли вообще слушатель»: его регистрирует любой ход шлюза
+    (``gateway/run.py``), включая webhook, где спросить человека нечем. Признак
+    ставит сам регистратор через ``register_gateway_notify(..., attended=True)``
+    и только если предъявляет оба конца — доставку вопроса и маршрут ответа.
+    """
+    session_key = get_current_session_key(default="")
+    if not session_key:
+        return False
+    with _lock:
+        return session_key in _attended_approval_sessions
 
 
 def _is_unattended_platform_approval_context() -> bool:
@@ -287,8 +306,22 @@ def _is_unattended_platform_approval_context() -> bool:
     who can resolve a pending approval. Treating them as gateway approval
     contexts blocks the session for the full approval timeout (60-300s) and
     then fails closed anyway — the deadlock in #37284/#87509.
+
+    «Без человека» — это про отсутствие канала ответа, а не про имя платформы.
+    Один и тот же ``api_server`` обслуживает и webhook-подобный вызов без
+    единого зрителя, и живой чат панели, где владелец смотрит на ход прямо
+    сейчас. Поэтому решает не имя платформы, а предъявленный маршрут ответа:
+    слушатель, зарегистрированный с ``attended=True``, — сессия идёт штатным
+    путём (allowlist → smart → запрос решения). Нет такого слушателя —
+    прежнее поведение по ``unattended_mode``.
+
+    Без этой развилки ``check_execute_code_guard`` (он проверяет unattended
+    РАНЬШЕ allowlist и smart) отвечал BLOCKED на любой ``execute_code`` в чате
+    панели — вплоть до ``print(1)``, — хотя спросить владельца было можно.
     """
-    return _get_session_platform() in _UNATTENDED_APPROVAL_PLATFORMS
+    if _get_session_platform() not in _UNATTENDED_APPROVAL_PLATFORMS:
+        return False
+    return not _has_attended_approval_surface()
 
 
 def _is_single_query_approval_context() -> bool:
@@ -2835,18 +2868,37 @@ class _ApprovalEntry:
 
 _gateway_queues: dict[str, list] = {}        # session_key → [_ApprovalEntry, …]
 _gateway_notify_cbs: dict[str, object] = {}  # session_key → callable(approval_data)
+#: Сессии, чей слушатель ЗАЯВИЛ, что вопрос дойдёт до человека и ответ вернётся.
+#: Отдельно от ``_gateway_notify_cbs``, потому что слушателя регистрируют все
+#: ходы шлюза подряд (``gateway/run.py``) — в том числе webhook, где показать
+#: карточку и принять ``/approve`` физически нечем. Читает это множество только
+#: ``_is_unattended_platform_approval_context``.
+_attended_approval_sessions: set[str] = set()
 
 
-def register_gateway_notify(session_key: str, cb) -> None:
+def register_gateway_notify(session_key: str, cb, *, attended: bool = False) -> None:
     """Register a per-session callback for sending approval requests to the user.
 
     The callback signature is ``cb(approval_data: dict) -> None`` where
     *approval_data* contains ``command``, ``description``, and
     ``pattern_keys``.  The callback bridges sync→async (runs in the agent
     thread, must schedule the actual send on the event loop).
+
+    *attended* объявляет, что у этой сессии есть замкнутый круг: вопрос
+    доедет до человека И его ответ вернётся обратно. Флаг существует потому,
+    что сам факт регистрации слушателя этого не доказывает — его ставит любой
+    ход шлюза, включая программные поверхности из
+    ``_UNATTENDED_APPROVAL_PLATFORMS``. Ставить ``True`` вправе только тот,
+    кто предъявляет и доставку, и маршрут ответа (чат панели: событие
+    ``hermes.approval.request`` плюс ``POST /api/sessions/{id}/approval``).
+    По умолчанию ``False`` — прежнее поведение для всех остальных.
     """
     with _lock:
         _gateway_notify_cbs[session_key] = cb
+        if attended:
+            _attended_approval_sessions.add(session_key)
+        else:
+            _attended_approval_sessions.discard(session_key)
 
 
 def unregister_gateway_notify(session_key: str) -> None:
@@ -2857,6 +2909,7 @@ def unregister_gateway_notify(session_key: str) -> None:
     """
     with _lock:
         _gateway_notify_cbs.pop(session_key, None)
+        _attended_approval_sessions.discard(session_key)
         entries = _gateway_queues.pop(session_key, [])
     for entry in entries:
         entry.event.set()

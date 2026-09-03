@@ -5446,7 +5446,16 @@ class APIServerAdapter(BasePlatformAdapter):
                 # `pending_approval` и ход виснет: спросить некого. Слушатель
                 # превращает её в карточку в браузере и блокирует поток агента
                 # ровно так же, как на мессенджерах.
-                register_gateway_notify(approval_session_key, _on_approval_request)
+                #
+                # `attended=True` — заявка на замкнутый круг, и панель предъявляет
+                # оба его конца: вопрос уходит событием в этот самый поток SSE,
+                # ответ приходит на `/api/sessions/{id}/approval` ниже. Только
+                # поэтому платформа `api_server` перестаёт считаться «без
+                # человека»: иначе `check_execute_code_guard` отвечал бы BLOCKED
+                # на любой execute_code до того, как посмотрит в allowlist.
+                register_gateway_notify(
+                    approval_session_key, _on_approval_request, attended=True
+                )
                 self._chat_approval_sessions[session_id or ""] = approval_session_key
 
             # Start agent in background.  agent_ref is a mutable container

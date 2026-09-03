@@ -14,6 +14,7 @@
 """
 
 import json
+import threading
 
 import pytest
 from aiohttp import web
@@ -67,6 +68,8 @@ def _clean_approval_queues():
     with approval_mod._lock:
         approval_mod._gateway_queues.clear()
         approval_mod._gateway_notify_cbs.clear()
+        approval_mod._attended_approval_sessions.clear()
+        approval_mod._session_approved.clear()
 
 
 def _sse_payloads(body: str, event_name: str) -> list[dict]:
@@ -351,3 +354,167 @@ class TestSessionApprovalEndpoints:
                 headers={"Authorization": "Bearer sk-secret-key-for-tests-32-chars"},
             )
             assert ok.status == 200
+
+
+class TestPanelIsAttendedForExecuteCode:
+    """Чат панели перестаёт считаться платформой «без человека».
+
+    ``check_execute_code_guard`` проверяет unattended-ветку РАНЬШЕ allowlist и
+    smart-одобрения, поэтому при дефолтном ``approvals.unattended_mode: deny``
+    любой ``execute_code`` на платформе ``api_server`` возвращал BLOCKED —
+    вплоть до ``print(1)``. Спросить владельца было можно: он смотрит на ход
+    прямо сейчас. Признак «есть кому ответить» заявляет сам регистратор
+    слушателя, и только тот, кто предъявляет оба конца круга.
+    """
+
+    SESSION = "s-panel"
+    CODE = "print(1)"
+
+    @pytest.fixture
+    def panel_session(self, monkeypatch):
+        """Ход панельного чата: платформа api_server, не CLI, без ask-режима."""
+        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "api_server")
+        # Ask-режим намеренно снят: ветка обязана открыться самим признаком
+        # attended, а не побочным HERMES_EXEC_ASK от процесса шлюза.
+        monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
+        monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
+        # Ручной режим: вердикт вспомогательной модели здесь не проверяется и
+        # сделал бы тест зависимым от сети.
+        monkeypatch.setattr(approval_mod, "_get_approval_mode", lambda: "manual")
+        token = approval_mod.set_current_session_key(self.SESSION)
+        interactive = approval_mod.set_hermes_interactive_context(False)
+        try:
+            yield
+        finally:
+            approval_mod.reset_hermes_interactive_context(interactive)
+            approval_mod.reset_current_session_key(token)
+
+    def _guard_in_thread(self, call):
+        """Прогнать страж в отдельном потоке: он блокируется до ответа."""
+        out: dict = {}
+
+        def _run():
+            token = approval_mod.set_current_session_key(self.SESSION)
+            interactive = approval_mod.set_hermes_interactive_context(False)
+            try:
+                out["result"] = call()
+            finally:
+                approval_mod.reset_hermes_interactive_context(interactive)
+                approval_mod.reset_current_session_key(token)
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        return thread, out
+
+    def test_execute_code_without_a_listener_still_denies(self, panel_session):
+        """Настоящий вызов без человека ведёт себя как раньше."""
+        assert approval_mod._is_unattended_platform_approval_context() is True
+        result = approval_mod.check_execute_code_guard(self.CODE, "local")
+        assert result["approved"] is False
+        assert "unattended platform" in result["message"]
+
+    def test_plain_gateway_listener_does_not_claim_a_human(self, panel_session):
+        """Слушателя вешает КАЖДЫЙ ход шлюза, в том числе webhook.
+
+        Если бы признаком служило само наличие ``_gateway_notify_cbs``, webhook
+        начал бы блокироваться на 300 секунд в ожидании ответа, которого некому
+        дать, — ровно тот тупик, ради которого ветка unattended и появилась.
+        """
+        approval_mod.register_gateway_notify(self.SESSION, lambda _data: None)
+        assert approval_mod._is_unattended_platform_approval_context() is True
+        assert approval_mod.check_execute_code_guard(self.CODE, "local")["approved"] is False
+
+    def test_attended_listener_asks_the_owner_and_the_answer_unblocks_the_turn(
+        self, panel_session
+    ):
+        asked = threading.Event()
+        seen: list[dict] = []
+
+        def _notify(data):
+            seen.append(data)
+            asked.set()
+
+        approval_mod.register_gateway_notify(self.SESSION, _notify, attended=True)
+        assert approval_mod._is_unattended_platform_approval_context() is False
+
+        thread, out = self._guard_in_thread(
+            lambda: approval_mod.check_execute_code_guard(self.CODE, "local")
+        )
+        assert asked.wait(timeout=10), "страж не спросил владельца"
+        assert seen[0]["pattern_key"] == "execute_code"
+
+        assert approval_mod.resolve_gateway_approval(self.SESSION, "once") == 1
+        thread.join(timeout=10)
+        assert out["result"]["approved"] is True
+        assert out["result"]["user_approved"] is True
+
+    def test_denial_from_the_card_blocks_the_script(self, panel_session):
+        asked = threading.Event()
+        approval_mod.register_gateway_notify(
+            self.SESSION, lambda _d: asked.set(), attended=True
+        )
+        thread, out = self._guard_in_thread(
+            lambda: approval_mod.check_execute_code_guard(self.CODE, "local")
+        )
+        assert asked.wait(timeout=10)
+        approval_mod.resolve_gateway_approval(self.SESSION, "deny")
+        thread.join(timeout=10)
+        assert out["result"]["approved"] is False
+        assert out["result"]["outcome"] == "denied"
+
+    def test_session_allowlist_is_reachable_at_last(self, panel_session):
+        """Раньше ветка unattended срабатывала РАНЬШЕ allowlist.
+
+        Значит «Разрешить до конца чата» записывалось, но никогда не читалось:
+        владельца спрашивали бы снова и снова. Теперь ответ действительно
+        держится всю сессию.
+        """
+        approval_mod.register_gateway_notify(
+            self.SESSION, lambda _d: pytest.fail("повторный вопрос после разрешения"),
+            attended=True,
+        )
+        approval_mod.approve_session(self.SESSION, "execute_code")
+        result = approval_mod.check_execute_code_guard(self.CODE, "local")
+        assert result["approved"] is True
+
+    def test_dangerous_terminal_command_also_reaches_the_card(self, panel_session):
+        """Тот же признак открывает штатный путь и опасным terminal-командам."""
+        asked = threading.Event()
+        seen: list[dict] = []
+
+        def _notify(data):
+            seen.append(data)
+            asked.set()
+
+        approval_mod.register_gateway_notify(self.SESSION, _notify, attended=True)
+        thread, out = self._guard_in_thread(
+            lambda: approval_mod.check_all_command_guards(
+                "chmod 777 /tmp/korra-approval-probe", "local"
+            )
+        )
+        assert asked.wait(timeout=10), "опасная команда не дошла до карточки"
+        assert seen[0]["command"] == "chmod 777 /tmp/korra-approval-probe"
+        assert approval_mod.resolve_gateway_approval(self.SESSION, "once") == 1
+        thread.join(timeout=10)
+        assert out["result"]["approved"] is True
+
+    def test_unregister_drops_the_attended_claim(self, panel_session):
+        """Ход кончился — признак снимается вместе со слушателем."""
+        approval_mod.register_gateway_notify(
+            self.SESSION, lambda _d: None, attended=True
+        )
+        assert approval_mod._is_unattended_platform_approval_context() is False
+        approval_mod.unregister_gateway_notify(self.SESSION)
+        assert approval_mod._is_unattended_platform_approval_context() is True
+
+    def test_webhook_is_never_attended_by_a_panel_claim(self, panel_session, monkeypatch):
+        """Признак привязан к сессии, а не глобален: webhook остаётся закрытым."""
+        approval_mod.register_gateway_notify(
+            self.SESSION, lambda _d: None, attended=True
+        )
+        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
+        other = approval_mod.set_current_session_key("s-webhook")
+        try:
+            assert approval_mod._is_unattended_platform_approval_context() is True
+        finally:
+            approval_mod.reset_current_session_key(other)
