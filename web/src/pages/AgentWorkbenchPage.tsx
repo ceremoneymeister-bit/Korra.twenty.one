@@ -331,11 +331,11 @@ export default function AgentWorkbenchPage() {
           role="tablist"
           aria-label="Агенты"
           onKeyDown={onTabKeyDown}
-          className="neo-tabs-list flex min-h-16 flex-wrap items-center gap-2 overflow-visible p-3"
+          className="neo-tabs-list flex min-h-14 items-center gap-2 p-2"
         >
           <div
             role="presentation"
-            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1.5 py-1.5"
           >
             {tabs.map((tab) => {
               const active = tab.profile === activeId;
