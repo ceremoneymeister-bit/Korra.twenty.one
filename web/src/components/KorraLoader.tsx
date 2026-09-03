@@ -58,12 +58,14 @@ export function KorraLoader({
       aria-live="polite"
       aria-busy="true"
     >
+      {/* У библиотеки два размера — 64 и 20; для экрана 64 мелковат, растим холст. */}
       <ThinkingOrb
         state="working"
         size={size}
         speed={1.4}
         theme={themeName === "dark" ? "dark" : "light"}
         aria-label={label}
+        style={size === 64 ? { transform: "scale(1.75)", margin: "1.5rem" } : undefined}
       />
       {showLabel ? (
         <span className="text-sm text-[var(--neo-text-secondary)]">{label}</span>

@@ -130,7 +130,7 @@ import { russianInterfaceText } from "@/lib/russian-interface-text";
 function RouteFallback({ label = "Загрузка…" }: { label?: string }) {
   return (
     <div
-      className="flex min-h-[12rem] flex-1 items-center justify-center"
+      className="flex min-h-[70vh] flex-1 items-center justify-center"
       aria-busy="true"
       aria-live="polite"
     >
