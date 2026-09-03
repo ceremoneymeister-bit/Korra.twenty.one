@@ -2,8 +2,10 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { ToolEntry } from "@/components/ToolCall";
 import type {
   ChatMessage,
+  SessionMessageReasoning,
   SSEToolProgressData,
 } from "@/lib/chat-types";
+import { previewArguments, previewToolResult } from "@/components/chat/tool-labels";
 import { api, withBasePath, type SessionMessage } from "@/lib/api";
 import { splitSSEBuffer } from "@/lib/sse-parser";
 import { toDisplay, type UploadedAttachment } from "@/lib/chat-attachments";
@@ -160,20 +162,32 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         (t) => t.id === action.toolData.toolCallId
       );
       const now = Date.now();
+      const status = mapStatus(action.toolData.status);
       if (idx === -1) {
         const newEntry: ToolEntry = {
           kind: "tool",
           id: action.toolData.toolCallId,
           tool_id: action.toolData.tool,
           name: action.toolData.tool,
-          status: mapStatus(action.toolData.status),
+          status,
           startedAt: now,
+          // Единственное описание вызова, которое сервер вообще присылает:
+          // `label` = build_tool_preview(имя, аргументы) — команда, путь или
+          // запрос человеческим текстом. Раньше поле молча терялось, и в
+          // ленте оставалось голое имя инструмента.
+          ...(action.toolData.label ? { context: action.toolData.label } : {}),
         };
         last.toolCalls = [...existing, newEntry];
       } else {
+        // Событие «completed» приходит без label — берём его из записи о
+        // старте, иначе чип с аргументом гас в момент завершения вызова.
         const updated: ToolEntry = {
           ...existing[idx],
-          status: mapStatus(action.toolData.status),
+          status,
+          ...(status === "done" || status === "error"
+            ? { completedAt: now }
+            : {}),
+          ...(action.toolData.label ? { context: action.toolData.label } : {}),
         };
         const newCalls = [...existing];
         newCalls[idx] = updated;
@@ -230,21 +244,106 @@ export interface UseChatStreamReturn {
   abort: () => void;
 }
 
-function sessionMessageToChatMessage(
-  sessionId: string,
-  message: SessionMessage,
-  index: number
-): ChatMessage | null {
-  if (message.role !== "user" && message.role !== "assistant") {
-    return null;
-  }
+/** Строка истории со всем, что реально отдаёт панельный маршрут
+ *  `GET /api/sessions/{id}/messages` (он возвращает строку таблицы целиком,
+ *  без проекции api_server). */
+type HistoryMessage = SessionMessage & SessionMessageReasoning;
 
-  return {
-    id: `${sessionId}-${index}`,
-    role: message.role,
-    content: message.content ?? "",
-    timestamp: message.timestamp ?? Date.now(),
+/**
+ * История сессии → лента чата.
+ *
+ * В базе один ход агента лежит цепочкой строк: ответ с `tool_calls`, затем
+ * строки роли `tool` с результатами, затем снова ответ — и так до реплики
+ * без вызовов. В живом потоке весь этот ход рисуется ОДНИМ пузырём: события
+ * `tool.progress` копятся на последнем сообщении. Поэтому цепочку сворачиваем
+ * в одно сообщение — иначе после перезагрузки та же переписка выглядела бы
+ * иначе, чем минуту назад вживую.
+ */
+function sessionMessagesToChat(
+  sessionId: string,
+  messages: HistoryMessage[],
+): ChatMessage[] {
+  const result: ChatMessage[] = [];
+  /** Незакрытый ход агента: в него дописываются вызовы и текст. */
+  let turn: ChatMessage | null = null;
+
+  const closeTurn = () => {
+    if (!turn) return;
+    // Ход без текста и без вызовов показывать нечего (служебные строки).
+    if (turn.content || turn.toolCalls?.length || turn.reasoning) {
+      result.push(turn);
+    }
+    turn = null;
   };
+
+  messages.forEach((message, index) => {
+    const timestamp = message.timestamp ?? Date.now();
+    const content = typeof message.content === "string" ? message.content : "";
+
+    if (message.role === "user") {
+      closeTurn();
+      result.push({
+        id: `${sessionId}-${index}`,
+        role: "user",
+        content,
+        timestamp,
+      });
+      return;
+    }
+
+    if (message.role === "tool") {
+      // Результат вызова прикрепляем к его же строке в текущем ходе.
+      if (!turn?.toolCalls || !message.tool_call_id) return;
+      const summary = previewToolResult(content);
+      if (!summary) return;
+      turn.toolCalls = turn.toolCalls.map((entry) =>
+        entry.id === message.tool_call_id ? { ...entry, summary } : entry,
+      );
+      return;
+    }
+
+    if (message.role !== "assistant") return;
+
+    if (!turn) {
+      turn = {
+        id: `${sessionId}-${index}`,
+        role: "assistant",
+        content: "",
+        timestamp,
+      };
+    }
+    if (content) {
+      turn.content = turn.content ? `${turn.content}\n\n${content}` : content;
+    }
+    const reasoning = message.reasoning_content?.trim();
+    if (reasoning && !turn.reasoning) turn.reasoning = reasoning;
+
+    const calls = message.tool_calls ?? [];
+    if (calls.length > 0) {
+      const entries: ToolEntry[] = calls.map((call) => {
+        const preview = previewArguments(call.function.name, call.function.arguments);
+        return {
+          kind: "tool",
+          id: call.id,
+          tool_id: call.function.name,
+          name: call.function.name,
+          status: "done",
+          // История не хранит длительность вызова. `0` — принятый в ToolCall
+          // признак «времени нет», и он же не даёт нарисовать выдуманное «0ms».
+          startedAt: 0,
+          ...(preview ? { context: preview } : {}),
+        };
+      });
+      turn.toolCalls = [...(turn.toolCalls ?? []), ...entries];
+      return;
+    }
+
+    // Ответ без вызовов завершает ход.
+    closeTurn();
+  });
+
+  closeTurn();
+  return result;
 }
 
 export interface UseChatStreamOptions {
@@ -332,11 +431,10 @@ export function useChatStream(
 
     try {
       const resp = await api.getSessionMessages(sessionId, profile || undefined);
-      const chatMessages = resp.messages
-        .map((message, index) =>
-          sessionMessageToChatMessage(sessionId, message, index)
-        )
-        .filter((message): message is ChatMessage => message !== null);
+      const chatMessages = sessionMessagesToChat(
+        sessionId,
+        resp.messages as HistoryMessage[],
+      );
 
       dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages });
 

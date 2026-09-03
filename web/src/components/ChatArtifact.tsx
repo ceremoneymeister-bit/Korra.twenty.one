@@ -7,11 +7,12 @@
  */
 
 import { useState } from "react";
-import { Check, Clock, Download, ExternalLink, Pencil, X } from "lucide-react";
+import { Download, ExternalLink, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { artifactUrl, shortName, type ChatArtifact } from "@/lib/chat-artifacts";
 import { AttachmentCard } from "@/components/ChatAttachments";
+import { ApprovalCard, ApprovalSettled } from "@/components/chat/ApprovalCard";
 
 function Lightbox({
   item,
@@ -55,11 +56,15 @@ export type ArtifactDecisionHandler = (
 ) => void | boolean | Promise<void | boolean>;
 
 /**
- * Кнопки решения под артефактом.
+ * Вопрос владельцу под артефактом.
  *
- * Это не украшение: именно они заменяют владельцу поход в таблицу. Решение
+ * Это не украшение: именно он заменяет владельцу поход в таблицу. Решение
  * уходит обычным сообщением в чат, агент подхватывает его штатным правилом
  * «подтверждение → обновить статус → вернуть сводку».
+ *
+ * Форма — карточка по эталону владельца (03.09.2026), протокол прежний:
+ * `onDecision("approve" | "change" | "defer", item)`, «Изменить» по-прежнему
+ * не отправляет ничего, а подставляет черновик в поле ввода.
  */
 function DecisionRow({
   item,
@@ -76,68 +81,59 @@ function DecisionRow({
 }) {
   const [sent, setSent] = useState<ArtifactDecision | null>(null);
   const [failed, setFailed] = useState(false);
+  // «Пропустить» ничего не отправляет и ничего не теряет: карточка сжимается
+  // до кнопки, решение остаётся доступным. Скрывать вопрос совсем нельзя —
+  // артефакт так и остался бы нерешённым, и владелец узнал бы об этом только
+  // от агента.
+  const [skipped, setSkipped] = useState(false);
   // Своё состояние живёт до перезагрузки, история — всегда. Показываем то, что
   // знает история, если она знает.
   const done = already ?? sent;
 
   if (done === "approve" || done === "defer") {
+    return <ApprovalSettled decision={done} />;
+  }
+
+  if (skipped) {
     return (
-      <div className="mt-1.5 text-[11px] text-muted-foreground font-sans normal-case tracking-normal">
-        {done === "approve" ? "Согласовано" : "Отложено"}
-      </div>
+      <button
+        type="button"
+        onClick={() => setSkipped(false)}
+        className={cn(
+          "mt-1.5 rounded-[var(--neo-radius-round)] px-2 py-1",
+          "border-0 bg-transparent outline-0 cursor-pointer",
+          "font-sans text-[11px] normal-case tracking-normal",
+          "text-[var(--neo-text-secondary)]",
+          "hover:shadow-[var(--neo-inset-compact)]",
+        )}
+      >
+        Решить по «{shortName(item.name, 28)}»
+      </button>
     );
   }
 
-  const btn =
-    "inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 " +
-    "text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground " +
-    "font-sans normal-case tracking-normal transition-colors";
-
   return (
-    <div className="mt-1.5 flex flex-wrap gap-1.5">
-      <button
-        type="button"
-        className={cn(btn, "border-primary/40 text-primary hover:bg-primary/10")}
-        disabled={busy}
-        onClick={async () => {
-          // Помечаем только по факту доставки: send() возвращает false и при
-          // оборванной сети, и во время чужого потока. Карточка не должна
-          // рапортовать об успехе, которого не было.
-          setFailed(false);
-          const ok = await onDecision("approve", item);
-          if (ok === false) setFailed(true);
-          else setSent("approve");
-        }}
-      >
-        <Check size={12} aria-hidden /> Согласовать
-      </button>
-      <button
-        type="button"
-        className={btn}
-        disabled={busy}
-        onClick={() => void onDecision("change", item)}
-      >
-        <Pencil size={12} aria-hidden /> Изменить
-      </button>
-      <button
-        type="button"
-        className={btn}
-        disabled={busy}
-        onClick={async () => {
-          setFailed(false);
-          const ok = await onDecision("defer", item);
-          if (ok === false) setFailed(true);
-          else setSent("defer");
-        }}
-      >
-        <Clock size={12} aria-hidden /> Отложить
-      </button>
-      {failed && (
-        <span className="w-full text-[11px] text-destructive">
-          Решение не отправилось — попробуйте ещё раз
-        </span>
-      )}
-    </div>
+    <ApprovalCard
+      question={`Что делаем с «${shortName(item.name, 44)}»?`}
+      busy={busy}
+      failed={failed}
+      onSkip={() => setSkipped(true)}
+      onSubmit={async (choice) => {
+        if (choice === "change") {
+          // «Изменить» — не решение, а начало разговора: наверх уходит тот же
+          // вызов, и хозяин чата подставляет черновик в поле.
+          void onDecision("change", item);
+          return;
+        }
+        // Помечаем только по факту доставки: send() возвращает false и при
+        // оборванной сети, и во время чужого потока. Карточка не должна
+        // рапортовать об успехе, которого не было.
+        setFailed(false);
+        const ok = await onDecision(choice, item);
+        if (ok === false) setFailed(true);
+        else setSent(choice);
+      }}
+    />
   );
 }
 

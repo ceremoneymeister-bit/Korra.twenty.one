@@ -42,7 +42,7 @@ import {
 import type { ComponentType } from "react";
 
 import { Markdown } from "@/components/Markdown";
-import { ToolCall } from "@/components/ToolCall";
+import { AgentTrace } from "@/components/chat/AgentTrace";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
 import {
   ChatArtifactList,
@@ -229,7 +229,8 @@ function AssistantBubble({
   decisionsBusy?: boolean;
   decided?: Map<string, "approve" | "defer">;
 }) {
-  const hasTools = message.toolCalls && message.toolCalls.length > 0;
+  const tools = message.toolCalls ?? [];
+  const hasTrace = tools.length > 0 || Boolean(message.reasoning?.trim());
   const [copied, setCopied] = useState(false);
   const artifactSplit = splitArtifacts(message.content ?? "");
 
@@ -241,12 +242,12 @@ function AssistantBubble({
     }
   }, [message.content]);
 
-  // An assistant message is created empty the moment you press send, so
-  // without this the transcript shows a blank bordered square for the whole
-  // turn. Show what is actually true — the agent is working — and nothing
-  // more: the API server emits no tool-progress events to report on.
-  // (Hooks above run unconditionally; this early return sits after them.)
-  if (!message.content && !hasTools) {
+  // Пузырь ответа рождается пустым в момент отправки. Пока не пришло ни
+  // одного события — показываем орбиту и честную подпись «работает»: сказать
+  // больше нечего, сервер ещё ничего не сообщил. Как только приходит первый
+  // `tool.progress`, орбита переезжает в заголовок AgentTrace.
+  // (Хуки выше выполняются безусловно; ранний выход стоит после них.)
+  if (!message.content && !hasTrace) {
     if (!streaming) return null;
     return (
       <div className="flex justify-start">
@@ -267,12 +268,13 @@ function AssistantBubble({
           "font-sans normal-case tracking-normal",
         )}
       >
-        {hasTools && (
-          <div className="mb-2 space-y-1">
-            {message.toolCalls!.map((tool) => (
-              <ToolCall key={tool.id} tool={tool} />
-            ))}
-          </div>
+        {hasTrace && (
+          <AgentTrace
+            tools={tools}
+            reasoning={message.reasoning}
+            active={Boolean(streaming)}
+            startedAt={message.timestamp}
+          />
         )}
         {message.content && (
           <Markdown content={artifactSplit.text} streaming={streaming} />

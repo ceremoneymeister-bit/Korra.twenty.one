@@ -1,0 +1,148 @@
+/* Ход работы агента: раскрытие, бегущий блик заголовка, появление строк.
+ *
+ * Грамматика по эталонам владельца (03.09.2026): раскрытие через
+ * grid-template-rows 0fr→1fr + opacity за 300 ms на cubic-bezier(.23,1,.32,1),
+ * строки появляются fade-up с шагом 80 ms. Цвет берём только из токенов
+ * --neo-*; ни рамок, ни обводок здесь нет — разделение идёт глубиной. */
+
+.korra-trace__panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 300ms cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 300ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.korra-trace__panel[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* Дочерний слой обязателен: анимировать можно только грид-строку, а её
+   содержимое должно уметь схлопнуться в ноль без переполнения. */
+.korra-trace__panel-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Направляющая слева: высота едет вместе с раскрытием, потому что линия
+   растянута на всю колонку строк. */
+.korra-trace__guide {
+  width: 1px;
+  flex: none;
+  background: var(--neo-shadow);
+}
+
+.korra-trace__row {
+  animation: korra-trace-fade-up 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.korra-trace__detail {
+  animation: korra-trace-fade-up 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* Точка «вызов идёт» — дышит той же кривой, что и точки загрузчика. */
+.korra-trace__pulse {
+  animation: neo-soft-pulse 900ms var(--neo-ease-out) infinite alternate;
+}
+
+/* Шеврон заголовка: 180° на раскрытии. */
+.korra-trace__chevron {
+  flex: none;
+  transition: transform var(--neo-duration-state) var(--neo-ease-out);
+}
+
+/* Вариант ответа в карточке решения: состояние выражает только глубина. */
+.korra-approval__option {
+  transition: box-shadow var(--neo-duration-state) var(--neo-ease-out);
+}
+
+/* Значок сменяется шевроном при наведении на строку — приём из эталона
+   ToolChips: подсказка «строку можно раскрыть» без лишнего элемента. */
+.korra-trace__row-icon,
+.korra-trace__row-chevron {
+  transition: opacity var(--neo-duration-quick) var(--neo-ease-out);
+}
+
+.korra-trace__row-chevron {
+  opacity: 0;
+}
+
+.korra-trace__row:hover .korra-trace__row-icon,
+.korra-trace__row:focus-visible .korra-trace__row-icon {
+  opacity: 0;
+}
+
+.korra-trace__row:hover .korra-trace__row-chevron,
+.korra-trace__row:focus-visible .korra-trace__row-chevron {
+  opacity: 1;
+}
+
+/* «Думаю…» с бегущим бликом: градиент шире текста, ездит по background-position.
+   Держится только на цветах темы, поэтому одинаково живёт в светлой и тёмной. */
+.korra-trace__shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--neo-text-secondary) 35%,
+    var(--neo-text-primary) 50%,
+    var(--neo-text-secondary) 65%
+  );
+  background-size: 200% auto;
+  /* Префикс нужен Safari: без него заливка не обрезается по глифам, и
+     строка «Думаю…» превращается в цветной прямоугольник. */
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: korra-trace-shimmer 1.4s linear infinite;
+}
+
+@keyframes korra-trace-shimmer {
+  to {
+    background-position: -200% center;
+  }
+}
+
+@keyframes korra-trace-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .korra-trace__panel,
+  .korra-trace__chevron,
+  .korra-trace__row-icon,
+  .korra-trace__row-chevron,
+  .korra-approval__option {
+    transition-duration: 0.01ms;
+  }
+
+  .korra-trace__row,
+  .korra-trace__detail,
+  .korra-trace__pulse {
+    animation: none;
+  }
+
+  /* Блик убираем, но текст обязан остаться видимым: без заливки
+     -webkit-text-fill-color: transparent оставил бы пустое место. */
+  .korra-trace__shimmer {
+    background: none;
+    animation: none;
+    color: var(--neo-text-secondary);
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+@media (forced-colors: active) {
+  .korra-trace__shimmer {
+    background: none;
+    animation: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
