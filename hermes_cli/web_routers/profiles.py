@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, Query  # noqa: F401
 from hermes_cli.web_deps import late
 from hermes_cli.web_models import (
     ProfileCreate,
+    ProfileDisplayNameUpdate,
     ProfileActiveUpdate,
     ProfileExport,
     ProfileImport,
@@ -1112,6 +1113,28 @@ async def update_profile_description_endpoint(name: str, body: ProfileDescriptio
     return {"ok": True, "description": text, "description_auto": False}
 
 
+@router.put("/api/profiles/{name}/display-name")
+async def update_profile_display_name_endpoint(name: str, body: ProfileDisplayNameUpdate):
+    """Задать или сбросить человеческое имя профиля (для вкладок агентов).
+
+    Korra 21, решение владельца 03.09.2026: на вкладке — имя, которое человек
+    написал сам, а не системный id. Хранится в profile.yaml (display_name),
+    отдаётся в ``GET /api/profiles``.
+    """
+    from hermes_cli import profiles as profiles_mod
+    _resolve_profile_dir(name)
+    try:
+        stored = profiles_mod.set_profile_display_name(name, body.display_name or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        _log.exception("PUT /api/profiles/%s/display-name failed", name)
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "display_name": stored}
+
+
 @router.put("/api/profiles/{name}/model")
 async def update_profile_model_endpoint(name: str, body: ProfileModelUpdate):
     """Set the main model (``model.default`` + ``model.provider``) for a
@@ -1129,7 +1152,23 @@ async def update_profile_model_endpoint(name: str, body: ProfileModelUpdate):
     except Exception as e:
         _log.exception("PUT /api/profiles/%s/model failed", name)
         raise HTTPException(status_code=500, detail=str(e))
-    return {"ok": True, "provider": provider, "model": model}
+    # Korra: профилю, которому сменили провайдера, подкладываем его ключи из
+    # корневого .env, если своих нет — иначе новый агент молчит.
+    seeded: List[str] = []
+    try:
+        from hermes_cli import profiles as profiles_mod
+        from hermes_cli.config import read_user_config_raw
+
+        seeded = profiles_mod.seed_provider_credentials_from_root(
+            provider,
+            read_user_config_raw(profile_dir / "config.yaml"),
+            profile_dir=profile_dir,
+        )
+        if seeded:
+            _log.info("profiles/%s/model: seeded %s from root .env", name, ", ".join(seeded))
+    except Exception:
+        _log.debug("seed_provider_credentials_from_root skipped", exc_info=True)
+    return {"ok": True, "provider": provider, "model": model, "seeded_credentials": seeded}
 
 
 @router.post("/api/profiles/{name}/describe-auto")

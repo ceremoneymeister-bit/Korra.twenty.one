@@ -653,6 +653,16 @@ class ProfileDescriptionUpdate(BaseModel):
     description: str = ""
 
 
+class ProfileDisplayNameUpdate(BaseModel):
+    """Человеческое имя профиля для вкладок и заголовков (Korra 21).
+
+    Только представление: каталог, обёртка и argv остаются каноническим id.
+    Пустая строка — сбросить имя.
+    """
+
+    display_name: str = ""
+
+
 class ProfileModelUpdate(BaseModel):
     provider: str
     model: str

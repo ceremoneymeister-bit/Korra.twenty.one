@@ -937,7 +937,9 @@ def _seed_runtime_credentials(profile_dir: Path, source_dir: Path) -> None:
             pass
 
 
-def seed_provider_credentials_from_root(provider: str, cfg: Dict) -> List[str]:
+def seed_provider_credentials_from_root(
+    provider: str, cfg: Dict, profile_dir: Optional[Path] = None
+) -> List[str]:
     """Подложить профилю ключи провайдера из корневого ``.env``, если своих нет.
 
     Korra 21, решение владельца 03.09.2026: все профили контура принадлежат
@@ -950,9 +952,14 @@ def seed_provider_credentials_from_root(provider: str, cfg: Dict) -> List[str]:
     имён (для журнала).
     """
     try:
-        from hermes_constants import get_hermes_home, get_process_hermes_home
+        from hermes_constants import (
+            get_hermes_home,
+            get_process_hermes_home,
+            reset_hermes_home_override,
+            set_hermes_home_override,
+        )
 
-        home = Path(get_hermes_home()).resolve()
+        home = Path(profile_dir or get_hermes_home()).resolve()
         root = Path(get_process_hermes_home()).resolve()
         if home == root:
             return []
@@ -973,14 +980,18 @@ def seed_provider_credentials_from_root(provider: str, cfg: Dict) -> List[str]:
         profile_env = load_env_file(home / ".env")
         root_env = load_env_file(root / ".env")
         copied: List[str] = []
-        for key in keys:
-            if profile_env.get(key, "").strip():
-                continue
-            value = root_env.get(key, "").strip()
-            if not value:
-                continue
-            save_env_value(key, value)
-            copied.append(key)
+        token = set_hermes_home_override(str(home))
+        try:
+            for key in keys:
+                if profile_env.get(key, "").strip():
+                    continue
+                value = root_env.get(key, "").strip()
+                if not value:
+                    continue
+                save_env_value(key, value)
+                copied.append(key)
+        finally:
+            reset_hermes_home_override(token)
         return copied
     except Exception:
         # Подстановка ключей — удобство, а не контракт: смена модели не должна
