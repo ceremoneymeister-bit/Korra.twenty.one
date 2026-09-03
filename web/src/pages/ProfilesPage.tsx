@@ -23,9 +23,15 @@ import {
   X,
 } from "lucide-react";
 import spinners from "unicode-animations";
+import { ThinkingOrb } from "thinking-orbs";
 import { H2 } from "@nous-research/ui/ui/components/typography/h2";
-import { api } from "@/lib/api";
-import type { ActiveProfileInfo, ProfileInfo } from "@/lib/api";
+import { api, probeProfileChat } from "@/lib/api";
+import type {
+  ActiveProfileInfo,
+  ModelOptionProvider,
+  ProfileInfo,
+} from "@/lib/api";
+import { useTheme } from "@/themes";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
@@ -50,6 +56,66 @@ import { cn, themedBody } from "@/lib/utils";
 // Mirrors hermes_cli/profiles.py::_PROFILE_ID_RE so we can reject obviously
 // invalid names (uppercase, spaces, …) before round-tripping a doomed POST.
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+/** Одна строка списка моделей: провайдер, модель и готовность его ключа. */
+export interface ModelChoice {
+  provider: string;
+  providerName: string;
+  model: string;
+  /** Подпись в списке — её же показывает свёрнутый Select. */
+  label: string;
+  /** Ключ провайдера уже настроен: агент сможет ответить сразу. */
+  ready: boolean;
+}
+
+/** Значение опции: провайдер и модель неразделимы, иначе выбор модели чужого
+ *  провайдера молча уводит профиль на неработающий ключ. */
+const modelKey = (provider: string | null, model: string | null) =>
+  provider && model ? `${provider}\u0000${model}` : "";
+
+const choiceKey = (choice: ModelChoice) =>
+  modelKey(choice.provider, choice.model);
+
+/** Nous в Korra 21 не предлагаем: контуры работают на своих провайдерах. */
+const HIDDEN_PROVIDERS = new Set(["nous"]);
+
+const READY_MARK = "готов";
+const NO_KEY_MARK = "нет ключа";
+
+/**
+ * Список моделей для мастера: сначала провайдеры с рабочими ключами.
+ *
+ * Признак готовности даёт сам движок — `authenticated` в строке провайдера
+ * (`_apply_picker_hints`, hermes_cli/inventory.py): `false` стоит у строк-
+ * заготовок без ключа и у настроенного провайдера, потерявшего доступ.
+ * Ровно так же его читает CronPage. Выбрать провайдера без ключа мастер даёт
+ * — но подпись и подсказка под списком говорят, что агент промолчит, пока
+ * ключ не появится в «Ключах».
+ */
+export function buildModelChoices(
+  providers: ModelOptionProvider[] | undefined,
+): ModelChoice[] {
+  const ready: ModelChoice[] = [];
+  const withoutKey: ModelChoice[] = [];
+  for (const provider of providers ?? []) {
+    const slug = (provider?.slug ?? "").trim();
+    if (!slug || HIDDEN_PROVIDERS.has(slug.toLowerCase())) continue;
+    const providerName = provider.name?.trim() || slug;
+    const isReady = provider.authenticated !== false;
+    const bucket = isReady ? ready : withoutKey;
+    for (const model of provider.models ?? []) {
+      if (!model) continue;
+      bucket.push({
+        provider: slug,
+        providerName,
+        model,
+        label: `${providerName} · ${model} — ${isReady ? READY_MARK : NO_KEY_MARK}`,
+        ready: isReady,
+      });
+    }
+  }
+  return [...ready, ...withoutKey];
+}
 
 /** Braille unicode spinner (`unicode-animations`); static first frame when reduced motion is preferred. */
 function ProfilesLoadingSpinner() {
@@ -267,6 +333,8 @@ export default function ProfilesPage() {
   const { t, tr } = useI18n();
   const { setEnd } = usePageHeader();
   const { setProfile } = useProfileScope();
+  // Орбита шага «Проверка» рисуется в теме панели — как в ChatWorking.
+  const { themeName } = useTheme();
 
   // Locale strings with English fallbacks. The enriched keys are optional in
   // the i18n type so untranslated locales don't break the build — they render
@@ -327,13 +395,53 @@ export default function ProfilesPage() {
   const [newDisplayName, setNewDisplayName] = useState("");
   const [creating, setCreating] = useState(false);
   // Model picker (lazy-loaded the first time a picker is opened). modelChoice
-  // is a "slug\u0000model" key, or "" to inherit from clone/default.
-  const [modelChoices, setModelChoices] = useState<
-    { provider: string; model: string; label: string }[] | null
-  >(null);
+  // is a `modelKey(provider, model)` value, or "" to inherit from clone/default.
+  const [modelChoices, setModelChoices] = useState<ModelChoice[] | null>(null);
   const modelChoicesLoading = useRef(false);
   const [modelChoice, setModelChoice] = useState("");
-  const closeCreateModal = useCallback(() => setCreateModalOpen(false), []);
+  // Модель профиля, которым сейчас управляет панель. Запасной вариант по
+  // умолчанию, когда у профиля-источника своей модели нет: этот провайдер на
+  // контуре точно рабочий.
+  const [currentModelChoice, setCurrentModelChoice] = useState("");
+  // Владелец выбрал модель руками — подстановка по умолчанию замолкает.
+  const modelChoiceTouched = useRef(false);
+
+  // Шаг «Проверка» — имя только что созданного профиля; null = шаг формы.
+  const [probeFor, setProbeFor] = useState<string | null>(null);
+  const [probeState, setProbeState] = useState<"sending" | "ok" | "error">(
+    "sending",
+  );
+  const [probeReply, setProbeReply] = useState("");
+  const [probeError, setProbeError] = useState("");
+  const [probeDetail, setProbeDetail] = useState("");
+  // Номер текущей проверки: ответ прошлой попытки не должен переписать
+  // результат той, что запустил «Повторить проверку».
+  const probeRequest = useRef(0);
+
+  /** Сбросить мастер целиком — и поля формы, и результат проверки. */
+  const resetCreateWizard = useCallback(() => {
+    // Ответ незакрытой проверки после этого уже никого не интересует.
+    probeRequest.current += 1;
+    setProbeFor(null);
+    setProbeState("sending");
+    setProbeReply("");
+    setProbeError("");
+    setProbeDetail("");
+    setNewName("");
+    setNewDisplayName("");
+    setNewDescription("");
+    setNoSkills(false);
+    setCloneAll(false);
+    setCloneFrom("default");
+    setModelChoice("");
+    modelChoiceTouched.current = false;
+  }, []);
+
+  const closeCreateModal = useCallback(() => {
+    setCreateModalOpen(false);
+    resetCreateWizard();
+  }, [resetCreateWizard]);
+
   const createModalRef = useModalBehavior({
     open: createModalOpen,
     onClose: closeCreateModal,
@@ -372,26 +480,14 @@ export default function ProfilesPage() {
   // Per-profile "set active" in-flight name
   const [settingActive, setSettingActive] = useState<string | null>(null);
 
-  const modelKey = (provider: string | null, model: string | null) =>
-    provider && model ? `${provider}\u0000${model}` : "";
-
   const loadModelChoices = useCallback(() => {
     if (modelChoices !== null || modelChoicesLoading.current) return;
     modelChoicesLoading.current = true;
     api
       .getModelOptions()
       .then((res) => {
-        const flat: { provider: string; model: string; label: string }[] = [];
-        for (const prov of res.providers ?? []) {
-          for (const m of prov.models ?? []) {
-            flat.push({
-              provider: prov.slug,
-              model: m,
-              label: `${prov.name} · ${m}`,
-            });
-          }
-        }
-        setModelChoices(flat);
+        setModelChoices(buildModelChoices(res.providers));
+        setCurrentModelChoice(modelKey(res.provider ?? null, res.model ?? null));
       })
       .catch(() => setModelChoices([]))
       .finally(() => {
@@ -418,6 +514,28 @@ export default function ProfilesPage() {
     if (createModalOpen) loadModelChoices();
   }, [createModalOpen, loadModelChoices]);
 
+  /** Профиль, с которого мастер снимает значения по умолчанию: выбранный
+   *  клон, а без клонирования — профиль по умолчанию. */
+  const sourceProfile = useMemo(() => {
+    const name = cloneFrom ?? profiles.find((p) => p.is_default)?.name ?? null;
+    return (name && profiles.find((p) => p.name === name)) || null;
+  }, [cloneFrom, profiles]);
+
+  // Модель по умолчанию — та, на которой работает профиль-источник, а не
+  // первая строка списка: именно первая строка и увела владельца на
+  // провайдера без рабочего ключа. Если у источника модели нет, берём модель
+  // профиля, которым управляет панель; если и её нет в списке — «унаследовать».
+  useEffect(() => {
+    if (!createModalOpen || modelChoices === null) return;
+    if (modelChoiceTouched.current) return;
+    const wanted =
+      modelKey(sourceProfile?.provider ?? null, sourceProfile?.model ?? null) ||
+      currentModelChoice;
+    setModelChoice(
+      wanted && modelChoices.some((c) => choiceKey(c) === wanted) ? wanted : "",
+    );
+  }, [createModalOpen, modelChoices, sourceProfile, currentModelChoice]);
+
   const isActive = useCallback(
     (p: ProfileInfo) =>
       activeInfo != null &&
@@ -425,6 +543,41 @@ export default function ProfilesPage() {
         (activeInfo.active === "default" && p.is_default)),
     [activeInfo],
   );
+
+  /**
+   * Контрольное сообщение новому агенту.
+   *
+   * Мастер обещает не «профиль создан», а «агент отвечает», поэтому спрашиваем
+   * ровно тем же маршрутом, каким пойдёт первое сообщение владельца. Отказ
+   * провайдера виден здесь, а не через день молчания в чате.
+   */
+  const runProbe = useCallback(async (name: string) => {
+    const ticket = probeRequest.current + 1;
+    probeRequest.current = ticket;
+    setProbeState("sending");
+    setProbeReply("");
+    setProbeError("");
+    setProbeDetail("");
+    try {
+      const outcome = await probeProfileChat(name);
+      if (probeRequest.current !== ticket) return;
+      if (outcome.ok) {
+        setProbeReply(outcome.reply);
+        setProbeState("ok");
+        return;
+      }
+      setProbeError(outcome.error);
+      setProbeDetail(outcome.detail);
+      setProbeState("error");
+    } catch (e) {
+      if (probeRequest.current !== ticket) return;
+      setProbeError(
+        ownerFacingError(e, "Не удалось отправить контрольное сообщение."),
+      );
+      setProbeDetail("");
+      setProbeState("error");
+    }
+  }, []);
 
   const handleCreate = async () => {
     const name = newName.trim();
@@ -440,9 +593,7 @@ export default function ProfilesPage() {
     try {
       const cloning = cloneFrom !== null;
       const picked = modelChoice
-        ? modelChoices?.find(
-            (c) => `${c.provider}\u0000${c.model}` === modelChoice,
-          )
+        ? modelChoices?.find((c) => choiceKey(c) === modelChoice)
         : undefined;
       const res = await api.createProfile({
         name,
@@ -453,11 +604,14 @@ export default function ProfilesPage() {
         provider: picked?.provider,
         model: picked?.model,
       });
-      showToast(`${t.profiles.created}: ${name}`, "success");
+      // Каноническое имя профиля решает сервер — и вкладка, и контрольное
+      // сообщение адресуются им, а не тем, что набрали в поле.
+      const created = res.name || name;
+      showToast(`${t.profiles.created}: ${created}`, "success");
       const displayName = newDisplayName.trim();
       if (displayName) {
         try {
-          await api.updateProfileDisplayName(name, displayName);
+          await api.updateProfileDisplayName(created, displayName);
         } catch (e) {
           showToast(ownerFacingError(e, "Имя для вкладки не сохранилось — задайте его через меню вкладки."), "error");
         }
@@ -468,15 +622,11 @@ export default function ProfilesPage() {
           "error",
         );
       }
-      setNewName("");
-      setNewDisplayName("");
-      setNewDescription("");
-      setNoSkills(false);
-      setCloneAll(false);
-      setCloneFrom("default");
-      setModelChoice("");
-      setCreateModalOpen(false);
+      // Список профилей обновляем сразу — он виден за окном мастера, пока
+      // идёт проверка. Само окно не закрываем: следующий шаг здесь же.
       load();
+      setProbeFor(created);
+      void runProbe(created);
     } catch (e) {
       showToast(ownerFacingError(e, "Не удалось создать профиль."), "error");
     } finally {
@@ -676,11 +826,7 @@ export default function ProfilesPage() {
   );
 
   const handleSaveModel = async (name: string) => {
-    const picked = modelEditChoice
-      ? modelChoices?.find(
-          (c) => `${c.provider}\u0000${c.model}` === modelEditChoice,
-        )
-      : undefined;
+    const picked = modelChoices?.find((c) => choiceKey(c) === modelEditChoice);
     if (!picked) return;
     setModelSaving(true);
     try {
@@ -788,6 +934,12 @@ export default function ProfilesPage() {
 
   const cloning = cloneFrom !== null;
 
+  /** Выбранная строка списка моделей — по ней мастер говорит про ключ. */
+  const pickedNewModel = useMemo(
+    () => modelChoices?.find((c) => choiceKey(c) === modelChoice) ?? null,
+    [modelChoices, modelChoice],
+  );
+
   if (loading) {
     return (
       <div
@@ -820,9 +972,7 @@ export default function ProfilesPage() {
         <div
           ref={createModalRef}
           className="fixed inset-0 z-[100] flex items-center justify-center bg-background/85 p-4"
-          onClick={(e) =>
-            e.target === e.currentTarget && setCreateModalOpen(false)
-          }
+          onClick={(e) => e.target === e.currentTarget && closeCreateModal()}
           role="dialog"
           aria-modal="true"
           aria-labelledby="create-profile-title"
@@ -836,7 +986,7 @@ export default function ProfilesPage() {
             <Button
               ghost
               size="icon"
-              onClick={() => setCreateModalOpen(false)}
+              onClick={closeCreateModal}
               className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
               aria-label={t.common.close}
             >
@@ -848,165 +998,287 @@ export default function ProfilesPage() {
                 id="create-profile-title"
                 className="font-mondwest text-display text-base tracking-wider"
               >
-                {t.profiles.newProfile}
+                {probeFor === null ? t.profiles.newProfile : "Проверка агента"}
+                {probeFor !== null && (
+                  <span className="text-muted-foreground"> · {probeFor}</span>
+                )}
               </h2>
             </header>
 
-            <div className="min-h-0 overflow-y-auto p-5 grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="profile-name">{t.profiles.name}</Label>
+            {probeFor !== null ? (
+              // Одна живая область на весь шаг: её содержимое меняется на
+              // месте, поэтому скринридер слышит и ожидание, и итог.
+              <div
+                className="min-h-0 overflow-y-auto p-5 grid gap-4"
+                role="status"
+                aria-live="polite"
+              >
+                {probeState === "sending" && (
+                  <div className="flex items-center gap-3">
+                    <ThinkingOrb
+                      state="working"
+                      size={20}
+                      speed={1.3}
+                      theme={themeName === "dark" ? "dark" : "light"}
+                      aria-label="Проверяю агента"
+                      style={{ transform: "scale(1.4)", margin: "0.25rem" }}
+                    />
+                    <span className="text-sm text-[var(--neo-text-secondary)]">
+                      Спрашиваю агента, готов ли он…
+                    </span>
+                  </div>
+                )}
 
-                <Input
-                  id="profile-name"
-                  autoFocus
-                  placeholder={t.profiles.namePlaceholder}
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleCreate();
-                  }}
-                  aria-invalid={
-                    newName.trim() !== "" &&
-                    !PROFILE_NAME_RE.test(newName.trim())
-                  }
-                />
+                {probeState === "ok" && (
+                  <>
+                    <div className="flex items-start gap-2">
+                      <Badge tone="success" className="shrink-0">
+                        {READY_MARK}
+                      </Badge>
+                      {/* Просили одно слово, но ответить агент может абзацем —
+                          в окно пускаем только начало. */}
+                      <p className="text-sm">
+                        Агент готов: «{probeReply.slice(0, 200)}»
+                      </p>
+                    </div>
 
-                <p className="text-xs text-muted-foreground">
-                  {t.profiles.nameRule}
-                </p>
-              </div>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" ghost onClick={closeCreateModal}>
+                        {t.common.close}
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="uppercase"
+                        onClick={() => {
+                          const target = probeFor;
+                          closeCreateModal();
+                          navigate(
+                            `/agents?agent=${encodeURIComponent(target)}`,
+                          );
+                        }}
+                      >
+                        Открыть чат
+                      </Button>
+                    </div>
+                  </>
+                )}
 
-              <div className="grid gap-2">
-                <Label htmlFor="profile-display-name">Имя для вкладки (необязательно)</Label>
-                <Input
-                  id="profile-display-name"
-                  placeholder="Например, Секретарь или Учитель китайского"
-                  value={newDisplayName}
-                  onChange={(e) => setNewDisplayName(e.target.value)}
-                  maxLength={64}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Показывается на вкладке агента вместо системного имени; можно по-русски.
-                </p>
-              </div>
+                {probeState === "error" && (
+                  <>
+                    <div className="grid gap-2">
+                      <div className="flex items-start gap-2">
+                        <Badge tone="warning" className="shrink-0">
+                          не отвечает
+                        </Badge>
+                        <p className="text-sm">{probeError}</p>
+                      </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="clone-from">{t.profiles.cloneFrom}</Label>
-                <Select
-                  id="clone-from"
-                  value={cloneFrom ?? ""}
-                  onValueChange={(v) => {
-                    const next = v || null;
-                    setCloneFrom(next);
-                    if (next === null) setCloneAll(false);
-                  }}
-                >
-                  <SelectOption value="">{t.profiles.cloneFromNone}</SelectOption>
-                  {profiles.map((profile) => (
-                    <SelectOption key={profile.name} value={profile.name}>
-                      {profile.name}
-                    </SelectOption>
-                  ))}
-                </Select>
-              </div>
+                      {probeDetail && probeDetail !== probeError && (
+                        <p className="font-mono text-xs text-muted-foreground break-words">
+                          {probeDetail.slice(0, 300)}
+                        </p>
+                      )}
 
-              <div className="grid gap-2">
-                <Label htmlFor="profile-description">
-                  {L.descriptionOptional}
-                </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Проверьте ключ провайдера в «Ключах» → профиль{" "}
+                        {probeFor}.
+                      </p>
+                    </div>
 
-                <textarea
-                  id="profile-description"
-                  className="flex min-h-[64px] w-full border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  placeholder={L.descriptionPlaceholder}
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="profile-model">{L.modelOptional}</Label>
-
-                <Select
-                  id="profile-model"
-                  value={modelChoice}
-                  disabled={modelChoices === null}
-                  onValueChange={setModelChoice}
-                >
-                  <SelectOption value="">
-                    {modelChoices === null ? L.modelLoading : L.modelInherit}
-                  </SelectOption>
-
-                  {(modelChoices ?? []).map((c) => (
-                    <SelectOption
-                      key={`${c.provider}\u0000${c.model}`}
-                      value={`${c.provider}\u0000${c.model}`}
-                    >
-                      {c.label}
-                    </SelectOption>
-                  ))}
-                </Select>
-
-                {modelChoices !== null && modelChoices.length === 0 && (
-                  <p className="text-xs text-muted-foreground">{L.modelNone}</p>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" ghost onClick={closeCreateModal}>
+                        {t.common.close}
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="uppercase"
+                        onClick={() => void runProbe(probeFor)}
+                      >
+                        Повторить проверку
+                      </Button>
+                    </div>
+                  </>
                 )}
               </div>
+            ) : (
+              <div className="min-h-0 overflow-y-auto p-5 grid gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="profile-name">{t.profiles.name}</Label>
 
-              <fieldset className="grid gap-3 border-t border-border pt-4">
-                <legend className="font-mondwest text-display text-xs tracking-wider text-muted-foreground">
-                  {L.advancedOptions}
-                </legend>
-
-                <div className="flex items-center gap-2.5">
-                  <Checkbox
-                    checked={cloneAll}
-                    disabled={!cloning}
-                    id="clone-all"
-                    onCheckedChange={(checked) => setCloneAll(checked === true)}
+                  <Input
+                    id="profile-name"
+                    autoFocus
+                    placeholder={t.profiles.namePlaceholder}
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleCreate();
+                    }}
+                    aria-invalid={
+                      newName.trim() !== "" &&
+                      !PROFILE_NAME_RE.test(newName.trim())
+                    }
                   />
 
-                  <Label
-                    className={cn(
-                      "font-mondwest normal-case tracking-normal text-sm cursor-pointer",
-                      !cloning && "opacity-50",
-                    )}
-                    htmlFor="clone-all"
-                  >
-                    {L.cloneAll}
-                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t.profiles.nameRule}
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-2.5">
-                  <Checkbox
-                    checked={noSkills}
-                    id="no-skills"
-                    disabled={cloning}
-                    onCheckedChange={(checked) => setNoSkills(checked === true)}
+                <div className="grid gap-2">
+                  <Label htmlFor="profile-display-name">Имя для вкладки (необязательно)</Label>
+                  <Input
+                    id="profile-display-name"
+                    placeholder="Например, Секретарь или Учитель китайского"
+                    value={newDisplayName}
+                    onChange={(e) => setNewDisplayName(e.target.value)}
+                    maxLength={64}
                   />
-
-                  <Label
-                    className={cn(
-                      "font-mondwest normal-case tracking-normal text-sm cursor-pointer",
-                      cloning && "opacity-50",
-                    )}
-                    htmlFor="no-skills"
-                  >
-                    {L.noSkillsOption}
-                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Показывается на вкладке агента вместо системного имени; можно по-русски.
+                  </p>
                 </div>
-              </fieldset>
 
-              <div className="flex justify-end">
-                <Button
-                  className="uppercase"
-                  size="sm"
-                  onClick={handleCreate}
-                  disabled={creating}
-                >
-                  {creating ? t.common.creating : t.common.create}
-                </Button>
+                <div className="grid gap-2">
+                  <Label htmlFor="clone-from">{t.profiles.cloneFrom}</Label>
+                  <Select
+                    id="clone-from"
+                    value={cloneFrom ?? ""}
+                    onValueChange={(v) => {
+                      const next = v || null;
+                      setCloneFrom(next);
+                      if (next === null) setCloneAll(false);
+                      // Источник сменился — модель по умолчанию снова идёт от
+                      // него, пока владелец не выберет другую руками.
+                      modelChoiceTouched.current = false;
+                    }}
+                  >
+                    <SelectOption value="">{t.profiles.cloneFromNone}</SelectOption>
+                    {profiles.map((profile) => (
+                      <SelectOption key={profile.name} value={profile.name}>
+                        {profile.name}
+                      </SelectOption>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="profile-description">
+                    {L.descriptionOptional}
+                  </Label>
+
+                  <textarea
+                    id="profile-description"
+                    className="flex min-h-[64px] w-full border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    placeholder={L.descriptionPlaceholder}
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="profile-model">{L.modelOptional}</Label>
+
+                  <Select
+                    id="profile-model"
+                    value={modelChoice}
+                    disabled={modelChoices === null}
+                    onValueChange={(v) => {
+                      modelChoiceTouched.current = true;
+                      setModelChoice(v);
+                    }}
+                  >
+                    <SelectOption value="">
+                      {modelChoices === null ? L.modelLoading : L.modelInherit}
+                    </SelectOption>
+
+                    {(modelChoices ?? []).map((c) => (
+                      <SelectOption key={choiceKey(c)} value={choiceKey(c)}>
+                        {c.label}
+                      </SelectOption>
+                    ))}
+                  </Select>
+
+                  {pickedNewModel && !pickedNewModel.ready && (
+                    <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <Badge tone="warning" className="shrink-0">
+                        {NO_KEY_MARK}
+                      </Badge>
+                      Агент не ответит, пока ключ провайдера{" "}
+                      {pickedNewModel.providerName} не появится в «Ключах».
+                    </p>
+                  )}
+
+                  {pickedNewModel?.ready && (
+                    <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <Badge tone="success" className="shrink-0">
+                        {READY_MARK}
+                      </Badge>
+                      Ключ провайдера {pickedNewModel.providerName} настроен.
+                    </p>
+                  )}
+
+                  {modelChoices !== null && modelChoices.length === 0 && (
+                    <p className="text-xs text-muted-foreground">{L.modelNone}</p>
+                  )}
+                </div>
+
+                <fieldset className="grid gap-3 border-t border-border pt-4">
+                  <legend className="font-mondwest text-display text-xs tracking-wider text-muted-foreground">
+                    {L.advancedOptions}
+                  </legend>
+
+                  <div className="flex items-center gap-2.5">
+                    <Checkbox
+                      checked={cloneAll}
+                      disabled={!cloning}
+                      id="clone-all"
+                      onCheckedChange={(checked) => setCloneAll(checked === true)}
+                    />
+
+                    <Label
+                      className={cn(
+                        "font-mondwest normal-case tracking-normal text-sm cursor-pointer",
+                        !cloning && "opacity-50",
+                      )}
+                      htmlFor="clone-all"
+                    >
+                      {L.cloneAll}
+                    </Label>
+                  </div>
+
+                  <div className="flex items-center gap-2.5">
+                    <Checkbox
+                      checked={noSkills}
+                      id="no-skills"
+                      disabled={cloning}
+                      onCheckedChange={(checked) => setNoSkills(checked === true)}
+                    />
+
+                    <Label
+                      className={cn(
+                        "font-mondwest normal-case tracking-normal text-sm cursor-pointer",
+                        cloning && "opacity-50",
+                      )}
+                      htmlFor="no-skills"
+                    >
+                      {L.noSkillsOption}
+                    </Label>
+                  </div>
+                </fieldset>
+
+                <div className="flex justify-end">
+                  <Button
+                    className="uppercase"
+                    size="sm"
+                    onClick={handleCreate}
+                    disabled={creating}
+                  >
+                    {creating ? t.common.creating : t.common.create}
+                  </Button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -1316,10 +1588,7 @@ export default function ProfilesPage() {
                       onValueChange={setModelEditChoice}
                     >
                       {(modelChoices ?? []).map((c) => (
-                        <SelectOption
-                          key={`${c.provider}\u0000${c.model}`}
-                          value={`${c.provider}\u0000${c.model}`}
-                        >
+                        <SelectOption key={choiceKey(c)} value={choiceKey(c)}>
                           {c.label}
                         </SelectOption>
                       ))}
@@ -1333,9 +1602,7 @@ export default function ProfilesPage() {
                         disabled={
                           modelSaving ||
                           !modelChoices?.some(
-                            (c) =>
-                              `${c.provider}\u0000${c.model}` ===
-                              modelEditChoice,
+                            (c) => choiceKey(c) === modelEditChoice,
                           )
                         }
                       >

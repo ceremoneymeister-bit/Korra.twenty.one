@@ -443,6 +443,141 @@ export async function transcribeAudio(
   return typeof payload?.transcript === "string" ? payload.transcript : "";
 }
 
+/** Итог контрольного сообщения новому агенту (см. `probeProfileChat`). */
+export interface ProfileProbeOutcome {
+  /** Агент ответил текстом — профиль отвечает. */
+  ok: boolean;
+  /** Ответ агента одной строкой. При отказе пусто. */
+  reply: string;
+  /** Причина отказа по-русски. При успехе пусто. */
+  error: string;
+  /** Дословный ответ сервера под русской фразой. У провайдерских отказов
+   *  («HTTP 401: invalid x-api-key») именно он и есть диагноз, а
+   *  `ownerFacingError` английскую прозу вырезает. */
+  detail: string;
+}
+
+/** ID сообщения для журнала доставки: 16–80 символов из `[A-Za-z0-9._:-]`
+ *  (`CLIENT_MESSAGE_ID_RE`, hermes_cli/chat_delivery.py). */
+function clientMessageId(): string {
+  const webCrypto = globalThis.crypto;
+  if (webCrypto && typeof webCrypto.randomUUID === "function") {
+    return webCrypto.randomUUID();
+  }
+  return `probe-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Строка из ответа сервера, если она там есть. */
+function probeServerText(payload: unknown, raw: string): string {
+  const body = payload as
+    | { detail?: unknown; error?: { message?: unknown } }
+    | null;
+  const fromError = body?.error?.message;
+  if (typeof fromError === "string" && fromError.trim()) return fromError.trim();
+  if (typeof body?.detail === "string" && body.detail.trim()) {
+    return body.detail.trim();
+  }
+  return raw.trim();
+}
+
+/**
+ * Контрольное сообщение новому профилю: «агент вообще отвечает?».
+ *
+ * Один короткий вопрос без потока (`stream: false`) в тот же маршрут, что и
+ * живой чат (`useChatStream`), — поэтому проверка идёт ровно тем же путём,
+ * что и первое сообщение владельца: тот же прокси, тот же профиль, тот же
+ * журнал доставки (заголовок `X-Korra-Client-Message-Id`).
+ *
+ * Провал отличается от успеха тремя способами, и все три встречаются вживую:
+ * не-2xx с `error.message`/`detail`; 200 с `finish_reason: "error"` (движок
+ * кладёт текст ошибки прямо в ответ, см. `gateway/platforms/api_server.py`);
+ * 200 с пустым ответом. Сетевую ошибку бросает `fetch` — её ловит вызывающий
+ * код и переводит `ownerFacingError`.
+ */
+export async function probeProfileChat(
+  profile: string,
+  prompt = "Ответь одним словом: готов?",
+  init?: { signal?: AbortSignal },
+): Promise<ProfileProbeOutcome> {
+  const response = await authedFetch(
+    appendProfileParam("/api/chat/completions", profile),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // Новый ID на каждый вызов: «Повторить проверку» должно спросить
+        // агента заново, а не получить из журнала записанный отказ.
+        "X-Korra-Client-Message-Id": clientMessageId(),
+      },
+      body: JSON.stringify({
+        model: "korra-agent",
+        messages: [{ role: "user", content: prompt }],
+        stream: false,
+      }),
+      ...(init?.signal ? { signal: init.signal } : {}),
+    },
+  );
+
+  const raw = await response.text().catch(() => "");
+  let payload: unknown = null;
+  try {
+    payload = raw ? JSON.parse(raw) : null;
+  } catch {
+    // Сервер ответил не-JSON — работаем с сырым текстом.
+  }
+  const serverText = probeServerText(payload, raw);
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      reply: "",
+      error: ownerFacingError(
+        `${response.status}: ${serverText}`,
+        "Агент не ответил на контрольное сообщение.",
+      ),
+      detail: serverText,
+    };
+  }
+
+  const body = payload as {
+    choices?: Array<{
+      finish_reason?: unknown;
+      message?: { content?: unknown };
+    }>;
+    hermes?: { failed?: unknown; error?: unknown };
+  } | null;
+  const choice = body?.choices?.[0];
+  const content =
+    typeof choice?.message?.content === "string"
+      ? choice.message.content.trim()
+      : "";
+  const failed =
+    body?.hermes?.failed === true || choice?.finish_reason === "error";
+
+  if (failed) {
+    const hermesError =
+      typeof body?.hermes?.error === "string" ? body.hermes.error.trim() : "";
+    const detail = hermesError || content || serverText;
+    return {
+      ok: false,
+      reply: "",
+      error: ownerFacingError(detail, "Агент ответил ошибкой."),
+      detail,
+    };
+  }
+
+  if (!content) {
+    return {
+      ok: false,
+      reply: "",
+      error: "Агент промолчал: ответ пришёл пустым.",
+      detail: serverText,
+    };
+  }
+
+  return { ok: true, reply: content, error: "", detail: "" };
+}
+
 export interface SessionQueryOptions {
   profile?: string;
   order?: "created" | "recent";
