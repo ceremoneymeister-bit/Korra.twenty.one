@@ -225,6 +225,29 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   padding: 0.1em 0.5em;
 }
 
+/* Канбан-доска (плагин со своим CSS): колонки после смены дизайна потеряли
+   границы — теперь каждая колонка вдавленный колодец на всю высоту. */
+[data-client-ui="true"] .hermes-kanban-columns {
+  gap: 1.25rem;
+  padding: 0.25rem;
+}
+
+[data-client-ui="true"] .hermes-kanban-column {
+  display: flex;
+  min-height: 60vh;
+  flex-direction: column;
+  border: 0;
+  border-radius: var(--neo-radius-card);
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset-compact);
+  padding: 0.75rem;
+}
+
+[data-client-ui="true"] .neo-card .hermes-kanban-column,
+[data-client-ui="true"] .hermes-kanban-column .neo-card {
+  box-shadow: var(--neo-depth-1);
+}
+
 [data-client-ui="true"] .text-display {
   letter-spacing: normal !important;
   text-transform: none !important;

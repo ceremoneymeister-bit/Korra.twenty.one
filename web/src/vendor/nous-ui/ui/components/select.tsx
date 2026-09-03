@@ -15,6 +15,8 @@ import {
   type ReactNode
 } from 'react'
 
+import { createPortal } from 'react-dom'
+
 import { cn } from '../../utils'
 
 import './form-controls.css'
@@ -23,8 +25,11 @@ const TRIGGER_CN =
   'neo-select-trigger flex h-11 min-h-11 w-full items-center justify-between gap-2 ' +
   'px-4 py-2 text-sm text-left cursor-pointer touch-manipulation'
 
+/* Меню рендерится через портал в body с фиксированной позицией: внутри
+ * заголовков и карточек с overflow оно обрезалось (владелец 03.09,
+ * переключатель профиля в шапке раздела). */
 const LISTBOX_CN =
-  'nous-ui-select-menu absolute z-50 mt-1.5 w-full max-h-60 overflow-auto origin-top ' +
+  'nous-ui-select-menu fixed z-[70] max-h-60 overflow-auto origin-top ' +
   'neo-select-menu p-1.5'
 
 type MenuState = 'closed' | 'closing' | 'open'
@@ -53,6 +58,22 @@ export function Select({
   const containerRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const closeTimerRef = useRef<number | null>(null)
+  const [menuBox, setMenuBox] = useState<{ top: number; left: number; width: number } | null>(null)
+
+  const measureMenu = useCallback(() => {
+    const el = containerRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const gap = 6
+    const estimated = 240
+    const below = window.innerHeight - rect.bottom - gap
+    const openUp = below < 160 && rect.top > below
+    setMenuBox({
+      top: openUp ? Math.max(8, rect.top - gap - Math.min(estimated, rect.top - gap)) : rect.bottom + gap,
+      left: rect.left,
+      width: Math.max(rect.width, 176),
+    })
+  }, [])
   const generatedId = useId()
   const triggerId = id ?? `nous-select-${generatedId}`
   const listboxId = `${triggerId}-listbox`
@@ -88,6 +109,7 @@ export function Select({
         window.clearTimeout(closeTimerRef.current)
         closeTimerRef.current = null
       }
+      measureMenu()
       setMenuState('open')
       setHighlightedIndex(
         selectedIndex >= 0
@@ -117,12 +139,25 @@ export function Select({
     document.addEventListener(
       'mousedown',
       e => {
-        if (!containerRef.current?.contains(e.target as Node)) close()
+        const target = e.target as Node
+        if (containerRef.current?.contains(target) || listRef.current?.contains(target)) return
+        close()
       },
       { signal: ac.signal }
     )
     return () => ac.abort()
   }, [open, close])
+
+  useEffect(() => {
+    if (!open) return
+    const onMove = () => measureMenu()
+    window.addEventListener('scroll', onMove, true)
+    window.addEventListener('resize', onMove)
+    return () => {
+      window.removeEventListener('scroll', onMove, true)
+      window.removeEventListener('resize', onMove)
+    }
+  }, [open, measureMenu])
 
   useEffect(() => {
     if (!open || highlightedIndex < 0) return
@@ -218,7 +253,7 @@ export function Select({
         />
       </button>
 
-      {menuState !== 'closed' && (
+      {menuState !== 'closed' && typeof document !== 'undefined' && createPortal(
         <div
           aria-hidden={menuState === 'closing' || undefined}
           className={LISTBOX_CN}
@@ -229,6 +264,7 @@ export function Select({
           }}
           ref={listRef}
           role="listbox"
+          style={menuBox ? { top: menuBox.top, left: menuBox.left, width: menuBox.width } : undefined}
         >
           {options.map((opt, i) => {
             const isSelected = opt.value === value
@@ -263,7 +299,8 @@ export function Select({
               </div>
             )
           })}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

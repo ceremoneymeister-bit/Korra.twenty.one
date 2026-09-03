@@ -22,7 +22,8 @@ export const darkNeumorphism: ThemeNeumorphism = {
   background: "#212121",
   surface: "#212121",
   shadow: "#191919",
-  highlight: "#3c3c3c",
+  /* Владелец 03.09: на тёмной теме блик был слишком ярким — приглушён. */
+  highlight: "#2e2e2e",
   textPrimary: "#e8e8e8",
   textSecondary: "#9a9a9a",
   accent: BRAND_LIME,

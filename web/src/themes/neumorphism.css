@@ -482,13 +482,24 @@
     color: var(--neo-text-primary);
   }
 
-  .neo-toast[data-tone='success'] {
-    box-shadow: inset 4px 0 0 var(--success), var(--neo-depth-3);
+  /* Тон уведомления — точка перед текстом, а не цветная кромка (владелец 03.09). */
+  .neo-toast {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
   }
 
-  .neo-toast[data-tone='error'] {
-    box-shadow: inset 4px 0 0 var(--destructive), var(--neo-depth-3);
+  .neo-toast::before {
+    width: 0.55rem;
+    height: 0.55rem;
+    flex: none;
+    border-radius: var(--neo-radius-round);
+    background: var(--neo-text-secondary);
+    content: '';
   }
+
+  .neo-toast[data-tone='success']::before { background: var(--neo-accent); }
+  .neo-toast[data-tone='error']::before { background: var(--destructive); }
 
   .neo-tabs-list {
     border: 0;

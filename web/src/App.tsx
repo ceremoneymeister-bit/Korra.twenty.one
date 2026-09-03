@@ -538,7 +538,22 @@ export default function App() {
   }, [embeddedChat, showTokenAnalytics, uiMode]);
 
   const sidebarNav = useMemo(
-    () => partitionSidebarNav(builtinNav, manifests),
+    () => {
+      const partitioned = partitionSidebarNav(builtinNav, manifests);
+      const kanban = partitioned.pluginItems.find((item) => item.path === "/kanban");
+      if (!kanban || !isProductUiMode()) return partitioned;
+      const coreItems = [...partitioned.coreItems];
+      const afterTasks = coreItems.findIndex((item) => item.path === "/cron");
+      coreItems.splice(afterTasks < 0 ? coreItems.length : afterTasks + 1, 0, {
+        ...kanban,
+        label: "Канбан-доска",
+        labelKey: undefined,
+      });
+      return {
+        coreItems,
+        pluginItems: partitioned.pluginItems.filter((item) => item.path !== "/kanban"),
+      };
+    },
     [builtinNav, manifests],
   );
   const productSettingsNav = useMemo<NavItem[]>(() => {
@@ -553,7 +568,10 @@ export default function App() {
     const source = embeddedChat || bubbleChat
       ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
       : BUILTIN_NAV_REST;
-    const pluginItems = partitionSidebarNav(source, manifests).pluginItems;
+    // Канбан живёт в главном списке под «Задачами» (решение владельца 03.09).
+    const pluginItems = partitionSidebarNav(source, manifests).pluginItems.filter(
+      (item) => item.path !== "/kanban",
+    );
     return [...selectServiceNav(source), ...pluginItems];
   }, [bubbleChat, embeddedChat, manifests]);
   // Группы сайдбара — аккордеон (решение владельца 03.09): открыта одна,
