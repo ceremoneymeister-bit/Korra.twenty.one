@@ -46,6 +46,7 @@ import { Markdown } from "@/components/Markdown";
 import { AgentTrace } from "@/components/chat/AgentTrace";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
 import { loadChatOutbox, type ChatOutboxRecord } from "@/lib/chat-outbox";
+import { useProfileScope } from "@/contexts/useProfileScope";
 import {
   ChatArtifactList,
   type ArtifactDecisionHandler,
@@ -454,7 +455,10 @@ function BubbleChatTranscript({
   onRetry,
   onDiscard,
   pendingElsewhere,
+  agentLabel,
 }: {
+  /** Имя агента вкладки для пустого экрана; пусто — главная Корра. */
+  agentLabel?: string;
   /** Черновик этого профиля из другого чата — напоминаем баннером. */
   pendingElsewhere?: ChatOutboxRecord | null;
   messages: ChatMessage[];
@@ -508,7 +512,7 @@ function BubbleChatTranscript({
           {messages.length === 0 ? (
             <div className="flex min-h-[40vh] items-center justify-center">
               <p className="text-base text-muted-foreground">
-                Напишите Корре своими словами — она на связи.
+                {agentLabel ? `Это чат с агентом «${agentLabel}» — напишите ему.` : "Напишите Корре своими словами — она на связи."}
               </p>
             </div>
           ) : (
@@ -563,6 +567,8 @@ function BubbleChatTranscript({
 /* ------------------------------------------------------------------ */
 
 interface BubbleChatComposerProps {
+  /** Имя агента вкладки для подсказок; пусто — главная Корра. */
+  agentLabel?: string;
   disabled?: boolean;
   streaming?: boolean;
   /** Поток уже прислал текст или событие инструмента. До этого честнее
@@ -602,6 +608,7 @@ export function BubbleChatComposer({
   prefill,
   onPrefillConsumed,
   profile,
+  agentLabel,
   allowAttachments = true,
 }: BubbleChatComposerProps) {
   const [value, setValue] = useState("");
@@ -1003,7 +1010,9 @@ export function BubbleChatComposer({
                 submit();
               }
             }}
-            placeholder={recording ? "Слушаю…" : "Напишите Корре…"}
+            placeholder={
+              recording ? "Слушаю…" : agentLabel ? `Напишите агенту «${agentLabel}»…` : "Напишите Корре…"
+            }
             disabled={disabled || submitting}
             className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent text-sm leading-6 normal-case tracking-normal"
             aria-describedby={shortcutId}
@@ -1200,6 +1209,13 @@ export default function BubbleChatPage({
   } = useChatStream({ profile: agentProfile });
   // Черновик недоставленного сообщения этого профиля из ДРУГОГО чата: пузырь
   // с «Повторить» есть только в своём чате, здесь напоминает баннер.
+  // Имя агента вкладки (display_name профиля) для подсказок композера и
+  // пустого экрана: во вкладках Секретаря и Учителя «Напишите Корре…» было
+  // ложью (QA 03.09).
+  const { profiles: scopeProfiles } = useProfileScope();
+  const agentLabel = agentProfile
+    ? (scopeProfiles.find((item) => item.name === agentProfile)?.display_name?.trim() || agentProfile)
+    : undefined;
   const pendingElsewhere = useMemo(() => {
     const pending = loadChatOutbox(agentProfile ?? "");
     return pending && pending.sessionId !== sessionId ? pending : null;
@@ -1401,8 +1417,10 @@ export default function BubbleChatPage({
           onRetry={() => void retryPending()}
           onDiscard={discardPending}
           pendingElsewhere={pendingElsewhere}
+          agentLabel={agentLabel}
         />
         <BubbleChatComposer
+          agentLabel={agentLabel}
           onSend={send}
           prefill={prefill}
           onPrefillConsumed={() => setPrefill(null)}
