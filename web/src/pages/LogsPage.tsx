@@ -35,10 +35,18 @@ const LINE_COLORS: Record<string, string> = {
   debug: "text-text-tertiary",
 };
 
-const formatFilterLabel = (value: string) => value.toUpperCase();
+/**
+ * Подпись фильтра для человека. Значение (`agent`, `WARNING`, …) уходит в API
+ * как есть — переводится только то, что видно на экране. Незнакомое значение
+ * `tr` вернёт без изменений, поэтому новый уровень из движка не исчезнет из
+ * полосы фильтров, а покажется своим исходным именем.
+ */
+type FilterLabel = (value: string) => string;
 
-const toSegmentOptions = <T extends string>(values: readonly T[]) =>
-  values.map((v) => ({ value: v, label: formatFilterLabel(v) }));
+const toSegmentOptions = <T extends string>(
+  values: readonly T[],
+  label: FilterLabel,
+) => values.map((v) => ({ value: v, label: label(v) }));
 
 const filterGroupClass =
   "flex min-w-0 w-full flex-col items-start gap-1.5 sm:w-auto sm:max-w-full sm:flex-row sm:items-center";
@@ -57,8 +65,9 @@ export default function LogsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
+  const filterLabel = useCallback<FilterLabel>((value) => tr(value), [tr]);
 
   const fetchLogs = useCallback(() => {
     setLoading(true);
@@ -81,8 +90,7 @@ export default function LogsPage() {
     setAfterTitle(
       <span className="flex items-center gap-1.5">
         <Badge tone="secondary" className="text-xs">
-          {formatFilterLabel(file)} · {formatFilterLabel(level)} ·{" "}
-          {formatFilterLabel(component)}
+          {filterLabel(file)} · {filterLabel(level)} · {filterLabel(component)}
         </Badge>
         <Button
           type="button"
@@ -125,6 +133,7 @@ export default function LogsPage() {
     autoRefresh,
     component,
     file,
+    filterLabel,
     level,
     loading,
     setAfterTitle,
@@ -158,7 +167,7 @@ export default function LogsPage() {
             className={segmentedClass}
             value={file}
             onChange={setFile}
-            options={toSegmentOptions(FILES)}
+            options={toSegmentOptions(FILES, filterLabel)}
           />
         </FilterGroup>
 
@@ -167,7 +176,7 @@ export default function LogsPage() {
             className={segmentedClass}
             value={level}
             onChange={setLevel}
-            options={toSegmentOptions(LEVELS)}
+            options={toSegmentOptions(LEVELS, filterLabel)}
           />
         </FilterGroup>
 
@@ -176,7 +185,7 @@ export default function LogsPage() {
             className={segmentedClass}
             value={component}
             onChange={setComponent}
-            options={toSegmentOptions(COMPONENTS)}
+            options={toSegmentOptions(COMPONENTS, filterLabel)}
           />
         </FilterGroup>
 

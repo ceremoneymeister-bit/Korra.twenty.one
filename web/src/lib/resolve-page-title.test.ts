@@ -47,7 +47,24 @@ describe("resolvePageTitle", () => {
 
   it("prefers plugin tab labels", () => {
     expect(
-      resolvePageTitle("/kanban", t, [{ path: "/kanban", label: "Kanban" }]),
+      resolvePageTitle("/notes", t, [{ path: "/notes", label: "Заметки" }]),
+    ).toBe("Заметки");
+    // Короткое имя плагина — не проза, его не подменяем: заголовок обязан
+    // совпадать с пунктом меню, по которому на экран пришли.
+    expect(
+      resolvePageTitle("/notes", t, [{ path: "/notes", label: "Kanban" }]),
+    ).toBe("Kanban");
+  });
+
+  it("names the shipped kanban board without a plugin tab", () => {
+    expect(resolvePageTitle("/kanban", t, [])).toBe("Канбан-доска");
+  });
+
+  it("falls back to the generic plugin title for English prose labels", () => {
+    expect(
+      resolvePageTitle("/notes", t, [
+        { path: "/notes", label: "Notes and long form drafts" },
+      ]),
     ).toBe("Плагин Korra");
   });
 

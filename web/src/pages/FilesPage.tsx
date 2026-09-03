@@ -25,6 +25,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { useSearchParams } from "react-router";
 import { Button } from "@/components/ProductButton";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import {
@@ -294,10 +295,17 @@ export default function FilesPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
   const listRequestRef = useRef(0);
-  const [currentPath, setCurrentPath] = useState<string | undefined>(() =>
-    clientMode ? "client" : undefined,
-  );
-  const currentPathRef = useRef(currentPath);
+  // Открытая папка живёт в адресе (`/files?path=…`), а не только в состоянии:
+  // «Назад» в браузере поднимает на уровень выше, ссылку на папку можно
+  // отправить, а перезагрузка страницы возвращает туда же (QA 03.09).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
+  const requestedPath =
+    searchParams.get("path")?.trim() || (clientMode ? "client" : undefined);
+  // Что реально показано на экране. Стартует пустым, поэтому первая загрузка
+  // случается всегда, даже когда адрес уже содержит нужную папку.
+  const currentPathRef = useRef<string | undefined>(undefined);
   const [pathInput, setPathInput] = useState("");
   const [listing, setListing] = useState<ManagedFilesResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -324,14 +332,14 @@ export default function FilesPage() {
     timeZone: getOwnerTimeZone(),
   }), []);
 
-  const activePath = listing?.path ?? currentPath ?? "";
+  const activePath = listing?.path ?? requestedPath ?? "";
   const canChangePath = listing?.can_change_path ?? false;
   const managedRoot = listing?.locked_root ?? listing?.root;
   const breadcrumbs = useMemo(
     () => buildFileBreadcrumbs(managedRoot, activePath, filesRootLabel()),
     [activePath, managedRoot],
   );
-  const rawHeaderPath = displayPath(listing?.locked_root ?? listing?.path ?? currentPath);
+  const rawHeaderPath = displayPath(listing?.locked_root ?? listing?.path ?? requestedPath);
   const headerPath = clientMode
     ? clientDisplayPath(activePath)
     : canChangePath
@@ -358,24 +366,46 @@ export default function FilesPage() {
     ["waiting", "uploading", "choice"].includes(item.status),
   );
 
-  const navigateTo = useCallback((path: string | undefined) => {
-    currentPathRef.current = path;
-    setCurrentPath(path);
-  }, []);
+  /** Переход в папку — новая запись в истории: «Назад» вернёт на уровень выше. */
+  const navigateTo = useCallback(
+    (path: string | undefined) => {
+      const next = new URLSearchParams(searchParamsRef.current);
+      if (path) next.set("path", path);
+      else next.delete("path");
+      setSearchParams(next);
+    },
+    [setSearchParams],
+  );
+
+  /**
+   * Сервер отвечает каноническим путём (корень контура, `client`, результат
+   * подъёма на «..»), и адрес обязан показывать именно его — иначе ссылка из
+   * адресной строки ведёт не туда, куда смотрит человек. Замена без новой
+   * записи в истории: один переход — одна кнопка «Назад».
+   */
+  const syncPathParam = useCallback(
+    (path: string) => {
+      if ((searchParamsRef.current.get("path") ?? "").trim() === path) return;
+      const next = new URLSearchParams(searchParamsRef.current);
+      next.set("path", path);
+      setSearchParams(next, { replace: true });
+    },
+    [setSearchParams],
+  );
 
   const load = useCallback(
     async (path?: string) => {
-      const requestedPath = path === undefined ? currentPathRef.current : path;
+      const target = path === undefined ? currentPathRef.current : path;
       const requestId = ++listRequestRef.current;
       setLoading(true);
       setError(null);
       try {
-        const result = await api.listFiles(requestedPath);
+        const result = await api.listFiles(target);
         if (requestId !== listRequestRef.current) return;
         setListing(result);
         currentPathRef.current = result.path;
-        setCurrentPath(result.path);
         setPathInput(result.path);
+        syncPathParam(result.path);
       } catch (e) {
         if (requestId !== listRequestRef.current) return;
         setError(ownerFacingError(e, "Не удалось загрузить список файлов."));
@@ -383,15 +413,26 @@ export default function FilesPage() {
         if (requestId === listRequestRef.current) setLoading(false);
       }
     },
-    [],
+    [syncPathParam],
   );
 
   useEffect(() => {
     // Existing dashboard data pages fetch from effects; keep this local and explicit
     // until the shared lint profile is updated for async page loaders.
-    void load(currentPath);
-  }, [currentPath]); // eslint-disable-line react-hooks/exhaustive-deps
+    //
+    // Эта папка уже на экране — второй запрос не нужен. Сюда мы приходим и
+    // сразу после того, как `load` сам переписал адрес каноническим путём:
+    // без проверки каждый переход стоил бы двух обращений к серверу.
+    if (requestedPath !== undefined && requestedPath === currentPathRef.current) {
+      return;
+    }
+    void load(requestedPath);
+  }, [requestedPath, load]);
 
+  // Два эффекта, а не один: раньше общий эффект зависел и от `loading`, и на
+  // каждый запрос снимал ОБА слота шапки и ставил их заново — путь рядом с
+  // заголовком мигал при любом обновлении списка. Теперь дёргается только та
+  // часть шапки, которая действительно изменилась.
   useEffect(() => {
     // В корне путь совпадает с названием экрана, и бейдж рядом с заголовком
     // повторял «Файлы» вторым словом — шапка сообщала одно и то же дважды.
@@ -407,6 +448,10 @@ export default function FilesPage() {
         </span>
       ),
     );
+    return () => setAfterTitle(null);
+  }, [breadcrumbs.length, canChangePath, headerPath, setAfterTitle]);
+
+  useEffect(() => {
     setEnd(
       <div className="flex items-center gap-2">
         <Button
@@ -421,11 +466,8 @@ export default function FilesPage() {
         </Button>
       </div>,
     );
-    return () => {
-      setAfterTitle(null);
-      setEnd(null);
-    };
-  }, [breadcrumbs.length, canChangePath, headerPath, load, loading, setAfterTitle, setEnd]);
+    return () => setEnd(null);
+  }, [load, loading, setEnd]);
 
   const openDirectory = (entry: ManagedFileEntry) => {
     if (entry.is_directory) {
@@ -433,13 +475,15 @@ export default function FilesPage() {
     }
   };
 
-  const goToPath = async () => {
+  const goToPath = () => {
     const nextPath = pathInput.trim();
     if (!nextPath) {
       showToast("Укажите путь", "error");
       return;
     }
-    await load(nextPath);
+    // Через адрес, а не через `load` напрямую: ручной ввод пути — такой же
+    // переход, как клик по папке, и «Назад» должен его отменять.
+    navigateTo(nextPath);
   };
 
   const createDirectory = async () => {
@@ -681,7 +725,7 @@ export default function FilesPage() {
             className="flex min-w-0 flex-1 items-center gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              void goToPath();
+              goToPath();
             }}
           >
             <Input
@@ -900,12 +944,16 @@ export default function FilesPage() {
             visibleEntries.map((entry) => (
               <div
                 key={entry.path}
-                className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-sm last:border-b-0 hover:bg-background/35 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem]"
+                className="relative grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-sm last:border-b-0 hover:bg-background/35 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem]"
               >
+                {/* `after:inset-0` растягивает область нажатия на всю строку:
+                    владелец жаловался, что папка открывается только по имени,
+                    а промах по размеру или дате не делает ничего (QA 03.09).
+                    Колонка действий поднята над этим слоем ниже. */}
                 <button
                   type="button"
                   onClick={() => (entry.is_directory ? openDirectory(entry) : previewEntry(entry))}
-                  className="flex min-w-0 items-center gap-3 text-left text-foreground"
+                  className="flex min-w-0 cursor-pointer items-center gap-3 text-left text-foreground after:absolute after:inset-0 after:content-['']"
                 >
                   {entry.is_directory ? (
                     <Folder className="h-4 w-4 shrink-0 text-warning" />
@@ -923,7 +971,7 @@ export default function FilesPage() {
                 <span className="hidden truncate text-xs text-text-secondary md:block">
                   {Number.isFinite(entry.mtime) ? dateFormat.format(entry.mtime * 1000) : "-"}
                 </span>
-                <span className="flex justify-end gap-1">
+                <span className="relative z-10 flex justify-end gap-1">
                   {entry.is_directory ? (
                     <Button
                       ghost

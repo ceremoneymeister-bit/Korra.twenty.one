@@ -126,8 +126,12 @@ function ProfileActionsMenu({
     setOpen(false);
   };
 
+  // `text-left` обязателен: у <button> по умолчанию `text-align: center`, и
+  // длинный пункт («Управлять навыками и инструментами») переносился на две
+  // строки по центру, пока соседние короткие стояли слева (QA 03.09).
+  // Перенос снят целиком — меню растёт вширь, а не вниз.
   const itemClass =
-    "flex w-full items-center gap-2.5 px-3 py-2 text-xs uppercase tracking-wider hover:bg-muted/50 disabled:opacity-40";
+    "flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-left text-xs uppercase tracking-wider hover:bg-muted/50 disabled:opacity-40 [&>*]:shrink-0";
 
   return (
     <div className="relative" data-profile-actions ref={containerRef}>
@@ -146,7 +150,7 @@ function ProfileActionsMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-50 mt-1 min-w-[200px] border border-border bg-card shadow-lg"
+          className="absolute right-0 top-full z-50 mt-1 w-max min-w-[200px] max-w-[calc(100vw-2rem)] border border-border bg-card shadow-lg"
         >
           {!isActive && (
             <button

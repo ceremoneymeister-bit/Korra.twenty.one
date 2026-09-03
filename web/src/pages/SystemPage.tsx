@@ -44,6 +44,7 @@ import { useModalBehavior } from "@/hooks/useModalBehavior";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { HermesConsoleModal } from "@/components/HermesConsoleModal";
 import { cn, themedBody } from "@/lib/utils";
+import { getOwnerTimeZone } from "@/lib/dashboard-flags";
 import { api } from "@/lib/api";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { ownerFacingError } from "@/lib/owner-facing-error";
@@ -64,19 +65,39 @@ import type {
 import { useI18n } from "@/i18n";
 
 function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (n < 1024) return `${n} Б`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} МБ`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} ГБ`;
 }
 
+/** Аптайм словами владельца: «27 д 7 ч 42 мин», а не `27d 7h 42m`. */
 function formatDuration(seconds: number): string {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
+  if (d > 0) return `${d} д ${h} ч ${m} мин`;
+  if (h > 0) return `${h} ч ${m} мин`;
+  return `${m} мин`;
+}
+
+/**
+ * Даты страницы — в русской раскладке и в часовом поясе владельца.
+ * `toLocaleString()` без локали брал её у браузера и показывал «1:50:18 PM»
+ * посреди русского интерфейса (QA 03.09).
+ */
+let systemDateFormat: Intl.DateTimeFormat | null = null;
+
+function formatSystemDate(value: string | number): string {
+  // Ленивая инициализация: часовой пояс владельца приезжает в `window` вместе
+  // со страницей, а модуль грузится отдельным чанком.
+  systemDateFormat ??= new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: getOwnerTimeZone(),
+  });
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : systemDateFormat.format(date);
 }
 
 type BackupImportTarget =
@@ -975,7 +996,7 @@ export default function SystemPage() {
               </Badge>
               <span className="text-sm text-muted-foreground">
                 {curator?.interval_hours ? tr("every {hours}h", { hours: curator.interval_hours }) : ""}
-                {curator?.last_run_at ? tr(" · last run {time}", { time: new Date(curator.last_run_at).toLocaleString() }) : tr(" · never run")}
+                {curator?.last_run_at ? tr(" · last run {time}", { time: formatSystemDate(curator.last_run_at) }) : tr(" · never run")}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -1007,7 +1028,9 @@ export default function SystemPage() {
                 {gatewayRunning ? tr("running") : tr("stopped")}
               </Badge>
               <span className="text-sm text-muted-foreground">
-                {status?.gateway_state ?? "—"}
+                {/* Состояние приходит английским словом движка — переводим тем
+                    же словарём, что и бейдж слева. */}
+                {status?.gateway_state ? tr(status.gateway_state) : "—"}
                 {status?.gateway_pid ? ` · pid ${status.gateway_pid}` : ""}
               </span>
             </div>

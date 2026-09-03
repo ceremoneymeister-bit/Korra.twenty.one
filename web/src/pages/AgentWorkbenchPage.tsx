@@ -50,6 +50,31 @@ import { useAgentTabs } from "@/hooks/useAgentTabs";
 /*  AgentWorkbenchPage (default export)                                */
 /* ------------------------------------------------------------------ */
 
+/** Ширина портального меню — та же, что в разметке (`min-w-[250px]`). */
+const TAB_MENU_WIDTH = 250;
+/** Отступ от края экрана, чтобы меню не липло к рамке окна. */
+const TAB_MENU_VIEWPORT_MARGIN = 12;
+
+/**
+ * Левый край меню под кнопкой, которая его открыла.
+ *
+ * Раньше меню прижималось правым краем к правому краю кнопки «⋮» и уезжало на
+ * 250 px влево — визуально оно принадлежало СОСЕДНЕЙ вкладке, а не своей
+ * (QA 03.09). Теперь меню начинается там же, где кнопка; у правого края экрана
+ * оно переворачивается — правый край меню встаёт по правому краю кнопки.
+ */
+function tabMenuLeft(trigger: DOMRect): number {
+  const viewportWidth =
+    typeof window === "undefined" ? TAB_MENU_WIDTH : window.innerWidth;
+  const maxLeft = viewportWidth - TAB_MENU_WIDTH - TAB_MENU_VIEWPORT_MARGIN;
+  const preferred =
+    trigger.left <= maxLeft ? trigger.left : trigger.right - TAB_MENU_WIDTH;
+  return Math.max(
+    TAB_MENU_VIEWPORT_MARGIN,
+    Math.min(preferred, Math.max(TAB_MENU_VIEWPORT_MARGIN, maxLeft)),
+  );
+}
+
 export default function AgentWorkbenchPage() {
   // Состав вкладок — реальные профили контура (см. lib/agent-tabs.ts):
   // главная «Корра» есть всегда, остальные приезжают из /api/profiles и
@@ -68,8 +93,8 @@ export default function AgentWorkbenchPage() {
     Record<string, number>
   >({});
   const [openMenu, setOpenMenu] = useState<
-    | { kind: "tab"; profile: string; top: number; right: number }
-    | { kind: "add"; top: number; right: number }
+    | { kind: "tab"; profile: string; top: number; left: number }
+    | { kind: "add"; top: number; left: number }
     | null
   >(null);
   const [renamingProfile, setRenamingProfile] = useState<string | null>(null);
@@ -199,7 +224,7 @@ export default function AgentWorkbenchPage() {
         kind: "tab",
         profile,
         top: rect.bottom + 8,
-        right: Math.max(12, window.innerWidth - rect.right),
+        left: tabMenuLeft(rect),
       });
       setRenamingProfile(null);
     },
@@ -217,7 +242,7 @@ export default function AgentWorkbenchPage() {
       setOpenMenu({
         kind: "add",
         top: rect.bottom + 8,
-        right: Math.max(12, window.innerWidth - rect.right),
+        left: tabMenuLeft(rect),
       });
       setRenamingProfile(null);
     },
@@ -394,8 +419,8 @@ export default function AgentWorkbenchPage() {
             ref={menuRef}
             role="menu"
             aria-label={`Действия агента «${menuTab.label}»`}
-            className="neo-select-menu fixed z-50 min-w-[250px] p-1.5"
-            style={{ top: openMenu.top, right: openMenu.right }}
+            className="neo-select-menu fixed z-50 w-[250px] p-1.5"
+            style={{ top: openMenu.top, left: openMenu.left }}
           >
             {renamingProfile === menuTab.profile ? (
               <form onSubmit={submitDisplayName} className="flex items-center gap-1.5 p-1">
@@ -517,8 +542,8 @@ export default function AgentWorkbenchPage() {
             ref={menuRef}
             role="menu"
             aria-label="Добавить вкладку агента"
-            className="neo-select-menu fixed z-50 min-w-[250px] p-1.5"
-            style={{ top: openMenu.top, right: openMenu.right }}
+            className="neo-select-menu fixed z-50 w-[250px] p-1.5"
+            style={{ top: openMenu.top, left: openMenu.left }}
           >
             {hiddenTabs.map((tab) => (
               <button
@@ -532,8 +557,8 @@ export default function AgentWorkbenchPage() {
                   setOpenMenu(null);
                 }}
               >
-                <Plus size={15} aria-hidden />
-                {tab.label}
+                <Plus size={15} className="shrink-0" aria-hidden />
+                <span className="min-w-0 truncate">{tab.label}</span>
               </button>
             ))}
             <button

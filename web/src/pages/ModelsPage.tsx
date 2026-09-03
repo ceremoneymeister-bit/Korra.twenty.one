@@ -47,6 +47,8 @@ import { ModelReloadConfirm } from "@/components/ModelReloadConfirm";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { russianInterfaceText } from "@/lib/russian-interface-text";
 
+// `label` — ключ перевода в `ru.dashboard`, а не готовая подпись: сам период
+// («7 дней») собирается из него через `tr` уже в разметке.
 const PERIODS = [
   { label: "7d", days: 7 },
   { label: "30d", days: 30 },
@@ -67,6 +69,11 @@ const AUX_TASKS: readonly { key: string; label: string; hint: string }[] = [
   { key: "profile_describer", label: "Описание профиля", hint: "Автоописание профилей" },
   { key: "curator", label: "Куратор", hint: "Проверка использования навыков" },
 ] as const;
+
+/** Русская подпись вспомогательной задачи; незнакомый ключ показываем как есть. */
+function auxTaskLabel(task: string): string {
+  return AUX_TASKS.find((entry) => entry.key === task)?.label ?? task;
+}
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -423,7 +430,7 @@ function ModelCard({
               )}
               {mainAuxTask && (
                 <span className="inline-flex items-center bg-purple-500/10 px-1.5 py-0.5 text-display text-xs font-medium tracking-wider text-purple-600 dark:text-purple-400">
-                  вспомогательная · {mainAuxTask}
+                  вспомогательная · {auxTaskLabel(mainAuxTask)}
                 </span>
               )}
             </div>
@@ -671,10 +678,7 @@ function AuxiliaryTasksModal({
             key={`picker-${refreshKey}`}
             loader={api.getModelOptions}
             alwaysGlobal
-            title={`Выбрать модель для задачи: ${
-              AUX_TASKS.find((t) => t.key === picker.task)?.label ??
-              picker.task
-            }`}
+            title={`Выбрать модель для задачи: ${auxTaskLabel(picker.task)}`}
             onApply={async ({ provider, model, confirmExpensiveModel }) => {
               const result = await api.setModelAssignment({
                 confirm_expensive_model: confirmExpensiveModel,
@@ -736,7 +740,8 @@ function MoaModelsModal({
 
   const presetNames = Object.keys(draft.presets || {});
   const preset = draft.presets[selected] || draft.presets[presetNames[0]];
-  const slotLabel = (slot: MoaModelSlot) => `${slot.provider || "(provider)"} · ${slot.model || "(model)"}`;
+  const slotLabel = (slot: MoaModelSlot) =>
+    `${slot.provider || "(провайдер не выбран)"} · ${slot.model || "(модель не выбрана)"}`;
 
   const updateSelectedPreset = (updater: (preset: MoaConfigResponse["presets"][string]) => MoaConfigResponse["presets"][string]) => {
     setDraft((prev) => ({
@@ -1140,7 +1145,7 @@ export default function ModelsPage() {
   // hermes_cli/config.py for the rationale: the numbers exclude auxiliary
   // calls and retries, so they're misleading next to provider billing.
   const [showTokens, setShowTokens] = useState(false);
-  const { t } = useI18n();
+  const { t, tr } = useI18n();
   const { setAfterTitle, setEnd } = usePageHeader();
 
   useEffect(() => {
@@ -1199,9 +1204,8 @@ export default function ModelsPage() {
             size="sm"
             outlined={days !== p.days}
             onClick={() => setDays(p.days)}
-            className="uppercase"
           >
-            {p.label}
+            {tr(p.label)}
           </Button>
         ))}
         <Button
@@ -1222,7 +1226,7 @@ export default function ModelsPage() {
       setAfterTitle(null);
       setEnd(null);
     };
-  }, [days, loading, load, setAfterTitle, setEnd, t.common.refresh]);
+  }, [days, loading, load, setAfterTitle, setEnd, t.common.refresh, tr]);
 
   useEffect(() => {
     load();

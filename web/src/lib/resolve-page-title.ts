@@ -1,7 +1,7 @@
 import type { Translations } from "@/i18n/types";
 import { productUiMode } from "./dashboard-flags";
 import { productNavLabel } from "./product-nav";
-import { russianInterfaceText } from "./russian-interface-text";
+import { russianInterfaceLabel } from "./russian-interface-text";
 
 const BUILTIN: Record<string, keyof Translations["app"]["nav"]> = {
   "/chat": "chat",
@@ -30,6 +30,12 @@ const BUILTIN_LITERAL: Record<string, string> = {
   "/system": "Система",
 };
 
+// Плагины поставки: их подпись задана продуктом, а не манифестом, поэтому она
+// нужна и здесь — на случай, если у вкладки не оказалось русского имени.
+const PLUGIN_LITERAL: Record<string, string> = {
+  "/kanban": "Канбан-доска",
+};
+
 export function resolvePageTitle(
   pathname: string,
   t: Translations,
@@ -41,7 +47,14 @@ export function resolvePageTitle(
   }
   const plugin = pluginTabs.find((p) => p.path === normalized);
   if (plugin) {
-    return russianInterfaceText(plugin.label, "Плагин Korra");
+    // Заголовок обязан совпадать с пунктом меню, по которому сюда пришли, —
+    // и подпись плагина это ровно он. Раньше здесь стоял `russianInterfaceText`,
+    // и короткое английское имя («Kanban») схлопывалось в безликое «Плагин
+    // Korra», хотя в сайдбаре пункт назывался нормально (QA 03.09).
+    return russianInterfaceLabel(
+      plugin.label,
+      PLUGIN_LITERAL[normalized] ?? "Плагин Korra",
+    );
   }
   // Продуктовая подпись — раньше админской: в продукте у экрана своё имя, и
   // заголовок обязан совпадать с пунктом меню, по которому на него пришли.
@@ -53,7 +66,7 @@ export function resolvePageTitle(
   if (key) {
     return t.app.nav[key];
   }
-  const literal = BUILTIN_LITERAL[normalized];
+  const literal = BUILTIN_LITERAL[normalized] ?? PLUGIN_LITERAL[normalized];
   if (literal) {
     return literal;
   }
