@@ -14,10 +14,14 @@ name: CI
 # Do not add ``secrets: inherit`` or GitHub App credentials here. Trusted
 # main-only automation uses protected environments in its own workflows.
 
+# Korra 03.09.2026: CI крутится на нашем же сервере и днём душит панель
+# владельца (load 16 на 8 vCPU), а лимит минут GitHub ограничен до 30.10.
+# Поэтому: ночной прогон по расписанию + ручной запуск; на push — ничего.
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *" # 02:30 UTC = 05:30 МСК, владелец спит
 
 permissions:
   contents: read
