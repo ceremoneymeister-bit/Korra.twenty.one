@@ -1,7 +1,7 @@
 # Configuration, Toolsets & Voice
 
-Edit with `hermes config edit` or `hermes config set section.key value`.
-Source of truth: `hermes config --help` and the configuration code in the
+Edit with `korra config edit` or `korra config set section.key value`.
+Source of truth: `korra config --help` and the configuration code in the
 installed build.
 
 ### Config Sections (most-used keys)
@@ -22,11 +22,11 @@ installed build.
 | `checkpoints` | `enabled`, `max_snapshots` (50) |
 | `curator` | `enabled`, `consolidate` (false, opt-in aux-model consolidation), `interval_hours`, `stale_after_days` |
 
-`hermes config check` reports sections missing from an older config.
+`korra config check` reports sections missing from an older config.
 
 ### Toolsets
 
-Enable/disable via `hermes tools` (interactive) or `hermes tools enable/disable NAME`.
+Enable/disable via `korra tools` (interactive) or `korra tools enable/disable NAME`.
 Full enumeration: `TOOLSETS` dict in `toolsets.py` (`_HERMES_CORE_TOOLS` is the default bundle most platforms inherit).
 
 | Toolset | What it provides |

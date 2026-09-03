@@ -2,7 +2,7 @@
 name: grounded-citations
 description: "Ground answers and documents in cited, verifiable sources."
 version: 1.1.0
-author: Hermes Agent + Teknium
+author: Korra + Teknium
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
@@ -56,7 +56,7 @@ Override per task with `--ledger <path>` or `HERMES_CITATION_LEDGER`.
 ## How to Run
 
 ```bash
-S=~/.hermes/skills/research/grounded-citations/scripts/sources.py
+S=$HERMES_HOME/skills/research/grounded-citations/scripts/sources.py
 
 python "$S" reset                                  # start a clean ledger
 python "$S" add https://example.com/a --title "A"  # prints: [1]

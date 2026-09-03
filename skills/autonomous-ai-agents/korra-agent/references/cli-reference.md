@@ -1,12 +1,12 @@
-# `hermes` CLI Reference
+# `korra` CLI Reference
 
-Live sources when anything looks stale: `hermes --help`,
-`hermes <command> --help`, and the command code in the installed build.
+Live sources when anything looks stale: `korra --help`,
+`korra <command> --help`, and the command code in the installed build.
 
 ### Global Flags
 
 ```
-hermes [flags] [command]        (no subcommand = interactive chat)
+korra [flags] [command]        (no subcommand = interactive chat)
 
   --version, -V             Show version
   -z, --oneshot PROMPT      One-shot: print ONLY the final response (for scripts/pipes)
@@ -27,7 +27,7 @@ hermes [flags] [command]        (no subcommand = interactive chat)
 ### Chat
 
 ```
-hermes chat [flags]
+korra chat [flags]
   -q, --query TEXT          Single query, non-interactive
   --image PATH              Attach a local image to a single query
   -Q, --quiet               Suppress banner, spinner, tool previews
@@ -40,111 +40,111 @@ hermes chat [flags]
 ### Configuration
 
 ```
-hermes setup [section]      Wizard (model|tts|terminal|gateway|tools|agent)
-hermes model                Interactive model/provider picker
-hermes fallback [add|remove|list]  Fallback provider chain
-hermes config [show|edit|get|set|unset|path|env-path|check|migrate]
-hermes login / logout       OAuth sign-in / clear stored auth
-hermes doctor [--fix]       Check dependencies and config
-hermes status [--all]       Component status
+korra setup [section]      Wizard (model|tts|terminal|gateway|tools|agent)
+korra model                Interactive model/provider picker
+korra fallback [add|remove|list]  Fallback provider chain
+korra config [show|edit|get|set|unset|path|env-path|check|migrate]
+korra login / logout       OAuth sign-in / clear stored auth
+korra doctor [--fix]       Check dependencies and config
+korra status [--all]       Component status
 ```
 
 ### Tools & Skills
 
 ```
-hermes tools [list|enable NAME|disable NAME]   Per-platform toolsets (curses UI with no args)
+korra tools [list|enable NAME|disable NAME]   Per-platform toolsets (curses UI with no args)
 
-hermes skills list|browse|search QUERY|inspect ID
-hermes skills install ID    Hub identifier OR a direct https://…/SKILL.md URL
-hermes skills config        Enable/disable skills per platform
-hermes skills check|update|uninstall|publish PATH
-hermes skills tap add REPO  Add a GitHub repo as a skill source
-hermes bundles              Skill bundles (one /<name> alias loads several skills)
+korra skills list|browse|search QUERY|inspect ID
+korra skills install ID    Hub identifier OR a direct https://…/SKILL.md URL
+korra skills config        Enable/disable skills per platform
+korra skills check|update|uninstall|publish PATH
+korra skills tap add REPO  Add a GitHub repo as a skill source
+korra bundles              Skill bundles (one /<name> alias loads several skills)
 ```
 
 ### MCP Servers
 
 ```
-hermes mcp add NAME (--url or --command) | remove | list | test NAME
-hermes mcp catalog | install NAME     Curated catalog install
-hermes mcp configure NAME             Toggle tool selection
-hermes mcp serve                      Run Korra as an MCP server
+korra mcp add NAME (--url or --command) | remove | list | test NAME
+korra mcp catalog | install NAME     Curated catalog install
+korra mcp configure NAME             Toggle tool selection
+korra mcp serve                      Run Korra as an MCP server
 ```
 Details (transport, tool discovery, catalog): `references/native-mcp.md`.
 
 ### Gateway (Messaging Platforms)
 
 ```
-hermes gateway run|install|start|stop|restart|status|setup
+korra gateway run|install|start|stop|restart|status|setup
 ```
 
-20+ platforms: Telegram, Discord, Slack, WhatsApp (Baileys + Business Cloud API), iMessage (Photon — `hermes photon setup`), Signal, Email, SMS, Matrix, Mattermost, Teams, LINE, SimpleX, ntfy, Google Chat, Home Assistant, DingTalk, Feishu, WeCom, Weixin, API Server, Webhooks. Open WebUI connects via the API Server adapter. Most adapters ship under `plugins/platforms/`.
-Source of truth: `hermes gateway --help` and the installed platform adapters.
+20+ platforms: Telegram, Discord, Slack, WhatsApp (Baileys + Business Cloud API), iMessage (Photon — `korra photon setup`), Signal, Email, SMS, Matrix, Mattermost, Teams, LINE, SimpleX, ntfy, Google Chat, Home Assistant, DingTalk, Feishu, WeCom, Weixin, API Server, Webhooks. Open WebUI connects via the API Server adapter. Most adapters ship under `plugins/platforms/`.
+Source of truth: `korra gateway --help` and the installed platform adapters.
 
 ### Sessions
 
 ```
-hermes sessions list|browse|rename ID TITLE|delete ID|export OUT|prune|stats
+korra sessions list|browse|rename ID TITLE|delete ID|export OUT|prune|stats
 ```
 
 ### Cron / Webhooks
 
 ```
-hermes cron list|create SCHED|edit ID|pause|resume|run ID|remove|status
+korra cron list|create SCHED|edit ID|pause|resume|run ID|remove|status
     Schedules: '30m', 'every 2h', '0 9 * * *', ISO timestamp
-hermes webhook subscribe NAME|list|remove NAME|test NAME
+korra webhook subscribe NAME|list|remove NAME|test NAME
 ```
 Webhook payloads/routes: `references/webhooks.md`.
 
 ### Profiles
 
 ```
-hermes profile list|create NAME (--clone|--clone-all|--clone-from)|use|show|delete
-hermes profile rename A B | alias NAME | export NAME | import FILE
+korra profile list|create NAME (--clone|--clone-all|--clone-from)|use|show|delete
+korra profile rename A B | alias NAME | export NAME | import FILE
 ```
 
 ### Credentials & Pools
 
 ```
-hermes auth                 Interactive credential manager
-hermes auth add [PROVIDER]  Add OAuth or API-key credential (nous, openai-codex, qwen-oauth, …)
-hermes auth list|remove P IDX|reset PROVIDER|status
+korra auth                 Interactive credential manager
+korra auth add [PROVIDER]  Add OAuth or API-key credential (nous, openai-codex, qwen-oauth, …)
+korra auth list|remove P IDX|reset PROVIDER|status
 ```
 Multiple credentials per provider form a pool that rotates automatically and skips exhausted keys.
 
 ### Other
 
 ```
-hermes desktop / gui        Native desktop app
-hermes dashboard            Web admin panel + embedded chat (--stop / --status)
-hermes proxy                OpenAI-compatible local proxy backed by an OAuth provider
-hermes portal               Quick setup / sign in via Nous Portal
-hermes kanban <verb>        Multi-agent work-queue board
-hermes project              Named multi-folder workspaces
-hermes skin list|use|set    Switch/tweak skins (see references/themes.md)
-hermes pets <verb>          Pet mascots (see references/petdex.md)
-hermes memory setup|status|off|reset   Memory provider
-hermes secrets bitwarden|onepassword   External secret stores
-hermes moa                  Mixture-of-Agents slots
-hermes hooks / security / backup / import / checkpoints / console
-hermes logs [-f] [errors]   View agent/error logs
-hermes send                 One-off message through a gateway platform
-hermes pairing / plugins / insights / journey / computer-use
-hermes acp                  ACP server (IDE integration)
-hermes completion bash|zsh|fish
-hermes update / uninstall / claw migrate
+korra desktop / gui        Native desktop app
+korra dashboard            Web admin panel + embedded chat (--stop / --status)
+korra proxy                OpenAI-compatible local proxy backed by an OAuth provider
+korra portal               Quick setup / sign in via Nous Portal
+korra kanban <verb>        Multi-agent work-queue board
+korra project              Named multi-folder workspaces
+korra skin list|use|set    Switch/tweak skins (see references/themes.md)
+korra pets <verb>          Pet mascots (see references/petdex.md)
+korra memory setup|status|off|reset   Memory provider
+korra secrets bitwarden|onepassword   External secret stores
+korra moa                  Mixture-of-Agents slots
+korra hooks / security / backup / import / checkpoints / console
+korra logs [-f] [errors]   View agent/error logs
+korra send                 One-off message through a gateway platform
+korra pairing / plugins / insights / journey / computer-use
+korra acp                  ACP server (IDE integration)
+korra completion bash|zsh|fish
+korra update / uninstall / claw migrate
 ```
 
-Plugin- and provider-supplied subcommands (e.g. `hermes photon setup`) only appear once their plugin is installed/active.
+Plugin- and provider-supplied subcommands (e.g. `korra photon setup`) only appear once their plugin is installed/active.
 
 ### Where to Find Things
 
 | Looking for... | Location |
 |---|---|
-| Config options | `hermes config --help` · `hermes config edit` · installed configuration code |
-| Tools / toolsets | `hermes tools --help` · `hermes tools list` · `toolsets.py` |
-| Skills catalog | `hermes skills --help` · `hermes skills browse` |
-| Provider setup | `hermes model --help` · installed provider plugins |
-| Env variables | `hermes config env-path` · installed configuration code |
-| Gateway logs | `~/.hermes/logs/gateway.log` (or `hermes logs`) |
-| Sessions | `hermes sessions browse` (reads state.db) |
+| Config options | `korra config --help` · `korra config edit` · installed configuration code |
+| Tools / toolsets | `korra tools --help` · `korra tools list` · `toolsets.py` |
+| Skills catalog | `korra skills --help` · `korra skills browse` |
+| Provider setup | `korra model --help` · installed provider plugins |
+| Env variables | `korra config env-path` · installed configuration code |
+| Gateway logs | `$HERMES_HOME/logs/gateway.log` (or `korra logs`) |
+| Sessions | `korra sessions browse` (reads state.db) |

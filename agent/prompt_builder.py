@@ -98,11 +98,15 @@ def _find_git_root(start: Path) -> Optional[Path]:
     return None
 
 
-_HERMES_MD_NAMES = (".hermes.md", "HERMES.md")
+# Korra: канон форка — `.korra.md` / `KORRA.md`. Апстримовые `.hermes.md` /
+# `HERMES.md` остаются в кортеже как legacy: у клиентов эти файлы уже лежат в
+# репозиториях, и молча перестать их читать значило бы потерять их правила.
+# Порядок задаёт приоритет внутри одного каталога — новое имя выигрывает.
+_HERMES_MD_NAMES = (".korra.md", "KORRA.md", ".hermes.md", "HERMES.md")
 
 
 def _find_hermes_md(cwd: Path) -> Optional[Path]:
-    """Discover the nearest ``.hermes.md`` or ``HERMES.md``.
+    """Discover the nearest ``.korra.md`` / ``KORRA.md`` (or legacy ``.hermes.md``).
 
     Search order: *cwd* first, then each parent directory up to (and
     including) the git repository root.  Returns the first match, or
@@ -174,19 +178,24 @@ HERMES_AGENT_HELP_GUIDANCE = (
     # "when the two differ" was cut (#95681): a model that just read the
     # skill won't ALSO fetch the docs to diff them, so the clause was dead
     # weight — the docs-are-authoritative sentence already carries the
-    # precedence. Injected only when skill_view exists AND the hermes-agent
+    # precedence. Injected only when skill_view exists AND the korra-agent
     # skill is actually installed (see system_prompt.py slot resolution).
     # Korra: жёсткий форк. Раньше здесь внешний сайт апстрима объявлялся
     # авторитетным и «всегда самым свежим» источником правды о движке. После
     # форка это неверно фактически: их документация описывает их код, а не наш,
     # и расхождение будет только расти. Авторитет перенесён на поставляемый
     # скилл, который едет вместе с этой версией движка.
+    #
+    # Korra: имя скилла всегда пишем полностью и в одну строку — модель уже
+    # обрезала его до `-agent` и получала «skill not found». Контур, где на
+    # диске ещё лежит старый каталог `hermes-agent`, обслуживается алиасом в
+    # tools/skills_tool.py, поэтому здесь достаточно одного канонического имени.
     "You run on Korra. When the user needs help with Korra itself — "
     "configuring, setting up, using, extending, or troubleshooting it — or when "
     "you need to understand your own features, tools, or capabilities, the "
-    "bundled `hermes-agent` skill is your authoritative reference: it ships with "
-    "this build and describes this build. Load it with "
-    "skill_view(name='hermes-agent') before configuring, modifying, or "
+    "bundled `korra-agent` skill is your authoritative reference: it ships with "
+    "this build and describes this build. Load it with the exact, complete name "
+    "skill_view(name='korra-agent') before configuring, modifying, or "
     "troubleshooting Korra so you don't guess or invent workarounds."
 )
 
@@ -201,8 +210,8 @@ HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS = (
     "You run on Korra. When the user needs help with Korra itself — "
     "configuring, setting up, using, extending, or troubleshooting it — say "
     "plainly what you do and don't know about this build instead of guessing. "
-    "Do not point the user at Hermes Agent documentation: it describes a "
-    "different codebase and will not match this build."
+    "Do not point the user at the upstream project's documentation: it "
+    "describes a different codebase and will not match this build."
 )
 
 # Memory guidance (#95681, consolidated): ONE block from ONE builder.
@@ -2261,7 +2270,7 @@ def load_soul_md(
 
 
 def _load_hermes_md(cwd_path: Path, context_length: Optional[int] = None) -> str:
-    """.hermes.md / HERMES.md — walk to git root."""
+    """.korra.md / KORRA.md (legacy .hermes.md / HERMES.md) — walk to git root."""
     hermes_md_path = _find_hermes_md(cwd_path)
     if not hermes_md_path:
         return ""
@@ -2278,7 +2287,10 @@ def _load_hermes_md(cwd_path: Path, context_length: Optional[int] = None) -> str
         content = _scan_context_content(content, rel)
         result = f"## {rel}\n\n{content}"
         return _truncate_content(
-            result, ".hermes.md", context_length=context_length,
+            # Korra: метка усечения — реальное имя найденного файла, а не
+            # захардкоженное `.hermes.md`. Иначе в контуре с `.korra.md`
+            # уведомление об обрезке называло бы несуществующий файл.
+            result, hermes_md_path.name, context_length=context_length,
             read_path=str(hermes_md_path),
         )
     except Exception as e:

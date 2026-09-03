@@ -389,6 +389,11 @@ requires = ["setuptools==83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
+# Korra: `korra` — каноническое имя команды форка, `hermes` оставлен рабочим
+# алиасом той же точки входа. Две записи, один main: снимать `hermes` нельзя —
+# на него завязаны установленные обёртки, systemd-юниты и docker-шим в живых
+# клиентских контурах.
+korra = "hermes_cli.main:main"
 hermes = "hermes_cli.main:main"
 hermes-agent = "run_agent:main"
 hermes-acp = "acp_adapter.entry:main"

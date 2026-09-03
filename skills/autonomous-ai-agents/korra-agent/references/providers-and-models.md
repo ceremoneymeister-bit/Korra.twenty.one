@@ -1,8 +1,8 @@
 # Providers & Model Aliases
 
-Set via `hermes model` (picker) or `hermes setup`. 35+ provider profiles ship as
+Set via `korra model` (picker) or `korra setup`. 35+ provider profiles ship as
 plugins under `plugins/model-providers/`; user plugins of the same name override.
-Source of truth: `hermes model --help`, `hermes setup --help`, and
+Source of truth: `korra model --help`, `korra setup --help`, and
 `plugins/model-providers/` in the installed build.
 
 ### Providers
@@ -11,10 +11,10 @@ Source of truth: `hermes model --help`, `hermes setup --help`, and
 |----------|------|----------------|
 | openrouter | API key | `OPENROUTER_API_KEY` |
 | anthropic | API key | `ANTHROPIC_API_KEY` (also `CLAUDE_CODE_OAUTH_TOKEN`) |
-| nous | OAuth device code | `hermes auth add nous` (or `NOUS_API_KEY`) |
-| openai-codex | OAuth | `hermes auth add openai-codex` |
-| qwen-oauth | OAuth | `hermes auth add qwen-oauth` |
-| minimax-oauth | OAuth | `hermes auth add minimax-oauth` |
+| nous | OAuth device code | `korra auth add nous` (or `NOUS_API_KEY`) |
+| openai-codex | OAuth | `korra auth add openai-codex` |
+| qwen-oauth | OAuth | `korra auth add qwen-oauth` |
+| minimax-oauth | OAuth | `korra auth add minimax-oauth` |
 | copilot | Token | `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` (Copilot device flow — `gh auth login` tokens do NOT work) |
 | copilot-acp | External CLI | Copilot CLI on PATH or `COPILOT_CLI_PATH` |
 | gemini | API key | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
@@ -30,8 +30,8 @@ Source of truth: `hermes model --help`, `hermes setup --help`, and
 | bedrock / vertex / azure-foundry | Cloud SDK / key | AWS SDK creds / Vertex ADC / `AZURE_FOUNDRY_API_KEY` |
 | custom | Config | `model.base_url` + `model.api_key` in config.yaml |
 
-Multiple credentials per provider pool and rotate automatically (`hermes auth`).
-Fallback chain when the primary fails: `hermes fallback add|remove|list`.
+Multiple credentials per provider pool and rotate automatically (`korra auth`).
+Fallback chain when the primary fails: `korra fallback add|remove|list`.
 
 ### User-defined model aliases
 
@@ -56,7 +56,7 @@ model_aliases:
     key_env: THETA_API_KEY        # or: api_key: "${THETA_API_KEY}"
 
 # Short form ("provider/model"), also via CLI:
-#   hermes config set model.aliases.fav openrouter/anthropic/claude-sonnet-4.6
+#   korra config set model.aliases.fav openrouter/anthropic/claude-sonnet-4.6
 model:
   aliases:
     fav: openrouter/anthropic/claude-sonnet-4.6

@@ -488,6 +488,15 @@ ENV HERMES_LAZY_INSTALL_TARGET=/opt/data/lazy-packages
 COPY --chmod=0755 docker/hermes-exec-shim.sh /opt/hermes/bin/hermes
 COPY --chmod=0755 docker/entrypoint-dispatch.sh /opt/hermes/docker/entrypoint-dispatch.sh
 
+# Korra: каноническое имя команды — `korra`; `hermes` остаётся алиасом.
+# Симлинк на тот же privilege-drop шим, а не вторая копия: шим не смотрит на
+# $0 и exec'ит venv-бинарь по абсолютному пути, поэтому `korra ...` ведёт себя
+# ровно как `hermes ...`, включая сброс привилегий при `docker exec` от root.
+# Симлинк относительный — переживает bind-mount /opt/hermes другим путём.
+# Точка входа `korra` в venv создаётся отдельно из [project.scripts]; шим нужен
+# потому, что /opt/hermes/bin стоит на PATH раньше venv.
+RUN ln -sf hermes /opt/hermes/bin/korra
+
 # Pre-s6 entrypoint.sh did `source .venv/bin/activate` which exported
 # the venv bin onto PATH; Architecture B's main-wrapper.sh does the
 # same for the container's main process, but `docker exec` and our

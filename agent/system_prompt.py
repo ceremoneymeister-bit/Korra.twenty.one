@@ -488,10 +488,10 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         # Fallback to hardcoded identity
         stable_parts.append(DEFAULT_AGENT_IDENTITY)
 
-    # Pointer to the docs (and, when it exists, the hermes-agent skill) for
-    # user questions about Hermes itself. The skill_view() pointer is a
+    # Pointer to the docs (and, when it exists, the korra-agent skill) for
+    # user questions about Korra itself. The skill_view() pointer is a
     # dangling reference in two cases — no skill tools in the toolset
-    # (Blank Slate) OR the hermes-agent skill not installed — so the
+    # (Blank Slate) OR the korra-agent skill not installed — so the
     # variant is chosen AFTER the skills index is built (see below) and
     # this slot holds its position. Toolset and skill set are fixed
     # per-session, so cache-safe either way.
@@ -656,10 +656,19 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
 
     # Resolve the help-guidance variant now that the skills index exists:
     # the skill-pointer variant requires BOTH skill_view in the toolset AND
-    # the hermes-agent skill actually present in the index (gating on the
+    # the korra-agent skill actually present in the index (gating on the
     # rendered index line keeps this a pure string check — no second
     # filesystem scan, and it inherits the index cache's stability).
-    if _has_skill_view and "- hermes-agent:" in skills_prompt:
+    #
+    # Korra: принимаем и legacy-имя `hermes-agent`. Контур, который обновили на
+    # новый образ, но ещё не мигрировали каталог данных, держит на диске старый
+    # скилл; без второй проверки такой контур молча получал бы вариант «скиллов
+    # нет» и терял указатель на собственную инструкцию. Текст подсказки в обоих
+    # случаях называет `korra-agent` — старое имя разрешает алиас в
+    # tools/skills_tool.py.
+    if _has_skill_view and (
+        "- korra-agent:" in skills_prompt or "- hermes-agent:" in skills_prompt
+    ):
         stable_parts[_help_guidance_slot] = HERMES_AGENT_HELP_GUIDANCE
 
     # Alibaba Coding Plan API always returns "glm-4.7" as model name regardless

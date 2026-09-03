@@ -300,7 +300,7 @@ def _pinned_guard(name: str) -> Optional[str]:
     irrecoverable loss, not against content evolution.
 
     Essential skills (``agent/skill_utils.ESSENTIAL_SKILLS``, e.g.
-    ``hermes-agent``) are treated as permanently pinned: the system prompt
+    ``korra-agent``) are treated as permanently pinned: the system prompt
     always references them, so deleting one leaves a dangling instruction.
 
     Best-effort: if the sidecar is unreadable we let the delete through

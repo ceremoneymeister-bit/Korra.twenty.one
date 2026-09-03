@@ -11,6 +11,7 @@ because its dispatch is tightly coupled to module-level ``cmd_*`` functions.
 """
 
 import argparse
+import re
 from functools import lru_cache
 
 
@@ -88,49 +89,75 @@ def _inherited_flag(parser, *args, **kwargs):
 
 _EPILOGUE = """
 Examples:
-    hermes                        Start interactive chat
-    hermes chat -q "Hello"        Single query mode
-    hermes --tui                  Launch the modern TUI (or set display.interface: tui)
-    hermes --cli                  Force the classic REPL (overrides display.interface: tui)
-    hermes -c                     Resume the most recent session
-    hermes -c "my project"        Resume a session by name (latest in lineage)
-    hermes --resume <session_id>  Resume a specific session by ID
-    hermes --resume latest        Resume the most recent session (same as -c)
-    hermes --tui --resume latest --in ./dir   Resume ./dir's latest session in the TUI
-    hermes setup                  Run setup wizard
-    hermes logout                 Clear stored authentication
-    hermes auth add <provider>    Add a pooled credential
-    hermes auth list              List pooled credentials
-    hermes auth remove <p> <t>    Remove pooled credential by index, id, or label
-    hermes auth reset <provider>  Clear exhaustion status for a provider
-    hermes model                  Select default model
-    hermes fallback [list]        Show fallback provider chain
-    hermes fallback add           Add a fallback provider (same picker as `hermes model`)
-    hermes fallback remove        Remove a fallback provider from the chain
-    hermes config                 View configuration
-    hermes config edit            Edit config in $EDITOR
-    hermes config set model gpt-4 Set a config value
-    hermes gateway                Run messaging gateway
-    hermes -s hermes-agent-dev,github-auth
-    hermes -w                     Start in isolated git worktree
-    hermes gateway install        Install gateway background service
-    hermes sessions list          List past sessions
-    hermes sessions browse        Interactive session picker
-    hermes sessions rename ID T   Rename/title a session
-    hermes logs                   View agent.log (last 50 lines)
-    hermes logs -f                Follow agent.log in real time
-    hermes logs errors            View errors.log
-    hermes logs --since 1h        Lines from the last hour
-    hermes debug share             Upload debug report for support
-    hermes console                Open the safe Hermes command console
-    hermes update                 Update to latest version
-    hermes dashboard              Start web UI dashboard (port 9119)
-    hermes dashboard --stop       Stop running dashboard processes
-    hermes dashboard --status     List running dashboard processes
+    korra                        Start interactive chat
+    korra chat -q "Hello"        Single query mode
+    korra --tui                  Launch the modern TUI (or set display.interface: tui)
+    korra --cli                  Force the classic REPL (overrides display.interface: tui)
+    korra -c                     Resume the most recent session
+    korra -c "my project"        Resume a session by name (latest in lineage)
+    korra --resume <session_id>  Resume a specific session by ID
+    korra --resume latest        Resume the most recent session (same as -c)
+    korra --tui --resume latest --in ./dir   Resume ./dir's latest session in the TUI
+    korra setup                  Run setup wizard
+    korra logout                 Clear stored authentication
+    korra auth add <provider>    Add a pooled credential
+    korra auth list              List pooled credentials
+    korra auth remove <p> <t>    Remove pooled credential by index, id, or label
+    korra auth reset <provider>  Clear exhaustion status for a provider
+    korra model                  Select default model
+    korra fallback [list]        Show fallback provider chain
+    korra fallback add           Add a fallback provider (same picker as `korra model`)
+    korra fallback remove        Remove a fallback provider from the chain
+    korra config                 View configuration
+    korra config edit            Edit config in $EDITOR
+    korra config set model gpt-4 Set a config value
+    korra gateway                Run messaging gateway
+    korra -s korra-agent,github
+    korra -w                     Start in isolated git worktree
+    korra gateway install        Install gateway background service
+    korra sessions list          List past sessions
+    korra sessions browse        Interactive session picker
+    korra sessions rename ID T   Rename/title a session
+    korra logs                   View agent.log (last 50 lines)
+    korra logs -f                Follow agent.log in real time
+    korra logs errors            View errors.log
+    korra logs --since 1h        Lines from the last hour
+    korra debug share             Upload debug report for support
+    korra console                Open the safe Korra command console
+    korra update                 Update to latest version
+    korra dashboard              Start web UI dashboard (port 9119)
+    korra dashboard --stop       Stop running dashboard processes
+    korra dashboard --status     List running dashboard processes
 
 For more help on a command:
-    hermes <command> --help
+    korra <command> --help
 """
+
+
+#: Каноническое имя команды форка. Апстримовое `hermes` осталось второй точкой
+#: входа (см. ``[project.scripts]`` в pyproject.toml), но справка, примеры и
+#: строка usage называют Korra.
+CANONICAL_PROG = "korra"
+
+#: Имена, под которыми запуск считается «легаси-алиасом»: справка тогда
+#: показывает то имя, которым команду реально вызвали, иначе пользователь
+#: копирует из примеров команду, которой у него в PATH может не быть.
+_LEGACY_PROG_NAMES = frozenset({"hermes", "hermes.exe"})
+
+
+def resolve_prog_name(argv0: str | None = None) -> str:
+    """Имя команды для usage/справки: `korra`, либо легаси-алиас как вызвали.
+
+    Берём basename ``sys.argv[0]``. Всё, что не входит в
+    :data:`_LEGACY_PROG_NAMES` (питоновский `-m`, pytest, обёртки), схлопывается
+    в :data:`CANONICAL_PROG` — иначе в usage полезли бы пути интерпретатора.
+    """
+    import os
+    import sys
+
+    raw = argv0 if argv0 is not None else (sys.argv[0] if sys.argv else "")
+    base = os.path.basename(raw or "").strip().lower()
+    return base if base in _LEGACY_PROG_NAMES else CANONICAL_PROG
 
 
 def build_top_level_parser():
@@ -140,11 +167,21 @@ def build_top_level_parser():
     ``chat_parser.set_defaults(func=cmd_chat)`` and continues registering
     other subparsers via ``subparsers.add_parser(...)``.
     """
+    prog = resolve_prog_name()
+    # Примеры написаны под `korra`; при запуске под легаси-именем подменяем
+    # токен целиком, чтобы пользователь не копировал несуществующую команду.
+    # Замена сдвигает каждую строку блока одинаково, поэтому колонка описаний
+    # остаётся выровненной. Lookahead обязателен: без него под `hermes` из
+    # примера `-s korra-agent` вышел бы несуществующий скилл `hermes-agent`.
+    epilogue = (
+        _EPILOGUE if prog == CANONICAL_PROG
+        else re.sub(rf"\b{CANONICAL_PROG}(?![-\w])", prog, _EPILOGUE)
+    )
     parser = argparse.ArgumentParser(
-        prog="hermes",
+        prog=prog,
         description="Korra - AI assistant with tool-calling capabilities",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=_EPILOGUE,
+        epilog=epilogue,
     )
 
     parser.add_argument(
@@ -195,7 +232,7 @@ def build_top_level_parser():
         help=(
             "Provider override for this invocation (e.g. openrouter, anthropic). "
             "Applies to -z/--oneshot and --tui. The persistent provider lives in config.yaml "
-            "under model.provider — use `hermes setup` or edit the file to change it."
+            "under model.provider — use `korra setup` or edit the file to change it."
         ),
     )
     _inherited_flag(
@@ -300,7 +337,7 @@ def build_top_level_parser():
         "--ignore-user-config",
         action="store_true",
         default=False,
-        help="Ignore ~/.hermes/config.yaml and fall back to built-in defaults (credentials in .env are still loaded)",
+        help="Ignore $HERMES_HOME/config.yaml and fall back to built-in defaults (credentials in .env are still loaded)",
     )
     _inherited_flag(
         parser,
@@ -562,7 +599,7 @@ def build_top_level_parser():
         "--ignore-user-config",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Ignore ~/.hermes/config.yaml and fall back to built-in defaults (credentials in .env are still loaded). Useful for isolated CI runs, reproduction, and third-party integrations.",
+        help="Ignore $HERMES_HOME/config.yaml and fall back to built-in defaults (credentials in .env are still loaded). Useful for isolated CI runs, reproduction, and third-party integrations.",
     )
     _inherited_flag(
         chat_parser,

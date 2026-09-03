@@ -110,11 +110,16 @@ def remove_path_from_shell_configs():
 
 
 def remove_wrapper_script():
-    """Remove the hermes wrapper script if it exists."""
+    """Remove the korra/hermes wrapper scripts if they exist."""
+    # Korra: `korra` — симлинк на лаунчер `hermes`, который ставит
+    # scripts/install.sh. Без него в списке удаление оставляло бы битый симлинк
+    # на снесённый лаунчер, и `korra` в PATH падал бы вместо «команда не найдена».
     wrapper_paths = [
+        Path.home() / ".local" / "bin" / "korra",
         Path.home() / ".local" / "bin" / "hermes",
         Path.home() / ".local" / "bin" / "hermes-acp",
         Path.home() / ".local" / "bin" / "hermes-agent",
+        Path("/usr/local/bin/korra"),
         Path("/usr/local/bin/hermes"),
         Path("/usr/local/bin/hermes-acp"),
         Path("/usr/local/bin/hermes-agent"),

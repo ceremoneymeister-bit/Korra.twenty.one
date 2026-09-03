@@ -6,7 +6,7 @@ source are the developer source of truth.
 ### Project Layout
 
 ```
-hermes-agent/
+korra-21/
 ├── run_agent.py          # AIAgent — core conversation loop
 ├── model_tools.py        # Tool discovery and dispatch
 ├── toolsets.py           # Toolset definitions
@@ -25,7 +25,7 @@ hermes-agent/
 └── tests/                # Extensive pytest suite (run via scripts/run_tests.sh)
 ```
 
-Config: `~/.hermes/config.yaml` (settings), `~/.hermes/.env` (API keys) — both under `$HERMES_HOME` when it is set.
+Config: `$HERMES_HOME/config.yaml` (settings), `$HERMES_HOME/.env` (API keys) — the data home follows the active profile.
 
 ### Adding a Tool
 
@@ -59,8 +59,8 @@ registry.register(
 `_HERMES_CORE_TOOLS` (every platform) or to a specific toolset.
 
 All handlers must return JSON strings. Use `get_hermes_home()` for paths,
-never hardcode `~/.hermes`. For custom/local-only tools, write a plugin in
-`~/.hermes/plugins/` instead of editing core — see `AGENTS.md`.
+never hardcode the home path. For custom/local-only tools, write a plugin in
+`$HERMES_HOME/plugins/` instead of editing core — see `AGENTS.md`.
 
 ### Adding a Slash Command
 
@@ -95,7 +95,7 @@ scripts/run_tests.sh tests/tools/test_x.py    # one file
 scripts/run_tests.sh -v --tb=long             # pass-through pytest flags
 ```
 
-- Tests auto-redirect `HERMES_HOME` to temp dirs — never touch real `~/.hermes/`.
+- Tests auto-redirect `HERMES_HOME` to temp dirs — never touch the real data home.
 - The script probes `.venv`, then `venv`, then the shared worktree venv.
 - **Windows:** the wrapper is POSIX-only; see `references/windows-quirks.md`
   for the direct-pytest workaround.

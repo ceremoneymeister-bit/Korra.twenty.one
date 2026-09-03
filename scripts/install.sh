@@ -2064,6 +2064,14 @@ EOF
     chmod +x "$command_link_dir/hermes"
     log_success "Installed hermes launcher → $command_link_display_dir/hermes"
 
+    # Korra: `korra` — каноническое имя команды форка, `hermes` остаётся
+    # алиасом. Симлинк на уже созданный лаунчер, а не вторая копия шима: обе
+    # точки входа в pyproject.toml ведут в один и тот же hermes_cli.main:main,
+    # а argparse берёт имя из argv[0], поэтому usage сам назовётся правильно.
+    rm -f "$command_link_dir/korra"
+    ln -s "hermes" "$command_link_dir/korra"
+    log_success "Installed korra launcher → $command_link_display_dir/korra"
+
     # Also expose `hermes-agent`. The `hermes-agent` console script declared in
     # pyproject.toml's [project.scripts] lives inside the venv, which is not on
     # the login-shell PATH. Without this launcher users can't invoke the agent

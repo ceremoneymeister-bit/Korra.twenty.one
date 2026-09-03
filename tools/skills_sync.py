@@ -111,7 +111,7 @@ def _essential_names() -> frozenset:
         from agent.skill_utils import ESSENTIAL_SKILLS
         return ESSENTIAL_SKILLS
     except Exception:
-        return frozenset({"hermes-agent"})
+        return frozenset({"korra-agent", "hermes-agent"})
 
 
 def _get_bundled_dir() -> Path:
@@ -719,7 +719,7 @@ def sync_skills(quiet: bool = False) -> dict:
     # Opt-out: a profile (named or the default ~/.hermes) that wrote the
     # .no-bundled-skills marker gets zero bundled-skill seeding — EXCEPT the
     # essential skills (agent/skill_utils.ESSENTIAL_SKILLS). The
-    # ``hermes-agent`` skill is the agent's own operating manual and the
+    # ``korra-agent`` skill is the agent's own operating manual and the
     # system prompt always points at it, so even a Blank Slate / --no-skills
     # profile keeps that one skill. Returning the empty-result shape with
     # skipped_opt_out lets callers report "opted out" instead of

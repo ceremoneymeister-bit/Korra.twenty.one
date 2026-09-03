@@ -2,7 +2,7 @@
 name: obsidian
 description: Read, search, create, and edit notes in the Obsidian vault.
 version: 1.0.0
-author: Teknium (teknium1), Hermes Agent
+author: Teknium (teknium1), Korra
 license: MIT
 platforms: [linux, macos, windows]
 metadata:

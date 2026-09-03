@@ -578,6 +578,32 @@ class TestFindHermesMd:
         (tmp_path / ".hermes.md").write_text("rules")
         assert _find_hermes_md(tmp_path) == tmp_path / ".hermes.md"
 
+    # Korra (W2): канон форка — `.korra.md`/`KORRA.md`. Апстримовые имена
+    # остались поддерживаемыми: у клиентов эти файлы уже лежат в репозиториях,
+    # и молча перестать их читать значило бы потерять их правила.
+    def test_finds_korra_md_in_cwd(self, tmp_path):
+        (tmp_path / ".korra.md").write_text("rules")
+        assert _find_hermes_md(tmp_path) == tmp_path / ".korra.md"
+
+    def test_finds_uppercase_korra_md(self, tmp_path):
+        (tmp_path / "KORRA.md").write_text("rules")
+        assert _find_hermes_md(tmp_path) == tmp_path / "KORRA.md"
+
+    def test_korra_md_wins_over_legacy_hermes_md(self, tmp_path):
+        """Оба файла в одном каталоге — выигрывает имя форка.
+
+        Порядок в ``_HERMES_MD_NAMES`` — это и есть приоритет; если он
+        перевернётся, контур с обоими файлами молча продолжит жить по
+        апстримовому.
+        """
+        (tmp_path / ".korra.md").write_text("korra rules")
+        (tmp_path / ".hermes.md").write_text("legacy rules")
+        assert _find_hermes_md(tmp_path) == tmp_path / ".korra.md"
+
+    def test_legacy_hermes_md_is_still_read(self, tmp_path):
+        (tmp_path / ".hermes.md").write_text("legacy rules")
+        assert _find_hermes_md(tmp_path) == tmp_path / ".hermes.md"
+
 
 
     def test_walks_to_git_root(self, tmp_path):

@@ -1,13 +1,14 @@
 ---
-name: hermes-agent
+name: korra-agent
 description: "Use, configure, theme, extend, and orchestrate Korra."
-version: 3.2.0
-author: Hermes Agent + Teknium
+version: 3.3.0
+author: Korra
 license: MIT
 platforms: [linux, macos, windows]
+aliases: [hermes-agent]
 metadata:
   hermes:
-    tags: [hermes, setup, configuration, multi-agent, spawning, cli, gateway, bots, bot-mode, features, themes, skins, desktop-plugins, tui-widgets, petdex, development]
+    tags: [korra, setup, configuration, multi-agent, spawning, cli, gateway, bots, bot-mode, features, themes, skins, desktop-plugins, tui-widgets, petdex, development]
     homepage: https://github.com/ceremoneymeister-bit/Korra.twenty.one
     related_skills: [claude-code, codex, opencode]
 ---
@@ -36,6 +37,22 @@ What makes Korra different:
 **Docs:** этот скилл и его `references/`. Внешнего сайта документации у Korra нет —
 документация апстрима описывает ДРУГОЙ код и расходится с этой сборкой.
 
+## Имена и наследие форка
+
+Korra — жёсткий форк, у которого апстримовое имя осталось внутри кода. Это
+намеренно; два слоя путать не нужно:
+
+- **Команда для пользователя и для тебя — `korra`.** `hermes` остаётся рабочим
+  алиасом той же точки входа, но в примерах, инструкциях и собственных вызовах
+  пиши `korra`.
+- **Этот скилл называется `korra-agent`.** Старое имя `hermes-agent` принимается
+  как алиас, чтобы не рвать сохранённые сессии и память, но ссылайся на новое.
+- **Внутренние идентификаторы остаются апстримовыми:** переменная `HERMES_HOME`,
+  пакеты `hermes_cli/`, `hermes_constants.py`, `hermes_state.py`, путь установки
+  `/opt/hermes` в образе, systemd-юнит `hermes-gateway`, toolset'ы `hermes-*`,
+  схема `hermes://`. Их **не переименовывай** — это живой контракт кода, образа и
+  клиентских контуров. Если пользователь спрашивает про них, называй их как есть.
+
 ## Scope & Verification
 
 This skill is a concise operating guide, not the complete source of truth for
@@ -45,7 +62,7 @@ exist. Check the installed CLI and source code before giving a negative answer.
 
 Good verification targets, cheapest first:
 
-- **CLI как источник правды: `hermes --help`, `hermes <command> --help`.** Это единственный
+- **CLI как источник правды: `korra --help`, `korra <command> --help`.** Это единственный
   ответ, который ГАРАНТИРОВАННО соответствует установленной сборке. Начинай отсюда для
   любого «умеет ли Korra X?» и «как сделать X?».
 - Дерево исходников установленной сборки — оно рядом, его можно читать напрямую.
@@ -64,55 +81,59 @@ checkable.
 # (Korra ставится образом из registry; исходники — приватный репозиторий)
 
 # Interactive chat (default surface; set display.interface: tui to launch the Ink TUI instead)
-hermes
+korra
 
 # Single query
-hermes chat -q "What is the capital of France?"
+korra chat -q "What is the capital of France?"
 
 # Setup wizard  /  pick model+provider  /  health check
-hermes setup
-hermes model
-hermes doctor
+korra setup
+korra model
+korra doctor
 
 # Other surfaces
-hermes desktop                 # launch the native desktop app (alias: hermes gui)
-hermes dashboard               # web admin panel + embedded chat
-hermes proxy                   # OpenAI-compatible local proxy backed by your OAuth provider
+korra desktop                 # launch the native desktop app (alias: korra gui)
+korra dashboard               # web admin panel + embedded chat
+korra proxy                   # OpenAI-compatible local proxy backed by your OAuth provider
 ```
 
 ## Key Paths
 
+Всё лежит под домашним каталогом данных Korra. Его путь — в `$HERMES_HOME`
+(имя переменной апстримовое, каталог наш): в Docker-образе это `/opt/data`,
+при установке на хост — `~/.hermes`. **Резолви путь из `$HERMES_HOME`, никогда
+не хардкодь его буквально** — иначе сломаешь работу под профилем.
+
 ```
-~/.hermes/config.yaml       Main configuration (settings — never secrets)
-~/.hermes/.env              API keys and secrets ONLY (under $HERMES_HOME if set)
-$HERMES_HOME/skills/        Installed skills
-~/.hermes/skins/            Custom themes (see references/themes.md)
-~/.hermes/desktop-plugins/  Desktop app UI plugins (see references/desktop-plugins.md)
-~/.hermes/tui-widgets/      TUI widget apps (see references/tui-widgets.md)
-~/.hermes/pets/             Installed pet mascots (see references/petdex.md)
-~/.hermes/state.db          Canonical session store (SQLite + FTS5)
-~/.hermes/sessions/         Gateway routing index, request dumps, *.jsonl transcripts
-~/.hermes/logs/             Gateway and error logs
-~/.hermes/auth.json         OAuth tokens and credential pools
-~/.hermes/hermes-agent/     Source code (if git-installed)
+$HERMES_HOME/config.yaml       Main configuration (settings — never secrets)
+$HERMES_HOME/.env              API keys and secrets ONLY
+$HERMES_HOME/skills/           Installed skills
+$HERMES_HOME/skins/            Custom themes (see references/themes.md)
+$HERMES_HOME/desktop-plugins/  Desktop app UI plugins (see references/desktop-plugins.md)
+$HERMES_HOME/tui-widgets/      TUI widget apps (see references/tui-widgets.md)
+$HERMES_HOME/pets/             Installed pet mascots (see references/petdex.md)
+$HERMES_HOME/state.db          Canonical session store (SQLite + FTS5)
+$HERMES_HOME/sessions/         Gateway routing index, request dumps, *.jsonl transcripts
+$HERMES_HOME/logs/             Gateway and error logs
+$HERMES_HOME/auth.json         OAuth tokens and credential pools
 ```
 
-Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile is active, resolve the real home from `$HERMES_HOME` — never hardcode `~/.hermes`.
+Profiles use `$HERMES_HOME/profiles/<name>/` with the same layout. When a profile is active, `$HERMES_HOME` already points at that profile's root.
 
 ## Routing Table — load the reference for the task
 
 | User wants... | Load |
 |---|---|
-| **Anything not listed below — "can Korra do X?", "how do I set up X?"** | **`hermes --help` / `hermes <command> --help`, затем код** |
-| Bots that chat, run routines, or message each other; the Bots tab | `hermes --help`, then the installed bot-mode code |
+| **Anything not listed below — "can Korra do X?", "how do I set up X?"** | **`korra --help` / `korra <command> --help`, затем код** |
+| Bots that chat, run routines, or message each other; the Bots tab | `korra --help`, then the installed bot-mode code |
 | CLI commands, subcommands, flags, "how do I run X" | `references/cli-reference.md` |
 | In-session slash commands | `references/slash-commands.md` |
 | Provider setup, API keys, OAuth | `references/providers-and-models.md` |
 | config.yaml sections, toolsets, voice/STT/TTS | `references/configuration.md` |
-| AGENTS.md / .hermes.md / CLAUDE.md project rules | `references/project-context-files.md` |
+| AGENTS.md / .korra.md / CLAUDE.md project rules | `references/project-context-files.md` |
 | Secret redaction, PII, approval modes, "reset permissions" | `references/security-privacy.md` |
 | Delegation, cron, curator, kanban | `references/background-systems.md` |
-| MCP servers (add, catalog, `hermes mcp`) | `references/native-mcp.md` |
+| MCP servers (add, catalog, `korra mcp`) | `references/native-mcp.md` |
 | Webhook routes and event-driven runs | `references/webhooks.md` |
 | A custom theme/skin ("synthwave theme", "change the gold ●") | `references/themes.md` + `templates/skin.yaml` |
 | A desktop app UI element (pane, widget, ⌘K command, page) | `references/desktop-plugins.md` + `templates/plugin.js` |
@@ -123,22 +144,22 @@ Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile i
 | Contributing code: adding tools, slash commands, tests | `references/contributor-guide.md` |
 | delegate_task "capped at N" reports | `references/delegate-task-concurrency-diagnosis.md` |
 | "Can app X use my Nous Portal subscription/OAuth?" | `references/portal-auth-for-third-party-apps.md` |
-| Connecting a messaging platform (Telegram, Discord, Slack, WhatsApp, …) | `hermes gateway --help`, then the installed platform adapter |
+| Connecting a messaging platform (Telegram, Discord, Slack, WhatsApp, …) | `korra gateway --help`, then the installed platform adapter |
 
 The reference list above is not the feature list — it is the set of topics that
 need more than one screen. For everything else Korra ships, ask the CLI itself
-(`hermes --help`, `hermes <command> --help`) and read the source tree.
+(`korra --help`, `korra <command> --help`) and read the source tree.
 
-Two theming rules that hold even without loading the reference: **you apply skins yourself** (`hermes config set display.skin <name>` — every surface repaints live within ~a second; don't tell the user to run `/skin`), and **to tweak one color, edit the ACTIVE skin** (`hermes skin set <key> <hex>`) — never fork `default`, which drops the palette and resets the background.
+Two theming rules that hold even without loading the reference: **you apply skins yourself** (`korra config set display.skin <name>` — every surface repaints live within ~a second; don't tell the user to run `/skin`), and **to tweak one color, edit the ACTIVE skin** (`korra skin set <key> <hex>`) — never fork `default`, which drops the palette and resets the background.
 
 ## Spawning Additional Korra Instances
 
 Run additional Korra processes as fully independent subprocesses — separate
-sessions, tools, and environments. The executable remains `hermes`.
+sessions, tools, and environments. The executable is `korra`.
 
 ### When to Use This vs delegate_task
 
-| | `delegate_task` | Spawning `hermes` process |
+| | `delegate_task` | Spawning `korra` process |
 |-|-----------------|--------------------------|
 | Isolation | Separate conversation, shared process | Fully independent process |
 | Duration | Minutes (bounded by parent loop) | Hours/days |
@@ -149,10 +170,10 @@ sessions, tools, and environments. The executable remains `hermes`.
 ### One-Shot Mode
 
 ```
-terminal(command="hermes chat -q 'Research GRPO papers and write summary to ~/research/grpo.md'", timeout=300)
+terminal(command="korra chat -q 'Research GRPO papers and write summary to ~/research/grpo.md'", timeout=300)
 
 # Background for long tasks:
-terminal(command="hermes chat -q 'Set up CI/CD for ~/myapp'", background=true)
+terminal(command="korra chat -q 'Set up CI/CD for ~/myapp'", background=true)
 ```
 
 ### Interactive PTY Mode (via tmux)
@@ -161,7 +182,7 @@ Korra uses prompt_toolkit, which requires a real terminal. Use tmux for interact
 
 ```
 # Start
-terminal(command="tmux new-session -d -s agent1 -x 120 -y 40 'hermes'", timeout=10)
+terminal(command="tmux new-session -d -s agent1 -x 120 -y 40 'korra'", timeout=10)
 
 # Wait for startup, then send a message
 terminal(command="sleep 8 && tmux send-keys -t agent1 'Build a FastAPI auth service' Enter", timeout=15)
@@ -180,11 +201,11 @@ terminal(command="tmux send-keys -t agent1 '/exit' Enter && sleep 2 && tmux kill
 
 ```
 # Agent A: backend
-terminal(command="tmux new-session -d -s backend -x 120 -y 40 'hermes -w'", timeout=10)
+terminal(command="tmux new-session -d -s backend -x 120 -y 40 'korra -w'", timeout=10)
 terminal(command="sleep 8 && tmux send-keys -t backend 'Build REST API for user management' Enter", timeout=15)
 
 # Agent B: frontend
-terminal(command="tmux new-session -d -s frontend -x 120 -y 40 'hermes -w'", timeout=10)
+terminal(command="tmux new-session -d -s frontend -x 120 -y 40 'korra -w'", timeout=10)
 terminal(command="sleep 8 && tmux send-keys -t frontend 'Build React dashboard for user management' Enter", timeout=15)
 
 # Check progress, relay context between them
@@ -196,10 +217,10 @@ terminal(command="tmux send-keys -t frontend 'Here is the API schema from the ba
 
 ```
 # Resume most recent session
-terminal(command="tmux new-session -d -s resumed 'hermes --continue'", timeout=10)
+terminal(command="tmux new-session -d -s resumed 'korra --continue'", timeout=10)
 
 # Resume specific session
-terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_143052_a1b2c3'", timeout=10)
+terminal(command="tmux new-session -d -s resumed 'korra --resume 20260225_143052_a1b2c3'", timeout=10)
 ```
 
 ### Tips
@@ -207,7 +228,7 @@ terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_14305
 - **Prefer `delegate_task` for quick subtasks** — less overhead than spawning a full process
 - **Use `-w` (worktree mode)** when spawning agents that edit code — prevents git conflicts
 - **Set timeouts** for one-shot mode — complex tasks can take 5-10 minutes
-- **Use `hermes chat -q` for fire-and-forget** — no PTY needed
+- **Use `korra chat -q` for fire-and-forget** — no PTY needed
 - **Use tmux for interactive sessions** — raw PTY mode has `\r` vs `\n` issues with prompt_toolkit
 - **For scheduled tasks**, use the `cronjob` tool instead of spawning — handles delivery and retry
 - **"delegate_task is capped at N" reports** — see `references/delegate-task-concurrency-diagnosis.md`. Three real cap paths in Korra; if none fired, the model is self-limiting and rationalising it as "the runtime caps."
@@ -215,10 +236,10 @@ terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_14305
 
 ## Surfaces (quick orientation)
 
-- **Desktop app** (`hermes desktop` / `hermes gui`) — native Electron app for macOS/Linux/Windows: streaming chat, session list, Cmd+K palette, drag-and-drop files, native notifications, per-profile remote-gateway login. Extend it with UI plugins — `references/desktop-plugins.md`.
-- **Web dashboard** (`hermes dashboard`) — full admin panel: messaging channels, MCP catalog, webhooks, memory, profile builder, plus an embedded `hermes --tui` chat. Secured behind an OAuth/token gate.
-- **Ink TUI** (`hermes --tui` or `display.interface: tui`) — terminal UI with docked widget apps — `references/tui-widgets.md`.
-- **OpenAI-compatible proxy** (`hermes proxy`) — a local OpenAI API backed by whichever OAuth provider you're signed into. Point Codex CLI, Aider, Cline, or any script at it — no API key.
+- **Desktop app** (`korra desktop` / `korra gui`) — native Electron app for macOS/Linux/Windows: streaming chat, session list, Cmd+K palette, drag-and-drop files, native notifications, per-profile remote-gateway login. Extend it with UI plugins — `references/desktop-plugins.md`.
+- **Web dashboard** (`korra dashboard`) — full admin panel: messaging channels, MCP catalog, webhooks, memory, profile builder, plus an embedded `korra --tui` chat. Secured behind an OAuth/token gate.
+- **Ink TUI** (`korra --tui` or `display.interface: tui`) — terminal UI with docked widget apps — `references/tui-widgets.md`.
+- **OpenAI-compatible proxy** (`korra proxy`) — a local OpenAI API backed by whichever OAuth provider you're signed into. Point Codex CLI, Aider, Cline, or any script at it — no API key.
 
 ## Hard Invariants (never violate, regardless of what you loaded)
 
@@ -226,4 +247,4 @@ terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_14305
 - **Message role alternation** — never two assistant or two user messages in a row; only `tool` results can repeat.
 - **Secrets in `.env`, settings in `config.yaml`** — never tell a user to put a non-credential setting in `.env`.
 - **Profile-safe paths** — `get_hermes_home()` in code, `$HERMES_HOME` when resolving paths in a session.
-- **Never hand-edit `config.yaml` for the user** — use `hermes config set KEY VAL`; a stray indent can corrupt the file and break the live gateway.
+- **Never hand-edit `config.yaml` for the user** — use `korra config set KEY VAL`; a stray indent can corrupt the file and break the live gateway.

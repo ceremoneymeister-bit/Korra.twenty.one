@@ -435,12 +435,20 @@ def _load_raw_config() -> Dict[str, Any]:
 
 
 # Skills that must stay available regardless of configuration. The
-# `hermes-agent` skill is the agent's own operating manual — it drives
-# configuring, extending, and troubleshooting Hermes itself, and the system
+# `korra-agent` skill is the agent's own operating manual — it drives
+# configuring, extending, and troubleshooting Korra itself, and the system
 # prompt unconditionally points at it. Disabling it leaves the agent unable
-# to help with Hermes, so disable requests for these names are ignored
+# to help with Korra, so disable requests for these names are ignored
 # everywhere the disabled list is consulted.
-ESSENTIAL_SKILLS: frozenset = frozenset({"hermes-agent"})
+#
+# Korra: скилл переименован из `hermes-agent` в `korra-agent`, чтобы слово
+# «hermes» не светилось в трассе инструментов у владельца. Legacy-имя оставлено
+# в множестве намеренно: у клиентских контуров на диске ещё лежит старый
+# каталог, а в конфигах может стоять `disabled_skills: [hermes-agent]`. Без
+# legacy-имени старый скилл внезапно стал бы отключаемым и мог пропасть из
+# индекса до миграции данных. Оба имени неотключаемы — это дешевле правки
+# конфигов на живом флоте.
+ESSENTIAL_SKILLS: frozenset = frozenset({"korra-agent", "hermes-agent"})
 
 
 def get_disabled_skill_names(platform: str | None = None) -> Set[str]:

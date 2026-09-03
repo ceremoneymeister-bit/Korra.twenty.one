@@ -191,6 +191,80 @@ def _is_remote_env_backend(backend: str) -> bool:
 _secret_capture_callback = None
 
 
+# ── Korra: legacy-имена и подсказка по промаху ───────────────────────────────
+#
+# Скилл `hermes-agent` переименован в `korra-agent`, чтобы апстримовый бренд не
+# светился в трассе инструментов. Переименование ломает два класса вызовов:
+#
+#   1. Сохранённые сессии, память и клиентские конфиги ссылаются на старое имя,
+#      а образ уже несёт новое. Обратная ситуация тоже реальна: контур обновили,
+#      но каталог данных ещё не мигрировали, и на диске лежит только старый
+#      скилл, тогда как системный промпт называет новый. Поэтому алиас
+#      двусторонний — разрешаем то имя, которое реально есть на диске.
+#   2. Модель уже обрезала имя до `-agent` и получала «skill not found» без
+#      единой зацепки: список `available_skills` обрезан до 20 имён и нужного
+#      среди них могло не быть.
+#
+# Обе проблемы лечатся в ветке «не найдено», а не на входе: пока имя находится
+# штатно, ни одного лишнего обхода файловой системы не появляется.
+_SKILL_NAME_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "hermes-agent": ("korra-agent",),
+    "korra-agent": ("hermes-agent",),
+}
+
+# Один повтор по алиасу на поток. Гейт именно thread-local, а не аргумент
+# функции: skill_view — зарегистрированный инструмент, лишний параметр уехал бы
+# в схему, которую видит модель.
+_alias_retry_guard = threading.local()
+
+
+def _skill_name_aliases(name: str) -> Tuple[str, ...]:
+    """Legacy/канонические синонимы имени скилла (регистронезависимо)."""
+    return _SKILL_NAME_ALIASES.get((name or "").strip().lower(), ())
+
+
+def _suggest_skill_names(name: str, available: List[str], limit: int = 5) -> List[str]:
+    """Ближайшие по написанию имена скиллов для ошибки «не найдено».
+
+    Две стратегии, в порядке убывания надёжности:
+
+    * **Подстрока.** Покрывает главный наблюдаемый случай — обрезанное имя
+      (`-agent` вместо `korra-agent`, `korra` вместо `korra-agent`). Совпадение
+      по подстроке здесь сильнее похожести: если модель написала кусок имени,
+      она почти наверняка имела в виду скилл, который его содержит.
+    * **difflib.** Ловит опечатки и перестановки (`korra-agnet`).
+
+    Порог 0.6 — стандартный для :func:`difflib.get_close_matches`; ниже него
+    подсказка начинает предлагать случайные скиллы, что хуже, чем её отсутствие.
+    """
+    import difflib
+
+    probe = (name or "").strip().lower()
+    if not probe:
+        return []
+
+    ranked: List[str] = []
+
+    def _add(candidate: str) -> None:
+        if candidate not in ranked:
+            ranked.append(candidate)
+
+    # Подстрока в обе стороны: и «модель обрезала имя», и «модель дописала лишнее».
+    for candidate in available:
+        low = candidate.lower()
+        if probe in low or low in probe:
+            _add(candidate)
+
+    for candidate in difflib.get_close_matches(probe, available, n=limit, cutoff=0.6):
+        _add(candidate)
+    # get_close_matches чувствителен к регистру, поэтому добираем по нижнему.
+    lowered = {c.lower(): c for c in available}
+    for candidate in difflib.get_close_matches(probe, list(lowered), n=limit, cutoff=0.6):
+        _add(lowered[candidate])
+
+    return ranked[:limit]
+
+
 def _skill_lookup_path_error(name: str) -> Optional[str]:
     """Return an error if a local skill lookup *name* can escape search roots.
 
@@ -863,7 +937,31 @@ def skills_list(category: str = None, task_id: str = None) -> str:
 
         # Filter by category if specified
         if category:
-            all_skills = [s for s in all_skills if s.get("category") == category]
+            # Korra: промах по категории раньше возвращал пустой список без
+            # единой зацепки — та же слепая зона, что и у skill_view с
+            # обрезанным именем. Отдаём реальные категории и ближайшую.
+            known_categories = sorted(
+                {s.get("category") for s in all_skills if s.get("category")}
+            )
+            filtered = [s for s in all_skills if s.get("category") == category]
+            if not filtered:
+                payload: Dict[str, Any] = {
+                    "success": True,
+                    "skills": [],
+                    "categories": known_categories,
+                    "count": 0,
+                    "message": f"No skills found in category '{category}'.",
+                    "hint": "Call skills_list() without a category to see everything.",
+                }
+                near = _suggest_skill_names(category, known_categories)
+                if near:
+                    payload["did_you_mean"] = near
+                    payload["hint"] = (
+                        f"Closest category: '{near[0]}'. Retry with that, or call "
+                        f"skills_list() without a category to see everything."
+                    )
+                return json.dumps(payload, ensure_ascii=False)
+            all_skills = filtered
 
         # Sort by category then name
         all_skills = _sort_skills(all_skills)
@@ -909,7 +1007,7 @@ def _serve_plugin_skill(
                 "success": False,
                 "error": (
                     f"Plugin '{namespace}' is disabled. "
-                    f"Re-enable with: hermes plugins enable {namespace}"
+                    f"Re-enable with: korra plugins enable {namespace}"
                 ),
             },
             ensure_ascii=False,
@@ -1431,16 +1529,49 @@ def skill_view(
                 )
 
         if not skill_md or not skill_md.exists():
-            available = [s["name"] for s in _sort_skills(_find_all_skills())[:20]]
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": f"Skill '{name}' not found.",
-                    "available_skills": available,
-                    "hint": "Use skills_list to see all available skills",
-                },
-                ensure_ascii=False,
-            )
+            all_names = [s["name"] for s in _sort_skills(_find_all_skills())]
+
+            # Korra: legacy-имя разрешаем ровно один раз и только если синоним
+            # действительно лежит на диске. Проверка по индексу до рекурсии —
+            # то, что не даёт паре `hermes-agent` ⇄ `korra-agent` зациклиться;
+            # thread-local страхует на случай, если индекс и резолвер разойдутся
+            # (например, скилл исчез между двумя обходами).
+            if not getattr(_alias_retry_guard, "active", False):
+                _known = {n.lower(): n for n in all_names}
+                for _alias in _skill_name_aliases(name):
+                    _resolved = _known.get(_alias.lower())
+                    if not _resolved:
+                        continue
+                    _alias_retry_guard.active = True
+                    try:
+                        logger.info(
+                            "skill_view: имя '%s' разрешено по алиасу в '%s'",
+                            name, _resolved,
+                        )
+                        return skill_view(
+                            _resolved,
+                            file_path=file_path,
+                            task_id=task_id,
+                            preprocess=preprocess,
+                        )
+                    finally:
+                        _alias_retry_guard.active = False
+
+            suggestions = _suggest_skill_names(name, all_names)
+            payload: Dict[str, Any] = {
+                "success": False,
+                "error": f"Skill '{name}' not found.",
+                "available_skills": all_names[:20],
+                "hint": "Use skills_list to see all available skills",
+            }
+            if suggestions:
+                payload["did_you_mean"] = suggestions
+                payload["hint"] = (
+                    f"Closest match: '{suggestions[0]}'. Retry skill_view with the "
+                    f"exact, complete name — a truncated name never resolves. "
+                    f"Use skills_list to see all available skills."
+                )
+            return json.dumps(payload, ensure_ascii=False)
 
         # Read the file once — reused for platform check and main content below
         try:
