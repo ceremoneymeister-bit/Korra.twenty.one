@@ -3,8 +3,12 @@ import type { DashboardTheme, ThemeLayout, ThemeTypography } from "./types";
 /** The two palette ids supported by the Korra dashboard. */
 export type BuiltinThemeName = "light" | "dark";
 
-/** Dominant lime sampled from the Korra 21 logo. */
-export const BRAND_LIME = "#9BE424";
+/** Фирменный лайм — доминирующий цвет знака «21» (точная выборка из
+ *  LOGO/k21: 34 267 пикселей #9EDE01). Раньше здесь стоял приблизительный
+ *  #9BE424, а в светлой теме он ещё и затемнялся до болотного #4F7900 ради
+ *  белого текста на кнопке (1.63:1 — нечитаемо). Правильный размен: лайм
+ *  оставляем фирменным, текст на нём делаем тёмным (11.61:1). */
+export const BRAND_LIME = "#9EDE01";
 
 const SYSTEM_SANS =
   'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
@@ -53,8 +57,8 @@ export const lightTheme: DashboardTheme = {
     cardForeground: "#202124",
     popover: "#FFFFFF",
     popoverForeground: "#202124",
-    primary: "#4F7900",
-    primaryForeground: "#FFFFFF",
+    primary: BRAND_LIME,
+    primaryForeground: "#150B29",
     secondary: "#EFEFEC",
     secondaryForeground: "#202124",
     muted: "#E7E7E3",
@@ -69,7 +73,7 @@ export const lightTheme: DashboardTheme = {
     input: "#B8BBB4",
     ring: "#4F7900",
   },
-  swatchColors: ["#F7F7F5", "#4F7900", BRAND_LIME],
+  swatchColors: ["#F7F7F5", "#1A1A18", BRAND_LIME],
 };
 
 /**
