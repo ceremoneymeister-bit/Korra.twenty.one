@@ -340,8 +340,12 @@ function BubbleChatSidebar({
 }: BubbleChatSidebarProps) {
   return (
     // No bg- override — let the parent dashboard background show through.
-    <aside className="hidden w-60 shrink-0 flex-col md:flex">
-      <div className="p-2 pb-0">
+    <aside
+      // Список чатов — вдавленная панель на холсте: отделяет его от переписки
+      // без линии-разделителя (владелец 03.09: «слились»).
+      className="mb-3 ml-3 mt-3 hidden w-60 shrink-0 flex-col rounded-[var(--neo-radius-card)] bg-[var(--neo-surface)] shadow-[var(--neo-inset-compact)] md:flex"
+    >
+      <div className="p-3 pb-0">
         <Button
           type="button"
           onClick={onNewChat}
