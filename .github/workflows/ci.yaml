@@ -56,6 +56,13 @@ jobs:
       ci_review_files: ${{ steps.classify.outputs.ci_review_files }}
       event_name: ${{ github.event_name }}
     steps:
+      # Korra: рабочая папка self-hosted раннера ОБЩАЯ для всех джобов, а
+      # actions/checkout не сбрасывает режим частичной выкачки. Джоб, который
+      # выкачивал один файл (здесь и в install-e2e), оставлял дерево пустым, и
+      # следующий джоб падал с «Can't find action.yml under .github/actions».
+      # Снимаем режим до и после — на hosted-раннерах это no-op.
+      - name: Снять частичную выкачку от предыдущего джоба
+        run: git sparse-checkout disable 2>/dev/null || true
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Detect affected areas
         id: classify
@@ -64,6 +71,9 @@ jobs:
           sparse-checkout: scripts/ci/classify_changes.py
           sparse-checkout-cone-mode: false
           github-token: ${{ github.token }}
+      - name: Вернуть полное дерево для следующих джобов
+        if: always()
+        run: git sparse-checkout disable 2>/dev/null || true
 
   # ─────────────────────────────────────────────────────────────────────
   # Lane-gated sub-workflows. Each runs in parallel after detect finishes.

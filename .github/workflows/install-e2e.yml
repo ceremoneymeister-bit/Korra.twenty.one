@@ -72,6 +72,11 @@ jobs:
           fetch-tags: true
           sparse-checkout: scripts/sandbox/pick-release-tags.sh
           sparse-checkout-cone-mode: false
+      # Korra: общая рабочая папка self-hosted раннера — режим частичной
+      # выкачки обязан сниматься, иначе следующий джоб получит пустое дерево.
+      - name: Вернуть полное дерево для следующих джобов
+        if: always()
+        run: git sparse-checkout disable 2>/dev/null || true
       - id: pick
         run: |
           set -euo pipefail
