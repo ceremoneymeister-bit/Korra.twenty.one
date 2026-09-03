@@ -77,7 +77,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
     setLoading(true);
     api
       .getOAuthProviders()
-      .then((resp) => setProviders(resp.providers))
+      .then((resp) => setProviders(resp.providers.filter((p) => p.id !== "nous" && !/nous/i.test(p.name))))
       .catch((error) =>
         onErrorRef.current?.(
           ownerFacingError(error, "Не удалось загрузить провайдеров."),
