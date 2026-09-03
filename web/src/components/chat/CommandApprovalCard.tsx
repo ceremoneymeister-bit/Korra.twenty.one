@@ -26,6 +26,7 @@ import { useState } from "react";
 import { Ban, Check, Clock, Infinity as InfinityIcon, ShieldCheck } from "lucide-react";
 import type { ComponentType } from "react";
 
+import { translateApprovalDescription } from "@/lib/approval-descriptions";
 import type { ApprovalChoiceValue } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 // Переходы элементов чата живут в одном файле — там же единственный на всю
@@ -111,7 +112,10 @@ export function CommandApprovalCard({
 
   const settled = decision !== undefined;
   const trimmedCommand = command?.trim() ?? "";
-  const trimmedDescription = description?.trim() ?? "";
+  // Движок описывает опасность по-английски (`DANGEROUS_PATTERNS`), а в двух
+  // строках упоминает и прежнее имя форка. В интерфейсе ни того, ни другого
+  // быть не должно.
+  const trimmedDescription = translateApprovalDescription(description);
 
   return (
     <div

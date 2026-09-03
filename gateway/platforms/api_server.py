@@ -5504,20 +5504,29 @@ class APIServerAdapter(BasePlatformAdapter):
             # side-by-side with ``tool_start_callback``/``tool_complete_callback``.
             # The structured callbacks are strictly richer (they carry
             # the tool_call id), so they own the chat-completions SSE channel.
-            agent_ref = [None]
-            agent_task = asyncio.ensure_future(self._run_agent(
-                user_message=user_message,
-                conversation_history=history,
-                ephemeral_system_prompt=system_prompt,
-                session_id=session_id,
-                stream_delta_callback=_on_delta,
-                tool_start_callback=_on_tool_start,
-                tool_complete_callback=_on_tool_complete,
-                agent_ref=agent_ref,
-                gateway_session_key=gateway_session_key,
-                **agent_overrides,
-                route=route,
-            ))
+            def _drop_approval_listener() -> None:
+                """Снять свою регистрацию слушателя и почистить карту сессий.
+
+                Карту чистим, только когда на ключе не осталось ни одного живого
+                хода: вторая вкладка того же чата может всё ещё ждать ответа, а
+                без записи её решение упёрлось бы в 409 «слушателя нет».
+                """
+                if approval_token is None:
+                    return
+                try:
+                    unregister_gateway_notify(approval_session_key, approval_token)
+                except Exception:
+                    logger.debug(
+                        "Не удалось снять слушателя одобрений для сессии %s",
+                        session_id or "",
+                        exc_info=True,
+                    )
+                if (
+                    not has_gateway_notify(approval_session_key)
+                    and self._chat_approval_sessions.get(session_id or "")
+                    == approval_session_key
+                ):
+                    self._chat_approval_sessions.pop(session_id or "", None)
 
             def _on_turn_finished(_fut) -> None:
                 """Закрыть поток и снять слушателя одобрений одним колбэком.
@@ -5530,28 +5539,32 @@ class APIServerAdapter(BasePlatformAdapter):
                 всё ещё ждали ответа человека.
                 """
                 _stream_q.put_nowait(None)
-                if approval_token is None:
-                    return
-                try:
-                    unregister_gateway_notify(approval_session_key, approval_token)
-                except Exception:
-                    logger.debug(
-                        "Не удалось снять слушателя одобрений для сессии %s",
-                        session_id or "",
-                        exc_info=True,
-                    )
-                # Карту чистим, только когда на ключе не осталось ни одного
-                # живого хода: вторая вкладка того же чата может всё ещё ждать
-                # ответа, а без записи её решение упёрлось бы в 409
-                # «слушателя нет».
-                if (
-                    not has_gateway_notify(approval_session_key)
-                    and self._chat_approval_sessions.get(session_id or "")
-                    == approval_session_key
-                ):
-                    self._chat_approval_sessions.pop(session_id or "", None)
+                _drop_approval_listener()
 
-            agent_task.add_done_callback(_on_turn_finished)
+            agent_ref = [None]
+            try:
+                agent_task = asyncio.ensure_future(self._run_agent(
+                    user_message=user_message,
+                    conversation_history=history,
+                    ephemeral_system_prompt=system_prompt,
+                    session_id=session_id,
+                    stream_delta_callback=_on_delta,
+                    tool_start_callback=_on_tool_start,
+                    tool_complete_callback=_on_tool_complete,
+                    agent_ref=agent_ref,
+                    gateway_session_key=gateway_session_key,
+                    **agent_overrides,
+                    route=route,
+                ))
+                agent_task.add_done_callback(_on_turn_finished)
+            except BaseException:
+                # Единственное окно, где слушателя снять уже некому: ход не
+                # запустился, а done-колбэк, который делает это в норме, ещё
+                # не навешен. Без этого сбой оставлял бы запись в трёх
+                # процессных словарях навсегда — сессия числилась бы «с живым
+                # человеком», а вопрос уходил бы в колбэк мёртвого запроса.
+                _drop_approval_listener()
+                raise
 
             return await self._write_sse_chat_completion(
                 request, completion_id, model_name, created, _stream_q,

@@ -712,3 +712,44 @@ class TestConcurrentTurnsShareOneSessionKey:
 
         assert entry.event.is_set() is True
         assert approval_mod.has_gateway_notify(self.KEY) is False
+
+
+class TestListenerNeverOutlivesItsTurn:
+    """Сбой между регистрацией и запуском хода не должен оставлять слушателя.
+
+    Слушателя снимает done-колбэк агентской задачи. Между регистрацией и его
+    навешиванием есть окно: если ход не запустится, снимать регистрацию будет
+    уже некому, и запись останется в процессных словарях навсегда — сессия
+    числилась бы «с живым человеком», а вопрос уходил бы в колбэк мёртвого
+    запроса.
+    """
+
+    @pytest.mark.asyncio
+    async def test_failed_turn_start_releases_the_listener(self, auth_adapter):
+        adapter = auth_adapter
+        app = _create_app(adapter)
+
+        def _explode(**_kwargs):
+            # Именно синхронный взрыв на вызове: так ведут себя неверные
+            # kwargs и сбой планировщика — ход не стартует вовсе, и
+            # done-колбэка, который снимает слушателя, ещё нет.
+            raise RuntimeError("ход не запустился")
+
+        async with TestClient(TestServer(app)) as cli:
+            with patch.object(adapter, "_run_agent", new=_explode):
+                resp = await cli.post(
+                    "/v1/chat/completions",
+                    headers={**_PANEL, "X-Hermes-Session-Id": "s-orphan"},
+                    json={
+                        "model": "test",
+                        "messages": [{"role": "user", "content": "привет"}],
+                        "stream": True,
+                    },
+                )
+                assert resp.status >= 500
+                await resp.read()
+
+        assert approval_mod.has_gateway_notify("s-orphan") is False
+        assert "s-orphan" not in approval_mod._attended_approval_sessions
+        assert "s-orphan" not in approval_mod._gateway_notify_registrations
+        assert "s-orphan" not in adapter._chat_approval_sessions

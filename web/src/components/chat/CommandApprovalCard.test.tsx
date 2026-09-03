@@ -78,6 +78,19 @@ describe("CommandApprovalCard — что видно человеку", () => {
     expect(hint).toContain("во всех каналах");
   });
 
+  it("подзаголовок показывает описание по-русски, а не строку движка", async () => {
+    await render(
+      <CommandApprovalCard
+        command="rm -rf /opt/data/tmp"
+        description="recursive delete"
+        choices={["once", "deny"]}
+        onDecide={vi.fn()}
+      />,
+    );
+    expect(container.textContent).toContain("Рекурсивное удаление");
+    expect(container.textContent).not.toContain("recursive delete");
+  });
+
   it("в интерфейсе нет слова hermes", async () => {
     await render(
       <CommandApprovalCard

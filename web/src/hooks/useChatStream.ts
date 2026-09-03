@@ -833,6 +833,17 @@ export function useChatStream(
         // нужен отдельно от `sawDone`: поток может оборваться после начала
         // ответа, и это уже не «не отправлено».
         let sawAgentOutput = false;
+        // Подпись «Отправляется…» гасим на ПЕРВОМ событии потока, а не в конце
+        // хода: на вопросе об одобрении ход стоит минутами, и всё это время
+        // владелец видел бы «отправляется» под сообщением, которое агент давно
+        // читает. Черновик в outbox при этом не трогаем — он снимается только
+        // по фактическому концу хода, иначе оборванный поток остался бы без
+        // страховки на повтор.
+        const noteAgentOutput = () => {
+          if (sawAgentOutput) return;
+          sawAgentOutput = true;
+          dispatch({ type: "MARK_DELIVERY", messageId, delivery: "delivered" });
+        };
 
         while (true) {
           const { done, value } = await reader.read();
@@ -861,7 +872,7 @@ export function useChatStream(
               const choice = event.data.choices[0];
               const content = choice?.delta?.content ?? "";
               if (content) {
-                sawAgentOutput = true;
+                noteAgentOutput();
                 dispatch({ type: "APPEND_DELTA", content });
               }
               if (choice?.finish_reason === "error") {
@@ -875,14 +886,14 @@ export function useChatStream(
                 break;
               }
             } else if (event.type === "tool_progress") {
-              sawAgentOutput = true;
+              noteAgentOutput();
               dispatch({ type: "UPSERT_TOOL", toolData: event.data });
             } else if (event.type === "approval_request") {
               // Ход агента с этого мгновения стоит и ждёт ответа человека.
               // Значит, сообщение до агента доехало — доставку признаём.
               const request = normalizeApprovalRequest(event.data);
               if (request) {
-                sawAgentOutput = true;
+                noteAgentOutput();
                 dispatch({ type: "APPROVAL_REQUESTED", request });
               }
             } else if (event.type === "done") {
