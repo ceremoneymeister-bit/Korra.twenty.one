@@ -854,6 +854,14 @@ def _seed_model_config(
                     str(model_cfg.get("provider") or ""),
                 )
             )
+        # Korra: под мультиплексом единственный HTTP-слушатель держит главный
+        # профиль и обслуживает всех через /p/<name>/. Новый профиль получает в
+        # .env API_SERVER_KEY (пропуск к мультиплексору), и по наличию ключа
+        # движок считал api_server включённым — и пропускал ВСЕ адаптеры
+        # профиля с ошибкой port-binding (03.09.2026, профиль secretary).
+        gateway_cfg = source_config.get("gateway")
+        if isinstance(gateway_cfg, dict) and gateway_cfg.get("multiplex_profiles"):
+            seeded_config["platforms"] = {"api_server": {"enabled": False}}
         config_path.write_text(
             yaml.safe_dump(seeded_config, sort_keys=False),
             encoding="utf-8",

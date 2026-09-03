@@ -1329,3 +1329,26 @@ class TestSeedProviderCredentialsFromRoot:
         (default_home / ".env").write_text("ANTHROPIC_API_KEY=root-anthropic\n")
         assert seed_provider_credentials_from_root("anthropic", {"model": {}}) == []
 
+
+class TestMultiplexSeedsApiServerOff:
+    """Под мультиплексом новый профиль не должен объявлять свой api_server."""
+
+    def test_pins_api_server_disabled_when_source_multiplexes(self, profile_env):
+        default_home = profile_env / ".hermes"
+        (default_home / "config.yaml").write_text(
+            "model:\n  provider: anthropic\n  default: claude-test\n"
+            "gateway:\n  multiplex_profiles: true\n"
+        )
+        profile_dir = create_profile("coder", no_alias=True)
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert cfg["platforms"]["api_server"]["enabled"] is False
+
+    def test_leaves_platforms_alone_without_multiplex(self, profile_env):
+        default_home = profile_env / ".hermes"
+        (default_home / "config.yaml").write_text(
+            "model:\n  provider: anthropic\n  default: claude-test\n"
+        )
+        profile_dir = create_profile("coder", no_alias=True)
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert "platforms" not in cfg
+
