@@ -154,8 +154,8 @@ function UserBubble({
     <div className="flex flex-col items-end gap-1">
       <div
         className={cn(
-          "max-w-[80%] rounded-md px-3 py-2",
-          "bg-primary/15 text-foreground border border-primary/30",
+          "max-w-[75%] rounded-[18px] bg-[var(--neo-surface)] px-3 py-2",
+          "text-[var(--neo-text-primary)] shadow-[var(--neo-depth-1)]",
           // Chat content must be readable — opt out of Korra's UPPERCASE body style.
           "font-sans normal-case tracking-normal",
         )}
@@ -168,26 +168,41 @@ function UserBubble({
         )}
       </div>
       {message.delivery === "sending" ? (
-        <span className="px-1 text-[0.7rem] text-muted-foreground" role="status">
+        <Button
+          type="button"
+          size="sm"
+          ghost
+          disabled
+          tabIndex={-1}
+          className="min-h-0 normal-case tracking-normal"
+          role="status"
+        >
           Отправляется…
-        </span>
+        </Button>
       ) : message.delivery === "failed" ? (
-        <div className="flex flex-wrap justify-end gap-1" aria-label="Действия с недоставленным сообщением">
-          <button
+        <div
+          className="flex flex-wrap justify-end gap-1"
+          aria-label="Действия с недоставленным сообщением"
+        >
+          <Button
             type="button"
+            size="sm"
+            outlined
             onClick={onRetry}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-warning hover:bg-warning/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/40"
+            prefix={<RotateCcw aria-hidden />}
+            className="normal-case tracking-normal"
           >
-            <RotateCcw className="size-3.5" aria-hidden />
             Не отправлено · Повторить
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            size="sm"
+            ghost
             onClick={onDiscard}
-            className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="normal-case tracking-normal"
           >
             Историю проверил(а) · убрать
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>
@@ -241,11 +256,11 @@ function AssistantBubble({
   }
 
   return (
-    <div className="group flex justify-start">
+    <div className="group flex justify-start pl-2">
       <div
         className={cn(
-          "relative max-w-[85%] rounded-md px-3 py-2",
-          "bg-card border border-border",
+          "relative w-full min-w-0 pr-8",
+          "text-[var(--neo-text-primary)]",
           // Chat content must be readable — opt out of Korra's UPPERCASE body style.
           "font-sans normal-case tracking-normal",
         )}
@@ -280,13 +295,17 @@ function AssistantBubble({
             className={cn(
               "absolute top-1 right-1 rounded-md p-1",
               "opacity-0 group-hover:opacity-100 transition-opacity",
-              "hover:bg-muted/40 text-muted-foreground",
-              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground",
+              "text-[var(--neo-text-secondary)] hover:shadow-[var(--neo-inset-compact)]",
+              "border-0 bg-transparent outline-0 focus-visible:opacity-100 focus-visible:outline-0",
             )}
             aria-label={copied ? "Скопировано" : "Скопировать"}
             title={copied ? "Скопировано" : "Скопировать"}
           >
-            {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
+            {copied ? (
+              <Check size={12} aria-hidden />
+            ) : (
+              <Copy size={12} aria-hidden />
+            )}
           </button>
         )}
       </div>
@@ -319,9 +338,8 @@ function BubbleChatSidebar({
 }: BubbleChatSidebarProps) {
   return (
     // No bg- override — let the parent dashboard background show through.
-    // Only border-r separates the sidebar from the transcript area.
-    <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-border">
-      <div className="p-2 border-b border-border">
+    <aside className="hidden w-60 shrink-0 flex-col md:flex">
+      <div className="p-2 pb-0">
         <Button
           type="button"
           onClick={onNewChat}
@@ -334,10 +352,10 @@ function BubbleChatSidebar({
       </div>
       <nav
         aria-label="Список чатов"
-        className="flex-1 overflow-y-auto py-1"
+        className="mt-4 flex flex-1 flex-col gap-1 overflow-y-auto px-1 pb-1"
       >
         {loading && sessions.length === 0 && (
-          <p className="px-5 py-2 text-sm text-text-secondary">
+          <p className="px-5 py-2 text-sm text-[var(--neo-text-secondary)]">
             Загрузка…
           </p>
         )}
@@ -353,38 +371,22 @@ function BubbleChatSidebar({
           const active = s.id === activeId;
           const Icon = iconForSource(s.source);
           return (
-            <div
-              key={s.id}
-              className={cn(
-                "group relative w-full",
-                "transition-colors",
-                active
-                  ? "text-midground"
-                  : "text-text-secondary hover:text-text-primary",
-              )}
-            >
+            <div key={s.id} className="group relative w-full">
               <button
                 type="button"
                 onClick={() => onSelect(s.id)}
                 className={cn(
-                  "relative w-full text-left",
+                  "relative w-full rounded-[var(--neo-radius-control)] border-0 bg-transparent text-left outline-0",
                   "px-5 py-2.5 pr-9 flex items-start gap-2.5",
                   "cursor-pointer",
-                  "font-sans text-sm",
+                  "font-sans text-sm transition-[box-shadow,color]",
+                  "focus:outline-0 focus-visible:outline-0",
+                  active
+                    ? "bg-[var(--neo-surface)] text-[var(--neo-text-primary)] shadow-[var(--neo-depth-1)]"
+                    : "text-[var(--neo-text-secondary)] shadow-none hover:shadow-[var(--neo-inset-compact)]",
                 )}
                 aria-current={active ? "page" : undefined}
               >
-                {active && (
-                  <span
-                    aria-hidden
-                    className="absolute left-0 top-0 bottom-0 w-px bg-midground"
-                    style={{ mixBlendMode: "plus-lighter" }}
-                  />
-                )}
-                <span
-                  aria-hidden
-                  className="absolute inset-y-0.5 left-1.5 right-1.5 bg-midground opacity-0 pointer-events-none transition-opacity duration-200 group-hover:opacity-5"
-                />
                 <Icon
                   size={14}
                   className="mt-1 shrink-0 relative"
@@ -392,7 +394,7 @@ function BubbleChatSidebar({
                 />
                 <span className="flex-1 min-w-0 relative">
                   <span className="block truncate">{titleFor(s)}</span>
-                  <span className="mt-0.5 block text-xs text-text-secondary">
+                  <span className="mt-0.5 block text-xs text-[var(--neo-text-secondary)]">
                     {formatRelative(s.last_active)}
                   </span>
                 </span>
@@ -407,10 +409,10 @@ function BubbleChatSidebar({
                 }}
                 className={cn(
                   "absolute top-1/2 right-2 -translate-y-1/2",
-                  "rounded-md p-1",
+                  "rounded-[var(--neo-radius-round)] border-0 bg-transparent p-1 outline-0",
                   "opacity-0 group-hover:opacity-60 hover:!opacity-100",
-                  "hover:bg-destructive/20 hover:text-destructive",
-                  "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground",
+                  "text-[var(--neo-text-secondary)] hover:text-destructive hover:shadow-[var(--neo-inset-compact)]",
+                  "focus-visible:opacity-100 focus-visible:outline-0",
                   "transition-opacity",
                 )}
                 aria-label={`Удалить чат «${titleFor(s)}»`}
@@ -469,68 +471,56 @@ function BubbleChatTranscript({
 
   return (
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
-      <div className="korra-chat-transcript__content max-w-3xl mx-auto px-4 pt-4 space-y-3">
-        {messages.length === 0 ? (
-          <div className="flex items-center justify-center min-h-[40vh]">
-<p className="text-base text-muted-foreground">
-              Напишите Корре своими словами — она на связи.
-            </p>
-          </div>
-        ) : (
-          messages.map((m, i) =>
-            m.role === "user" ? (
-              <UserBubble
-                key={m.id}
-                message={m}
-                onRetry={onRetry}
-                onDiscard={onDiscard}
-              />
-            ) : (
-              <AssistantBubble
-                key={m.id}
-                message={m}
-                streaming={
-                  streaming === true && lastIsAssistant && i === lastIdx
-                }
-                // Единственное, что мы про работу агента действительно знаем:
-                // были ли в предыдущем сообщении вложения. Значит, он сейчас
-                // их открывает. Остальное не выдумываем.
-                onDecision={onDecision}
-                decisionsBusy={busy}
-                decided={decided}
-                busyState={
-                  messages[i - 1]?.role === "user" &&
-                  ((messages[i - 1]?.attachments?.length ?? 0) > 0 ||
-                    messages[i - 1]?.content.includes("[вложения]"))
-                    ? "reading"
-                    : "working"
-                }
-              />
-            ),
-          )
-        )}
-        {error && (
-          <div
-            role="alert"
-            className="mx-auto max-w-[85%] rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-4 py-3 text-sm text-[var(--destructive)] shadow-[var(--neo-inset-compact)]"
-          >
-            Корра не смогла ответить: {error}
-          </div>
-        )}
-        {error && (
-          <div className="flex justify-center">
-            <p
+      <div className="px-4">
+        <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-3 pt-4">
+          {messages.length === 0 ? (
+            <div className="flex min-h-[40vh] items-center justify-center">
+              <p className="text-base text-muted-foreground">
+                Напишите Корре своими словами — она на связи.
+              </p>
+            </div>
+          ) : (
+            messages.map((m, i) =>
+              m.role === "user" ? (
+                <UserBubble
+                  key={m.id}
+                  message={m}
+                  onRetry={onRetry}
+                  onDiscard={onDiscard}
+                />
+              ) : (
+                <AssistantBubble
+                  key={m.id}
+                  message={m}
+                  streaming={
+                    streaming === true && lastIsAssistant && i === lastIdx
+                  }
+                  // Единственное, что мы про работу агента действительно знаем:
+                  // были ли в предыдущем сообщении вложения. Значит, он сейчас
+                  // их открывает. Остальное не выдумываем.
+                  onDecision={onDecision}
+                  decisionsBusy={busy}
+                  decided={decided}
+                  busyState={
+                    messages[i - 1]?.role === "user" &&
+                    ((messages[i - 1]?.attachments?.length ?? 0) > 0 ||
+                      messages[i - 1]?.content.includes("[вложения]"))
+                      ? "reading"
+                      : "working"
+                  }
+                />
+              ),
+            )
+          )}
+          {error && (
+            <div
               role="alert"
-              className={cn(
-                "text-xs rounded-md px-3 py-2 max-w-md text-center",
-                "bg-destructive/10 text-destructive border border-destructive/30",
-                "font-sans normal-case tracking-normal",
-              )}
+              className="mx-auto max-w-[85%] rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-4 py-3 text-sm text-[var(--destructive)] shadow-[var(--neo-inset-compact)]"
             >
-              {error}
-            </p>
-          </div>
-        )}
+              Корра не смогла ответить: {error}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

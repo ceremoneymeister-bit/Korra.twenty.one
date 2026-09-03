@@ -25,11 +25,16 @@ import {
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import {
+  ArrowLeft,
+  ArrowRight,
   Check,
+  EyeOff,
   MessageSquarePlus,
   MoreVertical,
   Pencil,
+  Plus,
   Settings,
+  UserRoundPlus,
   X,
 } from "lucide-react";
 import { Toast } from "@nous-research/ui/ui/components/toast";
@@ -49,16 +54,24 @@ export default function AgentWorkbenchPage() {
   // Состав вкладок — реальные профили контура (см. lib/agent-tabs.ts):
   // главная «Корра» есть всегда, остальные приезжают из /api/profiles и
   // подхватываются без перезагрузки страницы.
-  const { tabs, refresh, updateDisplayName } = useAgentTabs();
+  const {
+    tabs,
+    hiddenTabs,
+    refresh,
+    updateDisplayName,
+    hideTab,
+    showTab,
+    moveTab,
+  } = useAgentTabs();
   const [selectedId, setActiveId] = useState<string>(MAIN_AGENT_TAB.profile);
   const [newChatByProfile, setNewChatByProfile] = useState<
     Record<string, number>
   >({});
-  const [openMenu, setOpenMenu] = useState<{
-    profile: string;
-    top: number;
-    right: number;
-  } | null>(null);
+  const [openMenu, setOpenMenu] = useState<
+    | { kind: "tab"; profile: string; top: number; right: number }
+    | { kind: "add"; top: number; right: number }
+    | null
+  >(null);
   const [renamingProfile, setRenamingProfile] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -176,14 +189,33 @@ export default function AgentWorkbenchPage() {
   const toggleTabMenu = useCallback(
     (event: MouseEvent<HTMLButtonElement>, profile: string) => {
       event.stopPropagation();
-      if (openMenu?.profile === profile) {
+      if (openMenu?.kind === "tab" && openMenu.profile === profile) {
         setOpenMenu(null);
         setRenamingProfile(null);
         return;
       }
       const rect = event.currentTarget.getBoundingClientRect();
       setOpenMenu({
+        kind: "tab",
         profile,
+        top: rect.bottom + 8,
+        right: Math.max(12, window.innerWidth - rect.right),
+      });
+      setRenamingProfile(null);
+    },
+    [openMenu],
+  );
+
+  const toggleAddMenu = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      if (openMenu?.kind === "add") {
+        setOpenMenu(null);
+        return;
+      }
+      const rect = event.currentTarget.getBoundingClientRect();
+      setOpenMenu({
+        kind: "add",
         top: rect.bottom + 8,
         right: Math.max(12, window.innerWidth - rect.right),
       });
@@ -252,8 +284,16 @@ export default function AgentWorkbenchPage() {
   );
 
   const menuTab = openMenu
-    ? tabs.find((tab) => tab.profile === openMenu.profile)
+    ? openMenu.kind === "tab"
+      ? tabs.find((tab) => tab.profile === openMenu.profile)
+      : undefined
     : undefined;
+  const menuTabIndex = menuTab
+    ? tabs.findIndex((tab) => tab.profile === menuTab.profile)
+    : -1;
+  // Скрытые чаты тоже остаются смонтированы: «скрыть вкладку» — настройка
+  // полосы, а не команда оборвать ответ или забыть открытый разговор.
+  const mountedTabs = [...tabs, ...hiddenTabs];
 
   return (
     // Ту же полную высоту, что и у одиночного чата, даёт обёртка в App.tsx
@@ -266,64 +306,89 @@ export default function AgentWorkbenchPage() {
           role="tablist"
           aria-label="Агенты"
           onKeyDown={onTabKeyDown}
-          className="neo-tabs-list flex min-h-11 items-center gap-1 overflow-x-auto p-1"
+          className="neo-tabs-list flex min-h-11 items-center gap-1 overflow-hidden p-1"
         >
-          {tabs.map((tab) => {
-            const active = tab.profile === activeId;
-            const streaming = streamingByProfile[tab.profile] === true;
-            return (
-              <div
-                key={tab.profile}
-                role="presentation"
-                className="relative flex shrink-0 items-center"
-              >
-                <button
-                  id={`agent-tab-${tab.profile}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  aria-controls={`agent-panel-${tab.profile}`}
-                  tabIndex={active ? 0 : -1}
-                  title={tab.description}
-                  aria-label={
-                    streaming ? `${tab.label} — агент отвечает` : undefined
-                  }
-                  data-active={active ? "true" : undefined}
-                  onClick={() => setActiveId(tab.profile)}
-                  className={cn(
-                    "neo-tab flex min-h-9 items-center gap-2 px-3 py-2",
-                    "font-sans text-[0.9375rem] leading-snug normal-case tracking-normal",
-                    "whitespace-nowrap cursor-pointer",
-                    active && "font-semibold",
-                  )}
+          <div
+            role="presentation"
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+          >
+            {tabs.map((tab) => {
+              const active = tab.profile === activeId;
+              const streaming = streamingByProfile[tab.profile] === true;
+              return (
+                <div
+                  key={tab.profile}
+                  role="presentation"
+                  className="relative flex shrink-0 items-center"
                 >
-                  <span>{tab.label}</span>
-                  {streaming && (
-                    <span
-                      aria-hidden
-                      title="Агент отвечает"
-                      className="size-1.5 shrink-0 rounded-full bg-[var(--neo-accent)] animate-pulse"
-                    />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="neo-tab ml-0.5 flex size-8 items-center justify-center p-0"
-                  aria-label={`Меню агента «${tab.label}»`}
-                  aria-haspopup="menu"
-                  aria-expanded={openMenu?.profile === tab.profile}
-                  data-agent-tab-menu-trigger
-                  onClick={(event) => toggleTabMenu(event, tab.profile)}
-                >
-                  <MoreVertical size={17} aria-hidden />
-                </button>
-              </div>
-            );
-          })}
+                  <button
+                    id={`agent-tab-${tab.profile}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    aria-controls={`agent-panel-${tab.profile}`}
+                    tabIndex={active ? 0 : -1}
+                    title={tab.description}
+                    aria-label={
+                      streaming ? `${tab.label} — агент отвечает` : undefined
+                    }
+                    data-active={active ? "true" : undefined}
+                    onClick={() => setActiveId(tab.profile)}
+                    className={cn(
+                      "neo-tab flex min-h-9 items-center gap-2 px-3 py-2",
+                      "font-sans text-[0.9375rem] leading-snug normal-case tracking-normal",
+                      "cursor-pointer whitespace-nowrap",
+                      active && "font-semibold",
+                    )}
+                  >
+                    <span>{tab.label}</span>
+                    {streaming && (
+                      <span
+                        aria-hidden
+                        title="Агент отвечает"
+                        className="size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--neo-accent)]"
+                      />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="neo-tab ml-0.5 flex size-8 items-center justify-center p-0"
+                    aria-label={`Меню агента «${tab.label}»`}
+                    aria-haspopup="menu"
+                    aria-expanded={
+                      openMenu?.kind === "tab" &&
+                      openMenu.profile === tab.profile
+                    }
+                    data-agent-tab-menu-trigger
+                    onClick={(event) => toggleTabMenu(event, tab.profile)}
+                  >
+                    <MoreVertical size={17} aria-hidden />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            aria-label="Добавить вкладку агента"
+            aria-haspopup="menu"
+            aria-expanded={openMenu?.kind === "add"}
+            data-agent-tab-menu-trigger
+            onClick={toggleAddMenu}
+            className={cn(
+              "flex size-9 shrink-0 cursor-pointer items-center justify-center p-0",
+              "rounded-[var(--neo-radius-round)] border-0 bg-[var(--neo-surface)]",
+              "text-[var(--neo-text-secondary)] shadow-[var(--neo-depth-1)] outline-0",
+              "hover:text-[var(--neo-text-primary)] active:shadow-[var(--neo-inset-compact)]",
+              "focus:outline-0 focus-visible:outline-0",
+            )}
+          >
+            <Plus size={18} aria-hidden />
+          </button>
         </div>
       </div>
 
-      {openMenu && menuTab &&
+      {openMenu?.kind === "tab" && menuTab &&
         createPortal(
           <div
             ref={menuRef}
@@ -399,8 +464,90 @@ export default function AgentWorkbenchPage() {
                   <MessageSquarePlus size={15} aria-hidden />
                   Новый чат
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={menuTabIndex <= 0}
+                  className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => {
+                    moveTab(menuTab.profile, "left");
+                    setOpenMenu(null);
+                  }}
+                >
+                  <ArrowLeft size={15} aria-hidden />
+                  Сдвинуть влево
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={menuTabIndex < 0 || menuTabIndex >= tabs.length - 1}
+                  className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => {
+                    moveTab(menuTab.profile, "right");
+                    setOpenMenu(null);
+                  }}
+                >
+                  <ArrowRight size={15} aria-hidden />
+                  Сдвинуть вправо
+                </button>
+                {menuTab.profile !== MAIN_AGENT_TAB.profile && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
+                    onClick={() => {
+                      hideTab(menuTab.profile);
+                      setOpenMenu(null);
+                      setRenamingProfile(null);
+                    }}
+                  >
+                    <EyeOff size={15} aria-hidden />
+                    Скрыть вкладку
+                  </button>
+                )}
               </>
             )}
+          </div>,
+          document.body,
+        )}
+
+      {openMenu?.kind === "add" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label="Добавить вкладку агента"
+            className="neo-select-menu fixed z-50 min-w-[250px] p-1.5"
+            style={{ top: openMenu.top, right: openMenu.right }}
+          >
+            {hiddenTabs.map((tab) => (
+              <button
+                key={tab.profile}
+                type="button"
+                role="menuitem"
+                className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
+                onClick={() => {
+                  showTab(tab.profile);
+                  setActiveId(tab.profile);
+                  setOpenMenu(null);
+                }}
+              >
+                <Plus size={15} aria-hidden />
+                {tab.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              role="menuitem"
+              className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
+              onClick={() => {
+                setOpenMenu(null);
+                navigate("/profiles/new");
+              }}
+            >
+              <UserRoundPlus size={15} aria-hidden />
+              Создать нового агента
+            </button>
           </div>,
           document.body,
         )}
@@ -408,7 +555,7 @@ export default function AgentWorkbenchPage() {
       <Toast toast={toast} />
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {tabs.map((tab) => (
+        {mountedTabs.map((tab) => (
           <div
             key={tab.profile}
             id={`agent-panel-${tab.profile}`}

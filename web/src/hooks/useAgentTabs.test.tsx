@@ -43,6 +43,7 @@ async function mount() {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   getProfiles.mockReset();
   updateProfileDisplayName.mockReset();
   updateProfileDisplayName.mockResolvedValue({
@@ -158,5 +159,88 @@ describe("useAgentTabs", () => {
       await current.refresh();
     });
     expect(current.tabs.map((tab) => tab.profile)).toEqual(["", "keep"]);
+  });
+
+  it("восстанавливает порядок, позволяет двигать главную вкладку и добавляет новый профиль в конец", async () => {
+    window.localStorage.setItem(
+      "korra.agentTabs.order",
+      JSON.stringify(["writer", "", "analyst"]),
+    );
+    getProfiles.mockResolvedValue({
+      profiles: [
+        { name: "analyst", is_default: false },
+        { name: "writer", is_default: false },
+        { name: "newcomer", is_default: false },
+      ],
+    });
+    await mount();
+    await act(async () => {});
+
+    expect(current.tabs.map((tab) => tab.profile)).toEqual([
+      "writer",
+      "",
+      "analyst",
+      "newcomer",
+    ]);
+
+    await act(async () => current.moveTab("", "left"));
+    expect(current.tabs.map((tab) => tab.profile)).toEqual([
+      "",
+      "writer",
+      "analyst",
+      "newcomer",
+    ]);
+    expect(
+      JSON.parse(window.localStorage.getItem("korra.agentTabs.order")!),
+    ).toEqual(["", "writer", "analyst", "newcomer"]);
+  });
+
+  it("скрывает вкладку, не скрывает Корру и возвращает профиль", async () => {
+    getProfiles.mockResolvedValue({
+      profiles: [
+        { name: "writer", is_default: false, display_name: "Редактор" },
+      ],
+    });
+    await mount();
+    await act(async () => {});
+
+    await act(async () => current.hideTab("writer"));
+    expect(current.tabs.map((tab) => tab.profile)).toEqual([""]);
+    expect(current.hiddenTabs.map((tab) => tab.profile)).toEqual(["writer"]);
+    expect(
+      JSON.parse(window.localStorage.getItem("korra.agentTabs.hidden")!),
+    ).toEqual(["writer"]);
+
+    await act(async () => current.hideTab(""));
+    expect(current.tabs.map((tab) => tab.profile)).toEqual([""]);
+
+    await act(async () => current.showTab("writer"));
+    expect(current.tabs.map((tab) => tab.profile)).toEqual(["", "writer"]);
+    expect(current.hiddenTabs).toEqual([]);
+  });
+
+  it("вычищает удалённый профиль из порядка и скрытых вкладок", async () => {
+    window.localStorage.setItem(
+      "korra.agentTabs.order",
+      JSON.stringify(["ghost", "", "keep"]),
+    );
+    window.localStorage.setItem(
+      "korra.agentTabs.hidden",
+      JSON.stringify(["ghost"]),
+    );
+    getProfiles.mockResolvedValue({
+      profiles: [{ name: "keep", is_default: false }],
+    });
+    await mount();
+    await act(async () => {});
+
+    expect(current.tabs.map((tab) => tab.profile)).toEqual(["", "keep"]);
+    expect(current.hiddenTabs).toEqual([]);
+    expect(
+      JSON.parse(window.localStorage.getItem("korra.agentTabs.order")!),
+    ).toEqual(["", "keep"]);
+    expect(
+      JSON.parse(window.localStorage.getItem("korra.agentTabs.hidden")!),
+    ).toEqual([]);
   });
 });

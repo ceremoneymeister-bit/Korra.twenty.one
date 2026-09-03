@@ -2,26 +2,39 @@
 
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const workbenchMocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   updateDisplayName: vi.fn(),
+  hideTab: vi.fn(),
+  showTab: vi.fn(),
+  moveTab: vi.fn(),
+  tabs: [
+    { profile: "", label: "Корра" },
+    {
+      profile: "calculator",
+      label: "Сметчик",
+      description: "Считает стоимость проекта",
+    },
+  ],
+  hiddenTabs: [] as Array<{
+    profile: string;
+    label: string;
+    description?: string;
+  }>,
 }));
 
 vi.mock("@/hooks/useAgentTabs", () => ({
   useAgentTabs: () => ({
-    tabs: [
-      { profile: "", label: "Корра" },
-      {
-        profile: "calculator",
-        label: "Сметчик",
-        description: "Считает стоимость проекта",
-      },
-    ],
+    tabs: workbenchMocks.tabs,
+    hiddenTabs: workbenchMocks.hiddenTabs,
     refresh: workbenchMocks.refresh,
     updateDisplayName: workbenchMocks.updateDisplayName,
+    hideTab: workbenchMocks.hideTab,
+    showTab: workbenchMocks.showTab,
+    moveTab: workbenchMocks.moveTab,
   }),
 }));
 
@@ -45,6 +58,19 @@ import AgentWorkbenchPage from "./AgentWorkbenchPage";
 let container: HTMLDivElement;
 let root: Root;
 
+const DEFAULT_TABS = [
+  { profile: "", label: "Корра" },
+  {
+    profile: "calculator",
+    label: "Сметчик",
+    description: "Считает стоимость проекта",
+  },
+];
+
+function LocationProbe() {
+  return <output data-testid="location">{useLocation().pathname}</output>;
+}
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
@@ -67,10 +93,15 @@ async function enterText(input: HTMLInputElement, value: string) {
 }
 
 beforeEach(() => {
+  workbenchMocks.tabs = DEFAULT_TABS;
+  workbenchMocks.hiddenTabs = [];
   workbenchMocks.refresh.mockReset();
   workbenchMocks.refresh.mockResolvedValue(undefined);
   workbenchMocks.updateDisplayName.mockReset();
   workbenchMocks.updateDisplayName.mockResolvedValue(undefined);
+  workbenchMocks.hideTab.mockReset();
+  workbenchMocks.showTab.mockReset();
+  workbenchMocks.moveTab.mockReset();
 });
 
 afterEach(async () => {
@@ -193,5 +224,90 @@ describe("AgentWorkbenchPage", () => {
     expect(document.body.textContent).toContain(
       "Переименование появится после обновления движка",
     );
+  });
+
+  it("управляет порядком и скрытием из меню вкладки, но не скрывает Корру", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Меню агента «Сметчик»"]')
+        ?.click();
+    });
+    let menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    await act(async () => {
+      Array.from(menu.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("Сдвинуть влево"))
+        ?.click();
+    });
+    expect(workbenchMocks.moveTab).toHaveBeenCalledWith("calculator", "left");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Меню агента «Сметчик»"]')
+        ?.click();
+    });
+    menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    await act(async () => {
+      Array.from(menu.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("Скрыть вкладку"))
+        ?.click();
+    });
+    expect(workbenchMocks.hideTab).toHaveBeenCalledWith("calculator");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Меню агента «Корра»"]')
+        ?.click();
+    });
+    menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    expect(menu.textContent).not.toContain("Скрыть вкладку");
+  });
+
+  it("возвращает скрытую вкладку через «+» и открывает конструктор нового агента", async () => {
+    workbenchMocks.tabs = [{ profile: "", label: "Корра" }];
+    workbenchMocks.hiddenTabs = [
+      { profile: "calculator", label: "Сметчик" },
+    ];
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Добавить вкладку агента"]')
+        ?.click();
+    });
+    let menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    expect(menu.textContent).toContain("Сметчик");
+    expect(menu.textContent).toContain("Создать нового агента");
+    await act(async () => {
+      Array.from(menu.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("Сметчик"))
+        ?.click();
+    });
+    expect(workbenchMocks.showTab).toHaveBeenCalledWith("calculator");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Добавить вкладку агента"]')
+        ?.click();
+    });
+    menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    await act(async () => {
+      Array.from(menu.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("Создать нового агента"))
+        ?.click();
+    });
+    expect(
+      container.querySelector('[data-testid="location"]')?.textContent,
+    ).toBe("/profiles/new");
   });
 });
