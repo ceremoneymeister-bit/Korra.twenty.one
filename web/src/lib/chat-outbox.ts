@@ -11,6 +11,8 @@ export interface ChatOutboxRecord {
   createdAt: number;
   status: "sending" | "failed";
   error?: string;
+  /** Профиль (вкладка агента), из которой ушло сообщение; "" — главный. */
+  profile?: string;
 }
 
 function validAttachment(value: unknown): value is UploadedAttachment {
@@ -35,7 +37,8 @@ function validRecord(value: unknown): value is ChatOutboxRecord {
     Array.isArray(item.attachments) && item.attachments.length <= 5 && item.attachments.every(validAttachment) &&
     typeof item.createdAt === "number" && Number.isFinite(item.createdAt) &&
     (item.status === "sending" || item.status === "failed") &&
-    (item.error === undefined || typeof item.error === "string")
+    (item.error === undefined || typeof item.error === "string") &&
+    (item.profile === undefined || (typeof item.profile === "string" && item.profile.length <= 100))
   );
 }
 

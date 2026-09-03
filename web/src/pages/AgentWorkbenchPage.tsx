@@ -306,7 +306,7 @@ export default function AgentWorkbenchPage() {
           role="tablist"
           aria-label="Агенты"
           onKeyDown={onTabKeyDown}
-          className="neo-tabs-list flex min-h-11 items-center gap-1 overflow-hidden p-1"
+          className="neo-tabs-list flex min-h-[3.25rem] items-center gap-1.5 overflow-hidden p-1.5"
         >
           <div
             role="presentation"

@@ -87,8 +87,19 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
     }
 
     case "RESTORE_PENDING": {
+      // Та же сессия — сообщение добавляется к переписке, а не заменяет её
+      // (владелец 03.09: «ошибка возникла и исчезла переписка»).
+      const sameSession =
+        state.sessionId === action.sessionId && state.messages.length > 0;
+      const alreadyShown = state.messages.some(
+        (message) => message.clientMessageId === action.userMsg.clientMessageId,
+      );
       return {
-        messages: [action.userMsg],
+        messages: sameSession
+          ? alreadyShown
+            ? state.messages
+            : [...state.messages, action.userMsg]
+          : [action.userMsg],
         sessionId: action.sessionId,
         isStreaming: false,
         error: action.error,
@@ -279,6 +290,8 @@ export function useChatStream(
   useEffect(() => {
     const pending = loadChatOutbox();
     if (!pending) return;
+    // Черновик другой вкладки-профиля этой вкладке не принадлежит.
+    if ((pending.profile ?? "") !== (profile ?? "")) return;
     const restored: ChatOutboxRecord = {
       ...pending,
       status: "failed",
@@ -367,7 +380,7 @@ export function useChatStream(
       if (streamingRef.current) return false;
       if (!retryRecord) {
         const pending = loadChatOutbox();
-        if (pending) {
+        if (pending && (pending.profile ?? "") === (profile ?? "")) {
           dispatch({
             type: "RESTORE_PENDING",
             sessionId: pending.sessionId,
@@ -414,6 +427,7 @@ export function useChatStream(
         attachments,
         createdAt,
         status: "sending",
+        profile: profile ?? "",
       };
       if (!saveChatOutbox(outboxRecord)) {
         activeStreamIdRef.current = null;
@@ -698,6 +712,7 @@ export function useChatStream(
   const retryPending = useCallback(async (): Promise<boolean> => {
     const pending = loadChatOutbox();
     if (!pending || streamingRef.current) return false;
+    if ((pending.profile ?? "") !== (profile ?? "")) return false;
     return await send(pending.text, pending.attachments, pending);
   }, [send]);
 
@@ -705,6 +720,7 @@ export function useChatStream(
     if (streamingRef.current) return;
     const pending = loadChatOutbox();
     if (!pending) return;
+    if ((pending.profile ?? "") !== (profile ?? "")) return;
     clearChatOutbox(pending.messageId);
     dispatch({ type: "DISCARD_PENDING", messageId: pending.messageId });
   }, []);

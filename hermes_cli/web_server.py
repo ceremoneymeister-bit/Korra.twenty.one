@@ -3112,12 +3112,22 @@ async def _durable_browser_chat_response(
 
         run = _CHAT_DELIVERY_STREAMS.get(task_key)
         if state == "pending" and run is None:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "Доставка ещё проверяется. "
-                    "Откройте историю перед повторной отправкой"
-                ),
+            # Запись «в работе», а живого прогона нет: панель перезапустилась
+            # посреди ответа. Свежую (< 30 с) запись не трогаем — это может
+            # быть параллельная отправка того же сообщения. Старую перезапускаем:
+            # раньше здесь был вечный 409, и владелец после рестарта не мог
+            # отправить ни одно сообщение ни в одном чате (03.09.2026).
+            if time.time() - float(getattr(record, "updated_at", 0) or 0) < 30:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Доставка ещё проверяется. "
+                        "Откройте историю перед повторной отправкой"
+                    ),
+                )
+            _log.warning(
+                "chat delivery %s: pending without a live run — rerunning after restart",
+                message_id,
             )
         if run is None:
             run = _DurableBrowserChatStream()
@@ -3175,11 +3185,17 @@ async def _durable_browser_chat_response(
 
     task = _CHAT_DELIVERY_TASKS.get(task_key)
     if state == "pending" and task is None:
-        # The dashboard restarted while the upstream result was unknown. Never
-        # guess by sending a second agent turn; surface the ambiguity honestly.
-        raise HTTPException(
-            status_code=409,
-            detail="Доставка ещё проверяется. Откройте историю перед повторной отправкой",
+        # Панель перезапустилась посреди ответа. Свежую запись (< 30 с) не
+        # трогаем — это может быть параллельная отправка; старую перезапускаем
+        # (см. SSE-ветку выше).
+        if time.time() - float(getattr(record, "updated_at", 0) or 0) < 30:
+            raise HTTPException(
+                status_code=409,
+                detail="Доставка ещё проверяется. Откройте историю перед повторной отправкой",
+            )
+        _log.warning(
+            "chat delivery %s: pending without a live task — rerunning after restart",
+            message_id,
         )
     if task is None:
         task = asyncio.create_task(

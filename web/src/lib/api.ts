@@ -813,7 +813,7 @@ export const api = {
     fetchJSON<{ ok: boolean; display_name: string }>(
       `/api/profiles/${encodeURIComponent(name)}/display-name`,
       {
-        method: "POST",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ display_name: displayName }),
       },

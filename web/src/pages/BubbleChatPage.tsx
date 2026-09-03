@@ -259,6 +259,8 @@ function AssistantBubble({
     <div className="group flex justify-start pl-2">
       <div
         className={cn(
+          // Владелец 03.09: текст агента не должен упираться в правый край.
+          "max-w-[72ch]",
           "relative w-full min-w-0 pr-8",
           "text-[var(--neo-text-primary)]",
           // Chat content must be readable — opt out of Korra's UPPERCASE body style.
@@ -472,7 +474,7 @@ function BubbleChatTranscript({
   return (
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
       <div className="px-4">
-        <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-3 pt-4">
+        <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-7 pt-6">
           {messages.length === 0 ? (
             <div className="flex min-h-[40vh] items-center justify-center">
               <p className="text-base text-muted-foreground">
