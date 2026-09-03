@@ -8,9 +8,9 @@
 @import '@nous-research/ui/styles/fonts.css';
 @import '@nous-research/ui/styles/globals.css';
 
-/* Scan the published design-system bundle so its utility classes survive
-   Tailwind's JIT purge. */
-@source '../node_modules/@nous-research/ui/dist';
+/* Scan the vendored design-system source so its utility classes survive
+   Tailwind's JIT purge. Vite resolves the unchanged package imports here. */
+@source './vendor/nous-ui';
 
 /* Onest 2.001 — local variable font with full Cyrillic coverage. The file
    and its SIL OFL 1.1 notice live under /public/fonts, so the Russian product
@@ -109,6 +109,28 @@
   --theme-spacing-mul: 1;
   --theme-density: comfortable;
 
+  /* transitions.dev motion scale. Components consume only these semantic
+     timings/curves; palette changes stay instant when the theme flips. */
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --ease-out: ease-out;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dropdown-open-dur: var(--duration-fast);
+  --dropdown-close-dur: var(--duration-quick);
+  --dropdown-pre-scale: 0.97;
+  --dropdown-closing-scale: 0.99;
+  --dropdown-ease: var(--ease-smooth-out);
+  --check-box: var(--duration-quick);
+  --check-draw: var(--duration-medium);
+  --check-delay: 0ms;
+  --check-uncheck: var(--duration-quick);
+  --check-ease: var(--ease-smooth-out);
+  --toggle-dur: var(--duration-medium);
+  --toggle-track: 0ms;
+  --toggle-ease: cubic-bezier(0.34, 1.35, 0.64, 1);
+
   /* Data-series accents — consumed by Analytics + Models pages. */
   --series-input-token: #4f7900;
   --series-output-token: #7c3aed;
@@ -184,7 +206,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   letter-spacing: 0.01em !important;
 }
 
-[data-client-ui="true"] button {
+[data-client-ui="true"] button:not([role="switch"]):not([role="checkbox"]) {
   border-radius: 0.625rem;
 }
 
@@ -206,13 +228,17 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   border-color: var(--input, color-mix(in srgb, var(--midground-base) 15%, transparent));
 }
 
+[data-client-ui="true"] input:not([type="checkbox"]):not([type="radio"])[aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+
 [data-client-ui="true"] button:focus-visible,
 [data-client-ui="true"] a:focus-visible,
 [data-client-ui="true"] input:not([type="checkbox"]):not([type="radio"]):focus-visible,
 [data-client-ui="true"] textarea:focus-visible,
 [data-client-ui="true"] [role="combobox"]:focus-visible,
 [data-client-ui="true"] summary:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--ring, var(--midground-base)) 62%, transparent);
+  outline: 2px solid var(--ring, var(--midground-base));
   outline-offset: 2px;
 }
 

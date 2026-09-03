@@ -6,7 +6,10 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // Keep the copied upstream tree byte-for-byte reviewable instead of forcing
+  // our project-specific lint rules across all 148 source files. Components we
+  // intentionally customize are linted explicitly in the verification run.
+  globalIgnores(['dist', 'src/vendor/nous-ui/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

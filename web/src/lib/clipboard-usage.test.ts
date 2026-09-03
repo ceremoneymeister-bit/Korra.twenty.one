@@ -17,12 +17,16 @@ const SRC_ROOT = join(__dirname, "..");
 
 // The helper itself is the single allowed writer.
 const ALLOWLIST = new Set(["lib/clipboard.ts"]);
+// Vendored third-party sources retain their upstream implementation and are
+// reviewed independently from dashboard-specific architectural guards.
+const EXCLUDED_DIRS = new Set([join(SRC_ROOT, "vendor")]);
 
 function collectSourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     const st = statSync(full);
     if (st.isDirectory()) {
+      if (EXCLUDED_DIRS.has(full)) continue;
       collectSourceFiles(full, out);
     } else if (/\.(ts|tsx)$/.test(entry) && !/\.(test|spec)\.(ts|tsx)$/.test(entry)) {
       out.push(full);

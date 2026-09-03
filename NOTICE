@@ -34,3 +34,9 @@ Note on model names
 -------------------
 "Hermes-3" / "Hermes-4" and identifiers such as `nousresearch/hermes-*`
 refer to Nous Research models, not to this project's branding.
+
+Vendored Nous Research UI
+-------------------------
+The source of @nous-research/ui 0.18.2 is vendored under
+web/src/vendor/nous-ui/. Its MIT license and copy record are preserved in
+web/src/vendor/nous-ui/LICENSE-NOTICE.md.

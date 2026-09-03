@@ -10,12 +10,19 @@ function compilerPreset() {
 }
 import path from "path";
 
+const NOUS_UI_SRC = path.resolve(import.meta.dirname, "./src/vendor/nous-ui");
+
 export default defineConfig({
   plugins: [react(), babel({ presets: [compilerPreset()] })],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: [
+      {
+        find: /^@nous-research\/ui\/styles\/(fonts|globals)\.css$/,
+        replacement: `${NOUS_UI_SRC}/ui/$1.css`,
+      },
+      { find: "@nous-research/ui", replacement: NOUS_UI_SRC },
+      { find: "@", replacement: path.resolve(import.meta.dirname, "./src") },
+    ],
   },
   test: {
     environment: "node",

@@ -15,6 +15,7 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 const BACKEND = process.env.HERMES_DASHBOARD_URL ?? "http://127.0.0.1:9119";
+const NOUS_UI_SRC = path.resolve(import.meta.dirname, "./src/vendor/nous-ui");
 
 /**
  * In production the Python `hermes dashboard` server injects a one-shot
@@ -76,10 +77,18 @@ export default defineConfig({
     hermesDevToken(),
   ],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-      "@hermes/shared": path.resolve(__dirname, "../apps/shared/src"),
-    },
+    alias: [
+      {
+        find: /^@nous-research\/ui\/styles\/(fonts|globals)\.css$/,
+        replacement: `${NOUS_UI_SRC}/ui/$1.css`,
+      },
+      { find: "@nous-research/ui", replacement: NOUS_UI_SRC },
+      { find: "@", replacement: path.resolve(import.meta.dirname, "./src") },
+      {
+        find: "@hermes/shared",
+        replacement: path.resolve(import.meta.dirname, "../apps/shared/src"),
+      },
+    ],
     // When @nous-research/ui is symlinked via `file:../../design-language`,
     // Node's module resolution would pick up shared deps from
     // design-language/node_modules/*, giving us two copies + breaking
@@ -137,7 +146,7 @@ export default defineConfig({
             },
             {
               name: "ui",
-              test: /node_modules[\\/]@nous-research[\\/]ui([\\/]|$)/,
+              test: /(?:node_modules[\\/]@nous-research[\\/]ui|src[\\/]vendor[\\/]nous-ui)([\\/]|$)/,
             },
             {
               name: "vendor",
