@@ -181,8 +181,8 @@ describe("vendored Nous UI form controls", () => {
     );
     expect(control?.getAttribute("aria-expanded")).toBe("true");
     expect(control?.getAttribute("aria-activedescendant")).toContain("option-1");
-    expect(container.querySelectorAll('[role="option"]')).toHaveLength(3);
-    expect(container.querySelector('[role="option"]')?.className).toContain(
+    expect(document.body.querySelectorAll('[role="option"]')).toHaveLength(3);
+    expect(document.body.querySelector('[role="option"]')?.className).toContain(
       "min-h-10",
     );
 

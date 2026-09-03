@@ -107,7 +107,7 @@ describe("ProfileScopeChip", () => {
     expect(trigger?.textContent).toContain("Профиль: Основной");
 
     await act(async () => click(trigger));
-    const options = [...container.querySelectorAll('[role="option"]')];
+    const options = [...document.body.querySelectorAll('[role="option"]')];
     expect(options.map((option) => option.textContent)).toEqual([
       "Профиль: Основной",
       "Профиль: Исследователь",
