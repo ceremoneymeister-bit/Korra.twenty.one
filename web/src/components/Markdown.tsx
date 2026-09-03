@@ -38,7 +38,7 @@ export function Markdown({
         "text-foreground",
         variant === "document"
           ? "space-y-4 text-[0.95rem] leading-7"
-          : "space-y-2 text-sm leading-relaxed",
+          : "space-y-3 text-[15px] leading-[1.65]",
         className,
       )}
     >
@@ -209,7 +209,7 @@ function Block({
   switch (block.type) {
     case "code":
       return (
-        <pre className="bg-secondary/60 border border-border px-3 py-2.5 text-xs font-mono leading-relaxed overflow-x-auto">
+        <pre className="rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-4 py-3 text-[13px] font-mono leading-relaxed overflow-x-auto shadow-[var(--neo-inset-compact)]">
           <code>
             {block.content}
             {caret}
@@ -220,10 +220,10 @@ function Block({
     case "heading": {
       const Tag = `h${Math.min(block.level, 4)}` as "h1" | "h2" | "h3" | "h4";
       const messageSizes: Record<string, string> = {
-        h1: "text-base font-bold",
-        h2: "text-sm font-bold",
-        h3: "text-sm font-semibold",
-        h4: "text-sm font-medium",
+        h1: "mt-3 text-lg font-semibold",
+        h2: "mt-3 text-base font-semibold",
+        h3: "mt-2 text-[15px] font-semibold",
+        h4: "mt-2 text-[15px] font-medium",
       };
       // В документе заголовок обязан читаться как заголовок: иначе длинный
       // текст выглядит сплошной простынёй и его перестают читать.

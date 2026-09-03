@@ -1114,44 +1114,31 @@ function SidebarNavLink({
         onBlur={collapsed ? hideTooltip : undefined}
         className={({ isActive }) =>
           cn(
-            "group/nav relative flex items-center gap-3",
-            "px-5 py-2.5",
-            "font-sans text-display uppercase text-sm tracking-[0.12em]",
-            "whitespace-nowrap transition-colors cursor-pointer",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-midground",
+            // Пункты сайдбара — как список чатов (владелец 03.09): активный
+            // выпуклый, наведение вдавленное, без полосок и подсветок.
+            "group/nav relative mx-3 my-0.5 flex items-center gap-3",
+            "rounded-[var(--neo-radius-control)] px-4 py-3 text-[15px]",
+            "font-sans normal-case tracking-normal whitespace-nowrap cursor-pointer",
+            "transition-[box-shadow,color] duration-200 focus-visible:outline-none",
+            collapsed && "lg:mx-2 lg:justify-center lg:px-0",
             isActive
-              ? "text-midground"
-              : "text-text-secondary hover:text-midground",
+              ? "bg-[var(--neo-surface)] text-[var(--neo-text-primary)] shadow-[var(--neo-depth-1)]"
+              : "text-[var(--neo-text-secondary)] hover:text-[var(--neo-text-primary)] hover:shadow-[var(--neo-inset-compact)]",
           )
         }
-        style={{
-          clipPath: "var(--component-tab-clip-path)",
-        }}
       >
-        {({ isActive }) => (
+        {() => (
           <>
-            <Icon className="h-3.5 w-3.5 shrink-0" />
+            <Icon className="h-4 w-4 shrink-0" />
 
             <span
               className={cn(
                 "truncate transition-opacity duration-300",
-                collapsed ? "lg:opacity-0" : "lg:opacity-100",
+                collapsed ? "lg:hidden" : "lg:opacity-100",
               )}
             >
               {navLabel}
             </span>
-
-            <span
-              aria-hidden
-              className="absolute inset-y-0.5 left-1.5 right-1.5 bg-midground opacity-0 pointer-events-none transition-opacity duration-200 group-hover/nav:opacity-5"
-            />
-
-            {isActive && (
-              <span
-                aria-hidden
-                className="absolute left-0 top-0 bottom-0 w-px bg-midground"
-              />
-            )}
           </>
         )}
       </NavLink>

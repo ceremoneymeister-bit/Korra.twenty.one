@@ -320,6 +320,7 @@ export default function ProfilesPage() {
   const [cloneAll, setCloneAll] = useState(false);
   const [noSkills, setNoSkills] = useState(false);
   const [newDescription, setNewDescription] = useState("");
+  const [newDisplayName, setNewDisplayName] = useState("");
   const [creating, setCreating] = useState(false);
   // Model picker (lazy-loaded the first time a picker is opened). modelChoice
   // is a "slug\u0000model" key, or "" to inherit from clone/default.
@@ -449,6 +450,14 @@ export default function ProfilesPage() {
         model: picked?.model,
       });
       showToast(`${t.profiles.created}: ${name}`, "success");
+      const displayName = newDisplayName.trim();
+      if (displayName) {
+        try {
+          await api.updateProfileDisplayName(name, displayName);
+        } catch (e) {
+          showToast(ownerFacingError(e, "Имя для вкладки не сохранилось — задайте его через меню вкладки."), "error");
+        }
+      }
       if (picked && res.model_set === false) {
         showToast(
           tr("Profile created, but the model could not be saved — set it from the profile editor."),
@@ -456,6 +465,7 @@ export default function ProfilesPage() {
         );
       }
       setNewName("");
+      setNewDisplayName("");
       setNewDescription("");
       setNoSkills(false);
       setCloneAll(false);
@@ -859,6 +869,20 @@ export default function ProfilesPage() {
 
                 <p className="text-xs text-muted-foreground">
                   {t.profiles.nameRule}
+                </p>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="profile-display-name">Имя для вкладки (необязательно)</Label>
+                <Input
+                  id="profile-display-name"
+                  placeholder="Например, Секретарь или Учитель китайского"
+                  value={newDisplayName}
+                  onChange={(e) => setNewDisplayName(e.target.value)}
+                  maxLength={64}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Показывается на вкладке агента вместо системного имени; можно по-русски.
                 </p>
               </div>
 
