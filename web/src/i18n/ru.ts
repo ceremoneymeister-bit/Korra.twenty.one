@@ -713,7 +713,7 @@ export const ru: Translations = {
     Next: "Далее",
     Connected: "Подключено",
     "Restart to apply": "Требуется перезапуск",
-    "Gateway stopped": "Свой шлюз не запущен · чат идёт через общий",
+    "Gateway stopped": "Через общий шлюз",
     "Start failed": "Ошибка запуска",
     Disconnected: "Отключено",
     "Not configured": "Не настроено",
