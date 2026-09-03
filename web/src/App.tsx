@@ -123,7 +123,7 @@ import { latchChatActivation } from "@/lib/chat-activation";
 import { isStaleBuild, loadedBuild } from "@/lib/build-version";
 import { api } from "@/lib/api";
 import type { StatusResponse, UpdateCheckResponse } from "@/lib/api";
-import { russianInterfaceText } from "@/lib/russian-interface-text";
+import { russianInterfaceLabel } from "@/lib/russian-interface-text";
 
 function RouteFallback({ label = "Загрузка…" }: { label?: string }) {
   return (
@@ -320,7 +320,7 @@ function buildNavItems(
 
     const pluginItem: NavItem = {
       path: manifest.tab.path,
-      label: russianInterfaceText(manifest.label, manifest.name),
+      label: manifest.name === "kanban" ? "Канбан-доска" : russianInterfaceLabel(manifest.label, manifest.name),
       icon: resolveIcon(manifest.icon),
     };
 
@@ -615,7 +615,7 @@ export default function App() {
         .filter((m) => !m.tab.hidden)
         .map((m) => ({
           path: m.tab.override ?? m.tab.path,
-          label: russianInterfaceText(m.label, m.name),
+          label: m.name === "kanban" ? "Канбан-доска" : russianInterfaceLabel(m.label, m.name),
         })),
     [manifests],
   );

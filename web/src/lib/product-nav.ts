@@ -56,7 +56,6 @@ export const SERVICE_PATHS = [
   "/profiles",
   "/config",
   "/system",
-  "/docs",
 ];
 
 export const SERVICE_LABELS: Record<string, string> = {

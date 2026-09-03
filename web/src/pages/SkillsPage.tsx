@@ -64,7 +64,7 @@ import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
-import { russianInterfaceText } from "@/lib/russian-interface-text";
+import { russianInterfaceLabel, russianInterfaceText } from "@/lib/russian-interface-text";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 
 /* ------------------------------------------------------------------ */
@@ -94,7 +94,7 @@ function prettyCategory(
 ): string {
   if (!raw) return generalLabel;
   if (CATEGORY_LABELS[raw]) return CATEGORY_LABELS[raw];
-  return russianInterfaceText(raw, generalLabel);
+  return russianInterfaceLabel(raw, generalLabel);
 }
 
 const TOOLSET_ICONS: Record<

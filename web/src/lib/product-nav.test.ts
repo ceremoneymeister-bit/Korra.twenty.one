@@ -59,7 +59,6 @@ describe("secondary navigation", () => {
       "/profiles",
       "/config",
       "/system",
-      "/docs",
     ]);
   });
 });

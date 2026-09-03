@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import { PageHeaderContext } from "./page-header-context";
 import { resolvePageTitle } from "@/lib/resolve-page-title";
@@ -14,19 +14,34 @@ export function PageHeaderProvider({
 }) {
   const { pathname } = useLocation();
   const { t } = useI18n();
-  const [titleOverride, setTitleOverride] = useState<string | null>(null);
-  const [afterTitle, setAfterTitle] = useState<ReactNode>(null);
-  const [end, setEnd] = useState<ReactNode>(null);
-
-  // Clear any per-page title / toolbar slots when the path changes. Child routes
-  // re-fill these on mount via usePageHeader.
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useLayoutEffect(() => {
-    setTitleOverride(null);
-    setAfterTitle(null);
-    setEnd(null);
-  }, [pathname]);
-  /* eslint-enable react-hooks/set-state-in-effect */
+  // Слоты шапки помнят, ДЛЯ КАКОГО пути их заполнили: раньше провайдер
+  // очищал их эффектом при смене пути, и он срабатывал ПОСЛЕ эффекта новой
+  // страницы — чип профиля и кнопки пропадали при переходах по сайдбару
+  // (QA 03.09). Теперь чужой путь просто не показывается, очищать нечего.
+  type Slot<T> = { path: string; node: T } | null;
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
+  const [titleSlot, setTitleSlot] = useState<Slot<string | null>>(null);
+  const [afterTitleSlot, setAfterTitleSlot] = useState<Slot<ReactNode>>(null);
+  const [endSlot, setEndSlot] = useState<Slot<ReactNode>>(null);
+  const setTitleOverride = useCallback(
+    (node: string | null) =>
+      setTitleSlot(node == null ? null : { path: pathRef.current, node }),
+    [],
+  );
+  const setAfterTitle = useCallback(
+    (node: ReactNode) =>
+      setAfterTitleSlot(node == null ? null : { path: pathRef.current, node }),
+    [],
+  );
+  const setEnd = useCallback(
+    (node: ReactNode) =>
+      setEndSlot(node == null ? null : { path: pathRef.current, node }),
+    [],
+  );
+  const titleOverride = titleSlot && titleSlot.path === pathname ? titleSlot.node : null;
+  const afterTitle = afterTitleSlot && afterTitleSlot.path === pathname ? afterTitleSlot.node : null;
+  const end = endSlot && endSlot.path === pathname ? endSlot.node : null;
 
   const defaultTitle = useMemo(
     () => resolvePageTitle(pathname, t, pluginTabs),

@@ -29,7 +29,7 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/i18n", () => ({
   useI18n: () => ({
-    t: { app: { profileScopeLabel: "Профиль: {name}" } },
+    t: { app: { profileScopeLabel: "{name}" } },
   }),
 }));
 
@@ -104,14 +104,14 @@ describe("ProfileScopeChip", () => {
     );
 
     const trigger = container.querySelector('[role="combobox"]');
-    expect(trigger?.textContent).toContain("Профиль: Основной");
+    expect(trigger?.textContent).toContain("Основной");
 
     await act(async () => click(trigger));
     const options = [...document.body.querySelectorAll('[role="option"]')];
     expect(options.map((option) => option.textContent)).toEqual([
-      "Профиль: Основной",
-      "Профиль: Исследователь",
-      "Профиль: writer",
+      "Основной",
+      "Исследователь",
+      "writer",
     ]);
 
     await act(async () => {

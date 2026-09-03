@@ -14,7 +14,7 @@ export function useSidebarStatus() {
   useEffect(() => {
     const load = () => {
       api
-        .getStatus()
+        .getPanelStatus()
         .then(setStatus)
         .catch(() => {});
     };

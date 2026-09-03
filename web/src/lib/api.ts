@@ -372,6 +372,10 @@ function appendSessionFilters(url: string, options: SessionQueryOptions): string
 export const api = {
   buildWsUrl,
   getStatus: () => fetchJSON<StatusResponse>("/api/status"),
+  /** Статус самой панели (шлюз владельца) — вне области профиля раздела:
+   *  явный пустой profile= отключает подстановку, иначе выбор в чипе
+   *  «Секретарь» зажигал ложное «Корра сейчас недоступна» (QA 03.09). */
+  getPanelStatus: () => fetchJSON<StatusResponse>("/api/status?profile="),
   /**
    * Identity probe for the dashboard auth gate (Phase 7).
    *
@@ -716,35 +720,35 @@ export const api = {
   deleteCronJob: (id: string, profile = "default") =>
     fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${encodeURIComponent(id)}?profile=${encodeURIComponent(profile)}`, { method: "DELETE" }),
   getOwnerCronJobs: () =>
-    fetchJSON<CronJob[]>("/api/owner/cron/jobs"),
+    fetchJSON<CronJob[]>("/api/cron/jobs"),
   getOwnerCronDeliveryTargets: () =>
-    fetchJSON<{ targets: CronDeliveryTarget[] }>("/api/owner/cron/delivery-targets"),
+    fetchJSON<{ targets: CronDeliveryTarget[] }>("/api/cron/delivery-targets"),
   createOwnerCronJob: (job: OwnerCronJobCreate) =>
-    fetchJSON<CronJob>("/api/owner/cron/jobs", {
+    fetchJSON<CronJob>("/api/cron/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(job),
     }),
   updateOwnerCronJob: (id: string, job: OwnerCronJobUpdate) =>
-    fetchJSON<CronJob>(`/api/owner/cron/jobs/${encodeURIComponent(id)}`, {
+    fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(job),
     }),
   pauseOwnerCronJob: (id: string, expectedRevision: string) =>
-    fetchJSON<CronJob>(`/api/owner/cron/jobs/${encodeURIComponent(id)}/pause`, {
+    fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/pause`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expected_revision: expectedRevision }),
     }),
   resumeOwnerCronJob: (id: string, expectedRevision: string, confirmation: string) =>
-    fetchJSON<CronJob>(`/api/owner/cron/jobs/${encodeURIComponent(id)}/resume`, {
+    fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/resume`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expected_revision: expectedRevision, confirmation }),
     }),
   archiveOwnerCronJob: (id: string, expectedRevision: string) =>
-    fetchJSON<CronJob>(`/api/owner/cron/jobs/${encodeURIComponent(id)}/archive`, {
+    fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/archive`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expected_revision: expectedRevision }),
