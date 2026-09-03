@@ -201,3 +201,270 @@ describe("useChatStream — история сессии", () => {
     expect(answer.toolCalls?.[0].completedAt).toBeUndefined();
   });
 });
+
+describe("useChatStream — одобрение опасных команд", () => {
+  /** Ровно тот блок, который пишет api_server, когда ход агента упёрся в
+   *  политику одобрения и встал ждать ответа человека. */
+  const APPROVAL_BLOCK =
+    "event: hermes.approval.request\n" +
+    'data: {"event":"approval.request","request_id":"req-1","session_id":"s-live",' +
+    '"command":"rm -rf /opt/data/tmp","description":"Рекурсивное удаление",' +
+    '"pattern_key":"rm_rf","choices":["once","session","always","deny"]}\n\n';
+
+  /** Поток, который не закрывается сам: ход агента стоит на вопросе. */
+  function openStream() {
+    const encoder = new TextEncoder();
+    let push!: (chunk: string) => void;
+    let close!: () => void;
+    const body = new ReadableStream({
+      start(controller) {
+        push = (chunk) => controller.enqueue(encoder.encode(chunk));
+        close = () => controller.close();
+      },
+    });
+    return { body, push: (chunk: string) => push(chunk), close: () => close() };
+  }
+
+  function stubFetch(
+    stream: ReadableStream,
+    approvalResponse: () => Response,
+    calls: Array<{ url: string; method: string; body: string }>,
+  ) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        const href = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        calls.push({ url: href, method, body: String(init?.body ?? "") });
+        if (href.includes("/api/chat/approval") && method === "POST") {
+          return approvalResponse();
+        }
+        if (href.includes("/api/chat/approvals")) {
+          return new Response(JSON.stringify({ data: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(stream, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }),
+    );
+  }
+
+  /** Дать читателю потока провернуть очередь микрозадач. */
+  async function settle() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  it("живой запрос становится карточкой, а решение уходит своим маршрутом", async () => {
+    const stream = openStream();
+    const calls: Array<{ url: string; method: string; body: string }> = [];
+    stubFetch(
+      stream.body,
+      () =>
+        new Response(JSON.stringify({ resolved: 1 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      calls,
+    );
+
+    let sending!: Promise<boolean>;
+    await act(async () => {
+      sending = current.send("Почисти временные файлы");
+    });
+    await settle();
+
+    await act(async () => {
+      stream.push(APPROVAL_BLOCK);
+    });
+    await settle();
+
+    expect(current.approvals).toHaveLength(1);
+    expect(current.approvals[0]).toMatchObject({
+      status: "pending",
+      request: {
+        request_id: "req-1",
+        command: "rm -rf /opt/data/tmp",
+        description: "Рекурсивное удаление",
+      },
+    });
+    // Варианты не выдумываются в браузере: они приехали от движка.
+    expect(current.approvals[0].request.choices).toEqual([
+      "once",
+      "session",
+      "always",
+      "deny",
+    ]);
+
+    let ok = false;
+    await act(async () => {
+      ok = await current.resolveApproval("req-1", "once");
+    });
+
+    expect(ok).toBe(true);
+    const decision = calls.find(
+      (call) => call.method === "POST" && call.url.includes("/api/chat/approval"),
+    );
+    expect(decision).toBeDefined();
+    expect(JSON.parse(decision!.body)).toEqual({
+      session_id: current.sessionId,
+      request_id: "req-1",
+      choice: "once",
+    });
+    expect(current.approvals[0]).toMatchObject({
+      status: "settled",
+      decision: "once",
+    });
+
+    // Ход продолжился и закончился штатно — карточка остаётся в переписке.
+    await act(async () => {
+      stream.push('data: {"choices":[{"delta":{"content":"Удалил."},"finish_reason":null}]}\n\n');
+      stream.push("data: [DONE]\n\n");
+      stream.close();
+      await sending;
+    });
+    await settle();
+
+    expect(current.approvals[0].status).toBe("settled");
+    expect(current.messages[current.messages.length - 1].content).toBe("Удалил.");
+  });
+
+  it("опоздавшее решение гасит карточку и говорит, почему", async () => {
+    const stream = openStream();
+    const calls: Array<{ url: string; method: string; body: string }> = [];
+    stubFetch(
+      stream.body,
+      () =>
+        new Response(
+          JSON.stringify({ error: { code: "approval_not_pending" } }),
+          { status: 409, headers: { "content-type": "application/json" } },
+        ),
+      calls,
+    );
+
+    await act(async () => {
+      void current.send("Почисти временные файлы");
+    });
+    await settle();
+    await act(async () => {
+      stream.push(APPROVAL_BLOCK);
+    });
+    await settle();
+
+    let ok = true;
+    await act(async () => {
+      ok = await current.resolveApproval("req-1", "deny");
+    });
+
+    expect(ok).toBe(false);
+    expect(current.approvals[0]).toMatchObject({ status: "expired" });
+    expect(current.approvals[0].error).toContain("больше не ждёт ответа");
+
+    await act(async () => {
+      stream.close();
+    });
+    await settle();
+  });
+
+  it("после перезагрузки страницы нерешённый вопрос восстанавливается опросом", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL) => {
+        if (String(url).includes("/api/chat/approvals")) {
+          return new Response(
+            JSON.stringify({
+              object: "list",
+              session_id: "s-restored",
+              data: [
+                {
+                  request_id: "req-restored",
+                  command: "shutdown -h now",
+                  description: "Выключение машины",
+                  choices: ["once", "deny"],
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response("{}", { status: 200 });
+      }),
+    );
+
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({
+      session_id: "s-restored",
+      messages: [{ role: "user", content: "Выключи стенд" }] as unknown as SessionMessage[],
+    });
+
+    await act(async () => {
+      await current.loadSession("s-restored");
+    });
+    await settle();
+
+    expect(current.approvals).toHaveLength(1);
+    expect(current.approvals[0]).toMatchObject({
+      status: "pending",
+      request: { request_id: "req-restored", command: "shutdown -h now" },
+    });
+    // Живого потока нет — про исход надо сказать честно.
+    expect(current.approvals[0].request.choices).toEqual(["once", "deny"]);
+  });
+});
+
+describe("useChatStream — хозяин очереди вопросов остаётся на сервере", () => {
+  it("вопрос, живой на сервере, возвращается в работу после конца потока", async () => {
+    const live = {
+      request_id: "req-live",
+      command: "rm -rf /opt/data/tmp",
+      description: "Рекурсивное удаление",
+      choices: ["once", "deny"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL) => {
+        if (String(url).includes("/api/chat/approvals")) {
+          return new Response(JSON.stringify({ data: [live] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        const bytes = new TextEncoder().encode(
+          "event: hermes.approval.request\n" +
+            `data: ${JSON.stringify(live)}\n\n` +
+            "data: [DONE]\n\n",
+        );
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(bytes);
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+
+    // Поток кончился, а ответа на вопрос не было: сам по себе конец потока —
+    // повод погасить карточку, потому что обычно вместе с ходом снимается и
+    // слушатель одобрений.
+    await act(async () => {
+      await current.send("Почисти временные файлы");
+    });
+    expect(current.approvals).toHaveLength(1);
+
+    // Но правду знает сервер: он всё ещё числит вопрос нерешённым, и опрос
+    // возвращает карточку в работу вместо мёртвой кнопки.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(current.approvals[0].status).toBe("pending");
+    expect(current.approvals[0].request.request_id).toBe("req-live");
+  });
+});

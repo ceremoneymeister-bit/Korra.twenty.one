@@ -44,6 +44,7 @@ import { ThinkingOrb } from "thinking-orbs";
 
 import { Markdown } from "@/components/Markdown";
 import { AgentTrace } from "@/components/chat/AgentTrace";
+import { CommandApprovalCard } from "@/components/chat/CommandApprovalCard";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
 import { loadChatOutbox, type ChatOutboxRecord } from "@/lib/chat-outbox";
 import { useProfileScope } from "@/contexts/useProfileScope";
@@ -71,9 +72,9 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
-import type { ChatMessage } from "@/lib/chat-types";
+import type { ApprovalChoiceValue, ChatMessage } from "@/lib/chat-types";
 import { api, type SessionInfo } from "@/lib/api";
-import { useChatStream } from "@/hooks/useChatStream";
+import { useChatStream, type ChatApprovalEntry } from "@/hooks/useChatStream";
 import { useDictation, type DictationState } from "@/hooks/useDictation";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
@@ -456,6 +457,8 @@ function BubbleChatTranscript({
   onDiscard,
   pendingElsewhere,
   agentLabel,
+  approvals,
+  onApprovalDecision,
 }: {
   /** Имя агента вкладки для пустого экрана; пусто — главная Корра. */
   agentLabel?: string;
@@ -469,6 +472,9 @@ function BubbleChatTranscript({
   decided?: Map<string, "approve" | "defer">;
   onRetry?: () => void;
   onDiscard?: () => void;
+  /** Вопросы агента по опасным командам этого чата — живые и отвеченные. */
+  approvals?: ChatApprovalEntry[];
+  onApprovalDecision?: (requestId: string, choice: ApprovalChoiceValue) => void;
 }) {
   // Mark the last assistant message as streaming so Markdown shows a caret.
   const lastIdx = messages.length - 1;
@@ -482,11 +488,14 @@ function BubbleChatTranscript({
   // after React has committed the newest message to the DOM.
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const lastContentLen = messages[lastIdx]?.content.length ?? 0;
+  const approvalCount = approvals?.length ?? 0;
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages.length, lastContentLen, error]);
+    // Вопрос по команде докатываем в поле зрения наравне с сообщением: агент
+    // стоит и ждёт ответа, а карточка появляется внизу ленты.
+  }, [messages.length, lastContentLen, error, approvalCount]);
 
   return (
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
@@ -548,6 +557,27 @@ function BubbleChatTranscript({
               ),
             )
           )}
+          {/* Вопросы по опасным командам живут ниже переписки: ход агента
+              стоит, пока на них не ответят, и ответ должен быть первым, что
+              видно внизу ленты. Отвеченные остаются на месте — решение по
+              команде такая же часть разговора, как и сообщение. */}
+          {(approvals ?? []).map((entry) => (
+            <div key={entry.request.request_id} className="flex justify-start pl-2">
+              <CommandApprovalCard
+                command={entry.request.command}
+                description={entry.request.description}
+                choices={entry.request.choices ?? ["once", "deny"]}
+                sending={entry.status === "sending"}
+                expired={entry.status === "expired"}
+                {...(entry.decision ? { decision: entry.decision } : {})}
+                {...(entry.error ? { error: entry.error } : {})}
+                {...(entry.note ? { note: entry.note } : {})}
+                onDecide={(choice) =>
+                  onApprovalDecision?.(entry.request.request_id, choice)
+                }
+              />
+            </div>
+          ))}
           {error && (
             <div
               role="alert"
@@ -1223,7 +1253,9 @@ export default function BubbleChatPage({
     sessionId,
     isStreaming,
     error,
+    approvals,
     send,
+    resolveApproval,
     retryPending,
     discardPending,
     abort,
@@ -1384,6 +1416,16 @@ export default function BubbleChatPage({
     reset();
   }, [reset]);
 
+  // Решение по опасной команде уходит отдельным маршрутом, а не сообщением в
+  // чат: ход агента заблокирован внутри вызова инструмента и новую реплику
+  // он прочитает только следующим ходом — то есть никогда, пока стоит здесь.
+  const handleApprovalDecision = useCallback(
+    (requestId: string, choice: ApprovalChoiceValue) => {
+      void resolveApproval(requestId, choice);
+    },
+    [resolveApproval],
+  );
+
   // Delete chat: api.deleteSession then refresh the sidebar. If the deleted
   // thread is the one currently open, clear the bubble state too — otherwise
   // the user would be left with messages from a session that no longer
@@ -1441,6 +1483,8 @@ export default function BubbleChatPage({
           onDiscard={discardPending}
           pendingElsewhere={pendingElsewhere}
           agentLabel={agentLabel}
+          approvals={approvals}
+          onApprovalDecision={handleApprovalDecision}
         />
         <BubbleChatComposer
           agentLabel={agentLabel}

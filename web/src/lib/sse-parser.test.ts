@@ -22,3 +22,31 @@ describe("parseSSEBlock", () => {
     ).toMatchObject({ type: "tool_progress" });
   });
 });
+
+describe("parseSSEBlock — запрос одобрения команды", () => {
+  it("разбирает событие, которым ход агента просит решение", () => {
+    expect(
+      parseSSEBlock(
+        "event: hermes.approval.request\n" +
+          'data: {"request_id":"req-1","command":"rm -rf /tmp/x",' +
+          '"description":"Рекурсивное удаление","choices":["once","deny"]}',
+      ),
+    ).toEqual({
+      type: "approval_request",
+      data: {
+        request_id: "req-1",
+        command: "rm -rf /tmp/x",
+        description: "Рекурсивное удаление",
+        choices: ["once", "deny"],
+      },
+    });
+  });
+
+  it("запрос без request_id пропускает: такое решение некуда отправить", () => {
+    expect(
+      parseSSEBlock(
+        'event: hermes.approval.request\ndata: {"command":"rm -rf /tmp/x"}',
+      ),
+    ).toBeNull();
+  });
+});

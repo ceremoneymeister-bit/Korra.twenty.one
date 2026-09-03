@@ -109,6 +109,20 @@ class ChatImageUpload(BaseModel):
     filename: Optional[str] = None
 
 
+class ChatApprovalDecision(BaseModel):
+    """Решение человека по опасной команде из веб-чата.
+
+    `choice` — штатный вариант ядра одобрений: `once` (только этот вызов),
+    `session` (до конца сессии), `always` (навсегда), `deny` (отказ).
+    `request_id` адресует конкретный запрос: за один ход агент может спросить
+    не один раз, и без него решение ушло бы к самому старому из них.
+    """
+
+    session_id: str
+    choice: str
+    request_id: Optional[str] = None
+
+
 class ManagedDirectoryCreate(BaseModel):
     path: str
 

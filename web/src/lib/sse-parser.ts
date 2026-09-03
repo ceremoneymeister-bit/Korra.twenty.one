@@ -1,4 +1,9 @@
-import type { SSEChatChunkData, SSEEvent, SSEToolProgressData } from "./chat-types";
+import type {
+  SSEApprovalRequestData,
+  SSEChatChunkData,
+  SSEEvent,
+  SSEToolProgressData,
+} from "./chat-types";
 
 /**
  * Parse one SSE block (the text between two `\n\n` boundaries).
@@ -8,6 +13,7 @@ import type { SSEChatChunkData, SSEEvent, SSEToolProgressData } from "./chat-typ
  *   - `data: {...}`                               → { type: "chunk", data: ... }
  *   - `event: hermes.tool.progress\ndata: {...}`  → { type: "tool_progress", data: ... }
  *   - `event: korra.tool.progress\ndata: {...}`   → legacy alias of the same event
+ *   - `event: hermes.approval.request\ndata: {...}` → { type: "approval_request", … }
  *
  * Returns null for empty blocks, malformed JSON, or unknown event types.
  * Unknown event types are silently ignored to remain forward-compatible.
@@ -47,6 +53,23 @@ export function parseSSEBlock(block: string): SSEEvent | null {
       return { type: "tool_progress", data: parsed };
     } catch {
       console.warn("[sse-parser] Malformed JSON in tool progress block:", dataLine);
+      return null;
+    }
+  }
+
+  // Запрос одобрения опасной команды: ход агента стоит, пока человек не
+  // ответит. Запрос без `request_id` адресовать нечем — молча пропускаем,
+  // иначе карточка предлагала бы решение, которое некуда отправить.
+  if (eventType === "hermes.approval.request") {
+    try {
+      const parsed = JSON.parse(dataLine) as SSEApprovalRequestData;
+      if (!parsed || typeof parsed.request_id !== "string" || !parsed.request_id) {
+        console.warn("[sse-parser] Approval request without request_id:", dataLine);
+        return null;
+      }
+      return { type: "approval_request", data: parsed };
+    } catch {
+      console.warn("[sse-parser] Malformed JSON in approval request block:", dataLine);
       return null;
     }
   }

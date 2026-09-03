@@ -130,6 +130,41 @@ def _approval_event_choices(
     )
 
 
+#: Имя SSE-события, которым ход чата просит у человека решение по команде.
+#: Соседствует с `hermes.tool.progress` на том же потоке /v1/chat/completions:
+#: клиенты, которые о нём не знают, обязаны молча его пропустить.
+CHAT_APPROVAL_SSE_EVENT = "hermes.approval.request"
+
+
+def _chat_approval_event(
+    approval_data: Dict[str, Any], *, session_id: str
+) -> Dict[str, Any]:
+    """Собрать полезную нагрузку одобрения для потока чата.
+
+    Одна функция на два входа — живое уведомление из хода агента и опрос
+    ``GET /api/sessions/{id}/approvals`` после перезагрузки страницы, — чтобы
+    браузер видел ОДИН формат и не разбирал два похожих. Команда редактируется
+    тем же редактором, что и у /v1/runs (#48456): карточка в браузере
+    скриншотится так же, как сообщение в мессенджере.
+    """
+    event = dict(approval_data or {})
+    if "command" in event:
+        from gateway.run import _redact_approval_command
+
+        event["command"] = _redact_approval_command(event.get("command"))
+    event.update({
+        "event": "approval.request",
+        "session_id": session_id,
+        "timestamp": time.time(),
+        "choices": _approval_event_choices(
+            smart_denied=bool(event.get("smart_denied")),
+            allow_session=event.get("allow_session") is not False,
+            allow_permanent=event.get("allow_permanent") is not False,
+        ),
+    })
+    return event
+
+
 try:
     from aiohttp import web
     AIOHTTP_AVAILABLE = True
@@ -1591,6 +1626,11 @@ class APIServerAdapter(BasePlatformAdapter):
         # the dict holds a strong reference for the life of the turn, so an
         # id() can never be recycled while it is still registered.
         self._shutdown_interruptible_agents: Dict[int, Any] = {}
+        # Ключ одобрения для каждого живого хода чата: session_id -> session_key.
+        # Ядро одобрений адресует очередь по session_key, а клиент (панель) знает
+        # только идентификатор сессии из заголовка X-Hermes-Session-Id. Тот же
+        # приём, что и `_run_approval_sessions` у /v1/runs.
+        self._chat_approval_sessions: Dict[str, str] = {}
         # Back-reference to the owning GatewayRunner (set by gateway/run.py)
         # so /api/platforms/{platform}/events can resolve sibling adapters.
         # BasePlatformAdapter declares the class-level default of None.
@@ -2240,6 +2280,8 @@ class APIServerAdapter(BasePlatformAdapter):
             ("PATCH", "/api/sessions/{session_id}", self._handle_patch_session),
             ("DELETE", "/api/sessions/{session_id}", self._handle_delete_session),
             ("GET", "/api/sessions/{session_id}/messages", self._handle_session_messages),
+            ("GET", "/api/sessions/{session_id}/approvals", self._handle_session_approvals),
+            ("POST", "/api/sessions/{session_id}/approval", self._handle_session_approval),
             ("POST", "/api/sessions/{session_id}/fork", self._handle_fork_session),
             ("POST", "/api/sessions/{session_id}/chat", self._handle_session_chat),
             ("POST", "/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream),
@@ -3359,6 +3401,11 @@ class APIServerAdapter(BasePlatformAdapter):
                 "model_options": True,
                 "session_chat": True,
                 "session_chat_streaming": True,
+                # Поток /v1/chat/completions умеет присылать запрос одобрения
+                # отдельным событием, а решение принимается по маршрутам
+                # /api/sessions/{id}/approval(s).
+                "chat_approval_events": True,
+                "session_approval_response": True,
                 "session_fork": True,
                 "session_model_lock": True,
                 "admin_config_rw": False,
@@ -4435,6 +4482,124 @@ class APIServerAdapter(BasePlatformAdapter):
             return err
         return web.json_response({"object": "hermes.session", "session": self._session_response(session)})
 
+    async def _handle_session_approvals(self, request: "web.Request") -> "web.Response":
+        """GET /api/sessions/{session_id}/approvals — нерешённые запросы одобрения.
+
+        Живую карточку присылает поток SSE, но она живёт только в открытой
+        вкладке. Ход агента переживает перезагрузку страницы (ответ дописывается
+        на сервере), поэтому после F5 карточку надо чем-то восстановить — этим
+        маршрутом. Очередь остаётся хозяином: здесь только её снимок.
+
+        Сессии без живого хода отвечают пустым списком, а не 404: чат панели
+        создаёт запись сессии лениво, и 404 на первой же проверке выглядел бы
+        как поломка.
+        """
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        session_id = request.match_info["session_id"]
+        approval_session_key = self._chat_approval_sessions.get(session_id)
+        data: List[Dict[str, Any]] = []
+        if approval_session_key:
+            from tools.approval import list_gateway_approvals
+
+            data = [
+                _chat_approval_event(item, session_id=session_id)
+                for item in list_gateway_approvals(approval_session_key)
+            ]
+        return web.json_response({
+            "object": "list",
+            "session_id": session_id,
+            "data": data,
+        })
+
+    async def _handle_session_approval(self, request: "web.Request") -> "web.Response":
+        """POST /api/sessions/{session_id}/approval — решение человека по команде.
+
+        Зеркало ``POST /v1/runs/{run_id}/approval`` для сессий чата: варианты и
+        их смысл берутся из того же ядра одобрений (``once`` — только этот
+        вызов, ``session`` — до конца сессии, ``always`` — навсегда в
+        allowlist, ``deny`` — отказ).
+        """
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        session_id = request.match_info["session_id"]
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response(_openai_error("Invalid JSON"), status=400)
+
+        raw_choice = str(body.get("choice", "")).strip().lower()
+        aliases = {"approve": "once", "approved": "once", "allow": "once"}
+        choice = aliases.get(raw_choice, raw_choice)
+        allowed = {"once", "session", "always", "deny"}
+        if choice not in allowed:
+            return web.json_response(
+                _openai_error(
+                    "Invalid approval choice; expected one of: "
+                    + ", ".join(sorted(allowed)),
+                    code="invalid_approval_choice",
+                ),
+                status=400,
+            )
+
+        raw_request_id = body.get("request_id")
+        request_id = raw_request_id.strip() if isinstance(raw_request_id, str) else ""
+        if raw_request_id is not None and (not request_id or len(request_id) > 256):
+            return web.json_response(
+                _openai_error(
+                    "Approval request_id is invalid.",
+                    code="invalid_approval_request",
+                ),
+                status=400,
+            )
+
+        approval_session_key = self._chat_approval_sessions.get(session_id)
+        if not approval_session_key:
+            return web.json_response(
+                _openai_error(
+                    f"Session has no active approval listener: {session_id}",
+                    code="approval_not_active",
+                ),
+                status=409,
+            )
+
+        try:
+            from tools.approval import resolve_gateway_approval
+
+            resolved = resolve_gateway_approval(
+                approval_session_key,
+                choice,
+                request_id=request_id or None,
+            )
+        except Exception as exc:
+            logger.exception(
+                "[api_server] approval resolution failed for session %s", session_id
+            )
+            return web.json_response(_openai_error(str(exc)), status=500)
+
+        if resolved <= 0:
+            # Ход мог кончиться, а решение — опоздать на таймаут одобрения.
+            # Честный 409 лучше молчаливого 200: карточка в браузере обязана
+            # сказать, что решение уже никуда не пошло.
+            return web.json_response(
+                _openai_error(
+                    f"Session has no pending approval: {session_id}",
+                    code="approval_not_pending",
+                ),
+                status=409,
+            )
+
+        return web.json_response({
+            "object": "hermes.session.approval_response",
+            "session_id": session_id,
+            "choice": choice,
+            **({"request_id": request_id} if request_id else {}),
+            "resolved": resolved,
+        })
+
     async def _handle_patch_session(self, request: "web.Request") -> "web.Response":
         """PATCH /api/sessions/{session_id} — update client-safe session metadata."""
         auth_err = self._check_auth(request)
@@ -5254,6 +5419,36 @@ class APIServerAdapter(BasePlatformAdapter):
                     "status": "completed",
                 }))
 
+            # Ключ, под которым ход этого запроса кладёт свои одобрения:
+            # ровно то, что `_run_agent` биндит в session_context перед
+            # запуском агента. Разойдутся — карточка уедет в чужую очередь.
+            approval_session_key = gateway_session_key or session_id or ""
+
+            def _on_approval_request(approval_data: Dict[str, Any]) -> None:
+                """Показать запрос одобрения в потоке чата.
+
+                Вызывается из потока агента, который в этот момент уже
+                заблокирован в ожидании решения, поэтому очередь трогаем
+                только потокобезопасной записью.
+                """
+                _stream_q.put_threadsafe((
+                    "__approval_request__",
+                    _chat_approval_event(approval_data, session_id=session_id or ""),
+                ))
+
+            from tools.approval import (
+                register_gateway_notify,
+                unregister_gateway_notify,
+            )
+
+            if approval_session_key:
+                # Без слушателя опасная команда возвращается агенту как
+                # `pending_approval` и ход виснет: спросить некого. Слушатель
+                # превращает её в карточку в браузере и блокирует поток агента
+                # ровно так же, как на мессенджерах.
+                register_gateway_notify(approval_session_key, _on_approval_request)
+                self._chat_approval_sessions[session_id or ""] = approval_session_key
+
             # Start agent in background.  agent_ref is a mutable container
             # so the SSE writer can interrupt the agent on client disconnect.
             #
@@ -5276,9 +5471,32 @@ class APIServerAdapter(BasePlatformAdapter):
                 **agent_overrides,
                 route=route,
             ))
-            # Ensure SSE drain loops can terminate without relying on polling
-            # agent_task.done(), which can race with queue timeout checks.
-            agent_task.add_done_callback(lambda _fut: _stream_q.put_nowait(None))
+
+            def _on_turn_finished(_fut) -> None:
+                """Закрыть поток и снять слушателя одобрений одним колбэком.
+
+                Sentinel в очереди даёт SSE-циклу завершиться, не опрашивая
+                ``agent_task.done()`` (иначе гонка с таймаутом очереди, #24451).
+                Следом снимается слушатель: ход кончился ответом, ошибкой или
+                остановкой, нерешённое одобрение уже некому исполнять, а
+                ``unregister_gateway_notify`` разблокирует потоки, которые
+                всё ещё ждали ответа человека.
+                """
+                _stream_q.put_nowait(None)
+                if not approval_session_key:
+                    return
+                if self._chat_approval_sessions.get(session_id or "") == approval_session_key:
+                    self._chat_approval_sessions.pop(session_id or "", None)
+                try:
+                    unregister_gateway_notify(approval_session_key)
+                except Exception:
+                    logger.debug(
+                        "Не удалось снять слушателя одобрений для сессии %s",
+                        session_id or "",
+                        exc_info=True,
+                    )
+
+            agent_task.add_done_callback(_on_turn_finished)
 
             return await self._write_sse_chat_completion(
                 request, completion_id, model_name, created, _stream_q,
@@ -5471,9 +5689,22 @@ class APIServerAdapter(BasePlatformAdapter):
                 frontends can display them without storing the markers in
                 conversation history.  See #6972 for the original event,
                 #16588 for the ``toolCallId``/``status`` lifecycle fields.
+
+                Пара ``("__approval_request__", payload)`` — тот же приём для
+                запроса решения по опасной команде: ход агента стоит, пока
+                человек не ответит, и карточка должна доехать до браузера
+                отдельным событием, а не текстом ответа.
                 """
                 if isinstance(item, tuple) and len(item) == 2 and item[0] == "__tool_progress__":
                     await response.write(_sse_frame(item[1], event="hermes.tool.progress"))
+                elif (
+                    isinstance(item, tuple)
+                    and len(item) == 2
+                    and item[0] == "__approval_request__"
+                ):
+                    await response.write(
+                        _sse_frame(item[1], event=CHAT_APPROVAL_SSE_EVENT)
+                    )
                 else:
                     content_chunk = {
                         "id": completion_id, "object": "chat.completion.chunk",

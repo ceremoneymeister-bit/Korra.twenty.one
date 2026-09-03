@@ -71,6 +71,38 @@ export interface SSEToolProgressData {
   label?: string;
 }
 
+/** Варианты решения по опасной команде — ровно те, что понимает ядро
+ *  одобрений (`tools/approval.py`, `resolve_gateway_approval`). Список для
+ *  конкретного запроса присылает сервер в поле `choices`: у запросов, где
+ *  разрешать навсегда нельзя, `always` в нём не будет. Своих вариантов
+ *  браузер не придумывает. */
+export type ApprovalChoiceValue = "once" | "session" | "always" | "deny";
+
+/** Запрос одобрения опасной команды.
+ *
+ *  Один и тот же формат приходит двумя путями:
+ *    • живым событием `hermes.approval.request` в потоке
+ *      `POST /api/chat/completions` — пока идёт ход агента;
+ *    • ответом `GET /api/chat/approvals?session_id=…` — когда страницу
+ *      перезагрузили, а ход на сервере всё ещё стоит на вопросе.
+ *  Собирает его `_chat_approval_event` в gateway/platforms/api_server.py:
+ *  команда там уже отредактирована от секретов. */
+export interface SSEApprovalRequestData {
+  /** Адрес конкретного запроса в очереди одобрений. */
+  request_id: string;
+  session_id?: string;
+  /** Команда как её покажут человеку (секреты вырезаны на сервере). */
+  command?: string;
+  /** Чем именно опасна команда — человеческим текстом. */
+  description?: string;
+  pattern_key?: string;
+  pattern_keys?: string[];
+  choices?: ApprovalChoiceValue[];
+  /** Вспомогательная модель уже отказала: разрешение только разовое. */
+  smart_denied?: boolean;
+  timestamp?: number;
+}
+
 /** Строка истории сессии сверх того, что описано в `SessionMessage`.
  *
  *  Панельный маршрут `GET /api/sessions/{id}/messages`
@@ -86,4 +118,5 @@ export interface SessionMessageReasoning {
 export type SSEEvent =
   | { type: "chunk"; data: SSEChatChunkData }
   | { type: "tool_progress"; data: SSEToolProgressData }
+  | { type: "approval_request"; data: SSEApprovalRequestData }
   | { type: "done" };

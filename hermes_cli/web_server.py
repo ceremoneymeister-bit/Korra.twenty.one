@@ -1784,6 +1784,7 @@ from hermes_cli.web_models import (  # noqa: F401
     WhatsAppOnboardingApply,
     AudioTranscriptionRequest,
     ManagedFileUpload,
+    ChatApprovalDecision,
     ChatImageUpload,
     ManagedDirectoryCreate,
     ManagedTextWrite,
@@ -3361,6 +3362,95 @@ async def chat_completions_proxy(
             )
     except Exception as exc:
         _log.error("chat_completions_proxy upstream error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        media_type=response.headers.get("content-type", "application/json"),
+    )
+
+
+# --- Korra browser chat: одобрение опасных команд --------------------------
+# Опасная команда останавливает ход агента и ждёт живого ответа человека.
+# В мессенджерах на это отвечают командой в чате; в панели — карточкой, а
+# решение уходит этими двумя маршрутами в тот же движок, что и всё остальное
+# в чате (`/api/sessions/{id}/approval(s)` на api_server).
+_CHAT_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_CHAT_APPROVAL_CHOICES = frozenset({"once", "session", "always", "deny"})
+
+
+def _chat_approval_upstream(
+    session_id: str, profile: Optional[str], suffix: str
+) -> tuple[str, dict[str, str]]:
+    """Собрать адрес и заголовки запроса к api_server для одного решения."""
+    api_key = os.environ.get("API_SERVER_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="API server key not configured")
+    profile_name = (profile or "").strip()
+    if profile_name and not _CHAT_PROFILE_RE.fullmatch(profile_name):
+        raise HTTPException(status_code=400, detail="Некорректное имя профиля")
+    if not _CHAT_SESSION_ID_RE.fullmatch(session_id or ""):
+        raise HTTPException(status_code=400, detail="Некорректный идентификатор чата")
+    quoted = urllib.parse.quote(session_id, safe="")
+    prefix = (
+        f"/p/{urllib.parse.quote(profile_name, safe='')}" if profile_name else ""
+    )
+    url = f"{_API_SERVER_PROXY_TARGET}{prefix}/api/sessions/{quoted}{suffix}"
+    return url, {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+
+@app.get("/api/chat/approvals")
+async def chat_approvals_proxy(
+    session_id: str, profile: Optional[str] = None
+) -> Response:
+    """Нерешённые запросы одобрения этого чата.
+
+    Нужен ровно для одного случая: страницу перезагрузили, пока агент стоял на
+    вопросе. Ход на сервере жив, а карточка жила только в потоке SSE открытой
+    вкладки — восстанавливаем её отсюда.
+    """
+    import httpx as _httpx
+
+    url, headers = _chat_approval_upstream(session_id, profile, "/approvals")
+    try:
+        async with _httpx.AsyncClient(timeout=_httpx.Timeout(15.0)) as client:
+            response = await client.get(url, headers=headers)
+    except Exception as exc:
+        _log.error("chat_approvals_proxy upstream error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        media_type=response.headers.get("content-type", "application/json"),
+    )
+
+
+@app.post("/api/chat/approval")
+async def chat_approval_proxy(
+    payload: ChatApprovalDecision, profile: Optional[str] = None
+) -> Response:
+    """Отправить решение человека по одной опасной команде."""
+    import httpx as _httpx
+
+    choice = (payload.choice or "").strip().lower()
+    if choice not in _CHAT_APPROVAL_CHOICES:
+        raise HTTPException(status_code=400, detail="Неизвестное решение")
+    request_id = (payload.request_id or "").strip()
+    if payload.request_id is not None and (not request_id or len(request_id) > 256):
+        raise HTTPException(status_code=400, detail="Некорректный идентификатор запроса")
+
+    url, headers = _chat_approval_upstream(payload.session_id, profile, "/approval")
+    body: dict[str, Any] = {"choice": choice}
+    if request_id:
+        body["request_id"] = request_id
+    try:
+        async with _httpx.AsyncClient(timeout=_httpx.Timeout(15.0)) as client:
+            response = await client.post(url, json=body, headers=headers)
+    except Exception as exc:
+        _log.error("chat_approval_proxy upstream error: %s", exc)
         raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
     return Response(
         content=response.content,

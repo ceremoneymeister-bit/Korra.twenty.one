@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { ToolEntry } from "@/components/ToolCall";
 import type {
+  ApprovalChoiceValue,
   ChatMessage,
   SessionMessageReasoning,
+  SSEApprovalRequestData,
   SSEToolProgressData,
 } from "@/lib/chat-types";
+import {
+  fetchPendingApprovals,
+  normalizeApprovalRequest,
+  sendApprovalDecision,
+} from "@/lib/chat-approvals";
 import { previewArguments, previewToolResult } from "@/components/chat/tool-labels";
 import { api, withBasePath, type SessionMessage } from "@/lib/api";
 import { splitSSEBuffer } from "@/lib/sse-parser";
@@ -21,11 +28,35 @@ import {
 // State & Actions
 // ---------------------------------------------------------------------------
 
+/**
+ * Запрос одобрения вместе с тем, что с ним уже сделали в этой вкладке.
+ *
+ * `pending`  — агент стоит и ждёт ответа;
+ * `sending`  — ответ отправляется;
+ * `settled`  — ответ принят движком, исход в `decision`;
+ * `expired`  — отвечать некому: ход кончился или истёк таймаут ожидания.
+ *
+ * Отвеченные карточки не удаляются: решение по опасной команде остаётся
+ * видимым в переписке, как и всё остальное в ней.
+ */
+export interface ChatApprovalEntry {
+  request: SSEApprovalRequestData;
+  status: "pending" | "sending" | "settled" | "expired";
+  decision?: ApprovalChoiceValue;
+  error?: string;
+  /** Пояснение к исходу, когда ответ ушёл не в открытый поток. */
+  note?: string;
+}
+
+/** Как часто перепроверять нерешённые вопросы, когда живого потока нет. */
+const APPROVAL_POLL_MS = 5000;
+
 interface StreamState {
   messages: ChatMessage[];
   sessionId: string | null;
   isStreaming: boolean;
   error: string | null;
+  approvals: ChatApprovalEntry[];
 }
 
 type StreamAction =
@@ -40,6 +71,11 @@ type StreamAction =
   | { type: "UPSERT_TOOL"; toolData: SSEToolProgressData }
   | { type: "FINALIZE" }
   | { type: "SET_ERROR"; error: string }
+  | { type: "APPROVAL_REQUESTED"; request: SSEApprovalRequestData }
+  | { type: "APPROVAL_RESTORED"; requests: SSEApprovalRequestData[] }
+  | { type: "APPROVAL_SENDING"; requestId: string }
+  | { type: "APPROVAL_SETTLED"; requestId: string; decision: ApprovalChoiceValue }
+  | { type: "APPROVAL_FAILED"; requestId: string; error: string; expired: boolean }
   | { type: "RESET" }
   | { type: "RESET_STREAMING" };
 
@@ -48,7 +84,23 @@ const initialState: StreamState = {
   sessionId: null,
   isStreaming: false,
   error: null,
+  approvals: [],
 };
+
+/** Ход кончился — незакрытые вопросы уже некому исполнять. Держать их
+ *  «ждущими» значило бы предлагать кнопку, которая ничего не сделает. */
+function expirePendingApprovals(
+  approvals: ChatApprovalEntry[],
+): ChatApprovalEntry[] {
+  if (!approvals.some((entry) => entry.status === "pending" || entry.status === "sending")) {
+    return approvals;
+  }
+  return approvals.map((entry) =>
+    entry.status === "pending" || entry.status === "sending"
+      ? { ...entry, status: "expired" as const }
+      : entry,
+  );
+}
 
 function mapStatus(
   status: SSEToolProgressData["status"]
@@ -99,6 +151,7 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         return { ...state, isStreaming: false, error: action.error };
       }
       return {
+        ...state,
         messages: alreadyShown ? state.messages : [...state.messages, action.userMsg],
         sessionId: action.sessionId,
         isStreaming: false,
@@ -139,6 +192,9 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         messages: action.messages,
         isStreaming: false,
         error: null,
+        // Карточки принадлежат конкретному ходу конкретного чата; в другой
+        // переписке они относились бы к чужой команде.
+        approvals: [],
       };
     }
 
@@ -196,11 +252,118 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
     }
 
     case "FINALIZE": {
-      return { ...state, isStreaming: false };
+      return {
+        ...state,
+        isStreaming: false,
+        approvals: expirePendingApprovals(state.approvals),
+      };
     }
 
     case "SET_ERROR": {
-      return { ...state, isStreaming: false, error: action.error };
+      return {
+        ...state,
+        isStreaming: false,
+        error: action.error,
+        approvals: expirePendingApprovals(state.approvals),
+      };
+    }
+
+    case "APPROVAL_REQUESTED": {
+      // Один и тот же запрос может прийти дважды (переподписка на поток) —
+      // ключ здесь `request_id`, а не позиция в списке.
+      if (
+        state.approvals.some(
+          (entry) => entry.request.request_id === action.request.request_id,
+        )
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        approvals: [
+          ...state.approvals,
+          { request: action.request, status: "pending" },
+        ],
+      };
+    }
+
+    case "APPROVAL_RESTORED": {
+      // Хозяин очереди — сервер, поэтому его список правит обе стороны:
+      // ждущий у нас запрос, которого там нет, гасим; и наоборот — вопрос,
+      // который мы поспешили похоронить (например, по кнопке «Стоп»: она
+      // рвёт только показ, а ход на сервере продолжает ждать ответа),
+      // возвращаем в работу. Принятое решение не трогаем никогда.
+      const alive = new Set(action.requests.map((item) => item.request_id));
+      const known = new Set(
+        state.approvals.map((entry) => entry.request.request_id),
+      );
+      const kept = state.approvals.map((entry) => {
+        if (entry.status === "settled") return entry;
+        const stillWaiting = alive.has(entry.request.request_id);
+        if (stillWaiting && entry.status === "expired") {
+          return { ...entry, status: "pending" as const, error: undefined };
+        }
+        if (!stillWaiting && entry.status !== "expired") {
+          return { ...entry, status: "expired" as const };
+        }
+        return entry;
+      });
+      const added = action.requests
+        .filter((item) => !known.has(item.request_id))
+        .map((item) => ({ request: item, status: "pending" as const }));
+      if (added.length === 0 && kept.every((entry, i) => entry === state.approvals[i])) {
+        return state;
+      }
+      return { ...state, approvals: [...kept, ...added] };
+    }
+
+    case "APPROVAL_SENDING": {
+      return {
+        ...state,
+        approvals: state.approvals.map((entry) =>
+          entry.request.request_id === action.requestId
+            ? { ...entry, status: "sending", error: undefined }
+            : entry,
+        ),
+      };
+    }
+
+    case "APPROVAL_SETTLED": {
+      // Решение, отправленное вне живого потока (после перезагрузки страницы),
+      // разблокирует ход на сервере, но ответ агента дописывается уже мимо этой
+      // вкладки — честнее сказать это сразу, чем оставить человека ждать.
+      const note = state.isStreaming
+        ? undefined
+        : "Ход продолжится на сервере — ответ появится в истории чата.";
+      return {
+        ...state,
+        approvals: state.approvals.map((entry) =>
+          entry.request.request_id === action.requestId
+            ? {
+                ...entry,
+                status: "settled",
+                decision: action.decision,
+                error: undefined,
+                ...(note ? { note } : {}),
+              }
+            : entry,
+        ),
+      };
+    }
+
+    case "APPROVAL_FAILED": {
+      return {
+        ...state,
+        approvals: state.approvals.map((entry) =>
+          entry.request.request_id === action.requestId
+            ? {
+                ...entry,
+                status: action.expired ? "expired" : "pending",
+                error: action.error,
+              }
+            : entry,
+        ),
+      };
     }
 
     case "RESET": {
@@ -209,11 +372,16 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         sessionId: null,
         isStreaming: false,
         error: null,
+        approvals: [],
       };
     }
 
     case "RESET_STREAMING": {
-      return { ...state, isStreaming: false };
+      return {
+        ...state,
+        isStreaming: false,
+        approvals: expirePendingApprovals(state.approvals),
+      };
     }
 
     default: {
@@ -233,8 +401,15 @@ export interface UseChatStreamReturn {
   sessionId: string | null;
   isStreaming: boolean;
   error: string | null;
+  /** Вопросы агента по опасным командам: и живые, и уже отвеченные. */
+  approvals: ChatApprovalEntry[];
   /** Возвращает false, если сообщение доставить не удалось. */
   send: (text: string, attachments?: UploadedAttachment[]) => Promise<boolean>;
+  /** Отправить решение по одному вопросу. False — решение не ушло. */
+  resolveApproval: (
+    requestId: string,
+    choice: ApprovalChoiceValue,
+  ) => Promise<boolean>;
   retryPending: () => Promise<boolean>;
   discardPending: () => void;
   loadSession: (sessionId: string) => Promise<void>;
@@ -702,6 +877,14 @@ export function useChatStream(
             } else if (event.type === "tool_progress") {
               sawAgentOutput = true;
               dispatch({ type: "UPSERT_TOOL", toolData: event.data });
+            } else if (event.type === "approval_request") {
+              // Ход агента с этого мгновения стоит и ждёт ответа человека.
+              // Значит, сообщение до агента доехало — доставку признаём.
+              const request = normalizeApprovalRequest(event.data);
+              if (request) {
+                sawAgentOutput = true;
+                dispatch({ type: "APPROVAL_REQUESTED", request });
+              }
             } else if (event.type === "done") {
               // Just record that we saw [DONE]. The atomic finalize
               // happens after the reader actually terminates below.
@@ -830,12 +1013,82 @@ export function useChatStream(
     dispatch({ type: "DISCARD_PENDING", messageId: pending.messageId });
   }, [profile]);
 
+  const resolveApproval = useCallback(
+    async (
+      requestId: string,
+      choice: ApprovalChoiceValue,
+    ): Promise<boolean> => {
+      const sessionId = state.sessionId;
+      if (!sessionId || !requestId) return false;
+      dispatch({ type: "APPROVAL_SENDING", requestId });
+      const result = await sendApprovalDecision({
+        sessionId,
+        requestId,
+        choice,
+        ...(profile ? { profile } : {}),
+      });
+      if (!mountedRef.current) return result.ok;
+      if (result.ok) {
+        dispatch({ type: "APPROVAL_SETTLED", requestId, decision: choice });
+        return true;
+      }
+      dispatch({
+        type: "APPROVAL_FAILED",
+        requestId,
+        error: result.error,
+        expired: result.expired,
+      });
+      return false;
+    },
+    [state.sessionId, profile],
+  );
+
+  // Восстановление вопроса после перезагрузки страницы. Живой поток SSE живёт
+  // только в открытой вкладке, а ход агента переживает F5 и продолжает стоять
+  // на вопросе — поэтому при отсутствии потока спрашиваем сервер напрямую.
+  // Пока вопрос висит, перепроверяем: у ожидания есть таймаут, и мёртвую
+  // карточку честнее погасить, чем оставить кнопку, которая ничего не сделает.
+  const hasWaitingApproval = state.approvals.some(
+    (entry) => entry.status === "pending",
+  );
+  const { sessionId: currentSessionId, isStreaming } = state;
+  useEffect(() => {
+    if (!currentSessionId || isStreaming) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const requests = await fetchPendingApprovals(
+          currentSessionId,
+          profile || undefined,
+        );
+        if (cancelled || !mountedRef.current) return;
+        dispatch({ type: "APPROVAL_RESTORED", requests });
+      } catch {
+        // Не нашлось — не повод пугать человека: карточка либо появится на
+        // следующей проверке, либо её и правда нет.
+      }
+    };
+    void load();
+    if (!hasWaitingApproval) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const timer = window.setInterval(() => void load(), APPROVAL_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [currentSessionId, isStreaming, hasWaitingApproval, profile]);
+
   return {
     messages: state.messages,
     sessionId: state.sessionId,
     isStreaming: state.isStreaming,
     error: state.error,
+    approvals: state.approvals,
     send,
+    resolveApproval,
     retryPending,
     discardPending,
     loadSession,
