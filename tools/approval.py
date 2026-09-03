@@ -2874,9 +2874,37 @@ _gateway_notify_cbs: dict[str, object] = {}  # session_key → callable(approval
 #: карточку и принять ``/approve`` физически нечем. Читает это множество только
 #: ``_is_unattended_platform_approval_context``.
 _attended_approval_sessions: set[str] = set()
+#: Живые регистрации по ключу сессии: ``session_key → {token: (cb, attended)}``.
+#: Один ключ может обслуживать несколько ходов сразу — две вкладки панели в
+#: одном чате. Раньше вторая регистрация просто затирала первую, а конец
+#: ЛЮБОГО из ходов сносил слушателя целиком и будил очередь второго с
+#: ``result=None``: живой ход получал ложный BLOCKED «одобрение не получено».
+#: Порядок вставки сохраняется, поэтому активным считается последний
+#: зарегистрированный колбэк, а снос происходит, только когда снялся последний.
+_gateway_notify_registrations: dict[str, dict[str, tuple]] = {}
 
 
-def register_gateway_notify(session_key: str, cb, *, attended: bool = False) -> None:
+def _sync_gateway_notify_state(session_key: str) -> None:
+    """Пересобрать производные словари по живым регистрациям (под ``_lock``).
+
+    ``_gateway_notify_cbs`` и ``_attended_approval_sessions`` читают из семи
+    мест, включая ``tools/file_tools.py``, поэтому они остаются простыми
+    зеркалами реестра, а не меняют форму.
+    """
+    slots = _gateway_notify_registrations.get(session_key) or {}
+    if not slots:
+        _gateway_notify_registrations.pop(session_key, None)
+        _gateway_notify_cbs.pop(session_key, None)
+        _attended_approval_sessions.discard(session_key)
+        return
+    _gateway_notify_cbs[session_key] = list(slots.values())[-1][0]
+    if any(attended for _cb, attended in slots.values()):
+        _attended_approval_sessions.add(session_key)
+    else:
+        _attended_approval_sessions.discard(session_key)
+
+
+def register_gateway_notify(session_key: str, cb, *, attended: bool = False) -> str:
     """Register a per-session callback for sending approval requests to the user.
 
     The callback signature is ``cb(approval_data: dict) -> None`` where
@@ -2892,22 +2920,48 @@ def register_gateway_notify(session_key: str, cb, *, attended: bool = False) -> 
     кто предъявляет и доставку, и маршрут ответа (чат панели: событие
     ``hermes.approval.request`` плюс ``POST /api/sessions/{id}/approval``).
     По умолчанию ``False`` — прежнее поведение для всех остальных.
+
+    Возвращает токен регистрации. Передайте его в
+    ``unregister_gateway_notify``, если на одном ключе сессии может идти
+    больше одного хода: тогда снимется только своя регистрация, а чужая
+    очередь ожидания останется нетронутой.
     """
+    token = uuid.uuid4().hex
     with _lock:
-        _gateway_notify_cbs[session_key] = cb
-        if attended:
-            _attended_approval_sessions.add(session_key)
-        else:
-            _attended_approval_sessions.discard(session_key)
+        _gateway_notify_registrations.setdefault(session_key, {})[token] = (
+            cb,
+            bool(attended),
+        )
+        _sync_gateway_notify_state(session_key)
+    return token
 
 
-def unregister_gateway_notify(session_key: str) -> None:
+def unregister_gateway_notify(session_key: str, token: Optional[str] = None) -> None:
     """Unregister the per-session gateway approval callback.
 
     Signals ALL blocked threads for this session so they don't hang forever
     (e.g. when the agent run finishes or is interrupted).
+
+    Без *token* снос полный — так работают все исторические вызовы, где ход
+    на ключе сессии заведомо один. С *token* снимается только своя
+    регистрация: пока на ключе жив хоть один другой ход, слушатель остаётся,
+    а очередь ожидания НЕ будится. Иначе конец одного хода отвечал бы
+    ``result=None`` за чужой, ещё работающий, и тот получал бы BLOCKED
+    «одобрение не получено», хотя человек ничего не решал.
+
+    Токен, которого в реестре уже нет (регистрацию снесли раньше), — не
+    ошибка и не повод трогать очередь: она к этому моменту уже чужая.
     """
     with _lock:
+        if token is not None:
+            slots = _gateway_notify_registrations.get(session_key)
+            if not slots or token not in slots:
+                return
+            del slots[token]
+            if slots:
+                _sync_gateway_notify_state(session_key)
+                return
+        _gateway_notify_registrations.pop(session_key, None)
         _gateway_notify_cbs.pop(session_key, None)
         _attended_approval_sessions.discard(session_key)
         entries = _gateway_queues.pop(session_key, [])
@@ -2955,6 +3009,19 @@ def resolve_gateway_approval(session_key: str, choice: str,
             entry.reason = reason
         entry.event.set()
     return len(targets)
+
+
+def has_gateway_notify(session_key: str) -> bool:
+    """True, пока на ключе сессии жива хоть одна регистрация слушателя.
+
+    Нужна тем, кто ведёт свою карту сессий рядом с реестром: конец одного
+    хода не должен стирать запись, пока на том же ключе идёт другой (две
+    вкладки панели в одном чате).
+    """
+    if not session_key:
+        return False
+    with _lock:
+        return session_key in _gateway_notify_cbs
 
 
 def list_gateway_approvals(session_key: str) -> list[dict]:

@@ -25,6 +25,7 @@ from gateway.config import PlatformConfig
 from gateway.platforms.api_server import (
     APIServerAdapter,
     CHAT_APPROVAL_SSE_EVENT,
+    CHAT_ATTENDED_HEADER,
     _chat_approval_event,
     cors_middleware,
     security_headers_middleware,
@@ -69,6 +70,7 @@ def _clean_approval_queues():
         approval_mod._gateway_queues.clear()
         approval_mod._gateway_notify_cbs.clear()
         approval_mod._attended_approval_sessions.clear()
+        approval_mod._gateway_notify_registrations.clear()
         approval_mod._session_approved.clear()
 
 
@@ -127,6 +129,8 @@ class TestApprovalEventPayload:
 #: Продолжение сессии по X-Hermes-Session-Id движок пускает только с ключом —
 #: без него он не может отличить владельца от любого, кто угадал идентификатор.
 _AUTH = {"Authorization": "Bearer sk-secret-key-for-tests-32-chars"}
+#: Так панель отмечает свой поток; без отметки клиент считается программным.
+_PANEL = {**_AUTH, CHAT_ATTENDED_HEADER: "1"}
 
 
 class TestChatStreamApproval:
@@ -164,7 +168,7 @@ class TestChatStreamApproval:
             with patch.object(adapter, "_run_agent", side_effect=_mock_run_agent):
                 resp = await cli.post(
                     "/v1/chat/completions",
-                    headers={**_AUTH, "X-Hermes-Session-Id": "s-live"},
+                    headers={**_PANEL, "X-Hermes-Session-Id": "s-live"},
                     json={
                         "model": "test",
                         "messages": [{"role": "user", "content": "почисти"}],
@@ -518,3 +522,193 @@ class TestPanelIsAttendedForExecuteCode:
             assert approval_mod._is_unattended_platform_approval_context() is True
         finally:
             approval_mod.reset_current_session_key(other)
+
+
+class TestExecuteCodeNeverOffersPermanentScope:
+    """«Разрешить всегда» для execute_code снимало бы гейт со всего контура.
+
+    Вариант ``always`` пишет в config.yaml ``command_allowlist: [execute_code]``,
+    а этот ключ покрывает не команду, а инструмент целиком: после одного клика
+    произвольный питон перестаёт спрашивать везде и навсегда — в панели, в
+    мессенджерах, в CLI, в кронах. Проверено прогоном: один ответ ``always``
+    добавляет ключ в файл, и ``is_approved`` начинает пропускать любую другую
+    сессию. Поэтому такого варианта в карточке нет.
+    """
+
+    def test_execute_code_offers_only_one_shot_and_session(self):
+        event = _chat_approval_event(
+            {
+                "request_id": "req-1",
+                "command": "execute_code <<'PY'\nprint(1)\nPY",
+                "pattern_key": "execute_code",
+                "pattern_keys": ["execute_code"],
+                "allow_session": True,
+                "allow_permanent": True,
+            },
+            session_id="s-1",
+        )
+        assert event["choices"] == ["once", "session", "deny"]
+
+    def test_execute_code_is_caught_by_the_plural_key_too(self):
+        """Ядро кладёт ключ и в `pattern_key`, и в `pattern_keys` — смотрим оба."""
+        event = _chat_approval_event(
+            {"request_id": "req-2", "pattern_keys": ["execute_code"],
+             "allow_session": True, "allow_permanent": True},
+            session_id="s-1",
+        )
+        assert "always" not in event["choices"]
+
+    def test_ordinary_command_keeps_the_permanent_scope(self):
+        """У обычной команды ключ узкий — постоянное правило остаётся уместным."""
+        event = _chat_approval_event(
+            {
+                "request_id": "req-3",
+                "command": "chmod 777 /tmp/x",
+                "pattern_key": "world_writable",
+                "pattern_keys": ["world_writable"],
+                "allow_session": True,
+                "allow_permanent": True,
+            },
+            session_id="s-1",
+        )
+        assert event["choices"] == ["once", "session", "always", "deny"]
+
+
+class TestOnlyThePanelGetsTheListener:
+    """Слушателя получает только поток, который карточку действительно читает.
+
+    Сторонний OpenAI-совместимый клиент тоже ходит со ``stream: true``, но
+    вопрос в его поток означал бы ход, зависший до таймаута одобрения, вместо
+    честного ``pending_approval``, который такой клиент получал всегда.
+    """
+
+    async def _run_stream(self, adapter, headers, session_id):
+        app = _create_app(adapter)
+        seen: dict = {}
+
+        async def _mock_run_agent(**kwargs):
+            key = kwargs.get("session_id") or ""
+            seen["notify"] = approval_mod._gateway_notify_cbs.get(key)
+            seen["attended"] = key in approval_mod._attended_approval_sessions
+            seen["mapped"] = adapter._chat_approval_sessions.get(key)
+            return (
+                {"final_response": "готово", "messages": [], "api_calls": 1},
+                {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            )
+
+        async with TestClient(TestServer(app)) as cli:
+            with patch.object(adapter, "_run_agent", side_effect=_mock_run_agent):
+                resp = await cli.post(
+                    "/v1/chat/completions",
+                    headers={**headers, "X-Hermes-Session-Id": session_id},
+                    json={
+                        "model": "test",
+                        "messages": [{"role": "user", "content": "привет"}],
+                        "stream": True,
+                    },
+                )
+                assert resp.status == 200
+                await resp.text()
+        return seen
+
+    @pytest.mark.asyncio
+    async def test_panel_header_arms_the_card(self, auth_adapter):
+        seen = await self._run_stream(auth_adapter, _PANEL, "s-panel-hdr")
+        assert seen["notify"] is not None
+        assert seen["attended"] is True
+        assert seen["mapped"] == "s-panel-hdr"
+
+    @pytest.mark.asyncio
+    async def test_third_party_stream_keeps_the_old_behaviour(self, auth_adapter):
+        seen = await self._run_stream(auth_adapter, _AUTH, "s-third-party")
+        assert seen["notify"] is None, (
+            "чужому потоку повесили слушателя: карточку он не прочитает, "
+            "а ход встанет до таймаута одобрения"
+        )
+        assert seen["attended"] is False
+        assert seen["mapped"] is None
+
+    @pytest.mark.asyncio
+    async def test_falsy_header_value_is_not_a_panel(self, auth_adapter):
+        seen = await self._run_stream(
+            auth_adapter, {**_AUTH, CHAT_ATTENDED_HEADER: "0"}, "s-falsy"
+        )
+        assert seen["notify"] is None
+
+
+class TestConcurrentTurnsShareOneSessionKey:
+    """Две вкладки в одном чате — две регистрации на одном ключе сессии.
+
+    Ключ слушателя — сессия, а не ход. Раньше вторая регистрация затирала
+    первую, а конец ЛЮБОГО хода снимал слушателя целиком и будил очередь
+    второго с ``result=None``: живой ход получал ложный BLOCKED «одобрение не
+    получено», хотя человек ничего не решал.
+    """
+
+    KEY = "s-shared"
+
+    def test_finishing_one_turn_leaves_the_other_waiting(self):
+        first = approval_mod.register_gateway_notify(
+            self.KEY, lambda _d: None, attended=True
+        )
+        second = approval_mod.register_gateway_notify(
+            self.KEY, lambda _d: None, attended=True
+        )
+        entry = approval_mod._ApprovalEntry({"request_id": "req-live", "command": "ls"})
+        with approval_mod._lock:
+            approval_mod._gateway_queues[self.KEY] = [entry]
+
+        approval_mod.unregister_gateway_notify(self.KEY, first)
+
+        assert entry.event.is_set() is False, (
+            "конец первого хода разбудил чужое ожидание — второй получит "
+            "BLOCKED без единого решения человека"
+        )
+        assert entry.result is None
+        assert approval_mod.has_gateway_notify(self.KEY) is True
+        assert self.KEY in approval_mod._attended_approval_sessions
+
+        # Решение по-прежнему доходит до живого хода.
+        assert approval_mod.resolve_gateway_approval(self.KEY, "once") == 1
+        assert entry.result == "once"
+
+        approval_mod.unregister_gateway_notify(self.KEY, second)
+        assert approval_mod.has_gateway_notify(self.KEY) is False
+
+    def test_last_turn_out_tears_everything_down(self):
+        token = approval_mod.register_gateway_notify(self.KEY, lambda _d: None)
+        entry = approval_mod._ApprovalEntry({"request_id": "req-1", "command": "ls"})
+        with approval_mod._lock:
+            approval_mod._gateway_queues[self.KEY] = [entry]
+
+        approval_mod.unregister_gateway_notify(self.KEY, token)
+
+        # Ждать больше нечего — поток агента обязан разблокироваться.
+        assert entry.event.is_set() is True
+        assert approval_mod.has_gateway_notify(self.KEY) is False
+
+    def test_stale_token_never_touches_someone_elses_queue(self):
+        """Регистрацию уже снесли — повторный снос не должен будить чужих."""
+        token = approval_mod.register_gateway_notify(self.KEY, lambda _d: None)
+        approval_mod.unregister_gateway_notify(self.KEY)  # полный снос без токена
+        approval_mod.register_gateway_notify(self.KEY, lambda _d: None, attended=True)
+        entry = approval_mod._ApprovalEntry({"request_id": "req-2", "command": "ls"})
+        with approval_mod._lock:
+            approval_mod._gateway_queues[self.KEY] = [entry]
+
+        approval_mod.unregister_gateway_notify(self.KEY, token)
+
+        assert entry.event.is_set() is False
+        assert approval_mod.has_gateway_notify(self.KEY) is True
+
+    def test_legacy_call_without_a_token_still_tears_down(self):
+        """Исторические вызовы с одним аргументом ведут себя как раньше."""
+        approval_mod.register_gateway_notify(self.KEY, lambda _d: None)
+        entry = approval_mod._ApprovalEntry({"request_id": "req-3", "command": "ls"})
+        with approval_mod._lock:
+            approval_mod._gateway_queues[self.KEY] = [entry]
+
+        approval_mod.unregister_gateway_notify(self.KEY)
+
+        assert entry.event.is_set() is True
+        assert approval_mod.has_gateway_notify(self.KEY) is False

@@ -16,6 +16,11 @@ from fastapi import FastAPI
 from hermes_cli import web_server
 
 
+def _route_app_paths(*paths: str) -> FastAPI:
+    """Псевдоним для маршрутов вне пары одобрения (тот же сбор приложения)."""
+    return _route_app(*paths)
+
+
 def _route_app(*paths: str) -> FastAPI:
     """Собрать приложение ровно из проверяемых маршрутов панели.
 
@@ -110,6 +115,7 @@ def test_decision_goes_to_the_engine_with_the_server_key(monkeypatch):
     # Движок пускает к решению только по ключу сервера; браузерный токен
     # панели наверх не годится.
     assert call["headers"]["Authorization"] == "Bearer sk-panel-key-for-tests-0123456789"
+    assert call["headers"]["X-Korra-Attended"] == "1"
 
 
 def test_decision_for_a_profile_keeps_the_profile_prefix(monkeypatch):
@@ -201,3 +207,34 @@ def test_missing_server_key_is_a_server_error_not_a_silent_success(monkeypatch):
     )
     assert response.status_code == 500
     assert _Recorder.calls == []
+
+
+def test_panel_marks_its_own_chat_stream_as_read_by_a_human(monkeypatch):
+    """Только по этой отметке движок вешает слушателя одобрений.
+
+    Сторонний OpenAI-совместимый клиент ходит в тот же `/v1/chat/completions`
+    и тоже держит поток, но карточку не читает: вопрос в него означал бы ход,
+    зависший до таймаута одобрения. Отметку ставит именно прокси панели, и
+    ставит на каждый чат-запрос, а не только на потоковый.
+    """
+    real_client = httpx.AsyncClient
+    app = _route_app_paths("/api/chat/completions")
+
+    async def _call():
+        transport = httpx.ASGITransport(app=app)
+        async with real_client(
+            transport=transport, base_url="http://testserver"
+        ) as cli:
+            monkeypatch.setattr(httpx, "AsyncClient", _Recorder)
+            return await cli.post(
+                "/api/chat/completions",
+                json={
+                    "model": "korra-agent",
+                    "messages": [{"role": "user", "content": "Привет"}],
+                    "stream": False,
+                },
+            )
+
+    asyncio.run(_call())
+    assert _Recorder.calls, "запрос до движка не дошёл"
+    assert _Recorder.calls[0]["headers"]["X-Korra-Attended"] == "1"

@@ -130,6 +130,17 @@ def _approval_event_choices(
     )
 
 
+#: Ключ, под которым ядро одобрений заводит весь инструмент execute_code
+#: целиком. В постоянный allowlist он попадать не должен — см.
+#: ``_chat_approval_event``.
+_EXECUTE_CODE_PATTERN_KEY = "execute_code"
+
+#: Заголовок, которым панель отмечает СВОЙ поток чата. Только по нему ход
+#: получает слушателя одобрений: сторонний OpenAI-совместимый клиент со
+#: `stream: true` карточку читать не умеет, и вопрос в его поток означал бы
+#: зависший до таймаута ход вместо честного `pending_approval`.
+CHAT_ATTENDED_HEADER = "X-Korra-Attended"
+
 #: Имя SSE-события, которым ход чата просит у человека решение по команде.
 #: Соседствует с `hermes.tool.progress` на том же потоке /v1/chat/completions:
 #: клиенты, которые о нём не знают, обязаны молча его пропустить.
@@ -152,6 +163,17 @@ def _chat_approval_event(
         from gateway.run import _redact_approval_command
 
         event["command"] = _redact_approval_command(event.get("command"))
+    allow_permanent = event.get("allow_permanent") is not False
+    keys = {str(event.get("pattern_key") or "")}
+    keys.update(str(key) for key in (event.get("pattern_keys") or []))
+    if _EXECUTE_CODE_PATTERN_KEY in keys:
+        # `always` для execute_code записывает в config.yaml
+        # `command_allowlist: [execute_code]`, а этот ключ покрывает НЕ команду,
+        # а весь инструмент: после одного клика произвольный питон перестаёт
+        # спрашивать везде и навсегда — в панели, в мессенджерах, в CLI, в
+        # кронах. Один промах мышью снимает гейт со всего контура, поэтому
+        # такого варианта в карточке нет; «до конца чата» остаётся.
+        allow_permanent = False
     event.update({
         "event": "approval.request",
         "session_id": session_id,
@@ -159,7 +181,7 @@ def _chat_approval_event(
         "choices": _approval_event_choices(
             smart_denied=bool(event.get("smart_denied")),
             allow_session=event.get("allow_session") is not False,
-            allow_permanent=event.get("allow_permanent") is not False,
+            allow_permanent=allow_permanent,
         ),
     })
     return event
@@ -5437,11 +5459,23 @@ class APIServerAdapter(BasePlatformAdapter):
                 ))
 
             from tools.approval import (
+                has_gateway_notify,
                 register_gateway_notify,
                 unregister_gateway_notify,
             )
 
-            if approval_session_key:
+            # Слушателя получает только поток, который умеет показать карточку
+            # и вернуть ответ, — то есть панель, и она отмечает себя заголовком.
+            # Сторонний OpenAI-совместимый клиент со `stream: true` тоже держит
+            # поток, но карточку не читает: вопрос в него означал бы ход,
+            # зависший до таймаута одобрения, вместо честного
+            # `pending_approval`, который такой клиент получал всегда.
+            attended_client = _coerce_request_bool(
+                request.headers.get(CHAT_ATTENDED_HEADER), default=False
+            )
+            approval_token: Optional[str] = None
+
+            if approval_session_key and attended_client:
                 # Без слушателя опасная команда возвращается агенту как
                 # `pending_approval` и ход виснет: спросить некого. Слушатель
                 # превращает её в карточку в браузере и блокирует поток агента
@@ -5453,7 +5487,11 @@ class APIServerAdapter(BasePlatformAdapter):
                 # поэтому платформа `api_server` перестаёт считаться «без
                 # человека»: иначе `check_execute_code_guard` отвечал бы BLOCKED
                 # на любой execute_code до того, как посмотрит в allowlist.
-                register_gateway_notify(
+                #
+                # Токен регистрации нужен, потому что ключ здесь — сессия чата,
+                # а не ход: две вкладки в одном чате дают две регистрации, и
+                # снимать по концу хода можно только свою.
+                approval_token = register_gateway_notify(
                     approval_session_key, _on_approval_request, attended=True
                 )
                 self._chat_approval_sessions[session_id or ""] = approval_session_key
@@ -5492,18 +5530,26 @@ class APIServerAdapter(BasePlatformAdapter):
                 всё ещё ждали ответа человека.
                 """
                 _stream_q.put_nowait(None)
-                if not approval_session_key:
+                if approval_token is None:
                     return
-                if self._chat_approval_sessions.get(session_id or "") == approval_session_key:
-                    self._chat_approval_sessions.pop(session_id or "", None)
                 try:
-                    unregister_gateway_notify(approval_session_key)
+                    unregister_gateway_notify(approval_session_key, approval_token)
                 except Exception:
                     logger.debug(
                         "Не удалось снять слушателя одобрений для сессии %s",
                         session_id or "",
                         exc_info=True,
                     )
+                # Карту чистим, только когда на ключе не осталось ни одного
+                # живого хода: вторая вкладка того же чата может всё ещё ждать
+                # ответа, а без записи её решение упёрлось бы в 409
+                # «слушателя нет».
+                if (
+                    not has_gateway_notify(approval_session_key)
+                    and self._chat_approval_sessions.get(session_id or "")
+                    == approval_session_key
+                ):
+                    self._chat_approval_sessions.pop(session_id or "", None)
 
             agent_task.add_done_callback(_on_turn_finished)
 

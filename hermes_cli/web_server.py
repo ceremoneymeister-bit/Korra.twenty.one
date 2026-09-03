@@ -3242,6 +3242,10 @@ async def _durable_browser_chat_response(
 
 
 _CHAT_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+#: Заголовок, которым панель отмечает свой поток чата как читаемый человеком.
+#: Значение обязано совпадать с `CHAT_ATTENDED_HEADER` в
+#: gateway/platforms/api_server.py — это одна договорённость на два процесса.
+_CHAT_ATTENDED_HEADER = "X-Korra-Attended"
 
 
 @app.post("/api/chat/completions")
@@ -3298,6 +3302,12 @@ async def chat_completions_proxy(
     upstream_headers: dict[str, str] = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        # Отметка «этот поток читает человек»: только по ней движок вешает
+        # слушателя одобрений и показывает карточку. Сторонний
+        # OpenAI-совместимый клиент со `stream: true` заголовка не шлёт и
+        # получает прежнее поведение, а не вопрос в поток, который никто не
+        # смотрит.
+        _CHAT_ATTENDED_HEADER: "1",
     }
     for header_name in ("X-Hermes-Session-Id", "X-Hermes-Session-Key"):
         value = request.headers.get(header_name)
@@ -3399,6 +3409,7 @@ def _chat_approval_upstream(
     return url, {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        _CHAT_ATTENDED_HEADER: "1",
     }
 
 

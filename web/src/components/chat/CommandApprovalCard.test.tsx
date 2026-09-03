@@ -62,6 +62,22 @@ describe("CommandApprovalCard — что видно человеку", () => {
     expect(container.textContent).not.toContain("Разрешить до конца чата");
   });
 
+  it("«всегда» честно говорит про постоянный allowlist и все каналы", async () => {
+    // Вариант пишет правило в config.yaml контура: оно переживает перезапуск и
+    // действует в мессенджерах и CLI, а не только здесь. Подсказка «снимает
+    // вопрос в будущих чатах» это скрывала.
+    await render(
+      <CommandApprovalCard
+        command="chmod 777 /tmp/x"
+        choices={["once", "session", "always", "deny"]}
+        onDecide={vi.fn()}
+      />,
+    );
+    const hint = buttonByText("Разрешить всегда").textContent ?? "";
+    expect(hint).toContain("постоянный allowlist контура");
+    expect(hint).toContain("во всех каналах");
+  });
+
   it("в интерфейсе нет слова hermes", async () => {
     await render(
       <CommandApprovalCard
