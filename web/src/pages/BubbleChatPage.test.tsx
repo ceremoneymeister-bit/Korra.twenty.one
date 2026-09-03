@@ -509,7 +509,7 @@ describe("BubbleChatComposer · диктовка", () => {
     enableMicrophone();
     apiMocks.transcribeAudio.mockRejectedValue(
       new Error(
-        "Распознавание речи не настроено: нужен ключ Deepgram в разделе «Ключи».",
+        "Не получилось распознать речь. Повторите или напишите текстом; если распознавание не настроено, добавьте ключ Deepgram в разделе «Ключи».",
       ),
     );
     await render(<BubbleChatComposer onSend={vi.fn()} />);
@@ -521,7 +521,7 @@ describe("BubbleChatComposer · диктовка", () => {
     expect(
       container.querySelector(".korra-chat-composer__error")?.textContent,
     ).toBe(
-      "Распознавание речи не настроено: нужен ключ Deepgram в разделе «Ключи».",
+      "Не получилось распознать речь. Повторите или напишите текстом; если распознавание не настроено, добавьте ключ Deepgram в разделе «Ключи».",
     );
     expect(microphoneButton().dataset.state).toBe("idle");
   });

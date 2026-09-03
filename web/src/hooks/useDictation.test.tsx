@@ -200,7 +200,7 @@ describe("useDictation", () => {
     const onError = vi.fn();
     apiMocks.transcribeAudio.mockRejectedValue(
       new Error(
-        "Распознавание речи не настроено: нужен ключ Deepgram в разделе «Ключи».",
+        "Не получилось распознать речь. Повторите или напишите текстом; если распознавание не настроено, добавьте ключ Deepgram в разделе «Ключи».",
       ),
     );
     await mount({ onError });
@@ -209,7 +209,7 @@ describe("useDictation", () => {
     await press();
 
     expect(onError).toHaveBeenCalledWith(
-      "Распознавание речи не настроено: нужен ключ Deepgram в разделе «Ключи».",
+      "Не получилось распознать речь. Повторите или напишите текстом; если распознавание не настроено, добавьте ключ Deepgram в разделе «Ключи».",
     );
     expect(current.state).toBe("idle");
   });

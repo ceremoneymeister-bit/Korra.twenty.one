@@ -350,18 +350,19 @@ export interface AudioTranscriptionResponse {
   provider?: string | null;
 }
 
-/** Отказы вида «провайдер речи на контуре не настроен».
+/** Отказы вида «распознавание речи на контуре не работает».
  *
  *  Движок отвечает 400 с английским текстом от `tools/transcription_tools.py`:
- *  общий «No STT provider available…», отказ незарегистрированного плагина
- *  («no built-in, command, or plugin provider registered that name» — так
- *  выглядит именно случай `stt.provider = deepgram` без плагина) или жалоба
- *  на отсутствующий ключ. Владельцу все три означают одно и то же. */
+ *  общий «No STT provider available…», отказ незарегистрированного плагина,
+ *  жалоба на отсутствующий/недействительный ключ. С образа Korra 21 без ключа
+ *  Deepgram работает локальный whisper (`stt.fallback: local`), поэтому текст
+ *  не обещает, что ключ обязательно поможет: он поможет, если провайдера нет
+ *  вовсе (старый снимок движка) или ключ протух. */
 const STT_NOT_CONFIGURED =
   /no stt provider available|no built-in, command, or plugin|not configured|api[\s_-]?key|unauthorized/i;
 
 const STT_NOT_CONFIGURED_MESSAGE =
-  "Распознавание речи не настроено: нужен ключ Deepgram в разделе «Ключи».";
+  "Не получилось распознать речь. Повторите или напишите текстом; если распознавание не настроено, добавьте ключ Deepgram в разделе «Ключи».";
 
 const AUDIO_TOO_LONG_MESSAGE = "Запись слишком длинная. Скажите короче и повторите.";
 
