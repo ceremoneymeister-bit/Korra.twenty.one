@@ -306,8 +306,12 @@ class TestResolveProvider:
             lambda env=None: False,
         )
         monkeypatch.setenv("GITHUB_TOKEN", "gh-test-token")
-        with pytest.raises(AuthError, match="No inference provider configured"):
+        # Korra: текст отказа переведён на русский (его читает владелец контура
+        # в панели), поэтому проверяем машинный код, а не формулировку — она
+        # ещё будет меняться вместе с подсказкой про раздел «Ключи».
+        with pytest.raises(AuthError) as excinfo:
             resolve_provider("auto")
+        assert excinfo.value.code == "no_provider_configured"
 
 
 # =============================================================================

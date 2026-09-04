@@ -533,8 +533,10 @@ VOLUME [ "/opt/data" ]
 #
 # Снимается последним шагом, чтобы попали все слои, включая пакеты, которые
 # доставляют соседние блоки этого файла.
-RUN find / -xdev -type f -perm /6000 -perm /0111 2>/dev/null | sort \
-    > /opt/hermes/.suid-baseline && \
+# Без пайпа: hadolint требует `SHELL -o pipefail` перед RUN с конвейером, а у
+# /bin/sh этого режима нет. Сортировка на месте даёт тот же стабильный список.
+RUN find / -xdev -type f -perm /6000 -perm /0111 > /opt/hermes/.suid-baseline 2>/dev/null; \
+    sort -o /opt/hermes/.suid-baseline /opt/hermes/.suid-baseline && \
     chmod 0444 /opt/hermes/.suid-baseline && \
     wc -l < /opt/hermes/.suid-baseline
 
