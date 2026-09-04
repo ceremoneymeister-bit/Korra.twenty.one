@@ -50,6 +50,49 @@ def _env(**values):
     return patch.object(tt, "get_env_value", lambda name, default=None: values.get(name, default))
 
 
+@pytest.fixture(autouse=True)
+def _isolated_models_dir(tmp_path, monkeypatch):
+    """Каталог вшитых весов всегда указывает в пустую песочницу.
+
+    Иначе тесты зависели бы от того, есть ли на машине прогона настоящий
+    /opt/hermes/models/whisper: на сборочном хосте «весов нет», в контейнере
+    образа «веса есть», и один и тот же тест давал бы разные ответы.
+    """
+    root = tmp_path / "baked-models"
+    root.mkdir()
+    monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(root))
+    return root
+
+
+@pytest.fixture
+def baked_whisper(_isolated_models_dir):
+    """Веса medium, вшитые в образ, как после сборки."""
+    model_dir = _isolated_models_dir / "medium"
+    model_dir.mkdir()
+    (model_dir / "model.bin").write_bytes(b"ct2")
+    return model_dir
+
+
+def _fake_whisper_module(recorder):
+    """Подставной ``faster_whisper``: записывает, с чем позвали WhisperModel.
+
+    Именно модуль, а не patch по атрибуту: patch("faster_whisper.WhisperModel")
+    сначала импортирует настоящий пакет, а его в тестовом окружении нет, и
+    повторный импорт numpy в одном процессе падает.
+    """
+    import types
+
+    module = types.ModuleType("faster_whisper")
+
+    class FakeWhisperModel:
+        def __init__(self, model_name, **kwargs):
+            recorder["model_name"] = model_name
+            recorder["kwargs"] = kwargs
+
+    module.WhisperModel = FakeWhisperModel
+    return module
+
+
 def _raw_selection(provider="deepgram"):
     """Сырой config.yaml: выбор провайдера записан человеком, а не пришёл из дефолтов."""
     return patch(
@@ -119,12 +162,12 @@ class TestProviderSelection:
         with _env(DEEPGRAM_API_KEY="dg-live-key"), _raw_selection():
             assert tt._get_provider(_config()) == "deepgram"
 
-    def test_no_key_falls_back_to_local_whisper(self):
+    def test_no_key_falls_back_to_local_whisper(self, baked_whisper):
         """Главный сценарий владельца: ключа нет, речь всё равно распознаётся."""
         with _env(), _raw_selection(), patch.object(tt, "_HAS_FASTER_WHISPER", True):
             assert tt._get_provider(_config()) == "local"
 
-    def test_without_fallback_key_upstream_refusal_is_preserved(self):
+    def test_without_fallback_key_upstream_refusal_is_preserved(self, baked_whisper):
         """Без ``stt.fallback`` форк ведёт себя как апстрим — молча не подменяет выбор."""
         cfg = _config()
         cfg.pop("fallback")
@@ -140,19 +183,19 @@ class TestProviderSelection:
              patch.object(tt, "_try_lazy_install_stt", return_value=False):
             assert tt._get_provider(_config()) == "deepgram"
 
-    def test_chain_walks_to_the_first_ready_candidate(self):
+    def test_chain_walks_to_the_first_ready_candidate(self, baked_whisper):
         cfg = _config(fallback=["groq", "local"])
         with _env(), _raw_selection(), \
              patch.object(tt, "_HAS_FASTER_WHISPER", True), \
              patch.object(tt, "_resolve_provider_key", return_value=""):
             assert tt._get_provider(cfg) == "local"
 
-    def test_disabled_stt_stays_disabled(self):
+    def test_disabled_stt_stays_disabled(self, baked_whisper):
         """``stt.enabled: false`` — это выключено, а не «поищи запасной»."""
         with _env(), _raw_selection(), patch.object(tt, "_HAS_FASTER_WHISPER", True):
             assert tt._get_provider(_config(enabled=False)) == "none"
 
-    def test_builtin_provider_without_key_also_uses_the_chain(self):
+    def test_builtin_provider_without_key_also_uses_the_chain(self, baked_whisper):
         """Цепочка не привязана к Deepgram: встроенный провайдер без ключа тоже уходит."""
         cfg = {"provider": "groq", "fallback": "local"}
         with _env(), _raw_selection("groq"), \
@@ -179,7 +222,7 @@ class TestBakedModelDir:
         assert tt._resolve_local_model_source("medium") == str(model_dir)
 
     def test_absent_directory_keeps_the_size_name(self, tmp_path, monkeypatch):
-        """Исходная установка без образа: имя уходит в faster-whisper как раньше."""
+        """Резолвер только выбирает источник, запрещать не его работа."""
         monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
         assert tt._resolve_local_model_source("medium") == "medium"
 
@@ -187,6 +230,26 @@ class TestBakedModelDir:
         (tmp_path / "medium").mkdir()
         monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
         assert tt._resolve_local_model_source("medium") == "medium"
+
+    def test_baked_size_wins_over_the_configured_one(self, tmp_path, monkeypatch):
+        """Образ собран с --build-arg WHISPER_MODEL_SIZE=small, конфиг просит
+        medium: берём то, что реально вшито, иначе сборка отказала бы молча."""
+        small = self._baked(tmp_path, "small")
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        assert tt._resolve_local_model_source("medium") == str(small)
+
+    def test_ambiguous_bake_does_not_guess(self, tmp_path, monkeypatch):
+        """Вшито две модели, ни одна не совпала с конфигом: угадывать нечего."""
+        self._baked(tmp_path, "small")
+        self._baked(tmp_path, "large-v3")
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        assert tt._resolve_local_model_source("medium") == "medium"
+
+    def test_configured_size_wins_when_it_is_baked(self, tmp_path, monkeypatch):
+        medium = self._baked(tmp_path, "medium")
+        self._baked(tmp_path, "small")
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        assert tt._resolve_local_model_source("medium") == str(medium)
 
     def test_explicit_path_is_untouched(self, tmp_path, monkeypatch):
         monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
@@ -205,20 +268,177 @@ class TestBakedModelDir:
         monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
         calls = {}
 
-        class FakeWhisperModel:
-            def __init__(self, model_name, **kwargs):
-                calls["model_name"] = model_name
-                calls["kwargs"] = kwargs
-
-        with patch.dict("sys.modules"), \
-             patch("faster_whisper.WhisperModel", FakeWhisperModel), \
+        with patch.dict("sys.modules", {"faster_whisper": _fake_whisper_module(calls)}), \
              patch.object(tt, "_should_force_faster_whisper_cpu", return_value=False):
             tt._load_local_whisper_model(
                 "medium", device="cpu", compute_type="int8", cpu_threads=4,
             )
 
         assert calls["model_name"] == str(model_dir)
-        assert calls["kwargs"] == {"device": "cpu", "compute_type": "int8", "cpu_threads": 4}
+        assert calls["kwargs"] == {
+            "device": "cpu",
+            "compute_type": "int8",
+            "cpu_threads": 4,
+            # Сеть закрыта на настоящей границе — параметром самой библиотеки.
+            "local_files_only": True,
+        }
+
+    def test_permission_to_download_opens_the_network(self, tmp_path, monkeypatch):
+        """``stt.local.allow_download: true`` снимает local_files_only."""
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        calls = {}
+
+        with patch.dict("sys.modules", {"faster_whisper": _fake_whisper_module(calls)}), \
+             patch.object(tt, "_should_force_faster_whisper_cpu", return_value=False):
+            tt._load_local_whisper_model("medium", allow_download=True)
+
+        assert calls["model_name"] == "medium"
+        assert calls["kwargs"]["local_files_only"] is False
+
+    def test_network_is_closed_by_default(self, tmp_path, monkeypatch):
+        """Без разрешения библиотека обязана получить local_files_only=True.
+
+        Это и есть запрет на скачивание: он стоит там, где сеть открывается,
+        и его нельзя обойти мимо резолвера.
+        """
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        calls = {}
+
+        with patch.dict("sys.modules", {"faster_whisper": _fake_whisper_module(calls)}), \
+             patch.object(tt, "_should_force_faster_whisper_cpu", return_value=False):
+            tt._load_local_whisper_model("medium")
+
+        assert calls["kwargs"]["local_files_only"] is True
+
+
+class TestLocalReadinessGate:
+    """Без весов локальный провайдер выбирать нельзя."""
+
+    def _cfg(self, tmp_path, **local):
+        return _config(local=dict({"model": "medium"}, **local)), tmp_path
+
+    def test_missing_weights_make_local_unready(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        cfg = _config(local={"model": "medium"})
+        with patch.object(tt, "_HAS_FASTER_WHISPER", True):
+            assert tt._local_stt_ready(cfg) is False
+
+    def test_baked_weights_make_local_ready(self, tmp_path, monkeypatch):
+        (tmp_path / "medium").mkdir()
+        (tmp_path / "medium" / "model.bin").write_bytes(b"ct2")
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        cfg = _config(local={"model": "medium"})
+        with patch.object(tt, "_HAS_FASTER_WHISPER", True):
+            assert tt._local_stt_ready(cfg) is True
+
+    def test_chain_does_not_route_into_an_unusable_local(self, tmp_path, monkeypatch):
+        """Ключа нет и весов нет: подменять Deepgram на заведомо мёртвый local
+        нельзя, иначе человек получит невнятный отказ вместо «нужен ключ»."""
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        cfg = _config(local={"model": "medium"})
+        with _env(), _raw_selection(), \
+             patch.object(tt, "_HAS_FASTER_WHISPER", True), \
+             patch.object(tt, "_has_local_command", return_value=False), \
+             patch.object(tt, "_try_lazy_install_stt", return_value=False):
+            assert tt._get_provider(cfg) == "deepgram"
+
+    def test_forced_local_without_weights_explains_itself(self, tmp_path, monkeypatch):
+        """Отказ библиотеки переводится в текст, по которому понятно, что делать.
+
+        faster-whisper под local_files_only=True бросает английское исключение
+        про кэш и local_files_only. Владельцу оно не говорит ничего, поэтому
+        движок подменяет его своим текстом с обоими выходами.
+        """
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        audio = tmp_path / "voice.wav"
+        audio.write_bytes(b"RIFF")
+
+        class LocalEntryNotFoundError(Exception):
+            pass
+
+        def refuse(*_a, **_kw):
+            raise LocalEntryNotFoundError(
+                "Cannot find an appropriate cached snapshot for "
+                "Systran/faster-whisper-medium (local_files_only=True)"
+            )
+
+        with patch.object(tt, "_HAS_FASTER_WHISPER", True), \
+             patch.object(tt, "_load_local_whisper_model", side_effect=refuse), \
+             patch.object(tt, "_local_model", None), \
+             patch.object(tt, "_local_model_name", None), \
+             patch.object(tt, "_load_stt_config", return_value=_config(local={"model": "medium"})):
+            result = tt._transcribe_local(str(audio), "medium")
+
+        assert result["success"] is False
+        assert result["error_type"] == "local_weights_missing"
+        assert "DEEPGRAM_API_KEY" in result["error"]
+        assert "allow_download" in result["error"]
+
+    def test_a_real_model_failure_is_not_disguised(self, tmp_path, monkeypatch):
+        """Настоящая поломка модели обязана всплыть как есть, а не как «нет весов»."""
+        monkeypatch.setenv(tt.LOCAL_STT_MODELS_DIR_ENV, str(tmp_path))
+        audio = tmp_path / "voice.wav"
+        audio.write_bytes(b"RIFF")
+
+        with patch.object(tt, "_HAS_FASTER_WHISPER", True), \
+             patch.object(tt, "_load_local_whisper_model",
+                          side_effect=RuntimeError("CUDA out of memory")), \
+             patch.object(tt, "_local_model", None), \
+             patch.object(tt, "_local_model_name", None), \
+             patch.object(tt, "_load_stt_config", return_value=_config(local={"model": "medium"})):
+            result = tt._transcribe_local(str(audio), "medium")
+
+        assert result["success"] is False
+        assert result.get("error_type") != "local_weights_missing"
+        assert "CUDA out of memory" in result["error"]
+
+
+class TestCommandEnvAgreesWithReadinessCheck:
+    """Проверка готовности и запуск команды обязаны читать ключ одинаково.
+
+    Ключ, дописанный в .env контура без рестарта, виден движку через
+    get_env_value, но не виден в os.environ. Пока окружение дочернего процесса
+    собиралось только из os.environ, проверка говорила «Deepgram готов»,
+    fallback не срабатывал, а команда падала с кодом 3: распознавания не было
+    вообще.
+    """
+
+    def test_key_only_in_dotenv_reaches_the_child_process(self, monkeypatch):
+        """Настоящая команда, настоящее окружение: ключ виден только движку."""
+        monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+        with _env(DEEPGRAM_API_KEY="dg-from-dotenv"):
+            result = tt._run_command_stt(
+                'printf %s "${DEEPGRAM_API_KEY:-ПУСТО}"',
+                timeout=30,
+                env_passthrough=["DEEPGRAM_API_KEY"],
+            )
+        assert result.stdout.strip() == "dg-from-dotenv", (
+            "ключ из .env обязан доехать до команды: иначе проверка готовности "
+            "говорит «Deepgram готов», fallback не срабатывает, а команда падает"
+        )
+
+    def test_readiness_and_child_env_agree_on_the_same_key(self, monkeypatch):
+        """Оба конца читают ключ одинаково: готов ⇒ команда его увидит."""
+        monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
+        cfg = _config()
+        with _env(DEEPGRAM_API_KEY="dg-from-dotenv"):
+            assert tt._stt_missing_required_env("deepgram", cfg) == []
+            result = tt._run_command_stt(
+                'printf %s "${DEEPGRAM_API_KEY:-ПУСТО}"',
+                timeout=30,
+                env_passthrough=tt._command_stt_env_passthrough(cfg["deepgram"]),
+            )
+        assert result.stdout.strip() == "dg-from-dotenv"
+
+    def test_absent_key_stays_absent_in_the_child(self):
+        """Обратная сторона: чего нет, то и не подставляется."""
+        with _env():
+            result = tt._run_command_stt(
+                'printf %s "${DEEPGRAM_API_KEY:-ПУСТО}"',
+                timeout=30,
+                env_passthrough=["DEEPGRAM_API_KEY"],
+            )
+        assert result.stdout.strip() == "ПУСТО"
 
 
 class TestCpuThreads:
@@ -254,6 +474,7 @@ class TestConfigTemplate:
         assert local["model"] == "medium"
         assert local["compute_type"] == "int8"
         assert local["cpu_threads"] == 4
+        assert local["allow_download"] is False
 
     def test_defaults_release_the_model_after_five_idle_minutes(self):
         """Medium весит около гигабайта в резиденте, и на VPS он делит память
@@ -268,7 +489,7 @@ class TestConfigTemplate:
         # Значение должно быть не просто записано, а понято резолвером таймера.
         assert _get_idle_unload_seconds(local) == 300
 
-    def test_fresh_defaults_select_deepgram_and_fall_back_without_a_key(self):
+    def test_fresh_defaults_select_deepgram_and_fall_back_without_a_key(self, baked_whisper):
         """Свежая установка без ключей: правило владельца работает как есть."""
         from hermes_cli.config_defaults import DEFAULT_CONFIG
 

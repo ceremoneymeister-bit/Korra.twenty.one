@@ -345,27 +345,139 @@ def _normalize_local_command_model(model_name: Optional[str]) -> str:
     return _normalize_local_model(model_name)
 
 
-def _resolve_local_model_source(model_name: str) -> str:
-    """Подменить имя размера модели на путь к весам, вшитым в образ.
+class LocalSttModelUnavailable(RuntimeError):
+    """Веса локальной модели не вшиты в сборку, а скачивать их запрещено."""
+
+
+# Как выглядит отказ faster-whisper/huggingface_hub, когда local_files_only=True,
+# а в кэше ничего нет. Текст английский и невнятный для владельца, поэтому
+# ловим его по маркерам и подменяем своим.
+_LOCAL_WEIGHTS_MISSING_MARKERS = (
+    "local_files_only",
+    "localentrynotfound",
+    "cannot find an appropriate cached snapshot",
+    "we have no connection",
+    "offlinemodeisenabled",
+    "not found in the local cache",
+    "incorrect path_or_model_id",
+)
+
+
+def _looks_like_missing_local_weights(exc: BaseException) -> bool:
+    """Отказ из-за отсутствия локальных весов, а не поломка модели."""
+    blob = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in blob for marker in _LOCAL_WEIGHTS_MISSING_MARKERS)
+
+
+LOCAL_STT_MISSING_WEIGHTS_ERROR = (
+    "Локальная модель распознавания речи не вшита в эту сборку. "
+    "Задайте DEEPGRAM_API_KEY, чтобы распознавать через Deepgram, "
+    "или разрешите скачивание модели: stt.local.allow_download: true."
+)
+
+
+def _local_stt_models_root() -> Optional[Path]:
+    """Каталог с вшитыми в образ весами, если он вообще задан."""
+    root = str(os.getenv(LOCAL_STT_MODELS_DIR_ENV) or DEFAULT_LOCAL_STT_MODELS_DIR).strip()
+    return Path(root) if root else None
+
+
+def _baked_local_model_dirs() -> Dict[str, str]:
+    """``{размер: путь}`` для всех моделей, реально вшитых в образ."""
+    root = _local_stt_models_root()
+    if root is None:
+        return {}
+    found: Dict[str, str] = {}
+    try:
+        for entry in sorted(root.iterdir()):
+            if entry.is_dir() and (entry / "model.bin").is_file():
+                found[entry.name] = str(entry)
+    except OSError:
+        return {}
+    return found
+
+
+def _local_model_download_allowed(local_cfg: Optional[Dict[str, Any]]) -> bool:
+    """Разрешено ли тянуть веса из сети (``stt.local.allow_download``)."""
+    if not isinstance(local_cfg, dict):
+        return False
+    return is_truthy_value(local_cfg.get("allow_download", False), default=False)
+
+
+def _resolve_local_model_source(model_name: str, *, allow_download: bool = False) -> str:
+    """Вернуть то, что можно отдать faster-whisper как источник весов.
 
     Вызывается только на пути faster-whisper (провайдер ``local``): для
     ``local_command`` внешнему бинарю whisper нужно именно имя размера, а не
-    каталог. Имя, которое уже выглядит как путь или как repo-id Hugging Face
-    (в обоих случаях есть ``/``), возвращается нетронутым.
+    каталог.
+
+    Порядок:
+
+    1. Имя, которое уже выглядит как путь или repo-id Hugging Face (в обоих
+       случаях есть ``/``), возвращается нетронутым: это осознанный выбор.
+    2. Каталог образа ``<HERMES_STT_MODELS_DIR>/<размер>``.
+    3. Единственная модель, реально вшитая в образ, если сконфигурированного
+       размера там нет. Так образ, собранный с
+       ``--build-arg WHISPER_MODEL_SIZE=small``, работает без правки конфига,
+       а не отказывает молча из-за дефолтного ``medium``. Расхождение пишется
+       в лог: конфиг и образ разошлись, и это стоит увидеть.
+    4. Иначе имя размера как есть. Сеть при этом всё равно закрыта: запрет
+       на скачивание ставится не здесь, а на настоящей границе — параметром
+       ``local_files_only`` самой faster-whisper (см.
+       :func:`_load_local_whisper_model`). Так его нельзя обойти в обход
+       этой функции, и так продолжает работать честный случай «модель уже
+       лежит в кэше Hugging Face от прошлого запуска».
+
+    Правило владельца от 02.09.2026: в рантайме ничего не качаем. Апстрим
+    здесь молча тянул бы полтора гигабайта на ПЕРВОМ голосовом сообщении,
+    причём в опубликованном образе — в каталог, смонтированный только на
+    чтение, то есть с гарантированной ошибкой после долгого ожидания.
     """
     name = str(model_name or "").strip()
-    if not name or "/" in name or os.sep in name:
+    if not name:
+        name = DEFAULT_LOCAL_MODEL
+    if "/" in name or os.sep in name:
         return model_name
-    root = str(os.getenv(LOCAL_STT_MODELS_DIR_ENV) or DEFAULT_LOCAL_STT_MODELS_DIR).strip()
-    if not root:
-        return model_name
-    try:
-        candidate = Path(root) / name
-        if (candidate / "model.bin").is_file():
-            return str(candidate)
-    except OSError:
-        pass
-    return model_name
+
+    baked = _baked_local_model_dirs()
+    if name in baked:
+        return baked[name]
+
+    if len(baked) == 1:
+        only_size, only_path = next(iter(baked.items()))
+        logger.warning(
+            "STT: в образ вшита модель '%s', а stt.local.model просит '%s'. "
+            "Беру вшитую — иначе распознавание отказало бы на ровном месте. "
+            "Приведите stt.local.model к '%s' или пересоберите образ с "
+            "--build-arg WHISPER_MODEL_SIZE=%s.",
+            only_size, name, only_size, name,
+        )
+        return only_path
+
+    if allow_download:
+        logger.info(
+            "STT: весов '%s' в образе нет, stt.local.allow_download разрешает "
+            "скачивание с Hugging Face (первое распознавание будет долгим).",
+            name,
+        )
+    return name
+
+
+def _local_stt_ready(stt_config: Optional[Dict[str, Any]] = None) -> bool:
+    """Может ли локальный whisper реально работать: пакет плюс веса.
+
+    Одного ``_HAS_FASTER_WHISPER`` мало. Без весов провайдер выбирать нельзя:
+    цепочка ``stt.fallback`` обязана пройти мимо него к следующему кандидату,
+    иначе она уводила бы рабочий Deepgram в заведомо неработающий local.
+    """
+    if not _HAS_FASTER_WHISPER:
+        return False
+    if stt_config is None:
+        stt_config = _load_stt_config()
+    local_cfg = _get_stt_section(stt_config, "local")
+    if _local_model_download_allowed(local_cfg):
+        return True
+    return bool(_baked_local_model_dirs())
 
 
 def _get_local_cpu_threads(local_cfg: Dict[str, Any]) -> int:
@@ -774,7 +886,17 @@ def _run_command_stt(
 
     scrubbed = hermes_subprocess_env(inherit_credentials=False)
     for key in env_passthrough or []:
-        value = os.environ.get(key)
+        # Korra: через get_env_value, а не os.environ.get. Движок читает ключи
+        # ещё и из .env контура и из scope профиля, поэтому os.environ видит не
+        # всё. Расхождение было не косметическим: _stt_missing_required_env
+        # проверяет готовность провайдера ИМЕННО через get_env_value, и ключ,
+        # дописанный в .env без рестарта, давал «провайдер готов» + пустое
+        # окружение у команды. Fallback при этом не срабатывал (провайдер же
+        # готов), команда выходила с кодом 3, распознавания не было вообще.
+        # Оба конца обязаны читать ключ одинаково.
+        value = get_env_value(key)
+        if value is None:
+            value = os.environ.get(key)
         if value is not None:
             scrubbed[key] = value
     popen_kwargs: Dict[str, Any] = {
@@ -1175,12 +1297,15 @@ def _resolve_selected_provider(stt_config: dict) -> str:
 
     if explicit:
         if provider == "local":
-            if _HAS_FASTER_WHISPER:
+            # Korra: к наличию пакета добавлена проверка весов. Без неё цепочка
+            # stt.fallback уводила бы рабочий Deepgram в local, который на этой
+            # сборке заведомо не поедет.
+            if _local_stt_ready(stt_config):
                 return "local"
             if _has_local_command():
                 return "local_command"
             # Try lazy-install before giving up
-            if _try_lazy_install_stt():
+            if _try_lazy_install_stt() and _local_stt_ready(stt_config):
                 return "local"
             logger.warning(
                 "STT provider 'local' configured but unavailable "
@@ -1191,7 +1316,7 @@ def _resolve_selected_provider(stt_config: dict) -> str:
         if provider == "local_command":
             if _has_local_command():
                 return "local_command"
-            if _HAS_FASTER_WHISPER:
+            if _local_stt_ready(stt_config):
                 logger.info("Local STT command unavailable, using local faster-whisper")
                 return "local"
             logger.warning(
@@ -1273,12 +1398,12 @@ def _resolve_selected_provider(stt_config: dict) -> str:
     # intentionally skipped while `mistralai` is quarantined on PyPI (malicious
     # 2.4.6 release on 2026-05-12).
 
-    if _HAS_FASTER_WHISPER:
+    if _local_stt_ready(stt_config):
         return "local"
     if _has_local_command():
         return "local_command"
     # Try lazy-install before falling through to cloud providers
-    if _try_lazy_install_stt():
+    if _try_lazy_install_stt() and _local_stt_ready(stt_config):
         return "local"
     if _HAS_OPENAI and _resolve_provider_key("GROQ_API_KEY", "groq"):
         logger.info("No local STT available, using Groq Whisper API")
@@ -1887,6 +2012,7 @@ def _load_local_whisper_model(
     device: str = "auto",
     compute_type: str = "auto",
     cpu_threads: int = 0,
+    allow_download: bool = False,
 ):
     """Load faster-whisper with graceful CUDA → CPU fallback.
 
@@ -1909,7 +2035,15 @@ def _load_local_whisper_model(
     Korra: имя размера здесь же превращается в путь к весам, вшитым в образ
     (:func:`_resolve_local_model_source`) — загрузка не ходит в сеть.
     """
-    model_name = _resolve_local_model_source(model_name)
+    model_name = _resolve_local_model_source(model_name, allow_download=allow_download)
+    # Korra: НАСТОЯЩИЙ запрет на скачивание. Правило владельца 02.09.2026 —
+    # в рантайме ничего не тянем; в опубликованном образе скачивание вдобавок
+    # обречено, /opt/hermes смонтирован только на чтение. Ставим запрет на той
+    # границе, где сеть и открывается: параметром самой faster-whisper. Для
+    # вшитого каталога параметр безразличен (там путь, а не repo-id), зато
+    # честный случай «модель уже в кэше HF от прошлого запуска» продолжает
+    # работать, чего пред-полётная проверка по каталогу образа не умела.
+    load_kwargs: Dict[str, Any] = {"local_files_only": not allow_download}
     force_cpu = _should_force_faster_whisper_cpu()
     if force_cpu:
         # Importing ctranslate2/faster-whisper itself can abort on some
@@ -1925,7 +2059,8 @@ def _load_local_whisper_model(
             "(int8) to avoid native device autodetection crashes"
         )
         return WhisperModel(
-            model_name, device="cpu", compute_type="int8", cpu_threads=cpu_threads,
+            model_name, device="cpu", compute_type="int8",
+            cpu_threads=cpu_threads, **load_kwargs,
         )
 
     try:
@@ -1934,6 +2069,7 @@ def _load_local_whisper_model(
             device=device,
             compute_type=compute_type,
             cpu_threads=cpu_threads,
+            **load_kwargs,
         )
     except Exception as exc:
         if not _looks_like_cuda_lib_error(exc):
@@ -1944,7 +2080,8 @@ def _load_local_whisper_model(
             exc,
         )
         return WhisperModel(
-            model_name, device="cpu", compute_type="int8", cpu_threads=cpu_threads,
+            model_name, device="cpu", compute_type="int8",
+            cpu_threads=cpu_threads, **load_kwargs,
         )
 
 
@@ -2113,6 +2250,7 @@ def _transcribe_local(
                         device=local_cfg.get("device", "auto"),
                         compute_type=local_cfg.get("compute_type", "auto"),
                         cpu_threads=_get_local_cpu_threads(local_cfg),
+                        allow_download=_local_model_download_allowed(local_cfg),
                     )
                     _local_model_name = model_name
                 model = _local_model
@@ -2151,7 +2289,10 @@ def _transcribe_local(
             )
             from faster_whisper import WhisperModel
             model = WhisperModel(
-                _resolve_local_model_source(model_name),
+                _resolve_local_model_source(
+                    model_name,
+                    allow_download=_local_model_download_allowed(local_cfg),
+                ),
                 device="cpu",
                 compute_type="int8",
                 cpu_threads=_get_local_cpu_threads(local_cfg),
@@ -2174,7 +2315,33 @@ def _transcribe_local(
 
         return {"success": True, "transcript": transcript, "provider": "local"}
 
+    except LocalSttModelUnavailable as exc:
+        # Korra: отдельная ветка до общего except. Отсутствие весов — это не
+        # авария движка, а состояние сборки, и человеку нужен текст, по
+        # которому понятно, что делать, а не «Local transcription failed:
+        # LocalSttModelUnavailable(...)».
+        logger.warning("STT: локальные веса недоступны — %s", exc)
+        return {
+            "success": False,
+            "transcript": "",
+            "provider": "local",
+            "error_type": "local_weights_missing",
+            "error": str(exc),
+        }
     except Exception as e:
+        # Korra: отказ «весов нет локально» приходит из faster-whisper обычным
+        # исключением с английским текстом про local_files_only. Владельцу он
+        # ничего не говорит, поэтому подменяем своим — и только его, реальные
+        # поломки модели по-прежнему всплывают как есть.
+        if _looks_like_missing_local_weights(e):
+            logger.warning("STT: локальные веса недоступны — %s", e)
+            return {
+                "success": False,
+                "transcript": "",
+                "provider": "local",
+                "error_type": "local_weights_missing",
+                "error": LOCAL_STT_MISSING_WEIGHTS_ERROR,
+            }
         logger.error("Local transcription failed: %s", e, exc_info=True)
         return {"success": False, "transcript": "", "error": f"Local transcription failed: {e}"}
 

@@ -95,7 +95,7 @@ class TestProviderGating:
         # must get the trim. New built-ins are cloud unless proven otherwise.
         assert CLOUD_STT_PROVIDERS == BUILTIN_STT_PROVIDERS - {"local", "local_command"}
 
-    def test_local_provider_never_trims(self, tmp_path):
+    def test_local_provider_never_trims(self, baked_whisper_weights, tmp_path):
         wav = _write_wav(tmp_path / "a.wav", [("tone", 1)])
         with patch("tools.transcription_tools._load_stt_config",
                    return_value={"provider": "local", "enabled": True}), \

@@ -32,7 +32,7 @@ def _clear_openai_env(monkeypatch):
 class TestGetProvider:
     """_get_provider() picks the right backend based on config + availability."""
 
-    def test_local_when_available(self):
+    def test_local_when_available(self, baked_whisper_weights):
         with patch("tools.transcription_tools._HAS_FASTER_WHISPER", True):
             from tools.transcription_tools import _get_provider
             assert _get_provider({"provider": "local"}) == "local"
@@ -258,7 +258,7 @@ class TestNormalizeLocalModel:
         assert _normalize_local_model("whisper-1") == DEFAULT_LOCAL_MODEL
 
 
-    def test_local_transcribe_normalises_model(self):
+    def test_local_transcribe_normalises_model(self, baked_whisper_weights):
         """transcribe_audio with local provider must not pass 'whisper-1' to WhisperModel."""
         import os
         from unittest.mock import MagicMock, patch

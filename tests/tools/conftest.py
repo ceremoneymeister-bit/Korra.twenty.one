@@ -146,3 +146,24 @@ def _korra_pin_english_ui(monkeypatch):
             i18n.reset_language_cache()
     except Exception:
         pass
+
+
+@pytest.fixture
+def baked_whisper_weights(tmp_path, monkeypatch):
+    """Korra: сборка, которая несёт веса локального whisper.
+
+    На Korra 21 «пакет faster-whisper установлен» больше НЕ значит «локальный
+    провайдер работоспособен»: скачивать веса в рантайме запрещено (правило
+    владельца 02.09.2026), поэтому образ обязан нести их с собой, а
+    ``_local_stt_ready`` это проверяет.
+
+    Тесты выбора провайдера объявляют такую сборку явно. Без фикстуры они
+    зависели бы от того, лежит ли на машине прогона настоящий
+    /opt/hermes/models/whisper, и проверяли бы разное на сборочном хосте и
+    внутри образа.
+    """
+    root = tmp_path / "baked-whisper"
+    (root / "medium").mkdir(parents=True)
+    (root / "medium" / "model.bin").write_bytes(b"ct2")
+    monkeypatch.setenv("HERMES_STT_MODELS_DIR", str(root))
+    return root

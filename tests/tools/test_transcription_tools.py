@@ -106,7 +106,7 @@ class TestGetProviderGroq:
 class TestGetProviderFallbackPriority:
     """Auto-detect fallback priority and explicit provider behaviour."""
 
-    def test_auto_detect_prefers_local(self):
+    def test_auto_detect_prefers_local(self, baked_whisper_weights):
         """Auto-detect prefers local over any cloud provider."""
         with patch("tools.transcription_tools._HAS_FASTER_WHISPER", True):
             from tools.transcription_tools import _get_provider
@@ -382,7 +382,7 @@ class TestTranscribeLocalExtended:
         # WhisperModel should be created only once
         assert mock_whisper_cls.call_count == 1
 
-    def test_config_device_and_compute_type_passed_to_whisper(self, tmp_path):
+    def test_config_device_and_compute_type_passed_to_whisper(self, tmp_path, baked_whisper_weights):
         """User-configured device and compute_type should be forwarded to WhisperModel.
 
         Regression test for #8319: these values were hardcoded to "auto".
@@ -419,9 +419,21 @@ class TestTranscribeLocalExtended:
         # Korra: к паре device/compute_type добавился cpu_threads из
         # stt.local.cpu_threads. В этом конфиге ключа нет, значит 0 —
         # «сколько потоков, решает ctranslate2», то есть поведение апстрима.
-        mock_whisper_cls.assert_called_once_with(
-            "base", device="cpu", compute_type="float32", cpu_threads=0,
-        )
+        mock_whisper_cls.assert_called_once()
+        args, kwargs = mock_whisper_cls.call_args
+        assert kwargs == {
+            "device": "cpu",
+            "compute_type": "float32",
+            "cpu_threads": 0,
+            # Korra: сеть закрыта по умолчанию. Скачивание весов в рантайме
+            # запрещено, разрешается только через stt.local.allow_download.
+            "local_files_only": True,
+        }
+        # Korra: вместо имени размера уезжает каталог весов из образа. Здесь
+        # вшита medium, а конфиг просит base — берётся единственная вшитая
+        # модель, иначе сборка с другим --build-arg WHISPER_MODEL_SIZE
+        # отказывала бы молча.
+        assert args[0] == str(baked_whisper_weights / "medium")
 
 
     def test_cuda_out_of_memory_does_not_trigger_cpu_fallback(self, tmp_path):
@@ -1049,7 +1061,7 @@ class TestShellSafety:
 class TestLocalModelLock:
     """#24767 — concurrent first-use must not double-load the whisper model."""
 
-    def test_concurrent_transcribe_loads_model_once(self, tmp_path):
+    def test_concurrent_transcribe_loads_model_once(self, tmp_path, baked_whisper_weights):
         import threading
         from tools.transcription_tools import _transcribe_local
 
@@ -1066,7 +1078,8 @@ class TestLocalModelLock:
         load_started = threading.Event()
 
         # Korra: cpu_threads добавлен в сигнатуру загрузчика (stt.local.cpu_threads).
-        def slow_load(model_name, device="auto", compute_type="auto", cpu_threads=0):
+        def slow_load(model_name, device="auto", compute_type="auto", cpu_threads=0,
+                      allow_download=False):
             nonlocal load_count
             load_count += 1
             load_started.set()
