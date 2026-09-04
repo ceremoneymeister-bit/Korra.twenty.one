@@ -7,6 +7,10 @@
 руками, и один неверный `cp -r` отправляет чужие паспортные данные незнакомому
 человеку — необратимо, потому что образ уже у него.
 
+Проверяются все деревья, которые реально уезжают в образ, а не только `skills/`:
+финальный слой Dockerfile копирует корень целиком, и `optional-skills/` с его
+каталогами `scripts/` попадает к клиенту ровно так же.
+
 Здесь проверяется класс, а не конкретные имена: список фамилий сам по себе
 персональные данные, в репозитории ему не место. Он живёт в контуре
 (`denylist.local.txt`) и проверяется отдельно, в смоуке образа перед
@@ -18,7 +22,20 @@ from pathlib import Path
 
 import pytest
 
-SKILLS = Path(__file__).resolve().parents[2] / "skills"
+REPO = Path(__file__).resolve().parents[2]
+
+#: Все деревья, которые физически уезжают в образ и попадают к клиенту.
+#: Их выбирает не вкус, а Dockerfile: финальный слой копирует корень целиком
+#: (`COPY --link . .`), а `.dockerignore` ни одно из них не исключает. Гейт,
+#: смотревший только в `skills/`, проверял половину поставки: `optional-skills/`
+#: с его каталогами scripts/ — такое же естественное место для «временного»
+#: файла, а `plugins/` уезжает вместе с остальным.
+SKILL_ROOTS = tuple(
+    root for root in (REPO / "skills", REPO / "optional-skills", REPO / "plugins")
+    if root.is_dir()
+)
+#: Оставлено для сообщений об ошибке: пути печатаются относительно корня.
+SKILLS = REPO / "skills"
 
 #: Реквизиты рядом со своим названием. Голое число не годится: версии, даты и
 #: номера портов дают ложные срабатывания пачками.
@@ -46,12 +63,15 @@ _ID_DOCS = re.compile(r"(паспорт\s*(серия|№|:)|СНИЛС\s*[:\-]?
 
 def _skill_files() -> list[Path]:
     files: list[Path] = []
-    for path in SKILLS.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip"}:
-            continue
-        files.append(path)
+    for root in SKILL_ROOTS:
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if "node_modules" in path.parts or "__pycache__" in path.parts:
+                continue
+            if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip"}:
+                continue
+            files.append(path)
     return files
 
 
@@ -72,7 +92,7 @@ def _hits(texts, pattern) -> list[str]:
     for path, body in texts:
         match = pattern.search(body)
         if match:
-            rel = path.relative_to(SKILLS.parent)
+            rel = path.relative_to(REPO)
             # В сообщение об ошибке попадает путь и вид совпадения, но не сами
             # данные: отчёт о падении теста тоже кто-то прочитает.
             found.append(f"{rel} (совпадение вида «{match.group(1) if match.groups() else match.group(0)[:12]}»)")
@@ -100,4 +120,5 @@ class TestBundledSkillsAreImpersonal:
         Файл существует в личных контурах и сам себя описывает как «в коробку
         НЕ едет» — но лежит в дереве скиллов, а перенос делается руками.
         """
-        assert not list(SKILLS.rglob("denylist.local.txt"))
+        for root in SKILL_ROOTS:
+            assert not list(root.rglob("denylist.local.txt")), root
