@@ -15,6 +15,7 @@ import types
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import asyncio
 import pytest
 import yaml
 
@@ -1286,6 +1287,56 @@ class TestOfflineProviderKeySlots:
         # Синтезированное каноническое имя не должно вытеснять настоящее
         # главное имя ключа — инвариант держится на обоих путях разбора.
         assert definition.api_key_env_vars[0] != "GITHUB_COPILOT_API_KEY"
+
+
+class TestProfileCreationSeedsCredentials:
+    """Мастер в панели создаёт агента одним вызовом — засев обязан быть в нём.
+
+    Ключи провайдера подкладывались только на маршруте смены модели у готового
+    профиля (`PUT /api/profiles/{name}/model`). Мастер создания агента его не
+    зовёт: он делает ровно один `POST /api/profiles` с провайдером и моделью.
+    Итог у владельца и у любого клиента одинаковый — новый агент поднимался
+    без ключа и молча не отвечал, а лечилось это правкой `profiles/<имя>/.env`
+    руками, то есть снаружи и в обход движка.
+    """
+
+    def test_created_profile_gets_provider_key_from_root_env(self, profile_env):
+        from agent.secret_scope import load_env_file
+        from korra_cli.web_routers import profiles as router
+
+        default_home = profile_env / ".hermes"
+        (default_home / ".env").write_text(
+            "API_SERVER_KEY=gateway-key-0123456789abcdef\n"
+            "ANTHROPIC_API_KEY=root-anthropic\n"
+            "TELEGRAM_BOT_TOKEN=channel-secret\n"
+        )
+
+        body = router.ProfileCreate(
+            name="secretary",
+            provider="anthropic",
+            model="claude-test",
+        )
+        result = asyncio.run(router.create_profile_endpoint(body))
+
+        assert result["ok"] is True
+        assert result["model_set"] is True
+        # Ключ провайдера подложен...
+        assert result["seeded_credentials"] == ["ANTHROPIC_API_KEY"]
+        profile_env_file = load_env_file(Path(result["path"]) / ".env")
+        assert profile_env_file.get("ANTHROPIC_API_KEY") == "root-anthropic"
+        # ...а чужой секрет платформы — нет: профиль не должен поднять
+        # второго бота на том же токене.
+        assert "TELEGRAM_BOT_TOKEN" not in profile_env_file
+
+    def test_creation_without_provider_seeds_nothing(self, profile_env):
+        from korra_cli.web_routers import profiles as router
+
+        (profile_env / ".hermes" / ".env").write_text("ANTHROPIC_API_KEY=root-anthropic\n")
+
+        result = asyncio.run(router.create_profile_endpoint(router.ProfileCreate(name="plain")))
+
+        assert result["model_set"] is False
+        assert result["seeded_credentials"] == []
 
 
 class TestSeedProviderCredentialsFromRoot:

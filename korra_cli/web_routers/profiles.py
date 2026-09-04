@@ -841,12 +841,34 @@ async def create_profile_endpoint(body: ProfileCreate):
     provider = (body.provider or "").strip()
     model = (body.model or "").strip()
     model_set = False
+    seeded_credentials: List[str] = []
     if provider and model:
         try:
             _write_profile_model(path, provider, model)
             model_set = True
         except Exception:
             _log.exception("Setting model for new profile %s failed", body.name)
+        # Korra: тот же засев ключей, что и при смене провайдера у готового
+        # профиля (PUT /api/profiles/{name}/model). Без него агент, созданный
+        # мастером в панели с провайдером вроде custom:*, поднимался без ключа
+        # и молча не отвечал: провайдер объявлен, credentials нет. Мастер
+        # делает ровно один вызов, второго пути у него нет — значит засев
+        # обязан быть здесь, а не только на маршруте смены модели.
+        try:
+            from korra_cli.config import read_user_config_raw
+
+            seeded_credentials = profiles_mod.seed_provider_credentials_from_root(
+                provider,
+                read_user_config_raw(path / "config.yaml"),
+                profile_dir=path,
+            )
+            if seeded_credentials:
+                _log.info(
+                    "profiles/%s: seeded %s from root .env",
+                    body.name, ", ".join(seeded_credentials),
+                )
+        except Exception:
+            _log.debug("seed_provider_credentials_from_root skipped", exc_info=True)
 
     # Optional MCP servers. Best-effort, same rationale as model assignment.
     mcp_written = 0
@@ -893,6 +915,7 @@ async def create_profile_endpoint(body: ProfileCreate):
         "name": body.name,
         "path": str(path),
         "model_set": model_set,
+        "seeded_credentials": seeded_credentials,
         "mcp_written": mcp_written,
         "skills_disabled": skills_disabled,
         "hub_installs": hub_installs,
