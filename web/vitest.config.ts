@@ -27,5 +27,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}"],
+    // Возвращает в globalThis хранилище из jsdom: на Node 26 его перекрывает
+    // одноимённая пустая заглушка самого Node — подробности в setup-файле.
+    setupFiles: ["./vitest.setup.ts"],
   },
 });
