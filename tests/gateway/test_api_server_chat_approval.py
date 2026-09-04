@@ -72,6 +72,10 @@ def _clean_approval_queues():
         approval_mod._attended_approval_sessions.clear()
         approval_mod._gateway_notify_registrations.clear()
         approval_mod._session_approved.clear()
+        # Постоянный allowlist — процессный синглтон и пишется в config.yaml;
+        # утечь между тестами он не должен.
+        approval_mod._permanent_approved.discard("execute_code")
+        approval_mod._permanent_approved.discard("world_writable")
 
 
 def _sse_payloads(body: str, event_name: str) -> list[dict]:
@@ -753,3 +757,126 @@ class TestListenerNeverOutlivesItsTurn:
         assert "s-orphan" not in approval_mod._attended_approval_sessions
         assert "s-orphan" not in approval_mod._gateway_notify_registrations
         assert "s-orphan" not in adapter._chat_approval_sessions
+
+
+class TestServerRefusesPermanentScopeForExecuteCode:
+    """Запрет на постоянное правило живёт и на сервере, не только в карточке.
+
+    Кнопки «Разрешить всегда» для execute_code в интерфейсе нет, но маршрут
+    открыт по ключу сервера, а цена ошибки — запись
+    ``command_allowlist: [execute_code]`` в config.yaml: после неё произвольный
+    питон перестаёт спрашивать во всех каналах и навсегда.
+    """
+
+    def _queue(self, adapter, *entries):
+        with approval_mod._lock:
+            approval_mod._gateway_queues["s-1"] = list(entries)
+        adapter._chat_approval_sessions["s-1"] = "s-1"
+
+    def _execute_code_entry(self, request_id="req-code"):
+        return approval_mod._ApprovalEntry({
+            "request_id": request_id,
+            "command": "execute_code <<'PY'\nprint(1)\nPY",
+            "pattern_key": "execute_code",
+            "pattern_keys": ["execute_code"],
+        })
+
+    @pytest.mark.asyncio
+    async def test_always_for_execute_code_is_refused_and_writes_nothing(self, adapter):
+        app = _create_app(adapter)
+        entry = self._execute_code_entry()
+        self._queue(adapter, entry)
+
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                "/api/sessions/s-1/approval",
+                json={"choice": "always", "request_id": "req-code"},
+            )
+            assert resp.status == 400
+            body = await resp.json()
+
+        assert body["error"]["code"] == "permanent_scope_not_allowed"
+        assert body["error"]["message"] == (
+            "Для execute_code постоянное правило не записывается — "
+            "разрешите один раз или до конца чата"
+        )
+        # Ничего не решено: поток агента всё ещё ждёт настоящего ответа.
+        assert entry.result is None
+        assert entry.event.is_set() is False
+        assert "execute_code" not in approval_mod._permanent_approved
+
+    @pytest.mark.asyncio
+    async def test_refusal_covers_the_fifo_target_without_request_id(self, adapter):
+        """Без request_id ядро берёт самый старый запрос — запрет смотрит туда же."""
+        app = _create_app(adapter)
+        entry = self._execute_code_entry()
+        self._queue(adapter, entry)
+
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post("/api/sessions/s-1/approval", json={"choice": "always"})
+            assert resp.status == 400
+        assert entry.result is None
+
+    @pytest.mark.asyncio
+    async def test_one_shot_and_session_scopes_still_work(self, adapter):
+        app = _create_app(adapter)
+        for scope in ("once", "session"):
+            entry = self._execute_code_entry(f"req-{scope}")
+            self._queue(adapter, entry)
+            async with TestClient(TestServer(app)) as cli:
+                resp = await cli.post(
+                    "/api/sessions/s-1/approval",
+                    json={"choice": scope, "request_id": f"req-{scope}"},
+                )
+                assert resp.status == 200, scope
+            assert entry.result == scope
+
+    @pytest.mark.asyncio
+    async def test_ordinary_command_keeps_the_permanent_scope(self, adapter):
+        """Запрет узкий: у обычной команды ключ покрывает её саму."""
+        app = _create_app(adapter)
+        entry = approval_mod._ApprovalEntry({
+            "request_id": "req-chmod",
+            "command": "chmod 777 /tmp/x",
+            "pattern_key": "world_writable",
+            "pattern_keys": ["world_writable"],
+        })
+        self._queue(adapter, entry)
+
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                "/api/sessions/s-1/approval",
+                json={"choice": "always", "request_id": "req-chmod"},
+            )
+            assert resp.status == 200
+        assert entry.result == "always"
+
+    @pytest.mark.asyncio
+    async def test_refusal_targets_the_named_request_not_a_neighbour(self, adapter):
+        """В очереди два запроса: запрет обязан смотреть на адресованный."""
+        app = _create_app(adapter)
+        ordinary = approval_mod._ApprovalEntry({
+            "request_id": "req-chmod",
+            "command": "chmod 777 /tmp/x",
+            "pattern_key": "world_writable",
+            "pattern_keys": ["world_writable"],
+        })
+        code = self._execute_code_entry()
+        self._queue(adapter, ordinary, code)
+
+        async with TestClient(TestServer(app)) as cli:
+            # Адресован execute_code, хотя первым в очереди стоит обычная команда.
+            refused = await cli.post(
+                "/api/sessions/s-1/approval",
+                json={"choice": "always", "request_id": "req-code"},
+            )
+            assert refused.status == 400
+            # Обычная команда постоянное правило по-прежнему принимает.
+            allowed = await cli.post(
+                "/api/sessions/s-1/approval",
+                json={"choice": "always", "request_id": "req-chmod"},
+            )
+            assert allowed.status == 200
+
+        assert code.result is None
+        assert ordinary.result == "always"

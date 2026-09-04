@@ -4535,6 +4535,34 @@ class APIServerAdapter(BasePlatformAdapter):
             "data": data,
         })
 
+    def _targets_execute_code(
+        self, approval_session_key: str, request_id: str
+    ) -> bool:
+        """True, когда решение адресовано запуску произвольного кода.
+
+        Адресация повторяет ``resolve_gateway_approval``: точный ``request_id``
+        либо самый старый запрос в очереди (FIFO). Если запроса в очереди уже
+        нет, ответ False — пусть на «нечего решать» отвечает сам резолв своим
+        409, а не этот запрет своим 400.
+        """
+        from tools.approval import list_gateway_approvals
+
+        pending = list_gateway_approvals(approval_session_key)
+        if not pending:
+            return False
+        if request_id:
+            target = next(
+                (item for item in pending if item.get("request_id") == request_id),
+                None,
+            )
+        else:
+            target = pending[0]
+        if target is None:
+            return False
+        keys = {str(target.get("pattern_key") or "")}
+        keys.update(str(key) for key in (target.get("pattern_keys") or []))
+        return _EXECUTE_CODE_PATTERN_KEY in keys
+
     async def _handle_session_approval(self, request: "web.Request") -> "web.Response":
         """POST /api/sessions/{session_id}/approval — решение человека по команде.
 
@@ -4542,6 +4570,11 @@ class APIServerAdapter(BasePlatformAdapter):
         их смысл берутся из того же ядра одобрений (``once`` — только этот
         вызов, ``session`` — до конца сессии, ``always`` — навсегда в
         allowlist, ``deny`` — отказ).
+
+        Единственное отступление от ядра: ``always`` для ``execute_code``
+        отклоняется с 400 и ничего не пишет — этот ключ покрывает не команду, а
+        весь инструмент, и постоянное правило сняло бы вопрос с произвольного
+        питона во всех каналах сразу.
         """
         auth_err = self._check_auth(request)
         if auth_err:
@@ -4586,6 +4619,25 @@ class APIServerAdapter(BasePlatformAdapter):
                     code="approval_not_active",
                 ),
                 status=409,
+            )
+
+        if choice == "always" and self._targets_execute_code(
+            approval_session_key, request_id
+        ):
+            # Карточка такой кнопки не рисует (`_chat_approval_event` убирает
+            # `always` для этого ключа), но запрет обязан жить и здесь: маршрут
+            # открыт по ключу сервера, а цена ошибки — запись
+            # `command_allowlist: [execute_code]` в config.yaml, после которой
+            # произвольный питон перестаёт спрашивать во ВСЕХ каналах и
+            # навсегда. Отказ до записи: `resolve_gateway_approval` ниже уже
+            # разбудил бы поток агента, и откатывать было бы нечего.
+            return web.json_response(
+                _openai_error(
+                    "Для execute_code постоянное правило не записывается — "
+                    "разрешите один раз или до конца чата",
+                    code="permanent_scope_not_allowed",
+                ),
+                status=400,
             )
 
         try:
