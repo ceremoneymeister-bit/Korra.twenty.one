@@ -122,9 +122,9 @@ def _mint(command: str, label: str) -> tuple[str, Optional[float]]:
             # commonly print an absolute ISO 8601 deadline instead. Treating
             # that as "no TTL advertised" caches the token for the life of the
             # process, so every request 401s once the deadline passes.
-            # Imported lazily: hermes_cli.auth imports from agent.* at module
+            # Imported lazily: korra_cli.auth imports from agent.* at module
             # level, so a top-level import here would risk a cycle.
-            from hermes_cli.auth import _parse_iso_timestamp
+            from korra_cli.auth import _parse_iso_timestamp
 
             for field in ("expiry", "expiresOn"):
                 deadline = _parse_iso_timestamp(payload.get(field))

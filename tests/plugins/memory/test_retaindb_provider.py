@@ -95,7 +95,7 @@ def test_upload_file_allows_regular_file(tmp_path):
 
 def _capture_initialized_client(monkeypatch, tmp_path):
     """Patch _Client/_WriteQueue/get_hermes_home; return a dict capturing args."""
-    import hermes_constants
+    import korra_constants
 
     import plugins.memory.retaindb as retaindb_module
 
@@ -110,12 +110,12 @@ def _capture_initialized_client(monkeypatch, tmp_path):
 
     monkeypatch.setattr(retaindb_module, "_Client", _FakeClient)
     monkeypatch.setattr(retaindb_module, "_WriteQueue", lambda *a, **k: MagicMock())
-    monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: tmp_path)
+    monkeypatch.setattr(korra_constants, "get_hermes_home", lambda: tmp_path)
     return retaindb_module, captured
 
 
 def test_retaindb_config_loader_uses_readonly_config(monkeypatch):
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
     import plugins.memory.retaindb as retaindb_module
 
     backing_config = {

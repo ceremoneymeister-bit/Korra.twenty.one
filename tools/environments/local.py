@@ -15,9 +15,9 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from hermes_constants import get_process_hermes_home, korra_env, korra_env_set, korra_env_pop, korra_env_aliases
+from korra_constants import get_process_hermes_home, korra_env, korra_env_set, korra_env_pop, korra_env_aliases
 from tools.environments.base import BaseEnvironment, _pipe_stdin
-from hermes_cli._subprocess_compat import windows_hide_flags
+from korra_cli._subprocess_compat import windows_hide_flags
 
 _IS_WINDOWS = platform.system() == "Windows"
 
@@ -48,7 +48,7 @@ _BG_GROUP_RE = re.compile(r"^(hermes_bg_[A-Za-z0-9_-]+)\.(log|pid|exit)$")
 def _default_terminal_temp_dir() -> "Path | None":
     """Return HERMES_HOME/cache/terminal, or None if unresolvable."""
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         return get_hermes_home() / "cache" / "terminal"
     except Exception:
         return None
@@ -328,7 +328,7 @@ def _build_provider_env_blocklist() -> frozenset:
     blocked: set[str] = set()
 
     try:
-        from hermes_cli.auth import PROVIDER_REGISTRY
+        from korra_cli.auth import PROVIDER_REGISTRY
         for pconfig in PROVIDER_REGISTRY.values():
             blocked.update(pconfig.api_key_env_vars)
             if pconfig.auth_type == "aws_sdk":
@@ -339,7 +339,7 @@ def _build_provider_env_blocklist() -> frozenset:
         pass
 
     try:
-        from hermes_cli.config import OPTIONAL_ENV_VARS
+        from korra_cli.config import OPTIONAL_ENV_VARS
         for name, metadata in OPTIONAL_ENV_VARS.items():
             category = metadata.get("category")
             if category in {"tool", "messaging"}:
@@ -645,7 +645,7 @@ def _inject_context_hermes_home(env: dict) -> None:
     в окружении ребёнка означали бы, что профиль пишет память соседа.
     """
     try:
-        from hermes_constants import get_hermes_home_override
+        from korra_constants import get_hermes_home_override
 
         value = get_hermes_home_override()
         if not value:
@@ -763,7 +763,7 @@ def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = Non
 
     _inject_context_hermes_home(sanitized)
 
-    from hermes_constants import apply_subprocess_home_env
+    from korra_constants import apply_subprocess_home_env
     apply_subprocess_home_env(sanitized)
 
     # Same cross-session leak guard as _make_run_env, for the background/PTY
@@ -908,7 +908,7 @@ def hermes_subprocess_env(*, inherit_credentials: bool = False) -> dict[str, str
     env.setdefault("PYTHONUTF8", "1")
 
     _inject_context_hermes_home(env)
-    from hermes_constants import apply_subprocess_home_env
+    from korra_constants import apply_subprocess_home_env
     apply_subprocess_home_env(env)
 
     _strip_hermes_owned_pythonpath_and_runtime_markers(env)
@@ -970,7 +970,7 @@ def build_subprocess_env(
       grep-able and future-fixable.
     * ``inherit_profile_home`` — on the non-scrub path, when True, bridge the
       context-local Hermes home override into ``HERMES_HOME`` and apply the
-      subprocess HOME contract (``hermes_constants.apply_subprocess_home_env``).
+      subprocess HOME contract (``korra_constants.apply_subprocess_home_env``).
       Pass False to keep the inherited env untouched (exact legacy
       ``os.environ.copy()`` behavior).
     * ``extra`` — applied **last** on the non-scrub path so explicit caller
@@ -990,7 +990,7 @@ def build_subprocess_env(
     env: dict[str, str] = dict(base) if base is not None else os.environ.copy()
     if inherit_profile_home:
         _inject_context_hermes_home(env)
-        from hermes_constants import apply_subprocess_home_env
+        from korra_constants import apply_subprocess_home_env
         apply_subprocess_home_env(env)
     if extra:
         env.update(extra)
@@ -1438,7 +1438,7 @@ def _managed_runtime_path_entries() -> list[str]:
     mid-process (``heal_hermes_managed_node``, a first browser install).
     """
     try:
-        from hermes_constants import get_hermes_home, iter_hermes_node_dirs
+        from korra_constants import get_hermes_home, iter_hermes_node_dirs
 
         candidates = [*iter_hermes_node_dirs(), get_hermes_home() / "bin"]
         return [str(d) for d in candidates if d.is_dir()]
@@ -1593,7 +1593,7 @@ def _make_run_env(env: dict) -> dict:
 
     _inject_context_hermes_home(run_env)
 
-    from hermes_constants import apply_subprocess_home_env
+    from korra_constants import apply_subprocess_home_env
     apply_subprocess_home_env(run_env)
 
     # Bridge ContextVar-based session vars into the subprocess env (with the
@@ -1691,7 +1691,7 @@ def _build_hermes_repo_root_aliases(
 #: The Hermes repository root - three levels up from this file
 #: (``tools/environments/local.py`` -> ``tools/environments`` -> ``tools``
 #: -> repo root).  This is the directory the Electron app prepends to
-#: PYTHONPATH so the backend can do ``import tools``, ``import hermes_cli``,
+#: PYTHONPATH so the backend can do ``import tools``, ``import korra_cli``,
 #: etc.  Subprocesses that are NOT the Hermes backend don't need it and it
 #: can shadow local packages.
 _hermes_repo_root: Path = Path(__file__).resolve().parents[2]
@@ -1700,7 +1700,7 @@ _hermes_repo_root: Path = Path(__file__).resolve().parents[2]
 #: ``Path(__file__).resolve()`` canonicalizes symlinks/junctions, but the
 #: Windows gateway launcher deliberately renders Hermes-owned paths under
 #: the configured HERMES_HOME spelling (which may be a junction to another
-#: drive — see ``hermes_cli/gateway_windows.py::_preserve_hermes_home_path``).
+#: drive — see ``korra_cli/gateway_windows.py::_preserve_hermes_home_path``).
 #: ``Path(__file__)`` (unresolved) keeps that spelling, so a PYTHONPATH
 #: entry written by the launcher still matches even though it differs
 #: lexically from the resolved root.
@@ -1897,7 +1897,7 @@ def _read_terminal_shell_init_config() -> tuple[list[str], bool]:
     execution never breaks because the config file is unreadable.
     """
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
 
         cfg = load_config() or {}
         terminal_cfg = cfg.get("terminal") or {}
@@ -2063,7 +2063,7 @@ class LocalEnvironment(BaseEnvironment):
             # accepts forward slashes in filesystem paths, and we control
             # the path so we can guarantee no spaces.
             try:
-                from hermes_constants import get_hermes_home
+                from korra_constants import get_hermes_home
                 cache_dir = get_hermes_home() / "cache" / "terminal"
             except Exception:
                 cache_dir = Path(tempfile.gettempdir()) / "hermes_terminal"
@@ -2088,7 +2088,7 @@ class LocalEnvironment(BaseEnvironment):
         # Windows branch above. /tmp is only a last-resort fallback now
         # because RAM-backed tmpfs /tmp fills up under Hermes load.
         try:
-            from hermes_constants import get_hermes_home
+            from korra_constants import get_hermes_home
             cache_dir = get_hermes_home() / "cache" / "terminal"
             cache_dir.mkdir(parents=True, exist_ok=True)
             resolved = str(cache_dir)

@@ -29,7 +29,7 @@ from agent.acp_openai_bridge import (
 from agent.file_safety import get_read_block_error, get_write_denied_error, is_write_approval_required
 from agent.redact import redact_sensitive_text
 from tools.environments.local import hermes_subprocess_env
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 ACP_MARKER_BASE_URL = "acp://copilot"
 _DEFAULT_TIMEOUT_SECONDS = 900.0
@@ -158,7 +158,7 @@ def _build_subprocess_env() -> dict[str, str]:
     env = hermes_subprocess_env(inherit_credentials=True)
     home = _resolve_home_dir()
     env["HOME"] = home
-    from hermes_constants import apply_subprocess_home_env
+    from korra_constants import apply_subprocess_home_env
     apply_subprocess_home_env(env)
     return env
 
@@ -420,7 +420,7 @@ class CopilotACPClient:
         try:
             # Hide the console the CLI child would otherwise flash on Windows
             # (#56747). Hide-only — stdio pipes stay intact for the ACP wire.
-            from hermes_cli._subprocess_compat import windows_hide_flags
+            from korra_cli._subprocess_compat import windows_hide_flags
 
             proc = subprocess.Popen(
                 [self._acp_command] + self._acp_args,

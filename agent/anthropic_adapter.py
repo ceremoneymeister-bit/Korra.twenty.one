@@ -21,7 +21,7 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 from typing import Any, Dict, List, Optional, Tuple
 from utils import base_url_host_matches, base_url_hostname, normalize_proxy_env_vars
 from agent.secret_scope import get_secret as _get_secret
@@ -113,7 +113,7 @@ from agent.anthropic_credentials import (  # noqa: F401
 )
 
 try:
-    import hermes_cli as _hermes_cli
+    import korra_cli as _hermes_cli
 
     _HERMES_VERSION = str(_hermes_cli.__version__)
 except Exception:

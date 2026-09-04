@@ -23,8 +23,8 @@ def resolve_profile(rid, params, err_fn) -> Tuple[Optional[Any], Optional[dict]]
     profile = str(params.get("profile") or "").strip()
     if not profile:
         return None, None
-    from hermes_cli.profiles import get_profile_dir
-    from hermes_constants import set_hermes_home_override
+    from korra_cli.profiles import get_profile_dir
+    from korra_constants import set_hermes_home_override
 
     profile_dir = get_profile_dir(profile)
     if not profile_dir or not profile_dir.is_dir():
@@ -35,7 +35,7 @@ def resolve_profile(rid, params, err_fn) -> Tuple[Optional[Any], Optional[dict]]
 def reset_profile(token) -> None:
     if token is not None:
         try:
-            from hermes_constants import reset_hermes_home_override
+            from korra_constants import reset_hermes_home_override
 
             reset_hermes_home_override(token)
         except Exception:
@@ -49,7 +49,7 @@ def summarize_server(name: str, cfg: dict) -> Dict[str, Any]:
     flag so a UI can tell an OAuth server that still needs authentication from
     one already authenticated.
     """
-    from hermes_cli.mcp_config import _oauth_tokens_present
+    from korra_cli.mcp_config import _oauth_tokens_present
 
     cfg = cfg if isinstance(cfg, dict) else {}
     transport = "http" if cfg.get("url") else ("stdio" if cfg.get("command") else "unknown")

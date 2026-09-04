@@ -35,7 +35,7 @@ import os
 import threading
 import time
 from typing import Any, Callable, Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 
 def synth_turn_armed() -> bool:

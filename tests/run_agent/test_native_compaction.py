@@ -443,7 +443,7 @@ class TestAgentInitConfig:
         assert agent.codex_responses_compact_threshold is None
 
     def test_public_config_default_selects_automatic_threshold(self):
-        from hermes_cli.config import DEFAULT_CONFIG
+        from korra_cli.config import DEFAULT_CONFIG
 
         assert (
             DEFAULT_CONFIG["compression"]["codex_responses_compact_threshold"] is None

@@ -118,7 +118,7 @@ def test_pet_fragments_render_half_blocks(boba_like):
 
 
 def test_pet_resolve_config_enables_and_disables(boba_like):
-    from hermes_cli.config import load_config, save_config
+    from korra_cli.config import load_config, save_config
 
     cli_obj = _make_cli()
 
@@ -184,7 +184,7 @@ def test_pet_fragments_render_kitty_placeholders(boba_like):
 
 
 def test_pet_off_clears_pending_kitty_frame(boba_like):
-    from hermes_cli.config import load_config, save_config
+    from korra_cli.config import load_config, save_config
 
     cli_obj = _make_cli()
     cli_obj._pet_kitty_pending = "stale-apc"
@@ -202,7 +202,7 @@ def test_pet_off_clears_pending_kitty_frame(boba_like):
 
 
 def test_pet_resolve_wezterm_stays_unicode(boba_like, monkeypatch):
-    from hermes_cli.config import load_config, save_config
+    from korra_cli.config import load_config, save_config
 
     monkeypatch.delenv("KITTY_WINDOW_ID", raising=False)
     monkeypatch.setenv("TERM", "xterm-256color")
@@ -221,7 +221,7 @@ def test_pet_resolve_wezterm_stays_unicode(boba_like, monkeypatch):
 
 
 def test_pet_resolve_ghostty_uses_kitty(boba_like, monkeypatch):
-    from hermes_cli.config import load_config, save_config
+    from korra_cli.config import load_config, save_config
 
     monkeypatch.delenv("WEZTERM_PANE", raising=False)
     monkeypatch.delenv("KITTY_WINDOW_ID", raising=False)

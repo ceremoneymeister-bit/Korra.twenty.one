@@ -35,7 +35,7 @@ def _looks_like_ollama_endpoint(base_url: str | None) -> bool:
     # ("http://host:99999/v1" parses fine in the OpenAI client, so the URL
     # is reachable here). Treat a malformed port as "not Ollama" instead of
     # killing the whole kwargs build — same try/except shape the 11434
-    # check in hermes_cli/models.py uses, not the same detection logic.
+    # check in korra_cli/models.py uses, not the same detection logic.
     try:
         if parsed.port == 11434:
             return True

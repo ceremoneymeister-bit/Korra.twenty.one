@@ -86,7 +86,7 @@ def _run_main(mod, tokens_dir, argv, responses):
     with patch.object(mod.os, "environ", dict(mod.os.environ, HERMES_HOME=str(tokens_dir.parent))), \
          patch.object(mod.urllib.request, "urlopen", side_effect=fake_urlopen), \
          patch.object(sys, "argv", ["diagnose-oauth-mcp.py", *argv]):
-        # Force the env-var fallback path (ignore any importable hermes_constants).
+        # Force the env-var fallback path (ignore any importable korra_constants).
         with patch.object(mod, "_hermes_home", lambda: str(tokens_dir.parent)):
             buf = io.StringIO()
             from contextlib import redirect_stdout

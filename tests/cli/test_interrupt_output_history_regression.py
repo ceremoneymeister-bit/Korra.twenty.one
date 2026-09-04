@@ -54,7 +54,7 @@ class TestRecoverTerminalPreservesHistory:
         cli = object.__new__(HermesCLI)
         cli._force_full_redraw = MagicMock()
 
-        with patch("hermes_cli.curses_ui.flush_stdin"):
+        with patch("korra_cli.curses_ui.flush_stdin"):
             cli._recover_terminal_after_interrupt()
 
         assert list(cli_mod._OUTPUT_HISTORY) == ["normal response text"], (
@@ -66,7 +66,7 @@ class TestRecoverTerminalPreservesHistory:
         cli = object.__new__(HermesCLI)
         cli._force_full_redraw = MagicMock()
 
-        with patch("hermes_cli.curses_ui.flush_stdin"):
+        with patch("korra_cli.curses_ui.flush_stdin"):
             cli._recover_terminal_after_interrupt()
 
         cli._force_full_redraw.assert_called_once()
@@ -80,7 +80,7 @@ class TestRecoverTerminalPreservesHistory:
         cli = object.__new__(HermesCLI)
         cli._force_full_redraw = MagicMock()
 
-        with patch("hermes_cli.curses_ui.flush_stdin"):
+        with patch("korra_cli.curses_ui.flush_stdin"):
             cli._recover_terminal_after_interrupt()
 
         assert len(cli_mod._OUTPUT_HISTORY) == 5

@@ -52,10 +52,10 @@ from urllib.request import url2pathname
 from agent.message_content import flatten_message_text
 from agent.memory_provider import MemoryProvider
 from agent.skill_commands import extract_user_instruction_from_skill_message
-from hermes_cli import __version__ as _HERMES_VERSION
+from korra_cli import __version__ as _HERMES_VERSION
 from tools.registry import tool_error
 from utils import atomic_json_write, env_var_enabled
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 try:
     import fcntl
@@ -1137,7 +1137,7 @@ def _is_local_openviking_url(value: str) -> bool:
 
 def _load_hermes_openviking_config() -> dict:
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
 
         config = load_config_readonly()
         memory_config = config.get("memory", {}) if isinstance(config, dict) else {}
@@ -1489,7 +1489,7 @@ def _local_openviking_bind(endpoint: str) -> tuple[str, int]:
 
 def _openviking_server_log_path() -> Path:
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         home = get_hermes_home()
     except Exception:
         home = Path(korra_env("KORRA_HOME", "")).expanduser() if korra_env("KORRA_HOME") else Path.home() / ".hermes"
@@ -2478,7 +2478,7 @@ class OpenVikingMemoryProvider(MemoryProvider):
         if endpoint:
             normalized["endpoint"] = _normalize_openviking_url(endpoint)
 
-        from hermes_cli.config import load_config, save_config
+        from korra_cli.config import load_config, save_config
 
         config = load_config()
         memory_config = config.get("memory")
@@ -2529,8 +2529,8 @@ class OpenVikingMemoryProvider(MemoryProvider):
 
     def post_setup(self, hermes_home: str, config: dict) -> None:
         """Custom setup that can reuse OpenViking's shared CLI config."""
-        from hermes_cli.config import save_config
-        from hermes_cli.memory_setup import _CANCELLED, _curses_select, _print_cancelled_setup, _prompt
+        from korra_cli.config import save_config
+        from korra_cli.memory_setup import _CANCELLED, _curses_select, _print_cancelled_setup, _prompt
 
         hermes_home_path = Path(hermes_home)
         env_path = hermes_home_path / ".env"
@@ -2793,7 +2793,7 @@ class OpenVikingMemoryProvider(MemoryProvider):
         hermes_home = str(kwargs.get("hermes_home") or "").strip()
         if not hermes_home:
             try:
-                from hermes_constants import get_hermes_home
+                from korra_constants import get_hermes_home
                 hermes_home = str(get_hermes_home())
             except Exception:
                 hermes_home = str(Path.home() / ".hermes")

@@ -107,7 +107,7 @@ def test_install_id_persists_across_calls(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     (tmp_path / "config.yaml").write_text("{}\n")
 
-    import hermes_cli.config as cfg_mod
+    import korra_cli.config as cfg_mod
     from agent.monitoring.policy import ensure_install_id
 
     first = ensure_install_id(cfg_mod.load_config())

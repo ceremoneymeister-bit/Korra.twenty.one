@@ -16,8 +16,8 @@ import sqlite3
 import pytest
 from fastapi import HTTPException
 
-from hermes_cli import web_server
-from hermes_cli.web_routers import sessions as sessions_router
+from korra_cli import web_server
+from korra_cli.web_routers import sessions as sessions_router
 
 
 class _MalformedDB:
@@ -99,7 +99,7 @@ async def test_delete_does_not_claim_success_on_a_corrupt_store(malformed_db):
 
 @pytest.mark.asyncio
 async def test_rename_endpoint_reports_corruption(malformed_db):
-    from hermes_cli.web_models import SessionRename
+    from korra_cli.web_models import SessionRename
 
     with pytest.raises(HTTPException) as excinfo:
         await sessions_router.rename_session_endpoint(

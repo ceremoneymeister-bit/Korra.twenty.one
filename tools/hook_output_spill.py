@@ -82,7 +82,7 @@ def get_spill_config() -> Dict[str, Any]:
     """Return resolved hook output-spill config. Never raises."""
     section: Dict[str, Any] = {}
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
         cfg = load_config() or {}
         hooks = cfg.get("hooks") if isinstance(cfg, dict) else None
         if isinstance(hooks, dict):
@@ -117,7 +117,7 @@ def _resolve_spill_dir(directory_override: Optional[str], session_id: Optional[s
     if directory_override:
         base = Path(os.path.expanduser(directory_override))
     else:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
 
         base = Path(get_hermes_home()) / "hook_outputs"
 

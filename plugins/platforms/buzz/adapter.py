@@ -114,7 +114,7 @@ def _unscoped_profile_secrets() -> Dict[str, str]:
     if _UNSCOPED_PROFILE_SECRETS is None:
         try:
             from agent.secret_scope import build_profile_secret_scope
-            from hermes_constants import get_hermes_home
+            from korra_constants import get_hermes_home
 
             _UNSCOPED_PROFILE_SECRETS = dict(
                 build_profile_secret_scope(get_hermes_home())
@@ -2020,7 +2020,7 @@ class BuzzAdapter(BasePlatformAdapter):
 
     @staticmethod
     def _cursor_path() -> Path:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
 
         return get_hermes_home() / _CURSOR_STATE_SUBDIR / _CURSOR_STATE_FILENAME
 
@@ -3039,8 +3039,8 @@ def _profile_buzz_extra() -> dict:
     if not _profile_scoped():
         return {}
     try:
-        from hermes_constants import get_hermes_home
-        from hermes_cli.config import read_user_config_raw
+        from korra_constants import get_hermes_home
+        from korra_cli.config import read_user_config_raw
 
         cfg = read_user_config_raw(Path(get_hermes_home()) / "config.yaml")
     except Exception:
@@ -3290,10 +3290,10 @@ async def _standalone_send(
 def interactive_setup() -> None:
     """Interactive ``hermes gateway setup`` flow for the Buzz platform.
 
-    Lazy-imports ``hermes_cli.setup`` helpers so the plugin stays importable
+    Lazy-imports ``korra_cli.setup`` helpers so the plugin stays importable
     in non-CLI contexts (gateway runtime, tests).
     """
-    from hermes_cli.setup import (
+    from korra_cli.setup import (
         prompt,
         prompt_yes_no,
         save_env_value,

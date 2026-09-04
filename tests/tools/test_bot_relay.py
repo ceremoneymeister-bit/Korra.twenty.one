@@ -514,7 +514,7 @@ def test_ttl_config_read_is_lazy_and_defensive(monkeypatch):
     real_import = builtins.__import__
 
     def _boom(name, *a, **k):
-        if name.startswith("hermes_cli"):
+        if name.startswith("korra_cli"):
             raise ImportError("config unavailable")
         return real_import(name, *a, **k)
 

@@ -14,7 +14,7 @@ the same sequence, the desktop build stage is never reached, and the pre-build
 clean has already removed `apps/desktop/release` -- leaving an install whose
 Start Menu shortcut points at a `Hermes.exe` that no longer exists.
 
-Driving the update as `python.exe -m hermes_cli.main update` puts the inherited
+Driving the update as `python.exe -m korra_cli.main update` puts the inherited
 image handle on `python.exe`, which uv never has to replace, so the shim is an
 ordinary unlocked file when uv rewrites it.
 
@@ -83,17 +83,17 @@ def test_invoke_hermes_step_calls_drive_python_not_the_shim() -> None:
 def test_update_invocation_uses_module_entrypoint() -> None:
     source = _read()
 
-    assert '@("-m", "hermes_cli.main", "update"' in source, (
-        "The update step must invoke `python.exe -m hermes_cli.main update ...` "
+    assert '@("-m", "korra_cli.main", "update"' in source, (
+        "The update step must invoke `python.exe -m korra_cli.main update ...` "
         "so the inherited image handle lands on python.exe, which uv never has "
         "to replace."
     )
     assert (
-        '@("-m", "hermes_cli.main", "desktop", "--force-build", "--build-only")'
+        '@("-m", "korra_cli.main", "desktop", "--force-build", "--build-only")'
         in source
     ), (
         "The desktop rebuild step must also go through "
-        "`python.exe -m hermes_cli.main desktop ...` for the same reason."
+        "`python.exe -m korra_cli.main desktop ...` for the same reason."
     )
 
 

@@ -19,7 +19,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.api_server import APIServerAdapter
 from gateway.run import _INTERRUPT_REASON_GATEWAY_SHUTDOWN
-from hermes_state import SessionDB
+from korra_state import SessionDB
 from tests.gateway.restart_test_helpers import make_restart_runner
 
 # Safety net so a regression parks the executor thread forever instead of

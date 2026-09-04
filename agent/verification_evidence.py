@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 
 
 _DB_LOCK = threading.Lock()
@@ -65,7 +65,7 @@ def _db_path() -> Path:
 
 
 def _connect() -> sqlite3.Connection:
-    from hermes_state import apply_wal_with_fallback
+    from korra_state import apply_wal_with_fallback
 
     path = _db_path()
     path.parent.mkdir(parents=True, exist_ok=True)

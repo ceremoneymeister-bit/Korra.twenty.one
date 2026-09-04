@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from hermes_constants import display_hermes_home
+from korra_constants import display_hermes_home
 
 logger = logging.getLogger(__name__)
 
@@ -562,7 +562,7 @@ def _validate_bot_chat_deliver(deliver: Optional[str]) -> Optional[str]:
         return None
     try:
         from cron.scheduler import parse_bot_chat_deliver_token
-        from hermes_cli.profiles import normalize_profile_name, profile_exists
+        from korra_cli.profiles import normalize_profile_name, profile_exists
     except Exception:
         return None  # validation is best-effort; resolution re-checks at fire time
     for part in str(deliver).split(","):
@@ -658,12 +658,12 @@ def _validate_cron_base_url(
             "configured custom provider to use a custom endpoint."
         )
     try:
-        from hermes_cli.runtime_provider import (
+        from korra_cli.runtime_provider import (
             has_named_custom_provider,
             resolve_requested_provider,
             _get_named_custom_provider,
         )
-        from hermes_cli.auth import PROVIDER_REGISTRY
+        from korra_cli.auth import PROVIDER_REGISTRY
         from utils import base_url_host_matches, base_url_hostname
     except Exception:
         # Can't resolve provider metadata -> fail closed.
@@ -722,7 +722,7 @@ def _validate_cron_script_path(script: Optional[str]) -> Optional[str]:
     if not script or not script.strip():
         return None  # empty/None = clearing the field, always OK
 
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     raw = script.strip()
 
@@ -858,7 +858,7 @@ def _forward_relay_fronted_run(
     # (0.0.0.0/::) listens on loopback too, so dial loopback for those.
     host = ""
     try:
-        from hermes_cli.config import cfg_get, load_config_readonly
+        from korra_cli.config import cfg_get, load_config_readonly
 
         host = str(
             cfg_get(
@@ -1427,7 +1427,7 @@ def _apply_continuity(
 def _gateway_liveness_notice(plural: bool = False) -> dict:
     """Build the ``gateway_running``/``warning`` payload for tool results.
 
-    Thin adapter over the shared CLI helper ``hermes_cli.cron._builtin_gateway_liveness``
+    Thin adapter over the shared CLI helper ``korra_cli.cron._builtin_gateway_liveness``
     (#87033) so the CLI and this tool can never disagree about what "scheduler
     active" means. Returns ``{"gateway_running": False, "warning": ...}`` when
     the builtin ticker has no gateway process to run it, ``{"gateway_running":
@@ -1436,7 +1436,7 @@ def _gateway_liveness_notice(plural: bool = False) -> dict:
     (the ``list`` action).
     """
     try:
-        from hermes_cli.cron import _builtin_gateway_liveness
+        from korra_cli.cron import _builtin_gateway_liveness
 
         _gw = _builtin_gateway_liveness()
     except Exception:

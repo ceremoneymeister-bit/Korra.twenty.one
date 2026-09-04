@@ -10,7 +10,7 @@ this gate covers the locked-reader subset).
 pool, no lock, with a byte-identical fallback to the locked writer when
 WAL is off. Reads have no reason to hold the writer lock.
 
-The gate parses ``hermes_state.py`` with ``ast`` and flags any method
+The gate parses ``korra_state.py`` with ``ast`` and flags any method
 that (a) opens ``with self._lock:`` and (b) runs ONLY read statements
 (SELECT/PRAGMA-read) on ``self._conn`` inside it — i.e. a pure reader
 convoying on the writer lock. Methods that write under the lock are the
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-_STATE_PY = Path(__file__).resolve().parents[2] / "hermes_state.py"
+_STATE_PY = Path(__file__).resolve().parents[2] / "korra_state.py"
 
 _WRITE_RE = re.compile(
     r"^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|VACUUM|BEGIN|COMMIT|ANALYZE)\b",

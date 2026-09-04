@@ -20,7 +20,7 @@ import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterator, List, Optional, Set
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -3988,7 +3988,7 @@ class TelegramAdapter(BasePlatformAdapter):
     ) -> None:
         """Save a newly created thread_id back into config.yaml so it persists across restarts."""
         try:
-            from hermes_constants import get_hermes_home
+            from korra_constants import get_hermes_home
             config_path = get_hermes_home() / "config.yaml"
             if not config_path.exists():
                 logger.warning("[%s] Config file not found at %s, cannot persist thread_id", self.name, config_path)
@@ -4038,7 +4038,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 changed = True
 
             if changed:
-                from hermes_cli.config import atomic_config_write
+                from korra_cli.config import atomic_config_write
 
                 atomic_config_write(
                     config_path,
@@ -4189,7 +4189,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     BotCommandScopeAllGroupChats,
                     BotCommandScopeDefault,
                 )
-                from hermes_cli.commands import telegram_menu_commands, telegram_menu_max_commands
+                from korra_cli.commands import telegram_menu_commands, telegram_menu_max_commands
                 if not self._bot:
                     return
                 # Telegram allows up to 100 commands but has an undocumented
@@ -4265,7 +4265,7 @@ class TelegramAdapter(BasePlatformAdapter):
         if handler is None:
             return
         try:
-            from hermes_cli.lifecycle import has_hook
+            from korra_cli.lifecycle import has_hook
 
             if not has_hook("gateway_platform_event"):
                 return
@@ -6660,7 +6660,7 @@ class TelegramAdapter(BasePlatformAdapter):
             return SendResult(success=False, error="Not connected")
 
         try:
-            from hermes_cli.providers import get_label
+            from korra_cli.providers import get_label
         except ImportError:
             def get_label(slug):
                 return slug
@@ -6849,7 +6849,7 @@ class TelegramAdapter(BasePlatformAdapter):
         so all surfaces stay consistent.
         """
         try:
-            from hermes_cli.models import group_providers
+            from korra_cli.models import group_providers
         except Exception:
             group_providers = None
 
@@ -6953,7 +6953,7 @@ class TelegramAdapter(BasePlatformAdapter):
             return
 
         try:
-            from hermes_cli.providers import get_label
+            from korra_cli.providers import get_label
         except ImportError:
             def get_label(slug):
                 return slug
@@ -7134,7 +7134,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 return
 
             try:
-                from hermes_cli.model_selection_guards import combined_selection_warning
+                from korra_cli.model_selection_guards import combined_selection_warning
 
                 # Pricing lookup can hit models.dev / a /models endpoint on a
                 # cache miss — keep it off the event loop.
@@ -7199,7 +7199,7 @@ class TelegramAdapter(BasePlatformAdapter):
             # --- Provider group selected: show member providers ---
             group_id = data[4:]
             try:
-                from hermes_cli.models import PROVIDER_GROUPS
+                from korra_cli.models import PROVIDER_GROUPS
                 _label, _desc, member_slugs = PROVIDER_GROUPS.get(group_id, ("", "", []))
             except Exception:
                 _label, member_slugs = "", []
@@ -7759,7 +7759,7 @@ class TelegramAdapter(BasePlatformAdapter):
             pass  # non-fatal if edit fails
         # Write the response file
         try:
-            from hermes_constants import get_hermes_home
+            from korra_constants import get_hermes_home
             home = get_hermes_home()
             response_path = home / ".update_response"
             tmp = response_path.with_suffix(".tmp")
@@ -9887,7 +9887,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 if chat_id in self._forum_command_registered:
                     return
                 from telegram import BotCommand, BotCommandScopeChat
-                from hermes_cli.commands import telegram_menu_commands, telegram_menu_max_commands
+                from korra_cli.commands import telegram_menu_commands, telegram_menu_max_commands
                 menu_commands, _ = telegram_menu_commands(max_commands=telegram_menu_max_commands())
                 bot_commands = [BotCommand(name, desc) for name, desc in menu_commands]
                 await self._bot.set_my_commands(bot_commands, scope=BotCommandScopeChat(chat_id=chat_id))
@@ -10620,7 +10620,7 @@ class TelegramAdapter(BasePlatformAdapter):
         try:
             # Canonical loader: behavioral read (dm_topics routing) now honors
             # managed-scope overlay + ${VAR} expansion like every other read.
-            from hermes_cli.config import load_config_readonly
+            from korra_cli.config import load_config_readonly
             config = load_config_readonly()
 
             dm_topics = (
@@ -11036,7 +11036,7 @@ class TelegramAdapter(BasePlatformAdapter):
 # replace the per-platform core touchpoints (the Platform.TELEGRAM branch in
 # gateway/run.py, the telegram_cfg YAML→env/extra block in gateway/config.py,
 # the _setup_telegram wizard + _PLATFORMS["telegram"] static dict in
-# hermes_cli/{setup,gateway}.py, and the _send_telegram dispatch in
+# korra_cli/{setup,gateway}.py, and the _send_telegram dispatch in
 # tools/send_message_tool.py).  Telegram uses the generic token connected
 # check, so no is_connected override is needed.
 # ──────────────────────────────────────────────────────────────────────────
@@ -11091,7 +11091,7 @@ def _is_connected(config) -> bool:
     """
     token = getattr(config, "token", None)
     if not token:
-        import hermes_cli.gateway as gateway_mod
+        import korra_cli.gateway as gateway_mod
         token = gateway_mod.get_env_value("TELEGRAM_BOT_TOKEN") or ""
     return bool(str(token).strip())
 
@@ -11139,9 +11139,9 @@ def interactive_setup() -> None:
     Delegates to the existing CLI setup helpers (managed-bot QR onboarding,
     token validation, allowlist capture) via lazy import so the full wizard
     behavior is preserved without duplicating ~150 lines. Replaces the
-    _PLATFORMS["telegram"] static dict dispatch in hermes_cli/gateway.py.
+    _PLATFORMS["telegram"] static dict dispatch in korra_cli/gateway.py.
     """
-    from hermes_cli import setup as _setup_mod
+    from korra_cli import setup as _setup_mod
     _setup_mod._setup_telegram()
 
 

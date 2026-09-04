@@ -1,10 +1,10 @@
 """Resolve HERMES_HOME for standalone skill scripts.
 
 Skill scripts may run outside the Hermes process (system Python, nix env,
-CI) where ``hermes_constants`` is not importable.  This module provides the
+CI) where ``korra_constants`` is not importable.  This module provides the
 same ``get_hermes_home()`` contract without requiring it on ``sys.path``.
 
-When ``hermes_constants`` IS available it is used directly so profile
+When ``korra_constants`` IS available it is used directly so profile
 resolution and any future enhancements are picked up automatically.
 """
 
@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 
 try:
-    from hermes_constants import get_hermes_home as get_hermes_home
+    from korra_constants import get_hermes_home as get_hermes_home
 except (ModuleNotFoundError, ImportError):
 
     def get_hermes_home() -> Path:

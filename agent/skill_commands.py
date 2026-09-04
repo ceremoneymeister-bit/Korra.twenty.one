@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hermes_constants import display_hermes_home, korra_env
+from korra_constants import display_hermes_home, korra_env
 from agent.prompt_cache_boundary import register_stable_prefix
 from agent.skill_preprocessing import (
     expand_inline_shell as _expand_inline_shell,
@@ -223,7 +223,7 @@ def _resolve_skill_commands_home() -> str:
     skill list cached, so ``get_skill_commands()`` reported a cache miss for
     skills that only exist under the new profile (#88023).
     """
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     return str(get_hermes_home())
 
@@ -447,7 +447,7 @@ def scan_skill_commands() -> Dict[str, Dict[str, Any]]:
             iter_project_skill_files,
             iter_skill_index_files,
         )
-        from hermes_cli.commands import resolve_command
+        from korra_cli.commands import resolve_command
         disabled = _get_disabled_skill_names()
         seen_names: set = set()
 

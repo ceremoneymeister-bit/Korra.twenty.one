@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from hermes_cli.config import DEFAULT_CONFIG
+from korra_cli.config import DEFAULT_CONFIG
 from tools import browser_camofox, browser_tool
 
 

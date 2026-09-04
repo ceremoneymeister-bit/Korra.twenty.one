@@ -11,7 +11,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 
 _MAX_CHANGED_PATHS_IN_NUDGE = 8
@@ -112,7 +112,7 @@ def verify_on_stop_enabled(config: dict[str, Any] | None = None) -> bool:
         return env.strip().lower() not in {"0", "false", "no", "off"}
     if config is None:
         try:
-            from hermes_cli.config import load_config_readonly
+            from korra_cli.config import load_config_readonly
 
             config = load_config_readonly()
         except Exception:

@@ -37,7 +37,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 # Match ``https://meet.google.com/abc-defg-hij`` or ``.../lookup/...`` — the
 # short three-segment code or a lookup URL. Anything else is rejected.

@@ -94,7 +94,7 @@ def _unlocked_conn_calls(tree: ast.AST):
 
 
 def test_every_conn_call_outside_construction_holds_the_lock():
-    src = (_repo_root() / "hermes_state.py").read_text(encoding="utf-8")
+    src = (_repo_root() / "korra_state.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     offending = _unlocked_conn_calls(tree)
     assert not offending, (

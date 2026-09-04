@@ -311,14 +311,14 @@ class TestGptQualityPinnedToMedium:
 class TestModelResolution:
 
     def test_no_config_falls_back_to_default(self, image_tool):
-        with patch("hermes_cli.config.load_config", return_value={}):
+        with patch("korra_cli.config.load_config", return_value={}):
             mid, meta = image_tool._resolve_fal_model()
         assert mid == "fal-ai/flux-2/klein/9b"
 
 
     def test_config_wins_over_env_var(self, image_tool, monkeypatch):
         monkeypatch.setenv("FAL_IMAGE_MODEL", "fal-ai/z-image/turbo")
-        with patch("hermes_cli.config.load_config",
+        with patch("korra_cli.config.load_config",
                    return_value={"image_gen": {"model": "fal-ai/nano-banana-pro"}}):
             mid, _ = image_tool._resolve_fal_model()
         assert mid == "fal-ai/nano-banana-pro"
@@ -506,7 +506,7 @@ class TestManagedKreaRouting:
             "agent.image_gen_registry.get_provider", lambda name: fake_provider
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins._ensure_plugins_discovered", lambda *a, **k: None
+            "korra_cli.plugins._ensure_plugins_discovered", lambda *a, **k: None
         )
 
         out = image_tool._maybe_route_managed_krea("a cat", "portrait")
@@ -626,7 +626,7 @@ class TestUpscaleDispatchForwarding:
             "agent.image_gen_registry.get_provider", lambda name: fake_provider
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins._ensure_plugins_discovered", lambda *a, **k: None
+            "korra_cli.plugins._ensure_plugins_discovered", lambda *a, **k: None
         )
 
         out = image_tool._dispatch_to_plugin_provider("a cat", "square", upscale=True)
@@ -644,7 +644,7 @@ class TestUpscaleDispatchForwarding:
             "agent.image_gen_registry.get_provider", lambda name: fake_provider
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins._ensure_plugins_discovered", lambda *a, **k: None
+            "korra_cli.plugins._ensure_plugins_discovered", lambda *a, **k: None
         )
 
         image_tool._dispatch_to_plugin_provider("a cat", "square")

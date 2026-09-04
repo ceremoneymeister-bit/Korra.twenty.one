@@ -159,7 +159,7 @@ class TestDetectAudioEnvironment:
         monkeypatch.delenv("SSH_CLIENT", raising=False)
         monkeypatch.delenv("SSH_TTY", raising=False)
         monkeypatch.delenv("SSH_CONNECTION", raising=False)
-        monkeypatch.setattr("hermes_constants.is_container", lambda: False)
+        monkeypatch.setattr("korra_constants.is_container", lambda: False)
         monkeypatch.setattr("tools.voice_mode._import_audio",
                             lambda: (MagicMock(), MagicMock()))
         monkeypatch.setattr("builtins.open", _non_wsl_proc_version(open))
@@ -232,7 +232,7 @@ class TestDetectAudioEnvironment:
         monkeypatch.delenv("SSH_CONNECTION", raising=False)
         monkeypatch.delenv("PULSE_SERVER", raising=False)
         monkeypatch.setenv("PIPEWIRE_REMOTE", "/run/user/1000/pipewire-0")
-        monkeypatch.setattr("hermes_constants.is_container", lambda: True)
+        monkeypatch.setattr("korra_constants.is_container", lambda: True)
 
         sd = MagicMock()
         sd.query_devices.return_value = []
@@ -253,7 +253,7 @@ class TestDetectAudioEnvironment:
         monkeypatch.delenv("PULSE_SERVER", raising=False)
         monkeypatch.delenv("PIPEWIRE_REMOTE", raising=False)
         monkeypatch.setattr("tools.voice_mode._pulse_socket_reachable", lambda: False)
-        monkeypatch.setattr("hermes_constants.is_container", lambda: True)
+        monkeypatch.setattr("korra_constants.is_container", lambda: True)
         monkeypatch.setattr("tools.voice_mode._import_audio",
                             lambda: (MagicMock(), MagicMock()))
 
@@ -300,7 +300,7 @@ class TestCheckVoiceRequirements:
             lambda p: plugin_provider if p == "my-plugin-stt" else None,
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins._ensure_plugins_discovered",
+            "korra_cli.plugins._ensure_plugins_discovered",
             lambda force=False: None,
         )
 
@@ -1331,11 +1331,11 @@ class TestGetBeepVolume:
         ({"voice": {"beep_volume": True}}, 0.3),           # bool is not a volume
     ])
     def test_config_value_resolution(self, config, expected):
-        with patch("hermes_cli.config.load_config", return_value=config):
+        with patch("korra_cli.config.load_config", return_value=config):
             assert self._get() == expected
 
     def test_load_config_exception_falls_back(self):
-        with patch("hermes_cli.config.load_config",
+        with patch("korra_cli.config.load_config",
                    side_effect=RuntimeError("broken config")):
             assert self._get() == 0.3
 
@@ -1545,7 +1545,7 @@ class TestWSLAudioEnvironmentGate:
         with patch("builtins.open", side_effect=self._fake_open_wsl), \
              patch("tools.voice_mode._wsl_powershell_tts_available", return_value=True), \
              patch("tools.voice_mode._pulse_socket_reachable", return_value=False), \
-             patch("hermes_constants.is_container", return_value=False):
+             patch("korra_constants.is_container", return_value=False):
             result = vm.detect_audio_environment()
 
         assert result["available"] is True, (
@@ -1572,7 +1572,7 @@ class TestWSLAudioEnvironmentGate:
         with patch("builtins.open", side_effect=self._fake_open_wsl), \
              patch("tools.voice_mode._wsl_powershell_tts_available", return_value=False), \
              patch("tools.voice_mode._pulse_socket_reachable", return_value=False), \
-             patch("hermes_constants.is_container", return_value=False):
+             patch("korra_constants.is_container", return_value=False):
             result = vm.detect_audio_environment()
 
         assert result["available"] is False, (
@@ -1591,7 +1591,7 @@ class TestWSLAudioEnvironmentGate:
         monkeypatch.setattr("tools.voice_mode._import_audio",
                             lambda: (MagicMock(), MagicMock()))
         with patch("builtins.open", side_effect=self._fake_open_wsl), \
-             patch("hermes_constants.is_container", return_value=False):
+             patch("korra_constants.is_container", return_value=False):
             result = vm.detect_audio_environment()
 
         assert result["available"] is True

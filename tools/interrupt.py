@@ -16,7 +16,7 @@ Usage in tools:
 
 import logging
 import threading
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 

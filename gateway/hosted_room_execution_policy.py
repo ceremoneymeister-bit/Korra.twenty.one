@@ -128,8 +128,8 @@ def execution_policy_mapping(
     if not isinstance(config, Mapping):
         raise RoomExecutionPolicyError("gateway config is invalid")
 
-    from hermes_cli.config import resolve_turn_limit
-    from hermes_cli.tools_config import _get_platform_tools
+    from korra_cli.config import resolve_turn_limit
+    from korra_cli.tools_config import _get_platform_tools
     from tools.approval import _YOLO_MODE_FROZEN, _normalize_approval_mode
 
     toolsets = sorted({*_get_platform_tools(dict(config), "api_server"), "bot_room"})

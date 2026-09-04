@@ -114,7 +114,7 @@ E164_RE = re.compile(r"^\+[1-9]\d{6,14}$")
 def _auth_json_path() -> Path:
     """Resolve ``~/.hermes/auth.json`` honouring the active Hermes profile."""
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         return Path(get_hermes_home()) / "auth.json"
     except Exception:
         return Path(os.path.expanduser("~/.hermes")) / "auth.json"
@@ -142,7 +142,7 @@ def _save_auth(data: Dict[str, Any]) -> None:
     # open() → write → chmod() sequence left a window where the bearer
     # token sat world-readable at process umask (typically 0o644), and the
     # predictable temp name could be pre-planted (symlink attack). Mirrors
-    # hermes_cli/auth.py:_save_auth_store (#19673, #21148).
+    # korra_cli/auth.py:_save_auth_store (#19673, #21148).
     fd = os.open(
         str(tmp),
         os.O_WRONLY | os.O_CREAT | os.O_EXCL,
@@ -194,7 +194,7 @@ def load_photon_token() -> Optional[str]:
 
 def store_photon_token(token: str) -> None:
     """Persist a dashboard bearer token under ``credential_pool.photon``."""
-    from hermes_cli.auth import _auth_store_lock
+    from korra_cli.auth import _auth_store_lock
 
     with _auth_store_lock():
         auth = _load_auth()
@@ -308,7 +308,7 @@ def store_project_credentials(
     ``auth.json`` so management commands work even when ``.env`` hasn't been
     loaded into the current process.
     """
-    from hermes_cli.auth import _auth_store_lock
+    from korra_cli.auth import _auth_store_lock
 
     with _auth_store_lock():
         auth = _load_auth()
@@ -336,7 +336,7 @@ def store_user_numbers(
     """Persist non-secret Photon user numbers for offline ``status`` output."""
     if not phone_number and not assigned_phone_number:
         return
-    from hermes_cli.auth import _auth_store_lock
+    from korra_cli.auth import _auth_store_lock
 
     with _auth_store_lock():
         auth = _load_auth()
@@ -361,9 +361,9 @@ def _persist_runtime_env(spectrum_project_id: str, project_secret: str) -> None:
     caller — same CodeQL-clean-flow rationale as the rest of this module.
     """
     try:
-        from hermes_cli.config import save_env_value
+        from korra_cli.config import save_env_value
     except ImportError:
-        logger.warning("photon: hermes_cli.config unavailable — skipping .env write")
+        logger.warning("photon: korra_cli.config unavailable — skipping .env write")
         return
     try:
         save_env_value("PHOTON_PROJECT_ID", spectrum_project_id)
@@ -1033,7 +1033,7 @@ def _configured_operator_phone() -> Optional[str]:
 
 def _get_config_env_value(key: str) -> Optional[str]:
     try:
-        from hermes_cli.config import get_env_value
+        from korra_cli.config import get_env_value
     except Exception:
         return os.getenv(key)
     return get_env_value(key)

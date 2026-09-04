@@ -38,7 +38,7 @@ from tools.registry import (
     tool_error,
 )
 from toolsets import resolve_toolset, validate_toolset
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -238,13 +238,13 @@ discover_builtin_tools()
 #
 # Each entry point now runs discovery explicitly at its own startup:
 #   - gateway/run.py            -> start_gateway() uses run_in_executor
-#   - cli.py, hermes_cli/*      -> inline on startup (no event loop)
+#   - cli.py, korra_cli/*      -> inline on startup (no event loop)
 #   - tui_gateway/server.py     -> inline on startup (no event loop)
 #   - acp_adapter/server.py     -> asyncio.to_thread on session init
 
 # Plugin tool discovery (user/project/pip plugins)
 try:
-    from hermes_cli.plugins import discover_plugins
+    from korra_cli.plugins import discover_plugins
     discover_plugins()
 except Exception as e:
     logger.debug("Plugin discovery failed: %s", e)
@@ -355,7 +355,7 @@ def get_tool_definitions(
     cache_key = None
     if quiet_mode:
         try:
-            from hermes_cli.config import get_config_path
+            from korra_cli.config import get_config_path
             cfg_path = get_config_path()
             cfg_stat = cfg_path.stat()
             cfg_fp = (cfg_stat.st_mtime_ns, cfg_stat.st_size)
@@ -707,14 +707,14 @@ def _resolve_active_context_length() -> int:
     back to a fixed token cutoff in that case.
     """
     try:
-        from hermes_cli.config import load_config as _load
+        from korra_cli.config import load_config as _load
         cfg = _load() or {}
         model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
         if not isinstance(model_cfg, dict):
             model_cfg = {}
         _raw_model_id = model_cfg.get("model") or model_cfg.get("default") or ""
         if isinstance(_raw_model_id, dict):
-            from hermes_cli.config import split_model_config_default
+            from korra_cli.config import split_model_config_default
             _raw_model_id, _ = split_model_config_default(_raw_model_id)
         model_id = str(_raw_model_id).strip()
         if not model_id:
@@ -738,7 +738,7 @@ def _resolve_active_context_length() -> int:
         api_key = ""
         if provider:
             try:
-                from hermes_cli.runtime_provider import resolve_runtime_provider
+                from korra_cli.runtime_provider import resolve_runtime_provider
                 rt = resolve_runtime_provider(
                     requested=provider, target_model=model_id
                 ) or {}
@@ -1209,7 +1209,7 @@ def _emit_post_tool_call_hook(
     if _post_tool_call_hook_suppressed.get():
         return
     try:
-        from hermes_cli.lifecycle import has_hook, invoke_hook
+        from korra_cli.lifecycle import has_hook, invoke_hook
         if not has_hook("post_tool_call"):
             return
         if status is None:
@@ -1397,7 +1397,7 @@ def handle_function_call(
     _tool_original_args = dict(function_args)
     if not skip_tool_request_middleware:
         try:
-            from hermes_cli.middleware import apply_tool_request_middleware
+            from korra_cli.middleware import apply_tool_request_middleware
 
             _tool_request_mw = apply_tool_request_middleware(
                 function_name,
@@ -1432,7 +1432,7 @@ def handle_function_call(
         if not skip_pre_tool_call_hook:
             block_message: Optional[str] = None
             try:
-                from hermes_cli.plugins import _dispatch_pre_tool_call_hooks
+                from korra_cli.plugins import _dispatch_pre_tool_call_hooks
                 block_message, modified_args = _dispatch_pre_tool_call_hooks(
                     function_name,
                     function_args,
@@ -1560,7 +1560,7 @@ def handle_function_call(
             if skip_tool_execution_middleware:
                 result = _dispatch(function_args)
             else:
-                from hermes_cli.middleware import run_tool_execution_middleware
+                from korra_cli.middleware import run_tool_execution_middleware
 
                 result = run_tool_execution_middleware(
                     function_name,
@@ -1603,7 +1603,7 @@ def handle_function_call(
         # Gated on has_hook so the no-listener path skips both the result
         # field derivation and the payload dispatch.
         try:
-            from hermes_cli.lifecycle import has_hook, invoke_hook
+            from korra_cli.lifecycle import has_hook, invoke_hook
             if has_hook("transform_tool_result"):
                 status, error_type, error_message = _tool_result_observer_fields(
                     function_name,

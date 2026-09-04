@@ -941,7 +941,7 @@ class TestMultiplexProfileWebhookAuthentication:
         runner.config.multiplex_profiles = True
         adapter.gateway_runner = runner
         monkeypatch.setattr(
-            "hermes_cli.profiles.profiles_to_serve",
+            "korra_cli.profiles.profiles_to_serve",
             lambda multiplex, profile_allowlist=None: [
                 ("default", tmp_path),
                 ("worker", tmp_path / "profiles" / "worker"),

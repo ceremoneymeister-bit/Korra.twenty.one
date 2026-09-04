@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from hermes_cli.timeouts import get_provider_request_timeout
+from korra_cli.timeouts import get_provider_request_timeout
 from agent.message_sanitization import (
     _FULL_ARGS_LOG_BOUND,
     coalesce_tool_call_id,
@@ -2186,7 +2186,7 @@ VALID_CACHE_TTLS = ("5m", "1h")
 
 def _raw_cache_ttl_from_config() -> Any:
     """Read the raw ``prompt_caching.cache_ttl`` config value (may raise)."""
-    from hermes_cli.config import load_config_readonly
+    from korra_cli.config import load_config_readonly
 
     pc_cfg = load_config_readonly().get("prompt_caching", {}) or {}
     return pc_cfg.get("cache_ttl", "5m")
@@ -2420,9 +2420,9 @@ def anthropic_prompt_cache_policy(
     # the policy from the preset's real aggregator slot instead.
     if eff_provider.strip().lower() == "moa":
         try:
-            from hermes_cli.config import load_config as _load_moa_cfg
-            from hermes_cli.moa_config import resolve_moa_preset
-            from hermes_cli.runtime_provider import resolve_runtime_provider
+            from korra_cli.config import load_config as _load_moa_cfg
+            from korra_cli.moa_config import resolve_moa_preset
+            from korra_cli.runtime_provider import resolve_runtime_provider
 
             _preset = resolve_moa_preset(
                 _load_moa_cfg().get("moa") or {}, eff_model or None
@@ -2516,8 +2516,8 @@ def anthropic_prompt_cache_policy(
         # custom_provider_aliases (space→hyphen, custom: prefix variants).
         # A raw-string gate here would silently drop declarations whose
         # config spelling differs only in host case / trailing slash.
-        from hermes_cli.providers import custom_provider_aliases
-        from hermes_cli.route_identity import normalize_route_base_url
+        from korra_cli.providers import custom_provider_aliases
+        from korra_cli.route_identity import normalize_route_base_url
 
         _provider_ids = {provider_lower}
         if provider_lower.startswith("custom:"):
@@ -2545,7 +2545,7 @@ def anthropic_prompt_cache_policy(
         # while still recognizing arbitrary config keys and built-in-name
         # overrides that point at a different endpoint.
         try:
-            from hermes_cli.providers import get_provider
+            from korra_cli.providers import get_provider
 
             # allow_network=False: this runs per request destination; a cold
             # models.dev cache must not trigger a foreground registry fetch
@@ -2568,7 +2568,7 @@ def anthropic_prompt_cache_policy(
         is_anthropic_wire or _litellm_openai_wire or _route_may_be_custom
     ):
         try:
-            from hermes_cli.config import get_custom_provider_model_capability
+            from korra_cli.config import get_custom_provider_model_capability
 
             custom_prompt_caching = get_custom_provider_model_capability(
                 model=eff_model,
@@ -2819,7 +2819,7 @@ def create_openai_client(agent, client_kwargs: dict, *, reason: str, shared: boo
     # keys — never override headers a caller deliberately set.
     try:
         if base_url_host_matches(str(client_kwargs.get("base_url", "")), "githubcopilot.com"):
-            from hermes_cli.models import copilot_default_headers
+            from korra_cli.models import copilot_default_headers
             existing = dict(client_kwargs.get("default_headers") or {})
             existing_lower = {k.lower() for k in existing}
             for hk, hv in copilot_default_headers().items():
@@ -2834,7 +2834,7 @@ def create_openai_client(agent, client_kwargs: dict, *, reason: str, shared: boo
     # empty Authorization default_header overrides the SDK's
     # "Bearer <api_key>" so no credential ever reaches the wire.
     if agent.provider == "opencode-free":
-        from hermes_cli.models import opencode_zen_free_headers
+        from korra_cli.models import opencode_zen_free_headers
 
         _existing = dict(client_kwargs.get("default_headers") or {})
         _existing.update(opencode_zen_free_headers())
@@ -2887,7 +2887,7 @@ def _apply_switched_provider_request_overrides(agent, new_provider):
     custom_providers = getattr(agent, "_custom_providers", None)
     if custom_providers is None:
         try:
-            from hermes_cli.config import load_config, get_compatible_custom_providers
+            from korra_cli.config import load_config, get_compatible_custom_providers
             custom_providers = get_compatible_custom_providers(load_config())
         except Exception:
             custom_providers = []
@@ -2928,7 +2928,7 @@ def switch_model(
     change persists across turns (unlike fallback which is
     turn-scoped).
     """
-    from hermes_cli.providers import determine_api_mode
+    from korra_cli.providers import determine_api_mode
     from agent.native_compaction import resolve_native_compaction_capabilities
 
     old_model = agent.model
@@ -2972,7 +2972,7 @@ def switch_model(
     # hit /v1/v1/messages.  `model_switch.switch_model()` already strips
     # this, but we guard here so any direct callers (future code paths,
     # tests) can't reintroduce the double-/v1 404 bug.
-    from hermes_cli.models import opencode_provider_family
+    from korra_cli.models import opencode_provider_family
 
     if (
         api_mode == "anthropic_messages"
@@ -3139,7 +3139,7 @@ def switch_model(
             # the matching block in agent_init.py for the full rationale.
             if new_provider == "minimax-oauth" and isinstance(effective_key, str) and effective_key:
                 try:
-                    from hermes_cli.auth import build_minimax_oauth_token_provider
+                    from korra_cli.auth import build_minimax_oauth_token_provider
                     effective_key = build_minimax_oauth_token_provider()
                 except Exception as _mm_exc:  # noqa: BLE001
                     import logging as _logging
@@ -3167,7 +3167,7 @@ def switch_model(
                 "base_url": effective_base,
             }
             try:
-                from hermes_cli.config import (
+                from korra_cli.config import (
                     apply_custom_provider_tls_to_client_kwargs,
                     get_compatible_custom_providers,
                     load_config_readonly,
@@ -3211,7 +3211,7 @@ def switch_model(
     # ── LM Studio: preload before probing context length ──
     _sm_custom_providers = None
     try:
-        from hermes_cli.config import (
+        from korra_cli.config import (
             get_compatible_custom_providers,
             get_custom_provider_context_length,
             load_config,
@@ -3276,7 +3276,7 @@ def switch_model(
         from agent.model_metadata import get_model_context_length
         if _sm_custom_providers is None:
             try:
-                from hermes_cli.config import get_compatible_custom_providers, load_config
+                from korra_cli.config import get_compatible_custom_providers, load_config
                 _sm_custom_providers = get_compatible_custom_providers(load_config())
             except Exception:
                 _sm_custom_providers = None
@@ -3313,8 +3313,8 @@ def switch_model(
     # resolved through the shared chokepoint (per-model > global; YAML
     # boolean False = disabled).
     try:
-        from hermes_constants import resolve_reasoning_config
-        from hermes_cli.config import load_config as _sm_load_config
+        from korra_constants import resolve_reasoning_config
+        from korra_cli.config import load_config as _sm_load_config
 
         _reasoning_cfg = _sm_load_config() or {}
         agent.reasoning_config = resolve_reasoning_config(_reasoning_cfg, agent.model)
@@ -3451,7 +3451,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
 
     _tool_middleware_trace = list(tool_request_middleware_trace or [])
     try:
-        from hermes_cli.middleware import apply_tool_request_middleware
+        from korra_cli.middleware import apply_tool_request_middleware
 
         if not skip_tool_request_middleware:
             _tool_request_mw = apply_tool_request_middleware(
@@ -3472,7 +3472,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
     block_message: Optional[str] = None
     if not pre_tool_block_checked:
         try:
-            from hermes_cli.plugins import _dispatch_pre_tool_call_hooks
+            from korra_cli.plugins import _dispatch_pre_tool_call_hooks
             block_message, modified_args = _dispatch_pre_tool_call_hooks(
                 function_name, function_args, task_id=effective_task_id or "",
                 session_id=getattr(agent, "session_id", "") or "",
@@ -3544,7 +3544,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
         def _execute(next_args: dict) -> Any:
             session_db = agent._get_session_db_for_recall()
             if not session_db:
-                from hermes_state import format_session_db_unavailable
+                from korra_state import format_session_db_unavailable
                 return _finish_agent_tool(json.dumps({"success": False, "error": format_session_db_unavailable()}), next_args)
             from tools.session_search_tool import session_search as _session_search
             return _finish_agent_tool(
@@ -3729,7 +3729,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
     if skip_tool_execution_middleware:
         return _execute(function_args)
 
-    from hermes_cli.middleware import run_tool_execution_middleware
+    from korra_cli.middleware import run_tool_execution_middleware
 
     return run_tool_execution_middleware(
         function_name,

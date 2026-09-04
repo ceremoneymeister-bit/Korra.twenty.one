@@ -93,7 +93,7 @@ meta_ai = MetaAIProfile(
     # Responses API is the wire that engages Muse prompt caching: measured
     # 0 cached tokens on /v1/chat/completions vs 93-99% cache hits on
     # /v1/responses with prompt_cache_retention (see host_mandated_api_mode
-    # in hermes_cli/providers.py and the retention hint in
+    # in korra_cli/providers.py and the retention hint in
     # agent/transports/codex.py). The MetaAIProfile chat-completions hook
     # above still covers custom OpenAI-compatible endpoints configured with
     # a non-api.meta.ai base URL, which fall through to chat_completions.

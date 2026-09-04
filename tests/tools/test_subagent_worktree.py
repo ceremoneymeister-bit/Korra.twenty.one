@@ -301,14 +301,14 @@ class SubagentWorktreeTests(unittest.TestCase):
 
     def test_local_backend_active_local(self):
         with mock.patch(
-            "hermes_cli.config.load_config_readonly",
+            "korra_cli.config.load_config_readonly",
             return_value={"terminal": {"backend": "local"}},
         ):
             self.assertTrue(sw.local_backend_active())
 
     def test_local_backend_active_docker(self):
         with mock.patch(
-            "hermes_cli.config.load_config_readonly",
+            "korra_cli.config.load_config_readonly",
             return_value={"terminal": {"backend": "docker"}},
         ):
             self.assertFalse(sw.local_backend_active())

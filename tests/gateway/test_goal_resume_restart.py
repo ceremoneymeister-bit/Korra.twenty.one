@@ -25,7 +25,7 @@ from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.platforms.base import MessageEvent, MessageType
 from gateway.run import GatewayRunner
 from gateway.session import SessionSource
-from hermes_cli import goals
+from korra_cli import goals
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def hermes_home(tmp_path, monkeypatch):
     # this xdist worker would silently point the goals DB at a dead tmp
     # dir and make resume enqueue nothing (CI-only flake). Pin the
     # override to THIS home so the fixture is immune to leaks.
-    from hermes_constants import (
+    from korra_constants import (
         reset_hermes_home_override,
         set_hermes_home_override,
     )
@@ -59,7 +59,7 @@ def _exhaust_budget(session_id: str, goal_text: str = "ship the benchmark"):
     mgr = goals.GoalManager(session_id)
     mgr.set(goal_text, max_turns=1)
     with patch(
-        "hermes_cli.goals.judge_goal",
+        "korra_cli.goals.judge_goal",
         return_value=("continue", "needs more steps", False, None, False),
     ):
         decision = mgr.evaluate_after_turn("worked a bit")

@@ -303,7 +303,7 @@ class TestVerifierEnabled:
         agent = _bare_agent()
         # With no env and no config present, safe default is True.
         # load_config may surface a user config.yaml in some envs — stub it.
-        import hermes_cli.config as _cfg_mod
+        import korra_cli.config as _cfg_mod
         monkeypatch.setattr(_cfg_mod, "load_config", lambda: {})
         assert agent._file_mutation_verifier_enabled() is True
 
@@ -327,7 +327,7 @@ class TestVerifierEnabled:
         agent = _bare_agent()
         calls = {"n": 0}
 
-        import hermes_cli.config as _cfg_mod
+        import korra_cli.config as _cfg_mod
 
         def counting_load():
             calls["n"] += 1
@@ -352,7 +352,7 @@ class TestVerifierEnabled:
         monkeypatch.delenv("HERMES_FILE_MUTATION_VERIFIER", raising=False)
         agent = _bare_agent()
 
-        import hermes_cli.config as _cfg_mod
+        import korra_cli.config as _cfg_mod
         monkeypatch.setattr(
             _cfg_mod, "load_config", lambda: {"display": {"file_mutation_verifier": False}}
         )

@@ -26,14 +26,14 @@ def _reset_resolver_state(monkeypatch):
 
 class TestCloudProviderCachePolicy:
     def test_cache_is_isolated_by_hermes_home(self, tmp_path, monkeypatch):
-        from hermes_constants import (
+        from korra_constants import (
             get_hermes_home,
             reset_hermes_home_override,
             set_hermes_home_override,
         )
 
         monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
+            "korra_cli.config.read_raw_config",
             lambda: {"browser": {"cloud_provider": "profile-provider"}},
         )
         providers = {}
@@ -68,7 +68,7 @@ class TestCloudProviderCachePolicy:
     ):
         from agent.browser_provider import BrowserProvider
         import agent.browser_registry as browser_registry
-        from hermes_constants import (
+        from korra_constants import (
             reset_hermes_home_override,
             set_hermes_home_override,
         )
@@ -97,7 +97,7 @@ class TestCloudProviderCachePolicy:
         first = Provider("first")
         second = Provider("second")
         monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
+            "korra_cli.config.read_raw_config",
             lambda: {"browser": {"cloud_provider": "cache-replacement"}},
         )
         monkeypatch.setattr(browser_tool, "_ensure_browser_plugins_loaded", lambda: None)
@@ -125,7 +125,7 @@ class TestCloudProviderCachePolicy:
 
         from agent.browser_provider import BrowserProvider
         import agent.browser_registry as browser_registry
-        from hermes_constants import (
+        from korra_constants import (
             reset_hermes_home_override,
             set_hermes_home_override,
         )
@@ -168,7 +168,7 @@ class TestCloudProviderCachePolicy:
             return resolved
 
         monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
+            "korra_cli.config.read_raw_config",
             lambda: {"browser": {"cloud_provider": "cache-race"}},
         )
         monkeypatch.setattr(browser_tool, "_ensure_browser_plugins_loaded", lambda: None)
@@ -201,7 +201,7 @@ class TestCloudProviderCachePolicy:
     def test_explicit_local_caches_permanently(self, monkeypatch):
         """`cloud_provider: local` is a positive choice and must stick."""
         monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
+            "korra_cli.config.read_raw_config",
             lambda: {"browser": {"cloud_provider": "local"}},
         )
 
@@ -210,7 +210,7 @@ class TestCloudProviderCachePolicy:
 
         # Even if config later changes, the cache stays.
         monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
+            "korra_cli.config.read_raw_config",
             lambda: {"browser": {"cloud_provider": "browser-use"}},
         )
         assert browser_tool._get_cloud_provider() is None
@@ -219,7 +219,7 @@ class TestCloudProviderCachePolicy:
     def test_no_credentials_yet_does_not_cache_none(self, monkeypatch):
         """Auto-detect path with no creds: must NOT poison the cache."""
         monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
+            "korra_cli.config.read_raw_config",
             lambda: {"browser": {}},
         )
 
@@ -257,7 +257,7 @@ class TestCloudProviderCachePolicy:
             browser_tool, "_PROVIDER_REGISTRY", {"browser-use": exploding_factory}
         )
         monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
+            "korra_cli.config.read_raw_config",
             lambda: {"browser": {"cloud_provider": "browser-use"}},
         )
 

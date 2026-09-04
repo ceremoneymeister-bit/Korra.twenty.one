@@ -19,7 +19,7 @@ from cron.jobs import (
     load_jobs,
 )
 from cron.scheduler import get_running_job_ids
-from hermes_time import now as _hermes_now
+from korra_time import now as _hermes_now
 
 logger = logging.getLogger(__name__)
 _KNOWN_STATUSES = {"claimed", "running", "completed", "failed", "unknown"}

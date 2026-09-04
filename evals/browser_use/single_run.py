@@ -30,7 +30,7 @@ import re
 import sys
 import tempfile
 import time
-from hermes_constants import korra_env_set
+from korra_constants import korra_env_set
 
 ARM, TASK_KEY, MODEL, REP = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 

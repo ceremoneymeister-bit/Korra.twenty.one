@@ -125,7 +125,7 @@ def test_recover_closes_owned_db_when_unexpected_exception_escapes(
             self.closed = True
 
     db = InterruptingDB()
-    monkeypatch.setattr("hermes_state.SessionDB", lambda: db)
+    monkeypatch.setattr("korra_state.SessionDB", lambda: db)
 
     with pytest.raises(KeyboardInterrupt):
         recover_pending_to_db()
@@ -161,7 +161,7 @@ def test_get_flush_dir_uses_get_hermes_home(tmp_path, monkeypatch):
         return tmp_path
 
     monkeypatch.setattr(
-        "hermes_constants.get_hermes_home", fake_get_hermes_home
+        "korra_constants.get_hermes_home", fake_get_hermes_home
     )
     result = mod._get_flush_dir()
     assert captured.get("called") is True

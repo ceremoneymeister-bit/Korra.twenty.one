@@ -8,7 +8,7 @@ is destroyed a few seconds later — the handoff reply is silently lost.
 
 Fix under test: ``ProcessRegistry.wait_for_pending_completions`` gives the
 one-shot exit paths (``cli._finalize_single_query`` and
-``hermes_cli.oneshot``) a bounded linger over every tracked
+``korra_cli.oneshot``) a bounded linger over every tracked
 ``notify_on_complete`` process, so the delivery lands before the parent dies.
 
 Covers:
@@ -184,7 +184,7 @@ def test_wait_uses_reconcile_for_orphaned_pipe_exits(registry, monkeypatch):
 
 
 def test_config_default_exists_and_is_bounded():
-    from hermes_cli.config_defaults import DEFAULT_CONFIG
+    from korra_cli.config_defaults import DEFAULT_CONFIG
 
     val = DEFAULT_CONFIG["terminal"]["oneshot_completion_wait_seconds"]
     assert float(val) > 0
@@ -197,7 +197,7 @@ def test_config_reader_falls_back_when_config_unreadable(monkeypatch):
         raise RuntimeError("config unreadable")
 
     monkeypatch.setattr(
-        "hermes_cli.config.read_raw_config", _boom, raising=False
+        "korra_cli.config.read_raw_config", _boom, raising=False
     )
     val = pr_mod.ProcessRegistry._oneshot_completion_wait_seconds()
     assert val > 0
@@ -205,7 +205,7 @@ def test_config_reader_falls_back_when_config_unreadable(monkeypatch):
 
 def test_config_value_is_floored_at_zero(monkeypatch):
     monkeypatch.setattr(
-        "hermes_cli.config.read_raw_config",
+        "korra_cli.config.read_raw_config",
         lambda: {"terminal": {"oneshot_completion_wait_seconds": -5}},
         raising=False,
     )
@@ -293,9 +293,9 @@ def test_finalize_single_query_survives_wait_failure(monkeypatch):
 
 
 def test_oneshot_module_lingers_before_agent_close():
-    """hermes_cli/oneshot.py must wait for pending completions before
+    """korra_cli/oneshot.py must wait for pending completions before
     agent.close() (which kill_all()s the task's processes)."""
-    src = (REPO_ROOT / "hermes_cli" / "oneshot.py").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "korra_cli" / "oneshot.py").read_text(encoding="utf-8")
     wait_pos = src.find("process_registry.wait_for_pending_completions")
     assert wait_pos != -1, "oneshot.py lost the completion linger"
     close_call = src.find("agent.close()", wait_pos)

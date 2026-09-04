@@ -51,7 +51,7 @@ def test_own_profile_resolves_without_name():
 
 
 def test_named_profile_resolves_when_exists():
-    with mock.patch("hermes_cli.profiles.profile_exists", return_value=True):
+    with mock.patch("korra_cli.profiles.profile_exists", return_value=True):
         target = _resolve_bot_chat_target({"id": "j1"}, "research")
     assert target is not None
     assert target["platform"] == BOT_CHAT_PLATFORM
@@ -59,7 +59,7 @@ def test_named_profile_resolves_when_exists():
 
 
 def test_unknown_profile_resolves_to_none():
-    with mock.patch("hermes_cli.profiles.profile_exists", return_value=False):
+    with mock.patch("korra_cli.profiles.profile_exists", return_value=False):
         assert _resolve_bot_chat_target({"id": "j1"}, "ghost") is None
 
 
@@ -95,7 +95,7 @@ def test_preflight_still_blocks_unknown_platforms():
 def test_create_validation_rejects_unknown_profile():
     from tools.cronjob_tools import _validate_bot_chat_deliver
 
-    with mock.patch("hermes_cli.profiles.profile_exists", return_value=False):
+    with mock.patch("korra_cli.profiles.profile_exists", return_value=False):
         err = _validate_bot_chat_deliver("bot-chat:ghost")
     assert err is not None
     assert "machine-local" in err
@@ -107,7 +107,7 @@ def test_create_validation_accepts_bare_and_existing():
     assert _validate_bot_chat_deliver("bot-chat") is None
     assert _validate_bot_chat_deliver(None) is None
     assert _validate_bot_chat_deliver("telegram:-100") is None
-    with mock.patch("hermes_cli.profiles.profile_exists", return_value=True):
+    with mock.patch("korra_cli.profiles.profile_exists", return_value=True):
         assert _validate_bot_chat_deliver("bot-chat:research") is None
 
 
@@ -205,7 +205,7 @@ def test_deliver_message_carries_cron_attribution(tmp_path):
 # ── delivery-targets listing (UI pickers) ────────────────────────────────────
 
 def test_delivery_targets_include_local_profiles():
-    with mock.patch("hermes_cli.profiles.list_profile_names",
+    with mock.patch("korra_cli.profiles.list_profile_names",
                     return_value=["default", "research"]):
         targets = sched.cron_delivery_targets()
     ids = [t["id"] for t in targets]

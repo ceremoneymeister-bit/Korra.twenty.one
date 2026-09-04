@@ -7,7 +7,7 @@ and implement the required methods.
 
 # Хелперы совместимости имён переменных окружения нужны уже на этапе
 # импорта модуля, поэтому импорт стоит выше остальных.
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 import asyncio
 import inspect
@@ -627,7 +627,7 @@ sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
 
 from gateway.config import Platform, PlatformConfig
 from gateway.session import SessionSource, build_session_key
-from hermes_constants import get_default_hermes_root, get_hermes_dir, get_hermes_home
+from korra_constants import get_default_hermes_root, get_hermes_dir, get_hermes_home
 
 if TYPE_CHECKING:
     from agent.display import ToolPreview
@@ -812,7 +812,7 @@ def get_inbound_media_max_bytes() -> int:
     unreadable — falls back to the default.
     """
     try:
-        from hermes_cli.config import load_config_readonly as _load_config
+        from korra_cli.config import load_config_readonly as _load_config
         cfg = _load_config()  # read-only: .get() only, never mutated
     except Exception:
         return DEFAULT_INBOUND_MEDIA_MAX_BYTES
@@ -1606,7 +1606,7 @@ def _docker_sandbox_dir_candidates(session_key: str = "") -> List[str]:
     if shared:
         candidates.append(sanitize_task_id_for_path(f"shared:{shared}"))
     try:
-        from hermes_cli.profiles import get_active_profile_name
+        from korra_cli.profiles import get_active_profile_name
 
         profile = get_active_profile_name() or "default"
     except Exception:
@@ -3789,7 +3789,7 @@ class BasePlatformAdapter(ABC):
         """
         platform_name = getattr(self.platform, "value", str(self.platform))
         try:
-            from hermes_cli.plugins import get_plugin_manager
+            from korra_cli.plugins import get_plugin_manager
             factories = get_plugin_manager().get_platform_handler_factories(
                 platform_name
             )
@@ -4299,7 +4299,7 @@ class BasePlatformAdapter(ABC):
         auto-deletion.  Non-fatal if config is unreadable.
         """
         try:
-            from hermes_cli.config import load_config_readonly as _load_config
+            from korra_cli.config import load_config_readonly as _load_config
         except Exception:
             return 0
         try:
@@ -6309,7 +6309,7 @@ class BasePlatformAdapter(ABC):
             # session lifecycle and its cleanup races with the running task
             # (see PR #4926).
             cmd = event.get_command()
-            from hermes_cli.commands import (
+            from korra_cli.commands import (
                 is_interrupt_then_dispatch,
                 should_bypass_active_session,
             )

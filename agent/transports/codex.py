@@ -111,7 +111,7 @@ def _is_opencode_responses_backend(params: Dict[str, Any]) -> bool:
     the OpenCode gateway).
     """
     try:
-        from hermes_cli.models import opencode_provider_family
+        from korra_cli.models import opencode_provider_family
 
         if opencode_provider_family(params.get("provider")) is not None:
             return True

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, Collection
 
 from agent.interrupt_compat import request_hard_interrupt
-from hermes_constants import korra_env, korra_env_set
+from korra_constants import korra_env, korra_env_set
 
 
 def now_ns() -> int:
@@ -599,9 +599,9 @@ class ComputeHost:
         secret_token = None
         try:
             if profile_home:
-                from hermes_constants import set_hermes_home_override
+                from korra_constants import set_hermes_home_override
                 from agent.secret_scope import build_profile_secret_scope, set_secret_scope
-                from hermes_state import SessionDB
+                from korra_state import SessionDB
 
                 home_token = set_hermes_home_override(profile_home)
                 secret_token = set_secret_scope(build_profile_secret_scope(Path(profile_home)))
@@ -633,7 +633,7 @@ class ComputeHost:
                     session_db.close()
             if home_token is not None:
                 try:
-                    from hermes_constants import reset_hermes_home_override
+                    from korra_constants import reset_hermes_home_override
                     from agent.secret_scope import reset_secret_scope
 
                     reset_hermes_home_override(home_token)

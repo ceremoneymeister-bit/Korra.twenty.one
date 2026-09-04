@@ -268,7 +268,7 @@ def _migrate_remote_run_schema(conn: sqlite3.Connection) -> None:
 
 def default_db_path() -> Path:
     """Return the gateway-wide state database for the active install."""
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     home = get_hermes_home()
     root = home.parent.parent if home.parent.name == "profiles" else home
@@ -277,7 +277,7 @@ def default_db_path() -> Path:
 
 def local_authority_gateway_id() -> str:
     """Return the stable server-owned identity for hosted-room authority."""
-    from hermes_cli.install_identity import get_install_id
+    from korra_cli.install_identity import get_install_id
 
     install_id = get_install_id()
     if not install_id:
@@ -1112,7 +1112,7 @@ def remote_run_receipt(
 
 
 def _connect(db_path: Path | str) -> sqlite3.Connection:
-    from hermes_state import apply_wal_with_fallback
+    from korra_state import apply_wal_with_fallback
 
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -62,7 +62,7 @@ import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
-from hermes_constants import korra_env_set
+from korra_constants import korra_env_set
 
 logger = logging.getLogger(__name__)
 

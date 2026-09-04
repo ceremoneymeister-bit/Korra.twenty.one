@@ -21,7 +21,7 @@ class NousProfile(ProviderProfile):
         fallback, so this is cheap to call and safe offline.
         """
         try:
-            from hermes_cli.models import get_nous_recommended_aux_model
+            from korra_cli.models import get_nous_recommended_aux_model
 
             return get_nous_recommended_aux_model(vision=vision) or ""
         except Exception:
@@ -80,7 +80,7 @@ class NousProfile(ProviderProfile):
         the Portal has told us it doesn't accept.
         """
         try:
-            from hermes_cli.models import (
+            from korra_cli.models import (
                 nous_model_reasoning_capabilities,
                 warm_nous_reasoning_caps_async,
             )

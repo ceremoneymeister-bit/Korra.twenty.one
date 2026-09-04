@@ -11,7 +11,7 @@ leaked shell variable, so ``scripts/run_tests.sh``'s ``env -i`` was no help:
   2. The flag outlives that test (``monkeypatch.delenv`` on an *absent* key
      records no undo entry), so every later test in the process sees it.
   3. Any later test that drives a turn to completion hits the TTS dispatch in
-     ``prompt.submit``, which calls ``hermes_cli.voice.speak_text`` on a
+     ``prompt.submit``, which calls ``korra_cli.voice.speak_text`` on a
      daemon thread with the turn's final response text.
   4. ``speak_text`` needs no API key to be audible — ``tools/tts_tool.py``
      defaults to the keyless ``edge`` provider.
@@ -82,9 +82,9 @@ def test_voice_toggle_still_leaks_the_env_var_but_speech_is_stubbed(monkeypatch)
     )
 
     # Called exactly as tui_gateway/server.py's prompt.submit completion path
-    # calls it (a late `from hermes_cli.voice import speak_text`), with the
+    # calls it (a late `from korra_cli.voice import speak_text`), with the
     # exact fixture string that came out of the speakers.
-    from hermes_cli.voice import speak_text
+    from korra_cli.voice import speak_text
 
     assert speak_text("partial answer complete") is None
     assert calls == [], (
@@ -110,7 +110,7 @@ def test_voice_env_does_not_leak_into_the_next_test():
 
 def test_guard_can_be_opted_out_of_explicitly():
     """The stub is a guard, not a lobotomy — the real function is reachable."""
-    import hermes_cli.voice as voice
+    import korra_cli.voice as voice
 
     assert voice.speak_text.__name__ == "_blocked_speak_text"
 
@@ -121,6 +121,6 @@ def test_bypass_marker_restores_the_real_speak_text():
 
     Asserts identity only — it does not call it, which would speak aloud.
     """
-    import hermes_cli.voice as voice
+    import korra_cli.voice as voice
 
     assert voice.speak_text.__name__ == "speak_text"

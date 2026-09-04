@@ -13,7 +13,7 @@ process stayed alive, so the supervisor's restart-on-exit never fired.
 Worse, those connections were opened WITHOUT ``check_same_thread=False`` (both
 writer opens pass it), so ``close()`` on them raised ``ProgrammingError`` from
 a different thread and the bare ``except Exception: pass`` hid it -- leaving
-``hermes_cli.sqlite_safe_read``'s registry permanently over-counted as well.
+``korra_cli.sqlite_safe_read``'s registry permanently over-counted as well.
 
 The contract pinned here: reads borrow from a BOUNDED pool, connections are
 returned and reused, surplus connections are closed rather than dropped, and
@@ -40,12 +40,12 @@ import threading
 
 import pytest
 
-from hermes_state import SessionDB
+from korra_state import SessionDB
 
 
 def _live_count(path) -> int:
     """Live-connection count the tracking registry holds for *path*."""
-    import hermes_cli.sqlite_safe_read as mod
+    import korra_cli.sqlite_safe_read as mod
 
     with mod._live_lock:
         return mod._live_connections.get(mod._key(path), 0)
@@ -192,7 +192,7 @@ def test_read_open_failure_backs_off_but_recovers(db):
     """
     import time as _time
 
-    from hermes_state import _READ_OPEN_RETRY_SECONDS
+    from korra_state import _READ_OPEN_RETRY_SECONDS
 
     baseline = db._get_read_conn()
     assert baseline is not None, "baseline read open should succeed"
@@ -261,7 +261,7 @@ def test_peak_live_connections_bounded_under_simultaneous_burst(db):
     of them have checked out, so the count below IS the simultaneous peak
     rather than a sample of it.
     """
-    from hermes_state import _READ_POOL_MAX
+    from korra_state import _READ_POOL_MAX
 
     n = 64
     assert n > _READ_POOL_MAX, "burst must exceed the ceiling to test anything"
@@ -313,7 +313,7 @@ def test_exhausted_permits_fall_back_to_the_writer_connection(db):
     connection. Blocking instead would convert descriptor exhaustion into a
     stall -- the same outage with a different stack trace.
     """
-    from hermes_state import _READ_POOL_MAX
+    from korra_state import _READ_POOL_MAX
 
     held = [db._checkout_read_conn() for _ in range(_READ_POOL_MAX)]
     assert all(c is not None for c in held), "the first _READ_POOL_MAX must succeed"
@@ -342,8 +342,8 @@ def test_permits_are_not_stranded_by_a_failed_open(db, monkeypatch):
     """
     import sqlite3 as _sqlite3
 
-    import hermes_state as _hs
-    from hermes_state import _READ_POOL_MAX
+    import korra_state as _hs
+    from korra_state import _READ_POOL_MAX
 
     def boom(*a, **kw):
         raise _sqlite3.OperationalError("simulated open failure")
@@ -369,7 +369,7 @@ def test_permits_are_not_stranded_by_a_failed_open(db, monkeypatch):
 @pytest.mark.requires_wal
 def test_close_returns_every_permit(db):
     """close() must release the permits its drained connections held."""
-    from hermes_state import _READ_POOL_MAX
+    from korra_state import _READ_POOL_MAX
 
     held = [db._checkout_read_conn() for _ in range(_READ_POOL_MAX)]
     for c in held:
@@ -401,7 +401,7 @@ def test_close_returns_every_permit(db):
 @pytest.mark.requires_wal
 def test_peak_is_bounded_across_two_SessionDBs_on_one_path(db):
     """Two handles on one file must share one read-connection ceiling."""
-    from hermes_state import SessionDB, _READ_POOL_MAX
+    from korra_state import SessionDB, _READ_POOL_MAX
 
     second = SessionDB(db_path=db.db_path)
     try:
@@ -458,7 +458,7 @@ def test_idle_permits_are_reclaimed_from_a_peer_instance(db):
     SessionDB, a second profile's store -- to the locked writer connection for
     the life of the process. Trading one bug for a quieter one.
     """
-    from hermes_state import SessionDB, _READ_POOL_MAX
+    from korra_state import SessionDB, _READ_POOL_MAX
 
     # Warm every permit into db's IDLE pool.
     held = [db._checkout_read_conn() for _ in range(_READ_POOL_MAX)]
@@ -498,8 +498,8 @@ def test_idle_permits_are_reclaimed_from_a_peer_instance(db):
 @pytest.mark.requires_wal
 def test_peak_is_bounded_across_many_database_files(tmp_path):
     """Read connections must be capped for the PROCESS, not just per file."""
-    import hermes_state
-    from hermes_state import SessionDB, _READ_POOL_MAX, _READ_POOL_PROCESS_MAX
+    import korra_state
+    from korra_state import SessionDB, _READ_POOL_MAX, _READ_POOL_PROCESS_MAX
 
     n_files = (_READ_POOL_PROCESS_MAX // _READ_POOL_MAX) + 2
     dbs = []
@@ -539,16 +539,16 @@ def test_peak_is_bounded_across_many_database_files(tmp_path):
     finally:
         for d in dbs:
             d.close()
-        assert hermes_state._process_read_permits.acquire(blocking=False), (
+        assert korra_state._process_read_permits.acquire(blocking=False), (
             "close() stranded a process permit"
         )
-        hermes_state._process_read_permits.release()
+        korra_state._process_read_permits.release()
 
 
 @pytest.mark.requires_wal
 def test_idle_connections_are_reclaimed_across_database_files(tmp_path):
     """A quiet profile's idle connections must not starve the busy one."""
-    from hermes_state import SessionDB, _READ_POOL_MAX, _READ_POOL_PROCESS_MAX
+    from korra_state import SessionDB, _READ_POOL_MAX, _READ_POOL_PROCESS_MAX
 
     quiet = []
     try:
@@ -582,7 +582,7 @@ def test_no_read_connection_is_opened_without_descriptor_headroom(db, monkeypatc
     subprocess pipes, and EMFILE lands on whoever asks next -- which in the
     report was terminal_tool, not SQLite.
     """
-    import hermes_state
+    import korra_state
 
     # Drain the pool so the next read must OPEN rather than reuse.
     while True:
@@ -591,19 +591,19 @@ def test_no_read_connection_is_opened_without_descriptor_headroom(db, monkeypatc
         except queue.Empty:
             break
 
-    monkeypatch.setattr(hermes_state, "_fd_soft_limit", lambda: 256)
-    monkeypatch.setattr(hermes_state, "_open_fd_count", lambda: 250)
-    monkeypatch.setattr(hermes_state, "_fd_usage_cache", (0.0, None))
+    monkeypatch.setattr(korra_state, "_fd_soft_limit", lambda: 256)
+    monkeypatch.setattr(korra_state, "_open_fd_count", lambda: 250)
+    monkeypatch.setattr(korra_state, "_fd_usage_cache", (0.0, None))
 
     assert db._get_read_conn() is None, "a read connection was opened with 6 fds left"
     # The read still has to work -- degradation, not failure.
     assert db.get_session("s1") is not None
-    assert hermes_state._read_open_denied_fd_headroom > 0, (
+    assert korra_state._read_open_denied_fd_headroom > 0, (
         "the guard fired without leaving a trace to diagnose it from"
     )
 
-    monkeypatch.setattr(hermes_state, "_open_fd_count", lambda: 10)
-    monkeypatch.setattr(hermes_state, "_fd_usage_cache", (0.0, None))
+    monkeypatch.setattr(korra_state, "_open_fd_count", lambda: 10)
+    monkeypatch.setattr(korra_state, "_fd_usage_cache", (0.0, None))
     conn = db._get_read_conn()
     assert conn is not None, "headroom returned but the read path stayed degraded"
     db._close_read_conn(conn)
@@ -611,17 +611,17 @@ def test_no_read_connection_is_opened_without_descriptor_headroom(db, monkeypatc
 
 def test_fd_headroom_guard_fails_open_where_it_cannot_measure(monkeypatch):
     """No RLIMIT_NOFILE (Windows) means unmeasurable, not tight."""
-    import hermes_state
+    import korra_state
 
-    monkeypatch.setattr(hermes_state, "_fd_soft_limit", lambda: None)
-    assert hermes_state._fd_headroom_ok() is True
+    monkeypatch.setattr(korra_state, "_fd_soft_limit", lambda: None)
+    assert korra_state._fd_headroom_ok() is True
 
     # A probe that could not get a descriptor of its own is evidence, not
     # absence of evidence.
-    monkeypatch.setattr(hermes_state, "_fd_soft_limit", lambda: 256)
-    monkeypatch.setattr(hermes_state, "_open_fd_count", lambda: -1)
-    monkeypatch.setattr(hermes_state, "_fd_usage_cache", (0.0, None))
-    assert hermes_state._fd_headroom_ok() is False
+    monkeypatch.setattr(korra_state, "_fd_soft_limit", lambda: 256)
+    monkeypatch.setattr(korra_state, "_open_fd_count", lambda: -1)
+    monkeypatch.setattr(korra_state, "_fd_usage_cache", (0.0, None))
+    assert korra_state._fd_headroom_ok() is False
 
 
 @pytest.mark.requires_wal
@@ -629,11 +629,11 @@ def test_duplicate_handles_on_one_path_are_reported(db, caplog):
     """Writer connections cannot be capped, so duplicates must be visible."""
     import logging
 
-    from hermes_state import SessionDB, _HANDLES_PER_PATH_WARN
+    from korra_state import SessionDB, _HANDLES_PER_PATH_WARN
 
     extra = []
     try:
-        with caplog.at_level(logging.WARNING, logger="hermes_state"):
+        with caplog.at_level(logging.WARNING, logger="korra_state"):
             for _ in range(_HANDLES_PER_PATH_WARN):
                 extra.append(SessionDB(db_path=db.db_path))
         assert any(

@@ -14,7 +14,7 @@ loop continues instead of exiting.
 from __future__ import annotations
 
 from typing import Any, Iterable, Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 
 _TERMINAL_KANBAN_TOOLS = frozenset({"kanban_complete", "kanban_block"})

@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +354,7 @@ def build_billing_state(*, timeout: float = 15.0) -> BillingState:
         return fixture
 
     try:
-        from hermes_cli.nous_billing import (
+        from korra_cli.nous_billing import (
             BillingAuthError,
             BillingError,
             _absolutize_portal_url,

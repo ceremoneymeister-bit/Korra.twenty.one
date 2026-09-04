@@ -74,7 +74,7 @@ _spillover_pruned_once = False
 
 def get_spillover_dir():
     """Return $HERMES_HOME/cache/spillover as a Path (not created)."""
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     return get_hermes_home() / SPILLOVER_SUBDIR
 

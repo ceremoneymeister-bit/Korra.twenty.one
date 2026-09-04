@@ -209,7 +209,7 @@ class TestScanSkillCommands:
         """
         import agent.skill_commands as sc_mod
         from agent.skill_commands import get_skill_commands
-        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+        from korra_constants import reset_hermes_home_override, set_hermes_home_override
 
         empty_local_dir = tmp_path / "no-local-skills"
         empty_local_dir.mkdir()

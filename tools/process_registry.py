@@ -44,11 +44,11 @@ from pathlib import Path
 
 _IS_WINDOWS = platform.system() == "Windows"
 from tools.environments.local import _find_shell, _resolve_safe_cwd, _sanitize_subprocess_env
-from hermes_cli._subprocess_compat import windows_hide_flags
+from korra_cli._subprocess_compat import windows_hide_flags
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from hermes_cli.config import get_hermes_home
+from korra_cli.config import get_hermes_home
 
 from agent.redact import redact_sensitive_text
 
@@ -885,7 +885,7 @@ class ProcessRegistry:
         config is unreadable, so callers always get a sane number.
         """
         try:
-            from hermes_cli.config import read_raw_config, cfg_get, DEFAULT_CONFIG
+            from korra_cli.config import read_raw_config, cfg_get, DEFAULT_CONFIG
             cfg = read_raw_config()
             val = cfg_get(cfg, "terminal", "daemon_term_grace_seconds")
             if val is None:
@@ -1674,7 +1674,7 @@ class ProcessRegistry:
     def is_session_waiting(self, session_id: str) -> bool:
         """Whether a goal loop parked on this session should still be parked.
 
-        Used by the goal-loop wait barrier (``hermes_cli.goals``) to support
+        Used by the goal-loop wait barrier (``korra_cli.goals``) to support
         waiting on a process's OWN trigger, not just its exit. A session is
         "still waiting" when:
           - it is still running, AND
@@ -1830,7 +1830,7 @@ class ProcessRegistry:
         is unreadable so callers always get a sane bound.
         """
         try:
-            from hermes_cli.config import DEFAULT_CONFIG, cfg_get, read_raw_config
+            from korra_cli.config import DEFAULT_CONFIG, cfg_get, read_raw_config
             cfg = read_raw_config()
             val = cfg_get(cfg, "terminal", "oneshot_completion_wait_seconds")
             if val is None:
@@ -1865,7 +1865,7 @@ class ProcessRegistry:
         DEFAULT applies (suppress) — never crash the drain loop.
         """
         try:
-            from hermes_cli.config import DEFAULT_CONFIG, cfg_get, read_raw_config
+            from korra_cli.config import DEFAULT_CONFIG, cfg_get, read_raw_config
             cfg = read_raw_config()
             val = cfg_get(cfg, "delegation", "surface_child_process_notifications")
             if val is None:
@@ -3058,7 +3058,7 @@ def _delegation_model_not_found_notice(results) -> "list[str] | None":
         "hermes config get delegation.model).",
     ]
     try:
-        from hermes_cli.fallback_config import get_fallback_chain
+        from korra_cli.fallback_config import get_fallback_chain
 
         if not get_fallback_chain(config):
             lines.append(

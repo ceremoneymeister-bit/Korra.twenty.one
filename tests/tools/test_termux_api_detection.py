@@ -165,8 +165,8 @@ class TestDetectAudioEnvironmentTermuxFallback:
         # (маркеры containerd в mountinfo от ЧУЖИХ работающих контейнеров) и
         # уводит детект в ветку «в контейнере нет аудио» вместо Termux-ветки.
         # Тест — про Termux-пробы, контейнер-детект здесь закрепляется.
-        import hermes_constants
-        monkeypatch.setattr(hermes_constants, "_container_detected", False)
+        import korra_constants
+        monkeypatch.setattr(korra_constants, "_container_detected", False)
         monkeypatch.setenv("TERMUX_VERSION", "0.118.3")
         monkeypatch.setenv("PREFIX", "/data/data/com.termux/files/usr")
         monkeypatch.delenv("SSH_CLIENT", raising=False)

@@ -307,7 +307,7 @@ class TestDevGate:
             lambda **kw: {"api_key": token, "base_url": "https://x"}, raising=False,
         )
         # patch the lazily-imported symbol used inside resolve_identity
-        import hermes_cli.auth as auth_mod
+        import korra_cli.auth as auth_mod
         monkeypatch.setattr(auth_mod, "resolve_nous_runtime_credentials",
                             lambda **kw: {"api_key": token, "base_url": "https://x"})
         ident = ssc.resolve_identity()
@@ -316,7 +316,7 @@ class TestDevGate:
 
     def test_gate_closed_without_claim(self, monkeypatch):
         token = _jwt({"sub": "user1"})  # no tool_gateway_admin
-        import hermes_cli.auth as auth_mod
+        import korra_cli.auth as auth_mod
         monkeypatch.setattr(auth_mod, "resolve_nous_runtime_credentials",
                             lambda **kw: {"api_key": token, "base_url": "https://x"})
         ident = ssc.resolve_identity()
@@ -324,14 +324,14 @@ class TestDevGate:
 
     def test_gate_closed_when_claim_false(self, monkeypatch):
         token = _jwt({"sub": "u", "tool_gateway_admin": False})
-        import hermes_cli.auth as auth_mod
+        import korra_cli.auth as auth_mod
         monkeypatch.setattr(auth_mod, "resolve_nous_runtime_credentials",
                             lambda **kw: {"api_key": token, "base_url": "https://x"})
         assert ssc.dev_gate_open() is False
 
     def test_maybe_push_inert_when_gate_closed(self, monkeypatch):
         token = _jwt({"sub": "u"})
-        import hermes_cli.auth as auth_mod
+        import korra_cli.auth as auth_mod
         monkeypatch.setattr(auth_mod, "resolve_nous_runtime_credentials",
                             lambda **kw: {"api_key": token})
         monkeypatch.setattr(ssc, "resolve_sync_base_url", lambda: "http://x")
@@ -339,7 +339,7 @@ class TestDevGate:
         assert ssc.maybe_push_skills() is None
 
     def test_maybe_pull_inert_when_not_logged_in(self, monkeypatch):
-        import hermes_cli.auth as auth_mod
+        import korra_cli.auth as auth_mod
 
         def _raise(**kw):
             raise RuntimeError("not logged in")
@@ -455,11 +455,11 @@ class TestMergeDecision:
 @pytest.fixture
 def synced_env(tmp_path, monkeypatch):
     """A HERMES_HOME with two opted-in skills + a token-carrying identity."""
-    import hermes_constants
+    import korra_constants
     home = tmp_path / "hermes"
     skills = home / "skills"
     skills.mkdir(parents=True)
-    monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: home)
+    monkeypatch.setattr(korra_constants, "get_hermes_home", lambda: home)
     monkeypatch.setattr(ssc, "_skills_dir", lambda: skills)
 
     _write_skill(skills, "alpha", body="alpha v1\n")
@@ -729,7 +729,7 @@ class TestEnvConfig:
         # With nothing configured a user must still reach the real plane —
         # otherwise every sync command fails with "no base URL configured".
         monkeypatch.delenv("HERMES_SYNC_BASE_URL", raising=False)
-        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {}, raising=False)
+        monkeypatch.setattr("korra_cli.config.load_config", lambda: {}, raising=False)
         assert ssc.resolve_sync_base_url() == ssc.DEFAULT_SYNC_BASE_URL
 
     def test_default_is_a_bare_https_origin(self):
@@ -746,7 +746,7 @@ class TestEnvConfig:
     def test_config_overrides_default(self, monkeypatch):
         monkeypatch.delenv("HERMES_SYNC_BASE_URL", raising=False)
         monkeypatch.setattr(
-            "hermes_cli.config.load_config",
+            "korra_cli.config.load_config",
             lambda: {"sync": {"base_url": "https://cfg.example/"}},
             raising=False,
         )
@@ -755,7 +755,7 @@ class TestEnvConfig:
     def test_feature_enabled_env(self, monkeypatch):
         # Default off.
         monkeypatch.delenv("HERMES_SYNC_ENABLED", raising=False)
-        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {}, raising=False)
+        monkeypatch.setattr("korra_cli.config.load_config", lambda: {}, raising=False)
         assert ssc.sync_feature_enabled() is False
         for truthy in ("1", "true", "YES", "on"):
             monkeypatch.setenv("HERMES_SYNC_ENABLED", truthy)
@@ -766,7 +766,7 @@ class TestEnvConfig:
 
     def test_default_opt_in_env(self, monkeypatch):
         monkeypatch.delenv("HERMES_SYNC_DEFAULT_OPT_IN", raising=False)
-        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {}, raising=False)
+        monkeypatch.setattr("korra_cli.config.load_config", lambda: {}, raising=False)
         assert ssc.sync_default_opt_in() is False
         monkeypatch.setenv("HERMES_SYNC_DEFAULT_OPT_IN", "true")
         assert ssc.sync_default_opt_in() is True
@@ -774,7 +774,7 @@ class TestEnvConfig:
     def test_config_yaml_fallback_when_no_env(self, monkeypatch):
         monkeypatch.delenv("HERMES_SYNC_ENABLED", raising=False)
         monkeypatch.setattr(
-            "hermes_cli.config.load_config",
+            "korra_cli.config.load_config",
             lambda: {"sync": {"enabled": True}},
             raising=False,
         )
@@ -784,7 +784,7 @@ class TestEnvConfig:
         # Env wins over config.yaml (operator override precedence).
         monkeypatch.setenv("HERMES_SYNC_ENABLED", "false")
         monkeypatch.setattr(
-            "hermes_cli.config.load_config",
+            "korra_cli.config.load_config",
             lambda: {"sync": {"enabled": True}},
             raising=False,
         )
@@ -877,7 +877,7 @@ class TestOrgIdentityGate:
     def test_org_identity_requires_role_claim(self, monkeypatch):
         # Personal org: NAS stamps NO org_role -> inert, not an error path.
         token = _jwt({"sub": "u", "org_id": "org-1"})
-        import hermes_cli.auth as auth_mod
+        import korra_cli.auth as auth_mod
         monkeypatch.setattr(auth_mod, "resolve_nous_runtime_credentials",
                             lambda **kw: {"api_key": token, "base_url": "https://x"})
         with pytest.raises(ssc.SyncInertError):
@@ -886,7 +886,7 @@ class TestOrgIdentityGate:
 
     def test_org_identity_with_role(self, monkeypatch):
         token = _jwt({"sub": "u", "org_id": "org-9", "org_role": "MEMBER"})
-        import hermes_cli.auth as auth_mod
+        import korra_cli.auth as auth_mod
         monkeypatch.setattr(auth_mod, "resolve_nous_runtime_credentials",
                             lambda **kw: {"api_key": token, "base_url": "https://x"})
         ident = ssc.resolve_org_identity()
@@ -1005,7 +1005,7 @@ class TestOrgEndToEnd:
     def test_maybe_pull_org_inert_without_role(self, monkeypatch):
         # Personal org: no org_role claim -> None, never raises.
         token = _jwt({"sub": "u", "org_id": "org-1"})
-        import hermes_cli.auth as auth_mod
+        import korra_cli.auth as auth_mod
         monkeypatch.setattr(auth_mod, "resolve_nous_runtime_credentials",
                             lambda **kw: {"api_key": token})
         assert ssc.maybe_pull_org_skills() is None

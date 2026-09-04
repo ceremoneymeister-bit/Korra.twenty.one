@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 from gateway.config import Platform
 from gateway.run import GatewayRunner
-from hermes_cli import kanban_db as kb
+from korra_cli import kanban_db as kb
 
 
 class RecordingAdapter:

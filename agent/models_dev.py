@@ -233,13 +233,13 @@ def _models_dev_to_hermes_ids(mdev_id: str) -> List[str]:
 
 def _get_cache_path() -> Path:
     """Return path to disk cache file."""
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
     return get_hermes_home() / "models_dev_cache.json"
 
 
 def _get_etag_path() -> Path:
     """Return path to the ETag sidecar file for conditional GET."""
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
     return get_hermes_home() / "models_dev_cache.etag"
 
 
@@ -287,7 +287,7 @@ def _get_models_dev_url() -> str:
     Falls back to the default public URL when unset or empty.
     """
     try:
-        from hermes_cli.config import cfg_get, load_config_readonly
+        from korra_cli.config import cfg_get, load_config_readonly
         cfg = load_config_readonly()
         url = cfg_get(cfg, "models_dev", "url", default="")
         if isinstance(url, str) and url.strip():
@@ -891,7 +891,7 @@ def _load_model_overrides() -> Dict[str, Any]:
     Returns empty dict on any failure.
     """
     try:
-        from hermes_cli.config import cfg_get, load_config_readonly
+        from korra_cli.config import cfg_get, load_config_readonly
         raw = cfg_get(load_config_readonly(), "model_overrides", default={})
         return raw if isinstance(raw, dict) else {}
     except Exception:
@@ -1277,7 +1277,7 @@ def list_provider_models(
     picker (``hermes model``), which is an interactive user-facing flow
     where a fresh catalog is worth a short network wait.
     """
-    from hermes_cli.models import normalize_provider
+    from korra_cli.models import normalize_provider
     provider = normalize_provider(provider) or provider
     
     models = _get_provider_models(provider, allow_network=allow_network)

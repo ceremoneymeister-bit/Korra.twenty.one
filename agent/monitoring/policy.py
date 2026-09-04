@@ -34,7 +34,7 @@ def ensure_install_id(config: Dict[str, Any]) -> str:
 
     minted = str(uuid.uuid4())
     try:
-        from hermes_cli.config import load_config, save_config
+        from korra_cli.config import load_config, save_config
 
         fresh = load_config()
         if isinstance(fresh, dict):

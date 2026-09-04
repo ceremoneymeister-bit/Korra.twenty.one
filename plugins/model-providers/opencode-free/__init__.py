@@ -5,13 +5,13 @@ KEYLESS: the relay serves free-tier models anonymously and rejects any
 Authorization bearer it doesn't recognize with 401 — so this provider
 never sends a credential at all (the runtime resolver pins the keyless
 placeholder and an empty Authorization header; see
-hermes_cli.models.opencode_zen_free_runtime). No OpenCode account needed.
+korra_cli.models.opencode_zen_free_runtime). No OpenCode account needed.
 Select via ``hermes model`` or ``/model free``.
 """
 
 from typing import Any
 
-from hermes_cli import __version__ as _HERMES_VERSION
+from korra_cli import __version__ as _HERMES_VERSION
 from providers import register_provider
 from providers.base import ProviderProfile
 

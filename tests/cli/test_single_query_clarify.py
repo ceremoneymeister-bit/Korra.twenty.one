@@ -18,7 +18,7 @@ import inspect
 
 
 def test_no_choices_returns_immediate_headless_answer():
-    from hermes_cli.cli_agent_setup_mixin import _single_query_clarify_callback
+    from korra_cli.cli_agent_setup_mixin import _single_query_clarify_callback
 
     result = _single_query_clarify_callback("Which timezone should I use?")
     assert result.startswith("[single-query mode: no user available")
@@ -26,7 +26,7 @@ def test_no_choices_returns_immediate_headless_answer():
 
 
 def test_choices_return_pick_best_guidance():
-    from hermes_cli.cli_agent_setup_mixin import _single_query_clarify_callback
+    from korra_cli.cli_agent_setup_mixin import _single_query_clarify_callback
 
     result = _single_query_clarify_callback(
         "Format?", choices=["json", "yaml"]
@@ -36,7 +36,7 @@ def test_choices_return_pick_best_guidance():
 
 
 def test_multi_select_choices_return_subset_guidance():
-    from hermes_cli.cli_agent_setup_mixin import _single_query_clarify_callback
+    from korra_cli.cli_agent_setup_mixin import _single_query_clarify_callback
 
     result = _single_query_clarify_callback(
         "Which checks?", choices=["lint", "types", "tests"], multi_select=True
@@ -49,8 +49,8 @@ def test_callback_signature_matches_oneshot_contract():
     """The headless callback must be a drop-in wherever a clarify callback is
     accepted — same (question, choices, multi_select) shape as the oneshot
     one and the interactive CLIApp one."""
-    from hermes_cli.cli_agent_setup_mixin import _single_query_clarify_callback
-    from hermes_cli import oneshot
+    from korra_cli.cli_agent_setup_mixin import _single_query_clarify_callback
+    from korra_cli import oneshot
 
     ours = inspect.signature(_single_query_clarify_callback)
     oneshot_cb = inspect.signature(oneshot._oneshot_clarify_callback)
@@ -63,7 +63,7 @@ def test_agent_construction_gates_clarify_callback_on_single_query_mode():
     interactive callback unconditionally (#94943). Source-level pin modeled
     on test_cli_active_agent_ref_wiring: _init_agent is too integration-heavy
     to drive with a stub, but the wiring contract is one expression."""
-    from hermes_cli import cli_agent_setup_mixin as mixin_mod
+    from korra_cli import cli_agent_setup_mixin as mixin_mod
 
     src = inspect.getsource(mixin_mod)
     assert "_single_query_clarify_callback" in src, (

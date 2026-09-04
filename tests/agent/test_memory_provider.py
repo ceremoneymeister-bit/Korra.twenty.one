@@ -622,7 +622,7 @@ class TestEntryPointMemoryProviderDiscovery:
     def test_inactive_entry_point_load_does_not_register_skill(
         self, tmp_path, monkeypatch
     ):
-        from hermes_cli.plugins import get_plugin_manager
+        from korra_cli.plugins import get_plugin_manager
         from plugins.memory import load_memory_provider
         import plugins.memory as memory_plugins
 
@@ -654,7 +654,7 @@ class TestEntryPointMemoryProviderDiscovery:
     def test_switching_provider_prunes_registered_entry_point_skill(
         self, tmp_path, monkeypatch
     ):
-        from hermes_cli.plugins import get_plugin_manager
+        from korra_cli.plugins import get_plugin_manager
         from tools.skills_tool import skill_view
         import plugins.memory as memory_plugins
 
@@ -750,7 +750,7 @@ class TestSequentialDispatchRouting:
 
 class TestSetupFieldFiltering:
     """Test the 'when' clause and 'default_from' logic used by the
-    memory setup wizard in hermes_cli/memory_setup.py.
+    memory setup wizard in korra_cli/memory_setup.py.
 
     These features are generic — any memory plugin can use them in
     get_config_schema(). Currently used by the hindsight plugin.

@@ -29,7 +29,7 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from hermes_cli._subprocess_compat import windows_hide_flags
+from korra_cli._subprocess_compat import windows_hide_flags
 
 
 # Match the ALLOWED_STATUS_VALUES + ALLOWED_OVERALL_VALUES the cua-driver

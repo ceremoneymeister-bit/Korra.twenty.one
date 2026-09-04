@@ -93,7 +93,7 @@ def test_final_response_closes_tool_tail_before_persistence(monkeypatch):
     way, the next turn reloads a stale/malformed history and can appear to loop
     because the assistant's visible final answer is missing from durable state.
     """
-    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
+    monkeypatch.setattr("korra_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
     agent = FakeAgent()
     messages = [
         {"role": "user", "content": "do it"},
@@ -134,13 +134,13 @@ def test_fallback_timestamp_survives_delayed_sqlite_persistence(
     monkeypatch, tmp_path
 ):
     """The durable row records message creation, not the later DB flush."""
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     created_at = 1_781_976_577.25
     persisted_at = created_at + 600
     monkeypatch.setattr("agent.message_metadata.wall_time", lambda: created_at)
-    monkeypatch.setattr("hermes_state.time.time", lambda: persisted_at)
-    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
+    monkeypatch.setattr("korra_state.time.time", lambda: persisted_at)
+    monkeypatch.setattr("korra_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
 
     db = SessionDB(db_path=tmp_path / "state.db")
     db.create_session("sess-test", source="cli")
@@ -283,9 +283,9 @@ def test_empty_final_response_recovers_stream_buffer_into_blank_assistant_row(
     still holds the delivered text, that blank row is the durable transcript —
     Desktop reload shows nothing even though the user already saw the answer.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
-    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
+    monkeypatch.setattr("korra_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
 
     db = SessionDB(db_path=tmp_path / "state.db")
     db.create_session("sess-test", source="cli")
@@ -342,7 +342,7 @@ def test_empty_final_response_recovers_stream_buffer_into_blank_assistant_row(
 
 def test_failed_turn_does_not_recover_stream_buffer_as_final_response(monkeypatch):
     """A failed turn must not invent a successful answer from the stream buffer."""
-    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
+    monkeypatch.setattr("korra_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
     agent = FakeAgent()
     agent._current_streamed_assistant_text = "partial tokens"
 
@@ -374,7 +374,7 @@ def test_delivery_only_reasoning_excerpt_does_not_fill_blank_assistant(monkeypat
     tool_calls. Filling that tail would persist the excerpt and break replay
     (test_empty_terminal_reasoning_surface).
     """
-    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
+    monkeypatch.setattr("korra_cli.plugins.invoke_hook", lambda *_a, **_kw: [])
     agent = FakeAgent()
     excerpt = (
         "⚠️ The model produced only internal reasoning and no final answer, "

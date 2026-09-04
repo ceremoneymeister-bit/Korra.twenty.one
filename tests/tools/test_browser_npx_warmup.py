@@ -176,7 +176,7 @@ def test_timeout_cleanup_communicate_itself_raising_does_not_propagate():
     """The post-kill drain call is itself best-effort — if the process is
     stuck badly enough that even the 5s cleanup communicate() times out (or
     raises for any other reason), that must not escape and crash the
-    fire-and-forget caller (hermes_cli/doctor.py calls this bare)."""
+    fire-and-forget caller (korra_cli/doctor.py calls this bare)."""
     proc = _mock_proc(
         communicate_side_effect=[
             subprocess.TimeoutExpired(cmd=["npx"], timeout=60.0),
@@ -206,7 +206,7 @@ def test_returns_false_instead_of_raising_on_popen_failure():
 
 
 def test_returns_false_instead_of_raising_on_unexpected_communicate_exception():
-    """Fire-and-forget contract: hermes_cli/doctor.py calls this bare (no
+    """Fire-and-forget contract: korra_cli/doctor.py calls this bare (no
     try/except of its own), so any exception must be swallowed here."""
     proc = _mock_proc(communicate_side_effect=OSError("broken pipe"))
     with patch("tools.browser_tool._resolve_npx_bin", return_value="/usr/bin/npx"), \

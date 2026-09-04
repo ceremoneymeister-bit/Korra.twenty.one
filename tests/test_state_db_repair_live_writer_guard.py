@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from hermes_state import (
+from korra_state import (
     SessionDB,
     repair_state_db_schema,
 )

@@ -11,7 +11,7 @@ from __future__ import annotations
 import inspect
 from typing import get_args
 
-from agent.transports.hermes_tools_mcp_server import (
+from agent.transports.korra_tools_mcp_server import (
     _signature_from_schema,
 )
 
@@ -85,7 +85,7 @@ class TestSignatureFromSchema:
 
 class TestModuleSurface:
     def test_module_imports_clean(self):
-        from agent.transports import hermes_tools_mcp_server as m
+        from agent.transports import korra_tools_mcp_server as m
         assert callable(m.main)
         assert callable(m._build_server)
         assert isinstance(m.EXPOSED_TOOLS, tuple)
@@ -96,7 +96,7 @@ class TestModuleSurface:
         own builtins are better-integrated with its sandbox + approvals.
         Specifically: no terminal/shell, no read_file/write_file, no
         patch — those are codex's built-in tools."""
-        from agent.transports.hermes_tools_mcp_server import EXPOSED_TOOLS
+        from agent.transports.korra_tools_mcp_server import EXPOSED_TOOLS
         forbidden = {
             "terminal", "shell", "read_file", "write_file", "patch",
             "search_files", "process",
@@ -116,7 +116,7 @@ class TestMain:
     def test_main_returns_2_when_mcp_unavailable(self, monkeypatch):
         """When the mcp package isn't installed, main() should exit
         cleanly with code 2 and an install hint, not crash."""
-        import agent.transports.hermes_tools_mcp_server as m
+        import agent.transports.korra_tools_mcp_server as m
 
         def boom_build(*a, **kw):
             raise ImportError("mcp not installed")
@@ -126,7 +126,7 @@ class TestMain:
         assert rc == 2
 
     def test_main_handles_keyboard_interrupt(self, monkeypatch):
-        import agent.transports.hermes_tools_mcp_server as m
+        import agent.transports.korra_tools_mcp_server as m
 
         class FakeServer:
             def run(self):
@@ -137,7 +137,7 @@ class TestMain:
         assert rc == 0
 
     def test_main_returns_1_on_runtime_error(self, monkeypatch):
-        import agent.transports.hermes_tools_mcp_server as m
+        import agent.transports.korra_tools_mcp_server as m
 
         class CrashingServer:
             def run(self):

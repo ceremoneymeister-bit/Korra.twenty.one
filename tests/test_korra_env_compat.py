@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-import hermes_constants
-from hermes_constants import (
+import korra_constants
+from korra_constants import (
     get_default_hermes_root,
     get_hermes_home,
     get_process_hermes_home,
@@ -262,7 +262,7 @@ def test_default_root_of_docker_profile_layout(tmp_path, monkeypatch, name):
     monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.delenv("KORRA_HOME", raising=False)
     monkeypatch.setenv(name, str(home))
-    monkeypatch.setattr(hermes_constants, "_default_hermes_root_memo", None)
+    monkeypatch.setattr(korra_constants, "_default_hermes_root_memo", None)
     assert get_default_hermes_root() == root
 
 
@@ -271,7 +271,7 @@ def test_default_root_of_docker_profile_layout(tmp_path, monkeypatch, name):
 
 # Проверяется рантайм движка. Вне периметра: комплекты скиллов и
 # `scripts/` — самостоятельные файлы, которые запускаются своим
-# интерпретатором и не обязаны импортировать hermes_constants;
+# интерпретатором и не обязаны импортировать korra_constants;
 # фронтенды и десктоп — отдельный слой.
 #
 # Каталоги отсекаются ПО ПУТИ ОТ КОРНЯ, а не по имени: отсечение по имени
@@ -377,9 +377,9 @@ def test_engine_code_has_no_raw_env_reads_by_variable():
     """Чтение ``os.environ.get(_SOME_ENV)`` мимо хелпера теряет второе имя.
 
     Литеральное имя ловится глазами и грепом, спрятанное за константой или
-    переменной цикла — нет: так `hermes_cli/web_server.py` перестал бы
+    переменной цикла — нет: так `korra_cli/web_server.py` перестал бы
     видеть `HERMES_DASHBOARD_FILES_ROOT`, который контур владельца задаёт
-    снаружи, а `hermes_cli/kanban.py` — `HERMES_PROFILE`.
+    снаружи, а `korra_cli/kanban.py` — `HERMES_PROFILE`.
     """
     import ast
     import re as _re

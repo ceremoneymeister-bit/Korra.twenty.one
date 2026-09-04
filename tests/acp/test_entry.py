@@ -54,7 +54,7 @@ def test_main_skips_configured_mcp_discovery_when_requested(monkeypatch):
 def test_main_setup_offers_browser_install_when_tty(monkeypatch):
     """When stdin is a TTY and the user answers yes, model setup is followed
     by a browser-tools bootstrap call."""
-    monkeypatch.setattr("hermes_cli.main.main", lambda: None)
+    monkeypatch.setattr("korra_cli.main.main", lambda: None)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda *_args, **_kwargs: "y")
 
@@ -83,7 +83,7 @@ def test_main_setup_browser_propagates_browser_failure(monkeypatch):
     def fake_ensure(dep, interactive=True):
         return dep != "browser"  # browser fails
 
-    monkeypatch.setattr("hermes_cli.dep_ensure.ensure_dependency", fake_ensure)
+    monkeypatch.setattr("korra_cli.dep_ensure.ensure_dependency", fake_ensure)
 
     with pytest.raises(SystemExit) as excinfo:
         entry.main(["--setup-browser"])

@@ -233,7 +233,7 @@ def _flush_session_db_after_tool_progress(
         return persisted
     except Exception as exc:
         agent._incremental_persistence_failed = True
-        from hermes_state import classify_persistence_error
+        from korra_state import classify_persistence_error
         agent._last_persistence_error_cause = classify_persistence_error(exc)
         logger.warning("Incremental tool-call persistence failed after %s: %s", stage, exc)
         return False
@@ -247,7 +247,7 @@ def _image_generate_parallel_limit() -> int:
     intentionally conservative while allowing users to tune it per install.
     """
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
 
         cfg = load_config() or {}
         image_gen = cfg.get("image_gen") if isinstance(cfg, dict) else None
@@ -595,7 +595,7 @@ def _run_agent_tool_execution_middleware(
 ) -> _ManagedToolResult:
     """Run Relay rewrites before Hermes policy and dispatch exactly once."""
     from agent import relay_tools
-    from hermes_cli.middleware import (
+    from korra_cli.middleware import (
         apply_tool_request_middleware,
         run_tool_execution_middleware,
     )
@@ -644,7 +644,7 @@ def _run_agent_tool_execution_middleware(
             def _resolve_pre_tool_block():
                 nonlocal final_args
                 try:
-                    from hermes_cli.plugins import _dispatch_pre_tool_call_hooks
+                    from korra_cli.plugins import _dispatch_pre_tool_call_hooks
 
                     block_msg, modified_args = _dispatch_pre_tool_call_hooks(
                         function_name,
@@ -2131,7 +2131,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
             def _execute(next_args: dict) -> Any:
                 session_db = agent._get_session_db_for_recall()
                 if not session_db:
-                    from hermes_state import format_session_db_unavailable
+                    from korra_state import format_session_db_unavailable
                     return json.dumps({"success": False, "error": format_session_db_unavailable()})
                 from tools.session_search_tool import session_search as _session_search
                 return _session_search(

@@ -293,7 +293,7 @@ class TestNoProgressDeadLoopBreaker:
         from unittest.mock import MagicMock
         import os
 
-        from hermes_state import SessionDB
+        from korra_state import SessionDB
         from run_agent import AIAgent
 
         with tempfile.TemporaryDirectory() as tmpdir:

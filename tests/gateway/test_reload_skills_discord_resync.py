@@ -69,7 +69,7 @@ class TestRefreshSkillGroup:
             )
 
         monkeypatch.setattr(
-            "hermes_cli.commands.discord_skill_commands_by_category",
+            "korra_cli.commands.discord_skill_commands_by_category",
             fake_collector,
         )
 
@@ -113,7 +113,7 @@ class TestRegisterSkillGroupUsesInstanceState:
                 0,
             )
         monkeypatch.setattr(
-            "hermes_cli.commands.discord_skill_commands_by_category",
+            "korra_cli.commands.discord_skill_commands_by_category",
             fake_collector,
         )
 

@@ -12,7 +12,7 @@ loop, so the desktop WS never received gateway.ready and boot escalated to the
 import threading
 import time
 
-from hermes_cli import web_server
+from korra_cli import web_server
 
 
 def _reset_cache():

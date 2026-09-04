@@ -332,7 +332,7 @@ class PeerRunsHTTPClient:
         headers: Mapping[str, str] | None = None,
         room_grant: str | None = None,
     ) -> dict[str, Any]:
-        from hermes_cli.urllib_security import open_credentialed_url
+        from korra_cli.urllib_security import open_credentialed_url
 
         deadline = time.monotonic() + self.timeout_seconds
         ambiguous = method == "POST"

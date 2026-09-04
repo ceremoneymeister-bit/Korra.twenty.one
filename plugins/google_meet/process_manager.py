@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hermes_constants import get_hermes_home, korra_env_set
+from korra_constants import get_hermes_home, korra_env_set
 
 # File + directory layout (under $HERMES_HOME):
 #

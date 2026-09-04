@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set
 
-from hermes_constants import hermes_home_key
+from korra_constants import hermes_home_key
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +166,8 @@ def _discovery_cache_path() -> Optional[Path]:
     """Path of the tool-discovery verdict cache, or None if unresolvable."""
     try:
         # Deferred import keeps tools/registry.py a no-deps leaf at module
-        # import time (hermes_constants itself is stdlib-only, so no cycle).
-        from hermes_constants import get_hermes_home
+        # import time (korra_constants itself is stdlib-only, so no cycle).
+        from korra_constants import get_hermes_home
 
         return Path(get_hermes_home()) / "cache" / "tool_discovery_cache.json"
     except Exception:
@@ -334,7 +334,7 @@ def check_fn_cache_scope() -> Optional[str]:
 
         if not is_multiplex_active():
             return None
-        from hermes_constants import get_hermes_home_override
+        from korra_constants import get_hermes_home_override
 
         override = get_hermes_home_override()
         if not override:

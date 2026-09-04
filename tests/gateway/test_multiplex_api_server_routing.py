@@ -45,7 +45,7 @@ class TestApiServerProfileResolution:
     def test_unserved_prefix_is_rejected(self, monkeypatch):
         adapter = _make_adapter(multiplex=True, allowlist=["worker"])
         monkeypatch.setattr(
-            "hermes_cli.profiles.profiles_to_serve",
+            "korra_cli.profiles.profiles_to_serve",
             lambda multiplex, profile_allowlist=None: [
                 ("default", "/profiles/default"),
                 ("worker", "/profiles/worker"),
@@ -85,7 +85,7 @@ class TestApiServerModelsUnderProfile:
         adapter = _make_adapter(multiplex=True)
         adapter._model_name = "hermes-agent"
         monkeypatch.setattr(
-            "hermes_cli.profiles.get_active_profile_name",
+            "korra_cli.profiles.get_active_profile_name",
             lambda: "coder",
         )
         token_prof = _api_request_profile.set("coder")

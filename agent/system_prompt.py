@@ -54,7 +54,7 @@ from agent.prompt_builder import (
     is_fable_51_model,
 )
 from agent.runtime_cwd import resolve_context_cwd
-from hermes_constants import get_default_hermes_root, get_hermes_home, korra_env
+from korra_constants import get_default_hermes_root, get_hermes_home, korra_env
 from pathlib import Path
 from utils import is_truthy_value
 
@@ -174,7 +174,7 @@ def _plugin_session_info(agent: Any) -> Dict[str, str]:
         if _home is not None:
             profile_name = _profile_name_for_home(_home)
         else:
-            from hermes_cli.profiles import get_active_profile_name
+            from korra_cli.profiles import get_active_profile_name
 
             profile_name = str(get_active_profile_name() or "default")
     except Exception:
@@ -206,7 +206,7 @@ def _frozen_plugin_prompt_sections(agent: Any) -> tuple:
         setattr(agent, attr, rendered)
         return rendered
     try:
-        from hermes_cli.plugins import render_system_prompt_sections
+        from korra_cli.plugins import render_system_prompt_sections
 
         rendered = tuple(render_system_prompt_sections(_plugin_session_info(agent)))
     except Exception as exc:
@@ -229,7 +229,7 @@ def _frozen_plugin_prompt_sections(agent: Any) -> tuple:
 
 def _restore_plugin_prompt_sections(prompt: str) -> tuple:
     """Recover frozen section bytes from the already-persisted full prompt."""
-    from hermes_cli.plugins import (
+    from korra_cli.plugins import (
         MAX_SYSTEM_PROMPT_SECTION_CHARS,
         PLUGIN_SECTIONS_END,
         PLUGIN_SECTIONS_START,
@@ -278,7 +278,7 @@ def restore_plugin_prompt_sections(agent: Any, prompt: str) -> None:
 
 
 def _plugin_section_blocks(sections: tuple, position: str) -> List[str]:
-    from hermes_cli.plugins import format_system_prompt_sections
+    from korra_cli.plugins import format_system_prompt_sections
 
     selected = [section for section in sections if section.position == position]
     block = format_system_prompt_sections(selected)
@@ -389,7 +389,7 @@ def _agent_home(agent: Any) -> Optional[Path]:
     Returns None when neither resolves so callers fall back to ambient.
     """
     try:
-        from hermes_constants import get_hermes_home_override
+        from korra_constants import get_hermes_home_override
 
         override = get_hermes_home_override()
         if override:
@@ -423,7 +423,7 @@ def _profile_name_for_home(home: Path) -> str:
     profile would misreport as "default".
     """
     try:
-        from hermes_constants import get_default_hermes_root
+        from korra_constants import get_default_hermes_root
 
         root = get_default_hermes_root()
         rel = home.resolve().relative_to((root / "profiles").resolve())
@@ -863,7 +863,7 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # uses: top-level platform overrides gateway.platforms at the leaf.
     if platform_key == "telegram" and _default_hint:
         try:
-            from hermes_cli.config import load_config_readonly
+            from korra_cli.config import load_config_readonly
             _cfg = load_config_readonly()
             _gw_tg_extra = (((_cfg.get("gateway") or {}).get("platforms") or {}).get("telegram") or {}).get("extra")
             _top_tg_extra = ((_cfg.get("platforms") or {}).get("telegram") or {}).get("extra")
@@ -975,7 +975,7 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         _plugin_section_blocks(_frozen_plugin_prompt_sections(agent), "after_memory")
     )
 
-    from hermes_time import get_timezone as _hermes_tz, now as _hermes_now
+    from korra_time import get_timezone as _hermes_tz, now as _hermes_now
     now = _hermes_now()
     # Date-only (not minute-precision) so the system prompt is byte-stable
     # for the full day.  Minute-precision changes invalidate prefix-cache KV

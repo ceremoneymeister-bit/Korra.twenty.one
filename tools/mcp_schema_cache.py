@@ -23,7 +23,7 @@ _cache_lock = threading.Lock()
 
 
 def _cache_path() -> Path:
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     return get_hermes_home() / "cache" / _CACHE_FILENAME
 

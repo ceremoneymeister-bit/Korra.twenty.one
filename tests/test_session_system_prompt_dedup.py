@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from hermes_state import SCHEMA_VERSION, SessionDB
+from korra_state import SCHEMA_VERSION, SessionDB
 
 
 @pytest.fixture()

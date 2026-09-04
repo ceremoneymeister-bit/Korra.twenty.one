@@ -6,11 +6,11 @@ from unittest.mock import MagicMock, patch
 
 def test_slash_worker_accepts_profile_home():
     """_SlashWorker.__init__ accepts profile_home parameter."""
-    # hermes_state evaluates get_hermes_home() / "state.db" at import time, so
+    # korra_state evaluates get_hermes_home() / "state.db" at import time, so
     # the mock must return a Path (a bare str raises TypeError under per-file
     # subprocess isolation).
     with patch.dict("sys.modules", {
-        "hermes_constants": MagicMock(
+        "korra_constants": MagicMock(
             get_hermes_home=MagicMock(return_value=Path("/tmp/hermes_test")),
         ),
     }):

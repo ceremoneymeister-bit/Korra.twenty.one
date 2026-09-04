@@ -27,8 +27,8 @@ CORRUPT_PNG = base64.b64decode(
 
 def _reload(monkeypatch, hermes_home: Path):
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-    import hermes_constants
-    importlib.reload(hermes_constants)
+    import korra_constants
+    importlib.reload(korra_constants)
     import tools.image_source as isrc
     importlib.reload(isrc)
     return isrc

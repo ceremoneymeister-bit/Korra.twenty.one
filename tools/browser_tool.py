@@ -66,7 +66,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple, Union
 from pathlib import Path
 from agent.redact import redact_cdp_url
-from hermes_constants import (
+from korra_constants import (
     agent_browser_runnable,
     get_hermes_home,
     get_hermes_home_override,
@@ -74,8 +74,8 @@ from hermes_constants import (
     node_tool_runnable,
 )
 from utils import env_int, is_truthy_value
-from hermes_cli.config import DEFAULT_CONFIG, cfg_get
-from hermes_cli._subprocess_compat import windows_hide_flags
+from korra_cli.config import DEFAULT_CONFIG, cfg_get
+from korra_cli._subprocess_compat import windows_hide_flags
 
 
 def __getattr__(name: str):
@@ -334,7 +334,7 @@ def _get_command_timeout() -> int:
 
     result = DEFAULT_COMMAND_TIMEOUT
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         val = cfg_get(cfg, "browser", "command_timeout")
         if val is not None:
@@ -374,7 +374,7 @@ def get_browser_snapshot_threshold() -> int:
 
     result = DEFAULT_SNAPSHOT_THRESHOLD
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         val = cfg_get(cfg, "browser", "snapshot_threshold")
         if val is not None:
@@ -583,7 +583,7 @@ def _get_cdp_override_raw() -> str:
         return env_override
 
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
 
         cfg = read_raw_config()
         browser_cfg = cfg.get("browser", {})
@@ -631,7 +631,7 @@ def _get_dialog_policy_config() -> Tuple[str, float]:
     )
 
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
 
         cfg = read_raw_config()
         browser_cfg = cfg.get("browser", {}) if isinstance(cfg, dict) else {}
@@ -792,7 +792,7 @@ def _ensure_browser_plugins_loaded() -> None:
     calls early-return inside `_ensure_plugins_discovered`.
     """
     try:
-        from hermes_cli.plugins import _ensure_plugins_discovered
+        from korra_cli.plugins import _ensure_plugins_discovered
 
         _ensure_plugins_discovered()
     except Exception as exc:
@@ -861,7 +861,7 @@ def _resolve_cloud_provider_uncached() -> Optional[CloudBrowserProvider]:
     resolved: Optional[CloudBrowserProvider] = None
     provider_key = None
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         browser_cfg = cfg.get("browser", {})
         if isinstance(browser_cfg, dict) and "cloud_provider" in browser_cfg:
@@ -952,7 +952,7 @@ def _resolve_cloud_provider_uncached() -> Optional[CloudBrowserProvider]:
     return _cached_cloud_provider
 
 
-from hermes_constants import is_termux as _is_termux_environment
+from korra_constants import is_termux as _is_termux_environment
 
 
 def _browser_install_hint() -> str:
@@ -963,8 +963,8 @@ def _browser_install_hint() -> str:
 
 # Sentinel _find_agent_browser returns/caches to mean "resolve via npx" rather
 # than a concrete executable path. A named constant + predicate keep the six
-# comparison sites (four here, plus hermes_cli/tools_config.py and
-# hermes_cli/doctor.py) from drifting if the sentinel's exact spelling ever
+# comparison sites (four here, plus korra_cli/tools_config.py and
+# korra_cli/doctor.py) from drifting if the sentinel's exact spelling ever
 # changes.
 NPX_AGENT_BROWSER_SENTINEL = "npx agent-browser"
 
@@ -1062,7 +1062,7 @@ def _get_browser_engine() -> str:
 
     # Config file takes priority
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         val = cfg.get("browser", {}).get("engine")
         if val and str(val).strip():
@@ -1106,7 +1106,7 @@ def _is_headed_mode() -> bool:
     _cached_headed_mode = False
 
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         val = cfg.get("browser", {}).get("headed")
         if val is not None:
@@ -1487,7 +1487,7 @@ def _auto_local_for_private_urls() -> bool:
 
     _auto_local_for_private_urls_resolved = True
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         browser_cfg = cfg.get("browser", {})
         if isinstance(browser_cfg, dict) and "auto_local_for_private_urls" in browser_cfg:
@@ -1509,7 +1509,7 @@ def _use_real_profile() -> bool:
     so there is no hot-path cost to keeping it uncached.
     """
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         browser_cfg = cfg.get("browser", {})
         if isinstance(browser_cfg, dict):
@@ -1561,7 +1561,7 @@ def _agent_browser_argv(browser_cmd: str) -> list:
 def _cdp_http_ready(http_cdp: str) -> bool:
     """True when an ``http://host:port`` CDP discovery root answers."""
     try:
-        from hermes_cli.browser_connect import is_browser_debug_ready
+        from korra_cli.browser_connect import is_browser_debug_ready
 
         return is_browser_debug_ready(http_cdp, timeout=1.0)
     except Exception:
@@ -1651,7 +1651,7 @@ def _real_profile_cdp() -> tuple:
         # it so revoking consent actually removes the credential copies. Cheap
         # (one isdir check) and idempotent.
         try:
-            from hermes_cli.browser_connect import cleanup_real_profile_snapshots
+            from korra_cli.browser_connect import cleanup_real_profile_snapshots
 
             cleanup_real_profile_snapshots()
         except Exception as e:
@@ -1672,7 +1672,7 @@ def _real_profile_cdp() -> tuple:
             "or turn the toggle off."
         )
 
-    from hermes_cli.browser_connect import (
+    from korra_cli.browser_connect import (
         UNSUPPORTED_CHANNEL,
         detect_default_chromium,
         real_profile_copy_dir,
@@ -1731,7 +1731,7 @@ def _real_profile_cdp() -> tuple:
         # No live browser owns the dir now — safe to (re)snapshot + overlay.
         snap_dir, err = snapshot_real_profile(browser)
         if err or not snap_dir:
-            from hermes_cli.browser_connect import _PROFILE_LOCKED_PREFIX
+            from korra_cli.browser_connect import _PROFILE_LOCKED_PREFIX
 
             if err and err.startswith(_PROFILE_LOCKED_PREFIX):
                 # The user's browser is holding the profile. Surface the guidance
@@ -1756,7 +1756,7 @@ def _real_profile_cdp() -> tuple:
         # NO mock-keychain switches keeps the OS keychain path intact, exactly
         # as the snapshot design intends; agent-browser attaches to it after
         # via --auto-connect (--cdp <port>).
-        from hermes_cli.browser_connect import chromium_executable
+        from korra_cli.browser_connect import chromium_executable
 
         real_binary = chromium_executable(browser)
         if real_binary is None:
@@ -2090,7 +2090,7 @@ def _allow_private_urls() -> bool:
 def _resolve_allow_private_urls() -> bool:
     """Read the browser private-URL toggle from the active config scope."""
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         browser_cfg = cfg.get("browser", {})
         if isinstance(browser_cfg, dict):
@@ -2157,7 +2157,7 @@ DEFAULT_SESSION_INACTIVITY_TIMEOUT = int(
 def _get_session_inactivity_timeout() -> int:
     result = env_int("BROWSER_INACTIVITY_TIMEOUT", DEFAULT_SESSION_INACTIVITY_TIMEOUT)
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         val = cfg_get(cfg, "browser", "inactivity_timeout")
         if val is not None:
@@ -3306,7 +3306,7 @@ def _find_agent_browser(*, validate: bool = True) -> str:
 
     # Nothing found — try lazy installation before giving up.
     try:
-        from hermes_cli.dep_ensure import ensure_dependency
+        from korra_cli.dep_ensure import ensure_dependency
         if ensure_dependency("browser"):
             candidates = [
                 shutil.which("agent-browser"),
@@ -4039,7 +4039,7 @@ def _store_full_snapshot(snapshot_text: str) -> Optional[str]:
     """
     try:
         import hashlib
-        from hermes_constants import get_hermes_dir
+        from korra_constants import get_hermes_dir
         from agent.redact import redact_sensitive_text
 
         content = redact_sensitive_text(snapshot_text, force=True)
@@ -4944,7 +4944,7 @@ def _allow_unsafe_browser_evaluate() -> bool:
     sensitive-primitive denylist even if ``browser.restrict_evaluate`` is set.
     """
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
 
         cfg = read_raw_config()
         return is_truthy_value(cfg_get(cfg, "browser", "allow_unsafe_evaluate"), default=False)
@@ -4968,7 +4968,7 @@ def _restrict_browser_evaluate() -> bool:
     ``browser.allow_unsafe_evaluate: true`` overrides it back off.
     """
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
 
         cfg = read_raw_config()
         return is_truthy_value(cfg_get(cfg, "browser", "restrict_evaluate"), default=False)
@@ -5292,7 +5292,7 @@ def _maybe_start_recording(task_id: str):
         if task_id in _recording_sessions:
             return
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         hermes_home = get_hermes_home()
         cfg = read_raw_config()
         record_enabled = cfg_get(cfg, "browser", "record_sessions", default=False)
@@ -5438,7 +5438,7 @@ def browser_vision(question: str, annotate: bool = False, task_id: Optional[str]
 
     import base64
     import uuid as uuid_mod
-    from hermes_constants import get_hermes_dir
+    from korra_constants import get_hermes_dir
     screenshots_dir = get_hermes_dir("cache/screenshots", "browser_screenshots")
     screenshot_path = screenshots_dir / f"browser_screenshot_{uuid_mod.uuid4().hex}.png"
     effective_task_id = _last_session_key(task_id or "default")
@@ -5497,7 +5497,7 @@ def browser_vision(question: str, annotate: bool = False, task_id: Optional[str]
             _lp_fallback_warning = fb_result.get("fallback_warning")
             fb_path = fb_result.get("data", {}).get("path", "")
             if fb_path and os.path.exists(fb_path):
-                from hermes_constants import get_hermes_dir
+                from korra_constants import get_hermes_dir
                 screenshots_dir = get_hermes_dir("cache/screenshots", "browser_screenshots")
                 screenshots_dir.mkdir(parents=True, exist_ok=True)
                 import shutil as _shutil_vision
@@ -5662,7 +5662,7 @@ def browser_vision(question: str, annotate: bool = False, task_id: Optional[str]
         vision_timeout = 120.0
         vision_temperature = 0.1
         try:
-            from hermes_cli.config import load_config
+            from korra_cli.config import load_config
             _cfg = load_config()
             _vision_cfg = cfg_get(_cfg, "auxiliary", "vision", default={})
             _vt = _vision_cfg.get("timeout")

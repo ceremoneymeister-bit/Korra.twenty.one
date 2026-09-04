@@ -25,14 +25,14 @@ def server():
     # The sys.modules mocks only need to cover the *initial* import — once
     # tui_gateway.server is cached, they are inert. Keeping them active for
     # the whole test poisons any module first imported inside a test body:
-    # e.g. hermes_cli.active_sessions would bind the mocked get_hermes_home
+    # e.g. korra_cli.active_sessions would bind the mocked get_hermes_home
     # (a fixed shared path) forever, leaking active-session registry entries
     # across every later test in the process. Scope the patch to the import.
     with patch.dict("sys.modules", {
-        "hermes_constants": MagicMock(get_hermes_home=MagicMock(return_value="/tmp/hermes_test")),
-        "hermes_cli.env_loader": MagicMock(),
-        "hermes_cli.banner": MagicMock(),
-        "hermes_state": MagicMock(),
+        "korra_constants": MagicMock(get_hermes_home=MagicMock(return_value="/tmp/hermes_test")),
+        "korra_cli.env_loader": MagicMock(),
+        "korra_cli.banner": MagicMock(),
+        "korra_state": MagicMock(),
     }):
         import importlib
         mod = importlib.import_module("tui_gateway.server")
@@ -953,7 +953,7 @@ def test_sync_session_key_after_compress_reanchors_active_session_lease(
     home = tmp_path / ".hermes"
     monkeypatch.setenv("HERMES_HOME", str(home))
 
-    from hermes_cli.active_sessions import (
+    from korra_cli.active_sessions import (
         active_session_registry_snapshot,
         try_acquire_active_session,
     )
@@ -1002,7 +1002,7 @@ def test_make_agent_accepts_list_system_prompt(server, monkeypatch):
     monkeypatch.setitem(sys.modules, "run_agent", types.SimpleNamespace(AIAgent=_Agent))
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.runtime_provider",
+        "korra_cli.runtime_provider",
         types.SimpleNamespace(
             resolve_runtime_provider=lambda **_kwargs: {
                 "provider": "test",
@@ -1217,7 +1217,7 @@ def test_skin_live_switch_end_to_end(server, tmp_path, monkeypatch):
     """Real config + skin files: activating a skin (as `hermes config set` does)
     makes the per-tool reconcile broadcast skin.changed with the resolved palette.
     Exercises _load_cfg → _skin_sig → resolve_skin → _emit with no mocks in between."""
-    import hermes_cli.skin_engine as skin_engine
+    import korra_cli.skin_engine as skin_engine
 
     (tmp_path / "skins").mkdir()
     (tmp_path / "skins" / "midnight.yaml").write_text(

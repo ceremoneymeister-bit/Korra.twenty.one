@@ -371,7 +371,7 @@ def _clamp_duration(family: Dict[str, Any], duration: Optional[int]) -> Optional
 
 def _load_video_gen_section() -> Dict[str, Any]:
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
 
         cfg = load_config()
         section = cfg.get("video_gen") if isinstance(cfg, dict) else None

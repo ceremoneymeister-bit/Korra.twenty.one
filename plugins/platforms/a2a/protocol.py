@@ -790,7 +790,7 @@ class TaskStore:
 
 def _conv_dir() -> Path:
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         base = Path(get_hermes_home())
     except Exception:
         base = Path(os.path.expanduser("~/.hermes"))

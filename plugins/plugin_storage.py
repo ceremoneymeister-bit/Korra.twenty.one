@@ -53,10 +53,10 @@ def plugin_data_dir(name: str) -> Path:
 
     ``<hermes home>/plugin-data/<name>/`` — survives plugin update and
     removal, and follows the active profile because it resolves through
-    :func:`hermes_constants.get_hermes_home` on every call. Don't cache the
+    :func:`korra_constants.get_hermes_home` on every call. Don't cache the
     result across profile switches.
     """
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     root = get_hermes_home() / "plugin-data" / _validate_name(name)
     root.mkdir(parents=True, exist_ok=True)

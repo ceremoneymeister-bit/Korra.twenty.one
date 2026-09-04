@@ -65,7 +65,7 @@ def _home_candidates() -> list:
         home / ".local" / "bin" / "lightpanda",
     ]
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
 
         candidates.append(Path(get_hermes_home()) / "bin" / "lightpanda")
     except Exception as e:  # pragma: no cover - defensive
@@ -108,7 +108,7 @@ def _pick_free_loopback_port() -> int:
 
 
 def _state_dir() -> Path:
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     path = Path(get_hermes_home()) / "cache" / "browser-use" / "lightpanda"
     path.mkdir(parents=True, exist_ok=True)
@@ -131,7 +131,7 @@ def _browser_env() -> dict:
 
 def _cdp_ready(url: str) -> bool:
     try:
-        from hermes_cli.browser_connect import is_browser_debug_ready
+        from korra_cli.browser_connect import is_browser_debug_ready
 
         return is_browser_debug_ready(url, timeout=0.2)
     except Exception as e:

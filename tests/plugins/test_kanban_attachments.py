@@ -1,7 +1,7 @@
 """Tests for Kanban task file attachments (#35338).
 
 Covers three layers:
-  * ``hermes_cli.kanban_db`` accessors (add/list/get/delete + path helpers)
+  * ``korra_cli.kanban_db`` accessors (add/list/get/delete + path helpers)
   * the dashboard REST surface (upload / list / download / delete)
   * worker-context surfacing so a kanban worker sees the absolute paths
 
@@ -20,7 +20,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from hermes_cli import kanban_db as kb
+from korra_cli import kanban_db as kb
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +257,7 @@ def test_store_attachment_bytes_roundtrip(kanban_home):
 
 
 def test_cli_attach_attachments_and_rm(kanban_home, tmp_path):
-    from hermes_cli.kanban import run_slash
+    from korra_cli.kanban import run_slash
 
     conn = kb.connect()
     try:

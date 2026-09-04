@@ -298,7 +298,7 @@ class TestDriverCmdResolution:
         with patch("shutil.which", return_value="/env/path/cua-driver") as which_mock, \
              patch("subprocess.Popen", return_value=proc), \
              patch("sys.stdout", new_callable=StringIO), \
-             patch("hermes_cli.tools_config._cua_driver_cmd", side_effect=Exception("force env")):
+             patch("korra_cli.tools_config._cua_driver_cmd", side_effect=Exception("force env")):
             # Force env-var resolution path inside run_doctor.
             doctor.run_doctor()
         which_mock.assert_called_with("/env/path/cua-driver")

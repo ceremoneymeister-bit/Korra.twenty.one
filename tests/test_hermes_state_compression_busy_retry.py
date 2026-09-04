@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from hermes_state import (
+from korra_state import (
     CompressionSessionBusyError,
     SessionCompressionInProgressError,
     SessionDB,

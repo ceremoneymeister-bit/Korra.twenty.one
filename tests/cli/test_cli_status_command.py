@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from cli import HermesCLI
-from hermes_cli.commands import resolve_command
+from korra_cli.commands import resolve_command
 
 
 def _make_cli():
@@ -44,7 +44,7 @@ def test_egress_command_is_available_in_cli_registry():
 def test_process_command_egress_prints_proxy_status(monkeypatch):
     cli_obj = _make_cli()
     monkeypatch.setattr(
-        "hermes_cli.proxy_cli.format_status_text",
+        "korra_cli.proxy_cli.format_status_text",
         lambda: "Egress proxy status\nEnabled: no",
     )
 

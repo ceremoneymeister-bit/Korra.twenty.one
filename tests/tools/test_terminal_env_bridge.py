@@ -11,7 +11,7 @@ import os
 import pytest
 
 import tools.terminal_tool as terminal_tool
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 
 
 @pytest.fixture(autouse=True)
@@ -120,7 +120,7 @@ def test_defaults_backfill_when_neither_config_nor_env_selects_backend():
 def test_bridge_only_attempted_once(monkeypatch):
     calls = []
 
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     real = config_mod.apply_terminal_config_to_env
 
@@ -138,7 +138,7 @@ def test_bridge_only_attempted_once(monkeypatch):
 
 
 def test_bridge_config_failure_does_not_crash(monkeypatch):
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     monkeypatch.setattr(
         config_mod,

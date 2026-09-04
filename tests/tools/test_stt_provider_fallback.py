@@ -96,7 +96,7 @@ def _fake_whisper_module(recorder):
 def _raw_selection(provider="deepgram"):
     """Сырой config.yaml: выбор провайдера записан человеком, а не пришёл из дефолтов."""
     return patch(
-        "hermes_cli.config.read_raw_config_readonly",
+        "korra_cli.config.read_raw_config_readonly",
         return_value={"stt": {"provider": provider}},
     )
 
@@ -460,7 +460,7 @@ class TestCpuThreads:
 
 class TestConfigTemplate:
     def test_defaults_pair_deepgram_with_a_local_fallback(self):
-        from hermes_cli.config_defaults import DEFAULT_CONFIG
+        from korra_cli.config_defaults import DEFAULT_CONFIG
 
         stt = DEFAULT_CONFIG["stt"]
         assert stt["provider"] == "deepgram"
@@ -468,7 +468,7 @@ class TestConfigTemplate:
         assert stt["deepgram"]["requires_env"] == ["DEEPGRAM_API_KEY"]
 
     def test_defaults_pin_the_medium_model_on_cpu(self):
-        from hermes_cli.config_defaults import DEFAULT_CONFIG
+        from korra_cli.config_defaults import DEFAULT_CONFIG
 
         local = DEFAULT_CONFIG["stt"]["local"]
         assert local["model"] == "medium"
@@ -481,7 +481,7 @@ class TestConfigTemplate:
         с самим агентом. Апстримный 0 («не выгружать никогда») писался под
         base в 150 МБ; здесь модель отпускается, а следующее голосовое платит
         полторы секунды повторной загрузки с диска образа, без сети."""
-        from hermes_cli.config_defaults import DEFAULT_CONFIG
+        from korra_cli.config_defaults import DEFAULT_CONFIG
         from tools.transcription_tools import _get_idle_unload_seconds
 
         local = DEFAULT_CONFIG["stt"]["local"]
@@ -491,7 +491,7 @@ class TestConfigTemplate:
 
     def test_fresh_defaults_select_deepgram_and_fall_back_without_a_key(self, baked_whisper):
         """Свежая установка без ключей: правило владельца работает как есть."""
-        from hermes_cli.config_defaults import DEFAULT_CONFIG
+        from korra_cli.config_defaults import DEFAULT_CONFIG
 
         stt = DEFAULT_CONFIG["stt"]
         with _env(), _raw_selection(), patch.object(tt, "_HAS_FASTER_WHISPER", True):
@@ -502,8 +502,8 @@ class TestConfigTemplate:
     def test_contour_command_survives_the_merge_and_gains_requires_env(self):
         """Контур со своей секцией ``stt.deepgram`` не теряет её и получает
         requires_env из дефолтов — правку живого config.yaml это не требует."""
-        from hermes_cli.config import _deep_merge
-        from hermes_cli.config_defaults import DEFAULT_CONFIG
+        from korra_cli.config import _deep_merge
+        from korra_cli.config_defaults import DEFAULT_CONFIG
 
         contour = {"stt": {"provider": "deepgram", "deepgram": {"command": "мой-скрипт {input_path}"}}}
         merged = _deep_merge(DEFAULT_CONFIG, contour)["stt"]
@@ -518,7 +518,7 @@ class TestProfileSeeding:
         """Профиль — не отдельный контур: правило распознавания у него общее."""
         import yaml
 
-        from hermes_cli.profiles import _seed_model_config
+        from korra_cli.profiles import _seed_model_config
 
         source = tmp_path / "home"
         source.mkdir()
@@ -545,7 +545,7 @@ class TestProfileSeeding:
         """Нечего наследовать — профиль просто живёт на дефолтах движка."""
         import yaml
 
-        from hermes_cli.profiles import _seed_model_config
+        from korra_cli.profiles import _seed_model_config
 
         source = tmp_path / "home"
         source.mkdir()

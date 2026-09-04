@@ -337,7 +337,7 @@ class TestAllResolvableCommandsBypassGuard:
 
     def test_should_bypass_returns_true_for_every_registered_command(self):
         """Spot-check: the commands previously-broken on Discord all bypass."""
-        from hermes_cli.commands import should_bypass_active_session
+        from korra_cli.commands import should_bypass_active_session
 
         for cmd in (
             "model", "reasoning", "personality", "voice", "insights", "title",
@@ -350,7 +350,7 @@ class TestAllResolvableCommandsBypassGuard:
 
     def test_should_bypass_returns_false_for_unknown(self):
         """Unknown words don't bypass — they get queued as user text."""
-        from hermes_cli.commands import should_bypass_active_session
+        from korra_cli.commands import should_bypass_active_session
 
         assert should_bypass_active_session("foobar") is False
         assert should_bypass_active_session(None) is False
@@ -421,13 +421,13 @@ class TestPendingCommandSafetyNet:
     def test_stop_command_detected(self):
         """resolve_command must recognize /stop so the safety net can
         discard it."""
-        from hermes_cli.commands import resolve_command
+        from korra_cli.commands import resolve_command
 
         assert resolve_command("stop") is not None
         assert resolve_command("stop").name == "stop"
 
     def test_new_command_detected(self):
-        from hermes_cli.commands import resolve_command
+        from korra_cli.commands import resolve_command
 
         assert resolve_command("new") is not None
         assert resolve_command("new").name == "new"

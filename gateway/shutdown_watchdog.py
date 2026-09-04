@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from gateway.restart import GATEWAY_SERVICE_RESTART_EXIT_CODE
-from hermes_constants import get_hermes_home, korra_env
+from korra_constants import get_hermes_home, korra_env
 from utils import atomic_json_write
 
 logger = logging.getLogger(__name__)
@@ -432,7 +432,7 @@ def arm_shutdown_watchdog(
         except Exception:
             pass
         try:
-            from hermes_logging import drain_log_queue
+            from korra_logging import drain_log_queue
             drain_log_queue(timeout=1.0)
         except Exception:
             pass
@@ -513,7 +513,7 @@ async def loop_heartbeat_forever(
     loop itself (``_tick_socket_handler``) — and records whether it is armed in
     the heartbeat payload (``loop_tick_socket``). External probes must require
     the witness to agree with file staleness before classifying a loop as
-    wedged; see ``hermes_cli.gateway.probe_gateway_loop_liveness`` for the
+    wedged; see ``korra_cli.gateway.probe_gateway_loop_liveness`` for the
     two-witness contract.
     """
     try:

@@ -71,7 +71,7 @@ import logging
 import time
 import threading
 
-from hermes_constants import get_hermes_home, display_hermes_home, korra_env
+from korra_constants import get_hermes_home, display_hermes_home, korra_env
 import os
 import re
 from enum import Enum
@@ -79,7 +79,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, Any, List, Optional, Set, Tuple
 
 from tools.registry import registry, tool_error
-from hermes_cli.config import cfg_get
+from korra_cli.config import cfg_get
 from utils import env_var_enabled
 from agent.skill_utils import (
     EXCLUDED_SKILL_DIRS as _EXCLUDED_SKILL_DIRS,
@@ -90,7 +90,7 @@ logger = logging.getLogger(__name__)
 
 # Per-session skill discovery cache.  _find_all_skills() re-reads every
 # SKILL.md on every call; with hundreds of skills this is wasteful.
-# Cache validation (mirrors hermes_cli/profiles.py::_count_skills, d5eee133e):
+# Cache validation (mirrors korra_cli/profiles.py::_count_skills, d5eee133e):
 #   - signature = per-dir max mtime of the dir AND its immediate children
 #     (one scandir per dir; catches skill add/remove inside categories,
 #     which does NOT bump the root dir's mtime), plus the disabled-set
@@ -301,7 +301,7 @@ def load_env() -> Dict[str, str]:
 
     # utf-8-sig: users hand-edit .env in Notepad, which prepends a BOM that
     # would otherwise glue U+FEFF onto the first key name (same dialect as
-    # the canonical readers in hermes_cli/config.py).
+    # the canonical readers in korra_cli/config.py).
     with env_path.open(encoding="utf-8-sig", errors="replace") as f:
         for line in f:
             line = line.strip()
@@ -741,7 +741,7 @@ def _is_skill_disabled(name: str, platform: str = None) -> bool:
     3. ``HERMES_SESSION_PLATFORM`` from gateway session context
     """
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
         config = load_config()
         skills_cfg = config.get("skills", {})
         resolved_platform = platform or korra_env("KORRA_PLATFORM") or _get_session_platform()
@@ -911,7 +911,7 @@ def skills_list(category: str = None, task_id: str = None) -> str:
         # Find all skills
         all_skills = _find_all_skills()
         try:
-            from hermes_cli.plugins import discover_plugins, get_plugin_manager
+            from korra_cli.plugins import discover_plugins, get_plugin_manager
 
             discover_plugins()
             for plugin_skill in get_plugin_manager().list_plugin_skill_metadata():
@@ -999,7 +999,7 @@ def _serve_plugin_skill(
     session_id: str | None = None,
 ) -> str:
     """Read a plugin-provided skill, apply guards, return JSON."""
-    from hermes_cli.plugins import _get_disabled_plugins, get_plugin_manager
+    from korra_cli.plugins import _get_disabled_plugins, get_plugin_manager
 
     if namespace in _get_disabled_plugins():
         return json.dumps(
@@ -1224,7 +1224,7 @@ def skill_view(
         # Bare names fall through to the existing flat-tree scan below.
         if ":" in name:
             from agent.skill_utils import is_valid_namespace, parse_qualified_name
-            from hermes_cli.plugins import discover_plugins, get_plugin_manager
+            from korra_cli.plugins import discover_plugins, get_plugin_manager
 
             namespace, bare = parse_qualified_name(name)
             if not is_valid_namespace(namespace):

@@ -3,7 +3,7 @@
 The provider is KEYLESS: OpenCode's free tier is served anonymously and
 rejects any unrecognized Authorization bearer with 401, so the provider
 declares no env vars and every request goes out with an empty Authorization
-header (see hermes_cli.models.opencode_zen_free_runtime).
+header (see korra_cli.models.opencode_zen_free_runtime).
 """
 
 import os
@@ -63,7 +63,7 @@ class TestOpenCodeFreeAuthAlias:
     """Verify the hardcoded alias in auth.py resolve_provider()."""
 
     def test_resolve_provider_free_alias(self):
-        from hermes_cli.auth import resolve_provider
+        from korra_cli.auth import resolve_provider
         # "free" should resolve to "opencode-free" without any credential
         result = resolve_provider("free")
         assert result == "opencode-free"
@@ -73,28 +73,28 @@ class TestOpenCodeFreeModelLists:
     """Curated keyless model lists exist and stay in sync."""
 
     def test_fallback_models_exist(self):
-        from hermes_cli.setup import _DEFAULT_PROVIDER_MODELS
+        from korra_cli.setup import _DEFAULT_PROVIDER_MODELS
         assert "opencode-free" in _DEFAULT_PROVIDER_MODELS
 
     def test_setup_list_matches_curated_catalog(self):
         """setup.py sample list must be a subset of the curated catalog
         (behavior contract, not a frozen snapshot)."""
-        from hermes_cli.models import _PROVIDER_MODELS
-        from hermes_cli.setup import _DEFAULT_PROVIDER_MODELS
+        from korra_cli.models import _PROVIDER_MODELS
+        from korra_cli.setup import _DEFAULT_PROVIDER_MODELS
         curated = set(_PROVIDER_MODELS["opencode-free"])
         assert set(_DEFAULT_PROVIDER_MODELS["opencode-free"]) <= curated
 
     def test_every_curated_model_is_keyless(self):
         """Every model in the opencode-free catalog must satisfy the keyless
         predicate — a paid slug here would route with no auth and 401."""
-        from hermes_cli.models import _PROVIDER_MODELS, is_opencode_zen_free_model
+        from korra_cli.models import _PROVIDER_MODELS, is_opencode_zen_free_model
         for mid in _PROVIDER_MODELS["opencode-free"]:
             assert is_opencode_zen_free_model(mid), mid
 
     def test_delisted_ox_alpha_not_in_floor(self):
         """x-preview-f-free was delisted by the relay 2026-08-26 (401s keyless);
         the offline floor must not offer it (#95914)."""
-        from hermes_cli.models import _PROVIDER_MODELS
+        from korra_cli.models import _PROVIDER_MODELS
         assert "x-preview-f-free" not in _PROVIDER_MODELS["opencode-free"]
 
 
@@ -102,7 +102,7 @@ class TestOpenCodeFreeRuntimeKeyless:
     """The runtime resolver pins every opencode-free model keyless."""
 
     def test_free_provider_any_model_routes_keyless(self):
-        from hermes_cli.models import (
+        from korra_cli.models import (
             OPENCODE_ZEN_FREE_KEYLESS_PLACEHOLDER,
             opencode_zen_free_runtime,
         )
@@ -114,7 +114,7 @@ class TestOpenCodeFreeRuntimeKeyless:
 
     def test_free_provider_muse_routes_responses(self):
         """opencode-free inherits Zen's per-model endpoint routing."""
-        from hermes_cli.models import opencode_zen_free_runtime
+        from korra_cli.models import opencode_zen_free_runtime
         rt = opencode_zen_free_runtime(
             "opencode-free", "muse-spark-1.2-contributor-free"
         )

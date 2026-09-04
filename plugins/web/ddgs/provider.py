@@ -28,7 +28,7 @@ import time
 from typing import Any, Dict, Optional
 
 from agent.web_search_provider import WebSearchProvider
-from hermes_constants import korra_env_set
+from korra_constants import korra_env_set
 
 logger = logging.getLogger(__name__)
 

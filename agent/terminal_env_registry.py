@@ -30,7 +30,7 @@ import threading
 from typing import Dict, List, Optional
 
 from agent.terminal_env_provider import TerminalEnvironmentProvider
-from hermes_constants import hermes_home_key
+from korra_constants import hermes_home_key
 
 logger = logging.getLogger(__name__)
 

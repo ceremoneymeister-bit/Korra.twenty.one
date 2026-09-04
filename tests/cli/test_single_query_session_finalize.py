@@ -47,7 +47,7 @@ def test_finalize_single_query_runs_cleanup_when_finalize_hook_fails(monkeypatch
         calls.append("finalize")
         raise RuntimeError("hook failed")
 
-    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", invoke_hook)
+    monkeypatch.setattr("korra_cli.plugins.invoke_hook", invoke_hook)
     monkeypatch.setattr(cli, "_run_cleanup", lambda **kwargs: calls.append("cleanup"))
 
     cli._finalize_single_query(fake_cli)
@@ -65,7 +65,7 @@ def test_notify_single_query_session_finalize_uses_agent_session(monkeypatch):
     def invoke_hook(name, **kwargs):
         calls.append((name, kwargs))
 
-    monkeypatch.setattr("hermes_cli.plugins.invoke_hook", invoke_hook)
+    monkeypatch.setattr("korra_cli.plugins.invoke_hook", invoke_hook)
 
     cli._notify_single_query_session_finalize(fake_cli)
 

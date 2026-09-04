@@ -445,7 +445,7 @@ def _migrate_task_status_constraint(conn: sqlite3.Connection) -> None:
 
 
 def _connect(db_path: Path | str) -> sqlite3.Connection:
-    from hermes_state import apply_wal_with_fallback
+    from korra_state import apply_wal_with_fallback
 
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)

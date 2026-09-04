@@ -13,7 +13,7 @@ from typing import Any, Union
 from urllib.parse import urlparse
 
 import yaml
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -593,7 +593,7 @@ def atomic_roundtrip_yaml_update(
     # ``hermes config set``'s ``_set_nested`` (#91607: /model + TUI
     # persistence route through here and used to write ``glm-5: {'3': ...}``
     # phantom siblings while the runtime kept reading the literal key).
-    from hermes_cli.config import _greedy_literal_match, _split_key_path
+    from korra_cli.config import _greedy_literal_match, _split_key_path
 
     keys = _split_key_path(key_path)
     i = 0
@@ -663,18 +663,18 @@ def atomic_roundtrip_yaml_save(
     callers that mutate a deep-loaded config dict and want to persist the
     whole thing.
 
-    Shares the fail-closed contract ``hermes_cli.config.atomic_config_write``
+    Shares the fail-closed contract ``korra_cli.config.atomic_config_write``
     enforces for plain (non-comment-preserving) full-document writes: an
     existing-but-unreadable ``config.yaml`` (permission error, broken mount,
     transient I/O) raises rather than being silently replaced with only
     ``new_state``. Imported lazily to avoid a module-level circular import —
-    ``hermes_cli.config`` itself imports from this module.
+    ``korra_cli.config`` itself imports from this module.
     """
     from ruamel.yaml import YAML
     from ruamel.yaml.comments import CommentedMap
     from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
-    from hermes_cli.config import require_readable_config_before_write
+    from korra_cli.config import require_readable_config_before_write
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

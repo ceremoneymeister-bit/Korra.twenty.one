@@ -16,7 +16,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import Iterator, Mapping, MutableMapping
-from hermes_constants import korra_env, korra_env_pop, korra_env_set
+from korra_constants import korra_env, korra_env_pop, korra_env_set
 
 _DELEGATED_CHILD_CONTEXT: ContextVar[bool] = ContextVar(
     "hermes_delegated_child_context",

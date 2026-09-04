@@ -27,7 +27,7 @@ from gateway.hosted_room_execution_policy import (
     RoomExecutionPolicy,
     execution_policy_mapping,
 )
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 
 # Version 2 adds authority/member lineage to scoped grants. It is intentionally
@@ -122,7 +122,7 @@ def gateway_room_grant_secret(root: Path | str | None = None) -> bytes:
     """
 
     if root is None:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
 
         # Profile routing uses a context-local HERMES_HOME override. The process
         # environment retains the installation root and is the authority here.
@@ -450,7 +450,7 @@ def local_room_link_endpoint(value: Any | None = None) -> dict[str, Any]:
 def _room_link_url_from_config(home: str) -> str | None:
     """Read the restart-scoped user setting without polling config on probes."""
     from gateway.config import load_gateway_config
-    from hermes_constants import (
+    from korra_constants import (
         get_hermes_home,
         reset_hermes_home_override,
         set_hermes_home_override,
@@ -472,7 +472,7 @@ def _configured_room_link_url() -> str | None:
     override = korra_env("KORRA_ROOM_LINK_URL")
     if override is not None:
         return override
-    from hermes_constants import get_default_hermes_root, get_hermes_home
+    from korra_constants import get_default_hermes_root, get_hermes_home
 
     home = get_hermes_home()
     configured = _room_link_url_from_config(str(home))

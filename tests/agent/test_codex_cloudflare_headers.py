@@ -26,7 +26,7 @@ import base64
 import json
 from unittest.mock import MagicMock, patch
 
-from hermes_cli import __version__
+from korra_cli import __version__
 
 
 # ---------------------------------------------------------------------------

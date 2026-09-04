@@ -122,7 +122,7 @@ def _env_value(name: str) -> str:
     auto-detect cascade and ``check_web_api_key()`` blind to it. See #34290.
     """
     try:
-        from hermes_cli.config import get_env_value
+        from korra_cli.config import get_env_value
 
         val = get_env_value(name)
     except Exception:
@@ -138,7 +138,7 @@ def _has_env(name: str) -> bool:
 def _load_web_config() -> dict:
     """Load the ``web:`` section from ~/.hermes/config.yaml."""
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
         # ``or {}``: a present-but-null ``web:`` section (YAML ``web:`` with no
         # body) makes ``.get("web", {})`` return None, which would break every
         # caller that does ``_load_web_config().get(...)``. Honor the ``-> dict``
@@ -681,7 +681,7 @@ def _store_full_text(url: str, content: str) -> Optional[str]:
     try:
         import hashlib
         from urllib.parse import urlparse
-        from hermes_constants import get_hermes_dir
+        from korra_constants import get_hermes_dir
 
         cache_dir = get_hermes_dir("cache/web", "web_cache")
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -804,7 +804,7 @@ def _ensure_web_plugins_loaded() -> None:
     invocations.
     """
     try:
-        from hermes_cli.plugins import _ensure_plugins_discovered
+        from korra_cli.plugins import _ensure_plugins_discovered
 
         _ensure_plugins_discovered()
     except Exception as exc:  # noqa: BLE001
@@ -1557,7 +1557,7 @@ if __name__ == "__main__":
     # Check if API keys are available
     web_available = check_web_api_key()
     tool_gateway_available = _is_tool_gateway_ready()
-    from hermes_cli.config import get_env_value as _gev
+    from korra_cli.config import get_env_value as _gev
     firecrawl_key_available = bool((_gev("FIRECRAWL_API_KEY") or "").strip())
     firecrawl_url_available = bool((_gev("FIRECRAWL_API_URL") or "").strip())
 

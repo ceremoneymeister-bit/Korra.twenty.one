@@ -8,7 +8,7 @@ import pytest
 
 
 def test_is_zeroed_state_db_and_quarantine(tmp_path):
-    import hermes_state as hs
+    import korra_state as hs
 
     db = tmp_path / "state.db"
     db.write_bytes(bytes(1024))
@@ -30,8 +30,8 @@ def test_is_zeroed_never_probes_special_files(tmp_path):
     """
     import os
 
-    import hermes_state as hs
-    from hermes_cli.backup import is_zeroed_sqlite_file
+    import korra_state as hs
+    from korra_cli.backup import is_zeroed_sqlite_file
 
     fifo = tmp_path / "state.db"
     os.mkfifo(fifo)
@@ -42,7 +42,7 @@ def test_is_zeroed_never_probes_special_files(tmp_path):
 
 
 def test_sessiondb_opens_fresh_after_zeroed_quarantine(tmp_path, monkeypatch):
-    import hermes_state as hs
+    import korra_state as hs
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     db = tmp_path / "state.db"
@@ -63,7 +63,7 @@ def test_sessiondb_opens_fresh_after_zeroed_quarantine(tmp_path, monkeypatch):
 
 def test_is_zeroed_state_db_zero_byte_quarantine(tmp_path, monkeypatch):
     """#97568: a 0-byte file must be detected as zeroed and quarantined."""
-    import hermes_state as hs
+    import korra_state as hs
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     db = tmp_path / "state.db"
@@ -102,7 +102,7 @@ def test_concurrent_quarantine_no_clobber(tmp_path):
     second process re-checks under the lock, finds the file no longer
     zeroed (or gone), and returns without clobbering.
     """
-    import hermes_state as hs
+    import korra_state as hs
     import threading
     import sqlite3
 
@@ -161,7 +161,7 @@ def test_quarantine_fails_closed_when_lock_held(tmp_path):
     the file. A fail-open fallback would let a slow/paused startup that
     still owns the lock race with the fallback's re-check + rename.
     """
-    import hermes_state as hs
+    import korra_state as hs
     import platform
     import threading
 
@@ -227,7 +227,7 @@ def test_concurrent_openers_zero_byte_startup_serialization(tmp_path, monkeypatc
     database serialize through the startup lock, avoid racing on the initial
     0-byte creation window, and do not falsely quarantine each other's live file.
     """
-    import hermes_state as hs
+    import korra_state as hs
     import threading
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -272,8 +272,8 @@ def test_live_connection_0_byte_not_quarantined_in_process(tmp_path, monkeypatch
     """#97580: A live 0-byte connection tracked in this process must not be
     quarantined by is_zeroed_state_db / SessionDB.
     """
-    import hermes_state as hs
-    from hermes_cli.sqlite_safe_read import connect_tracked
+    import korra_state as hs
+    from korra_cli.sqlite_safe_read import connect_tracked
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     db = tmp_path / "state.db"

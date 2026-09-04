@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ def ledger_enabled() -> bool:
     """Config gate ``skills.ledger`` (default True). Lazy import so this
     module stays importable without the CLI config layer."""
     try:
-        from hermes_cli.config import cfg_get, load_config
+        from korra_cli.config import cfg_get, load_config
 
         return bool(cfg_get(load_config(), "skills", "ledger", default=True))
     except Exception as e:  # pragma: no cover — best-effort config read

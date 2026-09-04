@@ -63,32 +63,32 @@ _ALLOWED: dict[tuple[str, str], str] = {
         "can only run what is on that subshell's PATH, which local.py populates "
         "with the managed dirs — so PATH is the correct question to ask here."
     ),
-    ("hermes_cli/update_cmd.py", "uv"): (
+    ("korra_cli/update_cmd.py", "uv"): (
         "Termux fallback: a pkg-installed uv lands on PATH but not in the "
         "managed bin dir, and it is checked only after resolve_uv() misses."
     ),
-    ("hermes_cli/update_cmd.py", "npm"): (
+    ("korra_cli/update_cmd.py", "npm"): (
         "WSL diagnostic: deliberately inspects what PATH resolves so it can "
         "warn that the only reachable npm is the Windows one."
     ),
     ("tools/lazy_deps.py", "uv"): (
         "Fallback after resolve_uv(), plus the except-branch for the "
-        "hermes_cli import guard."
+        "korra_cli import guard."
     ),
     ("tools/browser_use_cli.py", "uv"): (
         "install_cli()'s fallback after ensure_uv() misses — a user-installed "
         "uv on PATH is a legitimate last rung before giving up with install "
         "guidance."
     ),
-    ("hermes_cli/gateway.py", "node"): (
+    ("korra_cli/gateway.py", "node"): (
         "Fallback rung of _append_node_dir_for_service(), after the managed "
         "dirs from iter_hermes_node_dirs() are already appended."
     ),
-    ("hermes_cli/main.py", "node"): (
+    ("korra_cli/main.py", "node"): (
         "_ensure_tui_node()'s idempotence gate: the question really is 'is "
         "node already discoverable on PATH', before bootstrapping one."
     ),
-    ("hermes_cli/main.py", "npm"): (
+    ("korra_cli/main.py", "npm"): (
         "Same _ensure_tui_node() gate as node."
     ),
     ("tools/browser_tool.py", "npx"): (
@@ -187,8 +187,8 @@ def test_no_unreviewed_bare_managed_runtime_lookups():
         "— on an install that has a managed one.\n"
         "Use instead:\n"
         "  uv       -> managed_uv.resolve_uv() (lookup) or ensure_uv() (may install)\n"
-        "  node/npm -> hermes_constants.find_node_executable()\n"
-        "  PATH env -> hermes_constants.iter_hermes_node_dirs()\n"
+        "  node/npm -> korra_constants.find_node_executable()\n"
+        "  PATH env -> korra_constants.iter_hermes_node_dirs()\n"
         "If PATH really is the right question, add the site to _ALLOWED with a "
         "reason."
     )
@@ -217,13 +217,13 @@ def test_allowlist_has_no_stale_entries():
 )
 def test_managed_node_helpers_exist(helper):
     """The alternatives this guard points contributors at must be importable."""
-    import hermes_constants
+    import korra_constants
 
-    assert callable(getattr(hermes_constants, helper))
+    assert callable(getattr(korra_constants, helper))
 
 
 def test_managed_uv_helpers_exist():
-    from hermes_cli.managed_uv import ensure_uv, managed_uv_path, resolve_uv
+    from korra_cli.managed_uv import ensure_uv, managed_uv_path, resolve_uv
 
     assert callable(resolve_uv)
     assert callable(ensure_uv)

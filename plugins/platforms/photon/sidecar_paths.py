@@ -117,7 +117,7 @@ def resolve_sidecar_dir(source_dir: Optional[Path] = None) -> Path:
     # Deps missing or stale inside a read-only tree: mirror to the durable
     # data volume so the normal install/self-heal machinery has somewhere
     # writable to work.
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     mirror = get_hermes_home() / "photon" / "sidecar"
     try:

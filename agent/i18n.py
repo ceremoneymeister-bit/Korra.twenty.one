@@ -36,7 +36,7 @@ import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +197,7 @@ def _config_language_cached() -> str | None:
     (e.g. after the setup wizard).
     """
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         cfg = load_config_readonly()
         lang = (cfg.get("display") or {}).get("language")
         if lang:
@@ -210,7 +210,7 @@ def _config_language_cached() -> str | None:
 def reset_language_cache() -> None:
     """Invalidate cached language resolution and catalogs.
 
-    Call after :func:`hermes_cli.config.save_config` if a running process
+    Call after :func:`korra_cli.config.save_config` if a running process
     needs to pick up a changed ``display.language`` without restart.
     """
     _config_language_cached.cache_clear()

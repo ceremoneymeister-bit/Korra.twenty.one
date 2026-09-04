@@ -101,7 +101,7 @@ class TestHandleUpdateCommand:
              patch("importlib.util.find_spec", return_value=fake_spec):
             result = _resolve_hermes_bin()
 
-        assert result == [sys.executable, "-m", "hermes_cli.main"]
+        assert result == [sys.executable, "-m", "korra_cli.main"]
 
 
     @pytest.mark.asyncio
@@ -209,7 +209,7 @@ class TestUpdateCommandPlatformGate:
         assert Platform.DISCORD not in GatewayRunner._UPDATE_ALLOWED_PLATFORMS
 
         # Make sure the plugin registry is populated so the fallback fires.
-        from hermes_cli.plugins import PluginManager
+        from korra_cli.plugins import PluginManager
         PluginManager().discover_and_load(force=True)
         from gateway.platform_registry import platform_registry
         discord_entry = platform_registry.get("discord")
@@ -240,7 +240,7 @@ class TestUpdateCommandPlatformGate:
 
         assert Platform.HOMEASSISTANT not in GatewayRunner._UPDATE_ALLOWED_PLATFORMS
 
-        from hermes_cli.plugins import PluginManager
+        from korra_cli.plugins import PluginManager
         PluginManager().discover_and_load(force=True)
         from gateway.platform_registry import platform_registry
         ha_entry = platform_registry.get("homeassistant")

@@ -22,7 +22,7 @@ def _response(content="ok"):
 class TestSlotRuntimeApiMode:
     """_slot_runtime should include api_mode when resolve_runtime_provider returns it."""
 
-    @patch("hermes_cli.runtime_provider.resolve_runtime_provider")
+    @patch("korra_cli.runtime_provider.resolve_runtime_provider")
     def test_slot_runtime_includes_api_mode(self, mock_resolve):
         """api_mode from resolve_runtime_provider is forwarded in output dict."""
         mock_resolve.return_value = {
@@ -40,7 +40,7 @@ class TestSlotRuntimeApiMode:
         assert result["api_key"] == "test-key"
 
 
-    @patch("hermes_cli.runtime_provider.resolve_runtime_provider")
+    @patch("korra_cli.runtime_provider.resolve_runtime_provider")
     def test_slot_runtime_omits_api_mode_when_empty(self, mock_resolve):
         """Empty string api_mode is treated as absent."""
         mock_resolve.return_value = {

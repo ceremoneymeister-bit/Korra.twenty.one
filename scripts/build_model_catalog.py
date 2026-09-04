@@ -14,7 +14,7 @@ Usage::
 
     python scripts/build_model_catalog.py
 
-Output: ``hermes_cli/data/model-catalog.json`` (Korra: переехал из website/)
+Output: ``korra_cli/data/model-catalog.json`` (Korra: переехал из website/)
 
 Live URL (after ``deploy-site.yml`` runs on merge to main):
 ``https://hermes-agent.nousresearch.com/docs/api/model-catalog.json``
@@ -33,7 +33,7 @@ sys.path.insert(0, REPO_ROOT)
 # Ensure HERMES_HOME is set for imports that touch it at module level.
 os.environ.setdefault("HERMES_HOME", os.path.join(os.path.expanduser("~"), ".hermes"))
 
-from hermes_cli.models import (  # noqa: E402
+from korra_cli.models import (  # noqa: E402
     OPENROUTER_MODELS,
     PREFERRED_SILENT_DEFAULT_MODEL,
     _PROVIDER_MODELS,
@@ -41,7 +41,7 @@ from hermes_cli.models import (  # noqa: E402
 
 # Korra: website/ удалён вместе с сайтом апстрима — манифест живёт
 # в package-data движка, откуда его читает seed_cache_from_checkout().
-OUTPUT_PATH = os.path.join(REPO_ROOT, "hermes_cli", "data", "model-catalog.json")
+OUTPUT_PATH = os.path.join(REPO_ROOT, "korra_cli", "data", "model-catalog.json")
 CATALOG_VERSION = 1
 
 

@@ -20,7 +20,7 @@ import os
 
 import pytest
 
-from hermes_state import SessionDB
+from korra_state import SessionDB
 
 
 IDLE_S = 6 * 3600
@@ -133,7 +133,7 @@ class TestEntryAndWsWiring:
         monkeypatch.setattr(entry, "write_json", lambda _payload: True)
         monkeypatch.setattr(entry.sys, "stdin", io.StringIO(""))
 
-        import hermes_cli.model_switch as ms
+        import korra_cli.model_switch as ms
         monkeypatch.setattr(ms, "prewarm_picker_cache_async", lambda: None)
 
         entry.main()

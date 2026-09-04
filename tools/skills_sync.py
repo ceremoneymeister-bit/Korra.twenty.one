@@ -45,7 +45,7 @@ for _stream in (sys.stdout, sys.stderr):
             _stream.reconfigure(encoding="utf-8", errors="replace")
         except (ValueError, TypeError):
             pass
-from hermes_constants import get_bundled_skills_dir, get_hermes_home, get_optional_skills_dir
+from korra_constants import get_bundled_skills_dir, get_hermes_home, get_optional_skills_dir
 from agent.skill_utils import is_excluded_skill_path
 from typing import Dict, List, Optional, Set, Tuple
 from utils import atomic_replace, atomic_write_text
@@ -100,7 +100,7 @@ def _manifest_file() -> Path:
 # When present in HERMES_HOME, sync_skills() is a no-op so neither the
 # installer, `hermes update`, nor a direct sync re-injects bundled skills.
 # Delete the file to opt back in. Mirrors
-# hermes_cli.profiles.NO_BUNDLED_SKILLS_MARKER (kept as a literal here to
+# korra_cli.profiles.NO_BUNDLED_SKILLS_MARKER (kept as a literal here to
 # avoid importing the CLI layer into this low-level sync module).
 NO_BUNDLED_SKILLS_MARKER = ".no-bundled-skills"
 

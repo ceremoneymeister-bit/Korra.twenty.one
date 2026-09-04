@@ -7,7 +7,7 @@ are rebound onto server.py's globals at install time — see method_ctx.py.
 from .method_ctx import HandlerRegistry
 
 import types
-from hermes_constants import korra_env_set
+from korra_constants import korra_env_set
 
 _registry = HandlerRegistry()
 method = _registry.method
@@ -287,7 +287,7 @@ def _pending_reaction_notes(session: dict) -> str:
 
 @method("prompt.submit")
 def _(rid, params: dict) -> dict:
-    from hermes_cli.input_sanitize import sanitize_user_prompt_text
+    from korra_cli.input_sanitize import sanitize_user_prompt_text
 
     sid = params.get("session_id", "")
     raw_text = params.get("text", "")
@@ -314,7 +314,7 @@ def _(rid, params: dict) -> dict:
             korra_env_set(os.environ, "KORRA_VOICE", "0")
             korra_env_set(os.environ, "KORRA_VOICE_TTS", "0")
             try:
-                from hermes_cli.voice import stop_continuous
+                from korra_cli.voice import stop_continuous
 
                 stop_continuous()
             except Exception:
@@ -377,7 +377,7 @@ def _(rid, params: dict) -> dict:
                     hosted = probe_hosted_room(default_db_path(), room_id=room_id)
                     peer = False
                     if not hosted:
-                        from hermes_constants import named_profile_home
+                        from korra_constants import named_profile_home
 
                         session_profile_home = named_profile_home(
                             str(session.get("profile_home") or "")
@@ -953,7 +953,7 @@ def _(rid, params: dict) -> dict:
         # resumes with full context (the agent won't persist the seed itself).
         _persist_branch_seed(session)
     except Exception as exc:
-        from hermes_state import is_disk_full_error
+        from korra_state import is_disk_full_error
 
         with session["history_lock"]:
             session["running"] = False
@@ -1056,7 +1056,7 @@ def _(rid, params: dict) -> dict:
     if err:
         return err
     try:
-        from hermes_cli.clipboard import has_clipboard_image, save_clipboard_image
+        from korra_cli.clipboard import has_clipboard_image, save_clipboard_image
     except Exception as e:
         return _err(rid, 5027, f"clipboard unavailable: {e}")
 
@@ -1277,7 +1277,7 @@ def _(rid, params: dict) -> dict:
             "-f", str(first_page), "-l", str(last_page),
             str(pdf_path), str(out_prefix),
         ]
-        from hermes_cli._subprocess_compat import windows_hide_flags
+        from korra_cli._subprocess_compat import windows_hide_flags
 
         try:
             res = subprocess.run(

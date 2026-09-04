@@ -95,7 +95,7 @@ class TestFormatSessionInfo:
             },
         )
         with p1, p2, p3, patch(
-            "hermes_cli.config.get_compatible_custom_providers",
+            "korra_cli.config.get_compatible_custom_providers",
             return_value=[
                 {
                     "name": "custom-local-agentw",

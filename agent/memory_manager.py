@@ -1424,7 +1424,7 @@ class MemoryManager:
         ``get_hermes_home()`` themselves.
         """
         if "hermes_home" not in kwargs:
-            from hermes_constants import get_hermes_home
+            from korra_constants import get_hermes_home
             kwargs["hermes_home"] = str(get_hermes_home())
         for provider in self._providers:
             try:

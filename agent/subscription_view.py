@@ -24,7 +24,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from agent.billing_view import parse_money
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +268,7 @@ def build_subscription_state(*, timeout: float = 15.0) -> SubscriptionState:
         return fixture
 
     try:
-        from hermes_cli.nous_billing import (
+        from korra_cli.nous_billing import (
             BillingAuthError,
             BillingError,
             _absolutize_portal_url,

@@ -184,7 +184,7 @@ def test_malformed_memory_config_still_builds_default_store():
     malformed = {"memory": "not-a-mapping"}
     with (
         patch(
-            "hermes_cli.config.load_config_readonly",
+            "korra_cli.config.load_config_readonly",
             return_value=malformed,
         ),
         patch(
@@ -765,7 +765,7 @@ class TestInit:
             patch("run_agent.get_tool_definitions", return_value=[]),
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
-            patch("hermes_cli.config.load_config", return_value={}), patch("hermes_cli.config.load_config_readonly", return_value={}),
+            patch("korra_cli.config.load_config", return_value={}), patch("korra_cli.config.load_config_readonly", return_value={}),
         ):
             a = AIAgent(
                 api_key="test-k...7890",
@@ -787,11 +787,11 @@ class TestInit:
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
-                "hermes_cli.config.load_config",
+                "korra_cli.config.load_config",
                 return_value={"prompt_caching": {"cache_ttl": falsy_value}},
             ),
             patch(
-                "hermes_cli.config.load_config_readonly",
+                "korra_cli.config.load_config_readonly",
                 return_value={"prompt_caching": {"cache_ttl": falsy_value}},
             ),
         ):
@@ -815,11 +815,11 @@ class TestInit:
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
-                "hermes_cli.config.load_config",
+                "korra_cli.config.load_config",
                 return_value={"prompt_caching": {"cache_ttl": False}},
             ),
             patch(
-                "hermes_cli.config.load_config_readonly",
+                "korra_cli.config.load_config_readonly",
                 return_value={"prompt_caching": {"cache_ttl": False}},
             ),
         ):
@@ -846,10 +846,10 @@ class TestInit:
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
-                "hermes_cli.config.load_config",
+                "korra_cli.config.load_config",
                 return_value={"model": {"max_tokens": 4096}},
             ), patch(
-                "hermes_cli.config.load_config_readonly",
+                "korra_cli.config.load_config_readonly",
                 return_value={"model": {"max_tokens": 4096}},
             ),
         ):
@@ -1136,10 +1136,10 @@ class TestToolUseEnforcementConfig:
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
-                "hermes_cli.config.load_config",
+                "korra_cli.config.load_config",
                 return_value={"agent": {"tool_use_enforcement": tool_use_enforcement}},
             ), patch(
-                "hermes_cli.config.load_config_readonly",
+                "korra_cli.config.load_config_readonly",
                 return_value={"agent": {"tool_use_enforcement": tool_use_enforcement}},
             ),
         ):
@@ -1184,10 +1184,10 @@ class TestToolUseEnforcementConfig:
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
-                "hermes_cli.config.load_config",
+                "korra_cli.config.load_config",
                 return_value={"agent": {"tool_use_enforcement": True}},
             ), patch(
-                "hermes_cli.config.load_config_readonly",
+                "korra_cli.config.load_config_readonly",
                 return_value={"agent": {"tool_use_enforcement": True}},
             ),
         ):
@@ -1220,10 +1220,10 @@ class TestExecutionGuidanceConfig:
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
-                "hermes_cli.config.load_config",
+                "korra_cli.config.load_config",
                 return_value={"agent": agent_cfg},
             ), patch(
-                "hermes_cli.config.load_config_readonly",
+                "korra_cli.config.load_config_readonly",
                 return_value={"agent": agent_cfg},
             ),
         ):
@@ -1290,10 +1290,10 @@ class TestTaskCompletionGuidance:
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
-                "hermes_cli.config.load_config",
+                "korra_cli.config.load_config",
                 return_value={"agent": agent_cfg},
             ), patch(
-                "hermes_cli.config.load_config_readonly",
+                "korra_cli.config.load_config_readonly",
                 return_value={"agent": agent_cfg},
             ),
         ):
@@ -1329,10 +1329,10 @@ class TestTaskCompletionGuidance:
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
-                "hermes_cli.config.load_config",
+                "korra_cli.config.load_config",
                 return_value={"agent": {"task_completion_guidance": True}},
             ), patch(
-                "hermes_cli.config.load_config_readonly",
+                "korra_cli.config.load_config_readonly",
                 return_value={"agent": {"task_completion_guidance": True}},
             ),
         ):
@@ -1364,10 +1364,10 @@ class TestEnvironmentProbeIntegration:
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
-                "hermes_cli.config.load_config",
+                "korra_cli.config.load_config",
                 return_value={"agent": {"environment_probe": environment_probe}},
             ), patch(
-                "hermes_cli.config.load_config_readonly",
+                "korra_cli.config.load_config_readonly",
                 return_value={"agent": {"environment_probe": environment_probe}},
             ),
         ):
@@ -1572,7 +1572,7 @@ class TestBuildApiKwargs:
     def test_core_responses_preserves_supported_xhigh(self, agent, monkeypatch):
         """The core GitHub Responses path must preserve a supported xhigh."""
         monkeypatch.setattr(
-            "hermes_cli.models.github_model_reasoning_efforts",
+            "korra_cli.models.github_model_reasoning_efforts",
             lambda _model: ["none", "low", "medium", "high", "xhigh"],
         )
         agent.model = "gpt-5.5"
@@ -1772,8 +1772,8 @@ class TestExecuteToolCalls:
             hook_calls.append((hook_name, kwargs))
             return []
 
-        monkeypatch.setattr("hermes_cli.lifecycle.invoke_hook", _capture_hook)
-        monkeypatch.setattr("hermes_cli.lifecycle.has_hook", lambda name: True)
+        monkeypatch.setattr("korra_cli.lifecycle.invoke_hook", _capture_hook)
+        monkeypatch.setattr("korra_cli.lifecycle.has_hook", lambda name: True)
 
         with (
             patch("run_agent.handle_function_call", side_effect=KeyboardInterrupt),
@@ -1800,9 +1800,9 @@ class TestExecuteToolCalls:
         messages = []
         hook_calls = []
 
-        monkeypatch.setattr("hermes_cli.lifecycle.has_hook", lambda name: True)
+        monkeypatch.setattr("korra_cli.lifecycle.has_hook", lambda name: True)
         monkeypatch.setattr(
-            "hermes_cli.lifecycle.invoke_hook",
+            "korra_cli.lifecycle.invoke_hook",
             lambda hook_name, **kwargs: hook_calls.append((hook_name, kwargs)) or [],
         )
 
@@ -1827,9 +1827,9 @@ class TestExecuteToolCalls:
         mock_msg = _mock_assistant_msg(content="", tool_calls=[tc])
         messages = []
         hook_calls = []
-        monkeypatch.setattr("hermes_cli.lifecycle.has_hook", lambda name: True)
+        monkeypatch.setattr("korra_cli.lifecycle.has_hook", lambda name: True)
         monkeypatch.setattr(
-            "hermes_cli.lifecycle.invoke_hook",
+            "korra_cli.lifecycle.invoke_hook",
             lambda hook_name, **kwargs: hook_calls.append((hook_name, kwargs)) or [],
         )
         with patch("run_agent.handle_function_call", return_value="ok") as mock_hfc:
@@ -1854,9 +1854,9 @@ class TestExecuteToolCalls:
         mock_msg = _mock_assistant_msg(content="", tool_calls=[tc])
         messages = []
         hook_calls = []
-        monkeypatch.setattr("hermes_cli.lifecycle.has_hook", lambda name: True)
+        monkeypatch.setattr("korra_cli.lifecycle.has_hook", lambda name: True)
         monkeypatch.setattr(
-            "hermes_cli.lifecycle.invoke_hook",
+            "korra_cli.lifecycle.invoke_hook",
             lambda hook_name, **kwargs: hook_calls.append((hook_name, kwargs)) or [],
         )
 
@@ -2182,7 +2182,7 @@ class TestConcurrentToolExecution:
         monkeypatch,
         quiet_mode,
     ):
-        from hermes_cli.middleware import RequestMiddlewareResult
+        from korra_cli.middleware import RequestMiddlewareResult
 
         trace = [{"source": "test-middleware"}]
         observed = []
@@ -2194,7 +2194,7 @@ class TestConcurrentToolExecution:
         )
         mock_msg = _mock_assistant_msg(content="", tool_calls=[tool_call])
         monkeypatch.setattr(
-            "hermes_cli.middleware.apply_tool_request_middleware",
+            "korra_cli.middleware.apply_tool_request_middleware",
             lambda _name, args, **_kwargs: RequestMiddlewareResult(
                 payload=args,
                 original_payload=args,
@@ -2203,11 +2203,11 @@ class TestConcurrentToolExecution:
             ),
         )
         monkeypatch.setattr(
-            "hermes_cli.middleware.run_tool_execution_middleware",
+            "korra_cli.middleware.run_tool_execution_middleware",
             lambda _name, args, callback, **_kwargs: callback(args),
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            "korra_cli.plugins._dispatch_pre_tool_call_hooks",
             lambda *_args, **_kwargs: (None, None),
         )
         monkeypatch.setattr(
@@ -2269,7 +2269,7 @@ class TestConcurrentToolExecution:
         messages = []
 
         monkeypatch.setattr(
-            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            "korra_cli.plugins._dispatch_pre_tool_call_hooks",
             lambda *args, **kwargs: ("Blocked by policy", None),
         )
         agent._checkpoint_mgr.enabled = True
@@ -2316,12 +2316,12 @@ class TestConcurrentToolExecution:
             "tool_request": [],
             "tool_execution": [execution_middleware],
         })
-        monkeypatch.setattr("hermes_cli.plugins.get_plugin_manager", lambda: manager)
+        monkeypatch.setattr("korra_cli.plugins.get_plugin_manager", lambda: manager)
         monkeypatch.setattr(
-            "hermes_cli.lifecycle.invoke_hook",
+            "korra_cli.lifecycle.invoke_hook",
             lambda hook_name, **kwargs: hook_calls.append((hook_name, kwargs)) or [],
         )
-        monkeypatch.setattr("hermes_cli.lifecycle.has_hook", lambda name: True)
+        monkeypatch.setattr("korra_cli.lifecycle.has_hook", lambda name: True)
 
         with patch(
             "run_agent.handle_function_call",
@@ -2359,7 +2359,7 @@ class TestConcurrentToolExecution:
         """Blocked memory tool should not reset the nudge counter."""
         agent._turns_since_memory = 5
         monkeypatch.setattr(
-            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            "korra_cli.plugins._dispatch_pre_tool_call_hooks",
             lambda *args, **kwargs: ("Blocked", None),
         )
         with patch("tools.memory_tool.memory_tool", side_effect=AssertionError("should not run")):
@@ -2382,18 +2382,18 @@ class TestConcurrentToolExecution:
         dispatched = []
         duplicate_errors = []
         monkeypatch.setattr(
-            "hermes_cli.middleware.apply_tool_request_middleware",
+            "korra_cli.middleware.apply_tool_request_middleware",
             lambda _name, args, **_kwargs: SimpleNamespace(
                 payload=args,
                 trace=[],
             ),
         )
         monkeypatch.setattr(
-            "hermes_cli.middleware.run_tool_execution_middleware",
+            "korra_cli.middleware.run_tool_execution_middleware",
             lambda _name, args, callback, **_kwargs: callback(args),
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            "korra_cli.plugins._dispatch_pre_tool_call_hooks",
             lambda *_args, **_kwargs: (None, None),
         )
         monkeypatch.setattr(tool_executor, "_begin_tool_execution", lambda *_a, **_k: None)
@@ -2437,18 +2437,18 @@ class TestConcurrentToolExecution:
         errors = []
         barrier = threading.Barrier(2)
         monkeypatch.setattr(
-            "hermes_cli.middleware.apply_tool_request_middleware",
+            "korra_cli.middleware.apply_tool_request_middleware",
             lambda _name, args, **_kwargs: SimpleNamespace(
                 payload=args,
                 trace=[],
             ),
         )
         monkeypatch.setattr(
-            "hermes_cli.middleware.run_tool_execution_middleware",
+            "korra_cli.middleware.run_tool_execution_middleware",
             lambda _name, args, callback, **_kwargs: callback(args),
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            "korra_cli.plugins._dispatch_pre_tool_call_hooks",
             lambda *_args, **_kwargs: (None, None),
         )
         monkeypatch.setattr(tool_executor, "_begin_tool_execution", lambda *_a, **_k: None)
@@ -2517,14 +2517,14 @@ class TestAgentRuntimePostHookOwnershipSync:
 
         hook_calls = []
         monkeypatch.setattr(
-            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            "korra_cli.plugins._dispatch_pre_tool_call_hooks",
             lambda *args, **kwargs: (None, None),
         )
         monkeypatch.setattr(
-            "hermes_cli.lifecycle.invoke_hook",
+            "korra_cli.lifecycle.invoke_hook",
             lambda hook_name, **kwargs: hook_calls.append((hook_name, kwargs)) or [],
         )
-        monkeypatch.setattr("hermes_cli.lifecycle.has_hook", lambda name: True)
+        monkeypatch.setattr("korra_cli.lifecycle.has_hook", lambda name: True)
         monkeypatch.setattr(
             "tools.todo_tool.todo_tool",
             lambda **kwargs: '{"ok":true}',
@@ -3050,11 +3050,11 @@ class TestRunConversation:
                 return_value="/profile",
             ),
             patch(
-                "hermes_cli.observability.relay_shared_metrics.start_task_run",
+                "korra_cli.observability.relay_shared_metrics.start_task_run",
                 side_effect=start_error,
             ),
             patch(
-                "hermes_cli.observability.relay_shared_metrics.finish_task_run"
+                "korra_cli.observability.relay_shared_metrics.finish_task_run"
             ) as finish_task_run,
             patch("agent.conversation_loop.run_conversation") as run_conversation,
         ):
@@ -3253,10 +3253,10 @@ class TestRunConversation:
         with (
             patch("run_agent.handle_function_call", return_value="search result"),
             patch(
-                "hermes_cli.lifecycle.has_hook",
+                "korra_cli.lifecycle.has_hook",
                 side_effect=lambda name: name in {"pre_api_request", "post_api_request"},
             ),
-            patch("hermes_cli.lifecycle.invoke_hook", side_effect=_record_hook),
+            patch("korra_cli.lifecycle.invoke_hook", side_effect=_record_hook),
             patch.object(agent, "_persist_session"),
             patch.object(agent, "_save_trajectory"),
             patch.object(agent, "_cleanup_task_resources"),
@@ -3300,10 +3300,10 @@ class TestRunConversation:
                 return_value=failed_result,
             ),
             patch(
-                "hermes_cli.observability.relay_shared_metrics.start_task_run",
+                "korra_cli.observability.relay_shared_metrics.start_task_run",
             ),
             patch(
-                "hermes_cli.observability.relay_shared_metrics.finish_task_run",
+                "korra_cli.observability.relay_shared_metrics.finish_task_run",
                 side_effect=lambda **_kwargs: order.append("metrics"),
             ),
             patch.object(
@@ -3331,8 +3331,8 @@ class TestRunConversation:
             hook_called = True
             return []
 
-        monkeypatch.setattr("hermes_cli.lifecycle.has_hook", lambda name: False)
-        monkeypatch.setattr("hermes_cli.lifecycle.invoke_hook", _invoke_hook)
+        monkeypatch.setattr("korra_cli.lifecycle.has_hook", lambda name: False)
+        monkeypatch.setattr("korra_cli.lifecycle.invoke_hook", _invoke_hook)
         monkeypatch.setattr(agent, "_api_request_payload_for_hook", _payload_for_hook)
 
         agent._invoke_api_request_error_hook(
@@ -3371,12 +3371,12 @@ class TestRunConversation:
             payload_counts["response"] += 1
             return {}
 
-        monkeypatch.setattr("hermes_cli.lifecycle.has_hook", _has_hook)
+        monkeypatch.setattr("korra_cli.lifecycle.has_hook", _has_hook)
         monkeypatch.setattr(agent, "_api_request_payload_for_hook", _request_payload)
         monkeypatch.setattr(agent, "_api_response_payload_for_hook", _response_payload)
 
         with (
-            patch("hermes_cli.lifecycle.invoke_hook", return_value=[]),
+            patch("korra_cli.lifecycle.invoke_hook", return_value=[]),
             patch.object(agent, "_persist_session"),
             patch.object(agent, "_save_trajectory"),
             patch.object(agent, "_cleanup_task_resources"),
@@ -4485,7 +4485,7 @@ class TestRunConversation:
         retry up to 3 times rather than hard-failing after one — and recover
         if a retry produces a complete tool call. Regression for the false
         'model hit max output tokens' on Opus when the stream simply dropped."""
-        from hermes_constants import PARTIAL_STREAM_STUB_ID
+        from korra_constants import PARTIAL_STREAM_STUB_ID
 
         self._setup_agent(agent)
         agent.valid_tool_names.add("write_file")
@@ -4530,7 +4530,7 @@ class TestRunConversation:
         carries a tool_calls list). Confirms the zero-byte trigger is wired
         end-to-end through the retry loop, not just detected at the
         chat_completion_helpers unit level."""
-        from hermes_constants import PARTIAL_STREAM_STUB_ID
+        from korra_constants import PARTIAL_STREAM_STUB_ID
 
         self._setup_agent(agent)
         agent.valid_tool_names.add("write_file")
@@ -4637,9 +4637,9 @@ class TestRunConversation:
 
         with (
             patch("run_agent.handle_function_call", return_value="ok"),
-            patch("hermes_cli.kanban_db._record_task_failure",
+            patch("korra_cli.kanban_db._record_task_failure",
                   mock_record_failure),
-            patch("hermes_cli.kanban_db.connect", mock_connect),
+            patch("korra_cli.kanban_db.connect", mock_connect),
             patch.object(agent, "_persist_session"),
             patch.object(agent, "_save_trajectory"),
             patch.object(agent, "_cleanup_task_resources"),
@@ -4687,7 +4687,7 @@ class TestRunConversation:
 
         with (
             patch("run_agent.handle_function_call", return_value="ok"),
-            patch("hermes_cli.kanban_db._record_task_failure",
+            patch("korra_cli.kanban_db._record_task_failure",
                   mock_record_failure),
             patch.object(agent, "_persist_session"),
             patch.object(agent, "_save_trajectory"),
@@ -5317,7 +5317,7 @@ class TestNousCredentialRefresh:
             return _RebuiltClient()
 
         monkeypatch.setattr(
-            "hermes_cli.auth.resolve_nous_runtime_credentials", _fake_resolve
+            "korra_cli.auth.resolve_nous_runtime_credentials", _fake_resolve
         )
 
         existing = _ExistingClient()
@@ -5388,7 +5388,7 @@ class TestNousCredentialRefresh:
             agent._anthropic_client = _RebuiltAnthropic()
 
         monkeypatch.setattr(
-            "hermes_cli.auth.resolve_nous_runtime_credentials", _fake_resolve
+            "korra_cli.auth.resolve_nous_runtime_credentials", _fake_resolve
         )
         monkeypatch.setattr(agent, "_rebuild_anthropic_client", _fake_rebuild)
         monkeypatch.setattr(
@@ -6460,7 +6460,7 @@ class TestStreamingApiCall:
         # (id=PARTIAL_STREAM_STUB_ID, tool_calls=None so it can't execute,
         # finish_reason=length so the loop's continuation machinery fires with
         # chunking guidance) rather than stamping a normal 'length' truncation.
-        from hermes_constants import PARTIAL_STREAM_STUB_ID
+        from korra_constants import PARTIAL_STREAM_STUB_ID
         chunks = [
             _make_chunk(tool_calls=[_make_tc_delta(0, "call_1", "write_file", '{"path":"x.txt","content":"hel')]),
         ]

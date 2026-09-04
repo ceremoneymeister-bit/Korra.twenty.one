@@ -46,28 +46,28 @@ class TestNamedProfileMultiplexerGuard:
 
 
     def test_force_bypasses(self, monkeypatch):
-        from hermes_cli import gateway as gw
+        from korra_cli import gateway as gw
         # Even if it looks like a named profile, force returns immediately.
         monkeypatch.setattr(gw, "_profile_suffix", lambda: "coder")
         gw._guard_named_profile_under_multiplexer(force=True)
 
     def test_inert_when_no_default_gateway_running(self, monkeypatch, tmp_path):
-        from hermes_cli import gateway as gw
+        from korra_cli import gateway as gw
         monkeypatch.setattr(gw, "_profile_suffix", lambda: "coder")
         monkeypatch.setattr(
-            "hermes_constants.get_default_hermes_root", lambda: tmp_path
+            "korra_constants.get_default_hermes_root", lambda: tmp_path
         )
         # No gateway.pid in tmp_path => no running default gateway => no raise.
         gw._guard_named_profile_under_multiplexer(force=False)
 
     def _fake_running_default_gateway(self, monkeypatch, tmp_path):
         """Make the guard believe a live default gateway exists at tmp_path."""
-        from hermes_cli import gateway as gw
+        from korra_cli import gateway as gw
         import gateway.status as status
 
         monkeypatch.setattr(gw, "_profile_suffix", lambda: "coder")
         monkeypatch.setattr(
-            "hermes_constants.get_default_hermes_root", lambda: tmp_path
+            "korra_constants.get_default_hermes_root", lambda: tmp_path
         )
         (tmp_path / "gateway.pid").write_text("12345", encoding="utf-8")
         monkeypatch.setattr(status, "_read_pid_record", lambda p: {"pid": 12345})
@@ -81,7 +81,7 @@ class TestNamedProfileMultiplexerGuard:
             encoding="utf-8",
         )
 
-        from hermes_cli import gateway as gw
+        from korra_cli import gateway as gw
 
         with pytest.raises(SystemExit) as excinfo:
             gw._guard_named_profile_under_multiplexer(force=False)
@@ -97,7 +97,7 @@ class TestNamedProfileMultiplexerGuard:
             encoding="utf-8",
         )
 
-        from hermes_cli import gateway as gw
+        from korra_cli import gateway as gw
 
         with pytest.raises(SystemExit) as excinfo:
             gw._guard_named_profile_under_multiplexer(force=False)
@@ -118,7 +118,7 @@ class TestNamedProfileMultiplexerGuard:
             encoding="utf-8",
         )
 
-        from hermes_cli import gateway as gw
+        from korra_cli import gateway as gw
 
         gw._guard_named_profile_under_multiplexer(force=False)
 
@@ -129,7 +129,7 @@ class TestNamedProfileMultiplexerGuard:
             encoding="utf-8",
         )
 
-        from hermes_cli import gateway as gw
+        from korra_cli import gateway as gw
 
         assert gw.named_profile_served_by_running_multiplexer() is True
 

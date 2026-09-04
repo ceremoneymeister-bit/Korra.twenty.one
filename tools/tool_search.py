@@ -186,7 +186,7 @@ def _safe_float(value: Any, fallback: float) -> float:
 def load_config() -> ToolSearchConfig:
     """Load tool-search config from the user config file."""
     try:
-        from hermes_cli.config import load_config as _load
+        from korra_cli.config import load_config as _load
         cfg = _load() or {}
         tools_cfg = cfg.get("tools") if isinstance(cfg.get("tools"), dict) else {}
         if not isinstance(tools_cfg, dict):
@@ -200,7 +200,7 @@ def load_config() -> ToolSearchConfig:
 def load_config_readonly() -> ToolSearchConfig:
     """Load tool-search config without copying the cached full config."""
     try:
-        from hermes_cli.config import load_config_readonly as _load
+        from korra_cli.config import load_config_readonly as _load
         cfg = _load() or {}
         tools_cfg = cfg.get("tools") if isinstance(cfg.get("tools"), dict) else {}
         if not isinstance(tools_cfg, dict):

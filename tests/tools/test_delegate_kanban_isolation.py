@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 # The subprocess-boundary tests below spawn ``sys.executable -c`` with a tmp
-# cwd. Without an explicit PYTHONPATH the child resolves ``hermes_cli`` /
+# cwd. Without an explicit PYTHONPATH the child resolves ``korra_cli`` /
 # ``agent`` through whatever install is on sys.path (in a worktree that is the
 # MAIN checkout's editable install, which may not contain the code under
 # test). Pin the repo root so the child always imports the tree being tested.
@@ -36,7 +36,7 @@ def _make_running_kanban_task(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_KANBAN_WORKSPACE", str(workspace))
     monkeypatch.setenv("HERMES_KANBAN_ATTACHMENTS_ROOT", str(attachments_root))
 
-    from hermes_cli import kanban_db as kb
+    from korra_cli import kanban_db as kb
 
     kb._INITIALIZED_PATHS.clear()
     kb.init_db()
@@ -185,7 +185,7 @@ def test_delegate_child_kanban_cli_cannot_delete_parent_board(
     from tools.environments.local import LocalEnvironment
 
     code = (
-        "from hermes_cli import kanban; "
+        "from korra_cli import kanban; "
         "import argparse; "
         "p=argparse.ArgumentParser(); "
         "sub=p.add_subparsers(dest='cmd'); "

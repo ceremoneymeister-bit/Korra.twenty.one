@@ -104,15 +104,15 @@ def test_named_pipe_identify_status_and_fleet_consumer(live_server, monkeypatch)
     assert status["answering_pid"] == server_pid
 
     # Real fleet consumer prefers the pipe
-    import hermes_cli.update_receipt as ur
+    import korra_cli.update_receipt as ur
 
     monkeypatch.setattr(
-        "hermes_cli.build_info.get_code_identity",
+        "korra_cli.build_info.get_code_identity",
         lambda refresh=False: {"sha": ident.get("code_sha") or "X", "version": "t"},
     )
-    monkeypatch.setattr("hermes_cli.profiles._get_default_hermes_home", lambda: home)
+    monkeypatch.setattr("korra_cli.profiles._get_default_hermes_home", lambda: home)
     monkeypatch.setattr(
-        "hermes_cli.profiles._get_profiles_root", lambda: home / "no-profiles"
+        "korra_cli.profiles._get_profiles_root", lambda: home / "no-profiles"
     )
     fleet = ur.collect_fleet_versions()
     assert len(fleet) == 1, fleet
@@ -131,7 +131,7 @@ def test_pipe_gone_after_kill_falls_back(live_server, monkeypatch):
     assert identify_gateway(home, timeout=2.0) is None
 
     # Consumer falls back to the state file (live pid = this test process)
-    import hermes_cli.update_receipt as ur
+    import korra_cli.update_receipt as ur
 
     (home / "gateway_state.json").write_text(
         json.dumps(
@@ -140,12 +140,12 @@ def test_pipe_gone_after_kill_falls_back(live_server, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "hermes_cli.build_info.get_code_identity",
+        "korra_cli.build_info.get_code_identity",
         lambda refresh=False: {"sha": "NEW", "version": "t"},
     )
-    monkeypatch.setattr("hermes_cli.profiles._get_default_hermes_home", lambda: home)
+    monkeypatch.setattr("korra_cli.profiles._get_default_hermes_home", lambda: home)
     monkeypatch.setattr(
-        "hermes_cli.profiles._get_profiles_root", lambda: home / "no-profiles"
+        "korra_cli.profiles._get_profiles_root", lambda: home / "no-profiles"
     )
     fleet = ur.collect_fleet_versions()
     assert len(fleet) == 1, fleet

@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hermes_cli.focus_view import (
+from korra_cli.focus_view import (
     FOCUS_CONFIG_KEY,
     FOCUS_STATUSBAR_LABEL,
     FOCUS_TOOL_PROGRESS_MODE,
@@ -32,7 +32,7 @@ from hermes_cli.focus_view import (
     resolve_focus_arg,
     would_display_tool_line,
 )
-from hermes_cli.cli_commands_mixin import CLICommandsMixin
+from korra_cli.cli_commands_mixin import CLICommandsMixin
 
 
 # =========================================================================
@@ -253,7 +253,7 @@ def _make_agent(tool_progress_mode: str):
     with (
         patch("run_agent.get_tool_definitions", return_value=tool_defs),
         patch("run_agent.check_toolset_requirements", return_value={}),
-        patch("hermes_cli.config.load_config", return_value={}),
+        patch("korra_cli.config.load_config", return_value={}),
         patch("run_agent.OpenAI"),
     ):
         agent = AIAgent(
@@ -365,7 +365,7 @@ class TestModelFacingMessagesUnchanged:
 
 class TestCommandRegistration:
     def test_focus_is_registered_with_the_sibling_toggle_convention(self):
-        from hermes_cli.commands import resolve_command
+        from korra_cli.commands import resolve_command
 
         cmd = resolve_command("focus")
         assert cmd is not None

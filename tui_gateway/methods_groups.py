@@ -9,7 +9,7 @@ from .method_ctx import HandlerRegistry
 
 import os
 import threading
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 _registry = HandlerRegistry()
 method = _registry.method
@@ -149,7 +149,7 @@ def _profile_execution_policy(profile: str) -> dict:
     """Resolve execution policy under the exact multiplexed profile home."""
 
     from gateway.hosted_room_execution_policy import execution_policy_mapping
-    from hermes_constants import (
+    from korra_constants import (
         reset_hermes_home_override,
         set_hermes_home_override,
     )

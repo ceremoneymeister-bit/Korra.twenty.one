@@ -25,7 +25,7 @@ reference server module globals (``_ok``, ``_err``) not imported here.
 """
 
 from .method_ctx import HandlerRegistry
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 _registry = HandlerRegistry()
 method = _registry.method

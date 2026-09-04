@@ -31,7 +31,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 import plugins.dashboard_auth.nous as nous_plugin
-from hermes_cli.dashboard_auth import (
+from korra_cli.dashboard_auth import (
     InvalidCodeError,
     LoginStart,
     ProviderError,
@@ -229,7 +229,7 @@ class TestConfigYamlSource:
 
     @pytest.fixture
     def patch_config(self, monkeypatch):
-        """Yield a callable that replaces ``hermes_cli.config.load_config``
+        """Yield a callable that replaces ``korra_cli.config.load_config``
         with a stub returning the given dict. Tests pass the intended
         ``dashboard.oauth`` block; the stub returns the wrapping structure."""
 
@@ -238,7 +238,7 @@ class TestConfigYamlSource:
             if oauth_block is not None:
                 cfg = {"dashboard": {"oauth": oauth_block}}
             monkeypatch.setattr(
-                "hermes_cli.config.load_config", lambda: cfg
+                "korra_cli.config.load_config", lambda: cfg
             )
 
         return _set

@@ -110,7 +110,7 @@ class TestBuildLearnPrompt:
 
 class TestLearnRegistryWiring:
     def test_learn_is_registered_and_resolves(self):
-        from hermes_cli.commands import resolve_command
+        from korra_cli.commands import resolve_command
 
         cmd = resolve_command("learn")
         assert cmd is not None
@@ -119,6 +119,6 @@ class TestLearnRegistryWiring:
 
 
     def test_learn_is_not_cli_only(self):
-        from hermes_cli.commands import resolve_command
+        from korra_cli.commands import resolve_command
 
         assert not resolve_command("learn").cli_only

@@ -386,7 +386,7 @@ class TestFailureAttribution:
         ):
             monkeypatch.delenv(env_var, raising=False)
         monkeypatch.setattr(
-            "hermes_cli.auth.is_provider_explicitly_configured",
+            "korra_cli.auth.is_provider_explicitly_configured",
             lambda provider: False,
         )
         (hermes_home / "auth.json").write_text(

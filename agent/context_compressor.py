@@ -832,7 +832,7 @@ _PRUNE_MIN_CHARS = 200
 # the user never actually answered (timeout / no-user contexts). These must
 # not be quoted as a user answer during compaction. Sources:
 #   cli.py timeout callback, gateway/run.py timeout + delivery-failure paths,
-#   hermes_cli/oneshot.py no-user callback.
+#   korra_cli/oneshot.py no-user callback.
 _CLARIFY_NON_RESPONSE_PREFIXES = (
     "The user did not provide a response",
     "[user did not respond",
@@ -5010,12 +5010,12 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
 
         # Current date for temporal anchoring (see ## Temporal Anchoring below).
         # Date-only granularity matches system_prompt.py:337 (PR #20451) and the
-        # user's configured timezone via hermes_time.now(). The compaction summary
+        # user's configured timezone via korra_time.now(). The compaction summary
         # is a mid-conversation message that is NOT part of the cached prefix, so a
         # date here never affects prompt-cache stability. Resolved defensively —
         # a clock failure must never block compaction.
         try:
-            from hermes_time import now as _hermes_now
+            from korra_time import now as _hermes_now
 
             _today_str = _hermes_now().strftime("%Y-%m-%d")
         except Exception:  # pragma: no cover - clock resolution is best-effort
@@ -8479,7 +8479,7 @@ This compaction should PRIORITISE preserving all information related to the focu
         # high-water mark until exit. The helper is glibc-gated, config-gated
         # and rate-limited, so this is a safe no-op elsewhere. (#70782)
         try:
-            from hermes_cli.mem_trim import trim_memory
+            from korra_cli.mem_trim import trim_memory
 
             trim_memory(reason="post-compression")
         except Exception as exc:

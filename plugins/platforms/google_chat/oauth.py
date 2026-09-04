@@ -70,7 +70,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from packaging.requirements import Requirement
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 # Pin the legacy logger name so operator-side log filters keep matching
 # after the in-tree → plugin migration. See adapter.py for context.
@@ -79,9 +79,9 @@ logger = logging.getLogger("gateway.platforms.google_chat_user_oauth")
 # Use the project's HERMES_HOME helper so the token follows the user's
 # profile (e.g. tests can override via HERMES_HOME=/tmp/...).
 try:
-    from hermes_constants import display_hermes_home, get_hermes_home
+    from korra_constants import display_hermes_home, get_hermes_home
 except (ModuleNotFoundError, ImportError):
-    # Fallback for environments where hermes_constants isn't importable
+    # Fallback for environments where korra_constants isn't importable
     # (mirrors the same fallback used by the google-workspace skill's
     # _hermes_home.py shim).
     def get_hermes_home() -> Path:
@@ -403,7 +403,7 @@ def install_deps() -> bool:
 
     print("Installing Google Chat dependencies...")
     try:
-        from hermes_cli.tools_config import _pip_install
+        from korra_cli.tools_config import _pip_install
 
         result = _pip_install(["--quiet"] + missing)
         if result.returncode != 0:

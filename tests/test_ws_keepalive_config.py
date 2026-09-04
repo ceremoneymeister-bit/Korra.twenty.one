@@ -19,7 +19,7 @@ def _write_config(home, body: str) -> None:
 
 
 def test_dashboard_ws_defaults_present(_temp_home):
-    from hermes_cli.config import load_config
+    from korra_cli.config import load_config
 
     _write_config(_temp_home, "model:\n  default: test-model\n")
     cfg = load_config()
@@ -30,7 +30,7 @@ def test_dashboard_ws_defaults_present(_temp_home):
 
 
 def test_dashboard_ws_values_propagate_from_yaml(_temp_home):
-    from hermes_cli.config import load_config
+    from korra_cli.config import load_config
 
     _write_config(
         _temp_home,

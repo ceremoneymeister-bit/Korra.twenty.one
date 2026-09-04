@@ -32,7 +32,7 @@ async def test_direct_model_switch_offloads_to_thread(tmp_path, monkeypatch):
     gateway event loop (#20525)."""
     import asyncio
 
-    from hermes_cli.model_switch import ModelSwitchResult
+    from korra_cli.model_switch import ModelSwitchResult
 
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
@@ -52,7 +52,7 @@ async def test_direct_model_switch_offloads_to_thread(tmp_path, monkeypatch):
     def _fake_switch(**kwargs):
         return ModelSwitchResult(success=False, error_message="nope")
 
-    monkeypatch.setattr("hermes_cli.model_switch.switch_model", _fake_switch)
+    monkeypatch.setattr("korra_cli.model_switch.switch_model", _fake_switch)
 
     offloaded = []
     real_to_thread = asyncio.to_thread

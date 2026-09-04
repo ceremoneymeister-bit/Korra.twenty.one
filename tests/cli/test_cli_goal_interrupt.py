@@ -33,7 +33,7 @@ def hermes_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(home))
 
     # Bust the goal module's DB cache so it re-resolves HERMES_HOME each test.
-    from hermes_cli import goals
+    from korra_cli import goals
     goals._DB_CACHE.clear()
     yield home
     goals._DB_CACHE.clear()
@@ -42,7 +42,7 @@ def hermes_home(tmp_path, monkeypatch):
 def _make_cli_with_goal(session_id: str, goal_text: str = "build a thing"):
     """Build a minimal HermesCLI stub with an active goal wired in."""
     from cli import HermesCLI
-    from hermes_cli.goals import GoalManager
+    from korra_cli.goals import GoalManager
 
     cli = HermesCLI.__new__(HermesCLI)
     # State the hook + helpers touch directly.
@@ -76,7 +76,7 @@ class TestInterruptAutoPause:
         cli.conversation_history = [
             {"role": "assistant", "content": "partial"},
         ]
-        with patch("hermes_cli.goals.judge_goal"):
+        with patch("korra_cli.goals.judge_goal"):
             cli._maybe_continue_goal_after_turn()
         assert mgr.state.status == "paused"
 
@@ -101,7 +101,7 @@ class TestHealthyTurnStillRuns:
 
         # Force the judge to say "continue" without touching the network.
         with patch(
-            "hermes_cli.goals.judge_goal",
+            "korra_cli.goals.judge_goal",
             return_value=("continue", "needs more steps", False, None, False),
         ):
             cli._maybe_continue_goal_after_turn()
@@ -121,7 +121,7 @@ class TestHealthyTurnStillRuns:
         ]
 
         with patch(
-            "hermes_cli.goals.judge_goal",
+            "korra_cli.goals.judge_goal",
             return_value=("done", "goal satisfied", False, None, False),
         ):
             cli._maybe_continue_goal_after_turn()

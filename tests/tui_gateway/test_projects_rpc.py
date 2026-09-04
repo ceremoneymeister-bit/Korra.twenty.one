@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+from korra_constants import reset_hermes_home_override, set_hermes_home_override
 import tui_gateway.server as server
 
 
@@ -350,7 +350,7 @@ def test_remote_scan_failure_merges_instead_of_replacing_cache(tmp_path, monkeyp
     state of #81723 (regression for MEDIUM: `replace=True` was wiping on every
     call regardless of success).
     """
-    from hermes_cli import projects_db as pdb
+    from korra_cli import projects_db as pdb
     import tui_gateway.server as server
 
     def _git_repo(path):
@@ -403,7 +403,7 @@ def test_remote_scan_missing_root_does_not_wipe_cache(tmp_path):
     set and DELETE-replace every cached repo that lived under it. The missing
     root must contribute nothing, and the scan must merge — never wipe.
     """
-    from hermes_cli import projects_db as pdb
+    from korra_cli import projects_db as pdb
     import tui_gateway.server as server
 
     def _git_repo(path):
@@ -441,7 +441,7 @@ def test_remote_scan_missing_root_does_not_wipe_cache(tmp_path):
 
 def test_remote_scan_full_authoritative_replaces_cache(tmp_path):
     """Only a fully-walked scan may replace the stale cache."""
-    from hermes_cli import projects_db as pdb
+    from korra_cli import projects_db as pdb
     import tui_gateway.server as server
 
     def _git_repo(path):
@@ -670,7 +670,7 @@ def _bind_profiles(monkeypatch, tmp_path: Path, homes: dict[str, Path]) -> None:
     gateway detects "not a real profile on this host" and stays on launch.
     """
     monkeypatch.setattr(
-        "hermes_cli.profiles.get_profile_dir",
+        "korra_cli.profiles.get_profile_dir",
         lambda name: homes.get(name, tmp_path / "homes" / "missing" / name),
     )
 
@@ -688,7 +688,7 @@ def _create_project(home: Path, name: str, folder: Path, *, use: bool = False) -
 
 def _create_session(home: Path, session_id: str, cwd: Path) -> None:
     """Seed one message-bearing session in ``home``'s state.db."""
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=home / "state.db")
     try:
@@ -701,7 +701,7 @@ def _create_session(home: Path, session_id: str, cwd: Path) -> None:
 @contextlib.contextmanager
 def _serving_launch_profile(launch_home: Path):
     """Run the handlers as a backend launched under ``launch_home``."""
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     token = set_hermes_home_override(launch_home)
     prev_db, prev_error = server._db, server._db_error
@@ -717,7 +717,7 @@ def _serving_launch_profile(launch_home: Path):
 
 def _cached_repo_labels(home: Path) -> list[str]:
     """Labels in ``home``'s discovered-repo cache, read straight off disk."""
-    from hermes_cli import projects_db as pdb
+    from korra_cli import projects_db as pdb
 
     with pdb.connect_closing(home / "projects.db") as conn:
         return sorted(str(entry.get("label") or "") for entry in pdb.list_discovered_repos(conn))

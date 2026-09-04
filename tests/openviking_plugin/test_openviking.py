@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 import plugins.memory.openviking as openviking_plugin
-from hermes_cli import __version__ as _HERMES_VERSION
+from korra_cli import __version__ as _HERMES_VERSION
 from plugins.memory.openviking import OpenVikingMemoryProvider
 
 

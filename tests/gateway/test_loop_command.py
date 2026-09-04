@@ -10,7 +10,7 @@ from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.platforms.base import MessageEvent, MessageType
 from gateway.run import GatewayRunner
 from gateway.session import SessionSource
-from hermes_cli import goals, loops
+from korra_cli import goals, loops
 
 
 class _FakeSessionEntry:
@@ -96,7 +96,7 @@ async def test_gateway_loop_status_pause_stop(loop_env):
 
 @pytest.mark.asyncio
 async def test_gateway_loop_goal_note_when_goal_active(loop_env):
-    from hermes_cli.goals import GoalManager
+    from korra_cli.goals import GoalManager
 
     GoalManager(session_id="sid-gateway-loop").set("finish the migration")
     runner = _make_runner()

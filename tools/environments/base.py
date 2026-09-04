@@ -22,8 +22,8 @@ from collections import deque
 from pathlib import Path
 from typing import IO, Callable, Iterable, Protocol
 
-from hermes_constants import get_hermes_home, korra_env
-from hermes_cli._subprocess_compat import windows_hide_flags
+from korra_constants import get_hermes_home, korra_env
+from korra_cli._subprocess_compat import windows_hide_flags
 from tools.interrupt import is_interrupted, is_thread_interrupted
 from tools.environments.path_utils import (
     _SANDBOX_DIR_HASH_LEN,

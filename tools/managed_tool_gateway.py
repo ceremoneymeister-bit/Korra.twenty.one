@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 from tools.tool_backend_helpers import managed_nous_tools_enabled
 
 _DEFAULT_TOOL_GATEWAY_DOMAIN = "nousresearch.com"
@@ -131,7 +131,7 @@ def read_nous_access_token() -> Optional[str]:
         return cached_token
 
     try:
-        from hermes_cli.auth import resolve_nous_access_token
+        from korra_cli.auth import resolve_nous_access_token
 
         refreshed_token = resolve_nous_access_token(
             refresh_skew_seconds=_NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,

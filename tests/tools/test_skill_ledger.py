@@ -305,7 +305,7 @@ def test_config_gate_off_no_ledger_writes(ledger_env, monkeypatch):
     from tools import skill_ledger
     from tools.skill_manager_tool import skill_manage
 
-    import hermes_cli.config as _cfg
+    import korra_cli.config as _cfg
 
     monkeypatch.setattr(_cfg, "load_config", lambda *a, **k: {"skills": {"ledger": False}})
 

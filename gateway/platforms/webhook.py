@@ -505,7 +505,7 @@ class WebhookAdapter(BasePlatformAdapter):
 
     def _reload_dynamic_routes(self) -> None:
         """Reload agent-created subscriptions from disk if the file changed."""
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         hermes_home = get_hermes_home()
         subs_path = hermes_home / _DYNAMIC_ROUTES_FILENAME
         if not subs_path.exists():
@@ -587,7 +587,7 @@ class WebhookAdapter(BasePlatformAdapter):
             # the prefix served the gateway owner's routes/config under
             # another profile's URL (#91583 defect 2).
             try:
-                from hermes_cli.profiles import profile_matches_home
+                from korra_cli.profiles import profile_matches_home
 
                 if profile_matches_home(profile):
                     return None
@@ -595,7 +595,7 @@ class WebhookAdapter(BasePlatformAdapter):
                 pass
             return _PROFILE_REJECTED
         try:
-            from hermes_cli.profiles import profiles_to_serve
+            from korra_cli.profiles import profiles_to_serve
             served = {
                 name
                 for name, _ in profiles_to_serve(

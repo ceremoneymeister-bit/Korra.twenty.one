@@ -83,7 +83,7 @@ from tools.approval import (
     reset_hermes_interactive_context,
     set_hermes_interactive_context,
 )
-from hermes_constants import korra_env, korra_env_set, korra_env_pop
+from korra_constants import korra_env, korra_env_set, korra_env_pop
 
 logger = logging.getLogger(__name__)
 
@@ -110,20 +110,20 @@ def _named_custom_provider_catalogs() -> list[tuple[str, str, list[tuple[str, st
     unchanged.
     """
     try:
-        from hermes_cli.config import (
+        from korra_cli.config import (
             get_compatible_custom_providers,
             is_provider_enabled,
             load_config,
         )
-        from hermes_cli.model_switch import (
+        from korra_cli.model_switch import (
             _NativePickerModelList,
             _declared_model_ids,
             _entry_models_discovered,
             _fetch_picker_live_models,
             _models_config_is_allowlist,
         )
-        from hermes_cli.models import should_use_ollama_native_catalog
-        from hermes_cli.providers import custom_provider_slug
+        from korra_cli.models import should_use_ollama_native_catalog
+        from korra_cli.providers import custom_provider_slug
     except ImportError:
         return []
 
@@ -224,7 +224,7 @@ def _named_custom_provider_catalogs() -> list[tuple[str, str, list[tuple[str, st
     return catalogs
 
 try:
-    from hermes_cli import __version__ as HERMES_VERSION
+    from korra_cli import __version__ as HERMES_VERSION
 except Exception:
     HERMES_VERSION = "0.0.0"
 
@@ -238,7 +238,7 @@ _LIST_SESSIONS_PAGE_SIZE = 50
 # Per-provider cap for the ACP model selector. ACP clients (Zed, Buzz) render
 # the whole `availableModels` array in one dropdown, so an unbounded
 # cross-provider catalog degrades the picker. Mirrors the cap the MoA picker
-# already uses (`hermes_cli/moa_cmd.py`). This bounds each provider's row, not
+# already uses (`korra_cli/moa_cmd.py`). This bounds each provider's row, not
 # the total; aggregator providers stay intentionally uncapped inside the shared
 # inventory, and the current model is always kept via the fallback insert below.
 ACP_MAX_MODELS_PER_PROVIDER = 200
@@ -740,8 +740,8 @@ class HermesACPAgent(acp.Agent):
         provider = getattr(state.agent, "provider", None) or detect_provider() or "openrouter"
 
         try:
-            from hermes_cli.inventory import build_models_payload, load_picker_context
-            from hermes_cli.models import normalize_provider, provider_label
+            from korra_cli.inventory import build_models_payload, load_picker_context
+            from korra_cli.models import normalize_provider, provider_label
 
             normalized_provider = normalize_provider(provider)
             context = load_picker_context().with_overrides(
@@ -905,7 +905,7 @@ class HermesACPAgent(acp.Agent):
             def choice_provider(model_id: str) -> str:
                 parts = model_id.split(":")
                 if parts[:1] == ["custom"] and len(parts) > 1:
-                    from hermes_cli.models import _configured_custom_provider_ids
+                    from korra_cli.models import _configured_custom_provider_ids
 
                     lowered = model_id.lower()
                     for candidate in sorted(
@@ -984,7 +984,7 @@ class HermesACPAgent(acp.Agent):
         new_model = raw_model.strip()
 
         try:
-            from hermes_cli.models import detect_provider_for_model, parse_model_input
+            from korra_cli.models import detect_provider_for_model, parse_model_input
 
             target_provider, new_model = parse_model_input(new_model, current_provider)
             if target_provider == current_provider:
@@ -1094,7 +1094,7 @@ class HermesACPAgent(acp.Agent):
 
         title = row.get("title")
         # The `sessions` table does not have an `updated_at` column (see
-        # hermes_state.py schema — only started_at/ended_at). Use "now" as
+        # korra_state.py schema — only started_at/ended_at). Use "now" as
         # the updated_at since we're emitting this notification precisely
         # because the title was just refreshed.
         updated_at = datetime.now(timezone.utc).isoformat()
@@ -1223,7 +1223,7 @@ class HermesACPAgent(acp.Agent):
         registry was unchanged, or when the session was closed while waiting.
         """
         try:
-            from hermes_cli.mcp_startup import mcp_discovery_in_flight
+            from korra_cli.mcp_startup import mcp_discovery_in_flight
         except Exception:
             return
         if not mcp_discovery_in_flight():
@@ -1236,7 +1236,7 @@ class HermesACPAgent(acp.Agent):
 
         def _wait_then_refresh() -> None:
             try:
-                from hermes_cli.mcp_startup import join_mcp_discovery
+                from korra_cli.mcp_startup import join_mcp_discovery
 
                 if not join_mcp_discovery(timeout=30.0):
                     return

@@ -9,7 +9,7 @@ Model IDs here track the canonical Fireworks catalog (fw-ai/fireconnect
 ``setup-cli``).
 """
 
-from hermes_cli import __version__ as _HERMES_VERSION
+from korra_cli import __version__ as _HERMES_VERSION
 from providers import register_provider
 from providers.base import ProviderProfile
 

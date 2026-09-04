@@ -279,7 +279,7 @@ class TestPlatformsMerge:
 
 
     def test_get_all_platforms_includes_plugin(self):
-        from hermes_cli.platforms import get_all_platforms
+        from korra_cli.platforms import get_all_platforms
         from gateway.platform_registry import platform_registry as _reg
 
         _reg.register(PlatformEntry(
@@ -689,7 +689,7 @@ class TestMigratedPlatformWiring:
         ],
     )
     def test_lazy_installable_platform_has_split_wiring(self, platform_name):
-        from hermes_cli.plugins import discover_plugins
+        from korra_cli.plugins import discover_plugins
 
         discover_plugins()
         from gateway.platform_registry import platform_registry

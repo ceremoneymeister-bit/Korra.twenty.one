@@ -218,6 +218,6 @@ class TestConfigBridging:
         assert "TERMINAL_DEGRADED_MODE" in _terminal_tool_env_var_names()
 
     def test_default_config_carries_degraded_mode(self):
-        from hermes_cli.config_defaults import DEFAULT_CONFIG
+        from korra_cli.config_defaults import DEFAULT_CONFIG
 
         assert DEFAULT_CONFIG["terminal"].get("degraded_mode") == "warn"

@@ -295,7 +295,7 @@ async def test_recovered_mention_reuses_live_auth_and_mention_gates(adapter, mon
 
 
 def test_default_config_exposes_missed_message_backfill_settings():
-    from hermes_cli.config import DEFAULT_CONFIG
+    from korra_cli.config import DEFAULT_CONFIG
 
     assert DEFAULT_CONFIG["discord"]["missed_message_backfill"] == {
         "enabled": False,

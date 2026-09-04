@@ -12,9 +12,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-from hermes_cli.active_sessions import active_session_registry_snapshot
-from hermes_cli.browser_connect import ChromeDebugLaunch
+from korra_constants import reset_hermes_home_override, set_hermes_home_override
+from korra_cli.active_sessions import active_session_registry_snapshot
+from korra_cli.browser_connect import ChromeDebugLaunch
 from tools import async_delegation as ad
 from tui_gateway import server
 from tui_gateway.transport import bind_transport, reset_transport
@@ -249,7 +249,7 @@ def test_dashboard_process_isolation_config_coerces_raw_values():
 
 
 def test_default_config_seeds_dashboard_process_isolation_keys():
-    from hermes_cli.config import DEFAULT_CONFIG
+    from korra_cli.config import DEFAULT_CONFIG
 
     dashboard = DEFAULT_CONFIG["dashboard"]
     assert dashboard["turn_isolation"] is False
@@ -446,7 +446,7 @@ def test_compute_host_turn_end_updates_metadata_mirror(monkeypatch):
     # background update-check thread happens to finish. This test compares two
     # snapshots taken at different times, so pin the value to keep it
     # deterministic regardless of how long the preceding tests ran.
-    import hermes_cli.banner as _banner
+    import korra_cli.banner as _banner
 
     monkeypatch.setattr(_banner, "get_update_result", lambda timeout=0.5: None)
     session = _session(
@@ -822,8 +822,8 @@ def _write_profile_cfg(home: Path, cwd: str | None) -> Path:
 
 def test_profile_scoped_mcp_discovery_uses_target_home(monkeypatch, tmp_path):
     """MCP discovery must start under the selected profile's HERMES_HOME."""
-    from hermes_cli import mcp_startup
-    from hermes_constants import get_hermes_home
+    from korra_cli import mcp_startup
+    from korra_constants import get_hermes_home
     from tui_gateway import entry
 
     profile_home = tmp_path / "profiles" / "sheepyr"
@@ -872,7 +872,7 @@ def test_profile_scoped_agent_build_starts_mcp_discovery_in_profile_home(
     import threading
     import uuid
 
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     profile_home = tmp_path / "profiles" / "sheepyr"
     profile_home.mkdir(parents=True)
@@ -1904,7 +1904,7 @@ def test_voice_record_start_handles_non_dict_voice_cfg(monkeypatch):
 
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(
             start_continuous=fake_start_continuous, stop_continuous=lambda: None
         ),
@@ -1981,7 +1981,7 @@ def test_prompt_submit_typed_stop_phrase_ends_voice_chat(monkeypatch):
     )
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(
             stop_continuous=lambda force_transcribe=False: calls.__setitem__(
                 "stop_continuous", calls["stop_continuous"] + 1
@@ -2122,7 +2122,7 @@ def test_wake_owner_is_sticky_and_routes_detection_to_first_transport(monkeypatc
     )
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(
             start_continuous=start_continuous,
             stop_continuous=lambda **_kwargs: None,
@@ -2394,7 +2394,7 @@ def test_voice_record_start_forwards_max_recording_seconds(monkeypatch):
 
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(
             start_continuous=fake_start_continuous, stop_continuous=lambda: None
         ),
@@ -2435,7 +2435,7 @@ def test_voice_record_stop_forces_transcription(monkeypatch):
 
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(
             start_continuous=lambda **_kwargs: None,
             stop_continuous=fake_stop_continuous,
@@ -2457,7 +2457,7 @@ def test_voice_record_stop_forces_transcription(monkeypatch):
 def test_voice_record_stop_updates_event_session_id(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(
             start_continuous=lambda **_kwargs: True,
             stop_continuous=lambda **_kwargs: None,
@@ -2480,7 +2480,7 @@ def test_voice_record_stop_updates_event_session_id(monkeypatch):
 def test_voice_record_start_reports_busy_when_stop_is_in_progress(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(
             start_continuous=lambda **_kwargs: False,
             stop_continuous=lambda **_kwargs: None,
@@ -2545,7 +2545,7 @@ def test_load_enabled_toolsets_filters_invalid_tui_env(monkeypatch, capsys):
     monkeypatch.setenv("HERMES_TUI_TOOLSETS", "web, nope")
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.plugins",
+        "korra_cli.plugins",
         types.SimpleNamespace(discover_plugins=lambda: None),
     )
 
@@ -2567,7 +2567,7 @@ def test_load_enabled_toolsets_accepts_plugin_env_after_discovery(monkeypatch):
     monkeypatch.setattr(toolsets, "validate_toolset", fake_validate)
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.plugins",
+        "korra_cli.plugins",
         types.SimpleNamespace(
             discover_plugins=lambda: discovered.update({"ready": True})
         ),
@@ -2593,11 +2593,11 @@ def test_load_enabled_toolsets_rejects_disabled_mcp_env(monkeypatch, capsys):
     monkeypatch.setenv("HERMES_TUI_TOOLSETS", "mcp-off")
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.plugins",
+        "korra_cli.plugins",
         types.SimpleNamespace(discover_plugins=lambda: None),
     )
 
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     monkeypatch.setattr(
         config_mod,
@@ -2613,7 +2613,7 @@ def test_load_enabled_toolsets_rejects_disabled_mcp_env(monkeypatch, capsys):
     # universe); `project` is GUI-only, folded in by _load_enabled_toolsets.
     # Toolsets inside their first release (_RECENTLY_SHIPPED_TOOLSETS) are
     # back-filled onto saved lists that never offered them — allow those too.
-    from hermes_cli.tools_config import _RECENTLY_SHIPPED_TOOLSETS
+    from korra_cli.tools_config import _RECENTLY_SHIPPED_TOOLSETS
 
     result = server._load_enabled_toolsets()
     assert result is not None
@@ -2629,17 +2629,17 @@ def test_load_enabled_toolsets_falls_back_when_tui_env_invalid(monkeypatch, caps
     monkeypatch.setenv("HERMES_TUI_TOOLSETS", "nope")
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.plugins",
+        "korra_cli.plugins",
         types.SimpleNamespace(discover_plugins=lambda: None),
     )
 
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     monkeypatch.setattr(
         config_mod, "load_config", lambda: {"platform_toolsets": {"cli": ["memory"]}}
     )
 
-    from hermes_cli.tools_config import _RECENTLY_SHIPPED_TOOLSETS
+    from korra_cli.tools_config import _RECENTLY_SHIPPED_TOOLSETS
 
     result = server._load_enabled_toolsets()
     assert result is not None
@@ -2652,11 +2652,11 @@ def test_load_enabled_toolsets_warns_when_config_fallback_fails(monkeypatch, cap
     monkeypatch.setenv("HERMES_TUI_TOOLSETS", "nope")
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.plugins",
+        "korra_cli.plugins",
         types.SimpleNamespace(discover_plugins=lambda: None),
     )
 
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     monkeypatch.setattr(
         config_mod, "load_config", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
@@ -2669,7 +2669,7 @@ def test_load_enabled_toolsets_warns_when_config_fallback_fails(monkeypatch, cap
 def test_load_enabled_toolsets_honors_builtin_env_if_config_fails(monkeypatch):
     monkeypatch.setenv("HERMES_TUI_TOOLSETS", "web")
 
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     monkeypatch.setattr(
         config_mod, "load_config", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
@@ -2697,11 +2697,11 @@ def test_load_enabled_toolsets_reports_disabled_mcp_separately(monkeypatch, caps
     monkeypatch.setenv("HERMES_TUI_TOOLSETS", "web,mcp-off,nope")
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.plugins",
+        "korra_cli.plugins",
         types.SimpleNamespace(discover_plugins=lambda: None),
     )
 
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     monkeypatch.setattr(
         config_mod,
@@ -3364,7 +3364,7 @@ def test_live_visible_history_matches_eager_resume_with_real_db(tmp_path):
     projection — both keeping the candidate — so switching to a live session
     shows the same substantive answer a cold resume would.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "state.db")
     db.create_session("s1", source="tui")
@@ -3396,7 +3396,7 @@ def test_live_visible_history_matches_eager_resume_with_real_db(tmp_path):
 def test_live_visible_history_keeps_candidate_and_new_flushed_turn_real_db(tmp_path):
     """Real-DB variant of the combined case: a candidate from turn 1 AND a
     fully-flushed turn 2 both appear once."""
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "state.db")
     db.create_session("s1", source="tui")
@@ -3432,7 +3432,7 @@ def test_live_session_payload_reads_profile_db_not_launch_db(monkeypatch, tmp_pa
     fell back to collapsed in-memory model history — while eager
     ``session.resume`` against the same profile still showed them.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     launch_home = tmp_path / "launch"
     profile_home = tmp_path / "profile"
@@ -3486,7 +3486,7 @@ def test_lazy_child_watch_resume_serves_candidate_inclusive_display(monkeypatch,
     verbatim display projection so a persisted verification candidate is not
     collapsed out of the watch window (#65919 sibling of the warm-payload fix).
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "state.db")
     db.create_session("child1", source="tui")
@@ -3752,7 +3752,7 @@ def test_session_resume_follows_compression_tip(monkeypatch, tmp_path):
     the response generated after compression. session.resume must follow the
     compression tip via resolve_resume_session_id.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "state.db")
     base = int(time.time()) - 10_000
@@ -3937,7 +3937,7 @@ def test_session_resume_profile_uses_profile_db_cwd(monkeypatch, tmp_path):
 
     monkeypatch.setenv("TERMINAL_CWD", str(launch_cwd))
     monkeypatch.setattr(server, "_profile_home", lambda _profile: profile_home)
-    monkeypatch.setattr("hermes_state.SessionDB", lambda db_path=None: profile_db)
+    monkeypatch.setattr("korra_state.SessionDB", lambda db_path=None: profile_db)
     monkeypatch.setattr(server, "_get_db", lambda: launch_db)
     monkeypatch.setattr(server, "_enable_gateway_prompts", lambda: None)
     monkeypatch.setattr(server, "_set_session_context", lambda target: [])
@@ -4001,7 +4001,7 @@ def test_session_cwd_set_profile_session_updates_profile_db(monkeypatch, tmp_pat
 
     import tools.terminal_tool as terminal_tool
 
-    monkeypatch.setattr("hermes_state.SessionDB", lambda db_path=None: profile_db)
+    monkeypatch.setattr("korra_state.SessionDB", lambda db_path=None: profile_db)
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
     monkeypatch.setattr(terminal_tool, "cleanup_vm", lambda _key: None)
     monkeypatch.setattr(server, "_register_session_cwd", lambda _session: None)
@@ -4050,10 +4050,10 @@ def test_stored_session_runtime_overrides_skips_bare_billing_provider(monkeypatc
             }
         ]
     }
-    import hermes_cli.runtime_provider as rp
+    import korra_cli.runtime_provider as rp
 
     monkeypatch.setattr(rp, "load_config", lambda: cfg)
-    monkeypatch.setattr("hermes_cli.config.load_config", lambda: cfg)
+    monkeypatch.setattr("korra_cli.config.load_config", lambda: cfg)
     ov = server._stored_session_runtime_overrides(
         {"model": "m", "billing_provider": "custom", "model_config": {"provider": "custom:myendpoint"}}
     )
@@ -4417,10 +4417,10 @@ def test_apply_model_switch_persist_override_false_never_persists(monkeypatch):
         error_message="",
     )
     monkeypatch.setattr(
-        "hermes_cli.model_switch.switch_model", lambda **kw: result
+        "korra_cli.model_switch.switch_model", lambda **kw: result
     )
     monkeypatch.setattr(
-        "hermes_cli.model_switch.resolve_persist_behavior",
+        "korra_cli.model_switch.resolve_persist_behavior",
         lambda *a: pytest.fail("persist_override must bypass resolve_persist_behavior"),
     )
     monkeypatch.setattr(
@@ -4428,7 +4428,7 @@ def test_apply_model_switch_persist_override_false_never_persists(monkeypatch):
         lambda _r: pytest.fail("persist_override=False must not persist"),
     )
     monkeypatch.setattr(
-        "hermes_cli.model_cost_guard.expensive_model_warning",
+        "korra_cli.model_cost_guard.expensive_model_warning",
         lambda *a, **k: None,
     )
     session = {"agent": None}
@@ -4454,7 +4454,7 @@ def test_startup_runtime_does_not_treat_inference_provider_as_explicit(monkeypat
     monkeypatch.delenv("HERMES_TUI_PROVIDER", raising=False)
     monkeypatch.setenv("HERMES_INFERENCE_PROVIDER", "nous")
     monkeypatch.setattr(
-        "hermes_cli.models.detect_static_provider_for_model",
+        "korra_cli.models.detect_static_provider_for_model",
         lambda model, provider: None,
     )
 
@@ -4473,7 +4473,7 @@ def test_startup_runtime_detects_provider_for_model_env(monkeypatch):
         return "anthropic", "anthropic/claude-sonnet-4.6"
 
     monkeypatch.setattr(
-        "hermes_cli.models.detect_static_provider_for_model", fake_detect
+        "korra_cli.models.detect_static_provider_for_model", fake_detect
     )
 
     assert server._resolve_startup_runtime() == (
@@ -4530,7 +4530,7 @@ def test_make_agent_passes_configured_fallback_chain(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        "korra_cli.runtime_provider.resolve_runtime_provider",
         lambda requested=None, target_model=None: {
             "provider": "openai-codex",
             "base_url": "https://chatgpt.com/backend-api/codex",
@@ -4599,7 +4599,7 @@ def test_startup_runtime_resolves_short_alias_without_network(monkeypatch):
     monkeypatch.delenv("HERMES_INFERENCE_PROVIDER", raising=False)
     monkeypatch.setattr(server, "_load_cfg", lambda: {"model": {"provider": "auto"}})
     monkeypatch.setattr(
-        "hermes_cli.models.fetch_openrouter_models",
+        "korra_cli.models.fetch_openrouter_models",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("network lookup should not run")
         ),
@@ -4617,7 +4617,7 @@ def test_startup_runtime_does_not_call_network_detector(monkeypatch):
     monkeypatch.delenv("HERMES_INFERENCE_PROVIDER", raising=False)
     monkeypatch.setattr(server, "_load_cfg", lambda: {"model": {"provider": "auto"}})
     monkeypatch.setattr(
-        "hermes_cli.models.detect_provider_for_model",
+        "korra_cli.models.detect_provider_for_model",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("network detector called")
         ),
@@ -5553,7 +5553,7 @@ def test_superseded_runtime_finalized_without_reclaimed_broadcast(monkeypatch):
 
 
 def test_superseded_by_resume_is_recoverable_end_reason():
-    from hermes_state_common import _RECOVERABLE_END_REASONS
+    from korra_state_common import _RECOVERABLE_END_REASONS
 
     assert "superseded_by_resume" in _RECOVERABLE_END_REASONS
     # And quiet: it must NOT trigger the session.reclaimed broadcast.
@@ -7755,7 +7755,7 @@ def test_ensure_session_db_row_stamps_profile_name(monkeypatch, tmp_path):
         def close(self):
             pass
 
-    monkeypatch.setattr("hermes_state.SessionDB", _ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", _ProfileDB)
     monkeypatch.setattr(server, "_resolve_model", lambda: "test-model")
 
     server._ensure_session_db_row(
@@ -8162,7 +8162,7 @@ def test_config_get_approval_mode_fails_safe_to_manual_for_invalid_explicit_valu
 
     monkeypatch.setattr(server, "_hermes_home", tmp_path)
     # _load_approval_mode delegates to the canonical resolver in
-    # tools.approval, which reads via hermes_cli.config.load_config —
+    # tools.approval, which reads via korra_cli.config.load_config —
     # that path resolves HERMES_HOME from the environment, not
     # server._hermes_home.
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -8362,7 +8362,7 @@ def test_config_set_fast_updates_live_agent_session_scoped(monkeypatch):
     monkeypatch.setattr(server, "_session_info", lambda _agent, *a: {"model": "x"})
     monkeypatch.setattr(server, "_emit", lambda *args: emits.append(args))
     monkeypatch.setattr(
-        "hermes_cli.models.resolve_fast_mode_overrides",
+        "korra_cli.models.resolve_fast_mode_overrides",
         lambda _model_id: {"service_tier": "priority"},
     )
 
@@ -8441,7 +8441,7 @@ def test_config_set_fast_rejects_unsupported_model(monkeypatch):
         server, "_write_config_key", lambda path, value: writes.append((path, value))
     )
     monkeypatch.setattr(
-        "hermes_cli.models.resolve_fast_mode_overrides",
+        "korra_cli.models.resolve_fast_mode_overrides",
         lambda _model_id: None,
     )
 
@@ -8762,7 +8762,7 @@ def test_enable_gateway_prompts_sets_gateway_env(monkeypatch):
 
 
 def test_setup_status_reports_provider_config(monkeypatch):
-    monkeypatch.setattr("hermes_cli.main._has_any_provider_configured", lambda: False)
+    monkeypatch.setattr("korra_cli.main._has_any_provider_configured", lambda: False)
 
     resp = server.handle_request({"id": "1", "method": "setup.status", "params": {}})
 
@@ -8784,9 +8784,9 @@ def test_probe_credentials_allows_keyless_custom_runtime():
 
 
 def test_setup_runtime_check_rejects_empty_runtime_key(monkeypatch):
-    monkeypatch.setattr("hermes_cli.main._has_any_provider_configured", lambda: True)
+    monkeypatch.setattr("korra_cli.main._has_any_provider_configured", lambda: True)
     monkeypatch.setattr(
-        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        "korra_cli.runtime_provider.resolve_runtime_provider",
         lambda requested=None: {
             "provider": "openrouter",
             "api_key": "",
@@ -8806,9 +8806,9 @@ def test_setup_runtime_check_rejects_empty_runtime_key(monkeypatch):
 
 
 def test_setup_runtime_check_allows_no_key_custom_runtime(monkeypatch):
-    monkeypatch.setattr("hermes_cli.main._has_any_provider_configured", lambda: True)
+    monkeypatch.setattr("korra_cli.main._has_any_provider_configured", lambda: True)
     monkeypatch.setattr(
-        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        "korra_cli.runtime_provider.resolve_runtime_provider",
         lambda requested=None: {
             "provider": "custom",
             "api_key": "no-key-required",
@@ -8823,9 +8823,9 @@ def test_setup_runtime_check_allows_no_key_custom_runtime(monkeypatch):
 
 
 def test_setup_runtime_check_rejects_implicit_bedrock_when_unconfigured(monkeypatch):
-    monkeypatch.setattr("hermes_cli.main._has_any_provider_configured", lambda: False)
+    monkeypatch.setattr("korra_cli.main._has_any_provider_configured", lambda: False)
     monkeypatch.setattr(
-        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        "korra_cli.runtime_provider.resolve_runtime_provider",
         lambda requested=None: {
             "provider": "bedrock",
             "api_key": "aws-sdk",
@@ -8841,7 +8841,7 @@ def test_setup_runtime_check_rejects_implicit_bedrock_when_unconfigured(monkeypa
 
 def test_setup_runtime_check_honors_requested_provider(monkeypatch):
     """Onboarding must be able to validate the provider the user just connected."""
-    monkeypatch.setattr("hermes_cli.main._has_any_provider_configured", lambda: True)
+    monkeypatch.setattr("korra_cli.main._has_any_provider_configured", lambda: True)
 
     def fake_resolve(requested=None, **kwargs):
         if requested == "nous":
@@ -8857,7 +8857,7 @@ def test_setup_runtime_check_honors_requested_provider(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        "korra_cli.runtime_provider.resolve_runtime_provider",
         fake_resolve,
     )
 
@@ -9281,7 +9281,7 @@ def test_config_set_model_requires_confirmation_for_expensive_model(monkeypatch)
     agent = _Agent()
     server._sessions["sid"] = _session(agent=agent)
     monkeypatch.setattr(
-        "hermes_cli.model_switch.switch_model", lambda **_kwargs: result
+        "korra_cli.model_switch.switch_model", lambda **_kwargs: result
     )
     monkeypatch.setattr(server, "_restart_slash_worker", lambda sid, session: None)
     monkeypatch.setattr(server, "_emit", lambda *args, **kwargs: None)
@@ -9347,7 +9347,7 @@ def test_config_set_model_global_persists(monkeypatch):
         return result
 
     server._sessions["sid"] = _session(agent=_Agent())
-    monkeypatch.setattr("hermes_cli.model_switch.switch_model", _switch_model)
+    monkeypatch.setattr("korra_cli.model_switch.switch_model", _switch_model)
     monkeypatch.setattr(server, "_restart_slash_worker", lambda sid, session: None)
     monkeypatch.setattr(server, "_emit", lambda *args, **kwargs: None)
     # _persist_model_switch uses targeted save_config_value writes (#48305) so it
@@ -9396,7 +9396,7 @@ def test_config_set_model_explicit_provider_skips_broken_default_init(monkeypatc
             }
         raise RuntimeError(f"unexpected provider {requested}")
 
-    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", fake_runtime_provider)
+    monkeypatch.setattr("korra_cli.runtime_provider.resolve_runtime_provider", fake_runtime_provider)
 
     try:
         resp = server.handle_request(
@@ -9437,7 +9437,7 @@ def test_config_set_model_recovers_failed_profile_resume_after_build_completes(
     boundary. Provider resolution is the only model-switch leaf replaced.
     """
     from agent.secret_scope import current_secret_scope
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     launch_url = "https://launch.example/v1"
     profile_url = "https://profile.example/v1"
@@ -9586,12 +9586,12 @@ def test_config_set_model_recovers_failed_profile_resume_after_build_completes(
             assert release_old_finally.wait(timeout=10)
         return real_transfer(agent, db)
 
-    monkeypatch.setattr("hermes_cli.model_switch.switch_model", fake_switch_model)
+    monkeypatch.setattr("korra_cli.model_switch.switch_model", fake_switch_model)
     monkeypatch.setattr(
-        "hermes_cli.model_selection_guards.combined_selection_warning",
+        "korra_cli.model_selection_guards.combined_selection_warning",
         lambda *args, **kwargs: None,
     )
-    monkeypatch.setattr("hermes_state.SessionDB", FakeDb)
+    monkeypatch.setattr("korra_state.SessionDB", FakeDb)
     monkeypatch.setattr(server, "_make_agent", fake_make_agent)
     monkeypatch.setattr(server, "_transfer_db_to_agent", barrier_transfer)
     monkeypatch.setattr(
@@ -9707,7 +9707,7 @@ def test_config_set_model_explicit_provider_surfaces_selected_provider_errors(mo
             raise RuntimeError("missing anthropic API key")
         raise RuntimeError(f"unexpected provider {requested}")
 
-    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", fake_runtime_provider)
+    monkeypatch.setattr("korra_cli.runtime_provider.resolve_runtime_provider", fake_runtime_provider)
 
     try:
         resp = server.handle_request(
@@ -9765,7 +9765,7 @@ def test_config_set_model_does_not_leak_inference_provider_env(monkeypatch):
     server._sessions["sid"] = session
     monkeypatch.setenv("HERMES_INFERENCE_PROVIDER", "openrouter")
     monkeypatch.setattr(
-        "hermes_cli.model_switch.switch_model", lambda **_kwargs: result
+        "korra_cli.model_switch.switch_model", lambda **_kwargs: result
     )
     monkeypatch.setattr(server, "_restart_slash_worker", lambda sid, session: None)
     monkeypatch.setattr(server, "_emit", lambda *args, **kwargs: None)
@@ -9826,7 +9826,7 @@ def test_config_set_model_records_per_session_override_not_env(monkeypatch):
     monkeypatch.delenv("HERMES_TUI_PROVIDER", raising=False)
     monkeypatch.delenv("HERMES_INFERENCE_PROVIDER", raising=False)
     monkeypatch.setattr(
-        "hermes_cli.model_switch.switch_model", lambda **_kwargs: result
+        "korra_cli.model_switch.switch_model", lambda **_kwargs: result
     )
     monkeypatch.setattr(server, "_restart_slash_worker", lambda sid, session: None)
     monkeypatch.setattr(server, "_emit", lambda *args, **kwargs: None)
@@ -9924,7 +9924,7 @@ def test_config_set_model_switches_agent_without_touching_env(monkeypatch):
             warning_message="",
         )
 
-    monkeypatch.setattr("hermes_cli.model_switch.switch_model", fake_switch_model)
+    monkeypatch.setattr("korra_cli.model_switch.switch_model", fake_switch_model)
 
     try:
         resp = server.handle_request(
@@ -10000,7 +10000,7 @@ def test_config_set_model_once_keeps_env_and_records_restore(monkeypatch):
     monkeypatch.setenv("HERMES_INFERENCE_PROVIDER", "openrouter")
     monkeypatch.setenv("HERMES_MODEL", "old/model")
     monkeypatch.setattr(
-        "hermes_cli.model_switch.switch_model",
+        "korra_cli.model_switch.switch_model",
         lambda **kwargs: seen.update(kwargs) or result,
     )
     monkeypatch.setattr(server, "_restart_slash_worker", lambda *args, **kwargs: None)
@@ -10031,7 +10031,7 @@ def test_config_set_model_once_keeps_env_and_records_restore(monkeypatch):
 
 def test_config_set_model_once_requires_live_session(monkeypatch):
     monkeypatch.setattr(
-        "hermes_cli.model_switch.switch_model",
+        "korra_cli.model_switch.switch_model",
         lambda **_: (_ for _ in ()).throw(AssertionError("switch should not run")),
     )
 
@@ -10077,7 +10077,7 @@ def test_config_set_model_session_switch_clears_pending_once_restore(monkeypatch
     session = _session(agent=Agent())
     session["one_turn_model_restore"] = {"model": "old/model"}
     server._sessions["sid"] = session
-    monkeypatch.setattr("hermes_cli.model_switch.switch_model", lambda **_kwargs: result)
+    monkeypatch.setattr("korra_cli.model_switch.switch_model", lambda **_kwargs: result)
     monkeypatch.setattr(server, "_restart_slash_worker", lambda *args, **kwargs: None)
     monkeypatch.setattr(server, "_emit", lambda *args, **kwargs: None)
 
@@ -10173,9 +10173,9 @@ def test_config_set_personality_preserves_history_and_returns_info(monkeypatch):
         server, "_session_info", lambda agent, *a: {"model": getattr(agent, "model", "?")}
     )
     monkeypatch.setattr(server, "_emit", lambda *args: emits.append(args))
-    # Persistence now flows through the single owner (hermes_cli.personality),
+    # Persistence now flows through the single owner (korra_cli.personality),
     # never _write_config_key / agent.system_prompt.
-    import hermes_cli.personality as personality_mod
+    import korra_cli.personality as personality_mod
 
     monkeypatch.setattr(
         personality_mod,
@@ -11171,7 +11171,7 @@ def test_commands_catalog_includes_desktop_meta_without_skills():
 
 def test_commands_catalog_includes_plugin_commands(monkeypatch):
     monkeypatch.setattr(
-        "hermes_cli.plugins.get_plugin_commands",
+        "korra_cli.plugins.get_plugin_commands",
         lambda: {
             "lcm": {
                 "description": "Latent consistency",
@@ -11312,7 +11312,7 @@ def test_command_dispatch_exec_nonzero_surfaces_error(monkeypatch):
 
 
 def test_plugins_list_surfaces_loader_error(monkeypatch):
-    with patch("hermes_cli.plugins.get_plugin_manager", side_effect=Exception("boom")):
+    with patch("korra_cli.plugins.get_plugin_manager", side_effect=Exception("boom")):
         resp = server.handle_request(
             {"id": "1", "method": "plugins.list", "params": {}}
         )
@@ -11323,7 +11323,7 @@ def test_plugins_list_surfaces_loader_error(monkeypatch):
 
 def test_complete_slash_surfaces_completer_error(monkeypatch):
     with patch(
-        "hermes_cli.commands.SlashCommandCompleter",
+        "korra_cli.commands.SlashCommandCompleter",
         side_effect=Exception("no completer"),
     ):
         resp = server.handle_request(
@@ -11556,7 +11556,7 @@ def test_rollback_restore_preserves_composite_carrier_scaffold(monkeypatch, tmp_
         SUMMARY_PREFIX,
         _SUMMARY_END_MARKER,
     )
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     class _Mgr:
         enabled = True
@@ -14389,14 +14389,14 @@ def test_session_create_no_race_keeps_worker_alive(monkeypatch):
 
 
 def test_get_db_degrades_cleanly_when_sessiondb_init_fails(monkeypatch):
-    fake_mod = types.ModuleType("hermes_state")
+    fake_mod = types.ModuleType("korra_state")
 
     class _BrokenSessionDB:
         def __init__(self):
             raise RuntimeError("locking protocol")
 
     fake_mod.SessionDB = _BrokenSessionDB
-    monkeypatch.setitem(sys.modules, "hermes_state", fake_mod)
+    monkeypatch.setitem(sys.modules, "korra_state", fake_mod)
     monkeypatch.setattr(server, "_db", None)
     monkeypatch.setattr(server, "_db_error", None)
 
@@ -14407,14 +14407,14 @@ def test_get_db_degrades_cleanly_when_sessiondb_init_fails(monkeypatch):
 def test_ensure_session_db_row_false_when_store_unavailable(monkeypatch):
     """Store unavailable → False, so prompt.submit can fail the send loudly
     instead of streaming into a store that will never save it (#98924)."""
-    fake_mod = types.ModuleType("hermes_state")
+    fake_mod = types.ModuleType("korra_state")
 
     class _BrokenSessionDB:
         def __init__(self):
             raise RuntimeError("utf-8 boom")
 
     fake_mod.SessionDB = _BrokenSessionDB
-    monkeypatch.setitem(sys.modules, "hermes_state", fake_mod)
+    monkeypatch.setitem(sys.modules, "korra_state", fake_mod)
     monkeypatch.setattr(server, "_db", None)
     monkeypatch.setattr(server, "_db_error", None)
 
@@ -14766,7 +14766,7 @@ def test_session_list_honors_params_profile_opens_profile_db(monkeypatch, tmp_pa
 
     monkeypatch.setattr(server, "_profile_home", lambda p: profile_home if p == "mlperf" else None)
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
 
     resp = server.handle_request(
         {
@@ -14807,7 +14807,7 @@ def test_session_most_recent_honors_params_profile(monkeypatch, tmp_path):
 
     monkeypatch.setattr(server, "_profile_home", lambda p: profile_home if p == "mlperf" else None)
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB2)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB2)
 
     resp = server.handle_request(
         {
@@ -14867,7 +14867,7 @@ def test_session_delete_honors_params_profile_sessions_dir(monkeypatch, tmp_path
 
     monkeypatch.setattr(server, "_profile_home", lambda p: profile_home if p == "mlperf" else None)
     monkeypatch.setattr(server, "_get_db", lambda: None)
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
 
     resp = server.handle_request(
         {
@@ -14934,7 +14934,7 @@ def test_session_title_uses_session_profile_db_not_launch(monkeypatch, tmp_path)
         "last_active": 1.0,
     }
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
     try:
         set_resp = server.handle_request(
             {
@@ -14991,7 +14991,7 @@ def test_session_history_uses_session_profile_db(monkeypatch, tmp_path):
         "last_active": 1.0,
     }
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
     try:
         resp = server.handle_request(
             {"id": "1", "method": "session.history", "params": {"session_id": "sid"}}
@@ -15078,7 +15078,7 @@ def test_session_status_uses_session_profile_db(monkeypatch, tmp_path):
         "last_active": 1.0,
     }
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
     try:
         resp = server.handle_request(
             {"id": "1", "method": "session.status", "params": {"session_id": "sid"}}
@@ -15120,7 +15120,7 @@ def test_teardown_ends_session_in_profile_db(monkeypatch, tmp_path):
             seen["closed"] = True
 
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
     session = {
         "session_key": "ml-sess",
         "profile_home": str(profile_home),
@@ -15213,7 +15213,7 @@ def test_session_branch_writes_to_parent_profile_db(monkeypatch, tmp_path):
     }
     server._sessions["parent"] = parent
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
     monkeypatch.setattr(server, "_claim_active_session_slot", lambda *a, **k: (None, None))
 
     def _fake_make_agent(*a, **k):
@@ -15329,7 +15329,7 @@ def test_session_branch_installs_parent_profile_secret_scope(monkeypatch, tmp_pa
     }
     server._sessions["parent"] = parent
     monkeypatch.setattr(server, "_get_db", lambda: ProfileDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
     monkeypatch.setattr(server, "_claim_active_session_slot", lambda *a, **k: (None, None))
 
     def _fake_make_agent(*a, **k):
@@ -15446,7 +15446,7 @@ def test_session_branch_uses_persisted_display_history_after_compaction(monkeypa
     }
     server._sessions["parent"] = parent
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
     monkeypatch.setattr(server, "_claim_active_session_slot", lambda *args, **kwargs: (None, None))
     monkeypatch.setattr(server, "_make_agent", lambda *args, **kwargs: FakeAgent())
     monkeypatch.setattr(server, "_set_session_context", lambda *args, **kwargs: {})
@@ -15506,7 +15506,7 @@ def test_pending_title_finalizer_uses_session_profile_db(monkeypatch, tmp_path):
             seen["closed"] = True
 
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state.SessionDB", ProfileDB)
+    monkeypatch.setattr("korra_state.SessionDB", ProfileDB)
     session = {
         "session_key": "ml-sess",
         "pending_title": "deferred-title",
@@ -15557,13 +15557,13 @@ def test_model_options_does_not_overwrite_curated_models(monkeypatch):
     )
 
     with patch(
-        "hermes_cli.model_switch.list_authenticated_providers",
+        "korra_cli.model_switch.list_authenticated_providers",
         return_value=curated_providers,
     ) as listing:
         # If provider_model_ids gets called at all, the handler is still
         # overwriting curated with live — that's the regression we're
         # guarding against.
-        with patch("hermes_cli.models.provider_model_ids") as live_fetch:
+        with patch("korra_cli.models.provider_model_ids") as live_fetch:
             resp = server._methods["model.options"](99, {"session_id": ""})
 
     assert "result" in resp, resp
@@ -15592,7 +15592,7 @@ def test_model_options_propagates_list_exception(monkeypatch):
         lambda: {"providers": {}, "custom_providers": []},
     )
     with patch(
-        "hermes_cli.model_switch.list_authenticated_providers",
+        "korra_cli.model_switch.list_authenticated_providers",
         side_effect=RuntimeError("catalog blew up"),
     ):
         resp = server._methods["model.options"](77, {"session_id": ""})
@@ -15602,13 +15602,13 @@ def test_model_options_propagates_list_exception(monkeypatch):
 
 
 def test_model_options_hides_unconfigured_providers_by_default(monkeypatch):
-    from hermes_cli.inventory import ConfigContext
+    from korra_cli.inventory import ConfigContext
 
     calls = []
 
     monkeypatch.setattr(server, "_resolve_model", lambda: "")
     monkeypatch.setattr(
-        "hermes_cli.inventory.load_picker_context",
+        "korra_cli.inventory.load_picker_context",
         lambda: ConfigContext(
             current_provider="",
             current_model="",
@@ -15623,7 +15623,7 @@ def test_model_options_hides_unconfigured_providers_by_default(monkeypatch):
         return {"providers": [], "model": "", "provider": ""}
 
     monkeypatch.setattr(
-        "hermes_cli.inventory.build_models_payload",
+        "korra_cli.inventory.build_models_payload",
         _fake_build_models_payload,
     )
 
@@ -15648,7 +15648,7 @@ def test_model_options_hides_unconfigured_providers_by_default(monkeypatch):
 
 
 def test_model_options_preserves_canonical_custom_row_after_agent_init(monkeypatch):
-    from hermes_cli.inventory import ConfigContext
+    from korra_cli.inventory import ConfigContext
 
     class _Agent:
         provider = "custom"
@@ -15658,7 +15658,7 @@ def test_model_options_preserves_canonical_custom_row_after_agent_init(monkeypat
     server._sessions["custom-session"] = _session(agent=_Agent())
     monkeypatch.setattr(server, "_resolve_model", lambda: "")
     monkeypatch.setattr(
-        "hermes_cli.inventory.load_picker_context",
+        "korra_cli.inventory.load_picker_context",
         lambda: ConfigContext(
             current_provider="custom:local-ollama",
             current_model="qwen3.6:35b-65k",
@@ -15669,11 +15669,11 @@ def test_model_options_preserves_canonical_custom_row_after_agent_init(monkeypat
     )
     canonical = Mock(return_value="custom:local-ollama")
     monkeypatch.setattr(
-        "hermes_cli.runtime_provider.canonical_custom_identity",
+        "korra_cli.runtime_provider.canonical_custom_identity",
         canonical,
     )
     monkeypatch.setattr(
-        "hermes_cli.model_switch.list_authenticated_providers",
+        "korra_cli.model_switch.list_authenticated_providers",
         lambda **_kwargs: [
             {
                 "slug": "custom:local-ollama",
@@ -15694,11 +15694,11 @@ def test_model_options_preserves_canonical_custom_row_after_agent_init(monkeypat
         ],
     )
     monkeypatch.setattr(
-        "hermes_cli.auth.is_provider_explicitly_configured",
+        "korra_cli.auth.is_provider_explicitly_configured",
         lambda _slug: False,
     )
-    monkeypatch.setattr("hermes_cli.inventory._apply_pricing", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("hermes_cli.inventory._apply_capabilities", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("korra_cli.inventory._apply_pricing", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("korra_cli.inventory._apply_capabilities", lambda *_args, **_kwargs: None)
 
     resp = server._methods["model.options"](
         102,
@@ -15729,7 +15729,7 @@ def test_model_save_key_uses_credential_lifecycle_and_picker_context(monkeypatch
     }
     server._sessions["save-key-session"] = _session(agent=agent)
     monkeypatch.setattr(
-        "hermes_cli.auth.PROVIDER_REGISTRY",
+        "korra_cli.auth.PROVIDER_REGISTRY",
         {
             "test-provider": types.SimpleNamespace(
                 name="Test Provider",
@@ -15738,17 +15738,17 @@ def test_model_save_key_uses_credential_lifecycle_and_picker_context(monkeypatch
             )
         },
     )
-    monkeypatch.setattr("hermes_cli.config.is_managed", lambda: False)
+    monkeypatch.setattr("korra_cli.config.is_managed", lambda: False)
     save_credential = Mock()
     monkeypatch.setattr(
-        "hermes_cli.credential_lifecycle.save_provider_env_credential",
+        "korra_cli.credential_lifecycle.save_provider_env_credential",
         save_credential,
     )
     picker_context = Mock(return_value=picker_ctx)
     monkeypatch.setattr(server, "_model_picker_context", picker_context)
     build_payload = Mock(return_value={"providers": [provider]})
     monkeypatch.setattr(
-        "hermes_cli.inventory.build_models_payload",
+        "korra_cli.inventory.build_models_payload",
         build_payload,
     )
     monkeypatch.setenv(env_var, "previous-value")
@@ -15786,7 +15786,7 @@ def test_model_options_refresh_allows_custom_provider_probes(monkeypatch):
         lambda: {"providers": {}, "custom_providers": []},
     )
     with patch(
-        "hermes_cli.model_switch.list_authenticated_providers",
+        "korra_cli.model_switch.list_authenticated_providers",
         return_value=[],
     ) as listing:
         resp = server._methods["model.options"](78, {"session_id": "", "refresh": True})
@@ -16469,7 +16469,7 @@ def test_browser_manage_status_falls_back_to_config_cdp_url(monkeypatch):
     fake_cfg = types.SimpleNamespace(
         read_raw_config=lambda: {"browser": {"cdp_url": "http://lan:9222"}}
     )
-    with patch.dict(sys.modules, {"hermes_cli.config": fake_cfg}):
+    with patch.dict(sys.modules, {"korra_cli.config": fake_cfg}):
         resp = server.handle_request(
             {"id": "1", "method": "browser.manage", "params": {"action": "status"}}
         )
@@ -16571,13 +16571,13 @@ def test_browser_manage_connect_default_local_reports_launch_hint(monkeypatch):
         _stub_urlopen(monkeypatch, ok=False)
         with (
             patch(
-                "hermes_cli.browser_connect.launch_chrome_debug",
+                "korra_cli.browser_connect.launch_chrome_debug",
                 return_value=ChromeDebugLaunch(),
             ),
-            patch("hermes_cli.browser_connect.local_port_in_use", return_value=False),
-            patch("hermes_cli.browser_connect.manual_chrome_debug_command", return_value=None),
+            patch("korra_cli.browser_connect.local_port_in_use", return_value=False),
+            patch("korra_cli.browser_connect.manual_chrome_debug_command", return_value=None),
             patch(
-                "hermes_cli.browser_connect.get_chrome_debug_candidates",
+                "korra_cli.browser_connect.get_chrome_debug_candidates",
                 return_value=[],
             ),
         ):
@@ -16630,12 +16630,12 @@ def test_browser_manage_connect_no_session_skips_progress_events(monkeypatch):
         _stub_urlopen(monkeypatch, ok=False)
         with (
             patch(
-                "hermes_cli.browser_connect.launch_chrome_debug",
+                "korra_cli.browser_connect.launch_chrome_debug",
                 return_value=ChromeDebugLaunch(),
             ),
-            patch("hermes_cli.browser_connect.manual_chrome_debug_command", return_value=None),
+            patch("korra_cli.browser_connect.manual_chrome_debug_command", return_value=None),
             patch(
-                "hermes_cli.browser_connect.get_chrome_debug_candidates",
+                "korra_cli.browser_connect.get_chrome_debug_candidates",
                 return_value=[],
             ),
         ):
@@ -16726,10 +16726,10 @@ def test_browser_manage_connect_default_local_retries_after_launch(monkeypatch):
     with patch.dict(sys.modules, {"tools.browser_tool": fake}):
         with (
             patch(
-                "hermes_cli.browser_connect.launch_chrome_debug",
+                "korra_cli.browser_connect.launch_chrome_debug",
                 return_value=launched,
             ),
-            patch("hermes_cli.browser_connect.local_port_in_use", return_value=False),
+            patch("korra_cli.browser_connect.local_port_in_use", return_value=False),
         ):
             resp = server.handle_request(
                 {"id": "1", "method": "browser.manage", "params": {"action": "connect"}}
@@ -16817,9 +16817,9 @@ def test_browser_manage_connect_squatted_port_launches_on_alternate(monkeypatch)
 
     with patch.dict(sys.modules, {"tools.browser_tool": fake}):
         with (
-            patch("hermes_cli.browser_connect.launch_chrome_debug", side_effect=_launch),
-            patch("hermes_cli.browser_connect.local_port_in_use", return_value=True),
-            patch("hermes_cli.browser_connect.find_free_debug_port", return_value=9223),
+            patch("korra_cli.browser_connect.launch_chrome_debug", side_effect=_launch),
+            patch("korra_cli.browser_connect.local_port_in_use", return_value=True),
+            patch("korra_cli.browser_connect.find_free_debug_port", return_value=9223),
         ):
             resp = server.handle_request(
                 {"id": "1", "method": "browser.manage", "params": {"action": "connect"}}
@@ -17217,7 +17217,7 @@ def test_reload_env_rpc_calls_hermes_cli_reload_env(monkeypatch):
         return 7
 
     fake = types.SimpleNamespace(reload_env=_fake_reload)
-    with patch.dict(sys.modules, {"hermes_cli.config": fake}):
+    with patch.dict(sys.modules, {"korra_cli.config": fake}):
         resp = server.handle_request({"id": "1", "method": "reload.env", "params": {}})
 
     assert resp["result"] == {"updated": 7}
@@ -17229,7 +17229,7 @@ def test_reload_env_rpc_surfaces_errors(monkeypatch):
         raise RuntimeError("env path locked")
 
     fake = types.SimpleNamespace(reload_env=_broken)
-    with patch.dict(sys.modules, {"hermes_cli.config": fake}):
+    with patch.dict(sys.modules, {"korra_cli.config": fake}):
         resp = server.handle_request({"id": "1", "method": "reload.env", "params": {}})
 
     assert "error" in resp
@@ -17245,7 +17245,7 @@ def _setup_make_agent_mocks(monkeypatch, cfg):
         server, "_resolve_startup_runtime", lambda: ("test-model", None)
     )
     monkeypatch.setattr(
-        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        "korra_cli.runtime_provider.resolve_runtime_provider",
         lambda requested=None, target_model=None: {
             "provider": None,
             "base_url": None,
@@ -17277,7 +17277,7 @@ def test_make_agent_waits_for_shared_mcp_discovery(monkeypatch):
     _setup_make_agent_mocks(monkeypatch, {})
     waited = []
 
-    from hermes_cli import mcp_startup
+    from korra_cli import mcp_startup
 
     monkeypatch.setattr(
         mcp_startup,
@@ -17329,7 +17329,7 @@ def test_make_agent_uses_session_runtime_overrides(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        "korra_cli.runtime_provider.resolve_runtime_provider",
         fake_resolve_runtime_provider,
     )
 
@@ -18440,8 +18440,8 @@ def test_reap_idle_sessions_calls_periodic_trim(monkeypatch):
     monkeypatch.setattr(server, "_reclaim_orphaned_leases", lambda: None)
 
     # Patch the delayed import path: the function does
-    # `from hermes_cli.mem_trim import trim_memory` at call time.
-    import hermes_cli.mem_trim as mem_trim
+    # `from korra_cli.mem_trim import trim_memory` at call time.
+    import korra_cli.mem_trim as mem_trim
 
     monkeypatch.setattr(
         mem_trim, "trim_memory",
@@ -18462,7 +18462,7 @@ def test_reap_idle_sessions_logs_trim_failure(monkeypatch, caplog):
     monkeypatch.setattr(server, "_close_session_by_id", lambda *a, **k: None)
     monkeypatch.setattr(server, "_enforce_session_cap", lambda: None)
     monkeypatch.setattr(server, "_reclaim_orphaned_leases", lambda: None)
-    import hermes_cli.mem_trim as mem_trim
+    import korra_cli.mem_trim as mem_trim
 
     monkeypatch.setattr(mem_trim, "trim_memory", lambda **_kw: (_ for _ in ()).throw(RuntimeError("boom")))
     server._sessions.clear()
@@ -18829,7 +18829,7 @@ class _BillingHeaders:
 def test_billing_error_serialization_preserves_server_code(
     status, error, retry_after
 ):
-    import hermes_cli.nous_billing as nb
+    import korra_cli.nous_billing as nb
 
     headers = _BillingHeaders({"Retry-After": str(retry_after)}) if retry_after else None
     with pytest.raises(nb.BillingTransient) as ei:
@@ -18843,7 +18843,7 @@ def test_billing_error_serialization_preserves_server_code(
 
 
 def test_billing_rate_limit_without_error_defaults_wire_code():
-    import hermes_cli.nous_billing as nb
+    import korra_cli.nous_billing as nb
 
     exc = nb.BillingRateLimited("slow down", status=429, retry_after=10)
 
@@ -18862,7 +18862,7 @@ def _sub_rpc(method, params):
 
 
 def test_subscription_preview_serializes_quote(monkeypatch):
-    import hermes_cli.nous_billing as nb
+    import korra_cli.nous_billing as nb
 
     monkeypatch.setattr(
         nb,
@@ -18894,7 +18894,7 @@ def test_subscription_preview_requires_tier():
 
 
 def test_subscription_preview_scope_error_maps_to_step_up(monkeypatch):
-    import hermes_cli.nous_billing as nb
+    import korra_cli.nous_billing as nb
 
     def _raise(subscription_type_id):
         raise nb.BillingScopeRequired("billing:manage required")
@@ -18906,7 +18906,7 @@ def test_subscription_preview_scope_error_maps_to_step_up(monkeypatch):
 
 
 def test_subscription_change_cancellation(monkeypatch):
-    import hermes_cli.nous_billing as nb
+    import korra_cli.nous_billing as nb
 
     seen = {}
 
@@ -18923,7 +18923,7 @@ def test_subscription_change_cancellation(monkeypatch):
 
 
 def test_subscription_change_tier_downgrade(monkeypatch):
-    import hermes_cli.nous_billing as nb
+    import korra_cli.nous_billing as nb
 
     seen = {}
 
@@ -18945,7 +18945,7 @@ def test_subscription_change_requires_tier_or_cancel():
 
 
 def test_subscription_resume(monkeypatch):
-    import hermes_cli.nous_billing as nb
+    import korra_cli.nous_billing as nb
 
     monkeypatch.setattr(
         nb,
@@ -18958,7 +18958,7 @@ def test_subscription_resume(monkeypatch):
 
 
 def test_subscription_upgrade_echoes_status_and_idempotency(monkeypatch):
-    import hermes_cli.nous_billing as nb
+    import korra_cli.nous_billing as nb
 
     seen = {}
 
@@ -18976,7 +18976,7 @@ def test_subscription_upgrade_echoes_status_and_idempotency(monkeypatch):
 
 
 def test_subscription_upgrade_requires_action_surfaces_recovery(monkeypatch):
-    import hermes_cli.nous_billing as nb
+    import korra_cli.nous_billing as nb
 
     monkeypatch.setattr(
         nb,
@@ -19163,7 +19163,7 @@ class TestResolveRuntimeWithFallback:
         """When primary resolve succeeds, return its result directly."""
         expected = {"provider": "openai", "api_key": "tok"}
         monkeypatch.setattr(
-            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            "korra_cli.runtime_provider.resolve_runtime_provider",
             lambda **kw: expected,
         )
         resolution = server._resolve_runtime_with_fallback(
@@ -19175,7 +19175,7 @@ class TestResolveRuntimeWithFallback:
 
     def test_auth_error_tries_fallback_chain(self, monkeypatch):
         """On AuthError from primary, walk fallback_providers chain."""
-        from hermes_cli.auth import AuthError
+        from korra_cli.auth import AuthError
 
         fallback_runtime = {"provider": "deepseek", "api_key": "fb-tok"}
 
@@ -19185,7 +19185,7 @@ class TestResolveRuntimeWithFallback:
             return fallback_runtime
 
         monkeypatch.setattr(
-            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            "korra_cli.runtime_provider.resolve_runtime_provider",
             fake_resolve,
         )
         monkeypatch.setattr(
@@ -19202,7 +19202,7 @@ class TestResolveRuntimeWithFallback:
 
     def test_auth_error_skips_provider_only_fallback(self, monkeypatch):
         """Auth fallback requires one complete provider/model pair."""
-        from hermes_cli.auth import AuthError
+        from korra_cli.auth import AuthError
 
         requested = []
         fallback_runtime = {"provider": "openrouter", "api_key": "fb-tok"}
@@ -19214,7 +19214,7 @@ class TestResolveRuntimeWithFallback:
             return fallback_runtime
 
         monkeypatch.setattr(
-            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            "korra_cli.runtime_provider.resolve_runtime_provider",
             fake_resolve,
         )
         monkeypatch.setattr(
@@ -19238,7 +19238,7 @@ class TestResolveRuntimeWithFallback:
     def test_fallback_entry_key_env_resolves_api_key(self, monkeypatch):
         """A fallback entry naming its key via key_env passes the resolved
         env value as explicit_api_key (#43861, @VrtxOmega)."""
-        from hermes_cli.auth import AuthError
+        from korra_cli.auth import AuthError
 
         monkeypatch.setenv("FB_TEST_KEY", "env-resolved-key")
         captured = {}
@@ -19251,7 +19251,7 @@ class TestResolveRuntimeWithFallback:
             return fallback_runtime
 
         monkeypatch.setattr(
-            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            "korra_cli.runtime_provider.resolve_runtime_provider",
             fake_resolve,
         )
         monkeypatch.setattr(
@@ -19273,13 +19273,13 @@ class TestResolveRuntimeWithFallback:
 
     def test_auth_error_all_fallbacks_fail_raises(self, monkeypatch):
         """When all fallbacks also fail, re-raise the original AuthError."""
-        from hermes_cli.auth import AuthError
+        from korra_cli.auth import AuthError
 
         def fake_resolve(**kwargs):
             raise AuthError("No credentials for " + str(kwargs.get("requested")))
 
         monkeypatch.setattr(
-            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            "korra_cli.runtime_provider.resolve_runtime_provider",
             fake_resolve,
         )
         monkeypatch.setattr(
@@ -19296,7 +19296,7 @@ class TestResolveRuntimeWithFallback:
 
     def test_auth_error_skips_non_dict_entries(self, monkeypatch):
         """Fallback chain entries that are not dicts are skipped."""
-        from hermes_cli.auth import AuthError
+        from korra_cli.auth import AuthError
 
         fallback_runtime = {"provider": "anthropic", "api_key": "ant-tok"}
 
@@ -19306,7 +19306,7 @@ class TestResolveRuntimeWithFallback:
             return fallback_runtime
 
         monkeypatch.setattr(
-            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            "korra_cli.runtime_provider.resolve_runtime_provider",
             fake_resolve,
         )
         monkeypatch.setattr(
@@ -19329,7 +19329,7 @@ class TestResolveRuntimeWithFallback:
         provider when the primary provider raises AuthError."""
         import types
 
-        from hermes_cli.auth import AuthError
+        from korra_cli.auth import AuthError
 
         captured = {}
         fallback_runtime = {
@@ -19361,7 +19361,7 @@ class TestResolveRuntimeWithFallback:
             },
         )
         monkeypatch.setattr(
-            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            "korra_cli.runtime_provider.resolve_runtime_provider",
             fake_resolve,
         )
         monkeypatch.setattr("run_agent.AIAgent", fake_agent)
@@ -19692,7 +19692,7 @@ def test_full_duplex_stop_phrase_mid_generation_ends_voice_chat(monkeypatch, tmp
     )
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(stop_continuous=lambda **_kw: None, speak_text=lambda *a, **k: None),
     )
 
@@ -19742,7 +19742,7 @@ def test_speak_text_with_barge_arms_monitor_and_cuts_playback(monkeypatch, tmp_p
 
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(speak_text=fake_speak_text),
     )
 
@@ -19789,7 +19789,7 @@ def test_speak_text_with_barge_no_monitor_when_voice_mode_off(monkeypatch):
     done_speaking = threading.Event()
     monkeypatch.setitem(
         sys.modules,
-        "hermes_cli.voice",
+        "korra_cli.voice",
         types.SimpleNamespace(
             speak_text=lambda text, stop_event=None: done_speaking.set()
         ),
@@ -20096,7 +20096,7 @@ def test_prompt_submit_releases_old_history_before_heap_trim(monkeypatch):
             "reset_hermes_home_override",
             lambda _token: cleanup_order.append("reset_home"),
         )
-        monkeypatch.setattr("hermes_cli.mem_trim.trim_memory", _inspect_trim_frame)
+        monkeypatch.setattr("korra_cli.mem_trim.trim_memory", _inspect_trim_frame)
 
         resp = server.handle_request(
             {
@@ -20217,7 +20217,7 @@ def test_persist_branch_seed_keeps_reasoning_fields(monkeypatch, tmp_path):
     branch resuming without the parent's reasoning, preserved thinking blocks or
     Codex encrypted-reasoning/message-item continuation state.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "state.db")
     session = _session(
@@ -20253,7 +20253,7 @@ def test_session_branch_keeps_reasoning_fields(monkeypatch, tmp_path):
     Same drop as the seed path: the copy loop wrote only role/content, so the
     new session row replayed without the reasoning context the parent had.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "state.db")
     server._sessions["sid"] = _session(history=_branch_history())
@@ -20535,7 +20535,7 @@ def test_prompt_submit_truncation_archives_instead_of_deleting(monkeypatch):
     the FTS entry goes with them. Guarding the *aim* of a rewind still leaves
     every other way of aiming it wrong terminal, so the write itself has to
     stop destroying. The storage-layer contract this relies on is pinned in
-    tests/hermes_state/test_replace_messages_archive_siblings.py.
+    tests/korra_state/test_replace_messages_archive_siblings.py.
     """
 
     captured = {}
@@ -20618,7 +20618,7 @@ def test_prompt_submit_truncation_archives_instead_of_deleting(monkeypatch):
 
 def test_insert_message_rows_sets_row_id_on_fresh_dicts(tmp_path):
     """#82959: _insert_message_rows must assign _row_id on freshly inserted message dicts."""
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
     db = SessionDB(db_path=tmp_path / "state.db")
     db.create_session("fresh-msg-row-id-sid", "cli")
     msg = {"role": "user", "content": "fresh turn without pre-existing _row_id"}
@@ -20800,7 +20800,7 @@ def test_prompt_submit_row_id_real_sessiondb_resolve_without_memory_stamps(
     No hand-seeded ids and no MagicMock state manager — the contract that
     #82766 review said unit fixtures must exercise.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "rowid-trunc.db")
     session_key = "real-db-row-trunc"
@@ -20868,7 +20868,7 @@ def test_prompt_submit_row_id_real_sessiondb_unknown_refuses_despite_ordinal(
     """#82959 fail-closed: unknown row_id + valid ordinal must not truncate
     real SessionDB (the mass-delete class when durable id cannot resolve).
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "rowid-refuse.db")
     session_key = "real-db-row-refuse"
@@ -20926,7 +20926,7 @@ def test_prompt_submit_row_id_misaligned_memory_refuses_content_swap(
     must refuse (4018), not zip-stamp durable ids positionally and cut the
     wrong turn. Probe 4a from the PR #83202 review.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "rowid-misalign-content.db")
     session_key = "real-db-row-misalign-content"
@@ -20997,7 +20997,7 @@ def test_prompt_submit_row_id_misaligned_memory_role_shift_targets_real_turn(
     addressed user turn, never a positionally mis-aimed one. Probe 4b from
     the PR #83202 review.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "rowid-misalign-role.db")
     session_key = "real-db-row-misalign-role"
@@ -21149,7 +21149,7 @@ def test_prompt_submit_consecutive_rewinds_with_returned_survivor_row_ids(
     the first rewind. The submit response must return the fresh survivor ids,
     and a second rewind using them must succeed where the stale id fail-closes.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "rowid-consec.db")
     session_key = "real-db-consec-rewind"
@@ -21270,7 +21270,7 @@ def test_prompt_submit_rebind_map_clears_active_row_hidden_by_sequence_repair(
     monkeypatch, tmp_path
 ):
     """The bounded map classifies physical active IDs before user;user repair."""
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     db = SessionDB(db_path=tmp_path / "rowid-repaired-wedge.db")
     session_key = "real-db-rowid-repaired-wedge"
@@ -21424,7 +21424,7 @@ def test_persist_live_session_system_prompt_uses_profile_home(monkeypatch, tmp_p
         _session_db = None
 
         def _build_system_prompt(self, system_message=None):
-            from hermes_constants import get_hermes_home
+            from korra_constants import get_hermes_home
             home = get_hermes_home()
             built_homes.append(str(home))
             soul = (
@@ -21457,7 +21457,7 @@ def test_persist_live_session_system_prompt_uses_profile_home(monkeypatch, tmp_p
     assert "Work persona" in agent._cached_system_prompt
 
     # The override must have been reset after the call.
-    from hermes_constants import get_hermes_home_override
+    from korra_constants import get_hermes_home_override
     assert get_hermes_home_override() is None
 
 
@@ -21494,7 +21494,7 @@ def test_persist_live_session_system_prompt_restores_pre_existing_override(tmp_p
     not just the unset case: when a caller already holds an override, the
     persist call must scope to the session's profile and then hand the
     caller's override back, rather than clearing it to None."""
-    from hermes_constants import get_hermes_home_override
+    from korra_constants import get_hermes_home_override
 
     outer_home = tmp_path / "profile-outer"
     outer_home.mkdir()
@@ -21513,7 +21513,7 @@ def test_persist_live_session_system_prompt_restores_pre_existing_override(tmp_p
         _session_db = None
 
         def _build_system_prompt(self, system_message=None):
-            from hermes_constants import get_hermes_home
+            from korra_constants import get_hermes_home
             built_homes.append(str(get_hermes_home()))
             return "inner prompt"
 

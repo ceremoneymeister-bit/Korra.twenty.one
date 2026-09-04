@@ -91,7 +91,7 @@ def provider_tier(name: str) -> str:
     keyed, otherwise keyless when the tier is enabled.
     """
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
 
         web_cfg = load_config().get("web") or {}
         tiers = web_cfg.get("provider_tier") or {}

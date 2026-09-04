@@ -20,21 +20,21 @@ from plugins.memory.mem0._setup import (
 
 
 def _inject_fake_hermes_cli(monkeypatch):
-    """Inject fake hermes_cli modules so yaml/curses aren't required."""
-    fake_config_mod = types.ModuleType("hermes_cli.config")
+    """Inject fake korra_cli modules so yaml/curses aren't required."""
+    fake_config_mod = types.ModuleType("korra_cli.config")
     fake_config_mod.save_config = lambda c: None
 
-    fake_setup_mod = types.ModuleType("hermes_cli.memory_setup")
+    fake_setup_mod = types.ModuleType("korra_cli.memory_setup")
     fake_setup_mod._curses_select = lambda *a, **kw: 0
     fake_setup_mod._prompt = lambda label, default=None, secret=False: default or ""
 
-    fake_hermes_cli = types.ModuleType("hermes_cli")
+    fake_hermes_cli = types.ModuleType("korra_cli")
     fake_hermes_cli.config = fake_config_mod
     fake_hermes_cli.memory_setup = fake_setup_mod
 
-    monkeypatch.setitem(sys.modules, "hermes_cli", fake_hermes_cli)
-    monkeypatch.setitem(sys.modules, "hermes_cli.config", fake_config_mod)
-    monkeypatch.setitem(sys.modules, "hermes_cli.memory_setup", fake_setup_mod)
+    monkeypatch.setitem(sys.modules, "korra_cli", fake_hermes_cli)
+    monkeypatch.setitem(sys.modules, "korra_cli.config", fake_config_mod)
+    monkeypatch.setitem(sys.modules, "korra_cli.memory_setup", fake_setup_mod)
 
     monkeypatch.setattr("plugins.memory.mem0._setup._curses_select", lambda *a, **kw: 0)
     monkeypatch.setattr("plugins.memory.mem0._setup._prompt", lambda label, default=None, secret=False: default or "")

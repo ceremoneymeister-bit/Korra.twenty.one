@@ -51,7 +51,7 @@ def codex_cloudflare_headers(
         "originator": "codex_cli_rs",
     }
     if is_official_codex_base_url(base_url):
-        from hermes_cli import __version__
+        from korra_cli import __version__
 
         headers.update({
             "User-Agent": f"HermesAgent/{__version__}",

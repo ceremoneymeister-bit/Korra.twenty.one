@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any, Dict, Optional
-from hermes_constants import korra_env, korra_env_set
+from korra_constants import korra_env, korra_env_set
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ _TRUST_RECENT_ENV = "KORRA_MEDIA_TRUST_RECENT_FILES"
 def _load_gateway_cfg(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if config is None:
         try:
-            from hermes_cli.config import load_config
+            from korra_cli.config import load_config
 
             config = load_config() or {}
         except Exception:

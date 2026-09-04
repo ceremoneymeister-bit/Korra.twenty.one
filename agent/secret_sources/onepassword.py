@@ -389,7 +389,7 @@ def fetch_onepassword_secrets(
 
 
 # ---------------------------------------------------------------------------
-# Public entry point — called from hermes_cli.env_loader
+# Public entry point — called from korra_cli.env_loader
 # ---------------------------------------------------------------------------
 
 

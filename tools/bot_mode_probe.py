@@ -32,7 +32,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 _PROTOCOL_HEADING = "## Messaging other agents"
 
@@ -338,8 +338,8 @@ def capability_fingerprint(home: str | os.PathLike | None = None) -> str:
     try:
         # Canonical loader (managed overlay + env expansion + normalization),
         # scoped to the bot's home via the override the loaders already honor.
-        from hermes_cli.config import load_config_readonly
-        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+        from korra_cli.config import load_config_readonly
+        from korra_constants import reset_hermes_home_override, set_hermes_home_override
 
         token = set_hermes_home_override(str(resolved))
         try:

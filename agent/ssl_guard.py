@@ -12,7 +12,7 @@ import ssl
 from pathlib import Path
 
 from agent.errors import SSLConfigurationError
-from hermes_constants import korra_env, korra_env_aliases
+from korra_constants import korra_env, korra_env_aliases
 
 logger = logging.getLogger(__name__)
 

@@ -27,7 +27,7 @@ from gateway.session_db_recovery import RecoverableHandleCache
 
 def _live_count(path) -> int:
     """Live-connection count the tracking registry holds for *path*."""
-    import hermes_cli.sqlite_safe_read as mod
+    import korra_cli.sqlite_safe_read as mod
 
     with mod._live_lock:
         return mod._live_connections.get(mod._key(path), 0)
@@ -36,7 +36,7 @@ def _live_count(path) -> int:
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """A gateway home under tmp_path, with path resolution going through it."""
-    import hermes_state
+    import korra_state
 
     root = tmp_path / "hermes"
     root.mkdir(parents=True)
@@ -48,7 +48,7 @@ def home(tmp_path, monkeypatch):
     # keeps it inside tmp_path. Same reasoning as
     # test_multiplex_session_db_profile_scope.py.
     monkeypatch.setattr(
-        hermes_state, "DEFAULT_DB_PATH", hermes_state._IMPORT_DEFAULT_DB_PATH
+        korra_state, "DEFAULT_DB_PATH", korra_state._IMPORT_DEFAULT_DB_PATH
     )
     return root
 

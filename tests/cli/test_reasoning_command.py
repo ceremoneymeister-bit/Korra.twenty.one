@@ -93,7 +93,7 @@ class TestHandleReasoningCommand(unittest.TestCase):
 
     def test_effort_defaults_to_session_only(self):
         """Plain /reasoning <level> is session-scoped — no config write."""
-        from hermes_cli.cli_commands_mixin import CLICommandsMixin
+        from korra_cli.cli_commands_mixin import CLICommandsMixin
 
         stub = self._make_cli(reasoning_config={"enabled": True, "effort": "medium"})
         with patch("cli.save_config_value") as save_config, patch("cli._cprint"):
@@ -176,7 +176,7 @@ class TestHandleReasoningCommand(unittest.TestCase):
             CLI_CONFIG,
             {"model": {"default": "config-default-model", "provider": "openrouter"}},
         ), patch(
-            "hermes_cli.model_switch.switch_model", return_value=fake_result
+            "korra_cli.model_switch.switch_model", return_value=fake_result
         ):
             HermesCLI.new_session(stub, silent=True)
 
@@ -486,7 +486,7 @@ class TestConfigDefault(unittest.TestCase):
     """Verify config default for show_reasoning."""
 
     def test_default_config_has_show_reasoning(self):
-        from hermes_cli.config import DEFAULT_CONFIG
+        from korra_cli.config import DEFAULT_CONFIG
         display = DEFAULT_CONFIG.get("display", {})
         self.assertIn("show_reasoning", display)
         # Default ON (July 2026 TTFT-perception change): thinking models
@@ -499,7 +499,7 @@ class TestCommandRegistered(unittest.TestCase):
     """Verify /reasoning is in the COMMANDS dict."""
 
     def test_reasoning_in_commands(self):
-        from hermes_cli.commands import COMMANDS
+        from korra_cli.commands import COMMANDS
         self.assertIn("/reasoning", COMMANDS)
 
 

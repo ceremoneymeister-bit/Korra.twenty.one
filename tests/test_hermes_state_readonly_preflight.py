@@ -22,8 +22,8 @@ from pathlib import Path
 
 import pytest
 
-import hermes_state
-from hermes_state import SessionDB, preflight_db_writability
+import korra_state
+from korra_state import SessionDB, preflight_db_writability
 
 pytestmark = [
     pytest.mark.skipif(sys.platform == "win32", reason="POSIX chmod semantics"),
@@ -181,7 +181,7 @@ class TestSessionDBIntegration:
         first = SessionDB(db_path)
         first.close()
         os.chmod(db_path, 0o444)
-        hermes_state._set_last_init_error(None)
+        korra_state._set_last_init_error(None)
         try:
             with pytest.raises(sqlite3.OperationalError) as exc_info:
                 SessionDB(db_path)
@@ -190,4 +190,4 @@ class TestSessionDBIntegration:
             assert "chmod" in msg
         finally:
             os.chmod(db_path, 0o644)
-            hermes_state._set_last_init_error(None)
+            korra_state._set_last_init_error(None)

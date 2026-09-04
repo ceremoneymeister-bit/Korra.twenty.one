@@ -121,8 +121,8 @@ class TestTruncateContent:
         def default_load_config():
             return {}
 
-        monkeypatch.setattr("hermes_cli.config.load_config", default_load_config)
-        monkeypatch.setattr("hermes_cli.config.load_config_readonly", default_load_config)
+        monkeypatch.setattr("korra_cli.config.load_config", default_load_config)
+        monkeypatch.setattr("korra_cli.config.load_config_readonly", default_load_config)
 
 
 
@@ -140,8 +140,8 @@ class TestTruncateContent:
         def fake_load_config():
             return {"context_file_max_chars": 120}
 
-        monkeypatch.setattr("hermes_cli.config.load_config", fake_load_config)
-        monkeypatch.setattr("hermes_cli.config.load_config_readonly", fake_load_config)
+        monkeypatch.setattr("korra_cli.config.load_config", fake_load_config)
+        monkeypatch.setattr("korra_cli.config.load_config_readonly", fake_load_config)
 
         _truncate_content("x" * 180, "warning.md")
 
@@ -158,8 +158,8 @@ class TestTruncateContent:
         def fake_load_config():
             return {"context_file_max_chars": 120}
 
-        monkeypatch.setattr("hermes_cli.config.load_config", fake_load_config)
-        monkeypatch.setattr("hermes_cli.config.load_config_readonly", fake_load_config)
+        monkeypatch.setattr("korra_cli.config.load_config", fake_load_config)
+        monkeypatch.setattr("korra_cli.config.load_config_readonly", fake_load_config)
 
         # Generate a warning in a fresh child context, then assert it did NOT
         # leak into the parent context's accumulator.
@@ -187,8 +187,8 @@ class TestDynamicContextFileCap:
     @pytest.fixture(autouse=True)
     def _no_explicit_config(self, monkeypatch):
         # No explicit context_file_max_chars → dynamic path is eligible.
-        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
-        monkeypatch.setattr("hermes_cli.config.load_config_readonly", lambda: {})
+        monkeypatch.setattr("korra_cli.config.load_config", lambda: {})
+        monkeypatch.setattr("korra_cli.config.load_config_readonly", lambda: {})
 
 
     def test_dynamic_scales_above_floor_for_large_window(self):
@@ -204,11 +204,11 @@ class TestDynamicContextFileCap:
     def test_explicit_config_beats_dynamic(self, monkeypatch):
         # An explicit value always wins, even when a big window is available.
         monkeypatch.setattr(
-            "hermes_cli.config.load_config",
+            "korra_cli.config.load_config",
             lambda: {"context_file_max_chars": 1_000},
         )
         monkeypatch.setattr(
-            "hermes_cli.config.load_config_readonly",
+            "korra_cli.config.load_config_readonly",
             lambda: {"context_file_max_chars": 1_000},
         )
         assert _get_context_file_max_chars(200_000) == 1_000

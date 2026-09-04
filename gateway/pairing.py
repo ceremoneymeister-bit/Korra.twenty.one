@@ -33,7 +33,7 @@ from gateway.whatsapp_identity import (
     expand_whatsapp_aliases,
     normalize_whatsapp_identifier,
 )
-from hermes_constants import (
+from korra_constants import (
     get_default_hermes_root,
     get_hermes_dir,
     get_hermes_home,
@@ -61,7 +61,7 @@ MAX_FAILED_ATTEMPTS = 5             # Failed approvals before lockout
 # long-lived gateway process at container/process boot, and computing the
 # path eagerly freezes it to whatever HERMES_HOME/profile context existed
 # at that exact import moment for the rest of the process's lifetime --
-# even if a context-local override (see hermes_constants.set_hermes_home_override)
+# even if a context-local override (see korra_constants.set_hermes_home_override)
 # is established afterward. A freshly-started, short-lived process (e.g. the
 # ``hermes pairing`` CLI) re-imports this module later with the final
 # environment already in place, so it never observes the stale value -- the
@@ -186,7 +186,7 @@ def _read_allowlist_env(env_var: str) -> str:
     admin endpoints) keep the legacy ``os.getenv`` read.
 
     TODO(profile-secrets): the grant mirror below still WRITES through
-    ``hermes_cli.config.save_env_value`` / ``remove_env_value``, which target
+    ``korra_cli.config.save_env_value`` / ``remove_env_value``, which target
     the root ``.env`` — those writes need a profile-aware counterpart before
     pairing grants can be mirrored correctly under multiplexing.
     """
@@ -222,7 +222,7 @@ def _sync_allowlist_add(platform: str, user_id: str) -> None:
         return  # Already covered.
     ids.append(str(user_id))
     try:
-        from hermes_cli.config import save_env_value
+        from korra_cli.config import save_env_value
 
         save_env_value(env_var, ",".join(ids))
     except Exception:
@@ -346,7 +346,7 @@ def _sync_allowlist_remove(platform: str, user_id: str) -> None:
     if len(remaining) == len(ids):
         return  # Not present.
     try:
-        from hermes_cli.config import save_env_value, remove_env_value
+        from korra_cli.config import save_env_value, remove_env_value
 
         if remaining:
             save_env_value(env_var, ",".join(remaining))

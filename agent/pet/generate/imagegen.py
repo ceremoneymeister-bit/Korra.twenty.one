@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class SpriteProvider:
 
 def _discover() -> None:
     try:
-        from hermes_cli.plugins import _ensure_plugins_discovered
+        from korra_cli.plugins import _ensure_plugins_discovered
 
         _ensure_plugins_discovered()
     except Exception as exc:  # noqa: BLE001 - discovery is best-effort

@@ -66,7 +66,7 @@ def _make_event(text):
 
 def _fake_switch_result():
     """A successful ModelSwitchResult that bypasses real provider resolution."""
-    from hermes_cli.model_switch import ModelSwitchResult
+    from korra_cli.model_switch import ModelSwitchResult
 
     return ModelSwitchResult(
         success=True,
@@ -84,15 +84,15 @@ def _fake_switch_result():
 def _stub_picker_dependencies(monkeypatch):
     monkeypatch.setattr("agent.models_dev.fetch_models_dev", lambda: {})
     monkeypatch.setattr(
-        "hermes_cli.model_switch.list_picker_providers",
+        "korra_cli.model_switch.list_picker_providers",
         lambda **kw: [{"slug": "openrouter", "name": "OpenRouter", "models": ["gpt-5.5"]}],
     )
     monkeypatch.setattr(
-        "hermes_cli.model_switch.switch_model",
+        "korra_cli.model_switch.switch_model",
         lambda **kw: _fake_switch_result(),
     )
     monkeypatch.setattr(
-        "hermes_cli.model_switch.resolve_display_context_length",
+        "korra_cli.model_switch.resolve_display_context_length",
         lambda *a, **k: 272000,
     )
 
@@ -112,8 +112,8 @@ def _setup_isolated_home(tmp_path, monkeypatch, model_yaml_value):
     monkeypatch.setattr(gateway_run, "_hermes_home", hermes_home)
     _stub_picker_dependencies(monkeypatch)
     # save_config writes to ``get_hermes_home() / config.yaml`` — point it here.
-    monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: hermes_home)
-    monkeypatch.setattr("hermes_cli.config.get_hermes_home", lambda: hermes_home)
+    monkeypatch.setattr("korra_constants.get_hermes_home", lambda: hermes_home)
+    monkeypatch.setattr("korra_cli.config.get_hermes_home", lambda: hermes_home)
     return cfg_path
 
 

@@ -209,7 +209,7 @@ class TestAttendedGcPushedTier:
 
     def test_audit_verdict_and_reclaim_keeps_branch(self, repo_with_bare_origin):
         import cli  # noqa: F401  (worktree_gc lazily imports cli)
-        from hermes_cli import worktree_gc
+        from korra_cli import worktree_gc
 
         repo = repo_with_bare_origin
         wt = _mk_worktree(repo, "salv-lane", "salv/pushed-lane", push=True)
@@ -226,7 +226,7 @@ class TestAttendedGcPushedTier:
 
     def test_audit_never_pushed_keeps(self, repo_with_bare_origin):
         import cli  # noqa: F401
-        from hermes_cli import worktree_gc
+        from korra_cli import worktree_gc
 
         repo = repo_with_bare_origin
         wt = _mk_worktree(repo, "salv-keep", "salv/never-pushed", push=False)

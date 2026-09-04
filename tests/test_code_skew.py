@@ -73,13 +73,13 @@ class TestDashboardCodeSkewGuard:
     """Dashboard mirror of the gateway's model-switch skew guard (#86207)."""
 
     def test_dashboard_guard_returns_none_without_skew(self, monkeypatch):
-        from hermes_cli import web_server
+        from korra_cli import web_server
 
         monkeypatch.setattr(code_skew, "detect_code_skew", lambda: None)
         assert web_server._dashboard_code_skew_guard() is None
 
     def test_dashboard_guard_message_names_revs_and_restart(self, monkeypatch):
-        from hermes_cli import web_server
+        from korra_cli import web_server
 
         monkeypatch.setattr(code_skew, "detect_code_skew", lambda: ("abc1234567", "def4567890"))
         msg = web_server._dashboard_code_skew_guard()
@@ -101,13 +101,13 @@ class TestModelOptionsSkewGuard:
 
     def test_stale_dashboard_returns_503_and_skips_payload_build(self, monkeypatch):
         from fastapi import HTTPException
-        from hermes_cli import web_server
+        from korra_cli import web_server
 
         monkeypatch.setattr(code_skew, "detect_code_skew", lambda: ("abc1234567", "def4567890"))
 
         payload_calls: list = []
         monkeypatch.setattr(
-            "hermes_cli.inventory.build_model_options_payload",
+            "korra_cli.inventory.build_model_options_payload",
             lambda *a, **k: payload_calls.append(1) or {"providers": []},
         )
 
@@ -120,7 +120,7 @@ class TestModelOptionsSkewGuard:
         assert payload_calls == []
 
     def test_fresh_dashboard_builds_payload_unchanged(self, monkeypatch):
-        from hermes_cli import web_server
+        from korra_cli import web_server
 
         monkeypatch.setattr(code_skew, "detect_code_skew", lambda: None)
 
@@ -131,12 +131,12 @@ class TestModelOptionsSkewGuard:
         monkeypatch.setattr(
             web_server, "_profile_scope", lambda profile: contextlib.nullcontext()
         )
-        monkeypatch.setattr("hermes_cli.inventory.load_picker_context", lambda: {})
+        monkeypatch.setattr("korra_cli.inventory.load_picker_context", lambda: {})
 
         payload_calls: list = []
         expected = {"providers": [], "model": {}, "provider": None}
         monkeypatch.setattr(
-            "hermes_cli.inventory.build_model_options_payload",
+            "korra_cli.inventory.build_model_options_payload",
             lambda *a, **k: payload_calls.append(1) or expected,
         )
 

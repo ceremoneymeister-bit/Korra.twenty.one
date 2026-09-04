@@ -8,7 +8,7 @@ import types
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from hermes_cli.profiles import _get_default_hermes_home
+from korra_cli.profiles import _get_default_hermes_home
 
 import pytest
 
@@ -320,16 +320,16 @@ class TestResolveActiveHost:
             return_value=Path("/nonexistent/test-honcho-config.json"),
         ):
             os.environ.pop("HERMES_HONCHO_HOST", None)
-            # Temporarily remove hermes_cli.profiles to simulate import failure
-            saved = sys.modules.get("hermes_cli.profiles")
-            sys.modules["hermes_cli.profiles"] = None  # type: ignore
+            # Temporarily remove korra_cli.profiles to simulate import failure
+            saved = sys.modules.get("korra_cli.profiles")
+            sys.modules["korra_cli.profiles"] = None  # type: ignore
             try:
                 assert resolve_active_host() == "hermes"
             finally:
                 if saved is not None:
-                    sys.modules["hermes_cli.profiles"] = saved
+                    sys.modules["korra_cli.profiles"] = saved
                 else:
-                    sys.modules.pop("hermes_cli.profiles", None)
+                    sys.modules.pop("korra_cli.profiles", None)
 
 
 class TestProfileScopedConfig:
@@ -483,7 +483,7 @@ class TestGetHonchoClient:
     )
     def test_timeout_change_triggers_client_rebuild(self):
         """Changing timeout config must rebuild the cached client."""
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
 
         cfg_yaml = get_hermes_home() / "config.yaml"
         cfg_yaml.write_text("honcho:\n  timeout: 30\n")
@@ -685,7 +685,7 @@ class TestGetHonchoClientBaseUrlDoublePrefixFix:
         )
 
         with patch("honcho.Honcho", return_value=fake_honcho) as mock_honcho, \
-             patch("hermes_cli.config.load_config", return_value={}):
+             patch("korra_cli.config.load_config", return_value={}):
             get_honcho_client(cfg)
 
         mock_honcho.assert_called_once()
@@ -712,7 +712,7 @@ class TestGetHonchoClientBaseUrlDoublePrefixFix:
         }))
 
         with patch.dict(os.environ, {}, clear=True), \
-             patch("hermes_cli.profiles.get_active_profile_name", return_value="default"), \
+             patch("korra_cli.profiles.get_active_profile_name", return_value="default"), \
              patch("plugins.memory.honcho.client.resolve_config_path", return_value=config_file):
             cfg = HonchoClientConfig.from_global_config(config_path=config_file)
 
@@ -726,7 +726,7 @@ class TestGetHonchoClientBaseUrlDoublePrefixFix:
         mock_honcho = MagicMock(return_value=fake_honcho)
         fake_honcho_module = types.SimpleNamespace(Honcho=mock_honcho)
         with patch.dict(sys.modules, {"honcho": fake_honcho_module}), \
-             patch("hermes_cli.config.load_config", return_value={}):
+             patch("korra_cli.config.load_config", return_value={}):
             get_honcho_client(cfg)
 
         mock_honcho.assert_called_once()
@@ -768,7 +768,7 @@ class TestGetHonchoClientBaseUrlDoublePrefixFix:
         )
 
         with patch("honcho.Honcho", return_value=fake_honcho) as mock_honcho, \
-             patch("hermes_cli.config.load_config", return_value={}):
+             patch("korra_cli.config.load_config", return_value={}):
             get_honcho_client(cfg)
 
         mock_honcho.assert_called_once()

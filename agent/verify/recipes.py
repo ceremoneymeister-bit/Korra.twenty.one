@@ -18,7 +18,7 @@ Layer ownership vs :mod:`agent.coding_context`:
   port, and readiness path that let ``hermes verify`` boot the app and prove
   it serves HTTP. The ``hermes verify`` CLI merges any project-facts verify
   commands the recipe missed into its test list (see
-  ``hermes_cli.verify_cmd._merge_project_facts_commands``) so the two layers
+  ``korra_cli.verify_cmd._merge_project_facts_commands``) so the two layers
   extend rather than contradict each other.
 """
 

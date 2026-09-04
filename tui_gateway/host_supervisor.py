@@ -22,7 +22,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from hermes_constants import get_hermes_home, korra_env_set
+from korra_constants import get_hermes_home, korra_env_set
 from tools.environments.local import hermes_subprocess_env
 
 logger = logging.getLogger(__name__)

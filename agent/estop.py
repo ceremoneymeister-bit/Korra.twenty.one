@@ -45,7 +45,7 @@ _logged_components: set[str] = set()
 def _hermes_home() -> Path:
     """Resolve the active HERMES_HOME (profile-aware) at call time."""
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         return get_hermes_home()
     except Exception:
         return Path(os.path.expanduser("~/.hermes"))
@@ -60,7 +60,7 @@ def _canonical_root() -> Path:
     (jarvis-os/t_7b65ff88: fleet-analyst kept dispatching through pause).
     """
     try:
-        from hermes_constants import get_default_hermes_root
+        from korra_constants import get_default_hermes_root
         return Path(get_default_hermes_root())
     except Exception:
         return Path(os.path.expanduser("~/.hermes"))

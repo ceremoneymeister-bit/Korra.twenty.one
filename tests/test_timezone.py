@@ -1,5 +1,5 @@
 """
-Tests for timezone support (hermes_time module + integration points).
+Tests for timezone support (korra_time module + integration points).
 
 Covers:
   - Valid timezone applies correctly
@@ -17,16 +17,16 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-import hermes_time
+import korra_time
 
 
 def _reset_hermes_time_cache():
-    """Reset the hermes_time module cache."""
-    hermes_time.reset_cache()
+    """Reset the korra_time module cache."""
+    korra_time.reset_cache()
 
 
 # =========================================================================
-# hermes_time.now() — core helper
+# korra_time.now() — core helper
 # =========================================================================
 
 class TestHermesTimeNow:
@@ -42,7 +42,7 @@ class TestHermesTimeNow:
     def test_valid_timezone_applies(self):
         """With a valid IANA timezone, now() returns time in that zone."""
         os.environ["HERMES_TIMEZONE"] = "Asia/Kolkata"
-        result = hermes_time.now()
+        result = korra_time.now()
         assert result.tzinfo is not None
         # IST is UTC+5:30
         offset = result.utcoffset()
@@ -51,13 +51,13 @@ class TestHermesTimeNow:
     def test_utc_timezone(self):
         """UTC timezone works."""
         os.environ["HERMES_TIMEZONE"] = "UTC"
-        result = hermes_time.now()
+        result = korra_time.now()
         assert result.utcoffset() == timedelta(0)
 
     def test_us_eastern(self):
         """US/Eastern timezone works (DST-aware zone)."""
         os.environ["HERMES_TIMEZONE"] = "America/New_York"
-        result = hermes_time.now()
+        result = korra_time.now()
         assert result.tzinfo is not None
         # Offset is -5h or -4h depending on DST
         offset_hours = result.utcoffset().total_seconds() / 3600
@@ -80,7 +80,7 @@ class TestGetTimezone:
 
     def test_returns_zoneinfo_for_valid(self):
         os.environ["HERMES_TIMEZONE"] = "Europe/London"
-        tz = hermes_time.get_timezone()
+        tz = korra_time.get_timezone()
         assert isinstance(tz, ZoneInfo)
         assert str(tz) == "Europe/London"
 
@@ -97,16 +97,16 @@ class TestGetTimezone:
         monkeypatch.delenv("HERMES_TIMEZONE", raising=False)
 
         monkeypatch.setenv("HERMES_HOME", str(first_home))
-        assert str(hermes_time.get_timezone()) == "Asia/Tokyo"
+        assert str(korra_time.get_timezone()) == "Asia/Tokyo"
 
         # Multiplexed profile runtime scopes switch HERMES_HOME in one process.
         monkeypatch.setenv("HERMES_HOME", str(second_home))
-        assert str(hermes_time.get_timezone()) == "America/New_York"
+        assert str(korra_time.get_timezone()) == "America/New_York"
 
         # Switching BACK must return the first profile's zone (per-identity
         # entries stay hot; no single-slot ping-pong).
         monkeypatch.setenv("HERMES_HOME", str(first_home))
-        assert str(hermes_time.get_timezone()) == "Asia/Tokyo"
+        assert str(korra_time.get_timezone()) == "Asia/Tokyo"
 
     def test_concurrent_profile_resolution_never_mixes_zones(
         self, tmp_path, monkeypatch
@@ -121,7 +121,7 @@ class TestGetTimezone:
         """
         import threading
 
-        from hermes_constants import (
+        from korra_constants import (
             reset_hermes_home_override,
             set_hermes_home_override,
         )
@@ -145,7 +145,7 @@ class TestGetTimezone:
             for _ in range(200):
                 token = set_hermes_home_override(str(homes[key]))
                 try:
-                    tz = hermes_time.get_timezone()
+                    tz = korra_time.get_timezone()
                     if str(tz) != zones[key]:
                         errors.append((key, str(tz)))
                         return

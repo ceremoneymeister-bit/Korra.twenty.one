@@ -440,7 +440,7 @@ def _model_id_missing_known_prefix(model: str, provider: str) -> bool:
     if not name or "/" in name:
         return False
     try:
-        from hermes_cli.model_normalize import suggest_prefixed_model_id
+        from korra_cli.model_normalize import suggest_prefixed_model_id
 
         return bool(suggest_prefixed_model_id((provider or "").strip(), name))
     except Exception:
@@ -909,12 +909,12 @@ def classify_api_error(
     # Consulted BEFORE the built-in pipeline so a provider plugin can both
     # add classifications the core patterns miss and correct ones they get
     # wrong for its provider (see the ``transform_api_error_classification`` entry in
-    # hermes_cli.plugins.VALID_HOOKS for the callback contract). Callback
+    # korra_cli.plugins.VALID_HOOKS for the callback contract). Callback
     # exceptions are isolated inside invoke_hook and malformed returns are
     # dropped by the helper, so a broken plugin can never break
     # classification — the guard here only covers import/dispatch failure.
     try:
-        from hermes_cli.plugins import get_plugin_error_classification
+        from korra_cli.plugins import get_plugin_error_classification
         plugin_classification = get_plugin_error_classification(
             provider=provider,
             model=model,

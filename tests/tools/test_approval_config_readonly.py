@@ -7,14 +7,14 @@ a real config.yaml) and the guard path loaded config 2-3x per command.
 Every swapped call site was audited read-only (all callers take scalar
 reads or iterate; none mutate the returned dict or any nested structure),
 so they now use load_config_readonly() — the API built for exactly this
-(hermes_cli/config.py docstring; precedent: #74211, #74322).
+(korra_cli/config.py docstring; precedent: #74211, #74322).
 
 These tests drive the REAL functions against a temp HERMES_HOME config
 (AGENTS.md: E2E with real imports), not mocks of the seam under test.
 """
 import pytest
 
-import hermes_cli.config as hc
+import korra_cli.config as hc
 from tools.approval import (
     _get_approval_config,
     _get_approval_mode,

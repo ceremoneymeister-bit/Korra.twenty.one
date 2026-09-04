@@ -31,7 +31,7 @@ import pytest
 
 from agent.memory_manager import build_memory_context_block
 from agent.turn_context import build_turn_context, compose_user_api_content
-from hermes_state import SessionDB
+from korra_state import SessionDB
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +249,7 @@ class TestPrologueStamping:
     def test_stamps_api_content_from_plugin_context(self):
         agent = _FakeAgent()
         with patch(
-            "hermes_cli.plugins.invoke_hook",
+            "korra_cli.plugins.invoke_hook",
             return_value=[{"context": "PLUGIN-CTX"}],
         ):
             ctx = _build(agent)
@@ -264,7 +264,7 @@ class TestPrologueStamping:
 
     def test_no_stamp_without_injections(self):
         agent = _FakeAgent()
-        with patch("hermes_cli.plugins.invoke_hook", return_value=[]):
+        with patch("korra_cli.plugins.invoke_hook", return_value=[]):
             ctx = _build(agent)
         assert "api_content" not in ctx.messages[ctx.current_turn_user_idx]
         assert agent.api_content_at_persist is None
@@ -275,7 +275,7 @@ class TestPrologueStamping:
         agent = _FakeAgent()
         agent.api_mode = "codex_app_server"
         with patch(
-            "hermes_cli.plugins.invoke_hook",
+            "korra_cli.plugins.invoke_hook",
             return_value=[{"context": "PLUGIN-CTX"}],
         ):
             ctx = _build(agent)
@@ -460,7 +460,7 @@ def wire_env():
 
     try:
         with patch(
-            "hermes_cli.plugins.invoke_hook",
+            "korra_cli.plugins.invoke_hook",
             side_effect=lambda hook, **kw: (
                 [{"context": "PLUGIN-CTX"}] if hook == "pre_llm_call" else []
             ),
@@ -576,7 +576,7 @@ class TestPrologueMoaAndInPlaceBackfill:
         the wire."""
         agent = _FakeAgent()
         with patch(
-            "hermes_cli.plugins.invoke_hook",
+            "korra_cli.plugins.invoke_hook",
             return_value=[{"context": "PLUGIN-CTX"}],
         ):
             ctx = _build(agent, moa_active=True)
@@ -629,7 +629,7 @@ class TestPrologueMoaAndInPlaceBackfill:
             {"role": "assistant", "content": big},
         ]
         with patch(
-            "hermes_cli.plugins.invoke_hook",
+            "korra_cli.plugins.invoke_hook",
             return_value=[{"context": "PLUGIN-CTX"}],
         ):
             ctx = _build(agent, conversation_history=history)
@@ -975,7 +975,7 @@ class TestSessionRowExistsBeforePreflightCompaction:
         sid = "sess-fresh-inplace"
         try:
             agent, seen = self._make_agent(db, sid, in_place=True)
-            with patch("hermes_cli.plugins.invoke_hook", return_value=[]):
+            with patch("korra_cli.plugins.invoke_hook", return_value=[]):
                 ctx = _build(agent, conversation_history=self._oversized_history())
 
             # The row was created before compression started — without it the
@@ -996,7 +996,7 @@ class TestSessionRowExistsBeforePreflightCompaction:
         sid = "sess-fresh-rot"
         try:
             agent, seen = self._make_agent(db, sid, in_place=False)
-            with patch("hermes_cli.plugins.invoke_hook", return_value=[]):
+            with patch("korra_cli.plugins.invoke_hook", return_value=[]):
                 _build(agent, conversation_history=self._oversized_history())
 
             # The parent row existed before compression started — the child

@@ -70,7 +70,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 from utils import atomic_json_write
 
 _log = logging.getLogger(__name__)

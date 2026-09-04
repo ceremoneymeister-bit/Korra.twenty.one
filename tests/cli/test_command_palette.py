@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 from cli import HermesCLI
-from hermes_cli.commands import HELP_SESSION_SUBGROUPS
+from korra_cli.commands import HELP_SESSION_SUBGROUPS
 
 
 def _bare_cli():

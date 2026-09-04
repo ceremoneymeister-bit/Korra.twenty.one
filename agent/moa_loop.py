@@ -75,7 +75,7 @@ def _redact_reference_text(text: Any) -> Any:
 
 def _moa_privacy_mode(moa_raw: Any) -> str:
     """Resolve the normalized privacy-filter mode from a raw ``moa`` config."""
-    from hermes_cli.moa_config import coerce_privacy_filter
+    from korra_cli.moa_config import coerce_privacy_filter
 
     raw = moa_raw if isinstance(moa_raw, dict) else {}
     return coerce_privacy_filter(raw.get("privacy_filter"))
@@ -293,7 +293,7 @@ def _slot_reasoning_config(slot: dict[str, Any]) -> dict[str, Any] | None:
     """Translate optional per-MoA-slot reasoning_effort into runtime config."""
     effort = slot.get("reasoning_effort")
     try:
-        from hermes_constants import parse_reasoning_effort
+        from korra_constants import parse_reasoning_effort
 
         return parse_reasoning_effort(effort)
     except Exception:  # pragma: no cover - defensive; bad config must not break MoA
@@ -320,8 +320,8 @@ def _aggregator_reasoning_config(aggregator: dict[str, Any]) -> dict[str, Any] |
     if cfg is not None:
         return cfg
     try:
-        from hermes_cli.config import load_config
-        from hermes_constants import resolve_reasoning_config
+        from korra_cli.config import load_config
+        from korra_constants import resolve_reasoning_config
 
         return resolve_reasoning_config(
             load_config() or {}, str(aggregator.get("model") or "")
@@ -365,7 +365,7 @@ def _slot_runtime(slot: dict[str, Any]) -> dict[str, Any]:
             return cached
     out: dict[str, Any] = {"provider": provider, "model": model}
     try:
-        from hermes_cli.runtime_provider import resolve_runtime_provider
+        from korra_cli.runtime_provider import resolve_runtime_provider
 
         rt = resolve_runtime_provider(requested=provider, target_model=model)
         if rt.get("base_url"):
@@ -1293,7 +1293,7 @@ def aggregate_moa_context(
     # runs on the successful outputs only (failed refs are already filtered
     # into the degraded notice).
     try:
-        from hermes_cli.config import load_config as _load_config
+        from korra_cli.config import load_config as _load_config
 
         if _moa_privacy_mode((_load_config() or {}).get("moa")) == "full":
             successful_outputs = _redact_reference_outputs(successful_outputs)
@@ -1910,8 +1910,8 @@ class MoAChatCompletions:
                 raise TypeError("_moa_prepared_request must be a dict")
             return self._call_prepared_aggregator(prepared_request, api_kwargs)
 
-        from hermes_cli.config import get_config_path, load_config
-        from hermes_cli.moa_config import resolve_moa_preset
+        from korra_cli.config import get_config_path, load_config
+        from korra_cli.moa_config import resolve_moa_preset
 
         # Resolve the preset once per (config st_mtime_ns, preset_name).
         # resolve_moa_preset re-normalizes + re-validates the whole moa
@@ -2440,8 +2440,8 @@ def build_moa_facade(agent, preset_name: Any = None) -> MoAClient:
 
     resolved_preset = str(resolved_preset or "default")
     try:
-        from hermes_cli.config import load_config
-        from hermes_cli.moa_config import normalize_moa_config
+        from korra_cli.config import load_config
+        from korra_cli.moa_config import normalize_moa_config
 
         moa_cfg = normalize_moa_config(load_config().get("moa") or {})
         presets = moa_cfg.get("presets") or {}

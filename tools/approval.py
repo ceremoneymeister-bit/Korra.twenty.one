@@ -24,11 +24,11 @@ import time
 import unicodedata
 import uuid
 from typing import Optional
-from hermes_cli.config import cfg_get
+from korra_cli.config import cfg_get
 
 from tools.interrupt import is_interrupted
 from utils import env_var_enabled, is_truthy_value
-from hermes_constants import korra_env, korra_env_present, korra_env_set, korra_env_pop
+from korra_constants import korra_env, korra_env_present, korra_env_set, korra_env_pop
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ def _fire_approval_hook(hook_name: str, **kwargs) -> None:
     pre_approval_request, post_approval_response.
     """
     try:
-        from hermes_cli.lifecycle import invoke_hook
+        from korra_cli.lifecycle import invoke_hook
     except Exception:
         # Plugin system not available in this execution context
         # (e.g. bare tool-only imports, minimal test environments).
@@ -888,7 +888,7 @@ def _save_blocked_payload(command: str) -> Optional[str]:
     back to the manual write_file recipe).
     """
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         import time as _time
         import uuid as _uuid
         script_dir = get_hermes_home() / "cache" / "blocked-scripts"
@@ -1510,7 +1510,7 @@ def _rewrite_resolved_hermes_home(command: str) -> str:
     path can't be resolved or doesn't appear.
     """
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         home = get_hermes_home().expanduser()
         candidates = [
             str(home),
@@ -3304,7 +3304,7 @@ def load_permanent_allowlist() -> set:
     patterns added via 'always' in a previous session.
     """
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         config = load_config_readonly()
         patterns = set(config.get("command_allowlist", []) or [])
         if patterns:
@@ -3318,7 +3318,7 @@ def load_permanent_allowlist() -> set:
 def save_permanent_allowlist(patterns: set):
     """Save permanently allowed command patterns to config."""
     try:
-        from hermes_cli.config import load_config, save_config
+        from korra_cli.config import load_config, save_config
         config = load_config()
         config["command_allowlist"] = list(patterns)
         save_config(config)
@@ -3560,7 +3560,7 @@ def _get_approval_config() -> dict:
     callers must not mutate it or any nested structure.
     """
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         config = load_config_readonly()
         return config.get("approvals", {}) or {}
     except Exception as e:
@@ -3655,7 +3655,7 @@ def _get_approval_timeout() -> int:
 def _get_cron_approval_mode() -> str:
     """Read the cron approval mode from config. Returns 'deny' or 'approve'."""
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         config = load_config_readonly()
         mode = str(cfg_get(config, "approvals", "cron_mode", default="deny")).lower().strip()
         if mode in {"approve", "off", "allow", "yes"}:
@@ -3668,7 +3668,7 @@ def _get_cron_approval_mode() -> str:
 def _get_single_query_approval_mode() -> str:
     """Read the single-query (-q) approval mode from config. Returns 'deny' or 'approve'."""
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         config = load_config_readonly()
         mode = str(cfg_get(config, "approvals", "single_query_mode", default="deny")).lower().strip()
         if mode in {"approve", "off", "allow", "yes"}:
@@ -3687,7 +3687,7 @@ def _get_unattended_approval_mode() -> str:
     run a flagged action unless the operator explicitly trusts it.
     """
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         config = load_config_readonly()
         mode = str(cfg_get(config, "approvals", "unattended_mode", default="deny")).lower().strip()
         if mode in {"approve", "off", "allow", "yes"}:
@@ -4411,7 +4411,7 @@ def _format_tirith_description(tirith_result: dict) -> str:
 
 def get_plugin_manager():
     """Lazy plugin-manager seam used by tests and early tool-only imports."""
-    from hermes_cli.plugins import discover_plugins, get_plugin_manager as _get_manager
+    from korra_cli.plugins import discover_plugins, get_plugin_manager as _get_manager
 
     # Approval can be imported before model_tools, whose import normally
     # triggers general plugin discovery. Ensure an explicitly selected
@@ -4424,7 +4424,7 @@ def get_plugin_manager():
 def _get_approval_transport_config() -> tuple[str, str | None]:
     """Return explicitly selected transport and fail-closed fallback mode."""
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
 
         config = load_config_readonly() or {}
         approval_config = ((config.get("security") or {}).get("approval") or {})
@@ -4471,7 +4471,7 @@ def _present_with_selected_transport(
 
     try:
         from agent.redact import redact_sensitive_text
-        from hermes_cli.approval_transport import ApprovalRequest, invoke_approval_transport
+        from korra_cli.approval_transport import ApprovalRequest, invoke_approval_transport
 
         timeout_seconds = _get_approval_timeout()
         request = ApprovalRequest.create(
@@ -4971,7 +4971,7 @@ def check_all_command_guards(command: str, env_type: str,
                     # the cron branch below, see #20733).
                     _sq_fail_open = True  # safe default if config is unreadable
                     try:
-                        from hermes_cli.config import load_config_readonly as _load_cfg
+                        from korra_cli.config import load_config_readonly as _load_cfg
                         _sec = (_load_cfg() or {}).get("security", {}) or {}
                         if _sec.get("tirith_enabled", True):
                             _sq_fail_open = _sec.get("tirith_fail_open", True)
@@ -5036,7 +5036,7 @@ def check_all_command_guards(command: str, env_type: str,
                     # fail-closed synthesis in the main flow below; see #20733).
                     _cron_fail_open = True  # safe default if config is unreadable
                     try:
-                        from hermes_cli.config import load_config_readonly as _load_cfg
+                        from korra_cli.config import load_config_readonly as _load_cfg
                         _sec = (_load_cfg() or {}).get("security", {}) or {}
                         if _sec.get("tirith_enabled", True):
                             _cron_fail_open = _sec.get("tirith_fail_open", True)
@@ -5095,7 +5095,7 @@ def check_all_command_guards(command: str, env_type: str,
                 except ImportError:
                     _ua_fail_open = True  # safe default if config is unreadable
                     try:
-                        from hermes_cli.config import load_config_readonly as _load_cfg
+                        from korra_cli.config import load_config_readonly as _load_cfg
                         _sec = (_load_cfg() or {}).get("security", {}) or {}
                         if _sec.get("tirith_enabled", True):
                             _ua_fail_open = _sec.get("tirith_fail_open", True)
@@ -5134,7 +5134,7 @@ def check_all_command_guards(command: str, env_type: str,
         # normal approval flow.  Fixes #20733.
         _tirith_fail_open = True  # safe default if config is unreadable
         try:
-            from hermes_cli.config import load_config_readonly as _load_cfg
+            from korra_cli.config import load_config_readonly as _load_cfg
             _sec = (_load_cfg() or {}).get("security", {}) or {}
             _tirith_enabled = _sec.get("tirith_enabled", True)
             if _tirith_enabled:

@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from hermes_cli.config import get_hermes_home
+from korra_cli.config import get_hermes_home
 from utils import atomic_json_write
 
 logger = logging.getLogger(__name__)
@@ -439,7 +439,7 @@ def _build_from_sessions_db(platform_name: str) -> List[Dict[str, str]]:
     """Pull channels/contacts from state.db gateway session rows."""
     entries: List[Dict[str, str]] = []
     try:
-        from hermes_state import SessionDB
+        from korra_state import SessionDB
         db = SessionDB()
         try:
             lister = getattr(db, "list_gateway_sessions", None)

@@ -46,7 +46,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 from tools.daemon_pool import DaemonThreadPoolExecutor
 from tools.thread_context import propagate_context_to_thread
 
@@ -140,7 +140,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def _initialize_schema(conn: sqlite3.Connection) -> None:
-    from hermes_state import apply_durability_barriers
+    from korra_state import apply_durability_barriers
 
     # state.db's owning SessionDB connection establishes the configured journal
     # mode. This secondary durability ledger must preserve that mode: applying

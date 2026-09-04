@@ -49,7 +49,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from hermes_constants import get_hermes_home, korra_env
+from korra_constants import get_hermes_home, korra_env
 
 logger = logging.getLogger(__name__)
 

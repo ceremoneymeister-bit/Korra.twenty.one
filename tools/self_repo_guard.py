@@ -15,7 +15,7 @@ from tools.approval import (
     _iter_shell_command_starts,
     _read_shell_word,
 )
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 
 _WORKTREE_MUTATIONS = frozenset({

@@ -9,7 +9,7 @@ from gateway.kanban_watchers import (
     _release_singleton_lock,
 )
 from gateway.run import GatewayRunner
-from hermes_cli import kanban_db as kb
+from korra_cli import kanban_db as kb
 
 
 class RecordingAdapter:

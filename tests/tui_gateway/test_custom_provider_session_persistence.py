@@ -27,8 +27,8 @@ import json
 import types
 from unittest.mock import MagicMock, patch
 
-import hermes_cli.runtime_provider as rp
-from hermes_state import SessionDB
+import korra_cli.runtime_provider as rp
+from korra_state import SessionDB
 
 MIMO_URL = "https://token-plan-cn.xiaomimimo.com/v1"
 MIMO_KEY = "sk-mimo-entry-key"

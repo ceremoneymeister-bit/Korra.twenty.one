@@ -399,7 +399,7 @@ class TestPerResponseSessionWritePath:
         return agent
 
     def test_prepersisted_row_stores_the_freshly_built_prompt(self, tmp_path):
-        from hermes_state import SessionDB
+        from korra_state import SessionDB
 
         session_id = "gc_run_room42_default_Worker_5f2c1ab9d4e34f7a8b0c6d1e2f3a4b5c"
         with SessionDB(db_path=tmp_path / "state.db") as db:
@@ -419,7 +419,7 @@ class TestPerResponseSessionWritePath:
         self, tmp_path, caplog
     ):
         """Second turn of the SAME id restores — so nothing was dropped."""
-        from hermes_state import SessionDB
+        from korra_state import SessionDB
 
         session_id = "gc_run_room42_default_Worker_9a7e3b1c05d24e6fb83a1c7d9e0f2a4b"
         history = [{"role": "user", "content": "hi"}]

@@ -12,8 +12,8 @@ import httpx
 import pytest
 import yaml
 
-from hermes_cli import __version__
-from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+from korra_cli import __version__
+from korra_constants import reset_hermes_home_override, set_hermes_home_override
 
 
 CODEX_URL = "https://chatgpt.com/backend-api/codex"

@@ -33,7 +33,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 

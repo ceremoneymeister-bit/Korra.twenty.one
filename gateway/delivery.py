@@ -15,8 +15,8 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 
-from hermes_cli.config import get_hermes_home
-from hermes_constants import korra_env
+from korra_cli.config import get_hermes_home
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 

@@ -158,7 +158,7 @@ def test_pyproject_pins_match_lazy_deps_pins():
 
 
 def test_dingtalk_extra_includes_qrcode_for_qr_auth():
-    """DingTalk's QR-code device-flow auth (hermes_cli/dingtalk_auth.py)
+    """DingTalk's QR-code device-flow auth (korra_cli/dingtalk_auth.py)
     needs the qrcode package."""
     optional_dependencies = _load_optional_dependencies()
 

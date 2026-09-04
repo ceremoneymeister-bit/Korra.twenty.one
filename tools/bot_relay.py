@@ -45,7 +45,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Iterator, Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ REPLY_WAIT_SECONDS = 900
 STALE_AFTER_SECONDS = 6 * 3600
 
 # Fallback envelope TTL when config is unreachable — mirrors the
-# ``bot_mode.envelope_ttl_seconds`` default in hermes_cli/config_defaults.py.
+# ``bot_mode.envelope_ttl_seconds`` default in korra_cli/config_defaults.py.
 # Envelopes older than the TTL are refused at drain time with a
 # 'queued_expired' error reply instead of being delivered late.
 DEFAULT_ENVELOPE_TTL_SECONDS = 900
@@ -255,7 +255,7 @@ def _envelope_ttl_seconds() -> int:
     drain-time expiry.
     """
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
 
         cfg = load_config_readonly() or {}
         val = (cfg.get("bot_mode") or {}).get("envelope_ttl_seconds")
@@ -613,7 +613,7 @@ class TurnBusyError(RuntimeError):
 def turn_wait_seconds() -> float:
     """Wait budget for a queued delivery turn (config, lazily read)."""
     try:
-        from hermes_cli.config import cfg_get, load_config
+        from korra_cli.config import cfg_get, load_config
 
         val = cfg_get(load_config(), "bot_mode", "turn_wait_seconds", default=None)
         if val is not None:

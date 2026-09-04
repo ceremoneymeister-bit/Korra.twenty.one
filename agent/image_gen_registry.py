@@ -25,7 +25,7 @@ import threading
 from typing import Dict, List, Optional
 
 from agent.image_gen_provider import ImageGenProvider
-from hermes_constants import hermes_home_key
+from korra_constants import hermes_home_key
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ def get_active_provider() -> Optional[ImageGenProvider]:
     """
     configured: Optional[str] = None
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
 
         cfg = load_config_readonly()
         section = cfg.get("image_gen") if isinstance(cfg, dict) else None

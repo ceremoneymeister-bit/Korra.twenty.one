@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 from agent.skill_utils import is_excluded_skill_path, is_external_skill_path
 
 logger = logging.getLogger(__name__)
@@ -256,7 +256,7 @@ def _prune_builtins_enabled() -> bool:
     flag — built-ins only archive after a fresh inactivity window.
     """
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
 
         cfg = load_config()
         cur = cfg.get("curator") if isinstance(cfg, dict) else None
@@ -788,7 +788,7 @@ def telemetry_provenance(
         return "installed"
     if ":" in skill_name:
         try:
-            from hermes_cli.plugins import get_plugin_manager
+            from korra_cli.plugins import get_plugin_manager
 
             if get_plugin_manager().find_plugin_skill(skill_name) is not None:
                 return "installed"
@@ -820,7 +820,7 @@ def _emit_skill_lifecycle(
 ) -> None:
     """Emit one best-effort lifecycle fact after authoritative state changes."""
     try:
-        from hermes_cli.lifecycle import has_hook, invoke_hook
+        from korra_cli.lifecycle import has_hook, invoke_hook
 
         if not has_hook("on_skill_lifecycle"):
             return

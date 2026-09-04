@@ -11,7 +11,7 @@ it returns when the *pipe* reaches EOF. On Windows the write end of a redirected
 pipe is handed to the child as an inheritable handle, so every descendant
 spawned without its own redirection holds a duplicate, and EOF waits for the
 last of them to close it. ``hermes update`` deliberately runs build steps with
-stdout inherited (the tee-stderr runner in ``hermes_cli/main.py``), so the
+stdout inherited (the tee-stderr runner in ``korra_cli/main.py``), so the
 process tree under a step is arbitrarily deep and not something the hand-off can
 enumerate. When one of those descendants is a resident gateway, the pipe never
 closes and ``Invoke-HermesStep`` blocks for the life of the gateway.
@@ -61,7 +61,7 @@ class TestIdleWatchdogCountsUpdateLogGrowth:
 
     Real updates are stdout-silent for 40+ minutes: ``hermes update`` captures
     the (very loud) Electron/vite build into ``logs/update.log`` — NOT the
-    child's stdout (``hermes_cli/update_cmd.py``, the update-log tee) — so the
+    child's stdout (``korra_cli/update_cmd.py``, the update-log tee) — so the
     step's pipes go quiet for the whole build while the update is demonstrably
     progressing. A no-output ceiling that watches only stdout/stderr would
     kill every healthy large update at ``StepIdleTimeoutSeconds`` and mark it

@@ -48,10 +48,10 @@ from typing import Any, Callable, Dict, List, Optional
 from agent.secret_scope import get_secret
 
 from agent.memory_provider import MemoryProvider, RecallStatus
-from hermes_constants import get_hermes_home
-from hermes_time import now as _hermes_now
+from korra_constants import get_hermes_home
+from korra_time import now as _hermes_now
 from tools.registry import tool_error
-from hermes_cli.config import cfg_get
+from korra_cli.config import cfg_get
 
 logger = logging.getLogger(__name__)
 
@@ -558,7 +558,7 @@ def _utc_timestamp() -> str:
 def _event_timestamp() -> str:
     """Return the configured Hermes event time with an explicit UTC offset."""
     event_time = _hermes_now()
-    # hermes_time.now() guarantees an aware datetime. Keep this fallback so a
+    # korra_time.now() guarantees an aware datetime. Keep this fallback so a
     # replacement clock cannot silently emit an offset-less Hindsight Event Date.
     if event_time.tzinfo is None or event_time.utcoffset() is None:
         event_time = event_time.astimezone()
@@ -951,10 +951,10 @@ class HindsightMemoryProvider(MemoryProvider):
         import sys
         from pathlib import Path
 
-        from hermes_cli.config import save_config
-        from hermes_cli.secret_prompt import masked_secret_prompt
+        from korra_cli.config import save_config
+        from korra_cli.secret_prompt import masked_secret_prompt
 
-        from hermes_cli.memory_setup import _CANCELLED, _curses_select, _print_cancelled_setup
+        from korra_cli.memory_setup import _CANCELLED, _curses_select, _print_cancelled_setup
 
         print("\n  Configuring Hindsight memory:\n")
 
@@ -1167,7 +1167,7 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _offer_starter_template(self, mode: str, provider_config: dict, env_writes: dict) -> None:
         """Offer to seed the bank with a Hermes starter template (best-effort)."""
-        from hermes_cli.memory_setup import _CANCELLED, _curses_select
+        from korra_cli.memory_setup import _CANCELLED, _curses_select
 
         from . import templates as _hs_templates
 

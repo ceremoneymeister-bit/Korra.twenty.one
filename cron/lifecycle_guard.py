@@ -47,7 +47,7 @@ import shlex
 import stat
 from pathlib import Path
 from typing import Callable, Iterator, Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ def _current_profile_name() -> Optional[str]:
 
     Prefers the explicit ``HERMES_PROFILE_NAME`` / ``HERMES_PROFILE`` env
     (set by the profile launcher and kanban worker spawns), falling back to
-    ``hermes_cli.profiles.get_active_profile_name`` (derived from
+    ``korra_cli.profiles.get_active_profile_name`` (derived from
     ``HERMES_HOME``, which the gateway process inherits from its launch
     profile). Returns ``None`` when neither source yields a name.
     """
@@ -162,7 +162,7 @@ def _current_profile_name() -> Optional[str]:
         if value and value.strip():
             return value.strip()
     try:
-        from hermes_cli.profiles import get_active_profile_name
+        from korra_cli.profiles import get_active_profile_name
 
         return get_active_profile_name() or None
     except Exception:
@@ -259,7 +259,7 @@ def contains_gateway_lifecycle_command(text: str) -> bool:
     if profile_match:
         named = profile_match.group(1) or profile_match.group(2)
         if named:
-            # Profile ids cannot contain quotes (hermes_cli.profiles
+            # Profile ids cannot contain quotes (korra_cli.profiles
             # enforces `^[a-z0-9][a-z0-9_-]{0,63}$`), so a shell-quoted
             # `-p 'zeus'` compares equal to the bare name.
             named = named.strip().strip("\"'")
@@ -1165,7 +1165,7 @@ def _resolve_script_path(script_path: str) -> Optional[Path]:
     ``_expand_candidate_path``; such a value can never name a file the
     scheduler would execute, so there is nothing to scan.
     """
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     raw = _expand_candidate_path(script_path)
     if raw is None:

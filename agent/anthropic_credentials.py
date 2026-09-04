@@ -36,7 +36,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 from agent.secret_scope import get_secret as _get_secret
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def _getenv(name: str, default: str = "") -> str:
 
     Routes through the secret scope (Workstream A): identical to os.getenv
     when multiplexing is off, scope-aware (and fail-closed on an unscoped
-    read) when on. Mirrors the same wrapper in hermes_cli/runtime_provider.py.
+    read) when on. Mirrors the same wrapper in korra_cli/runtime_provider.py.
     """
     val = _get_secret(name, default)
     return val if val is not None else default
@@ -500,7 +500,7 @@ def _refresh_oauth_token(creds: Dict[str, Any]) -> Optional[str]:
     # Without this direct resolver path, two profiles can still spend one
     # single-use refresh token even though CredentialPool is serialized.
     try:
-        from hermes_cli.auth import AUTH_LOCK_TIMEOUT_SECONDS, _auth_store_lock, env_float
+        from korra_cli.auth import AUTH_LOCK_TIMEOUT_SECONDS, _auth_store_lock, env_float
 
         refresh_timeout_seconds = env_float(
             "KORRA_ANTHROPIC_REFRESH_TIMEOUT_SECONDS", 20
@@ -965,7 +965,7 @@ def run_hermes_oauth_login_pure() -> Optional[Dict[str, Any]]:
     print()
 
     try:
-        from hermes_cli.auth import _can_open_graphical_browser as _can_open_gui
+        from korra_cli.auth import _can_open_graphical_browser as _can_open_gui
     except Exception:
         _can_open_gui = lambda: True  # noqa: E731 — degrade to prior behavior
 

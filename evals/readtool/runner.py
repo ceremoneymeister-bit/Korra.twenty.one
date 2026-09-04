@@ -25,7 +25,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from hermes_constants import korra_env_set
+from korra_constants import korra_env_set
 
 EVAL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVAL_DIR.parent.parent

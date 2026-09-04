@@ -35,7 +35,7 @@ from agent.i18n import get_language
 logger = logging.getLogger(__name__)
 
 try:
-    import hermes_cli as _hermes_cli
+    import korra_cli as _hermes_cli
 
     _HERMES_VERSION = str(_hermes_cli.__version__)
 except Exception:

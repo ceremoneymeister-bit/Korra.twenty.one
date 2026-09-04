@@ -13,7 +13,7 @@ import asyncio
 from gateway.config import Platform
 from gateway.platforms.base import SendResult
 from gateway.run import GatewayRunner
-from hermes_cli import kanban_db as kb
+from korra_cli import kanban_db as kb
 
 
 class SoftFailAdapter:

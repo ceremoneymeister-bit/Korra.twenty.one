@@ -1,4 +1,4 @@
-"""Tests for hermes_state.py — SessionDB SQLite CRUD, FTS5 search, export."""
+"""Tests for korra_state.py — SessionDB SQLite CRUD, FTS5 search, export."""
 
 import sqlite3
 import time
@@ -9,9 +9,9 @@ from unittest import mock
 
 import pytest
 
-import hermes_state
+import korra_state
 from agent.session_activity import ActivityProvenance
-from hermes_state import SCHEMA_SQL, SCHEMA_VERSION, SessionDB
+from korra_state import SCHEMA_SQL, SCHEMA_VERSION, SessionDB
 
 
 class _NoFtsCursor(sqlite3.Cursor):
@@ -108,18 +108,18 @@ class TestConnectionLifecycle:
         self, tmp_path, monkeypatch
     ):
         """A failed schema init must close the connection opened before it."""
-        from hermes_cli.sqlite_safe_read import has_live_connection
+        from korra_cli.sqlite_safe_read import has_live_connection
 
         db_path = tmp_path / "state.db"
         opened = []
-        real_connect = hermes_state._connect_tracked_db
+        real_connect = korra_state._connect_tracked_db
 
         def capture_connect(*args, **kwargs):
             conn = real_connect(*args, **kwargs)
             opened.append(conn)
             return conn
 
-        monkeypatch.setattr(hermes_state, "_connect_tracked_db", capture_connect)
+        monkeypatch.setattr(korra_state, "_connect_tracked_db", capture_connect)
         monkeypatch.setattr(
             SessionDB,
             "_init_schema",
@@ -141,13 +141,13 @@ class TestConnectionLifecycle:
         self, tmp_path, monkeypatch
     ):
         """A post-open read setup failure must close its unregistered conn."""
-        from hermes_cli import sqlite_safe_read
+        from korra_cli import sqlite_safe_read
 
         db_path = tmp_path / "state.db"
         db = SessionDB(db_path=db_path)
         opened = []
-        real_connect = hermes_state._connect_tracked_db
-        real_pragmas = hermes_state.apply_database_pragmas
+        real_connect = korra_state._connect_tracked_db
+        real_pragmas = korra_state.apply_database_pragmas
 
         def capture_connect(*args, **kwargs):
             conn = real_connect(*args, **kwargs)
@@ -157,8 +157,8 @@ class TestConnectionLifecycle:
         def fail_pragmas(*args, **kwargs):
             raise RuntimeError("read setup failed")
 
-        monkeypatch.setattr(hermes_state, "_connect_tracked_db", capture_connect)
-        monkeypatch.setattr(hermes_state, "apply_database_pragmas", fail_pragmas)
+        monkeypatch.setattr(korra_state, "_connect_tracked_db", capture_connect)
+        monkeypatch.setattr(korra_state, "apply_database_pragmas", fail_pragmas)
         before = dict(sqlite_safe_read._live_connections)
         db._wal_active = True
 
@@ -168,7 +168,7 @@ class TestConnectionLifecycle:
             assert sqlite_safe_read._live_connections == before
         finally:
             monkeypatch.setattr(
-                hermes_state, "apply_database_pragmas", real_pragmas
+                korra_state, "apply_database_pragmas", real_pragmas
             )
             for conn in opened:
                 try:
@@ -245,7 +245,7 @@ class TestConnectionLifecycle:
         forensic backup."""
         import sqlite3
 
-        from hermes_cli.sqlite_safe_read import has_live_connection
+        from korra_cli.sqlite_safe_read import has_live_connection
 
         db_path = tmp_path / "state.db"
         writable = SessionDB(db_path=db_path)
@@ -494,7 +494,7 @@ class TestSessionLifecycle:
             kwargs["factory"] = _NoTrigramConnection
             return real_connect(*args, **kwargs)
 
-        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_trigram)
+        monkeypatch.setattr("korra_state.sqlite3.connect", connect_without_trigram)
         db = SessionDB(db_path=db_path)
         try:
             db.create_session(session_id="s1", source="cli")
@@ -869,7 +869,7 @@ class TestFTS5Search:
 
     def test_sanitize_fts5_query_strips_dangerous_chars(self):
         """Unit test for _sanitize_fts5_query static method."""
-        from hermes_state import SessionDB
+        from korra_state import SessionDB
         s = SessionDB._sanitize_fts5_query
         assert s('hello world') == 'hello world'
         assert '+' not in s('C++')
@@ -921,7 +921,7 @@ class TestCJKSearchFallback:
     """
 
     def test_cjk_detection_covers_all_ranges(self):
-        from hermes_state import SessionDB
+        from korra_state import SessionDB
         f = SessionDB._contains_cjk
         # Chinese (CJK Unified Ideographs)
         assert f("记忆断裂") is True
@@ -1436,7 +1436,7 @@ class TestDeleteEmptySessions:
     """``delete_empty_sessions`` sweeps every ended, non-archived session
     whose ``message_count`` is 0. Backs the dashboard's "Delete empty"
     button — see ``SessionsPage.tsx`` + ``DELETE /api/sessions/empty``
-    in ``hermes_cli/web_server.py``.
+    in ``korra_cli/web_server.py``.
 
     Invariants this class locks in:
 
@@ -1672,7 +1672,7 @@ class TestSanitizeTitle:
 class TestSchemaInit:
     def test_wal_mode(self, db):
         """Prefer WAL on fixed SQLite; DELETE on WAL-reset-vulnerable builds (#69784)."""
-        from hermes_state import is_sqlite_wal_reset_vulnerable
+        from korra_state import is_sqlite_wal_reset_vulnerable
 
         cursor = db._conn.execute("PRAGMA journal_mode")
         mode = cursor.fetchone()[0].lower()
@@ -1727,7 +1727,7 @@ class TestSchemaInit:
         This is the architectural invariant: SCHEMA_SQL declares the
         desired schema, _reconcile_columns ensures it matches reality.
         """
-        from hermes_state import SCHEMA_SQL
+        from korra_state import SCHEMA_SQL
 
         expected = SessionDB._parse_schema_columns(SCHEMA_SQL)
         for table_name, declared_cols in expected.items():
@@ -1818,7 +1818,7 @@ class TestReconcileColumnsErrorHandling:
                     "duplicate column name: last_read_at"
                 ),
             )
-            with caplog.at_level(logging.WARNING, logger="hermes_state"):
+            with caplog.at_level(logging.WARNING, logger="korra_state"):
                 stale._reconcile_columns(cursor)
         finally:
             conn.close()
@@ -1841,7 +1841,7 @@ class TestReconcileColumnsErrorHandling:
                     "Cannot add a NOT NULL column with default value NULL"
                 ),
             )
-            with caplog.at_level(logging.WARNING, logger="hermes_state"):
+            with caplog.at_level(logging.WARNING, logger="korra_state"):
                 stale._reconcile_columns(cursor)
         finally:
             conn.close()
@@ -1926,7 +1926,7 @@ class TestFtsRebuildLoopWithoutTrigram:
             conn.set_trace_callback(statements.append)
             return conn
 
-        monkeypatch.setattr("hermes_state.sqlite3.connect", connect)
+        monkeypatch.setattr("korra_state.sqlite3.connect", connect)
 
     @staticmethod
     def _rebuilds(statements):
@@ -2015,14 +2015,14 @@ class TestFtsRebuildLoopWithoutTrigram:
         that always works. Renaming a trigger without updating its DDL would
         otherwise silently reintroduce an unsatisfiable check.
         """
-        from hermes_state_common import (
+        from korra_state_common import (
             FTS_SQL,
             FTS_TRIGRAM_SQL,
             LEGACY_FTS_SQL,
             LEGACY_FTS_TRIGRAM_SQL,
             _FTS_TRIGGERS,
         )
-        from hermes_state_schema import _FTS_BASE_TRIGGERS, _FTS_TRIGRAM_TRIGGERS
+        from korra_state_schema import _FTS_BASE_TRIGGERS, _FTS_TRIGRAM_TRIGGERS
 
         # Exhaustive and disjoint: nothing may fall out of the classification.
         assert set(_FTS_BASE_TRIGGERS) | set(_FTS_TRIGRAM_TRIGGERS) == set(_FTS_TRIGGERS)
@@ -2465,7 +2465,7 @@ class TestListSessionsRich:
         ],
     )
     def test_rich_list_keeps_legacy_reset_children_visible(self, db, end_reason):
-        from hermes_state_common import _ephemeral_child_sql
+        from korra_state_common import _ephemeral_child_sql
 
         lane_key = "agent:main:telegram:dm:lane"
         parent_id = f"parent_{end_reason}"
@@ -2543,7 +2543,7 @@ class TestListSessionsRich:
         assert db.resolve_resume_session_id("legacy_parent") == "legacy_parent"
 
     # Compression-tip following (the walker's original purpose) is pinned by
-    # tests/hermes_state/test_resolve_resume_session_id.py
+    # tests/korra_state/test_resolve_resume_session_id.py
     # ::test_follows_compression_tip_when_parent_retains_messages.
 
     def test_session_key_predicate_can_use_session_key_index(self, db):
@@ -3323,7 +3323,7 @@ class TestFTS5ToolCallMigration:
             assert len(session_db.search_messages("LEGACYARG")) == 1, \
                 "v23 optimize must index tool_calls JSON into FTS"
             # schema_version bumped once the FTS layer is v23
-            from hermes_state import SCHEMA_VERSION
+            from korra_state import SCHEMA_VERSION
             row = session_db._conn.execute(
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()
@@ -3441,7 +3441,7 @@ class TestFTSExternalContentMigration:
         Mirrors what happened when ``_ensure_fts_schema`` ran inside
         ``_execute_write`` and the process died before the marker writes.
         """
-        from hermes_state import FTS_SQL, FTS_TRIGRAM_SQL
+        from korra_state import FTS_SQL, FTS_TRIGRAM_SQL
 
         conn = db._conn
         db._drop_fts_triggers(conn)
@@ -3506,7 +3506,7 @@ class TestFTSExternalContentMigration:
             assert db.fts_rebuild_status() is None
             assert db.fts_optimize_available() is False
             assert db.get_meta("fts_storage_version") == str(
-                hermes_state.FTS_STORAGE_VERSION
+                korra_state.FTS_STORAGE_VERSION
             )
             assert db._conn.execute(
                 "SELECT name FROM sqlite_master WHERE name LIKE '%_v22_trash%'"
@@ -3548,7 +3548,7 @@ class TestFTSExternalContentMigration:
                 "INSERT INTO state_meta (key, value) VALUES "
                 "('fts_storage_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (str(hermes_state.FTS_STORAGE_VERSION),),
+                (str(korra_state.FTS_STORAGE_VERSION),),
             )
             db._conn.commit()
 
@@ -3563,7 +3563,7 @@ class TestFTSExternalContentMigration:
             assert result["ok"] is True
             assert len(db.search_messages("deployment")) == 1
             assert db.get_meta("fts_storage_version") == str(
-                hermes_state.FTS_STORAGE_VERSION
+                korra_state.FTS_STORAGE_VERSION
             )
             assert db.fts_optimize_available() is False
         finally:
@@ -3907,17 +3907,17 @@ class TestApplyWalProbe:
     @pytest.fixture(autouse=True)
     def _assume_fixed_sqlite(self, monkeypatch):
         """These cases cover the fixed-SQLite WAL path (not the #69784 gate)."""
-        import hermes_state
+        import korra_state
 
         monkeypatch.setattr(
-            hermes_state, "is_sqlite_wal_reset_vulnerable", lambda version_info=None: False
+            korra_state, "is_sqlite_wal_reset_vulnerable", lambda version_info=None: False
         )
 
 
     def test_sets_wal_on_fresh_connection(self, tmp_path):
         """Probe sees 'delete', then set-pragma runs and returns 'wal'."""
         import sqlite3
-        from hermes_state import apply_wal_with_fallback
+        from korra_state import apply_wal_with_fallback
 
         class _TracingConn(sqlite3.Connection):
             def __init__(self, *a, **kw):
@@ -3950,7 +3950,7 @@ class TestApplyWalProbe:
         import sys
         import threading
         import sqlite3
-        from hermes_state import apply_wal_with_fallback
+        from korra_state import apply_wal_with_fallback
 
         db_path = tmp_path / "concurrent.db"
         errors = []
@@ -3996,7 +3996,7 @@ class TestApplyWalProbe:
     def test_returns_wal_not_delete_from_probe(self, tmp_path):
         """Early-return only on 'wal'; 'delete' or 'memory' must fall through to set-pragma."""
         import sqlite3
-        from hermes_state import apply_wal_with_fallback
+        from korra_state import apply_wal_with_fallback
 
         class _TracingConn(sqlite3.Connection):
             def __init__(self, *a, **kw):
@@ -4340,7 +4340,7 @@ def test_find_session_by_origin_matching_rules(db):
 def test_refresh_compression_lock_requires_holder_and_preserves_reclaimability(db, monkeypatch):
     db.create_session("s1", "cli")
 
-    monkeypatch.setattr(hermes_state.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(korra_state.time, "time", lambda: 1000.0)
     assert db.try_acquire_compression_lock("s1", "holder-a", ttl_seconds=10.0) is True
 
     original_expires = db._conn.execute(
@@ -4348,7 +4348,7 @@ def test_refresh_compression_lock_requires_holder_and_preserves_reclaimability(d
         ("s1",),
     ).fetchone()[0]
 
-    monkeypatch.setattr(hermes_state.time, "time", lambda: 1005.0)
+    monkeypatch.setattr(korra_state.time, "time", lambda: 1005.0)
     assert db.refresh_compression_lock("s1", "holder-a", ttl_seconds=10.0) is True
     refreshed_expires = db._conn.execute(
         "SELECT expires_at FROM compression_locks WHERE session_id = ?",
@@ -4358,7 +4358,7 @@ def test_refresh_compression_lock_requires_holder_and_preserves_reclaimability(d
 
     assert db.refresh_compression_lock("s1", "holder-b", ttl_seconds=10.0) is False
 
-    monkeypatch.setattr(hermes_state.time, "time", lambda: 1016.0)
+    monkeypatch.setattr(korra_state.time, "time", lambda: 1016.0)
     assert db.try_acquire_compression_lock("s1", "holder-b", ttl_seconds=10.0) is True
 
 
@@ -4372,11 +4372,11 @@ def test_refresh_cannot_resurrect_a_lock_already_reclaimed(db, monkeypatch):
     """
     db.create_session("s1", "cli")
 
-    monkeypatch.setattr(hermes_state.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(korra_state.time, "time", lambda: 1000.0)
     assert db.try_acquire_compression_lock("s1", "holder-a", ttl_seconds=10.0) is True
 
     # holder-a's lease lapses and holder-b legitimately reclaims it.
-    monkeypatch.setattr(hermes_state.time, "time", lambda: 1020.0)
+    monkeypatch.setattr(korra_state.time, "time", lambda: 1020.0)
     assert db.try_acquire_compression_lock("s1", "holder-b", ttl_seconds=10.0) is True
 
     # holder-a coming back late must NOT steal it back.
@@ -4583,7 +4583,7 @@ class TestGetMessagesPagination:
         )
 
         assert db.get_resume_message_count("tip") == 5
-        with pytest.raises(hermes_state.SessionResumeTooLargeError) as exc_info:
+        with pytest.raises(korra_state.SessionResumeTooLargeError) as exc_info:
             db.assert_resume_safe("tip", max_messages=4)
         assert exc_info.value.message_count == 5
         assert exc_info.value.limit == 4
@@ -4605,7 +4605,7 @@ class TestGetMessagesPagination:
         )
 
         assert db.assert_export_safe("tip", max_messages=2) == 2
-        with pytest.raises(hermes_state.SessionExportTooLargeError) as exc_info:
+        with pytest.raises(korra_state.SessionExportTooLargeError) as exc_info:
             db.assert_export_safe("root", max_messages=2)
         assert exc_info.value.session_id == "root"
         assert exc_info.value.message_count == 3
@@ -4620,16 +4620,16 @@ class TestGetMessagesPagination:
         )
 
         # A small explicit limit rejects...
-        with pytest.raises(hermes_state.SessionResumeTooLargeError):
+        with pytest.raises(korra_state.SessionResumeTooLargeError):
             db.assert_resume_safe("big", max_messages=2)
-        with pytest.raises(hermes_state.SessionExportTooLargeError):
+        with pytest.raises(korra_state.SessionExportTooLargeError):
             db.assert_export_safe("big", max_messages=2)
 
         # ...but a config-resolved limit of 0 disables both guards: no raise,
         # and no counting work at all (returns 0 — callers use the raise side
         # effect only).
-        monkeypatch.setattr(hermes_state, "resolved_max_resume_messages", lambda: 0)
-        monkeypatch.setattr(hermes_state, "resolved_max_export_messages", lambda: 0)
+        monkeypatch.setattr(korra_state, "resolved_max_resume_messages", lambda: 0)
+        monkeypatch.setattr(korra_state, "resolved_max_export_messages", lambda: 0)
         assert db.assert_resume_safe("big") == 0
         assert db.assert_export_safe("big") == 0
         # An explicit 0 disables too, independent of config.
@@ -4643,12 +4643,12 @@ class TestGetMessagesPagination:
             [{"role": "user", "content": f"msg-{i}"} for i in range(4)],
         )
 
-        monkeypatch.setattr(hermes_state, "resolved_max_resume_messages", lambda: 3)
-        monkeypatch.setattr(hermes_state, "resolved_max_export_messages", lambda: 3)
-        with pytest.raises(hermes_state.SessionResumeTooLargeError) as resume_exc:
+        monkeypatch.setattr(korra_state, "resolved_max_resume_messages", lambda: 3)
+        monkeypatch.setattr(korra_state, "resolved_max_export_messages", lambda: 3)
+        with pytest.raises(korra_state.SessionResumeTooLargeError) as resume_exc:
             db.assert_resume_safe("cfg")
         assert resume_exc.value.limit == 3
-        with pytest.raises(hermes_state.SessionExportTooLargeError) as export_exc:
+        with pytest.raises(korra_state.SessionExportTooLargeError) as export_exc:
             db.assert_export_safe("cfg")
         assert export_exc.value.limit == 3
 
@@ -4880,13 +4880,13 @@ class TestApplyDatabasePragmas:
     @staticmethod
     def _patch_cfg(monkeypatch, cfg):
         monkeypatch.setattr(
-            "hermes_cli.config.load_config_readonly",
+            "korra_cli.config.load_config_readonly",
             lambda: cfg,
         )
 
     def test_honors_wal_autocheckpoint_from_config(self, tmp_path, monkeypatch):
         import sqlite3
-        from hermes_state import apply_database_pragmas
+        from korra_state import apply_database_pragmas
 
         conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
         try:
@@ -4899,7 +4899,7 @@ class TestApplyDatabasePragmas:
 
     def test_honors_journal_size_limit_from_config(self, tmp_path, monkeypatch):
         import sqlite3
-        from hermes_state import apply_database_pragmas
+        from korra_state import apply_database_pragmas
 
         conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
         try:
@@ -4916,7 +4916,7 @@ class TestApplyDatabasePragmas:
 
     def test_noop_when_database_section_missing(self, tmp_path, monkeypatch):
         import sqlite3
-        from hermes_state import apply_database_pragmas
+        from korra_state import apply_database_pragmas
 
         conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
         try:
@@ -4931,7 +4931,7 @@ class TestApplyDatabasePragmas:
         """journal_mode is owned by apply_wal_with_fallback — a database:
         journal_mode entry must NOT cause a second, unguarded mode switch."""
         import sqlite3
-        from hermes_state import apply_database_pragmas
+        from korra_state import apply_database_pragmas
 
         conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
         try:
@@ -4944,7 +4944,7 @@ class TestApplyDatabasePragmas:
 
     def test_ignores_non_integer_values(self, tmp_path, monkeypatch):
         import sqlite3
-        from hermes_state import apply_database_pragmas
+        from korra_state import apply_database_pragmas
 
         conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
         try:
@@ -4961,7 +4961,7 @@ class TestApplyDatabasePragmas:
     def test_ignores_non_integer_performance_values(self, tmp_path, monkeypatch):
         """Garbage cache_size/mmap_size/temp_store values must be rejected."""
         import sqlite3
-        from hermes_state import apply_database_pragmas
+        from korra_state import apply_database_pragmas
 
         conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
         try:
@@ -5099,7 +5099,7 @@ class TestFtsRebuildFinishWithoutTrigram:
             return real_connect(*args, **kwargs)
 
         monkeypatch.setattr(
-            "hermes_state.sqlite3.connect", connect_without_trigram
+            "korra_state.sqlite3.connect", connect_without_trigram
         )
         db = SessionDB(db_path=db_path)
         try:
@@ -5147,7 +5147,7 @@ class TestFtsRebuildFinishWithoutTrigram:
             return real_connect(*args, **kwargs)
 
         monkeypatch.setattr(
-            "hermes_state.sqlite3.connect", connect_without_trigram
+            "korra_state.sqlite3.connect", connect_without_trigram
         )
         db = SessionDB(db_path=db_path)
         try:
@@ -5210,14 +5210,14 @@ class TestPerformancePragmasEndToEnd:
             conn.close()
 
     def _fresh_home(self, tmp_path, monkeypatch, config_text=None):
-        import hermes_state
+        import korra_state
 
         # Local venvs may bundle a WAL-reset-vulnerable SQLite (e.g. 3.46.0),
         # which would silently disable WAL and skip the per-thread reader
         # path. Force WAL eligibility so _get_read_conn is truly exercised
         # (established pattern used by the WAL tests above).
         monkeypatch.setattr(
-            hermes_state,
+            korra_state,
             "is_sqlite_wal_reset_vulnerable",
             lambda version_info=None: False,
         )
@@ -5231,7 +5231,7 @@ class TestPerformancePragmasEndToEnd:
     def test_configured_pragmas_reach_all_connection_types(
         self, tmp_path, monkeypatch
     ):
-        from hermes_state import SessionDB
+        from korra_state import SessionDB
 
         home = self._fresh_home(
             tmp_path,
@@ -5262,7 +5262,7 @@ class TestPerformancePragmasEndToEnd:
 
     def test_defaults_unchanged_without_config(self, tmp_path, monkeypatch):
         """No database: keys in config.yaml → SQLite defaults untouched."""
-        from hermes_state import SessionDB
+        from korra_state import SessionDB
 
         defaults = self._sqlite_defaults(tmp_path)
         home = self._fresh_home(tmp_path, monkeypatch, config_text=None)
@@ -5305,7 +5305,7 @@ class TestFts5SanitizerCharacterClass:
 
     @staticmethod
     def _sanitize(query):
-        from hermes_state_search import SessionSearchMixin
+        from korra_state_search import SessionSearchMixin
 
         return SessionSearchMixin._sanitize_fts5_query(query)
 

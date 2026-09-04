@@ -100,7 +100,7 @@ def list_providers() -> list[ProviderProfile]:
 def _user_plugins_dir() -> Path | None:
     """Return ``$HERMES_HOME/plugins/model-providers/`` if it exists."""
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
 
         d = get_hermes_home() / "plugins" / "model-providers"
         return d if d.is_dir() else None
@@ -187,7 +187,7 @@ def _discover_entry_point_providers() -> None:
     # Same opt-in gate as the general PluginManager: only entry points named
     # in ``plugins.enabled`` load, and ``plugins.disabled`` always wins.
     try:
-        from hermes_cli.plugins import _get_disabled_plugins, _get_enabled_plugins
+        from korra_cli.plugins import _get_disabled_plugins, _get_enabled_plugins
 
         enabled = _get_enabled_plugins()  # None = nothing enabled yet (opt-in default)
         disabled = _get_disabled_plugins()

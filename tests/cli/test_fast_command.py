@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 
 def _import_cli():
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     if not hasattr(config_mod, "save_env_value_secure"):
         config_mod.save_env_value_secure = lambda key, value: {
@@ -98,7 +98,7 @@ class TestPriorityProcessingModels(unittest.TestCase):
     """Verify the expanded Priority Processing model registry."""
 
     def test_all_documented_models_supported(self):
-        from hermes_cli.models import model_supports_fast_mode
+        from korra_cli.models import model_supports_fast_mode
 
         # All OpenAI flagship models support Priority Processing — including
         # future releases (gpt-5.5, 5.6...) via pattern matching.
@@ -116,7 +116,7 @@ class TestPriorityProcessingModels(unittest.TestCase):
 
     def test_codex_models_excluded(self):
         """Codex models route through Responses API and don't accept service_tier."""
-        from hermes_cli.models import model_supports_fast_mode
+        from korra_cli.models import model_supports_fast_mode
 
         for model in ["gpt-5-codex", "gpt-5.2-codex", "gpt-5.3-codex", "gpt-5.1-codex-max"]:
             assert not model_supports_fast_mode(model), f"{model} is codex — should not expose /fast"
@@ -124,7 +124,7 @@ class TestPriorityProcessingModels(unittest.TestCase):
 
 
     def test_grok_46_supports_priority_processing(self):
-        from hermes_cli.models import (
+        from korra_cli.models import (
             model_supports_fast_mode,
             resolve_fast_mode_overrides,
         )
@@ -135,7 +135,7 @@ class TestPriorityProcessingModels(unittest.TestCase):
         assert resolve_fast_mode_overrides("grok-4.6") == {"service_tier": "priority"}
 
     def test_resolve_overrides_returns_service_tier(self):
-        from hermes_cli.models import resolve_fast_mode_overrides
+        from korra_cli.models import resolve_fast_mode_overrides
 
         result = resolve_fast_mode_overrides("gpt-5.4")
         assert result == {"service_tier": "priority"}
@@ -200,7 +200,7 @@ class TestAnthropicFastMode(unittest.TestCase):
     """Verify Anthropic Fast Mode model support and override resolution."""
 
     def test_anthropic_opus_supported(self):
-        from hermes_cli.models import model_supports_fast_mode
+        from korra_cli.models import model_supports_fast_mode
 
         # Native Anthropic format (hyphens)
         assert model_supports_fast_mode("claude-opus-4-6") is True
@@ -217,7 +217,7 @@ class TestAnthropicFastMode(unittest.TestCase):
         sending speed=fast to Opus 4.7, Sonnet, or Haiku returns HTTP 400.
         Opus 4.8 uses a separate ``…-fast`` model id, not this parameter.
         """
-        from hermes_cli.models import model_supports_fast_mode
+        from korra_cli.models import model_supports_fast_mode
 
         assert model_supports_fast_mode("claude-sonnet-4-6") is False
         assert model_supports_fast_mode("claude-sonnet-4.6") is False
@@ -230,7 +230,7 @@ class TestAnthropicFastMode(unittest.TestCase):
 
 
     def test_resolve_overrides_returns_speed_for_anthropic(self):
-        from hermes_cli.models import resolve_fast_mode_overrides
+        from korra_cli.models import resolve_fast_mode_overrides
 
         result = resolve_fast_mode_overrides("claude-opus-4-6")
         assert result == {"speed": "fast"}
@@ -329,7 +329,7 @@ class TestAnthropicFastModeAdapter(unittest.TestCase):
 
 class TestConfigDefault(unittest.TestCase):
     def test_default_config_has_service_tier(self):
-        from hermes_cli.config import DEFAULT_CONFIG
+        from korra_cli.config import DEFAULT_CONFIG
 
         agent = DEFAULT_CONFIG.get("agent", {})
         self.assertIn("service_tier", agent)

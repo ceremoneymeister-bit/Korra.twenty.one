@@ -34,7 +34,7 @@ import re
 from typing import Any, Optional
 from urllib.parse import parse_qsl, quote, unquote, urljoin, urlparse, urlsplit, urlunsplit
 
-from hermes_constants import get_hermes_home_override, korra_env
+from korra_constants import get_hermes_home_override, korra_env
 from utils import is_truthy_value
 
 logger = logging.getLogger(__name__)
@@ -258,7 +258,7 @@ def _resolve_allow_private_urls() -> bool:
 
     # 2. Config file
     try:
-        from hermes_cli.config import read_raw_config
+        from korra_cli.config import read_raw_config
         cfg = read_raw_config()
         # security.allow_private_urls (preferred)
         sec = cfg.get("security", {})

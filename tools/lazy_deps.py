@@ -79,8 +79,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from hermes_cli._subprocess_compat import windows_hide_flags
-from hermes_constants import korra_env
+from korra_cli._subprocess_compat import windows_hide_flags
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -519,7 +519,7 @@ def _allow_lazy_installs() -> bool:
     """
     # (1) Config kill switch wins in every mode.
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
         cfg = load_config()
     except Exception:
         cfg = None
@@ -713,7 +713,7 @@ def _venv_pip_install(specs: tuple[str, ...], *, timeout: int = 300) -> _Install
       is append-only on ``sys.path`` so it can never shadow core. Used by
       the immutable Docker image to keep lazy installs off the sealed venv.
 
-    Mirrors the strategy in ``hermes_cli.tools_config._pip_install`` but
+    Mirrors the strategy in ``korra_cli.tools_config._pip_install`` but
     kept independent here so this module has no CLI dependency.
     """
     if not specs:
@@ -750,7 +750,7 @@ def _venv_pip_install(specs: tuple[str, ...], *, timeout: int = 300) -> _Install
         # migrating the Python runtime as a side effect of that is a far bigger
         # action than the caller asked for. Tier 2 pip covers the no-uv case.
         try:
-            from hermes_cli.managed_uv import resolve_uv
+            from korra_cli.managed_uv import resolve_uv
 
             uv_bin = resolve_uv() or shutil.which("uv")
         except Exception:
@@ -883,7 +883,7 @@ def ensure(feature: str, *, prompt: bool = True) -> None:
     # reports anything else as a hard failure rather than a skip.
     if _lazy_install_target() is None:
         try:
-            from hermes_cli.config import get_managed_system
+            from korra_cli.config import get_managed_system
 
             managed_by = get_managed_system()
         except Exception:

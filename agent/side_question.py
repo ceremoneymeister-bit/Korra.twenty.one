@@ -173,7 +173,7 @@ def render_history_for_side_question(
 def _side_question_task_config() -> Dict[str, Any]:
     """Return ``auxiliary.side_question`` from config (or ``{}``)."""
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
 
         cfg = load_config_readonly()
     except Exception:
@@ -202,7 +202,7 @@ def _answer_via_fork(
         _snapshot_review_usage,
         build_cache_parity_fork,
     )
-    from hermes_cli.plugins import (
+    from korra_cli.plugins import (
         clear_thread_tool_whitelist,
         set_thread_tool_whitelist,
     )

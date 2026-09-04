@@ -166,7 +166,7 @@ def _floor_subprocess_path(path: str) -> str:
 def _read_browser_cfg() -> dict:
     """Return the ``browser:`` config section, or {} on any failure."""
     try:
-        from hermes_cli.config import cfg_get, read_raw_config
+        from korra_cli.config import cfg_get, read_raw_config
 
         cfg = cfg_get(read_raw_config(), "browser", default={})
         return cfg if isinstance(cfg, dict) else {}
@@ -267,7 +267,7 @@ def default_downgrade_notice() -> Optional[str]:
         if _find_cli() is not None:
             return None
 
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
 
         stamp = Path(get_hermes_home()) / "cache" / _NOTICE_STAMP_NAME
         try:
@@ -294,7 +294,7 @@ def _managed_bin_dir() -> Optional[str]:
     """Hermes' own bin dir ($HERMES_HOME/bin) — where install.sh puts uv/uvx
     and where install_cli() links the browser-use binary."""
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
 
         return str(Path(get_hermes_home()) / "bin")
     except Exception as e:  # pragma: no cover — defensive
@@ -349,7 +349,7 @@ def install_cli(timeout_s: int = 600) -> Tuple[bool, str]:
     """Install the browser-use CLI persistently via ``uv tool install``.
 
     Resolution order for uv: Hermes' managed uv (bootstrapped on demand via
-    ``hermes_cli.managed_uv.ensure_uv``) → uv on PATH. The binary is linked
+    ``korra_cli.managed_uv.ensure_uv``) → uv on PATH. The binary is linked
     into ``$HERMES_HOME/bin`` (``UV_TOOL_BIN_DIR``) so ``_find_cli()``
     resolves it for every profile without touching the user's PATH.
 
@@ -368,7 +368,7 @@ def install_cli(timeout_s: int = 600) -> Tuple[bool, str]:
 
     uv_bin: Optional[str] = None
     try:
-        from hermes_cli.managed_uv import ensure_uv
+        from korra_cli.managed_uv import ensure_uv
 
         uv_bin = str(ensure_uv() or "") or None
     except Exception as e:
@@ -428,7 +428,7 @@ def _workspace_dir(task_id: Optional[str]) -> Optional[str]:
     try:
         from pathlib import Path
 
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
 
         safe = _TASK_ID_SAFE_RE.sub("_", str(task_id or "default"))[:80] or "default"
         path = Path(get_hermes_home()) / "cache" / "browser-use" / "workspace" / safe
@@ -665,7 +665,7 @@ def _resolve_real_profile_cdp(env: dict, force_local: bool) -> Optional[str]:
 
     With ``browser.use_real_profile`` on, local browsing must mean the user's
     default Chromium with their logins — a browser Hermes launches on a
-    SNAPSHOT of their real profile (see hermes_cli.browser_connect). Two ways
+    SNAPSHOT of their real profile (see korra_cli.browser_connect). Two ways
     in:
 
     - the effective backend is already local (no cloud provider, no CDP
@@ -815,7 +815,7 @@ def browser_exec(
     popen_extra: dict = {}
     if os.name == "nt":
         try:
-            from hermes_cli._subprocess_compat import windows_hide_flags
+            from korra_cli._subprocess_compat import windows_hide_flags
 
             popen_extra["creationflags"] = windows_hide_flags()
             _si = subprocess.STARTUPINFO()

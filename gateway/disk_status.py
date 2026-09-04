@@ -100,7 +100,7 @@ def collect_disk_status(home: Optional[Path] = None) -> Dict[str, Any]:
     }
     try:
         if home is None:
-            from hermes_constants import get_hermes_home
+            from korra_constants import get_hermes_home
 
             home = get_hermes_home()
         usage = shutil.disk_usage(home)

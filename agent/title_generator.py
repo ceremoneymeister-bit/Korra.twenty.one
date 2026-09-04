@@ -156,7 +156,7 @@ _MACHINE_PREFIXES = (
 def _title_language() -> str:
     """Return configured title language, or empty string to match the user."""
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
 
         return str(
             ((load_config_readonly() or {}).get("auxiliary") or {})
@@ -171,9 +171,9 @@ def _auto_title_enabled() -> bool:
     """Return whether automatic session title generation is enabled."""
     try:
         # Lazy imports, matching _title_language(): title_generator is imported
-        # from agent code paths where a module-level hermes_cli import risks
+        # from agent code paths where a module-level korra_cli import risks
         # circularity, and the read-only loader avoids config-migration writes.
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         from utils import is_truthy_value
 
         config = load_config_readonly()

@@ -15,7 +15,7 @@ plugin's job is to make its own model call. This module is the
 supported lane for that case.
 
 The plugin gets ``ctx.llm`` exposed on its
-:class:`~hermes_cli.plugins.PluginContext`:
+:class:`~korra_cli.plugins.PluginContext`:
 
 * ``complete(messages, ...)`` — chat completion against the user's
   active model + auth.
@@ -224,7 +224,7 @@ def _resolve_trust_policy(plugin_id: str) -> _TrustPolicy:
         return _TrustPolicy(plugin_id="")
 
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         config = load_config_readonly() or {}
     except Exception:  # pragma: no cover — config IO failure
         return _TrustPolicy(plugin_id=plugin_id)
@@ -360,7 +360,7 @@ def _resolve_task_ownership(plugin_id: str) -> tuple[frozenset, frozenset]:
     owned: set = set()
     builtin: set = set()
     try:
-        from hermes_cli.plugins import get_plugin_auxiliary_tasks
+        from korra_cli.plugins import get_plugin_auxiliary_tasks
 
         for entry in get_plugin_auxiliary_tasks():
             if entry.get("plugin") == plugin_id:
@@ -370,7 +370,7 @@ def _resolve_task_ownership(plugin_id: str) -> tuple[frozenset, frozenset]:
     except Exception:  # pragma: no cover — registry unavailable
         pass
     try:
-        from hermes_cli.main import _AUX_TASKS
+        from korra_cli.main import _AUX_TASKS
 
         builtin = {k for k, _name, _desc in _AUX_TASKS}
     except Exception:  # pragma: no cover — main import failure
@@ -716,7 +716,7 @@ def _resolve_attribution(
 class PluginLlm:
     """Host-owned LLM access for one trusted plugin.
 
-    Instances are constructed by :class:`hermes_cli.plugins.PluginContext`
+    Instances are constructed by :class:`korra_cli.plugins.PluginContext`
     and exposed as ``ctx.llm``. Plugins should not instantiate this
     directly — the constructor binds plugin identity for trust-gate
     enforcement.

@@ -122,7 +122,7 @@ def _both_first_class(a: BackendIdentity, b: BackendIdentity) -> bool:
     if not a.provider or not b.provider or a.provider == b.provider:
         return False
     try:
-        from hermes_cli.auth import PROVIDER_REGISTRY
+        from korra_cli.auth import PROVIDER_REGISTRY
 
         return a.provider in PROVIDER_REGISTRY and b.provider in PROVIDER_REGISTRY
     except Exception:

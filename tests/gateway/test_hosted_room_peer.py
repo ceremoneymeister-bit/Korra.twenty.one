@@ -26,7 +26,7 @@ from gateway.hosted_room_peer import (
     select_room_link,
     verify_room_grant,
 )
-from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+from korra_constants import reset_hermes_home_override, set_hermes_home_override
 
 
 SECRET = b"s" * 32

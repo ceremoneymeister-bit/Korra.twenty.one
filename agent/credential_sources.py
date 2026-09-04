@@ -149,7 +149,7 @@ def _remove_env_source(provider: str, removed) -> RemovalResult:
          EnvironmentFile, launchd plist) → hint them where to unset it
       3. Var lives in both → clear from .env, hint about shell
     """
-    from hermes_cli.config import get_env_path, remove_env_value
+    from korra_cli.config import get_env_path, remove_env_value
 
     result = RemovalResult()
     env_var = removed.source[len("env:"):]
@@ -163,7 +163,7 @@ def _remove_env_source(provider: str, removed) -> RemovalResult:
         env_path = get_env_path()
         if env_path.exists():
             # Read the .env as UTF-8 with BOM tolerance, matching the
-            # canonical reader in hermes_cli/config.py. read_text() with no
+            # canonical reader in korra_cli/config.py. read_text() with no
             # encoding falls back to the system locale (cp1252/GBK on Windows)
             # and never strips a BOM, so a Notepad-edited .env (BOM + non-ASCII
             # values) would make the first line fail the startswith() check —
@@ -214,7 +214,7 @@ def _remove_claude_code(provider: str, removed) -> RemovalResult:
 
 def _remove_hermes_pkce(provider: str, removed) -> RemovalResult:
     """~/.hermes/.anthropic_oauth.json is ours — delete it outright."""
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     result = RemovalResult()
     oauth_file = get_hermes_home() / ".anthropic_oauth.json"
@@ -229,7 +229,7 @@ def _remove_hermes_pkce(provider: str, removed) -> RemovalResult:
 
 def _clear_auth_store_provider(provider: str) -> bool:
     """Delete auth_store.providers[provider].  Returns True if deleted."""
-    from hermes_cli.auth import (
+    from korra_cli.auth import (
         _auth_store_lock,
         _load_auth_store,
         _save_auth_store,
@@ -310,7 +310,7 @@ def _remove_codex_device_code(provider: str, removed) -> RemovalResult:
     that canonical key here; the central dispatcher also suppresses
     ``removed.source`` which is fine — belt-and-suspenders, idempotent.
     """
-    from hermes_cli.auth import suppress_credential_source
+    from korra_cli.auth import suppress_credential_source
 
     result = RemovalResult()
     if _clear_auth_store_provider(provider):
@@ -357,7 +357,7 @@ def _remove_copilot_gh(provider: str, removed) -> RemovalResult:
     # the pool entry.  The central dispatcher in auth_remove_command will
     # ALSO suppress removed.source, but it's idempotent so double-calling
     # is harmless.
-    from hermes_cli.auth import suppress_credential_source
+    from korra_cli.auth import suppress_credential_source
     suppress_credential_source(provider, "gh_cli")
     for env_var in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
         suppress_credential_source(provider, f"env:{env_var}")

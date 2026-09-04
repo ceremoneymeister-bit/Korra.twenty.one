@@ -177,7 +177,7 @@ def test_room_agent_uses_target_policy_toolsets_and_turn_limit(monkeypatch):
     )
     monkeypatch.setattr("gateway.run._current_max_iterations", lambda: 999)
     monkeypatch.setattr(
-        "hermes_cli.tools_config._get_platform_tools",
+        "korra_cli.tools_config._get_platform_tools",
         lambda *_: {"terminal", "file", "web"},
     )
     adapter = APIServerAdapter(PlatformConfig(enabled=True))

@@ -30,7 +30,7 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 from typing import Dict, Any, List, Optional, Tuple
 
 from utils import atomic_write_text, is_truthy_value
@@ -926,7 +926,7 @@ def load_on_disk_store() -> "MemoryStore":
     memory_enabled = True
     user_profile_enabled = True
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
 
         config = load_config() or {}
         mem_cfg = get_builtin_memory_config(config)
@@ -1184,7 +1184,7 @@ def get_builtin_memory_config(config: Optional[Dict[str, Any]] = None) -> Dict[s
     """
     if config is None:
         try:
-            from hermes_cli.config import load_config_readonly
+            from korra_cli.config import load_config_readonly
 
             config = load_config_readonly()
         except Exception:

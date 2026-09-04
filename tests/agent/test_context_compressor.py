@@ -16,7 +16,7 @@ from agent.context_compressor import (
     _summarize_tool_result,
     _is_summary_access_or_quota_error,
 )
-from hermes_state import SessionDB
+from korra_state import SessionDB
 
 
 class StubProviderError(Exception):
@@ -187,7 +187,7 @@ class TestSummarizeToolResultClarify:
             # gateway/run.py timeout + delivery-failure paths
             "[user did not respond within 15m]",
             "[clarify prompt could not be delivered]",
-            # hermes_cli/oneshot.py no-user callback
+            # korra_cli/oneshot.py no-user callback
             "[oneshot mode: no user available. Pick the best option from "
             "['a', 'b'] using your own judgment and continue.]",
         ],
@@ -217,7 +217,7 @@ class TestSummarizeToolResultClarify:
         """Producer→recognizer drift guard: run the REAL oneshot no-user
         callback and assert its output is filtered. If the producer's wording
         drifts away from _CLARIFY_NON_RESPONSE_PREFIXES, this fails."""
-        from hermes_cli.oneshot import _oneshot_clarify_callback
+        from korra_cli.oneshot import _oneshot_clarify_callback
 
         sentinels = (
             _oneshot_clarify_callback("Deploy when?", choices=["a", "b"]),
@@ -2271,7 +2271,7 @@ class TestThresholdTokensCap:
     def test_default_config_disabled_and_no_behavior_change(self):
         """DEFAULT_CONFIG ships threshold_tokens=None (disabled) and both
         None and 0 leave the ratio-based trigger byte-identical."""
-        from hermes_cli.config import DEFAULT_CONFIG
+        from korra_cli.config import DEFAULT_CONFIG
         assert DEFAULT_CONFIG["compression"]["threshold_tokens"] is None
 
         with patch("agent.context_compressor.get_model_context_length", return_value=1_000_000):

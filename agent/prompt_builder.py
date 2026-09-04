@@ -13,7 +13,7 @@ import contextvars
 from collections import OrderedDict
 from pathlib import Path
 
-from hermes_constants import (
+from korra_constants import (
     korra_env,
     get_hermes_home,
     get_skills_dir,
@@ -1447,7 +1447,7 @@ def build_environment_hints() -> str:
     extra = (korra_env("KORRA_ENVIRONMENT_HINT") or "").strip()
     if not extra:
         try:
-            from hermes_cli.config import load_config_readonly
+            from korra_cli.config import load_config_readonly
 
             extra = str(
                 (load_config_readonly().get("agent", {}) or {}).get("environment_hint", "")
@@ -1501,7 +1501,7 @@ def _get_context_file_max_chars(context_length: Optional[int] = None) -> int:
       3. ``CONTEXT_FILE_MAX_CHARS`` (20K) as the upstream-compatible fallback.
     """
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
 
         val = load_config_readonly().get("context_file_max_chars")
         if isinstance(val, (int, float)) and val > 0:
@@ -2246,7 +2246,7 @@ def load_soul_md(
     same class as the skills-index leak fixed in #86313).
     """
     try:
-        from hermes_cli.config import ensure_hermes_home
+        from korra_cli.config import ensure_hermes_home
         ensure_hermes_home()
     except Exception as e:
         logger.debug("Could not ensure HERMES_HOME before loading SOUL.md: %s", e)

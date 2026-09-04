@@ -41,7 +41,7 @@ import threading
 from typing import Dict, List, Optional
 
 from agent.browser_provider import BrowserProvider
-from hermes_constants import hermes_home_key
+from korra_constants import hermes_home_key
 
 logger = logging.getLogger(__name__)
 

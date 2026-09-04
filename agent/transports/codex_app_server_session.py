@@ -38,7 +38,7 @@ from agent.transports.codex_app_server import (
     CodexAppServerError,
 )
 from agent.transports.codex_event_projector import CodexEventProjector
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 

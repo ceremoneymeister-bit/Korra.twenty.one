@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from tools.environments.local import hermes_subprocess_env
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 # Default minimum codex version we test against. The PR sets this from the
 # `codex --version` parsed at install time; bumping is a one-line change here.
@@ -131,7 +131,7 @@ class CodexAppServerClient:
 
         # Hide the console the codex child would otherwise flash on Windows
         # (#56747). Hide-only — stdio pipes stay intact for the app-server wire.
-        from hermes_cli._subprocess_compat import windows_hide_flags
+        from korra_cli._subprocess_compat import windows_hide_flags
 
         self._proc = subprocess.Popen(
             cmd,

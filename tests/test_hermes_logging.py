@@ -1,4 +1,4 @@
-"""Tests for hermes_logging — centralized logging setup."""
+"""Tests for korra_logging — centralized logging setup."""
 import io
 import logging
 import os
@@ -10,14 +10,14 @@ from unittest.mock import patch
 
 import pytest
 
-import hermes_logging
-# Use whatever RotatingFileHandler class hermes_logging actually resolved so
+import korra_logging
+# Use whatever RotatingFileHandler class korra_logging actually resolved so
 # the autouse fixture's isinstance checks (which strip rotating handlers
-# between tests) match the real handlers on every platform. hermes_logging
+# between tests) match the real handlers on every platform. korra_logging
 # aliases concurrent-log-handler's ConcurrentRotatingFileHandler on Windows
 # (the #44873 fix) but keeps stdlib RotatingFileHandler on POSIX, so importing
 # the name from the module under test keeps the two in lockstep.
-from hermes_logging import RotatingFileHandler
+from korra_logging import RotatingFileHandler
 
 
 @pytest.fixture(autouse=True)
@@ -30,10 +30,10 @@ def _reset_logging_state():
     logger.  We strip ALL RotatingFileHandlers before each test so the count
     assertions are stable regardless of test ordering.
     """
-    hermes_logging._logging_initialized = False
+    korra_logging._logging_initialized = False
     # File handlers now live behind the async QueueListener, not on the root
     # logger; tear down any leaked from other xdist tests in this worker.
-    hermes_logging._reset_queued_handlers()
+    korra_logging._reset_queued_handlers()
     root = logging.getLogger()
     prev_root_level = root.level
     root.setLevel(logging.NOTSET)
@@ -41,17 +41,17 @@ def _reset_logging_state():
     # test adds.
     pre_existing = list(root.handlers)
     # Ensure the record factory is installed (it's idempotent).
-    hermes_logging._install_session_record_factory()
+    korra_logging._install_session_record_factory()
     yield
     # Restore — tear down async file logging + remove handlers added by the test.
-    hermes_logging._reset_queued_handlers()
+    korra_logging._reset_queued_handlers()
     for h in list(root.handlers):
         if h not in pre_existing:
             root.removeHandler(h)
             h.close()
     root.setLevel(prev_root_level)
-    hermes_logging._logging_initialized = False
-    hermes_logging.clear_session_context()
+    korra_logging._logging_initialized = False
+    korra_logging.clear_session_context()
 
 
 @pytest.fixture
@@ -69,16 +69,16 @@ class TestSetupLogging:
     """setup_logging() creates agent.log + errors.log with RotatingFileHandler."""
 
     def test_creates_log_directory(self, hermes_home):
-        log_dir = hermes_logging.setup_logging(hermes_home=hermes_home)
+        log_dir = korra_logging.setup_logging(hermes_home=hermes_home)
         assert log_dir == hermes_home / "logs"
         assert log_dir.is_dir()
 
     def test_creates_agent_log_handler(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+        korra_logging.setup_logging(hermes_home=hermes_home)
         root = logging.getLogger()
 
         agent_handlers = [
-            h for h in hermes_logging.rotating_file_handlers()
+            h for h in korra_logging.rotating_file_handlers()
             if isinstance(h, RotatingFileHandler)
             and "agent.log" in getattr(h, "baseFilename", "")
         ]
@@ -87,12 +87,12 @@ class TestSetupLogging:
 
 
     def test_idempotent_no_duplicate_handlers(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
-        hermes_logging.setup_logging(hermes_home=hermes_home)  # second call — should be no-op
+        korra_logging.setup_logging(hermes_home=hermes_home)
+        korra_logging.setup_logging(hermes_home=hermes_home)  # second call — should be no-op
 
         root = logging.getLogger()
         agent_handlers = [
-            h for h in hermes_logging.rotating_file_handlers()
+            h for h in korra_logging.rotating_file_handlers()
             if isinstance(h, RotatingFileHandler)
             and "agent.log" in getattr(h, "baseFilename", "")
         ]
@@ -103,13 +103,13 @@ class TestSetupLogging:
 
 
     def test_writes_to_agent_log(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+        korra_logging.setup_logging(hermes_home=hermes_home)
 
         test_logger = logging.getLogger("test_hermes_logging.write_test")
         test_logger.info("test message for agent.log")
 
         # Flush handlers
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
 
         agent_log = hermes_home / "logs" / "agent.log"
         assert agent_log.exists()
@@ -118,12 +118,12 @@ class TestSetupLogging:
 
     def test_profile_routing_follows_context_home(self, hermes_home, tmp_path):
         """Desktop multiplex cron records are written to their owning profile."""
-        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+        from korra_constants import reset_hermes_home_override, set_hermes_home_override
 
         profile_home = tmp_path / "profile-b"
         profile_home.mkdir()
-        hermes_logging.setup_logging(hermes_home=hermes_home)
-        assert hermes_logging.enable_profile_log_routing(
+        korra_logging.setup_logging(hermes_home=hermes_home)
+        assert korra_logging.enable_profile_log_routing(
             [hermes_home, profile_home]
         ) is True
 
@@ -133,7 +133,7 @@ class TestSetupLogging:
             logger.info("profile-routed cron record")
         finally:
             reset_hermes_home_override(token)
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
 
         assert "profile-routed cron record" in (
             profile_home / "logs" / "agent.log"
@@ -151,11 +151,11 @@ class TestSetupLogging:
         config = {"logging": {"level": "DEBUG"}}
         (hermes_home / "config.yaml").write_text(yaml.dump(config))
 
-        hermes_logging.setup_logging(hermes_home=hermes_home, log_level="WARNING")
+        korra_logging.setup_logging(hermes_home=hermes_home, log_level="WARNING")
 
         root = logging.getLogger()
         agent_handlers = [
-            h for h in hermes_logging.rotating_file_handlers()
+            h for h in korra_logging.rotating_file_handlers()
             if isinstance(h, RotatingFileHandler)
             and "agent.log" in getattr(h, "baseFilename", "")
         ]
@@ -167,22 +167,22 @@ class TestGatewayMode:
     """setup_logging(mode='gateway') creates a filtered gateway.log."""
 
     def test_gateway_log_created(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
+        korra_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
         root = logging.getLogger()
 
         gw_handlers = [
-            h for h in hermes_logging.rotating_file_handlers()
+            h for h in korra_logging.rotating_file_handlers()
             if isinstance(h, RotatingFileHandler)
             and "gateway.log" in getattr(h, "baseFilename", "")
         ]
         assert len(gw_handlers) == 1
 
     def test_gateway_log_not_created_in_cli_mode(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="cli")
+        korra_logging.setup_logging(hermes_home=hermes_home, mode="cli")
         root = logging.getLogger()
 
         gw_handlers = [
-            h for h in hermes_logging.rotating_file_handlers()
+            h for h in korra_logging.rotating_file_handlers()
             if isinstance(h, RotatingFileHandler)
             and "gateway.log" in getattr(h, "baseFilename", "")
         ]
@@ -192,12 +192,12 @@ class TestGatewayMode:
 
     def test_gateway_log_receives_gateway_records(self, hermes_home):
         """gateway.log captures records from gateway.* loggers."""
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
+        korra_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
 
         gw_logger = logging.getLogger("plugins.platforms.telegram.adapter")
         gw_logger.info("telegram connected")
 
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
 
         gw_log = hermes_home / "logs" / "gateway.log"
         assert gw_log.exists()
@@ -205,7 +205,7 @@ class TestGatewayMode:
 
     def test_gateway_log_rejects_non_gateway_records(self, hermes_home):
         """gateway.log does NOT capture records from tools.*, agent.*, etc."""
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
+        korra_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
 
         tool_logger = logging.getLogger("tools.terminal_tool")
         tool_logger.info("running command")
@@ -213,7 +213,7 @@ class TestGatewayMode:
         agent_logger = logging.getLogger("agent.context_compressor")
         agent_logger.info("compressing context")
 
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
 
         gw_log = hermes_home / "logs" / "gateway.log"
         if gw_log.exists():
@@ -227,11 +227,11 @@ class TestGuiMode:
     """setup_logging(mode='gui') creates a filtered gui.log."""
 
     def test_gui_log_created(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gui")
+        korra_logging.setup_logging(hermes_home=hermes_home, mode="gui")
         root = logging.getLogger()
 
         gui_handlers = [
-            h for h in hermes_logging.rotating_file_handlers()
+            h for h in korra_logging.rotating_file_handlers()
             if isinstance(h, RotatingFileHandler)
             and "gui.log" in getattr(h, "baseFilename", "")
         ]
@@ -239,13 +239,13 @@ class TestGuiMode:
 
 
     def test_gui_log_receives_only_gui_components(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gui")
+        korra_logging.setup_logging(hermes_home=hermes_home, mode="gui")
 
-        logging.getLogger("hermes_cli.web_server").info("dashboard online")
+        logging.getLogger("korra_cli.web_server").info("dashboard online")
         logging.getLogger("tui_gateway.ws").info("ws connected")
         logging.getLogger("gateway.run").info("gateway event")
 
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
 
         gui_log = hermes_home / "logs" / "gui.log"
         assert gui_log.exists()
@@ -260,13 +260,13 @@ class TestSessionContext:
 
     def test_session_tag_in_log_output(self, hermes_home):
         """When session context is set, log lines include [session_id]."""
-        hermes_logging.setup_logging(hermes_home=hermes_home)
-        hermes_logging.set_session_context("abc123")
+        korra_logging.setup_logging(hermes_home=hermes_home)
+        korra_logging.set_session_context("abc123")
 
         test_logger = logging.getLogger("test.session_tag")
         test_logger.info("tagged message")
 
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
 
         agent_log = hermes_home / "logs" / "agent.log"
         content = agent_log.read_text()
@@ -283,7 +283,7 @@ class TestComponentFilter:
     """Unit tests for _ComponentFilter."""
 
     def test_passes_matching_prefix(self):
-        f = hermes_logging._ComponentFilter(("gateway",))
+        f = korra_logging._ComponentFilter(("gateway",))
         record = logging.LogRecord(
             "gateway.run", logging.INFO, "", 0, "msg", (), None
         )
@@ -291,7 +291,7 @@ class TestComponentFilter:
 
 
     def test_blocks_non_matching(self):
-        f = hermes_logging._ComponentFilter(("gateway",))
+        f = korra_logging._ComponentFilter(("gateway",))
         record = logging.LogRecord(
             "tools.terminal_tool", logging.INFO, "", 0, "msg", (), None
         )
@@ -305,8 +305,8 @@ class TestSetupVerboseLogging:
     """setup_verbose_logging() adds a DEBUG-level console handler."""
 
     def test_adds_stream_handler(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
-        hermes_logging.setup_verbose_logging()
+        korra_logging.setup_logging(hermes_home=hermes_home)
+        korra_logging.setup_verbose_logging()
 
         root = logging.getLogger()
         verbose_handlers = [
@@ -329,19 +329,19 @@ class TestAddRotatingHandler:
         logger = logging.getLogger("_test_rotating_dup")
         formatter = logging.Formatter("%(message)s")
 
-        hermes_logging._add_rotating_handler(
+        korra_logging._add_rotating_handler(
             logger, log_path,
             level=logging.INFO, max_bytes=1024, backup_count=1,
             formatter=formatter,
         )
-        hermes_logging._add_rotating_handler(
+        korra_logging._add_rotating_handler(
             logger, log_path,
             level=logging.INFO, max_bytes=1024, backup_count=1,
             formatter=formatter,
         )
 
         rotating_handlers = [
-            h for h in hermes_logging.rotating_file_handlers()
+            h for h in korra_logging.rotating_file_handlers()
             if isinstance(h, RotatingFileHandler)
         ]
         assert len(rotating_handlers) == 1
@@ -358,21 +358,21 @@ class TestAddRotatingHandler:
         logger = logging.getLogger("_test_no_session_filter")
         formatter = logging.Formatter("%(session_tag)s%(message)s")
 
-        hermes_logging._add_rotating_handler(
+        korra_logging._add_rotating_handler(
             logger, log_path,
             level=logging.INFO, max_bytes=1024, backup_count=1,
             formatter=formatter,
         )
 
-        handlers = [h for h in hermes_logging.rotating_file_handlers() if isinstance(h, RotatingFileHandler)]
+        handlers = [h for h in korra_logging.rotating_file_handlers() if isinstance(h, RotatingFileHandler)]
         assert len(handlers) == 1
         # No _SessionFilter on the handler — record factory handles it
         assert len(handlers[0].filters) == 0
 
         # But session_tag still works (via record factory)
-        hermes_logging.set_session_context("factory_test")
+        korra_logging.set_session_context("factory_test")
         logger.info("test msg")
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
         content = log_path.read_text()
         assert "[factory_test]" in content
 
@@ -389,8 +389,8 @@ class TestAddRotatingHandler:
 
         old_umask = os.umask(0o022)
         try:
-            with patch("hermes_cli.config.is_managed", return_value=True):
-                hermes_logging._add_rotating_handler(
+            with patch("korra_cli.config.is_managed", return_value=True):
+                korra_logging._add_rotating_handler(
                     logger, log_path,
                     level=logging.INFO, max_bytes=1024, backup_count=1,
                     formatter=formatter,
@@ -417,7 +417,7 @@ class TestWindowsConcurrentLogLockTimeout:
         logger.propagate = False
         logger.setLevel(logging.INFO)
 
-        handler = hermes_logging._ManagedRotatingFileHandler(
+        handler = korra_logging._ManagedRotatingFileHandler(
             str(log_path), maxBytes=1, backupCount=1, encoding="utf-8",
         )
         handler.setFormatter(logging.Formatter("%(message)s"))
@@ -429,10 +429,10 @@ class TestWindowsConcurrentLogLockTimeout:
         # Windows-only: concurrent-log-handler (and therefore its cross-process
         # lock timeout) is only installed on Windows — faking sys.platform
         # exercised the string check without the handler that raises it.
-        assert hermes_logging._is_windows_concurrent_log_lock_timeout(
+        assert korra_logging._is_windows_concurrent_log_lock_timeout(
             RuntimeError("Cannot acquire lock after 20 attempts")
         )
-        assert not hermes_logging._is_windows_concurrent_log_lock_timeout(
+        assert not korra_logging._is_windows_concurrent_log_lock_timeout(
             RuntimeError("some other logging failure")
         )
 
@@ -440,7 +440,7 @@ class TestWindowsConcurrentLogLockTimeout:
     def test_helper_never_matches_off_windows(self):
         # On POSIX the suppression must stay inert: stdlib RotatingFileHandler
         # is in use, so this RuntimeError text is never a CLH lock timeout.
-        assert not hermes_logging._is_windows_concurrent_log_lock_timeout(
+        assert not korra_logging._is_windows_concurrent_log_lock_timeout(
             RuntimeError("Cannot acquire lock after 20 attempts")
         )
 
@@ -481,7 +481,7 @@ class TestReadLoggingConfig:
     """_read_logging_config() reads from config.yaml."""
 
     def test_returns_none_when_no_config(self, hermes_home):
-        level, max_size, backup = hermes_logging._read_logging_config()
+        level, max_size, backup = korra_logging._read_logging_config()
         assert level is None
         assert max_size is None
         assert backup is None
@@ -491,7 +491,7 @@ class TestReadLoggingConfig:
         config = {"logging": {"level": "DEBUG", "max_size_mb": 10, "backup_count": 5}}
         (hermes_home / "config.yaml").write_text(yaml.dump(config))
 
-        level, max_size, backup = hermes_logging._read_logging_config()
+        level, max_size, backup = korra_logging._read_logging_config()
         assert level == "DEBUG"
         assert max_size == 10
         assert backup == 5
@@ -509,8 +509,8 @@ class TestExternalRotationRecovery:
     instead of the file the operator expects to read.
     """
 
-    def _make_handler(self, log_path: Path) -> hermes_logging._ManagedRotatingFileHandler:
-        handler = hermes_logging._ManagedRotatingFileHandler(
+    def _make_handler(self, log_path: Path) -> korra_logging._ManagedRotatingFileHandler:
+        handler = korra_logging._ManagedRotatingFileHandler(
             str(log_path), maxBytes=10 * 1024 * 1024, backupCount=3,
             encoding="utf-8",
         )
@@ -523,10 +523,10 @@ class TestExternalRotationRecovery:
             name="gateway.run", level=logging.INFO, pathname="", lineno=0,
             msg=msg, args=(), exc_info=None,
         )
-        # Match the record factory that hermes_logging installs at import time.
+        # Match the record factory that korra_logging installs at import time.
         record.session_tag = ""
         handler.emit(record)
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
 
     def test_recovers_after_external_rename(self, tmp_path):
         """logrotate-style external rename: ``mv gateway.log gateway.log.1``.
@@ -593,12 +593,12 @@ class TestExternalRotationRecovery:
         records leaking to agent.log) when something external rotates the
         file between setup_logging() calls.
         """
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
+        korra_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
         gw_path = hermes_home / "logs" / "gateway.log"
         rotated = hermes_home / "logs" / "gateway.log.1"
 
         logging.getLogger("gateway.run").info("line BEFORE rotation")
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
         assert "BEFORE rotation" in gw_path.read_text()
 
         # External actor renames the file out from under us.
@@ -608,10 +608,10 @@ class TestExternalRotationRecovery:
         # Caller (or some restart path) re-enters setup_logging.  This used
         # to silently no-op due to the per-path dedup check, leaving the
         # stale fd in place.
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
+        korra_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
 
         logging.getLogger("gateway.run").info("line AFTER rotation")
-        hermes_logging.flush_log_queue()
+        korra_logging.flush_log_queue()
 
         # The new record must reach the live gateway.log, not the rotated
         # backup.  Allen's logs had everything past the rotation point
@@ -642,7 +642,7 @@ class TestSafeStderr:
 
         fake = FakeStderr()
         monkeypatch.setattr(sys, "stderr", fake)
-        result = hermes_logging._safe_stderr()
+        result = korra_logging._safe_stderr()
         # Should be a TextIOWrapper, not the original FakeStderr
         assert isinstance(result, io.TextIOWrapper)
         assert result.encoding == "utf-8"
@@ -688,7 +688,7 @@ class TestAsyncQueueLogging:
     cross-process rotation lock (Windows event-loop-stall fix)."""
 
     def test_file_handlers_not_on_root(self, hermes_home):
-        hermes_logging.setup_logging(hermes_home=hermes_home)
+        korra_logging.setup_logging(hermes_home=hermes_home)
         root = logging.getLogger()
         # Rotating file handlers live on the async listener, never on root.
         assert not any(isinstance(h, RotatingFileHandler) for h in root.handlers)
@@ -700,6 +700,6 @@ class TestAsyncQueueLogging:
         # The real file handlers are discoverable via the accessor.
         assert any(
             "agent.log" in getattr(h, "baseFilename", "")
-            for h in hermes_logging.rotating_file_handlers()
+            for h in korra_logging.rotating_file_handlers()
         )
 

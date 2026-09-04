@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import plugins.memory.openviking as openviking_module
-from hermes_cli import __version__ as _HERMES_VERSION
+from korra_cli import __version__ as _HERMES_VERSION
 from plugins.memory.openviking import (
     OpenVikingMemoryProvider,
     _DEFERRED_COMMIT_TIMEOUT,
@@ -88,7 +88,7 @@ def _allow_setup_validation(monkeypatch, *, root_access: bool = False):
 
 
 def test_openviking_provider_config_loader_uses_readonly_config(monkeypatch):
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     calls = []
     backing_config = {
@@ -295,7 +295,7 @@ def test_post_setup_existing_profile_picker_validates_and_links_saved_profile(
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
     monkeypatch.setattr(openviking_module.Path, "home", staticmethod(lambda: tmp_path))
 
-    from hermes_cli import memory_setup
+    from korra_cli import memory_setup
 
     validate_calls = []
 

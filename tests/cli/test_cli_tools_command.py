@@ -34,9 +34,9 @@ class TestToolsSlashList:
 
     def test_list_calls_backend(self, capsys):
         cli_obj = _make_cli()
-        with patch("hermes_cli.tools_config.load_config",
+        with patch("korra_cli.tools_config.load_config",
                    return_value={"platform_toolsets": {"cli": ["web"]}}), \
-             patch("hermes_cli.tools_config.save_config"):
+             patch("korra_cli.tools_config.save_config"):
             cli_obj._handle_tools_command("/tools list")
         out = capsys.readouterr().out
         assert "web" in out
@@ -51,11 +51,11 @@ class TestToolsSlashDisableWithReset:
     def test_disable_applies_directly_and_resets_session(self):
         """Disable applies immediately (no confirmation prompt) and resets session."""
         cli_obj = _make_cli(["web", "memory"])
-        with patch("hermes_cli.tools_config.load_config",
+        with patch("korra_cli.tools_config.load_config",
                    return_value={"platform_toolsets": {"cli": ["web", "memory"]}}), \
-             patch("hermes_cli.tools_config.save_config"), \
-             patch("hermes_cli.tools_config._get_platform_tools", return_value={"memory"}), \
-             patch("hermes_cli.config.load_config", return_value={}), \
+             patch("korra_cli.tools_config.save_config"), \
+             patch("korra_cli.tools_config._get_platform_tools", return_value={"memory"}), \
+             patch("korra_cli.config.load_config", return_value={}), \
              patch.object(cli_obj, "new_session") as mock_reset:
             cli_obj._handle_tools_command("/tools disable web")
         mock_reset.assert_called_once()
@@ -65,11 +65,11 @@ class TestToolsSlashDisableWithReset:
     def test_disable_always_resets_session(self):
         """Even without a confirmation prompt, disable always resets the session."""
         cli_obj = _make_cli(["web", "memory"])
-        with patch("hermes_cli.tools_config.load_config",
+        with patch("korra_cli.tools_config.load_config",
                    return_value={"platform_toolsets": {"cli": ["web", "memory"]}}), \
-             patch("hermes_cli.tools_config.save_config"), \
-             patch("hermes_cli.tools_config._get_platform_tools", return_value={"memory"}), \
-             patch("hermes_cli.config.load_config", return_value={}), \
+             patch("korra_cli.tools_config.save_config"), \
+             patch("korra_cli.tools_config._get_platform_tools", return_value={"memory"}), \
+             patch("korra_cli.config.load_config", return_value={}), \
              patch.object(cli_obj, "new_session") as mock_reset:
             cli_obj._handle_tools_command("/tools disable web")
         mock_reset.assert_called_once()
@@ -84,11 +84,11 @@ class TestToolsSlashEnableWithReset:
     def test_enable_applies_directly_and_resets_session(self):
         """Enable applies immediately (no confirmation prompt) and resets session."""
         cli_obj = _make_cli(["memory"])
-        with patch("hermes_cli.tools_config.load_config",
+        with patch("korra_cli.tools_config.load_config",
                    return_value={"platform_toolsets": {"cli": ["memory"]}}), \
-             patch("hermes_cli.tools_config.save_config"), \
-             patch("hermes_cli.tools_config._get_platform_tools", return_value={"memory", "web"}), \
-             patch("hermes_cli.config.load_config", return_value={}), \
+             patch("korra_cli.tools_config.save_config"), \
+             patch("korra_cli.tools_config._get_platform_tools", return_value={"memory", "web"}), \
+             patch("korra_cli.config.load_config", return_value={}), \
              patch.object(cli_obj, "new_session") as mock_reset:
             cli_obj._handle_tools_command("/tools enable web")
         mock_reset.assert_called_once()

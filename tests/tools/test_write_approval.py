@@ -1,5 +1,5 @@
 """Tests for the memory/skill write-approval gate (tools/write_approval.py)
-and the shared slash-command handlers (hermes_cli/write_approval_commands.py).
+and the shared slash-command handlers (korra_cli/write_approval_commands.py).
 
 Covers the boolean write_approval gate (off by default = write freely; on =
 require approval) for both subsystems, the foreground-vs-background staging
@@ -26,7 +26,7 @@ def hermes_home(monkeypatch):
 
 
 def _set_approval(subsystem, enabled):
-    import hermes_cli.config as cfg
+    import korra_cli.config as cfg
     c = cfg.load_config()
     c.setdefault(subsystem, {})["write_approval"] = enabled
     cfg.save_config(c)
@@ -86,7 +86,7 @@ def test_cli_memory_approve_without_live_agent_uses_fresh_store(hermes_home, cap
     import json
     from tools.memory_tool import memory_tool, MemoryStore
     from tools import write_approval as wa
-    from hermes_cli.cli_commands_mixin import CLICommandsMixin
+    from korra_cli.cli_commands_mixin import CLICommandsMixin
 
     _set_approval("memory", True)
     staging = MemoryStore(); staging.load_from_disk()
@@ -114,7 +114,7 @@ def test_load_on_disk_store_honors_configured_limits_and_permissions(hermes_home
 
     # Config override path: helper picks up configured limits and store flags.
     monkeypatch.setattr(
-        "hermes_cli.config.load_config",
+        "korra_cli.config.load_config",
         lambda: {
             "memory": {
                 "memory_char_limit": 999,
@@ -134,7 +134,7 @@ def test_load_on_disk_store_honors_configured_limits_and_permissions(hermes_home
     def _boom():
         raise RuntimeError("no config")
 
-    monkeypatch.setattr("hermes_cli.config.load_config", _boom)
+    monkeypatch.setattr("korra_cli.config.load_config", _boom)
     fallback = load_on_disk_store()
     assert fallback.memory_char_limit == 2200
     assert fallback.user_char_limit == 1375
@@ -163,7 +163,7 @@ _SKILL = (
 
 
 def test_handle_approve_all(hermes_home):
-    from hermes_cli.write_approval_commands import handle_pending_subcommand
+    from korra_cli.write_approval_commands import handle_pending_subcommand
     from tools.memory_tool import MemoryStore
     from tools import write_approval as wa
     store = MemoryStore(); store.load_from_disk()
@@ -178,7 +178,7 @@ def test_handle_approve_all(hermes_home):
 
 
 def test_handle_approval_on(hermes_home):
-    from hermes_cli.write_approval_commands import handle_pending_subcommand
+    from korra_cli.write_approval_commands import handle_pending_subcommand
     from tools import write_approval as wa
     captured = {}
     out = handle_pending_subcommand(
@@ -190,7 +190,7 @@ def test_handle_approval_on(hermes_home):
 
 
 def test_handle_approval_off(hermes_home):
-    from hermes_cli.write_approval_commands import handle_pending_subcommand
+    from korra_cli.write_approval_commands import handle_pending_subcommand
     from tools import write_approval as wa
     captured = {}
     out = handle_pending_subcommand(

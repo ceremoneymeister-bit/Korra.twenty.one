@@ -30,7 +30,7 @@ from gateway.restart import (
     DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT,
     resolve_systemd_timeout_stop_sec,
 )
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 
 _SIGNAL_NAME_BY_NUM: Dict[int, str] = {}
@@ -421,7 +421,7 @@ def parse_systemd_duration_to_us(raw: str) -> Optional[int]:
     systemd accepts a wide grammar; we cover the common cases (s, ms, min,
     h) and return None on anything unexpected.  Never raises.
 
-    Public: also consumed by hermes_cli.gateway's restart-wait sizing.
+    Public: also consumed by korra_cli.gateway's restart-wait sizing.
     """
     if not raw:
         return None

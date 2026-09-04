@@ -27,10 +27,10 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 try:
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 except Exception:  # pragma: no cover — plugin may load before constants resolves
 
     def get_hermes_home() -> Path:  # type: ignore[no-redef]

@@ -56,7 +56,7 @@ def collect_inline_catalog() -> List[Dict[str, str]]:
     seen: set[str] = set()
 
     try:
-        from hermes_cli.commands import (
+        from korra_cli.commands import (
             _collect_gateway_skill_entries,
             _sanitize_telegram_name,
             telegram_bot_commands,

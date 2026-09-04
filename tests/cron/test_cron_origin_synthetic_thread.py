@@ -25,7 +25,7 @@ def _session_env(env: dict):
     Двойник обязан вести себя как настоящий хелпер: тот принимает оба имени
     пары ``KORRA_*``/``HERMES_*``, а фикстуры ниже задают старые имена.
     """
-    from hermes_constants import korra_env_aliases
+    from korra_constants import korra_env_aliases
 
     def _lookup(name, default=""):
         for alias in korra_env_aliases(name):

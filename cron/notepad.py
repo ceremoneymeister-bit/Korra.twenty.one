@@ -28,8 +28,8 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
-from hermes_constants import get_hermes_home
-from hermes_time import now as _hermes_now
+from korra_constants import get_hermes_home
+from korra_time import now as _hermes_now
 
 NOTEPAD_FILE = get_hermes_home().resolve() / "cron" / "notepad.db"
 MAX_VALUE_BYTES = 16 * 1024
@@ -46,7 +46,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def _initialize_schema(conn: sqlite3.Connection) -> None:
-    from hermes_state import apply_wal_with_fallback
+    from korra_state import apply_wal_with_fallback
 
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")

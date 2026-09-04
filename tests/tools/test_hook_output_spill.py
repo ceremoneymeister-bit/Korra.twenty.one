@@ -17,7 +17,7 @@ class GetSpillConfigTests(unittest.TestCase):
             # load_config is resolved at call time via local import;
             # patch the module's source instead.
             pass
-        with patch("hermes_cli.config.load_config", return_value={}):
+        with patch("korra_cli.config.load_config", return_value={}):
             cfg = hos.get_spill_config()
         self.assertTrue(cfg["enabled"])
         self.assertEqual(cfg["max_chars"], hos.DEFAULT_MAX_CHARS)
@@ -27,7 +27,7 @@ class GetSpillConfigTests(unittest.TestCase):
 
 
     def test_load_config_exception_is_swallowed(self):
-        with patch("hermes_cli.config.load_config", side_effect=RuntimeError("bad")):
+        with patch("korra_cli.config.load_config", side_effect=RuntimeError("bad")):
             cfg = hos.get_spill_config()
         self.assertEqual(cfg["max_chars"], hos.DEFAULT_MAX_CHARS)
         self.assertTrue(cfg["enabled"])

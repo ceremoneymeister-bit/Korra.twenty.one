@@ -39,7 +39,7 @@ needs to replace the import + call site:
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator
-from hermes_constants import korra_env, korra_env_set, korra_env_aliases
+from korra_constants import korra_env, korra_env_set, korra_env_aliases
 
 # Sentinel to distinguish "never set in this context" from "explicitly set to empty".
 # When a contextvar holds _UNSET, we fall back to os.environ (CLI/cron compat).

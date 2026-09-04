@@ -336,7 +336,7 @@ def _misfire_grace_minutes() -> float:
     catch-up sweep entirely.
     """
     try:
-        from hermes_cli.config import cfg_get, load_config
+        from korra_cli.config import cfg_get, load_config
 
         return float(
             cfg_get(
@@ -487,7 +487,7 @@ def resolve_cron_scheduler() -> "CronScheduler":
 
     name = ""
     try:
-        from hermes_cli.config import cfg_get, load_config
+        from korra_cli.config import cfg_get, load_config
         name = (cfg_get(load_config(), "cron", "provider", default="") or "").strip()
     except Exception:
         pass
@@ -688,7 +688,7 @@ class InProcessCronScheduler(CronScheduler):
             record_ticker_heartbeat,
             use_cron_store,
         )
-        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+        from korra_constants import set_hermes_home_override, reset_hermes_home_override
 
         logger = logging.getLogger("cron.scheduler_provider")
         logger.info(

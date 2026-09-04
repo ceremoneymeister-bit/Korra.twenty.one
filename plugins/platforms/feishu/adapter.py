@@ -132,7 +132,7 @@ from gateway.platforms.base import (
     cache_image_from_bytes,
 )
 from gateway.status import acquire_scoped_lock, release_scoped_lock
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 from utils import atomic_json_write, env_float, env_int
 
 from agent.secret_scope import UnscopedSecretError as _UnscopedSecretError
@@ -5278,7 +5278,7 @@ class FeishuAdapter(BasePlatformAdapter):
 #
 # Device-code flow: user scans a QR code with Feishu/Lark mobile app and the
 # platform creates a fully configured bot application automatically.
-# Called by `hermes gateway setup` via _setup_feishu() in hermes_cli/gateway.py.
+# Called by `hermes gateway setup` via _setup_feishu() in korra_cli/gateway.py.
 # =============================================================================
 
 
@@ -5619,7 +5619,7 @@ def _qr_register_inner(
 # per-platform core touchpoints (the Platform.FEISHU elif in gateway/run.py,
 # the feishu_cfg YAML→env block + _PLATFORM_CONNECTED_CHECKERS entry in
 # gateway/config.py, the _setup_feishu wizard + _PLATFORMS["feishu"] static
-# dict in hermes_cli/gateway.py, and the _send_feishu dispatch in
+# dict in korra_cli/gateway.py, and the _send_feishu dispatch in
 # tools/send_message_tool.py).
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -5694,12 +5694,12 @@ async def _standalone_send(
 def interactive_setup() -> None:
     """Interactive setup for Feishu / Lark — scan-to-create or manual creds.
 
-    Replaces the central _setup_feishu in hermes_cli/gateway.py and the static
+    Replaces the central _setup_feishu in korra_cli/gateway.py and the static
     _PLATFORMS["feishu"] dict. CLI helpers are lazy-imported.
     """
-    from hermes_cli.config import get_env_value, remove_env_value, save_env_value
-    from hermes_cli.setup import prompt_choice
-    from hermes_cli.cli_output import (
+    from korra_cli.config import get_env_value, remove_env_value, save_env_value
+    from korra_cli.setup import prompt_choice
+    from korra_cli.cli_output import (
         prompt,
         prompt_yes_no,
         print_header,

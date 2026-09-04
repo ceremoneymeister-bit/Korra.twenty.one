@@ -43,8 +43,8 @@ class TestNamedCustomProviderCatalogs:
                 }
             }
         )
-        with patch("hermes_cli.config.load_config", return_value=cfg), patch(
-            "hermes_cli.model_switch._fetch_picker_live_models",
+        with patch("korra_cli.config.load_config", return_value=cfg), patch(
+            "korra_cli.model_switch._fetch_picker_live_models",
             return_value=["model-a", "model-b"],
         ):
             catalogs = _named_custom_provider_catalogs()
@@ -68,8 +68,8 @@ class TestNamedCustomProviderCatalogs:
                 }
             }
         )
-        with patch("hermes_cli.config.load_config", return_value=cfg), patch(
-            "hermes_cli.model_switch._fetch_picker_live_models", return_value=None
+        with patch("korra_cli.config.load_config", return_value=cfg), patch(
+            "korra_cli.model_switch._fetch_picker_live_models", return_value=None
         ):
             assert _named_custom_provider_catalogs() == []
 
@@ -84,8 +84,8 @@ class TestNamedCustomProviderCatalogs:
                 }
             }
         )
-        with patch("hermes_cli.config.load_config", return_value=cfg), patch(
-            "hermes_cli.model_switch._fetch_picker_live_models", return_value=None
+        with patch("korra_cli.config.load_config", return_value=cfg), patch(
+            "korra_cli.model_switch._fetch_picker_live_models", return_value=None
         ):
             assert _named_custom_provider_catalogs() == []
 
@@ -101,8 +101,8 @@ class TestNamedCustomProviderCatalogs:
                 }
             ]
         )
-        with patch("hermes_cli.config.load_config", return_value=cfg), patch(
-            "hermes_cli.model_switch._fetch_picker_live_models", return_value=None
+        with patch("korra_cli.config.load_config", return_value=cfg), patch(
+            "korra_cli.model_switch._fetch_picker_live_models", return_value=None
         ):
             catalogs = _named_custom_provider_catalogs()
 
@@ -118,11 +118,11 @@ class TestNamedCustomProviderCatalogs:
                 }
             }
         )
-        with patch("hermes_cli.config.load_config", return_value=cfg), patch(
-            "hermes_cli.models.should_use_ollama_native_catalog",
+        with patch("korra_cli.config.load_config", return_value=cfg), patch(
+            "korra_cli.models.should_use_ollama_native_catalog",
             return_value=True,
         ), patch(
-            "hermes_cli.model_switch._fetch_picker_live_models",
+            "korra_cli.model_switch._fetch_picker_live_models",
             return_value=["qwen3:1.7b"],
         ) as fetch:
             catalogs = _named_custom_provider_catalogs()
@@ -146,11 +146,11 @@ class TestNamedCustomProviderCatalogs:
                 }
             ]
         )
-        with patch("hermes_cli.config.load_config", return_value=cfg), patch(
-            "hermes_cli.models.should_use_ollama_native_catalog",
+        with patch("korra_cli.config.load_config", return_value=cfg), patch(
+            "korra_cli.models.should_use_ollama_native_catalog",
             return_value=True,
         ), patch(
-            "hermes_cli.model_switch._fetch_picker_live_models",
+            "korra_cli.model_switch._fetch_picker_live_models",
             return_value=["qwen3:1.7b"],
         ) as fetch:
             catalogs = _named_custom_provider_catalogs()
@@ -168,13 +168,13 @@ class TestNamedCustomProviderCatalogs:
                 }
             }
         )
-        from hermes_cli.model_switch import _NativePickerModelList
+        from korra_cli.model_switch import _NativePickerModelList
 
-        with patch("hermes_cli.config.load_config", return_value=cfg), patch(
-            "hermes_cli.models.should_use_ollama_native_catalog",
+        with patch("korra_cli.config.load_config", return_value=cfg), patch(
+            "korra_cli.models.should_use_ollama_native_catalog",
             return_value=True,
         ), patch(
-            "hermes_cli.model_switch._fetch_picker_live_models",
+            "korra_cli.model_switch._fetch_picker_live_models",
             return_value=_NativePickerModelList(),
         ):
             assert _named_custom_provider_catalogs() == [
@@ -192,7 +192,7 @@ class TestModelStateIncludesNamedProviders:
         )
         acp_agent = HermesACPAgent(session_manager=manager)
 
-        with patch("hermes_cli.models.curated_models_for_provider", return_value=[]), patch(
+        with patch("korra_cli.models.curated_models_for_provider", return_value=[]), patch(
             "acp_adapter.server._named_custom_provider_catalogs",
             return_value=[("custom:ollama", "Ollama", [])],
         ):
@@ -215,7 +215,7 @@ class TestModelStateIncludesNamedProviders:
         acp_agent = HermesACPAgent(session_manager=manager)
 
         with patch(
-            "hermes_cli.models.curated_models_for_provider",
+            "korra_cli.models.curated_models_for_provider",
             return_value=[("gpt-5.4", "recommended")],
         ), patch(
             "acp_adapter.server._named_custom_provider_catalogs",
@@ -243,7 +243,7 @@ class TestModelStateIncludesNamedProviders:
 
     def test_selector_choice_id_round_trips_through_parse_model_input(self):
         """The encoded choice id must resolve back to the named provider."""
-        from hermes_cli.models import parse_model_input
+        from korra_cli.models import parse_model_input
 
         choice_id = "custom:bedrock-mantle:openai.gpt-5.5"
         cfg = {
@@ -254,14 +254,14 @@ class TestModelStateIncludesNamedProviders:
                 }
             }
         }
-        with patch("hermes_cli.config.load_config", return_value=cfg):
+        with patch("korra_cli.config.load_config", return_value=cfg):
             provider, model = parse_model_input(choice_id, "bedrock")
         assert provider == "custom:bedrock-mantle"
         assert model == "openai.gpt-5.5"
 
     def test_selector_choice_id_round_trips_colon_bearing_custom_identity(self):
         """Configured provider and model IDs may both contain colons."""
-        from hermes_cli.models import parse_model_input
+        from korra_cli.models import parse_model_input
 
         cfg = {
             "providers": {
@@ -271,7 +271,7 @@ class TestModelStateIncludesNamedProviders:
                 }
             }
         }
-        with patch("hermes_cli.config.load_config", return_value=cfg):
+        with patch("korra_cli.config.load_config", return_value=cfg):
             provider, model = parse_model_input(
                 "custom:local-127.0.0.1:11434:qwen3:1.7b", "custom"
             )

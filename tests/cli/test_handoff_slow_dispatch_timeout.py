@@ -26,7 +26,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hermes_state import SessionDB
+from korra_state import SessionDB
 
 
 @pytest.fixture()
@@ -88,7 +88,7 @@ def _run_handoff(db, session_id, monkeypatch, time_budget=30.0):
     compressed so a simulated 60s pending deadline elapses in well under a
     second of wall clock.
     """
-    from hermes_cli.cli_commands_mixin import CLICommandsMixin
+    from korra_cli.cli_commands_mixin import CLICommandsMixin
 
     printed: list[str] = []
 

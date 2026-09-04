@@ -179,7 +179,7 @@ def register_from_config(cfg: Optional[Dict[str, Any]]) -> List[WebhookTarget]:
     if not targets:
         return []
 
-    from hermes_cli.plugins import get_plugin_manager
+    from korra_cli.plugins import get_plugin_manager
 
     manager = get_plugin_manager()
 
@@ -266,7 +266,7 @@ def _parse_outbound_block(raw: Any) -> List[WebhookTarget]:
 
 
 def _parse_single_target(index: int, raw: Any) -> Optional[WebhookTarget]:
-    from hermes_cli.plugins import VALID_HOOKS
+    from korra_cli.plugins import VALID_HOOKS
 
     if not isinstance(raw, dict):
         logger.warning(

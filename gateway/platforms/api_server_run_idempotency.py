@@ -34,7 +34,7 @@ class RunIdempotencyStore:
     def __init__(self, db_path: str = None):
         if db_path is None:
             try:
-                from hermes_cli.config import get_hermes_home
+                from korra_cli.config import get_hermes_home
 
                 db_path = str(get_hermes_home() / "runs_idempotency.db")
             except Exception:
@@ -50,7 +50,7 @@ class RunIdempotencyStore:
             )
             self._conn = sqlite3.connect(":memory:", check_same_thread=False)
             self._db_path = None
-        from hermes_state import apply_wal_with_fallback
+        from korra_state import apply_wal_with_fallback
 
         apply_wal_with_fallback(self._conn, db_label="runs_idempotency.db")
         self._conn.execute(

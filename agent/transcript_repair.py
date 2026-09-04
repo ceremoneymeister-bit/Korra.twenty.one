@@ -1,6 +1,6 @@
 """Transcript repair and in-place row reconciliation helpers for SessionDB and run_agent.
 
-Extracted from hermes_state.py and run_agent.py to keep the godfiles narrow and bounded
+Extracted from korra_state.py and run_agent.py to keep the godfiles narrow and bounded
 under the 2K invariant (#95514 / PR #95886). Provides focused helpers to:
 1. Resolve active assistant rows and watermark compaction clones in SQLite during batch appends.
 2. In-place update blank assistant rows or adopt concurrent non-blank winner content without overwrite.

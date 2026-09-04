@@ -80,7 +80,7 @@ from gateway.platforms.base import (
 from gateway.platforms.whatsapp_common import WhatsAppBehaviorMixin, _get_wsecret
 from gateway.platforms.media_cache import ext_for_mime
 from gateway import rich_sent_store
-from hermes_constants import get_hermes_dir
+from korra_constants import get_hermes_dir
 
 logger = logging.getLogger(__name__)
 

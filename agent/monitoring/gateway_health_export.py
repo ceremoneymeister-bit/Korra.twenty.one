@@ -244,7 +244,7 @@ def _logs_endpoint(endpoint: str) -> str:
 
 def _version() -> str:
     try:
-        from hermes_cli import __version__
+        from korra_cli import __version__
         return str(__version__)
     except Exception:
         return "unknown"
@@ -252,7 +252,7 @@ def _version() -> str:
 
 def _profile() -> str:
     try:
-        from hermes_cli.profiles import get_active_profile_name
+        from korra_cli.profiles import get_active_profile_name
         return str(get_active_profile_name() or "default")
     except Exception:
         return "default"

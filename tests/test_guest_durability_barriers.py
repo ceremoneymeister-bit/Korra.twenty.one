@@ -11,12 +11,12 @@ import sqlite3
 
 import pytest
 
-import hermes_state
-from hermes_state import apply_durability_barriers
+import korra_state
+from korra_state import apply_durability_barriers
 
 
 def _config(monkeypatch, database_section):
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     cfg = {"database": database_section}
     monkeypatch.setattr(config_mod, "load_config_readonly", lambda *a, **k: cfg)
@@ -53,7 +53,7 @@ def test_guest_barriers_leave_synchronous_alone_when_unset(monkeypatch, tmp_path
 
 
 def test_guest_barriers_survive_config_failure(monkeypatch, tmp_path):
-    import hermes_cli.config as config_mod
+    import korra_cli.config as config_mod
 
     def _boom(*a, **k):
         raise RuntimeError("config unavailable")

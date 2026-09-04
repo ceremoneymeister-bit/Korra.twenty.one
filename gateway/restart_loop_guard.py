@@ -38,7 +38,7 @@ import logging
 import time
 from typing import List, Optional
 
-from hermes_constants import get_hermes_home
+from korra_constants import get_hermes_home
 
 logger = logging.getLogger("gateway.run")
 

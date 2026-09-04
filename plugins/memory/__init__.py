@@ -39,7 +39,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple, TYPE_CHECKING
-from hermes_cli.config import cfg_get
+from korra_cli.config import cfg_get
 
 if TYPE_CHECKING:
     from agent.memory_provider import MemoryProvider
@@ -80,7 +80,7 @@ def _register_synthetic_package(name: str, search_locations: List[str]) -> None:
 def _get_user_plugins_dir() -> Optional[Path]:
     """Return ``$HERMES_HOME/plugins/`` or None if unavailable."""
     try:
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         d = get_hermes_home() / "plugins"
         return d if d.is_dir() else None
     except Exception:
@@ -95,7 +95,7 @@ def _get_project_plugins_dir() -> Optional[Path]:
     ``cd`` into must not be able to offer the agent a memory backend.
     """
     try:
-        from hermes_cli.plugins import _env_enabled
+        from korra_cli.plugins import _env_enabled
 
         if not _env_enabled("KORRA_ENABLE_PROJECT_PLUGINS"):
             return None
@@ -218,7 +218,7 @@ def _entry_point_package_dir(entry_point) -> Optional[Path]:
     if entry_point is None:
         return None
     try:
-        from hermes_cli.plugins import resolve_module_origin
+        from korra_cli.plugins import resolve_module_origin
 
         module_name = (entry_point.value or "").split(":")[0].strip()
         origin = resolve_module_origin(module_name)
@@ -580,7 +580,7 @@ class _ProviderCollector:
             skill_name = args[0] if args else kwargs.get("name")
             qualified_name = f"{self.name}:{skill_name}"
 
-            from hermes_cli.plugins import get_plugin_manager
+            from korra_cli.plugins import get_plugin_manager
 
             registered_path = get_plugin_manager().find_plugin_skill(qualified_name)
             if registered_path is not None:
@@ -636,7 +636,7 @@ class _ProviderCollector:
         plugin manager, which discovery touches on every hermes startup.
         """
         if self._context is None:
-            from hermes_cli.plugins import PluginContext, PluginManifest, get_plugin_manager
+            from korra_cli.plugins import PluginContext, PluginManifest, get_plugin_manager
 
             manifest = PluginManifest(name=self.name, key=self.name)
             self._context = PluginContext(manifest, get_plugin_manager())
@@ -651,7 +651,7 @@ def _get_active_memory_provider() -> Optional[str]:
     no plugin loading.
     """
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
         config = load_config()
         return cfg_get(config, "memory", "provider") or None
     except Exception:
@@ -665,7 +665,7 @@ def _prune_inactive_memory_provider_skills(
     if active_provider is None:
         active_provider = _get_active_memory_provider()
 
-    from hermes_cli.plugins import get_plugin_manager
+    from korra_cli.plugins import get_plugin_manager
 
     manager = get_plugin_manager()
     for qualified_name, registered_path in list(

@@ -60,7 +60,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-from hermes_constants import secure_parent_dir
+from korra_constants import secure_parent_dir
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,7 @@ def _get_token_dir(hermes_home: str | Path | None = None) -> Path:
     Uses HERMES_HOME so each profile gets its own OAuth tokens.
     Layout: ``HERMES_HOME/mcp-tokens/``
     """
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     base = Path(hermes_home) if hermes_home is not None else Path(get_hermes_home())
     return base / "mcp-tokens"

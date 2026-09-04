@@ -15,7 +15,7 @@ from gateway.config import Platform, PlatformConfig
 from gateway.kanban_watchers import _wake_scope_id
 from gateway.run import GatewayRunner
 from gateway.session import build_session_key
-from hermes_cli import kanban_db as kb
+from korra_cli import kanban_db as kb
 from plugins.platforms.slack.adapter import SlackAdapter
 
 TEAM = "T0B8U2M6NRE"

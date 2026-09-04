@@ -129,7 +129,7 @@ class BrowserProvider(abc.ABC):
     def get_setup_schema(self) -> Optional[Dict[str, Any]]:
         """Return provider metadata for the ``hermes tools`` picker.
 
-        Used by :mod:`hermes_cli.tools_config` to inject this provider as a
+        Used by :mod:`korra_cli.tools_config` to inject this provider as a
         row in the Browser Automation picker. Shape mirrors the existing
         hardcoded entries in ``TOOL_CATEGORIES["browser"]``::
 

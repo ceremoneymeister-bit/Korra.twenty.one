@@ -52,7 +52,7 @@ class TestSaveConfigValueAtomic:
     def test_model_write_runs_shared_cron_drift_warning(self, config_env, monkeypatch):
         warning = MagicMock()
         monkeypatch.setattr(
-            "hermes_cli.config.warn_unpinned_cron_jobs_after_model_config_change",
+            "korra_cli.config.warn_unpinned_cron_jobs_after_model_config_change",
             warning,
         )
 

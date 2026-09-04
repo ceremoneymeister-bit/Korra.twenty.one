@@ -10,7 +10,7 @@ This module covers the chat_completions path (/v1 endpoint).
 from typing import Any
 from urllib.parse import urlparse
 
-from hermes_cli import __version__ as _HERMES_VERSION
+from korra_cli import __version__ as _HERMES_VERSION
 from providers import register_provider
 from providers.base import OMIT_TEMPERATURE, ProviderProfile
 

@@ -19,7 +19,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Any
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ from utils import atomic_replace
 from agent.turn_context import extract_api_content_sidecar
 
 # Session keys/ids flow into filesystem paths downstream (e.g.
-# ``sessions_dir / f"{session_id}.json"`` in hermes_state, request-dump
+# ``sessions_dir / f"{session_id}.json"`` in korra_state, request-dump
 # filenames in agent_runtime_helpers). Any value that could escape the
 # sessions directory as a path must be rejected at the entry boundary.
 # Rejects: parent traversal (``..``), a path separator anywhere (``/`` or
@@ -406,8 +406,8 @@ def _slack_tools_loaded() -> bool:
     if not _slack_token.strip():
         return False
     try:
-        from hermes_cli.config import load_config
-        from hermes_cli.tools_config import _get_platform_tools
+        from korra_cli.config import load_config
+        from korra_cli.tools_config import _get_platform_tools
         cfg = load_config()
         # include_default_mcp_servers=True (the default) so a Slack MCP
         # server that's enabled by default for this platform (not
@@ -434,8 +434,8 @@ def _discord_tools_loaded() -> bool:
     """
     try:
         from agent.secret_scope import get_secret
-        from hermes_cli.config import load_config
-        from hermes_cli.tools_config import _get_platform_tools
+        from korra_cli.config import load_config
+        from korra_cli.tools_config import _get_platform_tools
 
         if not (get_secret("DISCORD_BOT_TOKEN", "") or "").strip():
             return False
@@ -720,7 +720,7 @@ def build_session_context_prompt(
     lines.append("")
     lines.append("**Delivery options for scheduled tasks:**")
 
-    from hermes_constants import display_hermes_home
+    from korra_constants import display_hermes_home
 
     # Origin delivery
     if context.source.platform == Platform.LOCAL:
@@ -1344,7 +1344,7 @@ class SessionStore:
         once it expires, one caller reopens while concurrent callers keep
         using the JSONL fallback.
         """
-        from hermes_state import SessionDB, _default_db_path
+        from korra_state import SessionDB, _default_db_path
 
         path = Path(_default_db_path())
         def _open():
@@ -1964,7 +1964,7 @@ class SessionStore:
         if source is not None and source.profile:
             return source.profile
         try:
-            from hermes_cli.profiles import get_active_profile_name
+            from korra_cli.profiles import get_active_profile_name
             return get_active_profile_name() or "default"
         except Exception:
             return None
@@ -1983,7 +1983,7 @@ class SessionStore:
     @staticmethod
     def _active_profile_name() -> str:
         try:
-            from hermes_cli.profiles import get_active_profile_name
+            from korra_cli.profiles import get_active_profile_name
             return get_active_profile_name() or "default"
         except Exception:
             return "default"
@@ -3757,7 +3757,7 @@ class SessionStore:
             try:
                 self._append_transcript_message(session_id, msg)
             except Exception as exc:
-                from hermes_state import CompressionSessionClosedError
+                from korra_state import CompressionSessionClosedError
 
                 if isinstance(exc, CompressionSessionClosedError):
                     # Resolve the full continuation chain via the canonical
@@ -3948,7 +3948,7 @@ class SessionStore:
             return True
         import sqlite3
 
-        from hermes_state import SessionDB
+        from korra_state import SessionDB
 
         if isinstance(exc, sqlite3.DatabaseError):
             return SessionDB._is_fts_write_corruption_error(exc)

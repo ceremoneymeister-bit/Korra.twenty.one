@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 from utils import is_truthy_value
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +230,7 @@ def is_free_tier_model(model: str, base_url: str = "") -> bool:
     2. The ``stealth/`` prefix — Nous stealth-preview SKUs (e.g.
        ``stealth/ox-alpha``) are free-tier but carry no ``:free`` suffix.  Spend
        is forced to zero server-side, so these are also free by construction.
-    3. A peek into the in-process pricing cache in ``hermes_cli.models``
+    3. A peek into the in-process pricing cache in ``korra_cli.models``
        (populated when the model picker fetched ``/v1/models`` pricing for
        *base_url*). PEEK ONLY — a cache miss never triggers a fetch. This is
        CLI/TUI-session best-effort: gateway sessions never run the picker's
@@ -253,7 +253,7 @@ def is_free_tier_model(model: str, base_url: str = "") -> bool:
     if not base_url:
         return False
     try:
-        from hermes_cli.models import _is_model_free, _pricing_cache
+        from korra_cli.models import _is_model_free, _pricing_cache
 
         # Mirror get_pricing_for_provider's key normalization: the agent's
         # Nous base_url is /v1-suffixed (https://inference-api.nousresearch.com/v1)
@@ -841,7 +841,7 @@ def seed_credits_at_session_start(agent) -> bool:
 
         def _bg_seed() -> None:
             try:
-                from hermes_cli.nous_account import get_nous_portal_account_info
+                from korra_cli.nous_account import get_nous_portal_account_info
                 info = get_nous_portal_account_info(force_fresh=True)
                 if getattr(agent, "_credits_state", None) is not None:
                     return  # a live inference header beat us — don't clobber it

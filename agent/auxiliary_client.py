@@ -173,8 +173,8 @@ from agent.model_metadata import (
     get_model_context_length,
     strip_codex_context_variant_suffix as _strip_codex_ctx_variant,
 )
-from hermes_cli.config import get_hermes_home
-from hermes_constants import OPENROUTER_BASE_URL, korra_env
+from korra_cli.config import get_hermes_home
+from korra_constants import OPENROUTER_BASE_URL, korra_env
 from utils import base_url_host_matches, base_url_hostname, env_float, is_truthy_value, model_forces_max_completion_tokens, normalize_proxy_env_vars
 
 logger = logging.getLogger(__name__)
@@ -209,7 +209,7 @@ def _resolve_aux_verify(base_url: Optional[str]) -> Any:
     """
     try:
         from agent.ssl_verify import resolve_httpx_verify
-        from hermes_cli.config import (
+        from korra_cli.config import (
             get_custom_provider_tls_settings,
             load_config_readonly,
         )
@@ -278,7 +278,7 @@ def _create_openai_client(*, api_key: str, base_url: str, **kwargs: Any) -> Any:
     # unrecognized bearer. Override the SDK's Authorization header with an
     # empty value (single shared chokepoint for every aux client build).
     try:
-        from hermes_cli.models import (
+        from korra_cli.models import (
             OPENCODE_ZEN_FREE_KEYLESS_PLACEHOLDER,
             opencode_zen_free_headers,
         )
@@ -994,8 +994,8 @@ def _fast_model_from_catalog(provider_id: str) -> str:
     last-known-good fallback.
     """
     try:
-        from hermes_cli.auth import resolve_api_key_provider_credentials
-        from hermes_cli.models import fetch_models_with_pricing
+        from korra_cli.auth import resolve_api_key_provider_credentials
+        from korra_cli.models import fetch_models_with_pricing
         from providers import get_provider_profile
 
         # The provider's own credentials, because most ``/v1/models`` endpoints
@@ -1203,7 +1203,7 @@ def _apply_user_default_headers(headers: dict | None) -> dict | None:
     when nothing is configured. No allocation when there are no overrides.
     """
     try:
-        from hermes_cli.config import cfg_get, load_config
+        from korra_cli.config import cfg_get, load_config
         _cfg = load_config()
         user_headers = cfg_get(_cfg, "model", "default_headers")
         # ``model.extra_headers`` is an accepted alias (matches the
@@ -1249,7 +1249,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
     # Resolve config from disk if not provided.
     if or_config is None:
         try:
-            from hermes_cli.config import load_config_readonly
+            from korra_cli.config import load_config_readonly
             or_config = load_config_readonly().get("openrouter", {})
         except Exception:
             or_config = {}
@@ -1297,7 +1297,7 @@ def build_nvidia_nim_headers(base_url: str | None) -> dict:
 
 # Vercel AI Gateway app attribution headers. HTTP-Referer maps to
 # referrerUrl and X-Title maps to appName in the gateway's analytics.
-from hermes_cli import __version__ as _HERMES_VERSION
+from korra_cli import __version__ as _HERMES_VERSION
 
 _AI_GATEWAY_HEADERS = {
     "HTTP-Referer": "https://hermes-agent.nousresearch.com",
@@ -1310,7 +1310,7 @@ _AI_GATEWAY_HEADERS = {
 # when the auxiliary client is backed by Nous Portal.
 #
 # The tags are computed from agent.portal_tags so the client= marker stays
-# in lockstep with hermes_cli.__version__ across every Portal call site
+# in lockstep with korra_cli.__version__ across every Portal call site
 # (main loop, aux, compression, web_extract). Do not inline a literal here;
 # see agent/portal_tags.py for the rationale.
 from agent.portal_tags import nous_portal_tags as _nous_portal_tags
@@ -1319,7 +1319,7 @@ from agent.portal_tags import nous_portal_tags as _nous_portal_tags
 def _nous_extra_body() -> dict:
     """Return a fresh Nous Portal ``extra_body`` dict.
 
-    Computed at call time so a hot-reloaded ``hermes_cli.__version__`` is
+    Computed at call time so a hot-reloaded ``korra_cli.__version__`` is
     reflected without restarting long-running processes.
     """
     return {"tags": _nous_portal_tags()}
@@ -1478,7 +1478,7 @@ def _pool_runtime_base_url(entry: Any, fallback: str = "") -> str:
     if getattr(entry, "provider", None) == "nous":
         # Funnel through the canonical auth-layer reader so the env override
         # shares one normalization path with the rest of the NOUS resolution.
-        from hermes_cli.auth import _nous_inference_env_override
+        from korra_cli.auth import _nous_inference_env_override
 
         env_url = _nous_inference_env_override()
         if env_url:
@@ -2561,7 +2561,7 @@ def _endpoint_speaks_anthropic_messages(base_url: str) -> bool:
     """True if the endpoint at ``base_url`` speaks the Anthropic Messages
     protocol instead of OpenAI chat.completions.
 
-    Mirrors ``hermes_cli.runtime_provider._detect_api_mode_for_url`` so the
+    Mirrors ``korra_cli.runtime_provider._detect_api_mode_for_url`` so the
     auxiliary client and the main agent stay in sync on transport selection.
     Covers:
 
@@ -2715,7 +2715,7 @@ def _read_nous_auth() -> Optional[dict]:
 
 def _nous_api_key(provider: dict) -> str:
     """Extract a usable Nous inference JWT from stored auth state."""
-    from hermes_cli.auth import _nous_invoke_jwt_is_usable
+    from korra_cli.auth import _nous_invoke_jwt_is_usable
 
     for token_key, expiry_key in (
         ("agent_key", "agent_key_expires_at"),
@@ -2741,7 +2741,7 @@ def _nous_base_url() -> str:
 def _resolve_nous_pool_runtime_api(*, force_refresh: bool = False) -> Optional[tuple[str, str]]:
     """Resolve Nous auxiliary credentials from the selected pool entry."""
     try:
-        from hermes_cli.auth import _agent_key_is_usable
+        from korra_cli.auth import _agent_key_is_usable
 
         pool = load_pool("nous")
     except Exception as exc:
@@ -2802,7 +2802,7 @@ def _resolve_nous_runtime_api(*, force_refresh: bool = False) -> Optional[tuple[
         return pooled
 
     try:
-        from hermes_cli.auth import resolve_nous_runtime_credentials
+        from korra_cli.auth import resolve_nous_runtime_credentials
 
         creds = resolve_nous_runtime_credentials(
             timeout_seconds=env_float("KORRA_NOUS_TIMEOUT_SECONDS", 15),
@@ -2828,12 +2828,12 @@ def _resolve_xai_oauth_for_aux() -> Optional[Tuple[str, str]]:
     compression report "no provider configured" even though ``hermes auth
     status`` shows xAI OAuth as logged in.
 
-    Falls back to ``hermes_cli.auth``'s singleton runtime resolver for older
+    Falls back to ``korra_cli.auth``'s singleton runtime resolver for older
     auth-store-only logins. Returns ``None`` if the user is not authenticated
     with xAI Grok OAuth.
     """
     try:
-        from hermes_cli.auth import (
+        from korra_cli.auth import (
             DEFAULT_XAI_OAUTH_BASE_URL,
             _xai_validate_inference_base_url,
         )
@@ -2860,7 +2860,7 @@ def _resolve_xai_oauth_for_aux() -> Optional[Tuple[str, str]]:
         logger.debug("Auxiliary xAI OAuth pool credential resolution failed: %s", exc)
 
     try:
-        from hermes_cli.auth import resolve_xai_oauth_runtime_credentials
+        from korra_cli.auth import resolve_xai_oauth_runtime_credentials
 
         creds = resolve_xai_oauth_runtime_credentials()
     except Exception as exc:
@@ -2890,7 +2890,7 @@ def _read_codex_access_token() -> Optional[str]:
             return token
 
     try:
-        from hermes_cli.auth import _read_codex_tokens
+        from korra_cli.auth import _read_codex_tokens
         data = _read_codex_tokens()
         tokens = data.get("tokens", {})
         access_token = tokens.get("access_token")
@@ -2924,7 +2924,7 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
     credentials, or (None, None) if none are configured.
     """
     try:
-        from hermes_cli.auth import PROVIDER_REGISTRY, resolve_api_key_provider_credentials
+        from korra_cli.auth import PROVIDER_REGISTRY, resolve_api_key_provider_credentials
     except ImportError:
         logger.debug("Could not import PROVIDER_REGISTRY for API-key fallback")
         return None, None
@@ -2940,7 +2940,7 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
             # Without this gate, Claude Code credentials get silently used
             # as auxiliary fallback when the user's primary provider fails.
             try:
-                from hermes_cli.auth import is_provider_explicitly_configured
+                from korra_cli.auth import is_provider_explicitly_configured
                 if not is_provider_explicitly_configured("anthropic"):
                     continue
             except ImportError:
@@ -2968,7 +2968,7 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
             if base_url_host_matches(base_url, "api.kimi.com"):
                 extra["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
             elif base_url_host_matches(base_url, "githubcopilot.com"):
-                from hermes_cli.models import copilot_default_headers
+                from korra_cli.models import copilot_default_headers
 
                 extra["default_headers"] = copilot_default_headers()
             elif base_url_host_matches(base_url, "integrate.api.nvidia.com"):
@@ -3008,7 +3008,7 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
         if base_url_host_matches(base_url, "api.kimi.com"):
             extra["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
         elif base_url_host_matches(base_url, "githubcopilot.com"):
-            from hermes_cli.models import copilot_default_headers
+            from korra_cli.models import copilot_default_headers
 
             extra["default_headers"] = copilot_default_headers()
         elif base_url_host_matches(base_url, "integrate.api.nvidia.com"):
@@ -3056,7 +3056,7 @@ def _aux_openrouter_settings() -> Tuple[bool, str]:
     config-read failure.
     """
     try:
-        from hermes_cli.config import cfg_get, load_config_readonly
+        from korra_cli.config import cfg_get, load_config_readonly
 
         cfg = load_config_readonly()
         free_only = bool(cfg_get(cfg, "auxiliary", "free_only", default=False))
@@ -3186,7 +3186,7 @@ def _try_nous(vision: bool = False) -> Tuple[Optional[OpenAI], Optional[str]]:
         # model is irrelevant to "is Nous resolvable?", and the Portal
         # recommended-models fetch below can hit the network.
         try:
-            from hermes_cli.models import get_nous_recommended_aux_model
+            from korra_cli.models import get_nous_recommended_aux_model
             recommended = get_nous_recommended_aux_model(vision=vision)
             if recommended:
                 model = recommended
@@ -3251,7 +3251,7 @@ def _refresh_nous_recommended_model(
     stale = (stale_model or "").strip().lower()
     fresh: Optional[str] = None
     try:
-        from hermes_cli.models import get_nous_recommended_aux_model
+        from korra_cli.models import get_nous_recommended_aux_model
 
         fresh = get_nous_recommended_aux_model(vision=vision, force_refresh=True)
     except Exception as exc:
@@ -3284,7 +3284,7 @@ def _read_main_model() -> str:
     if isinstance(override, str) and override.strip():
         return override.strip()
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         cfg = load_config_readonly()
         model_cfg = cfg.get("model", {})
         if isinstance(model_cfg, str) and model_cfg.strip():
@@ -3311,7 +3311,7 @@ def _read_main_provider() -> str:
     if isinstance(override, str) and override.strip():
         return override.strip().lower()
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         cfg = load_config_readonly()
         model_cfg = cfg.get("model", {})
         if isinstance(model_cfg, dict):
@@ -3340,7 +3340,7 @@ def _read_main_api_key() -> str:
     if isinstance(override, str) and override.strip():
         return override.strip()
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
         cfg = load_config()
         model_cfg = cfg.get("model", {})
         if isinstance(model_cfg, dict):
@@ -3361,7 +3361,7 @@ def _read_main_base_url() -> str:
     if isinstance(override, str) and override.strip():
         return override.strip()
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
         cfg = load_config()
         model_cfg = cfg.get("model", {})
         if isinstance(model_cfg, dict):
@@ -3395,8 +3395,8 @@ def _resolve_moa_aggregator(preset_name: Optional[str]) -> Tuple[Optional[str], 
         or a malformed aggregator slot).
     """
     try:
-        from hermes_cli.config import load_config
-        from hermes_cli.moa_config import resolve_moa_preset
+        from korra_cli.config import load_config
+        from korra_cli.moa_config import resolve_moa_preset
 
         preset = resolve_moa_preset(load_config().get("moa") or {}, preset_name or None)
         agg = preset.get("aggregator") or {}
@@ -3784,7 +3784,7 @@ def _resolve_custom_runtime() -> Tuple[Optional[str], Optional[str], Optional[st
     environment.
     """
     try:
-        from hermes_cli.runtime_provider import resolve_runtime_provider
+        from korra_cli.runtime_provider import resolve_runtime_provider
 
         runtime = resolve_runtime_provider(requested="custom")
     except Exception as exc:
@@ -4012,7 +4012,7 @@ def _try_azure_foundry(
     """Resolve an Azure Foundry auxiliary client via the runtime resolver.
 
     Mirrors the ``_try_anthropic`` / ``_try_nous`` shape but delegates to
-    :func:`hermes_cli.runtime_provider._resolve_azure_foundry_runtime` —
+    :func:`korra_cli.runtime_provider._resolve_azure_foundry_runtime` —
     the same resolver the main agent uses — so:
 
     * ``auth_mode: api_key`` (default) gets the static
@@ -4032,9 +4032,9 @@ def _try_azure_foundry(
     Returns ``(client, model)`` or ``(None, None)`` on failure.
     """
     try:
-        from hermes_cli.runtime_provider import _resolve_azure_foundry_runtime
-        from hermes_cli.auth import AuthError
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.runtime_provider import _resolve_azure_foundry_runtime
+        from korra_cli.auth import AuthError
+        from korra_cli.config import load_config_readonly
     except ImportError:
         return None, None
 
@@ -4153,7 +4153,7 @@ def _try_anthropic(explicit_api_key: str = None) -> Tuple[Optional[Any], Optiona
     # see issue #52608.
     base_url = _pool_runtime_base_url(entry, _ANTHROPIC_DEFAULT_BASE_URL) if pool_present else _ANTHROPIC_DEFAULT_BASE_URL
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         cfg = load_config_readonly()
         model_cfg = cfg.get("model")
         if isinstance(model_cfg, dict):
@@ -4402,7 +4402,7 @@ def _is_payment_error(exc: Exception) -> bool:
 def _nous_portal_account_has_fresh_paid_access() -> bool:
     """Return True only when the fresh Nous account API says paid access is allowed."""
     try:
-        from hermes_cli.nous_account import get_nous_portal_account_info
+        from korra_cli.nous_account import get_nous_portal_account_info
 
         account_info = get_nous_portal_account_info(force_fresh=True)
         return account_info.paid_service_access is True
@@ -4543,7 +4543,7 @@ def _transient_retry_count() -> int:
     Best-effort: any config-read failure falls back to the default.
     """
     try:
-        from hermes_cli.config import cfg_get, load_config
+        from korra_cli.config import cfg_get, load_config
 
         val = cfg_get(load_config(), "auxiliary", "transient_retries")
         if val is None:
@@ -4904,7 +4904,7 @@ def _recoverable_pool_provider(
         rt_provider = rt.get("provider", "")
         if rt_provider and rt_provider not in {"", "auto", "custom"}:
             try:
-                from hermes_cli.auth import PROVIDER_REGISTRY
+                from korra_cli.auth import PROVIDER_REGISTRY
                 pconfig = PROVIDER_REGISTRY.get(rt_provider)
                 if pconfig and getattr(pconfig, "auth_type", None) == "api_key":
                     rt_base = str(getattr(pconfig, "inference_base_url", "") or "").rstrip("/")
@@ -5119,7 +5119,7 @@ def _refresh_provider_credentials(provider: str) -> bool:
     normalized = _normalize_aux_provider(provider)
     try:
         if normalized == "copilot":
-            from hermes_cli.copilot_auth import (
+            from korra_cli.copilot_auth import (
                 _jwt_cache,
                 _token_fingerprint,
                 exchange_copilot_token,
@@ -5134,7 +5134,7 @@ def _refresh_provider_credentials(provider: str) -> bool:
             _evict_cached_clients(normalized)
             return True
         if normalized == "openai-codex":
-            from hermes_cli.auth import resolve_codex_runtime_credentials
+            from korra_cli.auth import resolve_codex_runtime_credentials
 
             creds = resolve_codex_runtime_credentials(force_refresh=True)
             if not str(creds.get("api_key", "") or "").strip():
@@ -5142,7 +5142,7 @@ def _refresh_provider_credentials(provider: str) -> bool:
             _evict_cached_clients(normalized)
             return True
         if normalized == "nous":
-            from hermes_cli.auth import resolve_nous_runtime_credentials
+            from korra_cli.auth import resolve_nous_runtime_credentials
 
             creds = resolve_nous_runtime_credentials(
                 timeout_seconds=env_float("KORRA_NOUS_TIMEOUT_SECONDS", 15),
@@ -5174,7 +5174,7 @@ def _refresh_provider_credentials(provider: str) -> bool:
                 if refreshed is not None and str(getattr(refreshed, "runtime_api_key", "") or "").strip():
                     _evict_cached_clients(normalized)
                     return True
-            from hermes_cli.auth import resolve_xai_oauth_runtime_credentials
+            from korra_cli.auth import resolve_xai_oauth_runtime_credentials
 
             creds = resolve_xai_oauth_runtime_credentials(force_refresh=True)
             if not str(creds.get("api_key", "") or "").strip():
@@ -5311,7 +5311,7 @@ def _complete_fallback_destination(
             api_mode = "anthropic_messages"
         else:
             try:
-                from hermes_cli.runtime_provider import resolve_runtime_provider
+                from korra_cli.runtime_provider import resolve_runtime_provider
 
                 runtime = resolve_runtime_provider(
                     requested=provider,
@@ -6035,9 +6035,9 @@ def _fallback_entry_api_key(entry: Dict[str, Any]) -> Optional[str]:
 
     Delegates to the centralized, secret-scope-aware resolver so this path
     doesn't leak another profile's credential via a raw ``os.getenv`` under
-    gateway multiplexing (see ``hermes_cli.fallback_config.resolve_entry_api_key``).
+    gateway multiplexing (see ``korra_cli.fallback_config.resolve_entry_api_key``).
     """
-    from hermes_cli.fallback_config import resolve_entry_api_key
+    from korra_cli.fallback_config import resolve_entry_api_key
 
     return resolve_entry_api_key(entry)
 
@@ -6082,8 +6082,8 @@ def _try_main_fallback_chain(
     participate in the same order as the main agent.
     """
     try:
-        from hermes_cli.config import load_config_readonly
-        from hermes_cli.fallback_config import get_fallback_chain
+        from korra_cli.config import load_config_readonly
+        from korra_cli.fallback_config import get_fallback_chain
 
         chain = get_fallback_chain(load_config_readonly())
     except Exception as exc:
@@ -6276,7 +6276,7 @@ def _resolve_auto_route(
             # Named custom provider (custom_providers / providers dict entry).
             _has_named_entry = False
             try:
-                from hermes_cli.runtime_provider import _get_named_custom_provider
+                from korra_cli.runtime_provider import _get_named_custom_provider
                 _has_named_entry = _get_named_custom_provider(main_provider) is not None
             except ImportError:
                 pass
@@ -6446,7 +6446,7 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
     if base_url_host_matches(sync_base_url, "openrouter.ai"):
         async_kwargs["default_headers"] = build_or_headers()
     elif base_url_host_matches(sync_base_url, "githubcopilot.com"):
-        from hermes_cli.copilot_auth import copilot_request_headers
+        from korra_cli.copilot_auth import copilot_request_headers
 
         async_kwargs["default_headers"] = copilot_request_headers(
             is_agent_turn=True, is_vision=is_vision
@@ -6498,7 +6498,7 @@ def _normalize_resolved_model(model_name: Optional[str], provider: str) -> Optio
     if not model_name:
         return model_name
     try:
-        from hermes_cli.model_normalize import normalize_model_for_provider
+        from korra_cli.model_normalize import normalize_model_for_provider
 
         return normalize_model_for_provider(model_name, provider)
     except Exception:
@@ -6739,7 +6739,7 @@ def resolve_provider_client(
         # Dual-wire: anthropic/* → /v1/messages, everything else stays on
         # /chat/completions. Derive from the catalog id (not a stale
         # api_mode=chat_completions) so aux matches the main agent.
-        from hermes_cli.providers import nous_api_mode
+        from korra_cli.providers import nous_api_mode
 
         portal_mode = nous_api_mode(final_model)
         api_key_str = str(getattr(client, "api_key", "") or "")
@@ -6856,7 +6856,7 @@ def resolve_provider_client(
             if base_url_host_matches(custom_base, "api.kimi.com"):
                 extra["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
             elif base_url_host_matches(custom_base, "githubcopilot.com"):
-                from hermes_cli.copilot_auth import copilot_request_headers
+                from korra_cli.copilot_auth import copilot_request_headers
                 extra["default_headers"] = copilot_request_headers(
                     is_agent_turn=True, is_vision=is_vision
                 )
@@ -6900,7 +6900,7 @@ def resolve_provider_client(
 
     # ── Named custom providers (config.yaml providers dict / custom_providers list) ───
     try:
-        from hermes_cli.runtime_provider import _get_named_custom_provider
+        from korra_cli.runtime_provider import _get_named_custom_provider
         # When the raw requested name is an alias (``kimi`` → ``kimi-coding``)
         # and the user defined a ``custom_providers`` entry under that alias
         # name, the custom entry is the intended target — the built-in alias
@@ -7055,13 +7055,13 @@ def resolve_provider_client(
 
     # ── API-key providers from PROVIDER_REGISTRY ─────────────────────
     try:
-        from hermes_cli.auth import (
+        from korra_cli.auth import (
             PROVIDER_REGISTRY,
             resolve_api_key_provider_credentials,
             resolve_external_process_provider_credentials,
         )
     except ImportError:
-        logger.debug("hermes_cli.auth not available for provider %s", provider)
+        logger.debug("korra_cli.auth not available for provider %s", provider)
         return None, None
 
     pconfig = PROVIDER_REGISTRY.get(provider)
@@ -7098,7 +7098,7 @@ def resolve_provider_client(
         # (including a Go subscription key) is rejected. Route through the
         # keyless Zen runtime regardless of configured OpenCode credentials.
         try:
-            from hermes_cli.models import opencode_zen_free_runtime as _oc_free_rt
+            from korra_cli.models import opencode_zen_free_runtime as _oc_free_rt
             _free_rt = _oc_free_rt(provider, model)
         except Exception:
             _free_rt = None
@@ -7107,7 +7107,7 @@ def resolve_provider_client(
             raw_base_url = str(_free_rt["base_url"]).rstrip("/")
         if provider == "actual":
             try:
-                from hermes_cli.auth import (
+                from korra_cli.auth import (
                     ACTUAL_LOCAL_NOAUTH_PLACEHOLDER,
                     is_actual_local_base_url,
                     normalize_actual_base_url,
@@ -7151,7 +7151,7 @@ def resolve_provider_client(
         if base_url_host_matches(base_url, "api.kimi.com"):
             headers["User-Agent"] = "claude-code/0.1.0"
         elif base_url_host_matches(base_url, "githubcopilot.com"):
-            from hermes_cli.copilot_auth import copilot_request_headers
+            from korra_cli.copilot_auth import copilot_request_headers
 
             headers.update(copilot_request_headers(
                 is_agent_turn=True, is_vision=is_vision
@@ -7186,7 +7186,7 @@ def resolve_provider_client(
         # routes through responses.stream().
         if provider == "copilot" and final_model and not raw_codex:
             try:
-                from hermes_cli.models import _should_use_copilot_responses_api
+                from korra_cli.models import _should_use_copilot_responses_api
                 if _should_use_copilot_responses_api(final_model):
                     logger.debug(
                         "resolve_provider_client: copilot model %s needs "
@@ -7462,7 +7462,7 @@ def _main_model_supports_vision(provider: str, model: Optional[str]) -> bool:
     """
     try:
         from agent.image_routing import _lookup_supports_vision
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
     except ImportError:
         return True
     try:
@@ -8444,7 +8444,7 @@ def _resolve_task_provider_model(
         if normalized in {"", "auto", "custom"} or normalized.startswith("custom:"):
             return False
         try:
-            from hermes_cli.providers import get_provider
+            from korra_cli.providers import get_provider
 
             return get_provider(normalized) is not None
         except Exception:
@@ -8521,7 +8521,7 @@ def _get_auxiliary_task_config(task: str) -> Dict[str, Any]:
     """Return the config dict for auxiliary.<task>, or {} when unavailable.
 
     For plugin-registered auxiliary tasks (see
-    :meth:`hermes_cli.plugins.PluginContext.register_auxiliary_task`) the
+    :meth:`korra_cli.plugins.PluginContext.register_auxiliary_task`) the
     plugin's declared *defaults* are layered underneath the user's config
     so an unconfigured plugin task still works:
 
@@ -8532,7 +8532,7 @@ def _get_auxiliary_task_config(task: str) -> Dict[str, Any]:
     if not task:
         return {}
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
         config = load_config_readonly()
     except ImportError:
         return {}
@@ -8545,7 +8545,7 @@ def _get_auxiliary_task_config(task: str) -> Dict[str, Any]:
     # ctx.register_auxiliary_task(defaults={...}) takes effect without
     # forcing the user to write config.yaml entries.
     try:
-        from hermes_cli.plugins import get_plugin_auxiliary_tasks
+        from korra_cli.plugins import get_plugin_auxiliary_tasks
         for _entry in get_plugin_auxiliary_tasks():
             if _entry.get("key") == task:
                 _defaults = _entry.get("defaults") or {}
@@ -8587,7 +8587,7 @@ def _fast_lane_config_fields(
     - ``cap``: positive int from ``max_output_tokens``, else None.
       Booleans are config drift, never a cap (``int(True) == 1``).
     """
-    from hermes_constants import parse_reasoning_effort
+    from korra_constants import parse_reasoning_effort
 
     provider = str(config.get("provider") or "").strip().lower()
     model = str(config.get("model") or "").strip()
@@ -8745,7 +8745,7 @@ def _get_task_extra_body(task: str) -> Dict[str, Any]:
                     task,
                 )
                 return result
-            from hermes_constants import parse_reasoning_effort
+            from korra_constants import parse_reasoning_effort
             parsed = parse_reasoning_effort(effort)
             if parsed is not None:
                 result["reasoning"] = parsed
@@ -9045,7 +9045,7 @@ def _build_call_kwargs(
                 pass
         _nous_on_messages = False
         if _provider_norm in {"nous", "nous-portal", "nousresearch"}:
-            from hermes_cli.providers import nous_api_mode
+            from korra_cli.providers import nous_api_mode
 
             _nous_on_messages = nous_api_mode(model) == "anthropic_messages"
         if (
@@ -9176,7 +9176,7 @@ def _build_call_kwargs(
         effective_base = base_url or ""
         _nous_on_messages = False
         if provider_norm in {"nous", "nous-portal", "nousresearch"}:
-            from hermes_cli.providers import nous_api_mode
+            from korra_cli.providers import nous_api_mode
 
             _nous_on_messages = nous_api_mode(model) == "anthropic_messages"
         if (
@@ -9422,7 +9422,7 @@ def _provider_requires_stream(provider: str, base_url: Optional[str]) -> bool:
     if base_url_host_matches(_url, "copilot.tencent.com"):
         return True
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
         aux_cfg = (load_config() or {}).get("auxiliary", {})
         markers = aux_cfg.get("stream_only_base_urls") or []
         if isinstance(markers, (list, tuple)):

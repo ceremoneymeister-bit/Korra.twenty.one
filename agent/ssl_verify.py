@@ -7,7 +7,7 @@ import os
 import ssl
 from pathlib import Path
 from typing import Any, Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 

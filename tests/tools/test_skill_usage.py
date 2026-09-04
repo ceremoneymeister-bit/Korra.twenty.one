@@ -109,7 +109,7 @@ def test_skill_reuse_and_post_patch_reuse_are_derived_atomically(
     skills_home,
     monkeypatch,
 ):
-    from hermes_cli import lifecycle
+    from korra_cli import lifecycle
     from tools.skill_usage import bump_patch, bump_use, get_record, record_created
 
     events = []
@@ -142,7 +142,7 @@ def test_skill_reuse_and_post_patch_reuse_are_derived_atomically(
     assert record["last_reused_patch_generation"] == 1
 
 def test_skill_state_events_emit_only_for_real_transitions(skills_home, monkeypatch):
-    from hermes_cli import lifecycle
+    from korra_cli import lifecycle
     from tools.skill_usage import (
         STATE_ACTIVE,
         STATE_ARCHIVED,
@@ -178,7 +178,7 @@ def test_skill_event_is_not_emitted_when_usage_state_cannot_commit(
     skills_home,
     monkeypatch,
 ):
-    from hermes_cli import lifecycle
+    from korra_cli import lifecycle
     from tools import skill_usage
 
     events = []
@@ -198,7 +198,7 @@ def test_installed_lifecycle_uses_persisted_provenance_when_hub_lookup_misses(
     skills_home,
     monkeypatch,
 ):
-    from hermes_cli import lifecycle
+    from korra_cli import lifecycle
     from tools import skill_usage
 
     events = []
@@ -221,7 +221,7 @@ def test_created_skill_does_not_inherit_stale_identity_or_continuity(
     skills_home,
     monkeypatch,
 ):
-    from hermes_cli import lifecycle
+    from korra_cli import lifecycle
     from tools import skill_usage
 
     events = []
@@ -262,7 +262,7 @@ def test_malformed_usage_counters_recover_without_losing_patch_reuse(
     skills_home,
     monkeypatch,
 ):
-    from hermes_cli import lifecycle
+    from korra_cli import lifecycle
     from tools import skill_usage
 
     events = []

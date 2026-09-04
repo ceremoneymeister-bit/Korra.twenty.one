@@ -41,20 +41,20 @@ from typing import Any, Callable, List, Optional, Protocol
 
 # Add parent directory to path for imports BEFORE repo-level imports.
 # Without this, standalone invocations (e.g. after `hermes update` reloads
-# the module) fail with ModuleNotFoundError for hermes_time et al.
+# the module) fail with ModuleNotFoundError for korra_time et al.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from hermes_constants import get_hermes_home, korra_env, korra_env_pop
-from hermes_cli._subprocess_compat import windows_hide_flags
-from hermes_cli.config import (
+from korra_constants import get_hermes_home, korra_env, korra_env_pop
+from korra_cli._subprocess_compat import windows_hide_flags
+from korra_cli.config import (
     _expand_env_vars,
     cron_model_drift_axes,
     cron_model_drift_guard_enabled,
     load_config,
     resolve_cron_model_drift_defaults,
 )
-from hermes_cli.fallback_config import get_fallback_chain
-from hermes_time import now as _hermes_now
+from korra_cli.fallback_config import get_fallback_chain
+from korra_time import now as _hermes_now
 from agent.interrupt_compat import request_hard_interrupt
 from agent.delegation_context import (
     enter_non_dispatcher_owned_context,
@@ -584,10 +584,10 @@ def _merge_mcp_into_per_job_toolsets(per_job: list[str], cfg: dict) -> list[str]
     result = [t for t in per_job if t != "no_mcp"]
     if "no_mcp" in per_job:
         return result
-    # lazy import: avoid heavy hermes_cli import at cron module load (matches
+    # lazy import: avoid heavy korra_cli import at cron module load (matches
     # _resolve_cron_enabled_toolsets' fallback) and share one MCP-membership
     # computation with the gateway/CLI platform resolver.
-    from hermes_cli.tools_config import enabled_mcp_server_names
+    from korra_cli.tools_config import enabled_mcp_server_names
     enabled_mcp = enabled_mcp_server_names(cfg)
     if set(result) & enabled_mcp:
         return result
@@ -620,7 +620,7 @@ def _resolve_cron_enabled_toolsets(job: dict, cfg: dict) -> list[str] | None:
     if per_job:
         return _merge_mcp_into_per_job_toolsets(list(per_job), cfg or {})
     try:
-        from hermes_cli.tools_config import _get_platform_tools  # lazy: avoid heavy import at cron module load
+        from korra_cli.tools_config import _get_platform_tools  # lazy: avoid heavy import at cron module load
         return sorted(_get_platform_tools(cfg or {}, "cron"))
     except Exception as exc:
         logger.warning(
@@ -648,7 +648,7 @@ def _resolve_job_reasoning_config(job: dict, cfg: dict, model: str) -> dict | No
     Absent/None pin returns ``resolve_reasoning_config(cfg, model)``
     byte-identical, preserving pre-feature behavior.
     """
-    from hermes_constants import parse_reasoning_effort, resolve_reasoning_config
+    from korra_constants import parse_reasoning_effort, resolve_reasoning_config
 
     pinned = job.get("reasoning_effort")
     if pinned is not None:
@@ -1589,7 +1589,7 @@ def _reclaim_fds_best_effort() -> None:
     except Exception:
         pass
     try:
-        from hermes_cli.resource_limits import apply_nofile_soft_limit
+        from korra_cli.resource_limits import apply_nofile_soft_limit
 
         apply_nofile_soft_limit(None)
     except Exception:
@@ -2192,7 +2192,7 @@ def _plugin_cron_env_var(platform_name: str) -> str:
     support without editing this module.
     """
     try:
-        from hermes_cli.plugins import discover_plugins
+        from korra_cli.plugins import discover_plugins
         discover_plugins()  # idempotent
         from gateway.platform_registry import platform_registry
         entry = platform_registry.get(platform_name.lower())
@@ -2365,7 +2365,7 @@ def _iter_home_target_platforms():
     for name in _HOME_TARGET_ENV_VARS:
         yield name
     try:
-        from hermes_cli.plugins import discover_plugins
+        from korra_cli.plugins import discover_plugins
         discover_plugins()  # idempotent
         from gateway.platform_registry import platform_registry
         for entry in platform_registry.plugin_entries():
@@ -2444,7 +2444,7 @@ def cron_delivery_targets() -> list[dict]:
     # here are exactly the names that resolve at fire time — no gateway
     # config, no home channel needed.
     try:
-        from hermes_cli.profiles import list_profile_names
+        from korra_cli.profiles import list_profile_names
 
         for profile_name in list_profile_names():
             targets.append(
@@ -2652,8 +2652,8 @@ def _deliver_to_bot_chat(job: dict, content: str, profile: str) -> Optional[str]
         try:
             import importlib.util as _ilu
 
-            if _ilu.find_spec("hermes_cli") is not None:
-                argv = [sys.executable, "-m", "hermes_cli.main"]
+            if _ilu.find_spec("korra_cli") is not None:
+                argv = [sys.executable, "-m", "korra_cli.main"]
             else:
                 return "bot-chat delivery failed: hermes CLI not resolvable"
         except Exception:
@@ -2800,7 +2800,7 @@ def _resolve_bot_chat_target(job: dict, profile_arg: str) -> Optional[dict]:
         # Own profile: chat subprocess inherits HERMES_HOME, no name needed.
         return {"platform": BOT_CHAT_PLATFORM, "chat_id": "", "thread_id": None}
     try:
-        from hermes_cli.profiles import normalize_profile_name, profile_exists
+        from korra_cli.profiles import normalize_profile_name, profile_exists
 
         canon = normalize_profile_name(profile_arg)
         if not profile_exists(canon):
@@ -5116,10 +5116,10 @@ def _preflight_check_provider_key(job: dict, cfg: dict) -> Optional[str]:
     )
     model = job.get("model") or korra_env("KORRA_MODEL") or ""
 
-    from hermes_cli.auth import AuthError
+    from korra_cli.auth import AuthError
 
     try:
-        from hermes_cli.runtime_provider import resolve_runtime_provider
+        from korra_cli.runtime_provider import resolve_runtime_provider
 
         kwargs = {"requested": requested, "target_model": model}
         if job.get("base_url"):
@@ -5157,7 +5157,7 @@ def _delivery_platform_routed_from_primary_gateway(platform_name: str) -> bool:
     platform config leaks into this process's environment.
     """
     try:
-        from hermes_constants import get_default_hermes_root, get_hermes_home
+        from korra_constants import get_default_hermes_root, get_hermes_home
 
         primary_home = get_default_hermes_root()
         current_home = Path(get_hermes_home())
@@ -5181,7 +5181,7 @@ def _delivery_platform_routed_from_primary_gateway(platform_name: str) -> bool:
             return False
 
         from gateway.profile_routing import parse_profile_routes
-        from hermes_cli.profiles import profile_matches_home
+        from korra_cli.profiles import profile_matches_home
 
         platform_key = platform_name.lower()
         for route in parse_profile_routes(routes_raw):
@@ -5358,7 +5358,7 @@ def _cron_cleanup_timeout_seconds() -> float:
     """Return the wall-clock bound for cron post-run cleanup."""
     default = 10.0
     try:
-        from hermes_cli.config import load_config
+        from korra_cli.config import load_config
 
         cfg = load_config() or {}
         cron_cfg = cfg.get("cron", {}) if isinstance(cfg, dict) else {}
@@ -5536,7 +5536,7 @@ def run_job(
         # "no delivery target resolved". load_hermes_dotenv does not override
         # already-set vars, so the gateway's in-process tick is unaffected.
         try:
-            from hermes_cli.env_loader import load_hermes_dotenv
+            from korra_cli.env_loader import load_hermes_dotenv
 
             load_hermes_dotenv(hermes_home=_get_hermes_home())
         except Exception:
@@ -5908,7 +5908,7 @@ def run_job(
         # is set (mirrors startup), and the Bitwarden value-cache keeps the
         # forced re-pull off the network. load_hermes_dotenv also handles the
         # utf-8/latin-1 encoding fallback internally.
-        from hermes_cli.env_loader import (
+        from korra_cli.env_loader import (
             load_hermes_dotenv,
             reset_secret_source_cache,
         )
@@ -5944,7 +5944,7 @@ def run_job(
         _cfg = {}
         _model_cfg = {}
         try:
-            from hermes_cli.config import read_user_config_raw
+            from korra_cli.config import read_user_config_raw
             _cfg_path = str(_get_hermes_home() / "config.yaml")
             if os.path.exists(_cfg_path):
                 _cfg = read_user_config_raw(Path(_cfg_path))
@@ -5953,7 +5953,7 @@ def run_job(
                 # builds its own dict, so overlay managed values via the shared
                 # helper (fail-open, no-op when no managed scope).
                 try:
-                    from hermes_cli import managed_scope
+                    from korra_cli import managed_scope
                     _cfg = managed_scope.apply_managed_overlay(_cfg)
                 except Exception:
                     pass
@@ -5998,7 +5998,7 @@ def run_job(
 
         # Apply IPv4 preference if configured.
         try:
-            from hermes_constants import apply_ipv4_preference
+            from korra_constants import apply_ipv4_preference
             _net_cfg = _cfg.get("network", {})
             if isinstance(_net_cfg, dict) and _net_cfg.get("force_ipv4"):
                 apply_ipv4_preference(force=True)
@@ -6037,7 +6037,7 @@ def run_job(
         # Max iterations — resolved through resolve_turn_limit() so that
         # agent.max_turns: none / unlimited → sys.maxsize sentinel, and
         # explicit 0 / null / "none" are honored instead of skipped by `or`.
-        from hermes_cli.config import resolve_turn_limit as _resolve_turn_limit
+        from korra_cli.config import resolve_turn_limit as _resolve_turn_limit
         _mt = _cfg.get("agent", {}).get("max_turns")
         if _mt is None:
             _mt = _cfg.get("max_turns")
@@ -6046,11 +6046,11 @@ def run_job(
         # Provider routing
         pr = _cfg.get("provider_routing") or {}
 
-        from hermes_cli.runtime_provider import (
+        from korra_cli.runtime_provider import (
             resolve_runtime_provider,
             format_runtime_provider_error,
         )
-        from hermes_cli.auth import AuthError
+        from korra_cli.auth import AuthError
 
         # F8 runtime backstop: never resolve a stored provider/base_url pair that
         # would ship a named provider's stored credential to an off-host endpoint
@@ -6201,7 +6201,7 @@ def run_job(
                 if not fb_provider or not fb_model:
                     continue
                 try:
-                    from hermes_cli.fallback_config import resolve_entry_api_key
+                    from korra_cli.fallback_config import resolve_entry_api_key
 
                     fb_kwargs = {
                         "requested": fb_provider,
@@ -6381,7 +6381,7 @@ def run_job(
         # run forever.
         _session_db_timeout = _get_session_db_timeout()
         try:
-            from hermes_state import SessionDB
+            from korra_state import SessionDB
 
             if _session_db_timeout > 0:
                 _session_db_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -6686,7 +6686,7 @@ def run_job(
             # through and be delivered as a cron warning.
             _explainer_variants = []
             try:
-                from hermes_state import PERSISTENCE_ERROR_CAUSES as _causes
+                from korra_state import PERSISTENCE_ERROR_CAUSES as _causes
             except Exception:
                 _causes = ("locked", "disk", "unknown")
             for _cause in (None, *_causes):
@@ -6877,7 +6877,7 @@ def run_job(
             # session_lifecycle_statuses is the existing cost-bounded
             # classifier for exactly this shape. Only a POSITIVELY recognized
             # pathological status (see the status vocabulary in
-            # hermes_state's session_lifecycle_statuses docstring — keep the
+            # korra_state's session_lifecycle_statuses docstring — keep the
             # tuple below in sync when it grows) downgrades the booking: an
             # unknown value (newer classifier shape, test doubles) keeps the
             # historical reason, and so does a failed probe — the booking

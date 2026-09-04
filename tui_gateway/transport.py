@@ -28,7 +28,7 @@ import json
 import logging
 import threading
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 # Errno values that mean "the peer is gone" rather than "the host has a
 # real I/O problem".  Anything outside this set re-raises so it surfaces

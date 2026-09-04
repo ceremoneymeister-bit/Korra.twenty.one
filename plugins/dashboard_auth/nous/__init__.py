@@ -78,7 +78,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from hermes_cli.dashboard_auth import (
+from korra_cli.dashboard_auth import (
     DashboardAuthProvider,
     InvalidCodeError,
     LoginStart,
@@ -86,7 +86,7 @@ from hermes_cli.dashboard_auth import (
     RefreshExpiredError,
     Session,
 )
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -553,7 +553,7 @@ def _load_config_oauth_section() -> dict:
     through to ``{}`` so register() can rely on `.get(...)` access.
     """
     try:
-        from hermes_cli.config import cfg_get, load_config
+        from korra_cli.config import cfg_get, load_config
 
         cfg = load_config()
     except Exception as exc:  # noqa: BLE001 — broad catch is intentional
@@ -620,7 +620,7 @@ def register(ctx) -> None:
 
     Operator-owned dashboards (loopback / ``--insecure``) leave both
     surfaces unset, so this plugin is a no-op for them. The gate-
-    engagement layer (``hermes_cli.web_server.should_require_auth`` +
+    engagement layer (``korra_cli.web_server.should_require_auth`` +
     the fail-closed check in ``start_server``) handles the "public bind
     with zero providers" case independently.
     """

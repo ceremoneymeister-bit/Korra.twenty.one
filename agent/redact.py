@@ -19,7 +19,7 @@ from urllib.parse import unquote_plus
 # the terminal redactor still catches it. file_safety matches
 # case-insensitively (``resolved.name.lower()``); the lookup mirrors that.
 from agent.file_safety import _BLOCKED_PROJECT_ENV_BASENAMES as _ENV_FILE_BASENAMES
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ _SENSITIVE_BODY_KEYS = frozenset({
 # mid-session.  ON by default — secure default per issue #17691. Users who
 # need raw credential values in tool output (e.g. working on the redactor
 # itself) can opt out via `security.redact_secrets: false` in config.yaml
-# (bridged to this env var in hermes_cli/main.py, gateway/run.py, and
+# (bridged to this env var in korra_cli/main.py, gateway/run.py, and
 # cli.py) or `HERMES_REDACT_SECRETS=false` in ~/.hermes/.env. An opt-out
 # warning is logged at gateway and CLI startup so operators see the
 # downgrade — see `_log_redaction_status()` in gateway/run.py and cli.py.

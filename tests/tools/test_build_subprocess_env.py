@@ -43,7 +43,7 @@ def test_scrub_on_forwards_extra_like_sanitize_extra_env(monkeypatch):
 
 
 def test_no_scrub_inherit_profile_home_bridges_context_override(tmp_path):
-    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    from korra_constants import set_hermes_home_override, reset_hermes_home_override
 
     token = set_hermes_home_override(str(tmp_path))
     try:

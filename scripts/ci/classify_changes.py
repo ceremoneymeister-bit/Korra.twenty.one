@@ -105,7 +105,7 @@ _SCAN_FILES = {"setup.cfg", "pyproject.toml"}
 
 # MCP catalog files that require explicit security review.
 _MCP_CATALOG_PATHS = ("optional-mcps/",)
-_MCP_CATALOG_FILES = {"hermes_cli/mcp_catalog.py"}
+_MCP_CATALOG_FILES = {"korra_cli/mcp_catalog.py"}
 
 # Windows installer + its PowerShell tests. These only run on a Windows runner,
 # so they get their own lane rather than riding along with ``python``.

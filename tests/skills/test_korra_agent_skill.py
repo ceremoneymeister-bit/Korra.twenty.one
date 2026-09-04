@@ -87,7 +87,7 @@ def test_skill_does_not_route_to_upstream_docs(skill_text):
 SKILL_FILES = sorted(SKILL_DIR.rglob("*.md")) + sorted(SKILL_DIR.glob("templates/*"))
 
 # `hermes` в позиции команды: начало строки/после ``` или `$`, дальше подкоманда
-# или флаг. Env-переменные (HERMES_HOME), модули (hermes_cli) и путь установки
+# или флаг. Env-переменные (HERMES_HOME), модули (korra_cli) и путь установки
 # (/opt/hermes) под шаблон не попадают — они остаются намеренно.
 _HERMES_COMMAND = re.compile(r"(?:^|[`$(\s])hermes\s+(?:-|[a-z][a-z-]*\s)", re.MULTILINE)
 
@@ -108,7 +108,7 @@ def test_skill_files_do_not_teach_the_upstream_command(path: Path):
 def test_skill_files_do_not_invent_a_korra_home(path: Path):
     """`~/.korra` в коде не существует — такой путь был бы ложью.
 
-    Дефолт форка — `~/.hermes` (`hermes_constants._get_platform_default_hermes_home`),
+    Дефолт форка — `~/.hermes` (`korra_constants._get_platform_default_hermes_home`),
     в Docker-образе `HERMES_HOME=/opt/data`. Правильная форма в документации —
     `$HERMES_HOME`, и этот тест не даёт «обезбрендить» путь выдумкой.
     """

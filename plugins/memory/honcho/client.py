@@ -23,8 +23,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from agent.secret_scope import get_secret
-from hermes_constants import get_hermes_home, korra_env
-from hermes_cli.profiles import _get_default_hermes_home
+from korra_constants import get_hermes_home, korra_env
+from korra_cli.profiles import _get_default_hermes_home
 from plugins.plugin_utils import SingletonSlot
 from typing import Any, TYPE_CHECKING
 
@@ -88,7 +88,7 @@ def resolve_active_host() -> str:
         return explicit
 
     try:
-        from hermes_cli.profiles import get_active_profile_name
+        from korra_cli.profiles import get_active_profile_name
         profile = get_active_profile_name()
         profile_host = profile_host_key(profile)
     except Exception:
@@ -1096,7 +1096,7 @@ _honcho_json_timeout_memo: dict[str, tuple[int, float | None]] = {}
 def _config_yaml_timeout() -> float | None:
     """Read honcho.timeout / honcho.request_timeout via the cached config loader."""
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
 
         honcho_cfg = load_config_readonly().get("honcho", {})
         if isinstance(honcho_cfg, dict):
@@ -1281,7 +1281,7 @@ def get_honcho_client(config: HonchoClientConfig | None = None) -> Honcho:
         resolved_timeout = config.timeout
         if not resolved_base_url or resolved_timeout is None:
             try:
-                from hermes_cli.config import load_config
+                from korra_cli.config import load_config
                 hermes_cfg = load_config()
                 honcho_cfg = hermes_cfg.get("honcho", {})
                 if isinstance(honcho_cfg, dict):

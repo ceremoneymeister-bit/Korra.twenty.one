@@ -46,7 +46,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def _process_hermes_home() -> Path:
     val = korra_env("KORRA_HOME", "").strip()
     if val:
         return Path(val)
-    from hermes_constants import get_hermes_home
+    from korra_constants import get_hermes_home
 
     return get_hermes_home()
 
@@ -230,7 +230,7 @@ def check_state_db_integrity(home: Optional[Path] = None) -> str:
     Called only after an unclean death, because that is when the store may
     have been torn: a SIGKILL landing on a gateway mid-WAL-checkpoint can
     leave half-written b-tree pages behind (see
-    ``_enforce_macos_synchronous_full`` in :mod:`hermes_state` — macOS
+    ``_enforce_macos_synchronous_full`` in :mod:`korra_state` — macOS
     ``fsync`` guarantees neither data-on-platter nor write ordering).
 
     ``quick_check(1)`` stops at the first problem, so this costs ~2s on a
@@ -367,7 +367,7 @@ def read_prior_exit_label(profile_home: Path) -> str:
     """Container-boot helper: one-word summary of how the profile's last
     gateway life ended.  ``clean`` / ``unclean`` / ``unknown`` (no sentinel
     or never ran).  Read-only and exception-free — used by
-    ``hermes_cli.container_boot`` to annotate ``container-boot.log``.
+    ``korra_cli.container_boot`` to annotate ``container-boot.log``.
     """
     try:
         sentinel = _read_json(get_lifecycle_sentinel_path(profile_home))

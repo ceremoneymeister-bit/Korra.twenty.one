@@ -14,7 +14,7 @@ unsubscribe) and ``_format_kanban_event_text``.
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from hermes_cli import kanban_db as kb
+from korra_cli import kanban_db as kb
 from tui_gateway.server import (
     _collect_kanban_notifications,
     _format_kanban_event_text,
@@ -193,14 +193,14 @@ class TestCollectKanbanNotifications:
 
     def test_profile_scoped_session_reads_the_shared_board(self, tmp_path):
         """The kanban board is shared across profiles BY DESIGN (see the
-        hermes_cli/kanban_db.py module docstring): ``kanban_home()`` anchors on
+        korra_cli/kanban_db.py module docstring): ``kanban_home()`` anchors on
         ``get_default_hermes_root()``, which resolves the process env and
         ignores context-local profile overrides. A Desktop session bound to a
         non-launch profile (``session["profile_home"]``) must therefore still
         have its subscription claimed from the one shared board — the poller
         needs no per-profile home binding.
         """
-        from hermes_constants import (
+        from korra_constants import (
             reset_hermes_home_override,
             set_hermes_home_override,
         )

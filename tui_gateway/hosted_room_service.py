@@ -34,7 +34,7 @@ from tui_gateway.hosted_room_peer_transport import (
     PeerHostedRoomTransport,
     PeerMemberRoute,
 )
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 
 _HOSTED_ROOM_IDLE_FALLBACK_SECONDS = 5.0

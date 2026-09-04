@@ -1357,7 +1357,7 @@ def _make_cooldown_runner(monkeypatch, tmp_path, agent_cls, session_db, session_
     """Scaffolding for the restart-persistence tests: a fresh GatewayRunner
     wired to a REAL AsyncSessionDB facade (not a MagicMock) so the hygiene
     cooldown check/write paths exercise the actual SQLite-backed methods."""
-    from hermes_state import AsyncSessionDB
+    from korra_state import AsyncSessionDB
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
@@ -1450,7 +1450,7 @@ async def test_hygiene_compression_cooldown_survives_gateway_restart(
     assert the second runner still honors the cooldown — i.e. it does not
     re-instantiate a compression agent for the same failing session.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     gateway_run = importlib.import_module("gateway.run")
     session_id = "sess-restart"
@@ -1572,7 +1572,7 @@ async def test_hygiene_fence_cancel_records_cooldown_without_abort_flag(
     That used to skip the abort-cooldown block, so the next turn immediately
     re-armed hygiene and waited up to the 600s ceiling behind a doomed attempt.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     gateway_run = importlib.import_module("gateway.run")
     session_id = "sess-fence-cancel"
@@ -1652,7 +1652,7 @@ async def test_hygiene_does_not_wait_ceiling_after_fence_cancel(
     """Once the commit fence is cancelled, the host must stop extending the
     wait — even if the shielded worker is still alive and touching progress.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     worker_started = threading.Event()
     release_worker = threading.Event()
@@ -1725,7 +1725,7 @@ async def test_hygiene_skips_when_compression_already_in_flight(
     monkeypatch, tmp_path
 ):
     """Do not spawn a sibling hygiene compressor while a lock is already held."""
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     session_id = "sess-in-flight"
 
@@ -1766,7 +1766,7 @@ async def test_hygiene_unwind_records_cooldown(monkeypatch, tmp_path):
     ``except BaseException`` used to revoke the fence and re-raise with no
     cooldown, so the next turn after /restart re-triggered hygiene immediately.
     """
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     worker_started = threading.Event()
     release_worker = threading.Event()

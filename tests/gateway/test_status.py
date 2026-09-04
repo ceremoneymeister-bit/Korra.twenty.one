@@ -71,7 +71,7 @@ class TestGatewayPidState:
             record = {
                 "pid": pid,
                 "kind": "hermes-gateway",
-                "argv": ["python", "-m", "hermes_cli.main", "gateway"],
+                "argv": ["python", "-m", "korra_cli.main", "gateway"],
                 "start_time": start_time,
             }
             pid_path.write_text(json.dumps(record))
@@ -104,7 +104,7 @@ class TestGatewayPidState:
         pid_path.write_text(json.dumps({
             "pid": 99999,
             "kind": "hermes-gateway",
-            "argv": ["python", "-m", "hermes_cli.main", "gateway"],
+            "argv": ["python", "-m", "korra_cli.main", "gateway"],
             "start_time": 123,
         }))
 
@@ -116,7 +116,7 @@ class TestGatewayPidState:
             lambda: {
                 "pid": os.getpid(),
                 "kind": "hermes-gateway",
-                "argv": ["python", "-m", "hermes_cli.main", "gateway"],
+                "argv": ["python", "-m", "korra_cli.main", "gateway"],
                 "start_time": 123,
             },
         )
@@ -143,7 +143,7 @@ class TestGatewayPidState:
         for a named profile), gateway identity files should still be written to
         the process-level HERMES_HOME, not the profile's directory.  See #56986.
         """
-        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+        from korra_constants import set_hermes_home_override, reset_hermes_home_override
 
         process_home = tmp_path / "default"
         process_home.mkdir()
@@ -409,7 +409,7 @@ class TestTerminatePid:
 
         # taskkill is spawned with the no-window flag so the windowless
         # pythonw.exe backend doesn't flash a conhost window on force-kill.
-        from hermes_cli._subprocess_compat import windows_hide_flags
+        from korra_cli._subprocess_compat import windows_hide_flags
 
         assert calls == [
             (["taskkill", "/PID", "123", "/T", "/F"], True, True, 10, windows_hide_flags())
@@ -505,7 +505,7 @@ class TestScopedLocks:
             "pid": 873,
             "start_time": None,
             "kind": "hermes-gateway",
-            "argv": ["/Users/user/.hermes/hermes-agent/hermes_cli/main.py", "gateway", "run", "--replace"],
+            "argv": ["/Users/user/.hermes/hermes-agent/korra_cli/main.py", "gateway", "run", "--replace"],
         }))
 
         # Post-#21561 the liveness probe routes through
@@ -542,7 +542,7 @@ class TestScopedLocks:
             "pid": os.getpid(),
             "start_time": None,
             "kind": "hermes-gateway",
-            "argv": ["hermes_cli/main.py", "--profile", "milena", "gateway", "run", "--replace"],
+            "argv": ["korra_cli/main.py", "--profile", "milena", "gateway", "run", "--replace"],
             "scope": "discord-bot-token",
         }))
 
@@ -597,7 +597,7 @@ class TestScopedLocks:
             "pid": os.getpid(),
             "start_time": 111,
             "kind": "hermes-gateway",
-            "argv": ["hermes_cli/main.py", "gateway", "run", "--replace"],
+            "argv": ["korra_cli/main.py", "gateway", "run", "--replace"],
             "scope": "discord-bot-token",
         }))
 
@@ -915,7 +915,7 @@ class TestScopedLockTakeover:
         record = {
             "pid": pid,
             "kind": "hermes-gateway",
-            "argv": ["python", "-m", "hermes_cli.main", "gateway", "run"],
+            "argv": ["python", "-m", "korra_cli.main", "gateway", "run"],
             "start_time": start_time,
             "hermes_home": str(target_home),
         }
@@ -937,7 +937,7 @@ class TestScopedLockTakeover:
         monkeypatch.setattr(
             status,
             "_read_process_cmdline",
-            lambda _pid: "python -m hermes_cli.main gateway run",
+            lambda _pid: "python -m korra_cli.main gateway run",
         )
         calls = []
 
@@ -973,7 +973,7 @@ class TestScopedLockTakeover:
         monkeypatch.setattr(
             status,
             "_read_process_cmdline",
-            lambda _pid: "python -m hermes_cli.main gateway run",
+            lambda _pid: "python -m korra_cli.main gateway run",
         )
         calls = []
         monkeypatch.setattr(
@@ -1078,7 +1078,7 @@ class TestReadProcessCmdlinePsFallback:
 
         monkeypatch.setattr(status.Path, "read_bytes", fake_read_bytes)
         result = status._read_process_cmdline(12345)
-        assert "hermes_cli/main.py" in result
+        assert "korra_cli/main.py" in result
         assert calls == ["proc"]
 
 
@@ -1164,7 +1164,7 @@ class TestRespawnStormBreaker:
 class TestLaunchdPlistRespawnGovernance:
     def test_plist_has_throttle_interval(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        from hermes_cli.gateway import generate_launchd_plist
+        from korra_cli.gateway import generate_launchd_plist
 
         plist = generate_launchd_plist()
         assert "<key>ThrottleInterval</key>" in plist

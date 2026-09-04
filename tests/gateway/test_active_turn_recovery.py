@@ -40,7 +40,7 @@ def _make_store(tmp_path) -> SessionStore:
 
 
 def _make_db_store(tmp_path) -> SessionStore:
-    from hermes_state import SessionDB
+    from korra_state import SessionDB
 
     sessions_dir = tmp_path / "sessions"
     store = SessionStore(sessions_dir=sessions_dir, config=GatewayConfig())

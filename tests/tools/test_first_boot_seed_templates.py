@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hermes_cli.config_defaults import DEFAULT_CONFIG
+from korra_cli.config_defaults import DEFAULT_CONFIG
 
 REPO = Path(__file__).resolve().parents[2]
 KORRA_CONFIG_TEMPLATE = REPO / "korra-config.yaml.example"

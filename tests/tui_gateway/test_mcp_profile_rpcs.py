@@ -32,7 +32,7 @@ def hermes_root(tmp_path, monkeypatch):
     (root / "profiles" / "other").mkdir(parents=True)
     monkeypatch.setenv("HERMES_HOME", str(root))
     # Make sure no stale process-wide home override leaks in from another test.
-    from hermes_constants import get_hermes_home_override
+    from korra_constants import get_hermes_home_override
 
     assert get_hermes_home_override() is None
     return root

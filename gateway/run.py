@@ -13,12 +13,12 @@ Usage:
     python cli.py --gateway
 """
 
-# IMPORTANT: hermes_bootstrap must be the very first import — UTF-8 stdio
-# on Windows.  No-op on POSIX.  See hermes_bootstrap.py for full rationale.
+# IMPORTANT: korra_bootstrap must be the very first import — UTF-8 stdio
+# on Windows.  No-op on POSIX.  See korra_bootstrap.py for full rationale.
 try:
-    import hermes_bootstrap  # noqa: F401
+    import korra_bootstrap  # noqa: F401
 except ModuleNotFoundError:
-    # Graceful fallback when hermes_bootstrap isn't registered in the venv
+    # Graceful fallback when korra_bootstrap isn't registered in the venv
     # yet — happens during partial ``hermes update`` where git-reset landed
     # new code but ``uv pip install -e .`` didn't finish.  Missing bootstrap
     # means UTF-8 stdio setup is skipped on Windows; POSIX is unaffected.
@@ -27,7 +27,7 @@ except ModuleNotFoundError:
 # Хелперы совместимости имён переменных окружения нужны уже на этапе импорта
 # модуля (ниже по файлу они вызываются на верхнем уровне), поэтому импорт
 # стоит здесь — сразу за bootstrap, который обязан быть первым.
-from hermes_constants import korra_env, korra_env_present, korra_env_set, korra_env_pop, korra_env_setdefault
+from korra_constants import korra_env, korra_env_present, korra_env_set, korra_env_pop, korra_env_setdefault
 
 import asyncio
 import concurrent.futures
@@ -71,8 +71,8 @@ from agent.interrupt_compat import request_hard_interrupt
 from agent.turn_context import (
     compression_made_progress,
 )
-from hermes_cli.config import _is_ssh_remote_tilde_cwd, cfg_get
-from hermes_cli.fallback_config import get_fallback_chain
+from korra_cli.config import _is_ssh_remote_tilde_cwd, cfg_get
+from korra_cli.fallback_config import get_fallback_chain
 
 # --- Agent cache tuning ---------------------------------------------------
 # Bounds the per-session AIAgent cache to prevent unbounded growth in
@@ -1270,7 +1270,7 @@ def _telegramize_command_mentions(text: str, platform: Any) -> str:
     if platform_value != "telegram":
         return text
 
-    from hermes_cli.commands import _sanitize_telegram_name
+    from korra_cli.commands import _sanitize_telegram_name
 
     def _replace(match: re.Match[str]) -> str:
         sanitized = _sanitize_telegram_name(match.group(1))
@@ -1284,7 +1284,7 @@ def _telegramize_command_mentions(text: str, platform: Any) -> str:
 # after a gateway restart when the user's next message starts new work.
 #
 # The freshness signal is the timestamp of the last transcript row, which
-# ``hermes_state.get_messages`` carries on every persisted message.  This
+# ``korra_state.get_messages`` carries on every persisted message.  This
 # handles the two auto-continue cases uniformly:
 #   * resume_pending (gateway restart/shutdown watchdog marked the session)
 #   * tool-tail     (last persisted message is a tool result the agent
@@ -1832,7 +1832,7 @@ def _build_gateway_agent_history(
     timestamp prefix from its stored metadata.
     """
 
-    from hermes_time import get_timezone as _get_msg_tz
+    from korra_time import get_timezone as _get_msg_tz
     from gateway.message_timestamps import (
         render_user_content_with_timestamp as _render_msg_ts,
     )
@@ -2321,14 +2321,14 @@ _ensure_ssl_certs()
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Resolve Hermes home directory (respects HERMES_HOME override)
-from hermes_constants import get_hermes_home, get_hermes_home_override
+from korra_constants import get_hermes_home, get_hermes_home_override
 from utils import atomic_json_write, base_url_hostname, is_truthy_value
 _hermes_home = get_hermes_home()
 
 # Load environment variables from ~/.hermes/.env first.
 # User-managed env files should override stale shell exports on restart.
 from dotenv import load_dotenv  # noqa: F401  # backward-compat for tests that monkeypatch this symbol
-from hermes_cli.env_loader import load_hermes_dotenv
+from korra_cli.env_loader import load_hermes_dotenv
 _env_path = _hermes_home / '.env'
 load_hermes_dotenv(hermes_home=_hermes_home, project_env=Path(__file__).resolve().parents[1] / '.env')
 
@@ -2368,7 +2368,7 @@ def _bridge_max_turns_from_config(home: "Path") -> None:
     if not config_path.exists():
         return
     try:
-        from hermes_cli.config import _expand_env_vars, read_user_config_raw
+        from korra_cli.config import _expand_env_vars, read_user_config_raw
         # Presence-sensitive env bridge: raw read is deliberate (only keys the
         # user actually wrote get bridged); overlay + expansion applied below.
         cfg = read_user_config_raw(config_path)
@@ -2380,7 +2380,7 @@ def _bridge_max_turns_from_config(home: "Path") -> None:
         # overlay a managed agent.max_turns / timezone / redact_secrets would be
         # replaced by the user's value after the first turn. Fail-open.
         try:
-            from hermes_cli import managed_scope
+            from korra_cli import managed_scope
             cfg = managed_scope.apply_managed_overlay(cfg)
         except Exception:
             pass
@@ -2414,13 +2414,13 @@ def _bridge_max_turns_from_config(home: "Path") -> None:
 def _current_max_iterations() -> int:
     """Return the current per-turn iteration budget after runtime env refresh.
 
-    Goes through :func:`hermes_cli.config.resolve_turn_limit` so that
+    Goes through :func:`korra_cli.config.resolve_turn_limit` so that
     ``agent.max_turns: none`` / ``unlimited`` (bridged into
     ``HERMES_MAX_ITERATIONS`` as a string) resolves to the unlimited sentinel
     instead of crashing ``int()``.
     """
     _reload_runtime_env_preserving_config_authority()
-    from hermes_cli.config import resolve_turn_limit as _resolve_turn_limit
+    from korra_cli.config import resolve_turn_limit as _resolve_turn_limit
     return _resolve_turn_limit(korra_env("KORRA_MAX_ITERATIONS"))
 
 
@@ -2467,7 +2467,7 @@ class HygieneTurnHoldExceeded(Exception):
 
 def _multiplex_profile_homes(config: object) -> list[tuple[str, "Path"]]:
     """Return the authoritative profile set for one multiplex gateway config."""
-    from hermes_cli.profiles import profiles_to_serve
+    from korra_cli.profiles import profiles_to_serve
 
     return list(
         profiles_to_serve(
@@ -2566,13 +2566,13 @@ def _profile_runtime_scope(profile_home: "Path"):
     returns an isolated dict — which is what keeps subprocesses (MCP, kanban)
     from inheriting cross-profile secrets.
     """
-    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    from korra_constants import set_hermes_home_override, reset_hermes_home_override
     from agent.secret_scope import (
         build_profile_secret_scope,
         set_secret_scope,
         reset_secret_scope,
     )
-    from hermes_cli.env_loader import hydrate_profile_secret_sources
+    from korra_cli.env_loader import hydrate_profile_secret_sources
 
     home_token = set_hermes_home_override(str(profile_home))
     hydrate_profile_secret_sources(Path(profile_home))
@@ -2645,7 +2645,7 @@ _DOCKER_MEDIA_OUTPUT_CONTAINER_PATHS = {"/output", "/outputs"}
 # This env var is internal bridge plumbing, not a user-facing configuration
 # source. Initialize it from the canonical config default after dotenv loading
 # so an ambient process/.env value can never control lease safety on its own.
-from hermes_cli.config_defaults import DEFAULT_CONFIG as _DEFAULT_CONFIG
+from korra_cli.config_defaults import DEFAULT_CONFIG as _DEFAULT_CONFIG
 
 korra_env_set(
     os.environ, "KORRA_TURN_LEASE_TIMEOUT", str(_DEFAULT_CONFIG["agent"]["gateway_turn_lease_timeout"])
@@ -2659,7 +2659,7 @@ if _config_path.exists():
         # Presence-sensitive env bridge: raw read is deliberate — only keys the
         # user actually wrote may be bridged (a defaults merge would export the
         # whole DEFAULT_CONFIG into the env). Overlay + expansion applied below.
-        from hermes_cli.config import _expand_env_vars, read_user_config_raw
+        from korra_cli.config import _expand_env_vars, read_user_config_raw
         _cfg = read_user_config_raw(_config_path)
         # Expand ${ENV_VAR} references before bridging to env vars.
         _cfg = _expand_env_vars(_cfg)
@@ -2672,7 +2672,7 @@ if _config_path.exists():
         # overlay every HERMES_*/TERMINAL_* env var below would carry the user's
         # value even when an administrator pinned it. Fail-open via the helper.
         try:
-            from hermes_cli import managed_scope
+            from korra_cli import managed_scope
             _cfg = managed_scope.apply_managed_overlay(_cfg)
         except Exception:
             pass
@@ -2759,7 +2759,7 @@ if _config_path.exists():
             # below via the plugin auxiliary registry.
             _aux_bridged_keys = {"vision", "approval"}
             try:
-                from hermes_cli.plugins import get_plugin_auxiliary_tasks
+                from korra_cli.plugins import get_plugin_auxiliary_tasks
                 for _entry in get_plugin_auxiliary_tasks():
                     _aux_bridged_keys.add(_entry["key"])
             except Exception:
@@ -2919,7 +2919,7 @@ if _config_path.exists():
 
 # Apply IPv4 preference if configured (before any HTTP clients are created).
 try:
-    from hermes_constants import apply_ipv4_preference
+    from korra_constants import apply_ipv4_preference
     _network_cfg = (_cfg if '_cfg' in dir() else {}).get("network", {})
     if isinstance(_network_cfg, dict) and _network_cfg.get("force_ipv4"):
         apply_ipv4_preference(force=True)
@@ -2928,14 +2928,14 @@ except Exception as _bootstrap_exc:
 
 # Validate config structure early — log warnings so gateway operators see problems
 try:
-    from hermes_cli.config import print_config_warnings
+    from korra_cli.config import print_config_warnings
     print_config_warnings()
 except Exception as _bootstrap_exc:
     print(f"  Warning: config validation failed: {_bootstrap_exc}", file=sys.stderr)
 
 # Warn if user has deprecated MESSAGING_CWD / TERMINAL_CWD in .env
 try:
-    from hermes_cli.config import warn_deprecated_cwd_env_vars
+    from korra_cli.config import warn_deprecated_cwd_env_vars
     warn_deprecated_cwd_env_vars()
 except Exception as _bootstrap_exc:
     print(f"  Warning: deprecation check failed: {_bootstrap_exc}", file=sys.stderr)
@@ -3167,12 +3167,12 @@ def _resolve_runtime_agent_kwargs() -> dict:
     resolve credentials using the fallback provider chain from config.yaml
     before giving up.
     """
-    from hermes_cli.runtime_provider import (
+    from korra_cli.runtime_provider import (
         resolve_runtime_provider,
         format_runtime_provider_error,
         _get_model_config,
     )
-    from hermes_cli.auth import AuthError, is_rate_limited_auth_error
+    from korra_cli.auth import AuthError, is_rate_limited_auth_error
 
     try:
         runtime = resolve_runtime_provider()
@@ -3290,7 +3290,7 @@ def _resolve_gateway_model_context(model: Optional[str] = None) -> _GatewayModel
                 configured_provider = provider
                 configured_base_url = base_url
             try:
-                from hermes_cli.config import get_compatible_custom_providers
+                from korra_cli.config import get_compatible_custom_providers
 
                 custom_providers = get_compatible_custom_providers(data)
             except Exception:
@@ -3308,7 +3308,7 @@ def _resolve_gateway_model_context(model: Optional[str] = None) -> _GatewayModel
 
     if config_context_length is not None:
         try:
-            from hermes_cli.route_identity import should_clear_context_pin
+            from korra_cli.route_identity import should_clear_context_pin
 
             if should_clear_context_pin(
                 configured_model,
@@ -3324,7 +3324,7 @@ def _resolve_gateway_model_context(model: Optional[str] = None) -> _GatewayModel
 
     if config_context_length is None and custom_providers and base_url:
         try:
-            from hermes_cli.config import get_custom_provider_context_length
+            from korra_cli.config import get_custom_provider_context_length
 
             custom_ctx = get_custom_provider_context_length(
                 model=resolved_model,
@@ -3362,7 +3362,7 @@ def _resolve_gateway_model_context(model: Optional[str] = None) -> _GatewayModel
 
 def _resolve_runtime_agent_kwargs_for_provider(provider: str) -> dict:
     """Resolve runtime credentials for a specific provider (e.g. from channel override)."""
-    from hermes_cli.runtime_provider import (
+    from korra_cli.runtime_provider import (
         resolve_runtime_provider,
         format_runtime_provider_error,
     )
@@ -3387,7 +3387,7 @@ def _resolve_runtime_agent_kwargs_for_provider(provider: str) -> dict:
 
 def _deep_merge_request_overrides(base: Optional[dict], override: Optional[dict]) -> dict:
     """Merge request_overrides dicts, deep-merging nested dictionaries."""
-    from hermes_cli.config import _deep_merge
+    from korra_cli.config import _deep_merge
 
     base_dict = dict(base or {})
     override_dict = dict(override or {})
@@ -3417,7 +3417,7 @@ def _credential_pool_for_provider(provider: Optional[str]):
 
 def _try_resolve_fallback_provider() -> dict | None:
     """Attempt to resolve credentials from the fallback_model/fallback_providers config."""
-    from hermes_cli.runtime_provider import resolve_runtime_provider
+    from korra_cli.runtime_provider import resolve_runtime_provider
     try:
         # Canonical gateway loader: managed overlay + ${VAR} expansion +
         # root-model normalization now reach the fallback chain too (a raw
@@ -3428,7 +3428,7 @@ def _try_resolve_fallback_provider() -> dict | None:
             return None
         for entry in fb_list:
             try:
-                from hermes_cli.fallback_config import resolve_entry_api_key
+                from korra_cli.fallback_config import resolve_entry_api_key
 
                 runtime = resolve_runtime_provider(
                     requested=entry.get("provider"),
@@ -3993,7 +3993,7 @@ def _check_unavailable_skill(command_name: str) -> str | None:
                     )
 
         # Check optional skills (shipped with repo but not installed)
-        from hermes_constants import get_optional_skills_dir
+        from korra_constants import get_optional_skills_dir
         repo_root = Path(__file__).resolve().parent.parent
         optional_dir = get_optional_skills_dir(repo_root / "optional-skills")
         if optional_dir.exists():
@@ -4046,7 +4046,7 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
     ``_hermes_home`` still see their fixture). Callers handling multiplexed
     profile routes may pass that profile's explicit config path. The canonical
     path shares the mtime-keyed raw-yaml cache from
-    ``hermes_cli.config.read_raw_config``.
+    ``korra_cli.config.read_raw_config``.
 
     Managed scope is overlaid on the result (via the shared helper) so the
     gateway honors administrator-pinned values — neither read_raw_config nor a
@@ -4057,7 +4057,7 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
     raw: dict = {}
     used_canonical = False
     try:
-        from hermes_cli.config import get_config_path, read_raw_config
+        from korra_cli.config import get_config_path, read_raw_config
         # Fast path: if _hermes_home agrees with the canonical config
         # location, reuse the shared cache. Otherwise fall through to a
         # direct read (keeps test fixtures with a monkeypatched
@@ -4083,7 +4083,7 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
     # so the overlay is required on both paths for the gateway to honor pinned
     # values. Helper is fail-open and a no-op when no managed scope exists.
     try:
-        from hermes_cli import managed_scope
+        from korra_cli import managed_scope
         raw = managed_scope.apply_managed_overlay(raw if isinstance(raw, dict) else {})
     except Exception:
         pass
@@ -4096,7 +4096,7 @@ def _load_gateway_config(config_path: "Path | None" = None) -> dict:
     # gateway would resolve an empty model for ``model: {name: <id>}`` configs
     # while the CLI resolves it correctly. See issue #34500. Fail-open.
     try:
-        from hermes_cli.config import _normalize_root_model_keys
+        from korra_cli.config import _normalize_root_model_keys
         raw = _normalize_root_model_keys(raw)
     except Exception:
         pass
@@ -4116,7 +4116,7 @@ def _checkpoint_agent_kwargs(config: dict | None) -> dict:
     elif not isinstance(cp_cfg, dict):
         cp_cfg = {}
 
-    from hermes_cli.config import DEFAULT_CONFIG
+    from korra_cli.config import DEFAULT_CONFIG
     defaults = DEFAULT_CONFIG["checkpoints"]
     return {
         "checkpoints_enabled": cp_cfg.get("enabled", defaults["enabled"]),
@@ -4146,7 +4146,7 @@ def _load_gateway_runtime_config() -> dict:
     cfg = _load_gateway_config()
     if not isinstance(cfg, dict) or not cfg:
         return {}
-    from hermes_cli.config import _expand_env_vars
+    from korra_cli.config import _expand_env_vars
 
     expanded = _expand_env_vars(cfg)
     return expanded if isinstance(expanded, dict) else {}
@@ -4226,7 +4226,7 @@ def _resolve_hermes_bin() -> Optional[list[str]]:
 
     Tries in order:
     1. ``shutil.which("hermes")`` — standard PATH lookup
-    2. ``sys.executable -m hermes_cli.main`` — fallback when Hermes is running
+    2. ``sys.executable -m korra_cli.main`` — fallback when Hermes is running
        from a venv/module invocation and the ``hermes`` shim is not on PATH
 
     Returns argv parts ready for quoting/joining, or ``None`` if neither works.
@@ -4240,8 +4240,8 @@ def _resolve_hermes_bin() -> Optional[list[str]]:
     try:
         import importlib.util
 
-        if importlib.util.find_spec("hermes_cli") is not None:
-            return [sys.executable, "-m", "hermes_cli.main"]
+        if importlib.util.find_spec("korra_cli") is not None:
+            return [sys.executable, "-m", "korra_cli.main"]
     except Exception:
         pass
 
@@ -7687,7 +7687,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # so operators knowingly enable tirith or configure auxiliary.approval
         # for unattended gateways.
         try:
-            from hermes_cli.config import load_config as _load_full_config
+            from korra_cli.config import load_config as _load_full_config
             _appr_cfg = _load_full_config()
             _appr_mode = str(
                 cfg_get(_appr_cfg, "approvals", "mode", default="manual") or "manual"
@@ -7732,7 +7732,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # HERMES_HOME silently lost /resume, /title, /history, /branch, and
             # session search without this.  The underlying cause (usually
             # "locking protocol" from NFS) is now also captured by
-            # hermes_state.get_last_init_error() for slash-command error strings.
+            # korra_state.get_last_init_error() for slash-command error strings.
             logger.warning("SQLite session store not available: %s", e)
             # Surface the failure to the user via their home channel(s) once
             # the gateway connects.  Without this, state.db corruption or
@@ -7749,7 +7749,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # but never raised.
         if self._session_db is not None:
             try:
-                from hermes_cli.config import load_config as _load_full_config
+                from korra_cli.config import load_config as _load_full_config
                 _sess_cfg = (_load_full_config().get("sessions") or {})
                 # Non-destructive stale-session archive, independent of prune.
                 if _sess_cfg.get("auto_archive", False):
@@ -7775,7 +7775,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # under ~/.hermes/checkpoints/.  Opt-in via checkpoints.auto_prune,
         # idempotent via .last_prune marker.
         try:
-            from hermes_cli.config import load_config as _load_full_config
+            from korra_cli.config import load_config as _load_full_config
             _ckpt_cfg = (_load_full_config().get("checkpoints") or {})
             if _ckpt_cfg.get("auto_prune", False):
                 from tools.checkpoint_manager import maybe_auto_prune_checkpoints
@@ -7860,7 +7860,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         failure after recording that recoverable state so ``__init__`` can
         record ``_session_db_init_error`` for the #88235 broadcast.
         """
-        from hermes_state import AsyncSessionDB, SessionDB, _default_db_path
+        from korra_state import AsyncSessionDB, SessionDB, _default_db_path
         from gateway.session_db_recovery import RecoverableHandleCache
 
         path = Path(_default_db_path())
@@ -8143,9 +8143,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return
 
         # Push the global voice.auto_tts default (config.yaml) onto the adapter.
-        # Lazy import to avoid adding a module-level dep from gateway → hermes_cli.
+        # Lazy import to avoid adding a module-level dep from gateway → korra_cli.
         try:
-            from hermes_cli.config import load_config as _load_full_config
+            from korra_cli.config import load_config as _load_full_config
             _full_cfg = _load_full_config()
             _auto_tts_default = bool(
                 (_full_cfg.get("voice") or {}).get("auto_tts", False)
@@ -8418,7 +8418,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 _profile = source.profile
             else:
                 try:
-                    from hermes_cli.profiles import get_active_profile_name
+                    from korra_cli.profiles import get_active_profile_name
                     _profile = get_active_profile_name() or "default"
                 except Exception:
                     _profile = None
@@ -8777,7 +8777,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # doesn't fail with "model must be a non-empty string".
         if not model and runtime_kwargs.get("provider"):
             try:
-                from hermes_cli.models import get_default_model_for_provider
+                from korra_cli.models import get_default_model_for_provider
                 model = get_default_model_for_provider(runtime_kwargs["provider"])
                 if model:
                     logger.info(
@@ -8838,7 +8838,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         the fast-mode overrides, so a provider's configured request body still
         reaches the model on the gateway turn path.
         """
-        from hermes_cli.models import resolve_fast_mode_overrides
+        from korra_cli.models import resolve_fast_mode_overrides
 
         runtime = {
             "api_key": runtime_kwargs.get("api_key"),
@@ -9761,7 +9761,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if not session_id:
             return False
         try:
-            from hermes_cli.goals import GoalManager
+            from korra_cli.goals import GoalManager
             return GoalManager(session_id=session_id).is_active()
         except Exception as exc:
             logger.debug("goal continuation: active-state recheck failed: %s", exc)
@@ -10024,7 +10024,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         Checks HERMES_EPHEMERAL_SYSTEM_PROMPT env var first, then
         ``display.personality`` / ``agent.system_prompt`` in config.yaml.
         """
-        from hermes_cli.config import resolve_ephemeral_system_prompt_from_config
+        from korra_cli.config import resolve_ephemeral_system_prompt_from_config
 
         prompt = korra_env("KORRA_EPHEMERAL_SYSTEM_PROMPT", "")
         if prompt:
@@ -10044,14 +10044,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """Resolve model for this channel: channel_overrides else global default.
 
         Delegates the precedence rule to
-        :func:`hermes_cli.model_switch.resolve_effective_model` (session
+        :func:`korra_cli.model_switch.resolve_effective_model` (session
         override > channel override > global default) — the single owner
         shared with the API server, so the two surfaces cannot diverge
         again (see 7dd00bb47d).  This call site has no session tier: session
         /model overrides are applied later by
         ``_apply_session_model_override`` on the resolved runtime.
         """
-        from hermes_cli.model_switch import resolve_effective_model
+        from korra_cli.model_switch import resolve_effective_model
 
         override = None
         config = getattr(self, "config", None)
@@ -10102,7 +10102,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """Load reasoning effort from config.yaml, respecting per-model overrides.
 
         Thin wrapper over the shared chokepoint
-        :func:`hermes_constants.resolve_reasoning_config` (per-model override >
+        :func:`korra_constants.resolve_reasoning_config` (per-model override >
         global ``agent.reasoning_effort``; YAML boolean False = disabled).
         Closes #21256.
 
@@ -10110,7 +10110,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             model: The effective model for the calling session. When empty,
                    the config's ``model.default`` is used.
         """
-        from hermes_constants import resolve_reasoning_config
+        from korra_constants import resolve_reasoning_config
         cfg = _load_gateway_runtime_config()
         return resolve_reasoning_config(cfg, model)
 
@@ -10549,7 +10549,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         that genuinely lacks the key clears the chain.
         """
         try:
-            from hermes_cli.config import read_user_config_raw
+            from korra_cli.config import read_user_config_raw
             cfg_path = _hermes_home / "config.yaml"
             if not cfg_path.exists():
                 self._fallback_model = None
@@ -10560,12 +10560,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # below fixes the managed-scope/${VAR} drift without losing that.
             cfg = read_user_config_raw(cfg_path)
             try:
-                from hermes_cli import managed_scope
+                from korra_cli import managed_scope
                 cfg = managed_scope.apply_managed_overlay(cfg)
             except Exception:
                 pass
             try:
-                from hermes_cli.config import _expand_env_vars
+                from korra_cli.config import _expand_env_vars
                 expanded = _expand_env_vars(cfg)
                 if isinstance(expanded, dict):
                     cfg = expanded
@@ -10627,7 +10627,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     def _get_max_concurrent_sessions(self) -> Optional[int]:
         """Return the configured active chat session cap, if enabled."""
         try:
-            from hermes_cli.active_sessions import resolve_max_concurrent_sessions
+            from korra_cli.active_sessions import resolve_max_concurrent_sessions
 
             return resolve_max_concurrent_sessions(getattr(self, "config", None))
         except Exception:
@@ -10643,7 +10643,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         active_count = self._running_agent_count()
         if active_count < max_sessions:
             return None
-        from hermes_cli.active_sessions import active_session_limit_message
+        from korra_cli.active_sessions import active_session_limit_message
 
         return active_session_limit_message(active_count, max_sessions)
 
@@ -10659,7 +10659,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if local_limit_message is not None:
             return None, local_limit_message
         try:
-            from hermes_cli.active_sessions import try_acquire_active_session
+            from korra_cli.active_sessions import try_acquire_active_session
 
             platform = source.platform.value if source and source.platform else "gateway"
             return try_acquire_active_session(
@@ -11876,7 +11876,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         reason: str,
         **extra: Any,
     ) -> None:
-        """Run hermes_cli.lifecycle.finalize_session off the event loop, bounded.
+        """Run korra_cli.lifecycle.finalize_session off the event loop, bounded.
 
         finalize_session() invokes plugin ``on_session_finalize`` hooks
         synchronously; a hook doing heavy blocking work (observability trace
@@ -11888,7 +11888,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
 
         def _call() -> None:
-            from hermes_cli.lifecycle import finalize_session
+            from korra_cli.lifecycle import finalize_session
 
             finalize_session(
                 session_id=session_id,
@@ -12142,7 +12142,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # that triggered the /restart command closing its console.
         if sys.platform == "win32":
             import textwrap
-            from hermes_cli._subprocess_compat import (
+            from korra_cli._subprocess_compat import (
                 windows_detach_flags_without_breakaway,
                 windows_detach_popen_kwargs,
             )
@@ -12151,7 +12151,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             watcher = textwrap.dedent(
                 """
                 import os, subprocess, sys, time
-                from hermes_cli._subprocess_compat import windows_detach_flags_without_breakaway
+                from korra_cli._subprocess_compat import windows_detach_flags_without_breakaway
                 pid = int(sys.argv[1])
                 restart_after_s = float(sys.argv[2])
                 cmd = sys.argv[3:]
@@ -12235,7 +12235,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # ERROR_ACCESS_DENIED, surfaced as OSError.  Retry once without the
             # breakaway bit, preserving argv and the scrubbed watcher_env.
             # Mirrors the canonical fallback in
-            # hermes_cli/gateway_windows.py::_spawn_detached.
+            # korra_cli/gateway_windows.py::_spawn_detached.
             try:
                 subprocess.Popen(
                     watcher_argv,
@@ -13538,7 +13538,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             pass
         try:
-            from hermes_cli.profiles import get_active_profile_name
+            from korra_cli.profiles import get_active_profile_name
             _profile = get_active_profile_name()
             if _profile and _profile != "default":
                 logger.info("Active profile: %s", _profile)
@@ -13554,7 +13554,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             pass
         try:
-            from hermes_cli.config import load_config
+            from korra_cli.config import load_config
             from agent.monitoring.gateway_health_export import start_gateway_health_export
             self._gateway_health_export_runtime = start_gateway_health_export(load_config())
             if getattr(self._gateway_health_export_runtime, "enabled", False):
@@ -13566,9 +13566,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # in gateway.log and `hermes status` surfaces it; we do NOT block
         # startup or surface it inline to user messages, since the gateway
         # operator is the one who can act on it (uninstall the package,
-        # rotate credentials).  See hermes_cli/security_advisories.py.
+        # rotate credentials).  See korra_cli/security_advisories.py.
         try:
-            from hermes_cli.security_advisories import (
+            from korra_cli.security_advisories import (
                 detect_compromised,
                 gateway_log_message,
             )
@@ -13680,12 +13680,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         
         # Discover Python plugins before shell hooks so plugin block
         # decisions take precedence in tie cases.  The CLI startup path
-        # does this via an explicit call in hermes_cli/main.py; the
+        # does this via an explicit call in korra_cli/main.py; the
         # gateway lazily imports run_agent inside per-request handlers,
         # so the discover_plugins() side-effect in model_tools.py is NOT
         # guaranteed to have run by the time we reach this point.
         try:
-            from hermes_cli.plugins import discover_plugins
+            from korra_cli.plugins import discover_plugins
             discover_plugins()
         except Exception:
             logger.warning(
@@ -13734,7 +13734,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # hooks_auto_accept here would just duplicate that lookup.
         # Failures are logged but must never block gateway startup.
         try:
-            from hermes_cli.config import load_config
+            from korra_cli.config import load_config
             from agent.shell_hooks import register_from_config
             _hooks_cfg = load_config()
             register_from_config(_hooks_cfg, accept_hooks=False)
@@ -15457,7 +15457,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     def _active_profile_name(self) -> str:
         """Return the profile name this gateway represents."""
         try:
-            from hermes_cli.profiles import get_active_profile_name
+            from korra_cli.profiles import get_active_profile_name
             return get_active_profile_name() or "default"
         except Exception:
             return "default"
@@ -16572,7 +16572,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return 0
 
         try:
-            from hermes_cli.profiles import get_active_profile_name
+            from korra_cli.profiles import get_active_profile_name
         except Exception:
             return 0
 
@@ -16655,7 +16655,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         with _profile_runtime_scope(profile_home):
             profile_runtime_cfg = _load_gateway_runtime_config()
-            from hermes_cli.plugins import discover_plugins
+            from korra_cli.plugins import discover_plugins
 
             discover_plugins()
             profile_cfg = load_gateway_config()
@@ -16865,7 +16865,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             while self._running:
                 adapter = None
                 try:
-                    from hermes_cli.profiles import get_profile_dir
+                    from korra_cli.profiles import get_profile_dir
                     from gateway.config import load_gateway_config
 
                     profile_home = get_profile_dir(profile_name)
@@ -17102,7 +17102,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         handler in ``_profile_runtime_scope`` so allowlists/tokens from that
         profile's ``.env`` are visible to ``get_secret`` / authz.
         """
-        from hermes_cli.profiles import get_profile_dir
+        from korra_cli.profiles import get_profile_dir
 
         try:
             profile_home = get_profile_dir(profile_name)
@@ -17194,7 +17194,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     async def _handle_gateway_platform_event(self, event: dict, source) -> None:
         """Authorize and publish one normalized adapter event to plugin hooks."""
         try:
-            from hermes_cli.lifecycle import has_hook, invoke_hook
+            from korra_cli.lifecycle import has_hook, invoke_hook
 
             if not has_hook("gateway_platform_event"):
                 return
@@ -17207,7 +17207,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     def _make_profile_platform_event_handler(self, profile_name: str):
         """Bind platform-event auth and hook dispatch to one multiplex profile."""
-        from hermes_cli.profiles import get_profile_dir
+        from korra_cli.profiles import get_profile_dir
 
         try:
             profile_home = get_profile_dir(profile_name)
@@ -17743,7 +17743,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     #
     # Replaces the historical hand-written per-command if-chain: each
     # command's mid-run behavior is declared on its CommandDef
-    # (busy_policy / busy_handler in hermes_cli/commands.py) and resolved
+    # (busy_policy / busy_handler in korra_cli/commands.py) and resolved
     # here through a single handler table. Reply strings are byte-identical
     # to the old chain.
     # ------------------------------------------------------------------
@@ -17878,7 +17878,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         return ""
 
     async def _busy_egress_command(self, event: MessageEvent, quick_key: str, source):
-        from hermes_cli.proxy_cli import format_status_text
+        from korra_cli.proxy_cli import format_status_text
 
         return format_status_text()
 
@@ -18142,7 +18142,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # (e.g. customer handover ingest) without triggering the pairing flow.
         if not is_internal:
             try:
-                from hermes_cli.lifecycle import invoke_hook as _invoke_hook
+                from korra_cli.lifecycle import invoke_hook as _invoke_hook
                 _hook_results = _invoke_hook(
                     "pre_gateway_dispatch",
                     event=event,
@@ -18278,7 +18278,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     _estop_cmd = None
                 if _estop_cmd:
                     try:
-                        from hermes_cli.commands import (
+                        from korra_cli.commands import (
                             resolve_command as _resolve_estop_cmd,
                         )
                         _estop_allow = _resolve_estop_cmd(_estop_cmd) is not None
@@ -18345,7 +18345,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 _recognized_cmd = None
                 if cmd:
                     try:
-                        from hermes_cli.commands import resolve_command as _resolve_update_cmd
+                        from korra_cli.commands import resolve_command as _resolve_update_cmd
                     except Exception:
                         _resolve_update_cmd = None
                     if _resolve_update_cmd is not None:
@@ -18656,10 +18656,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if self._is_session_running(_quick_key):
             # Resolve the command once; every command's mid-run behavior is
             # declared on its CommandDef (busy_policy / busy_handler in
-            # hermes_cli/commands.py) and dispatched through the single
+            # korra_cli/commands.py) and dispatched through the single
             # resolver _dispatch_busy_slash_command below — no per-command
             # if-chain here.
-            from hermes_cli.commands import resolve_command as _resolve_cmd_inner
+            from korra_cli.commands import resolve_command as _resolve_cmd_inner
             _evt_cmd = event.get_command()
             _cmd_def_inner = _resolve_cmd_inner(_evt_cmd) if _evt_cmd else None
 
@@ -18862,7 +18862,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Check for commands
         command = event.get_command()
 
-        from hermes_cli.commands import (
+        from korra_cli.commands import (
             GATEWAY_KNOWN_COMMANDS,
             is_gateway_known_command,
             resolve_command as _resolve_cmd,
@@ -18920,7 +18920,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # hatches for a live agent.
         if command and is_gateway_known_command(canonical):
             try:
-                from hermes_cli.plugins import fire_pre_command_hook
+                from korra_cli.plugins import fire_pre_command_hook
                 fire_pre_command_hook(
                     surface="gateway",
                     command=str(canonical),
@@ -19021,7 +19021,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return await self._handle_whoami_command(event)
 
         if canonical == "egress":
-            from hermes_cli.proxy_cli import format_status_text
+            from korra_cli.proxy_cli import format_status_text
 
             return format_status_text()
 
@@ -19102,7 +19102,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # so role alternation is preserved). The live agent scans the
             # project with its own read-only tools and writes/updates
             # AGENTS.md via write_file. No engine, works on any backend.
-            from hermes_cli.init_command import build_init_prompt_for_cwd
+            from korra_cli.init_command import build_init_prompt_for_cwd
 
             _init_notes = event.get_command_args().strip()
             try:
@@ -19284,11 +19284,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # default MoA preset, then restore the prior model. To *switch* to a
             # MoA preset for the session, pick it from the model picker (MoA
             # presets surface as a virtual "Mixture of Agents" provider).
-            from hermes_cli.moa_config import (
+            from korra_cli.moa_config import (
                 moa_usage,
                 normalize_moa_config,
             )
-            from hermes_cli.config import load_config
+            from korra_cli.config import load_config
 
             moa_payload = event.get_command_args().strip()
             if not moa_payload:
@@ -19386,10 +19386,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Plugin-registered slash commands
         if command:
             try:
-                from hermes_cli.plugins import get_plugin_command_handler
+                from korra_cli.plugins import get_plugin_command_handler
                 # Normalize underscores to hyphens so Telegram's underscored
                 # autocomplete form matches plugin commands registered with
-                # hyphens. See hermes_cli/commands.py:_build_telegram_menu.
+                # hyphens. See korra_cli/commands.py:_build_telegram_menu.
                 plugin_handler = get_plugin_command_handler(command.replace("_", "-"))
                 if plugin_handler:
                     user_args = event.get_command_args().strip()
@@ -20027,7 +20027,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         if _msg_raw_ctx is not None:
                             _msg_config_ctx = int(_msg_raw_ctx)
                     try:
-                        from hermes_cli.config import get_compatible_custom_providers
+                        from korra_cli.config import get_compatible_custom_providers
 
                         _msg_custom_providers = get_compatible_custom_providers(_msg_cfg)
                     except Exception:
@@ -20059,7 +20059,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     _msg_config_ctx = None
                 if _msg_config_ctx is not None and isinstance(_msg_model_cfg, dict):
                     try:
-                        from hermes_cli.route_identity import should_clear_context_pin_async
+                        from korra_cli.route_identity import should_clear_context_pin_async
 
                         if await should_clear_context_pin_async(
                             None,  # model match already checked above
@@ -20074,7 +20074,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         _msg_config_ctx = None
                 if _msg_custom_providers and _msg_base_url:
                     try:
-                        from hermes_cli.config import get_custom_provider_context_length
+                        from korra_cli.config import get_custom_provider_context_length
 
                         _msg_custom_ctx = get_custom_provider_context_length(
                             model=_msg_model,
@@ -20259,7 +20259,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     def _install_plugin_message_injector(self) -> None:
         """Publish this live gateway's plugin message scheduler."""
-        from hermes_cli.plugins import get_plugin_manager
+        from korra_cli.plugins import get_plugin_manager
 
         get_plugin_manager().set_gateway_message_injector(
             self,
@@ -20268,7 +20268,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     def _clear_plugin_message_injector(self) -> None:
         """Remove this runner's scheduler without clobbering a newer owner."""
-        from hermes_cli.plugins import get_plugin_manager
+        from korra_cli.plugins import get_plugin_manager
 
         get_plugin_manager().clear_gateway_message_injector(self)
 
@@ -20953,7 +20953,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
                 if _hyg_config_context_length is not None:
                     try:
-                        from hermes_cli.route_identity import should_clear_context_pin_async
+                        from korra_cli.route_identity import should_clear_context_pin_async
 
                         if await should_clear_context_pin_async(
                             _hyg_configured_model,
@@ -20973,7 +20973,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 if _hyg_config_context_length is None and _hyg_base_url:
                     try:
                         try:
-                            from hermes_cli.config import (
+                            from korra_cli.config import (
                                 get_compatible_custom_providers as _gw_gcp,
                                 get_custom_provider_context_length as _gw_gccl,
                             )
@@ -21189,7 +21189,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                                 # mutation; otherwise keep the historical fast
                                 # path (no provider init, no best-effort hook)
                                 # for hygiene.
-                                from hermes_cli.config import load_config as _load_cfg
+                                from korra_cli.config import load_config as _load_cfg
                                 from utils import is_truthy_value as _is_truthy
 
                                 _hyg_checkpoint_required = _is_truthy(
@@ -22104,7 +22104,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # human-readable prefix the model sees) is gated behind
         # gateway.message_timestamps.enabled — default OFF.
         try:
-            from hermes_time import get_timezone as _get_evt_tz
+            from korra_time import get_timezone as _get_evt_tz
             from gateway.message_timestamps import (
                 coerce_message_timestamp as _coerce_msg_ts,
                 render_user_content_with_timestamp as _render_msg_ts,
@@ -23192,7 +23192,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             origin = None
         try:
-            from hermes_cli.suggestions_cmd import handle_suggestions_command
+            from korra_cli.suggestions_cmd import handle_suggestions_command
 
             return handle_suggestions_command(args, origin=origin, surface="gateway")
         except Exception as e:
@@ -23225,12 +23225,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             origin = None
         try:
-            from hermes_cli.blueprint_cmd import handle_blueprint_command
+            from korra_cli.blueprint_cmd import handle_blueprint_command
 
             return handle_blueprint_command(args, origin=origin, surface="gateway")
         except Exception as e:
             logger.debug("blueprint command failed: %s", e)
-            from hermes_cli.blueprint_cmd import BlueprintCommandResult
+            from korra_cli.blueprint_cmd import BlueprintCommandResult
 
             return BlueprintCommandResult(f"Cron blueprint command failed: {e}")
 
@@ -23242,7 +23242,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         GatewayRunner.config is a GatewayConfig dataclass, not the full
         user config mapping. Top-level config blocks such as ``goals`` are
-        therefore only available through hermes_cli.config.load_config().
+        therefore only available through korra_cli.config.load_config().
         """
         try:
             goals_cfg = (
@@ -23251,7 +23251,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 else getattr(self.config, "goals", {}) or {}
             )
             if not goals_cfg:
-                from hermes_cli.config import load_config
+                from korra_cli.config import load_config
 
                 goals_cfg = (load_config() or {}).get("goals") or {}
             return int(goals_cfg.get("max_turns", 20) or 20)
@@ -23269,7 +23269,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         dropped warm-up is a bounded stall, never a crash.
         """
         try:
-            from hermes_cli.goals import _get_session_db as _warm_goals_db
+            from korra_cli.goals import _get_session_db as _warm_goals_db
 
             await self._run_in_executor_with_context(_warm_goals_db)
         except Exception as exc:
@@ -23282,7 +23282,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         goals module can't be loaded.
         """
         try:
-            from hermes_cli.goals import GoalManager
+            from korra_cli.goals import GoalManager
         except Exception as exc:
             logger.debug("goal manager unavailable: %s", exc)
             return None, None
@@ -23313,7 +23313,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         Returns ``(manager, session_entry)`` or ``(None, None)``.
         """
         try:
-            from hermes_cli.heartbeat import HeartbeatManager
+            from korra_cli.heartbeat import HeartbeatManager
         except Exception as exc:
             logger.debug("heartbeat manager unavailable: %s", exc)
             return None, None
@@ -23362,7 +23362,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if existing is not None and not existing.done():
             return
 
-        from hermes_cli.heartbeat import POLL_SECONDS
+        from korra_cli.heartbeat import POLL_SECONDS
 
         async def _poll_loop():
             while True:
@@ -23380,7 +23380,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         # Busy sessions coalesce their tick to the next idle poll.
                         if quick_key in self._running_agents:
                             continue
-                        from hermes_cli.heartbeat import HeartbeatManager
+                        from korra_cli.heartbeat import HeartbeatManager
 
                         mgr = HeartbeatManager(session_id=session_id)
                         if not mgr.has_heartbeat():
@@ -23500,7 +23500,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         queue and takes priority naturally.
         """
         try:
-            from hermes_cli.goals import GoalManager
+            from korra_cli.goals import GoalManager
         except Exception as exc:
             logger.debug("goal continuation: goals module unavailable: %s", exc)
             return
@@ -23522,7 +23522,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return
 
         try:
-            from hermes_cli.goals import gather_background_processes as _gather_bg
+            from korra_cli.goals import gather_background_processes as _gather_bg
             _bg_procs = _gather_bg()
         except Exception:
             _bg_procs = None
@@ -23653,7 +23653,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         next tick; the idle wakeup watcher fires it when due.
         """
         try:
-            from hermes_cli.loops import LoopManager
+            from korra_cli.loops import LoopManager
         except Exception as exc:
             logger.debug("loop completion: loops module unavailable: %s", exc)
             return
@@ -23700,7 +23700,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         warned_no_route: set = set()
         while self._running:
             try:
-                from hermes_cli.loops import (
+                from korra_cli.loops import (
                     LoopManager,
                     goal_blocks_loop_tick,
                     list_active_loops,
@@ -24422,7 +24422,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         than trusted. When absent, falls back to standard
         ``platform_toolsets.<platform>`` resolution.
         """
-        from hermes_cli.tools_config import _get_platform_tools
+        from korra_cli.tools_config import _get_platform_tools
 
         override = None
         try:
@@ -25219,7 +25219,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     async def _disable_telegram_topic_mode_for_chat(self, source: SessionSource) -> str:
         """Cleanly disable topic mode for a chat via /topic off."""
         if not self._session_db:
-            from hermes_state import format_session_db_unavailable
+            from korra_state import format_session_db_unavailable
             return format_session_db_unavailable(prefix=t("gateway.shared.session_db_unavailable_prefix"))
         chat_id = str(source.chat_id or "")
         if not chat_id:
@@ -25674,7 +25674,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         (e.g. a prior "Always Approve" click) without a gateway restart.
         """
         try:
-            from hermes_cli.config import load_config
+            from korra_cli.config import load_config
             cfg = load_config()
             return cfg if isinstance(cfg, dict) else {}
         except Exception:
@@ -26374,7 +26374,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if not error:
             return
 
-        from hermes_state import classify_persistence_error, format_session_db_unavailable
+        from korra_state import classify_persistence_error, format_session_db_unavailable
 
         cause = classify_persistence_error(error)
         hint = format_session_db_unavailable()
@@ -26561,7 +26561,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         try:
             from agent.image_routing import decide_image_input_mode
             from agent.auxiliary_client import _read_main_model, _read_main_provider
-            from hermes_cli.config import load_config
+            from korra_cli.config import load_config
 
             cfg = user_config if isinstance(user_config, dict) else load_config()
             resolved_provider = (provider or "").strip()
@@ -28979,7 +28979,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             slack_tools = "1" if _slack_tools_loaded() else "0"
 
         try:
-            from hermes_constants import display_hermes_home
+            from korra_constants import display_hermes_home
 
             home_display = str(display_hermes_home())
         except Exception:
@@ -29388,7 +29388,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 logger.debug("Pressure release failed for %s: %s", key, _e)
             del agent
         try:
-            from hermes_cli.mem_trim import trim_memory
+            from korra_cli.mem_trim import trim_memory
 
             trim_memory(force=True, reason="agent_cache_pressure")
         except Exception:
@@ -30079,12 +30079,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
           3. The active profile (the multiplexer's own home).
         """
         from gateway.profile_routing import ProfileRouteRejected
-        from hermes_cli.profiles import (
+        from korra_cli.profiles import (
             get_active_profile_name,
             get_profile_dir,
             profile_exists,
         )
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         
         # Track whether a profile was explicitly requested (vs. falling back to default)
         explicit_profile = None
@@ -31352,7 +31352,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 # Aggregators (openrouter, etc.) keep the vendor/model slug, so
                 # they're left untouched.
                 try:
-                    from hermes_cli.model_normalize import (
+                    from korra_cli.model_normalize import (
                         _AGGREGATOR_PROVIDERS,
                         normalize_model_for_provider,
                     )
@@ -31465,7 +31465,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 _pending_cmd_word = _pending_parts[0][1:].lower() if _pending_parts else ""
                 if _pending_cmd_word:
                     try:
-                        from hermes_cli.commands import resolve_command as _rc_pending
+                        from korra_cli.commands import resolve_command as _rc_pending
                         if _rc_pending(_pending_cmd_word):
                             logger.info(
                                 "Discarding command '/%s' from pending queue — "
@@ -32023,7 +32023,7 @@ def _run_planned_stop_watcher(
     This watcher runs on every platform (cheap, defensive) and bridges
     the gap on Windows by translating a filesystem marker into the
     same shutdown-handler invocation a real SIGTERM would have produced
-    on POSIX. The CLI's ``hermes_cli.gateway_windows.stop()`` writes
+    on POSIX. The CLI's ``korra_cli.gateway_windows.stop()`` writes
     the marker via ``write_planned_stop_marker(pid)`` and then waits
     for the gateway PID to exit; this watcher is what makes that
     exit happen cleanly.
@@ -32115,7 +32115,7 @@ def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop
     from tools.environments.local import cleanup_terminal_temp_cache
     from tools.bot_mode_dm import cleanup_bot_dm_cache
     from tools.bot_relay import cleanup_bot_relay_artifacts
-    from hermes_cli.debug import _sweep_expired_pastes
+    from korra_cli.debug import _sweep_expired_pastes
 
     IMAGE_CACHE_EVERY = 60   # ticks — once per hour at default 60s interval
     CHANNEL_DIR_EVERY = 5    # ticks — every 5 minutes
@@ -32242,8 +32242,8 @@ def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop
         # SQLite connections are thread-bound and this runs off-loop.
         if tick_count % AUTO_ARCHIVE_EVERY == 0:
             try:
-                from hermes_cli.config import load_config as _load_full_config
-                from hermes_state import SessionDB
+                from korra_cli.config import load_config as _load_full_config
+                from korra_state import SessionDB
                 _sess_cfg = (_load_full_config().get("sessions") or {})
                 if _sess_cfg.get("auto_archive", False):
                     _adb = SessionDB()
@@ -32262,7 +32262,7 @@ def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop
         # the 60s housekeeping cadence does not create a trim storm.
         if tick_count % MEMORY_TRIM_EVERY == 0:
             try:
-                from hermes_cli.mem_trim import trim_memory
+                from korra_cli.mem_trim import trim_memory
 
                 trim_memory(reason="messaging gateway housekeeping")
             except Exception as exc:
@@ -32287,7 +32287,7 @@ def _start_cron_ticker(stop_event: threading.Event, adapters=None, loop=None, in
     (``cron.scheduler_provider``); the gateway resolves a provider and runs its
     ``start()`` directly (see ``start_gateway``). This shim runs ONLY the
     built-in in-process tick loop, exactly as before, for any external caller
-    or test that still references this symbol (e.g. hermes_cli/debug.py). It no
+    or test that still references this symbol (e.g. korra_cli/debug.py). It no
     longer runs gateway housekeeping — that moved to
     ``_start_gateway_housekeeping``.
     """
@@ -32611,7 +32611,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     # gateway.run from CLI/tool code do not poison HERMES_EXEC_ASK.
     korra_env_set(os.environ, "KORRA_EXEC_ASK", "1")
 
-    from hermes_cli.resource_limits import apply_nofile_soft_limit
+    from korra_cli.resource_limits import apply_nofile_soft_limit
 
     apply_nofile_soft_limit()
 
@@ -32817,7 +32817,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     # Centralized logging — agent.log (INFO+), errors.log (WARNING+),
     # and gateway.log (INFO+, gateway-component records only).
     # Idempotent, so repeated calls from AIAgent.__init__ won't duplicate.
-    from hermes_logging import setup_logging, _safe_stderr
+    from korra_logging import setup_logging, _safe_stderr
     setup_logging(hermes_home=_hermes_home, mode="gateway")
 
     # Startup security posture audit — warn-on-load, never blocks. Surfaces
@@ -32825,11 +32825,11 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     # so operators get the "you're exposed" signal the June 2026 MCP-config
     # persistence campaign victims never had.
     try:
-        from hermes_cli.security_audit_startup import log_startup_security_warnings
+        from korra_cli.security_audit_startup import log_startup_security_warnings
 
         _audit_cfg = None
         try:
-            from hermes_cli.config import read_raw_config
+            from korra_cli.config import read_raw_config
 
             _audit_cfg = read_raw_config()
         except Exception:
@@ -33069,7 +33069,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
 
         def _pause_for_update_handler() -> dict:
             try:
-                from hermes_cli.gateway import _get_restart_drain_timeout
+                from korra_cli.gateway import _get_restart_drain_timeout
 
                 _drain = float(_get_restart_drain_timeout())
             except Exception:
@@ -33118,7 +33118,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
         logger.debug("Lifecycle ledger startup record failed: %s", _lc_exc)
 
     try:
-        from hermes_cli.nous_auth_keepalive import start_nous_auth_keepalive
+        from korra_cli.nous_auth_keepalive import start_nous_auth_keepalive
 
         start_nous_auth_keepalive()
     except Exception as exc:
@@ -33327,7 +33327,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
             logger.debug("Control socket stop failed (non-fatal)", exc_info=True)
 
     try:
-        from hermes_cli.nous_auth_keepalive import stop_nous_auth_keepalive
+        from korra_cli.nous_auth_keepalive import stop_nous_auth_keepalive
 
         stop_nous_auth_keepalive()
     except Exception:
@@ -33402,7 +33402,7 @@ def main():
     """CLI entry point for the gateway."""
     # Advertise the agent harness to child processes (AI_AGENT is the
     # cross-agent standard; HERMES_AGENT the Hermes-specific marker — see
-    # _advertise_agent_env in hermes_cli/main.py, kept inline here to avoid
+    # _advertise_agent_env in korra_cli/main.py, kept inline here to avoid
     # importing that module's startup side effects). The value must equal our
     # public agent-harness registry id (``hermes-agent``) — standard-var
     # matching is exact. setdefault so an outer harness is never clobbered.
@@ -33413,7 +33413,7 @@ def main():
     # self-attach, so update-time reapers can identify this gateway (and its
     # child tree dies with it on Windows). Best-effort — never blocks startup.
     try:
-        from hermes_cli.process_identity import (
+        from korra_cli.process_identity import (
             attach_self_to_kill_on_close_job,
             register_self,
         )
@@ -33426,7 +33426,7 @@ def main():
     # Force UTF-8 stdio on Windows — gateway logs and startup banner would
     # otherwise UnicodeEncodeError on cp1252 consoles.  No-op on POSIX.
     try:
-        from hermes_cli.stdio import configure_windows_stdio
+        from korra_cli.stdio import configure_windows_stdio
         configure_windows_stdio()
     except Exception:
         pass
@@ -33499,7 +33499,7 @@ def _exit_after_graceful_shutdown(exit_code: int) -> None:
 
     Logging IS drained here: the rotating file handlers are driven by an
     async ``QueueListener`` on a dedicated thread (see
-    ``hermes_logging._register_queued_handler``), so records emitted right
+    ``korra_logging._register_queued_handler``), so records emitted right
     before shutdown may still be sitting in the in-memory queue. ``os._exit``
     below bypasses ``atexit``, so the ``atexit``-registered listener drain
     never runs on this path — we drain explicitly (bounded, via
@@ -33538,7 +33538,7 @@ def _exit_after_graceful_shutdown(exit_code: int) -> None:
     # join would re-freeze the shutdown. drain_log_queue() no-ops when logging
     # never initialized a queue (very early aborts), so this is always safe.
     try:
-        from hermes_logging import drain_log_queue
+        from korra_logging import drain_log_queue
         drain_log_queue(timeout=1.0)
     except Exception:
         pass

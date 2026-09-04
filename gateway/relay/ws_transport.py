@@ -40,7 +40,7 @@ from gateway.platforms.base import MessageEvent, MessageType
 from gateway.session import SessionSource
 from gateway.relay.descriptor import CapabilityDescriptor
 from gateway.relay.transport import InboundHandler
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ def _normalize_slack_parent_command(
     if not parent_parts or parent_parts[0] != "/hermes":
         return text, message_type
 
-    from hermes_cli.commands import slack_subcommand_map
+    from korra_cli.commands import slack_subcommand_map
 
     payload = parent_parts[1].strip() if len(parent_parts) > 1 else ""
     subcommand_map = slack_subcommand_map()

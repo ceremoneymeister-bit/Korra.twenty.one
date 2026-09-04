@@ -1,7 +1,7 @@
 """Tests for CLI resume model restoration and /model session persistence.
 
 Covers _restore_session_model, _persist_model_switch_to_session (cli.py) and
-SessionDB.session_gateway_runtime (hermes_state.py) — the round trip that
+SessionDB.session_gateway_runtime (korra_state.py) — the round trip that
 makes `hermes --resume` reopen a session on the model/provider it actually
 used instead of the ambient config default (#57588-class, #79536).
 """
@@ -11,7 +11,7 @@ import json
 import pytest
 
 import cli as cli_mod
-from hermes_state import SessionDB
+from korra_state import SessionDB
 
 
 def _make_stub(**overrides):
@@ -230,7 +230,7 @@ def test_persist_model_switch_heals_bare_custom(monkeypatch):
         base_url = "https://my-endpoint/v1"
         api_mode = ""
 
-    import hermes_cli.runtime_provider as rp
+    import korra_cli.runtime_provider as rp
     monkeypatch.setattr(rp, "canonical_custom_identity",
                         lambda base_url=None, model=None: "custom:myendpoint")
     stub = _make_stub(_session_db=_DB(), session_id="s1")
@@ -249,7 +249,7 @@ def test_persist_model_switch_heals_bare_custom(monkeypatch):
 
 def test_restore_session_model_heals_bare_custom_stored_rows(monkeypatch):
     """Rows persisted by older builds may carry bare 'custom' — heal or drop."""
-    import hermes_cli.runtime_provider as rp
+    import korra_cli.runtime_provider as rp
     monkeypatch.setattr(rp, "canonical_custom_identity",
                         lambda base_url=None, model=None: None)
     stub = _make_stub()

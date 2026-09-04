@@ -5,13 +5,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional
-from hermes_constants import korra_env
+from korra_constants import korra_env
 
 
 def _hermes_home_path() -> Path:
     """Resolve the active HERMES_HOME (profile-aware) without circular imports."""
     try:
-        from hermes_constants import get_hermes_home  # local import to avoid cycles
+        from korra_constants import get_hermes_home  # local import to avoid cycles
         return get_hermes_home()
     except Exception:
         return Path(os.path.expanduser("~/.hermes"))
@@ -20,7 +20,7 @@ def _hermes_home_path() -> Path:
 def _hermes_root_path() -> Path:
     """Resolve the Hermes root dir (always the parent of any profile, never per-profile)."""
     try:
-        from hermes_constants import get_default_hermes_root  # local import to avoid cycles
+        from korra_constants import get_default_hermes_root  # local import to avoid cycles
         return get_default_hermes_root()
     except Exception:
         return Path(os.path.expanduser("~/.hermes"))

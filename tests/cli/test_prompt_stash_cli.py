@@ -73,7 +73,7 @@ class TestStashStateInit:
 
     def test_stash_starts_empty(self, cli):
         # Duck-typed rather than isinstance: _make_cli reloads the `cli`
-        # module, which re-imports hermes_cli.prompt_toolkit stubs and can
+        # module, which re-imports korra_cli.prompt_toolkit stubs and can
         # yield a distinct-but-equivalent PromptStash class object.
         stash = cli._prompt_stash
         assert type(stash).__name__ == "PromptStash"

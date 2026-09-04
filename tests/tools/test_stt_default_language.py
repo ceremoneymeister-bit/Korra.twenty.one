@@ -6,7 +6,7 @@ Whisper auto-detection frequently misidentifies short/accented clips
 auto-detect with ``stt.language: ""``.
 """
 
-from hermes_cli.config import DEFAULT_CONFIG
+from korra_cli.config import DEFAULT_CONFIG
 from tools.transcription_tools import _resolve_stt_language
 
 

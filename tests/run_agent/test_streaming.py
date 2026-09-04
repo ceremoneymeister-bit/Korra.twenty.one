@@ -1107,7 +1107,7 @@ class TestPartialToolCallWarning:
         boundary by repair_empty_non_final_messages instead.
         """
         from run_agent import AIAgent
-        from hermes_constants import PARTIAL_STREAM_STUB_ID
+        from korra_constants import PARTIAL_STREAM_STUB_ID
 
         class _StallError(RuntimeError):
             pass

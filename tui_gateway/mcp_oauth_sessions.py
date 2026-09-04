@@ -8,7 +8,7 @@ primitive reports ``{status: pending|approved|error}`` until the tokens land on
 disk for that server in that profile.
 
 The underlying token machinery is the *same* one the CLI ``hermes mcp login``
-uses — ``hermes_cli.mcp_config._probe_single_server`` under
+uses — ``korra_cli.mcp_config._probe_single_server`` under
 ``tools.mcp_oauth.force_interactive_oauth`` — so no OAuth logic is reimplemented
 here. The only new piece is decoupling the two browser callbacks (authorization
 URL out, ``code``/``state`` back in) from a FastAPI ``Request``:
@@ -170,12 +170,12 @@ def _worker(session_id: str, hermes_home: str, server_name: str, cfg: dict, reco
     exists on disk (verified via ``_oauth_tokens_present``) and the server config
     is (re)saved into the profile's config.yaml.
     """
-    from hermes_cli.mcp_config import (
+    from korra_cli.mcp_config import (
         _oauth_tokens_present,
         _probe_single_server,
         _save_mcp_server,
     )
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
 
     rec = _sessions.get(session_id)
     flow = rec["flow"] if rec else None

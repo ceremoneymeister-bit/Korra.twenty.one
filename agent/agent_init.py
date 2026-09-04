@@ -48,10 +48,10 @@ from agent.tool_guardrails import (
     ToolCallGuardrailController,
     ToolGuardrailDecision,
 )
-from hermes_cli.config import cfg_get
-from hermes_cli.route_identity import normalize_route_base_url
-from hermes_cli.timeouts import get_provider_request_timeout
-from hermes_constants import get_hermes_home, korra_env_set
+from korra_cli.config import cfg_get
+from korra_cli.route_identity import normalize_route_base_url
+from korra_cli.timeouts import get_provider_request_timeout
+from korra_constants import get_hermes_home, korra_env_set
 from utils import base_url_host_matches, is_truthy_value
 
 # Use the same logger name as run_agent so tests patching ``run_agent.logger``
@@ -150,7 +150,7 @@ def _provider_default_routes(provider: str) -> set[str]:
     """Return known exact default routes for a canonical provider id."""
     routes: set[str] = set()
     try:
-        from hermes_cli.providers import HERMES_OVERLAYS, get_provider
+        from korra_cli.providers import HERMES_OVERLAYS, get_provider
 
         overlay = HERMES_OVERLAYS.get(provider)
         provider_def = get_provider(provider, allow_network=False)
@@ -177,9 +177,9 @@ def _provider_default_routes(provider: str) -> set[str]:
         pass
 
     try:
-        from hermes_cli.auth import PROVIDER_REGISTRY
-        from hermes_cli.models import normalize_provider as normalize_model_provider
-        from hermes_cli.providers import normalize_provider as normalize_registry_provider
+        from korra_cli.auth import PROVIDER_REGISTRY
+        from korra_cli.models import normalize_provider as normalize_model_provider
+        from korra_cli.providers import normalize_provider as normalize_registry_provider
 
         for provider_id, config in PROVIDER_REGISTRY.items():
             canonical_id = normalize_registry_provider(
@@ -226,7 +226,7 @@ def _context_route_mismatch(
     if not configured_provider:
         return False
     try:
-        from hermes_cli.models import normalize_provider as normalize_model_provider
+        from korra_cli.models import normalize_provider as normalize_model_provider
 
         configured_provider = normalize_model_provider(configured_provider)
         active_provider = normalize_model_provider(active_provider)
@@ -234,7 +234,7 @@ def _context_route_mismatch(
         configured_provider = configured_provider.lower()
         active_provider = active_provider.lower()
     try:
-        from hermes_cli.providers import normalize_provider as normalize_registry_provider
+        from korra_cli.providers import normalize_provider as normalize_registry_provider
 
         configured_provider = normalize_registry_provider(configured_provider)
         active_provider = normalize_registry_provider(active_provider)
@@ -754,7 +754,7 @@ def init_agent(
         # Portal is dual-wire: anthropic/* → Messages, everything else →
         # chat_completions. Callers that already pass api_mode win above;
         # this covers direct AIAgent construction without a resolved runtime.
-        from hermes_cli.providers import nous_api_mode
+        from korra_cli.providers import nous_api_mode
 
         agent.api_mode = nous_api_mode(agent.model)
     else:
@@ -769,7 +769,7 @@ def init_agent(
         # forcing `codex_responses` on the provider name alone would break custom endpoints
         # named "meta" that do not host the Responses API.
         try:
-            from hermes_cli.providers import host_mandated_api_mode as _host_mandated_api_mode
+            from korra_cli.providers import host_mandated_api_mode as _host_mandated_api_mode
 
             _mandated = _host_mandated_api_mode(base_url or "")
         except Exception:
@@ -805,7 +805,7 @@ def init_agent(
         pass  # Non-fatal — transport may not exist for all modes yet
 
     try:
-        from hermes_cli.model_normalize import (
+        from korra_cli.model_normalize import (
             _AGGREGATOR_PROVIDERS,
             normalize_model_for_provider,
         )
@@ -997,7 +997,7 @@ def init_agent(
     # fallback re-derivation (#33555).
     agent._cache_ttl = "5m"
     try:
-        from hermes_cli.config import load_config_readonly as _load_pc_cfg
+        from korra_cli.config import load_config_readonly as _load_pc_cfg
 
         from agent.agent_runtime_helpers import cache_ttl_means_disabled
 
@@ -1076,7 +1076,7 @@ def init_agent(
     # Centralized logging — agent.log (INFO+) and errors.log (WARNING+)
     # both live under ~/.hermes/logs/.  Idempotent, so gateway mode
     # (which creates a new AIAgent per message) won't duplicate handlers.
-    from hermes_logging import setup_logging, setup_verbose_logging
+    from korra_logging import setup_logging, setup_verbose_logging
     setup_logging(hermes_home=_ra()._hermes_home)
 
     if agent.verbose_logging:
@@ -1088,11 +1088,11 @@ def init_agent(
         # root logger's file handlers (agent.log, errors.log) from
         # ever seeing the records, because Python checks
         # logger.isEnabledFor() before handler propagation. We rely
-        # on the fact that hermes_logging.setup_logging() does not
+        # on the fact that korra_logging.setup_logging() does not
         # install a console StreamHandler in quiet mode — so INFO
         # records flow to the file handlers but never reach a
         # console. Any future noise reduction belongs at the
-        # handler level inside hermes_logging.py, not here.
+        # handler level inside korra_logging.py, not here.
         pass
     
     # Internal stream callback (set during streaming TTS).
@@ -1203,7 +1203,7 @@ def init_agent(
             # state cost is one file read + one timestamp compare per request.
             if agent.provider == "minimax-oauth" and isinstance(effective_key, str) and effective_key:
                 try:
-                    from hermes_cli.auth import build_minimax_oauth_token_provider
+                    from korra_cli.auth import build_minimax_oauth_token_provider
                     effective_key = build_minimax_oauth_token_provider()
                 except Exception as _mm_exc:  # noqa: BLE001 — never block startup on this
                     import logging as _logging
@@ -1270,7 +1270,7 @@ def init_agent(
         # Guardrail config — read from config.yaml at init time.
         agent._bedrock_guardrail_config = None
         try:
-            from hermes_cli.config import load_config_readonly as _load_br_cfg
+            from korra_cli.config import load_config_readonly as _load_br_cfg
             _gr = _load_br_cfg().get("bedrock", {}).get("guardrail", {})
             if _gr.get("guardrail_identifier") and _gr.get("guardrail_version"):
                 agent._bedrock_guardrail_config = {
@@ -1320,7 +1320,7 @@ def init_agent(
             # unrecognized bearer — including our keyless placeholder. Send an
             # empty Authorization header to override the SDK's "Bearer <key>".
             try:
-                from hermes_cli.models import (
+                from korra_cli.models import (
                     OPENCODE_ZEN_FREE_KEYLESS_PLACEHOLDER,
                     opencode_zen_free_headers,
                 )
@@ -1337,7 +1337,7 @@ def init_agent(
             elif base_url_host_matches(effective_base, "api.routermint.com"):
                 client_kwargs["default_headers"] = _ra()._routermint_headers()
             elif base_url_host_matches(effective_base, "githubcopilot.com"):
-                from hermes_cli.models import copilot_default_headers
+                from korra_cli.models import copilot_default_headers
 
                 client_kwargs["default_headers"] = copilot_default_headers()
             elif base_url_host_matches(effective_base, "api.kimi.com"):
@@ -1400,7 +1400,7 @@ def init_agent(
                     # (e.g. alibaba → DASHSCOPE_API_KEY, not ALIBABA_API_KEY).
                     _env_hint = f"{_explicit.upper()}_API_KEY"
                     try:
-                        from hermes_cli.auth import PROVIDER_REGISTRY
+                        from korra_cli.auth import PROVIDER_REGISTRY
                         _pcfg = PROVIDER_REGISTRY.get(_explicit)
                         if _pcfg and _pcfg.api_key_env_vars:
                             _env_hint = _pcfg.api_key_env_vars[0]
@@ -1418,7 +1418,7 @@ def init_agent(
                     _fb_resolved = False
                     for _fb in _fb_entries:
                         try:
-                            from hermes_cli.fallback_config import resolve_entry_api_key
+                            from korra_cli.fallback_config import resolve_entry_api_key
                             _fb_explicit_key = resolve_entry_api_key(_fb)
                             _fb_client, _fb_model = resolve_provider_client(
                                 _fb["provider"], model=_fb["model"], raw_codex=True,
@@ -1506,7 +1506,7 @@ def init_agent(
         agent._apply_user_default_headers()
 
         try:
-            from hermes_cli.config import (
+            from korra_cli.config import (
                 apply_custom_provider_extra_headers_to_client_kwargs,
                 apply_custom_provider_tls_to_client_kwargs,
                 get_compatible_custom_providers,
@@ -1596,7 +1596,7 @@ def init_agent(
     # ``model_tools`` was first imported. Ensure that profile's keyed plugin
     # manager has discovered its registrations before taking the tool snapshot.
     try:
-        from hermes_cli.plugins import discover_plugins
+        from korra_cli.plugins import discover_plugins
 
         discover_plugins()
     except Exception:
@@ -1710,7 +1710,7 @@ def init_agent(
     # reads the JSON files directly.  See run_agent._save_session_log.
     agent._session_json_enabled = False
     try:
-        from hermes_cli.config import load_config_readonly as _load_sess_cfg
+        from korra_cli.config import load_config_readonly as _load_sess_cfg
         _sess_cfg = (_load_sess_cfg().get("sessions") or {})
         agent._session_json_enabled = bool(_sess_cfg.get("write_json_snapshots", False))
     except Exception:
@@ -1801,7 +1801,7 @@ def init_agent(
     
     # Load config once for memory, skills, and compression sections
     try:
-        from hermes_cli.config import load_config_readonly as _load_agent_config
+        from korra_cli.config import load_config_readonly as _load_agent_config
         _agent_cfg = _load_agent_config()
     except Exception:
         _agent_cfg = {}
@@ -1962,7 +1962,7 @@ def init_agent(
                         _init_kwargs["gateway_session_key"] = agent._gateway_session_key
                     # Profile identity for per-profile provider scoping
                     try:
-                        from hermes_cli.profiles import get_active_profile_name
+                        from korra_cli.profiles import get_active_profile_name
                         _profile = get_active_profile_name()
                         _init_kwargs["agent_identity"] = _profile
                         _init_kwargs["agent_workspace"] = "hermes"
@@ -2438,7 +2438,7 @@ def init_agent(
     # a named custom provider may keep its base URL only in this list rather
     # than repeating it under ``model``.
     try:
-        from hermes_cli.config import get_compatible_custom_providers
+        from korra_cli.config import get_compatible_custom_providers
         _custom_providers = get_compatible_custom_providers(_agent_cfg)
     except Exception:
         _custom_providers = _agent_cfg.get("custom_providers")
@@ -2455,14 +2455,14 @@ def init_agent(
     if _config_context_length is not None and isinstance(_model_cfg, dict):
         _default = _model_cfg.get("default")
         if isinstance(_default, dict):
-            from hermes_cli.config import split_model_config_default
+            from korra_cli.config import split_model_config_default
             _default, _ = split_model_config_default(_default)
         _configured_default_model = str(_default or "").strip()
         _configured_default_runtime_model = _configured_default_model
         _active_runtime_model = agent.model
         if _configured_default_model:
             try:
-                from hermes_cli.model_normalize import normalize_model_for_provider
+                from korra_cli.model_normalize import normalize_model_for_provider
 
                 _configured_default_runtime_model = normalize_model_for_provider(
                     _configured_default_model, agent.provider
@@ -2497,7 +2497,7 @@ def init_agent(
             and not _configured_provider_norm.startswith("custom:")
         ):
             try:
-                from hermes_cli.auth import resolve_provider as resolve_auth_provider
+                from korra_cli.auth import resolve_provider as resolve_auth_provider
 
                 _resolved_auth_provider = resolve_auth_provider(
                     _configured_provider_norm
@@ -2515,7 +2515,7 @@ def init_agent(
             _user_providers = _agent_cfg.get("providers")
             _disabled_custom_provider_ids: set[str] = set()
             if isinstance(_user_providers, dict):
-                from hermes_cli.config import is_provider_enabled
+                from korra_cli.config import is_provider_enabled
 
                 for _provider_key, _provider_entry in _user_providers.items():
                     if not isinstance(_provider_entry, dict):
@@ -2614,7 +2614,7 @@ def init_agent(
     # Check custom_providers per-model context_length
     if _config_context_length is None and _custom_providers:
         try:
-            from hermes_cli.config import get_custom_provider_context_length
+            from korra_cli.config import get_custom_provider_context_length
             _cp_ctx_resolved = get_custom_provider_context_length(
                 model=agent.model,
                 base_url=agent.base_url,
@@ -2705,7 +2705,7 @@ def init_agent(
         if _selected_engine is None:
             _candidate = None
             try:
-                from hermes_cli.plugins import get_plugin_context_engine
+                from korra_cli.plugins import get_plugin_context_engine
                 _candidate = get_plugin_context_engine()
             except Exception:
                 _candidate = None
@@ -2904,7 +2904,7 @@ def init_agent(
     # non-CLI surface to still surface the warning.)
     if not agent.quiet_mode and (agent.platform or "cli") != "cli":
         try:
-            from hermes_cli.model_switch import _check_hermes_model_warning
+            from korra_cli.model_switch import _check_hermes_model_warning
 
             _hermes_warn = _check_hermes_model_warning(agent.model or "")
             if _hermes_warn:

@@ -208,7 +208,7 @@ def _load_review_credentials_cfg() -> Optional[Dict[str, Any]]:
     credentials — the main-model-first default.
     """
     try:
-        from hermes_cli.config import load_config_readonly
+        from korra_cli.config import load_config_readonly
 
         full = load_config_readonly()
         aux = full.get("auxiliary") or {}

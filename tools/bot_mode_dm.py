@@ -61,7 +61,7 @@ def _korra_env(name: str) -> str:
     Модуль запускается и как импорт движка, и как самостоятельный скрипт
     по пути (`python tools/bot_mode_dm.py --run-delivery ...`), где корень
     репозитория не на `sys.path`. Поэтому пара имён разворачивается здесь
-    руками, без импорта `hermes_constants`.
+    руками, без импорта `korra_constants`.
     """
     return os.environ.get("KORRA_" + name) or os.environ.get("HERMES_" + name) or ""
 

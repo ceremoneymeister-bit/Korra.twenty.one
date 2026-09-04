@@ -54,7 +54,7 @@ class TestIsWriteDenied:
     )
     def test_oauth_traversal_denied(self, path):
         """Path traversal attempts to protected OAuth files must be blocked."""
-        from hermes_constants import get_hermes_home
+        from korra_constants import get_hermes_home
         hermes_home = get_hermes_home()
         full_path = str(hermes_home / path)
         assert _is_write_denied(full_path) is True

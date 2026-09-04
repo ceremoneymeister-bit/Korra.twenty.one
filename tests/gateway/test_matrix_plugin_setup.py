@@ -1,14 +1,14 @@
 """Tests for the Matrix plugin's interactive_setup wizard home-channel flow.
 
 The interactive_setup wizard lazy-imports its CLI helpers from
-``hermes_cli.config`` (get_env_value / save_env_value / remove_env_value),
-``hermes_cli.cli_output`` (prompt / prompt_yes_no / print_*), and
+``korra_cli.config`` (get_env_value / save_env_value / remove_env_value),
+``korra_cli.cli_output`` (prompt / prompt_yes_no / print_*), and
 ``tools.lazy_deps`` (mautrix ensure). We patch each at its source module so
 the wizard runs without touching pip or the network. Covers the home-channel
 clear-on-blank behavior added in the follow-up to PR #58421.
 """
-import hermes_cli.config as config_mod
-import hermes_cli.cli_output as cli_output_mod
+import korra_cli.config as config_mod
+import korra_cli.cli_output as cli_output_mod
 import tools.lazy_deps as lazy_deps_mod
 from plugins.platforms.matrix.adapter import interactive_setup
 

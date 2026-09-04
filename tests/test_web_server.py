@@ -11,7 +11,7 @@ import sys
 import pytest
 import uvicorn
 
-from hermes_cli import web_server
+from korra_cli import web_server
 
 
 def _stub_uvicorn(monkeypatch):
