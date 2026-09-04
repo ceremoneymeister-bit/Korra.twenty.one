@@ -163,6 +163,10 @@ export default function ChannelsPage() {
   // Per-card busy + restart-needed tracking
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
+  /** Результат последней проверки по каналам — держится до следующей проверки. */
+  const [testResults, setTestResults] = useState<
+    Record<string, { ok: boolean; message: string }>
+  >({});
   const [restartNeeded, setRestartNeeded] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
@@ -269,6 +273,10 @@ export default function ChannelsPage() {
 
   const handleTest = async (platform: MessagingPlatform) => {
     setTestingId(platform.id);
+    const remember = (ok: boolean, message: string) => {
+      setTestResults((prev) => ({ ...prev, [platform.id]: { ok, message } }));
+      showToast(`${platform.name}: ${message}`, ok ? "success" : "error");
+    };
     try {
       const res = await api.testMessagingPlatform(platform.id);
       const message = res.ok
@@ -277,9 +285,9 @@ export default function ChannelsPage() {
             new Error(res.message),
             "Проверка подключения завершилась с ошибкой.",
           );
-      showToast(`${platform.name}: ${message}`, res.ok ? "success" : "error");
+      remember(res.ok, message);
     } catch (e) {
-      showToast(ownerFacingError(e, "Не удалось проверить подключение."), "error");
+      remember(false, ownerFacingError(e, "Не удалось проверить подключение."));
     } finally {
       setTestingId(null);
     }
@@ -604,6 +612,20 @@ export default function ChannelsPage() {
                             new Error(platform.error_message),
                             "Не удалось подключить канал.",
                           )}
+                        </span>
+                      )}
+                      {/* Ответ на «Проверить» остаётся у канала: тост живёт
+                          три секунды, а настраивают канал дольше. */}
+                      {testResults[platform.id] && (
+                        <span
+                          className={cn(
+                            "text-xs",
+                            testResults[platform.id].ok
+                              ? "text-success"
+                              : "text-destructive",
+                          )}
+                        >
+                          {testResults[platform.id].message}
                         </span>
                       )}
                     </div>
