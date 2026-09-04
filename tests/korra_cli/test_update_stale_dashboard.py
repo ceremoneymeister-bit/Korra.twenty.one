@@ -802,7 +802,7 @@ class TestCmdlineCapture:
     def test_reads_proc_cmdline_when_available(self, tmp_path, monkeypatch):
         live = self._live()
         proc_file = tmp_path / "cmdline"
-        proc_file.write_bytes(b"/usr/bin/python3\x00-m\x00hermes_cli.main\x00serve\x00")
+        proc_file.write_bytes(b"/usr/bin/python3\x00-m\x00korra_cli.main\x00serve\x00")
 
         real_exists = os.path.exists
 

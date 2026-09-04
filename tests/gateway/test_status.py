@@ -1074,7 +1074,7 @@ class TestReadProcessCmdlinePsFallback:
 
         def fake_read_bytes(self):
             calls.append("proc")
-            return b"python\x00hermes_cli/main.py\x00gateway\x00"
+            return b"python\x00korra_cli/main.py\x00gateway\x00"
 
         monkeypatch.setattr(status.Path, "read_bytes", fake_read_bytes)
         result = status._read_process_cmdline(12345)

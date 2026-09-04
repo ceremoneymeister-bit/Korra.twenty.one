@@ -241,7 +241,7 @@ class TestRuntimeFtsRebuild:
         os.chmod(proc_root / "222" / "fd", 0o000)
         # PID 222's cmdline is world-readable and looks like Hermes
         cmdline_path = proc_root / "222" / "cmdline"
-        cmdline_path.write_bytes(b"python3\x00hermes_cli.main\x00chat\x00")
+        cmdline_path.write_bytes(b"python3\x00korra_cli.main\x00chat\x00")
 
         monkeypatch.setattr(korra_state, "_IS_WINDOWS", False)
         monkeypatch.setattr(korra_state.os, "getpid", lambda: 111)
