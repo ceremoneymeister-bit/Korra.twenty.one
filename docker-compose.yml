@@ -1,5 +1,17 @@
 #
-# docker-compose.yml for Hermes Agent
+# docker-compose.yml для Korra 21 — самостоятельная установка «как у апстрима»:
+# два контейнера из одного образа, шлюз и панель отдельными службами.
+#
+# ВНИМАНИЕ. Контур клиента разворачивается НЕ этим файлом, а комплектом
+# docs/client-deploy/ (`up.sh`): там один контейнер, host-сеть, образ по
+# дайджесту из реестра, откат на прежний образ и выключенное право root у
+# агента. Причина одного контейнера — кабинет забирает пропуск сессии только
+# при привязке панели к петле, а мост этого не позволяет (разбор в
+# docs/client-deploy/README.md, шаг 6).
+#
+# Этот файл оставлен как апстримовый путь установки и для сборки из исходников.
+# Образ ниже — локально собранный тег: для установки из реестра подставьте
+# ghcr.io/ceremoneymeister-bit/korra.twenty.one@sha256:<дайджест>.
 #
 # Usage:
 #   KORRA_UID=$(id -u) KORRA_GID=$(id -g) docker compose up -d
@@ -29,8 +41,8 @@
 services:
   gateway:
     build: .
-    image: hermes-agent
-    container_name: hermes
+    image: korra.twenty.one:local
+    container_name: korra
     restart: unless-stopped
     network_mode: host
     volumes:
@@ -61,8 +73,8 @@ services:
     command: ["gateway", "run"]
 
   dashboard:
-    image: hermes-agent
-    container_name: hermes-dashboard
+    image: korra.twenty.one:local
+    container_name: korra-dashboard
     restart: unless-stopped
     network_mode: host
     depends_on:
