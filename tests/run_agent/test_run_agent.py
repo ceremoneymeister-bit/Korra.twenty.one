@@ -5676,7 +5676,11 @@ class TestSystemPromptStability:
         # Should have built fresh, not queried the DB
         mock_db.get_session.assert_not_called()
         assert agent._cached_system_prompt is not None
-        assert "Hermes Agent" in agent._cached_system_prompt
+        # Korra: форк представляется своим именем — «You are Korra…».
+        # Проверка на имя апстрима осталась от него и краснела независимо от
+        # того, что этот тест на самом деле стережёт (сборку промпта без
+        # обращения к базе).
+        assert "Korra" in agent._cached_system_prompt
 
 
 class TestBudgetPressure:
