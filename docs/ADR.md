@@ -8,7 +8,7 @@ Context:
 Hermes supports multiple profiles via different Hermes home directories.
 Homes are switched two ways in a running process: the `HERMES_HOME`
 environment variable (single-profile CLI/gateway processes), and the
-context-local `set_hermes_home_override()` (`hermes_constants.py`), which
+context-local `set_hermes_home_override()` (`korra_constants.py`), which
 the multiplexed gateway worker (`gateway/run.py`'s `_profile_scope`) and
 subagent/embedded callers use to serve several profiles from one
 long-lived process. The override is a `ContextVar` and deliberately does
