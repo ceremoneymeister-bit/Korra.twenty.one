@@ -460,8 +460,6 @@ def session_is_messaging_surface() -> bool:
     source, and reports messaging when any of them names a surface outside
     :data:`NON_MESSAGING_SESSION_SURFACES`.
     """
-    import os
-
     platform = korra_env("KORRA_PLATFORM") or get_session_env("KORRA_SESSION_PLATFORM", "")
     source = get_session_env("KORRA_SESSION_SOURCE", "")
     for identity in (platform, source):
@@ -513,8 +511,6 @@ def async_delivery_supported() -> bool:
     registering a watcher / dispatching a detached child, so they can refuse a
     promise the channel can't keep instead of silently no-op'ing.
     """
-    import os
-
     # A Kanban worker is a one-shot subprocess. Its parent session and process
     # disappear after the quiet turn returns, so a completion queued later has
     # no durable consumer even though an ordinary CLI session can drain that

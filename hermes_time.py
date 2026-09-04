@@ -14,7 +14,6 @@ crashes due to a bad timezone string.
 """
 
 import logging
-import os
 import threading
 from datetime import datetime
 from hermes_constants import get_config_path, korra_env

@@ -3791,7 +3791,6 @@ class AIAgent:
         cached, so tests and operators can still flip it at runtime.
         """
         try:
-            import os as _os
             env = korra_env("KORRA_FILE_MUTATION_VERIFIER")
             if env is not None:
                 return env.strip().lower() not in {"0", "false", "no", "off"}
@@ -3901,7 +3900,6 @@ class AIAgent:
         cached, so tests and operators can still flip it at runtime.
         """
         try:
-            import os as _os
             env = korra_env("KORRA_TURN_COMPLETION_EXPLAINER")
             if env is not None:
                 return env.strip().lower() not in {"0", "false", "no", "off"}

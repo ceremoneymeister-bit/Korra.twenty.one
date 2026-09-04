@@ -15,7 +15,6 @@ Usage in tools:
 """
 
 import logging
-import os
 import threading
 from hermes_constants import korra_env
 

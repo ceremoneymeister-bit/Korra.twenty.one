@@ -19,7 +19,6 @@ Until it ships, the fail-open contract handles 404s — the builder returns
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Optional

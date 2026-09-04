@@ -21530,8 +21530,6 @@ def _run_kanban_goal_loop_q(cli: "HermesCLI", first_response: str) -> None:
     caller — a broken goal loop must never wedge a worker, the dispatcher's
     claim TTL / crash detection is the backstop.
     """
-    import os as _os
-
     task_id = (korra_env("KORRA_KANBAN_TASK") or "").strip()
     if not task_id:
         return

@@ -699,7 +699,6 @@ def stable_device_id() -> str:
     # is then persisted, so a later `hermes sync device --name` (or editing the
     # file) still wins on that device. An explicit file (above) always wins over
     # the env.
-    import os
 
     env_name = (korra_env("KORRA_SYNC_DEVICE_NAME") or "").strip()
     val = env_name if env_name else _default_device_label()

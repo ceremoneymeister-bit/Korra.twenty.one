@@ -9,7 +9,6 @@ Routes messages to the appropriate destination based on:
 """
 
 import logging
-import os
 import re
 from pathlib import Path
 from datetime import datetime

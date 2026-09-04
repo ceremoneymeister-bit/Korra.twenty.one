@@ -13,7 +13,6 @@ loop continues instead of exiting.
 
 from __future__ import annotations
 
-import os
 from typing import Any, Iterable, Optional
 from hermes_constants import korra_env
 

@@ -23,7 +23,6 @@ keep the exact logger name (``"agent.conversation_loop"``).
 from __future__ import annotations
 
 import logging
-import os
 
 from agent.codex_responses_adapter import _summarize_user_message_for_log
 from agent.context_compressor import _DB_PERSISTED_MARKER

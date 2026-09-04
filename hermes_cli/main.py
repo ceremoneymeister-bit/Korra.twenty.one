@@ -13972,7 +13972,6 @@ def main():
                 return 1
             return 0 if _cua_driver_contract_status().get("ready") else 1
         if action == "status":
-            import os as _os
             import subprocess
             from hermes_cli.tools_config import _cua_driver_contract_status
             from tools.computer_use.cua_backend import (

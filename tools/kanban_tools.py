@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Optional
 
 from agent.redact import redact_sensitive_text

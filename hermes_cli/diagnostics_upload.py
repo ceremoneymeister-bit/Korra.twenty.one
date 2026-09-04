@@ -21,7 +21,6 @@ Uses stdlib ``urllib`` only, matching ``debug.py`` style — no third-party deps
 """
 
 import json
-import os
 import urllib.request
 from hermes_constants import korra_env
 

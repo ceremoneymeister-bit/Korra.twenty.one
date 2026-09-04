@@ -25,7 +25,6 @@ so this client never needs to know the namespace convention.
 from __future__ import annotations
 
 import json
-import os
 import random
 import sys
 import urllib.error

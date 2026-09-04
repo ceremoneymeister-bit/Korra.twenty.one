@@ -32,7 +32,6 @@ from hermes_constants import korra_env
 try:
     from hermes_constants import get_hermes_home
 except Exception:  # pragma: no cover — plugin may load before constants resolves
-    import os
 
     def get_hermes_home() -> Path:  # type: ignore[no-redef]
         val = (korra_env("KORRA_HOME") or "").strip()

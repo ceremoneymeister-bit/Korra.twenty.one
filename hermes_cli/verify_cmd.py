@@ -13,7 +13,6 @@ the verify-on-stop guard the same way a passing canonical test command does.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from hermes_constants import korra_env

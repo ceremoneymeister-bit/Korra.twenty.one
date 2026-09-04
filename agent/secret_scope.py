@@ -22,7 +22,6 @@ Design rationale lives in ``docs/design/multiplexing-gateway.md`` (Workstream A)
 """
 from __future__ import annotations
 
-import os
 import re
 from contextvars import ContextVar, Token
 from pathlib import Path

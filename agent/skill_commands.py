@@ -6,7 +6,6 @@ can invoke skills via /skill-name commands.
 
 import json
 import logging
-import os
 import re
 import threading
 from pathlib import Path

@@ -124,8 +124,6 @@ def exit_non_dispatcher_owned_context(token: Token[bool]) -> None:
 
 def is_delegated_child_process_context() -> bool:
     """Return True in this process or a subprocess spawned by a child."""
-    import os
-
     return bool(_DELEGATED_CHILD_CONTEXT.get()) or bool(
         korra_env(DELEGATED_CHILD_ENV_MARKER)
     )

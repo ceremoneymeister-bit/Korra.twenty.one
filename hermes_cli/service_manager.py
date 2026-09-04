@@ -345,8 +345,6 @@ def _profile_dir_for_gateway_service(name: str) -> Path:
     service suffix to either the root default profile or
     ``<root>/profiles/<profile>``.
     """
-    import os
-
     profile = name[len(S6_SERVICE_PREFIX):] if name.startswith(S6_SERVICE_PREFIX) else name
     validate_profile_name(profile)
     hermes_home = Path(korra_env("KORRA_HOME", "/opt/data"))

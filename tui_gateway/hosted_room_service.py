@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import os
 import threading
 import time
 from collections import Counter

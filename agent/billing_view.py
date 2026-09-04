@@ -15,7 +15,6 @@ We keep them as :class:`decimal.Decimal` end-to-end and only format for display.
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation

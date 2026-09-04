@@ -10,7 +10,6 @@ module-level constants live in hermes_state_common.
 
 import logging
 import json
-import os
 import re
 import sqlite3
 import time
