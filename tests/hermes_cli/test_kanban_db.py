@@ -852,13 +852,19 @@ class TestSharedBoardPaths:
         )
         assert env["HERMES_KANBAN_TASK"] == "t_dispatch_env"
         assert env["HERMES_KANBAN_BRANCH"] == "wt/t_dispatch_env"
+        # Слой совместимости имён: диспетчер снимает и ставит обе переменные
+        # пары, поэтому проверяются оба имени каждого ключа.
+        from hermes_constants import korra_env_aliases
+
         for key in sc._VAR_MAP:
-            if key == "HERMES_SESSION_SOURCE":
-                # Re-set by the dispatcher, so what matters is that it carries
-                # the worker's own tag rather than the inherited routing value.
-                assert env[key] == "kanban"
-                continue
-            assert key not in env
+            for alias in korra_env_aliases(key):
+                if alias.endswith("_SESSION_SOURCE"):
+                    # Re-set by the dispatcher, so what matters is that it
+                    # carries the worker's own tag rather than the inherited
+                    # routing value.
+                    assert env[alias] == "kanban"
+                    continue
+                assert alias not in env
 
 
 # ---------------------------------------------------------------------------

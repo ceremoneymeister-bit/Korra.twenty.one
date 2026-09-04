@@ -35,7 +35,7 @@ except Exception:  # pragma: no cover — plugin may load before constants resol
     import os
 
     def get_hermes_home() -> Path:  # type: ignore[no-redef]
-        val = (korra_env("HERMES_HOME") or "").strip()
+        val = (korra_env("KORRA_HOME") or "").strip()
         return Path(val).resolve() if val else (Path.home() / ".hermes").resolve()
 
 

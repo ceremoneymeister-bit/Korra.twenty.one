@@ -269,7 +269,7 @@ def get_registry() -> FileStateRegistry:
 
 def _disabled() -> bool:
     # Re-read each call so tests can toggle via monkeypatch.setenv.
-    return korra_env("HERMES_DISABLE_FILE_STATE_GUARD", "").strip() == "1"
+    return korra_env("KORRA_DISABLE_FILE_STATE_GUARD", "").strip() == "1"
 
 
 def _fmt_ts(ts: float) -> str:

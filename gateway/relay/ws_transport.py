@@ -91,7 +91,7 @@ def _env_disconnect_budget_s() -> float:
     variable, same default). Callers above the transport use this to
     apportion the budget across go_idle / monitor teardown / drain."""
     budget = 5.0  # _ADAPTER_DISCONNECT_TIMEOUT_SECS_DEFAULT in gateway/run.py
-    raw = korra_env("HERMES_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
+    raw = korra_env("KORRA_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
     if raw:
         try:
             budget = max(0.0, float(raw))

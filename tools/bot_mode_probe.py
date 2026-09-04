@@ -103,7 +103,7 @@ def is_bot_mode_managed(home: str | os.PathLike | None = None) -> bool:
     """
     try:
         resolved = Path(
-            str(home) if home else (korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes"))
+            str(home) if home else (korra_env("KORRA_HOME") or os.path.expanduser("~/.hermes"))
         )
         root = _hermes_root(resolved)
         return any(_is_bot_managed(d) for _n, d in _roster(root))
@@ -293,7 +293,7 @@ def get_bot_mode_protocol_section(home: str | os.PathLike | None = None, *, forc
     not the ambient HERMES_HOME — build threads can lose the ContextVar
     override and the env var would then name the wrong profile.
     """
-    resolved = str(home) if home else (korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes"))
+    resolved = str(home) if home else (korra_env("KORRA_HOME") or os.path.expanduser("~/.hermes"))
     with _lock:
         if force_refresh or resolved not in _cached:
             try:
@@ -333,7 +333,7 @@ def capability_fingerprint(home: str | os.PathLike | None = None) -> str:
     import hashlib
     import json
 
-    resolved = Path(str(home) if home else (korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes")))
+    resolved = Path(str(home) if home else (korra_env("KORRA_HOME") or os.path.expanduser("~/.hermes")))
     surface: dict = {}
     try:
         # Canonical loader (managed overlay + env expansion + normalization),

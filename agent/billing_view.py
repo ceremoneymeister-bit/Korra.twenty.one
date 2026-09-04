@@ -415,7 +415,7 @@ def _dev_fixture_billing_state() -> Optional[BillingState]:
     Mirrors ``HERMES_DEV_CREDITS_FIXTURE``; the usage *bar* still comes from
     ``HERMES_DEV_CREDITS_FIXTURE`` (set both to pair a bar with a billing state).
     """
-    name = (korra_env("HERMES_DEV_BILLING_FIXTURE") or "").strip().lower()
+    name = (korra_env("KORRA_DEV_BILLING_FIXTURE") or "").strip().lower()
     if not name:
         return None
 

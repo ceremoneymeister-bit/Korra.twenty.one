@@ -103,7 +103,7 @@ def _locales_dir() -> Path:
     ``_load_catalog`` error messages informative -- it logs the path it
     looked at -- rather than raising.
     """
-    override = korra_env("HERMES_BUNDLED_LOCALES", "").strip()
+    override = korra_env("KORRA_BUNDLED_LOCALES", "").strip()
     if override:
         candidate = Path(override)
         if candidate.is_dir():
@@ -221,7 +221,7 @@ def reset_language_cache() -> None:
 
 def get_language() -> str:
     """Resolve the active language using env > config > default order."""
-    env_lang = korra_env("HERMES_LANGUAGE")
+    env_lang = korra_env("KORRA_LANGUAGE")
     if env_lang:
         return _normalize_lang(env_lang)
     cfg_lang = _config_language_cached()

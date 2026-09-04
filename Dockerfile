@@ -331,7 +331,10 @@ RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra 
 ARG WHISPER_MODEL_SIZE=medium
 ARG WHISPER_MODEL_REPO=Systran/faster-whisper-medium
 ARG WHISPER_MODEL_REVISION=08e178d48790749d25932bbc082711ddcfdfbc4f
-ENV HERMES_STT_MODELS_DIR=/opt/hermes/models/whisper
+# Внутренняя переменная образа: снаружи её никто не задаёт, поэтому имя
+# объявляется под обоими именами пары сразу.
+ENV KORRA_STT_MODELS_DIR=/opt/hermes/models/whisper \
+    HERMES_STT_MODELS_DIR=/opt/hermes/models/whisper
 RUN set -eu; \
     WHISPER_MODEL_SIZE="${WHISPER_MODEL_SIZE}" \
     WHISPER_MODEL_REPO="${WHISPER_MODEL_REPO}" \
@@ -449,6 +452,19 @@ COPY --chmod=0755 docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-su
 COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles
 
 # ---------- Runtime ----------
+# Умолчания образа объявляются под СТАРЫМ именем HERMES_* сознательно.
+#
+# Движок и контейнерные скрипты читают пару «новое имя, при пустом —
+# старое»: KORRA_X сильнее HERMES_X. Если объявить умолчание образа под
+# новым именем, оно окажется сильнее значения, которое оператор передал
+# снаружи под старым (`docker run -e HERMES_HOME=...`), и внешний
+# контракт, который мы обещали сохранить, молча перестанет работать.
+# Умолчание под старым именем — самое слабое звено пары, поэтому любое
+# внешнее значение под любым из двух имён его перебивает.
+#
+# Переименование этих шести переменных делается вместе со сменой
+# комплекта развёртывания, когда старое имя перестанет приходить
+# снаружи, — это отдельный шаг, не слой переменных окружения.
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 # Point the TUI launcher at the prebuilt bundle baked at build time (Layer 8:
 # `ui-tui && npm run build`). This makes _make_tui_argv take the prebuilt-bundle

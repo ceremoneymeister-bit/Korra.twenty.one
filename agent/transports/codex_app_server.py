@@ -100,15 +100,15 @@ class CodexAppServerClient:
         # Codex sandbox on, but add the Kanban root as the only extra writable
         # root. Without this, codex-runtime workers finish their actual work
         # but crash/block when kanban_complete/kanban_block writes SQLite.
-        if korra_env("HERMES_KANBAN_TASK", env=spawn_env):
-            kanban_db = korra_env("HERMES_KANBAN_DB", env=spawn_env)
+        if korra_env("KORRA_KANBAN_TASK", env=spawn_env):
+            kanban_db = korra_env("KORRA_KANBAN_DB", env=spawn_env)
             kanban_root = (
                 os.path.dirname(kanban_db)
                 if kanban_db
                 else korra_env(
-                    "HERMES_KANBAN_ROOT",
+                    "KORRA_KANBAN_ROOT",
                     os.path.join(
-                        korra_env("HERMES_HOME", os.path.expanduser("~/.hermes"), env=spawn_env),
+                        korra_env("KORRA_HOME", os.path.expanduser("~/.hermes"), env=spawn_env),
                         "kanban",
                     ),
                     env=spawn_env,

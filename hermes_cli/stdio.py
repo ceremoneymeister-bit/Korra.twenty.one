@@ -106,7 +106,7 @@ def configure_windows_stdio() -> bool:
         _CONFIGURED = True
         return False
 
-    if korra_env("HERMES_DISABLE_WINDOWS_UTF8") in {"1", "true", "True", "yes"}:
+    if korra_env("KORRA_DISABLE_WINDOWS_UTF8") in {"1", "true", "True", "yes"}:
         _CONFIGURED = True
         return False
 

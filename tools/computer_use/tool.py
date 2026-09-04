@@ -55,6 +55,7 @@ from tools.computer_use.backend import (
     ComputerUseBackend,
     UIElement,
 )
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -304,8 +305,8 @@ def _get_backend(session_id: str = "") -> ComputerUseBackend:
                 if sid == "":
                     _backend = None
             else:
-                backend_name = os.environ.get(
-                    "HERMES_COMPUTER_USE_BACKEND", "cua"
+                backend_name = korra_env(
+                    "KORRA_COMPUTER_USE_BACKEND", "cua"
                 ).lower()
                 if backend_name in {"cua", "cua-driver", ""}:
                     from tools.computer_use.cua_backend import CuaDriverBackend

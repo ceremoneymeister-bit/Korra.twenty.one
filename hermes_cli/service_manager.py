@@ -349,7 +349,7 @@ def _profile_dir_for_gateway_service(name: str) -> Path:
 
     profile = name[len(S6_SERVICE_PREFIX):] if name.startswith(S6_SERVICE_PREFIX) else name
     validate_profile_name(profile)
-    hermes_home = Path(korra_env("HERMES_HOME", "/opt/data"))
+    hermes_home = Path(korra_env("KORRA_HOME", "/opt/data"))
     if hermes_home.parent.name == "profiles":
         root = hermes_home.parent.parent
     else:
@@ -684,11 +684,11 @@ class S6ServiceManager:
         # `gateway run --replace` which would re-dispatch `gateway
         # start`, etc. See `_gateway_command_inner` for the matching
         # guard.
-        lines.append("export HERMES_S6_SUPERVISED_CHILD=1")
+        lines.append("export KORRA_S6_SUPERVISED_CHILD=1 HERMES_S6_SUPERVISED_CHILD=1")
         # Generalized supervisor marker (#74872) — same meaning for the
         # profile-redirect guard in hermes_cli.main._apply_profile_override,
         # kept alongside the s6-specific sentinel for back-compat.
-        lines.append("export HERMES_SUPERVISED_CHILD=1")
+        lines.append("export KORRA_SUPERVISED_CHILD=1 HERMES_SUPERVISED_CHILD=1")
         # ``--replace`` makes the supervised gateway authoritative for its
         # profile's HERMES_HOME. Without it, a gateway started OUTSIDE s6
         # (a stray ``hermes gateway run`` from a shell, an agent action, or
@@ -794,8 +794,8 @@ class S6ServiceManager:
         return (
             f"#!/command/with-contenv sh\n"
             f"# shellcheck shell=sh\n"
-            f': "${{HERMES_HOME:=/opt/data}}"\n'
-            f'log_dir="$HERMES_HOME/logs/gateways/{prof}"\n'
+            f': "${{KORRA_HOME:=${{HERMES_HOME:-/opt/data}}}}"\n'
+            f'log_dir="$KORRA_HOME/logs/gateways/{prof}"\n'
             # Create the leaf and clear a stale s6-log lock as hermes when
             # this script starts as root. Never chown or unlink hermes-writable
             # volume paths from this restartable root-context script:

@@ -718,9 +718,9 @@ def dev_fixture_credits_state() -> Optional[CreditsState]:
     container env, a launch plist, …) can never surface fabricated balances/notices
     on a real account.
     """
-    if not is_truthy_value(korra_env("HERMES_DEV_CREDITS")):
+    if not is_truthy_value(korra_env("KORRA_DEV_CREDITS")):
         return None
-    raw = korra_env("HERMES_DEV_CREDITS_FIXTURE", "").strip()
+    raw = korra_env("KORRA_DEV_CREDITS_FIXTURE", "").strip()
     if not raw:
         return None
     name = raw

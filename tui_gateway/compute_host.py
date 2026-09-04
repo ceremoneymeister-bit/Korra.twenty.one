@@ -163,7 +163,7 @@ class ComputeHost:
         self._heartbeat_secs = (
             float(heartbeat_secs)
             if heartbeat_secs is not None
-            else float(korra_env("HERMES_COMPUTE_HOST_HEARTBEAT_SECS") or "15")
+            else float(korra_env("KORRA_COMPUTE_HOST_HEARTBEAT_SECS") or "15")
         )
         if self._heartbeat_secs > 0:
             threading.Thread(target=self._heartbeat_loop, name="compute-host-heartbeat", daemon=True).start()
@@ -875,13 +875,13 @@ def _rss_mb(pid: int) -> float:
 
 def _default_workers() -> int:
     try:
-        return max(2, int(korra_env("HERMES_TUI_RPC_POOL_WORKERS") or "8"))
+        return max(2, int(korra_env("KORRA_TUI_RPC_POOL_WORKERS") or "8"))
     except (TypeError, ValueError):
         return 8
 
 
 def run_host(stdin: Any = None, stdout: Any = None) -> None:
-    korra_env_set(os.environ, "HERMES_COMPUTE_HOST_CHILD", "1")
+    korra_env_set(os.environ, "KORRA_COMPUTE_HOST_CHILD", "1")
     stdin = stdin or sys.stdin
     host = ComputeHost(stdout=stdout or sys.stdout)
     shutting_down = threading.Event()
@@ -906,7 +906,7 @@ def run_host(stdin: Any = None, stdout: Any = None) -> None:
             "boot_id": host._boot_id,
             "build_sha": _build_sha(),
             "cwd": os.getcwd(),
-            "hermes_home": korra_env("HERMES_HOME", ""),
+            "hermes_home": korra_env("KORRA_HOME", ""),
         }
     )
 

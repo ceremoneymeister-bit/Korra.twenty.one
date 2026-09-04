@@ -48,7 +48,7 @@ def resolve_httpx_verify(
 
     effective_ca = (
         (ca_bundle or "").strip()
-        or korra_env("HERMES_CA_BUNDLE", "").strip()
+        or korra_env("KORRA_CA_BUNDLE", "").strip()
         or os.getenv("SSL_CERT_FILE", "").strip()
         or os.getenv("REQUESTS_CA_BUNDLE", "").strip()
         or os.getenv("CURL_CA_BUNDLE", "").strip()

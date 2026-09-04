@@ -1533,7 +1533,7 @@ class CLICommandsMixin:
         try:
             self._session_db.create_session(
                 session_id=new_session_id,
-                source=korra_env("HERMES_SESSION_SOURCE", "cli"),
+                source=korra_env("KORRA_SESSION_SOURCE", "cli"),
                 model=self.model,
                 model_config={
                     "max_iterations": self.max_turns,

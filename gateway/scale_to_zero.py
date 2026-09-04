@@ -43,12 +43,13 @@ import logging
 import os
 import socket
 from typing import Any, Iterable, Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
 # Env flag stamped by NAS when the scaleToZero Labs toggle is on (D11/Q8=A),
 # mirroring how the `relay` feature stamps GATEWAY_RELAY_URL. Truthy values only.
-SCALE_TO_ZERO_ENV = "HERMES_SCALE_TO_ZERO"
+SCALE_TO_ZERO_ENV = "KORRA_SCALE_TO_ZERO"
 
 # Fly-injected machine identity (present on every Fly machine). Used by the
 # self-suspend call; both must be present for self_suspend_available().
@@ -81,7 +82,7 @@ def scale_to_zero_enabled(environ: Optional[dict] = None) -> bool:
     gateway. Absent/blank/falsey -> disabled (fail-safe default off).
     """
     env = environ if environ is not None else os.environ
-    return str(env.get(SCALE_TO_ZERO_ENV, "")).strip().lower() in _TRUTHY
+    return str(korra_env(SCALE_TO_ZERO_ENV, "", env=env)).strip().lower() in _TRUTHY
 
 
 def parse_idle_timeout_seconds(

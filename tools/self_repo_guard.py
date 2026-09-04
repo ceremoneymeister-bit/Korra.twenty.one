@@ -744,6 +744,6 @@ def _block_message(operation: str, root: Path) -> str:
 
 def _scratch_dir_hint() -> str:
     """Disk-backed scratch location suggested to agents for temporary clones."""
-    hermes_home = korra_env("HERMES_HOME", "").strip()
+    hermes_home = korra_env("KORRA_HOME", "").strip()
     base = Path(hermes_home).expanduser() if hermes_home else Path.home() / ".hermes"
     return str(base / "scratch")

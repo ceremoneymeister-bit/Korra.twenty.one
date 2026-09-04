@@ -273,7 +273,7 @@ def register_from_config(
     # run fires zero user-configured code (plugins, MCP, AND hooks).
     from utils import env_var_enabled
 
-    if env_var_enabled("HERMES_SAFE_MODE"):
+    if env_var_enabled("KORRA_SAFE_MODE"):
         logger.info("HERMES_SAFE_MODE=1 — shell-hook registration skipped")
         return []
 
@@ -1066,7 +1066,7 @@ def _resolve_effective_accept(
     """
     if accept_hooks_arg:
         return True
-    env = korra_env("HERMES_ACCEPT_HOOKS", "").strip().lower()
+    env = korra_env("KORRA_ACCEPT_HOOKS", "").strip().lower()
     if env in {"1", "true", "yes", "on"}:
         return True
     cfg_val = cfg.get("hooks_auto_accept", False)

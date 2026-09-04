@@ -139,7 +139,7 @@ def _record_evidence(root: Path, recipe, result, *, partial: bool) -> None:
             tails.append(readiness_line)
         record_verify_run(
             root=root,
-            session_id=korra_env("HERMES_SESSION_ID"),
+            session_id=korra_env("KORRA_SESSION_ID"),
             ok=result.ok,
             command="hermes verify",
             scope="targeted" if partial else "full",

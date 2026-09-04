@@ -85,7 +85,7 @@ except (ModuleNotFoundError, ImportError):
     # (mirrors the same fallback used by the google-workspace skill's
     # _hermes_home.py shim).
     def get_hermes_home() -> Path:
-        val = korra_env("HERMES_HOME", "").strip()
+        val = korra_env("KORRA_HOME", "").strip()
         return Path(val) if val else Path.home() / ".hermes"
 
     def display_hermes_home() -> str:

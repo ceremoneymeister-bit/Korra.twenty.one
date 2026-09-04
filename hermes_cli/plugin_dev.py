@@ -65,9 +65,9 @@ def _doctor_runtime(plugin_path: Path):
             patch.dict(
                 os.environ,
                 korra_env_expand({
-                    "HERMES_HOME": str(home),
-                    "HERMES_BUNDLED_PLUGINS": str(bundled),
-                    "HERMES_ENABLE_PROJECT_PLUGINS": "0",
+                    "KORRA_HOME": str(home),
+                    "KORRA_BUNDLED_PLUGINS": str(bundled),
+                    "KORRA_ENABLE_PROJECT_PLUGINS": "0",
                 }),
                 clear=False,
             )

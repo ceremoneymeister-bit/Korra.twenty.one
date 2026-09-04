@@ -204,7 +204,7 @@ def _resolve_concurrent_tool_timeout() -> float | None:
     return resolve_timeout(
         "tools.concurrent_batch",
         default=_DEFAULT_CONCURRENT_TOOL_TIMEOUT_S,
-        env_var="HERMES_CONCURRENT_TOOL_TIMEOUT_S",
+        env_var="KORRA_CONCURRENT_TOOL_TIMEOUT_S",
     )
 
 

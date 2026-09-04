@@ -282,7 +282,7 @@ def _is_kanban_worker_env_gate(item: dict) -> bool:
     """Return True when Kanban is unavailable only because this is not a worker process."""
     if item.get("name") != "kanban":
         return False
-    if korra_env("HERMES_KANBAN_TASK"):
+    if korra_env("KORRA_KANBAN_TASK"):
         return False
 
     tools = item.get("tools") or []
@@ -291,7 +291,7 @@ def _is_kanban_worker_env_gate(item: dict) -> bool:
 
 def _doctor_tool_availability_detail(toolset: str) -> str:
     """Optional explanatory suffix for toolsets whose doctor status needs context."""
-    if toolset == "kanban" and not korra_env("HERMES_KANBAN_TASK"):
+    if toolset == "kanban" and not korra_env("KORRA_KANBAN_TASK"):
         return "(runtime-gated; loaded only for dispatcher-spawned workers)"
     return ""
 
@@ -624,8 +624,8 @@ def collect_relay_plugin_cutover_findings(
     # any box that exports legacy relay vars (10-vs-2 findings, Aug 2026).
     if env_map is None:
         for name in (*LEGACY_RELAY_EXPORT_ENV_VARS, RELAY_PLUGINS_CONFIG_ENV):
-            if name not in effective_env and os.environ.get(name) is not None:
-                effective_env[name] = os.environ[name]
+            if name not in effective_env and korra_env(name) is not None:
+                effective_env[name] = korra_env(name)
     if not str(effective_env.get(RELAY_PLUGINS_CONFIG_ENV, "")).strip():
         for name in configured_legacy_relay_env_vars(effective_env):
             findings.append(
@@ -1046,7 +1046,7 @@ def managed_scope_check() -> None:
         f"Managed scope active: {n_cfg} config key(s), {n_env} env key(s) "
         f"pinned by {managed_dir}"
     )
-    if korra_env("HERMES_MANAGED_DIR", "").strip():
+    if korra_env("KORRA_MANAGED_DIR", "").strip():
         check_info(f"managed dir set via HERMES_MANAGED_DIR={managed_dir}")
 
 
@@ -1240,7 +1240,7 @@ def run_doctor(args):
 
     # Doctor runs from the interactive CLI, so CLI-gated tool availability
     # checks (like cronjob management) should see the same context as `hermes`.
-    korra_env_setdefault(os.environ, "HERMES_INTERACTIVE", "1")
+    korra_env_setdefault(os.environ, "KORRA_INTERACTIVE", "1")
 
     # Handle `hermes doctor --ack <id>` as a fast path. Persist the ack and
     # return without running the rest of the diagnostics — the user has
@@ -1803,7 +1803,7 @@ def run_doctor(args):
             # Legacy root-level key counts too.
             if cfg_max_turns is None:
                 cfg_max_turns = raw_config.get("max_turns")
-            env_ghost = load_env().get("HERMES_MAX_ITERATIONS")
+            env_ghost = korra_env("KORRA_MAX_ITERATIONS", env=load_env())
             drift = (
                 cfg_max_turns is not None
                 and env_ghost is not None

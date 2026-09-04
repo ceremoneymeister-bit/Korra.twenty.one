@@ -453,7 +453,7 @@ class DeliveryRouter:
         otherwise the ``gateway.filter_silence_narration`` config flag wins
         (default True).
         """
-        env = korra_env("HERMES_FILTER_SILENCE_NARRATION")
+        env = korra_env("KORRA_FILTER_SILENCE_NARRATION")
         if env is not None:
             return env.strip().lower() in ("1", "true", "yes", "on")
         return bool(getattr(self.config, "filter_silence_narration", True))

@@ -157,7 +157,7 @@ def _current_profile_name() -> Optional[str]:
     ``HERMES_HOME``, which the gateway process inherits from its launch
     profile). Returns ``None`` when neither source yields a name.
     """
-    for env_name in ("HERMES_PROFILE_NAME", "HERMES_PROFILE"):
+    for env_name in ("KORRA_PROFILE_NAME", "KORRA_PROFILE"):
         value = korra_env(env_name)
         if value and value.strip():
             return value.strip()

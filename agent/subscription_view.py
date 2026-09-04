@@ -465,7 +465,7 @@ def dev_fixture_subscription_state() -> Optional[SubscriptionState]:
     Returns ``None`` when the env var is unset/empty (the real portal path runs).
     Throwaway scaffolding — mirrors ``HERMES_DEV_CREDITS_FIXTURE``.
     """
-    name = (korra_env("HERMES_DEV_SUBSCRIPTION_FIXTURE") or "").strip().lower()
+    name = (korra_env("KORRA_DEV_SUBSCRIPTION_FIXTURE") or "").strip().lower()
     if not name:
         return None
 

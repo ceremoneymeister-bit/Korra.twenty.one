@@ -1663,7 +1663,7 @@ def seed_profile_skills(profile_dir: Path, quiet: bool = False) -> Optional[dict
             [sys.executable, "-c",
              "import json; from tools.skills_sync import sync_skills; "
              "r = sync_skills(quiet=True); print(json.dumps(r))"],
-            env={**os.environ, **korra_env_expand({"HERMES_HOME": str(profile_dir)})},
+            env={**os.environ, **korra_env_expand({"KORRA_HOME": str(profile_dir)})},
             cwd=str(project_root),
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60,
         )
@@ -1861,7 +1861,7 @@ def _profile_bound_backend_pids(canon: str, profile_dir: Path) -> list[int]:
             # ...or by HERMES_HOME env pointing at this profile dir.
             if not bound:
                 try:
-                    env_home = (proc.environ() or {}).get("HERMES_HOME", "")
+                    env_home = korra_env("KORRA_HOME", "", env=proc.environ() or {})
                     if env_home and Path(env_home).resolve() == resolved_dir:
                         bound = True
                 except Exception:
@@ -2222,9 +2222,9 @@ def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
 
     # Derive service name for this profile
     # Temporarily set HERMES_HOME so _profile_suffix resolves correctly
-    old_home = korra_env("HERMES_HOME")
+    old_home = korra_env("KORRA_HOME")
     try:
-        korra_env_set(os.environ, "HERMES_HOME", str(profile_dir))
+        korra_env_set(os.environ, "KORRA_HOME", str(profile_dir))
         from hermes_cli.gateway import get_service_name, get_launchd_plist_path
 
         if _platform.system() == "Linux":
@@ -2259,9 +2259,9 @@ def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
         print(f"⚠ Service cleanup: {e}")
     finally:
         if old_home is not None:
-            korra_env_set(os.environ, "HERMES_HOME", old_home)
-        elif korra_env_present("HERMES_HOME"):
-            korra_env_pop(os.environ, "HERMES_HOME")
+            korra_env_set(os.environ, "KORRA_HOME", old_home)
+        elif korra_env_present("KORRA_HOME"):
+            korra_env_pop(os.environ, "KORRA_HOME")
 
 
 def _stop_gateway_process(profile_dir: Path) -> None:
@@ -2770,7 +2770,7 @@ def resolve_profile_env(profile_name: str) -> str:
     """
     canon = normalize_profile_name(profile_name)
     validate_profile_name(canon)
-    env_home = korra_env("HERMES_HOME", "").strip()
+    env_home = korra_env("KORRA_HOME", "").strip()
     if env_home:
         env_path = Path(env_home)
         # A profile-shaped env value means the root is the grandparent

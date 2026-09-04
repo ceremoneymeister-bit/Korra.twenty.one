@@ -146,7 +146,7 @@ def _reset_session_id_context():
 
     yield
     os.environ.pop("HERMES_SESSION_ID", None)
-    _VAR_MAP["HERMES_SESSION_ID"].set(_UNSET)
+    _VAR_MAP["KORRA_SESSION_ID"].set(_UNSET)
 
 
 def test_new_command_creates_real_fresh_session_and_resets_agent_state(tmp_path):

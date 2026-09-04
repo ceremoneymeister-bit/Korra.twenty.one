@@ -378,6 +378,9 @@ class TestRunJobKanbanIsolation:
 # Drift guard
 # ---------------------------------------------------------------------------
 
+_KANBAN_PREFIXES = ("KORRA_KANBAN_", "HERMES_KANBAN_")
+
+
 def test_every_dispatcher_kanban_var_is_identity_gated():
     """Invariant: every HERMES_KANBAN_* var the dispatcher injects is covered by
     the canonical KANBAN_ENV_KEYS, so the delegate_task subprocess scrubber and
@@ -387,6 +390,7 @@ def test_every_dispatcher_kanban_var_is_identity_gated():
     """
     import hermes_cli.kanban_db as kanban_db
     from agent.delegation_context import KANBAN_ENV_KEYS
+    from hermes_constants import korra_env_aliases
 
     source = ast.parse(open(kanban_db.__file__, encoding="utf-8").read())
     spawn = next(
@@ -396,7 +400,7 @@ def test_every_dispatcher_kanban_var_is_identity_gated():
 
     injected = set()
     for node in ast.walk(spawn):
-        # env["HERMES_KANBAN_X"] = ...  and the annotated form
+        # env["KORRA_KANBAN_X"] = ...  and the annotated form (оба имени пары)
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
@@ -405,11 +409,11 @@ def test_every_dispatcher_kanban_var_is_identity_gated():
                 if ast.unparse(target.value) != "env":
                     continue
                 key = ast.unparse(target.slice).strip("\"'")
-                if key.startswith("HERMES_KANBAN_"):
+                if key.startswith(_KANBAN_PREFIXES):
                     injected.add(key)
-        # env.update({"HERMES_KANBAN_X": ...}) / env.setdefault("HERMES_KANBAN_X", ...)
+        # env.update({"KORRA_KANBAN_X": ...}) / env.setdefault("KORRA_KANBAN_X", ...)
         # и парная запись слоя совместимости имён:
-        # korra_env_set(env, "HERMES_KANBAN_X", ...) / korra_env_expand({...})
+        # korra_env_set(env, "KORRA_KANBAN_X", ...) / korra_env_expand({...})
         elif isinstance(node, ast.Call):
             func = ast.unparse(node.func)
             if func not in (
@@ -429,11 +433,11 @@ def test_every_dispatcher_kanban_var_is_identity_gated():
                 elif isinstance(arg, ast.Constant):
                     literals.append(arg)
             for kw in node.keywords:
-                if kw.arg and kw.arg.startswith("HERMES_KANBAN_"):
+                if kw.arg and kw.arg.startswith(_KANBAN_PREFIXES):
                     injected.add(kw.arg)
             for lit in literals:
                 if isinstance(lit.value, str) and lit.value.startswith(
-                    "HERMES_KANBAN_"
+                    _KANBAN_PREFIXES
                 ):
                     injected.add(lit.value)
 
@@ -443,11 +447,20 @@ def test_every_dispatcher_kanban_var_is_identity_gated():
     # intentionally not part of KANBAN_ENV_KEYS. Listed explicitly so adding a
     # new var forces a decision instead of silently passing.
     behaviour_only = {
+        "KORRA_KANBAN_BRANCH",
+        "KORRA_KANBAN_GOAL_MODE",
+        "KORRA_KANBAN_GOAL_MAX_TURNS",
         "HERMES_KANBAN_BRANCH",
         "HERMES_KANBAN_GOAL_MODE",
         "HERMES_KANBAN_GOAL_MAX_TURNS",
     }
-    uncovered = injected - set(KANBAN_ENV_KEYS) - behaviour_only
+    # Имена пары равнозначны: сверяем каждое найденное имя под обоими.
+    covered = {
+        alias
+        for key in set(KANBAN_ENV_KEYS) | behaviour_only
+        for alias in korra_env_aliases(key)
+    }
+    uncovered = injected - covered
     assert not uncovered, (
         f"dispatcher injects {sorted(uncovered)} which is neither in "
         "KANBAN_ENV_KEYS nor explicitly classified as behaviour-only"

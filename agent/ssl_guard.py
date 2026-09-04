@@ -12,12 +12,12 @@ import ssl
 from pathlib import Path
 
 from agent.errors import SSLConfigurationError
-from hermes_constants import korra_env
+from hermes_constants import korra_env, korra_env_aliases
 
 logger = logging.getLogger(__name__)
 
 _CA_BUNDLE_ENV_VARS = (
-    "HERMES_CA_BUNDLE",
+    "KORRA_CA_BUNDLE",
     "SSL_CERT_FILE",
     "REQUESTS_CA_BUNDLE",
     "CURL_CA_BUNDLE",
@@ -27,7 +27,7 @@ _SKIP_VALUES = {"1", "true", "yes", "on"}
 
 
 def _skip_ssl_guard_enabled() -> bool:
-    return korra_env("HERMES_SKIP_SSL_GUARD", "").strip().lower() in _SKIP_VALUES
+    return korra_env("KORRA_SKIP_SSL_GUARD", "").strip().lower() in _SKIP_VALUES
 
 
 def _repair_hint() -> str:
@@ -79,9 +79,14 @@ def verify_ca_bundle() -> None:
         return
 
     for env_var in _CA_BUNDLE_ENV_VARS:
-        value = os.getenv(env_var)
-        if value:
-            _validate_bundle_path(env_var, value)
+        # В сообщении называется то имя, которое оператор действительно
+        # задал: подсказка «почини KORRA_CA_BUNDLE» человеку, выставившему
+        # HERMES_CA_BUNDLE, отправляет чинить не ту переменную.
+        for alias in korra_env_aliases(env_var):
+            value = os.environ.get(alias)
+            if value:
+                _validate_bundle_path(alias, value)
+                break
 
     try:
         import certifi

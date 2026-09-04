@@ -268,7 +268,7 @@ def _dev_fixture_usage_model() -> Optional[UsageModel]:
     Recognized names: ``free | healthy | low | topup | depleted``. Returns
     ``None`` when the env var is unset (real portal path runs).
     """
-    name = (korra_env("HERMES_DEV_CREDITS_FIXTURE") or "").strip().lower()
+    name = (korra_env("KORRA_DEV_CREDITS_FIXTURE") or "").strip().lower()
     if not name:
         return None
 

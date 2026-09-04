@@ -53,7 +53,17 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
-from hermes_constants import korra_env
+
+
+def _korra_env(name: str) -> str:
+    """Прочитать переменную под новым именем с откатом на старое.
+
+    Модуль запускается и как импорт движка, и как самостоятельный скрипт
+    по пути (`python tools/bot_mode_dm.py --run-delivery ...`), где корень
+    репозитория не на `sys.path`. Поэтому пара имён разворачивается здесь
+    руками, без импорта `hermes_constants`.
+    """
+    return os.environ.get("KORRA_" + name) or os.environ.get("HERMES_" + name) or ""
 
 logger = logging.getLogger(__name__)
 
@@ -559,7 +569,7 @@ def _delivery_lock(argv: list[str], *, stdin_file: bool):
         return contextlib.nullcontext()
     from tools.bot_relay import acquire_turn_lock
 
-    home = Path(korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes"))
+    home = Path(_korra_env("HOME") or os.path.expanduser("~/.hermes"))
     return acquire_turn_lock(_hermes_root(home), argv[2])
 
 
@@ -762,7 +772,7 @@ def _agent_home(agent: Any) -> str:
             return str(Path(db_path).parent)
     except Exception:
         pass
-    return korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes")
+    return _korra_env("HOME") or os.path.expanduser("~/.hermes")
 
 
 def _session_title(agent: Any) -> str:

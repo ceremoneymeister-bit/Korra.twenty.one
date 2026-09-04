@@ -803,7 +803,7 @@ def _touch_stale_kill_activity(agent, elapsed: float) -> None:
 def _check_stale_giveup(agent) -> None:
     """Raise immediately when the consecutive-stale streak is past the
     give-up threshold — no network attempt, no stale-timeout wait."""
-    _giveup = env_int("HERMES_STREAM_STALE_GIVEUP", 5)
+    _giveup = env_int("KORRA_STREAM_STALE_GIVEUP", 5)
     _streak = _stale_streak(agent)
     if _giveup > 0 and _streak >= _giveup:
         raise RuntimeError(
@@ -828,7 +828,7 @@ def _derive_stream_stale_timeout(agent, api_kwargs: dict) -> float:
     if _cfg_stale is not None:
         _base = _cfg_stale
     else:
-        _base = env_float("HERMES_STREAM_STALE_TIMEOUT", 180.0)
+        _base = env_float("KORRA_STREAM_STALE_TIMEOUT", 180.0)
     _est_tokens = estimate_request_context_tokens(api_kwargs)
     if _est_tokens > 100_000:
         _timeout = max(_base, 300.0)
@@ -1526,7 +1526,7 @@ def interruptible_api_call(agent, api_kwargs: dict):
     # requests — it is a backstop against unbounded growth, not a tighter
     # limit. Tunable via HERMES_CODEX_HARD_TIMEOUT_SECONDS (set to 0 to
     # disable the ceiling entirely; that restores the pre-fix behavior).
-    _codex_hard_timeout = _env_float("HERMES_CODEX_HARD_TIMEOUT_SECONDS", 1500.0)
+    _codex_hard_timeout = _env_float("KORRA_CODEX_HARD_TIMEOUT_SECONDS", 1500.0)
     if (
         _codex_watchdog_enabled
         and _openai_codex_backend
@@ -1551,12 +1551,12 @@ def interruptible_api_call(agent, api_kwargs: dict):
     # reconnect promptly when the socket is genuinely wedged. Set
     # HERMES_CODEX_TTFB_TIMEOUT_SECONDS=0 to disable this watchdog entirely.
     _ttfb_enabled = _codex_watchdog_enabled
-    _ttfb_timeout = _env_float("HERMES_CODEX_TTFB_TIMEOUT_SECONDS", 120.0)
+    _ttfb_timeout = _env_float("KORRA_CODEX_TTFB_TIMEOUT_SECONDS", 120.0)
     if _ttfb_timeout <= 0:
         _ttfb_enabled = False
     elif _openai_codex_backend:
-        _ttfb_disable_above = _env_float("HERMES_CODEX_TTFB_DISABLE_ABOVE_TOKENS", 10_000.0)
-        _ttfb_strict = korra_env("HERMES_CODEX_TTFB_STRICT", "").strip().lower() in {
+        _ttfb_disable_above = _env_float("KORRA_CODEX_TTFB_DISABLE_ABOVE_TOKENS", 10_000.0)
+        _ttfb_strict = korra_env("KORRA_CODEX_TTFB_STRICT", "").strip().lower() in {
             "1", "true", "yes", "on"
         }
         if (
@@ -1576,7 +1576,7 @@ def interruptible_api_call(agent, api_kwargs: dict):
                     _ttfb_disable_above,
                 )
                 _ttfb_timeout = _large_request_ttfb_timeout
-        _ttfb_cap = _env_float("HERMES_CODEX_TTFB_MAX_SECONDS", 120.0)
+        _ttfb_cap = _env_float("KORRA_CODEX_TTFB_MAX_SECONDS", 120.0)
         if _ttfb_cap > 0 and _ttfb_timeout > _ttfb_cap:
             logger.info(
                 "Capping openai-codex no-byte TTFB timeout from %.0fs to %.0fs "
@@ -1589,7 +1589,7 @@ def interruptible_api_call(agent, api_kwargs: dict):
 
     _codex_idle_enabled = _codex_watchdog_enabled
     _codex_idle_timeout = _env_float(
-        "HERMES_CODEX_EVENT_STALE_TIMEOUT_SECONDS",
+        "KORRA_CODEX_EVENT_STALE_TIMEOUT_SECONDS",
         _codex_idle_timeout_default,
     )
     if _codex_idle_timeout <= 0:
@@ -4018,14 +4018,14 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
         _base_timeout = (
             _provider_timeout_cfg
             if _provider_timeout_cfg is not None
-            else env_float("HERMES_API_TIMEOUT", 1800.0)
+            else env_float("KORRA_API_TIMEOUT", 1800.0)
         )
         # Read timeout: config wins here too.  Otherwise use
         # HERMES_STREAM_READ_TIMEOUT (default 120s) for cloud providers.
         if _provider_timeout_cfg is not None:
             _stream_read_timeout = _provider_timeout_cfg
         else:
-            _stream_read_timeout = env_float("HERMES_STREAM_READ_TIMEOUT", 120.0)
+            _stream_read_timeout = env_float("KORRA_STREAM_READ_TIMEOUT", 120.0)
             # Local providers (Ollama, llama.cpp, vLLM) can take minutes for
             # prefill on large contexts before producing the first token.
             # Auto-increase the httpx read timeout unless the user explicitly
@@ -4868,7 +4868,7 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
     def _call():
         import httpx as _httpx
 
-        _max_stream_retries = env_int("HERMES_STREAM_RETRIES", 2)
+        _max_stream_retries = env_int("KORRA_STREAM_RETRIES", 2)
 
         try:
             for _stream_attempt in range(_max_stream_retries + 1):
@@ -5209,7 +5209,7 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
     if _cfg_stale is not None:
         _stream_stale_timeout_base = _cfg_stale
     else:
-        _stream_stale_timeout_base = env_float("HERMES_STREAM_STALE_TIMEOUT", 180.0)
+        _stream_stale_timeout_base = env_float("KORRA_STREAM_STALE_TIMEOUT", 180.0)
     # Local providers (Ollama, oMLX, llama-cpp) can take 300+ seconds
     # for prefill on large contexts, so tolerate far longer silence than
     # the cloud default — but a wedged local server must EVENTUALLY trip the
@@ -5234,7 +5234,7 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
                     _local_default = float(_v)
         except Exception:
             pass
-        _stream_stale_timeout = env_float("HERMES_LOCAL_STREAM_STALE_TIMEOUT", _local_default)
+        _stream_stale_timeout = env_float("KORRA_LOCAL_STREAM_STALE_TIMEOUT", _local_default)
         logger.debug(
             "Local provider detected (%s) — stale stream timeout set to %.0fs",
             agent.base_url, _stream_stale_timeout,

@@ -76,6 +76,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from hermes_constants import korra_env_set
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ _STARTUP_GRACE_SECONDS = 5
 # ``<hermes_home>/proxy/management.token`` (0600), and injected into the
 # daemon's env under this name at start.  v0.39 validates at startup that
 # the named env var is non-empty when management.listen is set.
-_MGMT_API_KEY_ENV = "HERMES_IRON_PROXY_MGMT_KEY"
+_MGMT_API_KEY_ENV = "KORRA_IRON_PROXY_MGMT_KEY"
 # The management listener binds loopback at tunnel_port + 2 (tunnel_port
 # is CONNECT/MITM, +1 is the plain-HTTP forward listener).
 _MGMT_PORT_OFFSET = 2
@@ -1589,7 +1590,7 @@ def _read_pid() -> Optional[int]:
 # by ``_pid_alive`` to confirm a candidate PID still refers to *our* managed
 # binary even across PID recycling (a fresh process can't inherit our
 # arbitrary env value).
-_HERMES_IRON_PROXY_NONCE_ENV = "HERMES_IRON_PROXY_NONCE"
+_HERMES_IRON_PROXY_NONCE_ENV = "KORRA_IRON_PROXY_NONCE"
 _proxy_nonce: Optional[str] = None
 
 
@@ -1813,14 +1814,14 @@ def start_proxy(
     # persisted key (minting it if this is a config written by a newer
     # setup but the token file was removed).
     if _read_management_listen_from_config(cfg) is not None:
-        env[_MGMT_API_KEY_ENV] = ensure_management_token()
+        korra_env_set(env, _MGMT_API_KEY_ENV, ensure_management_token())
 
     # Plant a per-start nonce in the child env so ``_pid_alive`` can
     # confirm a candidate PID still refers to *our* binary across PID
     # recycling.  Module-global is fine — only one managed proxy per
     # Hermes process.
     _proxy_nonce = hashlib.sha256(os.urandom(16)).hexdigest()
-    env[_HERMES_IRON_PROXY_NONCE_ENV] = _proxy_nonce
+    korra_env_set(env, _HERMES_IRON_PROXY_NONCE_ENV, _proxy_nonce)
 
     log_path = _proxy_state_dir() / "iron-proxy.log"
     # Keep ownership of the fd tight: open with explicit 0o600 so the

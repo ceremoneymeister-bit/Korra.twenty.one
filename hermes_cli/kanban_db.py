@@ -179,7 +179,7 @@ def _assert_not_delegated_child_mutation() -> None:
 
         delegated = is_delegated_child_process_context()
     except Exception:
-        delegated = bool(korra_env("HERMES_DELEGATED_CHILD_CONTEXT"))
+        delegated = bool(korra_env("KORRA_DELEGATED_CHILD_CONTEXT"))
     if delegated:
         raise PermissionError(
             "delegate_task child contexts cannot mutate Kanban tasks or boards"
@@ -399,7 +399,7 @@ def _resolve_claim_ttl_seconds(ttl_seconds: Optional[int] = None) -> int:
     if ttl_seconds is not None:
         return max(1, int(ttl_seconds))
 
-    raw = korra_env("HERMES_KANBAN_CLAIM_TTL_SECONDS", "").strip()
+    raw = korra_env("KORRA_KANBAN_CLAIM_TTL_SECONDS", "").strip()
     if raw:
         try:
             parsed = int(raw)
@@ -439,7 +439,7 @@ def _resolve_crash_grace_seconds() -> int:
     non-integer, or negative. A value of 0 restores immediate-reclaim
     behaviour (useful for tests).
     """
-    raw = korra_env("HERMES_KANBAN_CRASH_GRACE_SECONDS", "").strip()
+    raw = korra_env("KORRA_KANBAN_CRASH_GRACE_SECONDS", "").strip()
     if raw:
         try:
             parsed = int(raw)
@@ -459,8 +459,8 @@ def _resolve_rate_limit_cooldown_seconds() -> int:
     the next tick) — useful for tests that want to assert the task becomes
     spawnable again immediately.
     """
-    raw = os.environ.get(
-        "HERMES_KANBAN_RATE_LIMIT_COOLDOWN_SECONDS", ""
+    raw = korra_env(
+        "KORRA_KANBAN_RATE_LIMIT_COOLDOWN_SECONDS", ""
     ).strip()
     if raw:
         try:
@@ -580,7 +580,7 @@ def kanban_home() -> Path:
     profile's ``HERMES_HOME`` would silently fork the board per profile,
     which breaks the dispatcher / worker handoff.
     """
-    override = korra_env("HERMES_KANBAN_HOME", "").strip()
+    override = korra_env("KORRA_KANBAN_HOME", "").strip()
     if override:
         return Path(override).expanduser()
     from hermes_constants import get_default_hermes_root
@@ -632,7 +632,7 @@ def get_current_board() -> str:
         except ValueError:
             pass
 
-    env = korra_env("HERMES_KANBAN_BOARD", "").strip()
+    env = korra_env("KORRA_KANBAN_BOARD", "").strip()
     if env:
         try:
             normed = _normalize_board_slug(env)
@@ -725,7 +725,7 @@ def kanban_db_path(board: Optional[str] = None) -> Path:
     3. Board ``default`` → ``<root>/kanban.db`` (back-compat path).
        Other boards → ``<root>/kanban/boards/<slug>/kanban.db``.
     """
-    override = korra_env("HERMES_KANBAN_DB", "").strip()
+    override = korra_env("KORRA_KANBAN_DB", "").strip()
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -747,7 +747,7 @@ def workspaces_root(board: Optional[str] = None) -> Path:
     that existing scratch workspaces from before the boards feature are
     preserved. Other boards use ``<root>/kanban/boards/<slug>/workspaces/``.
     """
-    override = korra_env("HERMES_KANBAN_WORKSPACES_ROOT", "").strip()
+    override = korra_env("KORRA_KANBAN_WORKSPACES_ROOT", "").strip()
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -777,7 +777,7 @@ def attachments_root(board: Optional[str] = None) -> Path:
     directly. Remote backends (Docker/Modal) need this directory mounted;
     see the kanban docs.
     """
-    override = korra_env("HERMES_KANBAN_ATTACHMENTS_ROOT", "").strip()
+    override = korra_env("KORRA_KANBAN_ATTACHMENTS_ROOT", "").strip()
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -1561,7 +1561,7 @@ def _resolve_busy_timeout_ms() -> int:
     expected.  A long busy timeout lets SQLite serialize writers via WAL rather
     than surfacing transient ``database is locked`` failures during bursts.
     """
-    raw = korra_env("HERMES_KANBAN_BUSY_TIMEOUT_MS", "").strip()
+    raw = korra_env("KORRA_KANBAN_BUSY_TIMEOUT_MS", "").strip()
     if raw:
         try:
             parsed = int(raw)
@@ -5813,7 +5813,7 @@ def _managed_scratch_path_info(p: Path) -> tuple[bool, Optional[str]]:
     except OSError:
         return False, None
     roots: list[tuple[Path, Optional[str]]] = []
-    override = korra_env("HERMES_KANBAN_WORKSPACES_ROOT", "").strip()
+    override = korra_env("KORRA_KANBAN_WORKSPACES_ROOT", "").strip()
     if override:
         try:
             roots.append((Path(override).expanduser().resolve(strict=False), None))
@@ -10613,7 +10613,7 @@ def _resolve_hermes_argv() -> list[str]:
     """
     import shutil
 
-    env_bin = korra_env("HERMES_BIN", "").strip()
+    env_bin = korra_env("KORRA_BIN", "").strip()
     if env_bin:
         if _looks_like_path(env_bin):
             return _hermes_path_argv(env_bin)
@@ -10751,7 +10751,9 @@ def _default_spawn(
     # session binds ContextVars in this process.
     from gateway.session_context import _VAR_MAP
     for key in _VAR_MAP:
-        env.pop(key, None)
+        # Оба имени пары: под вторым именем маршрут чужой сессии доехал бы
+        # до воркера.
+        korra_env_pop(env, key)
 
     # Inject HERMES_HOME so the worker reads the profile-scoped config.yaml
     # (fallback_providers, toolsets, agent settings, etc.) instead of the root
@@ -10764,7 +10766,7 @@ def _default_spawn(
     # being invisible to kanban workers.
     from hermes_cli.profiles import resolve_profile_env
     try:
-        korra_env_set(env, "HERMES_HOME", resolve_profile_env(profile_arg))
+        korra_env_set(env, "KORRA_HOME", resolve_profile_env(profile_arg))
     except FileNotFoundError:
         # Profile dir doesn't exist — defer resolution to the CLI's
         # _apply_profile_override() via HERMES_PROFILE (set below).
@@ -10772,9 +10774,9 @@ def _default_spawn(
         # HERMES_HOME never had profiles created.
         pass
     if task.tenant:
-        korra_env_set(env, "HERMES_TENANT", task.tenant)
-    korra_env_set(env, "HERMES_KANBAN_TASK", task.id)
-    korra_env_set(env, "HERMES_KANBAN_WORKSPACE", workspace)
+        korra_env_set(env, "KORRA_TENANT", task.tenant)
+    korra_env_set(env, "KORRA_KANBAN_TASK", task.id)
+    korra_env_set(env, "KORRA_KANBAN_WORKSPACE", workspace)
     # Tag the worker's session so it lands in state.db as `kanban`, not as an
     # untitled `cli` row. A worker is a dispatcher-owned run whose transcript is
     # read on the board and in `hermes kanban log` — it is not a conversation
@@ -10782,7 +10784,7 @@ def _default_spawn(
     # resume picker, session_search) filters it out by source. Without this the
     # sidebar renders one row per attempt, labeled with the worker's own prompt
     # ("work kanban task t_…").
-    korra_env_set(env, "HERMES_SESSION_SOURCE", "kanban")
+    korra_env_set(env, "KORRA_SESSION_SOURCE", "kanban")
     # Pin TERMINAL_CWD to the task's workspace so the worker's file tools and
     # context-file loader anchor on the workspace, not whatever cwd the
     # dispatching gateway happened to export. The worker subprocess is already
@@ -10798,18 +10800,18 @@ def _default_spawn(
     if workspace and os.path.isabs(workspace) and os.path.isdir(workspace):
         env["TERMINAL_CWD"] = workspace
     if task.branch_name:
-        korra_env_set(env, "HERMES_KANBAN_BRANCH", task.branch_name)
+        korra_env_set(env, "KORRA_KANBAN_BRANCH", task.branch_name)
     if task.current_run_id is not None:
-        korra_env_set(env, "HERMES_KANBAN_RUN_ID", str(task.current_run_id))
+        korra_env_set(env, "KORRA_KANBAN_RUN_ID", str(task.current_run_id))
     if task.claim_lock:
-        korra_env_set(env, "HERMES_KANBAN_CLAIM_LOCK", task.claim_lock)
+        korra_env_set(env, "KORRA_KANBAN_CLAIM_LOCK", task.claim_lock)
     # Goal-loop mode: the worker reads these and wraps its run in the
     # Ralph-style /goal judge loop (see cli.py quiet-mode path). Only set
     # when enabled so non-goal tasks keep a clean env.
     if task.goal_mode:
-        korra_env_set(env, "HERMES_KANBAN_GOAL_MODE", "1")
+        korra_env_set(env, "KORRA_KANBAN_GOAL_MODE", "1")
         if task.goal_max_turns is not None:
-            korra_env_set(env, "HERMES_KANBAN_GOAL_MAX_TURNS", str(int(task.goal_max_turns)))
+            korra_env_set(env, "KORRA_KANBAN_GOAL_MAX_TURNS", str(int(task.goal_max_turns)))
     terminal_timeout = _worker_terminal_timeout_env(
         task.max_runtime_seconds,
         env.get("TERMINAL_TIMEOUT"),
@@ -10828,19 +10830,19 @@ def _default_spawn(
     # dispatcher's. Belt-and-braces with the `get_default_hermes_root()`
     # resolution in `kanban_home()` — symmetric resolution is the norm,
     # but unusual symlink / Docker layouts are caught here too.
-    korra_env_set(env, "HERMES_KANBAN_DB", str(kanban_db_path(board=board)))
-    korra_env_set(env, "HERMES_KANBAN_WORKSPACES_ROOT", str(workspaces_root(board=board)))
-    _retag_legacy_worker_sessions(env["HERMES_KANBAN_WORKSPACES_ROOT"])
+    korra_env_set(env, "KORRA_KANBAN_DB", str(kanban_db_path(board=board)))
+    korra_env_set(env, "KORRA_KANBAN_WORKSPACES_ROOT", str(workspaces_root(board=board)))
+    _retag_legacy_worker_sessions(korra_env("KORRA_KANBAN_WORKSPACES_ROOT", env=env))
     # Board slug — the final defense-in-depth pin. If the worker ever
     # resolves kanban paths without the DB / workspaces env vars, the
     # board slug still forces it to the right directory.
     resolved_board = _normalize_board_slug(board) or get_current_board()
-    korra_env_set(env, "HERMES_KANBAN_BOARD", resolved_board)
+    korra_env_set(env, "KORRA_KANBAN_BOARD", resolved_board)
     # HERMES_PROFILE is the author the kanban_comment tool defaults to.
     # `hermes -p <assignee>` activates the profile, but the env var is
     # what the tool reads — set it explicitly here so comments are
     # attributed correctly regardless of how the child loads config.
-    korra_env_set(env, "HERMES_PROFILE", profile_arg)
+    korra_env_set(env, "KORRA_PROFILE", profile_arg)
 
     # A worker must NEVER boot the interactive TUI: an inherited HERMES_TUI=1
     # or a `display.interface: tui` in the profile's config would send the
@@ -10848,7 +10850,7 @@ def _default_spawn(
     # doing the task → "protocol violation" on every attempt. `--cli` is the
     # highest-precedence interface override; dropping the env var covers
     # older hermes builds on PATH that predate the flag's precedence.
-    korra_env_pop(env, "HERMES_TUI")
+    korra_env_pop(env, "KORRA_TUI")
 
     cmd = [
         *_resolve_hermes_argv(),
@@ -10882,7 +10884,7 @@ def _default_spawn(
     # branch, not a nested one.
     if task.reasoning_effort:
         cmd.extend(["--reasoning", task.reasoning_effort])
-    worker_toolsets = _resolve_worker_cli_toolsets(env.get("HERMES_HOME"))
+    worker_toolsets = _resolve_worker_cli_toolsets(korra_env("KORRA_HOME", env=env))
     if worker_toolsets:
         cmd.extend(["--toolsets", ",".join(worker_toolsets)])
     cmd.extend([

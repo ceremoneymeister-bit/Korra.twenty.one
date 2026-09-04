@@ -283,7 +283,7 @@ def _current_session_key() -> str:
     """
     from gateway.session_context import get_session_env
 
-    return get_session_env("HERMES_SESSION_KEY", "")
+    return get_session_env("KORRA_SESSION_KEY", "")
 
 
 def _get_approval_callback():
@@ -459,7 +459,7 @@ def _handle_sudo_failure(output: str, env_type: str) -> str:
 
     Returns enhanced output if sudo failed in such a context, else original.
     """
-    is_gateway = env_var_enabled("HERMES_GATEWAY_SESSION")
+    is_gateway = env_var_enabled("KORRA_GATEWAY_SESSION")
     is_delegated_child = _in_delegated_child_context()
 
     if not is_gateway and not is_delegated_child:
@@ -603,7 +603,7 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
             result["done"] = True
     
     try:
-        korra_env_set(os.environ, "HERMES_SPINNER_PAUSE", "1")
+        korra_env_set(os.environ, "KORRA_SPINNER_PAUSE", "1")
         time.sleep(0.2)
         
         print()
@@ -654,8 +654,8 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
         sys.stdout.flush()
         return ""
     finally:
-        if korra_env_present("HERMES_SPINNER_PAUSE"):
-            korra_env_pop(os.environ, "HERMES_SPINNER_PAUSE")
+        if korra_env_present("KORRA_SPINNER_PAUSE"):
+            korra_env_pop(os.environ, "KORRA_SPINNER_PAUSE")
 
 def _safe_command_preview(command: Any, limit: int = 200) -> str:
     """Return a log-safe preview for possibly-invalid command values."""
@@ -1102,7 +1102,7 @@ def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None
     # Children always behave as headless — configured SUDO_PASSWORD, the
     # session cache, and the NOPASSWD probe above all still work.
     should_prompt_for_sudo = (
-        env_var_enabled("HERMES_INTERACTIVE") or has_sudo_prompt_callback
+        env_var_enabled("KORRA_INTERACTIVE") or has_sudo_prompt_callback
     ) and not _in_delegated_child_context()
     if not has_configured_password and not sudo_password and should_prompt_for_sudo:
         sudo_password = _prompt_for_sudo_password(timeout_seconds=45)
@@ -1435,7 +1435,7 @@ def _current_session_profile() -> str:
     """
     from gateway.session_context import get_session_env
 
-    return get_session_env("HERMES_SESSION_PROFILE", "")
+    return get_session_env("KORRA_SESSION_PROFILE", "")
 
 
 _ISOLATION_OVERRIDE_KEYS = frozenset({
@@ -3478,13 +3478,13 @@ def terminal_tool(
                             proc_session.id,
                         )
                     else:
-                        _gw_platform = _gse("HERMES_SESSION_PLATFORM", "")
+                        _gw_platform = _gse("KORRA_SESSION_PLATFORM", "")
                         if _gw_platform:
-                            _gw_chat_id = _gse("HERMES_SESSION_CHAT_ID", "")
-                            _gw_thread_id = _gse("HERMES_SESSION_THREAD_ID", "")
-                            _gw_user_id = _gse("HERMES_SESSION_USER_ID", "")
-                            _gw_user_name = _gse("HERMES_SESSION_USER_NAME", "")
-                            _gw_message_id = _gse("HERMES_SESSION_MESSAGE_ID", "")
+                            _gw_chat_id = _gse("KORRA_SESSION_CHAT_ID", "")
+                            _gw_thread_id = _gse("KORRA_SESSION_THREAD_ID", "")
+                            _gw_user_id = _gse("KORRA_SESSION_USER_ID", "")
+                            _gw_user_name = _gse("KORRA_SESSION_USER_NAME", "")
+                            _gw_message_id = _gse("KORRA_SESSION_MESSAGE_ID", "")
                             proc_session.watcher_platform = _gw_platform
                             proc_session.watcher_chat_id = _gw_chat_id
                             proc_session.watcher_user_id = _gw_user_id
@@ -3498,7 +3498,7 @@ def terminal_tool(
                             # (/new) before the process finishes, instead of
                             # injecting it into the chat's NEW session.
                             proc_session.parent_session_id = _gse(
-                                "HERMES_SESSION_ID", ""
+                                "KORRA_SESSION_ID", ""
                             )
 
                 # Mutual exclusion: if both notify_on_complete and watch_patterns
@@ -3669,7 +3669,7 @@ def terminal_tool(
             if sudo_cache_cleared:
                 has_sudo_prompt_callback = _get_sudo_password_callback() is not None
                 can_reprompt = (
-                    has_sudo_prompt_callback or env_var_enabled("HERMES_INTERACTIVE")
+                    has_sudo_prompt_callback or env_var_enabled("KORRA_INTERACTIVE")
                 ) and not _in_delegated_child_context()
                 if can_reprompt:
                     output += (

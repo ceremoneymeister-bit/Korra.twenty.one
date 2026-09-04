@@ -88,7 +88,7 @@ def get_bundled_plugins_dir() -> Path:
     installs) so read-only store paths are consulted first.  Falls back to
     the in-repo path used during development.
     """
-    env_override = korra_env("HERMES_BUNDLED_PLUGINS")
+    env_override = korra_env("KORRA_BUNDLED_PLUGINS")
     if env_override:
         return Path(env_override)
     return Path(__file__).resolve().parent.parent / "plugins"
@@ -122,7 +122,7 @@ logger = logging.getLogger(__name__)
 # The env var is read once at import time; tests that need to flip it
 # mid-process can call ``_install_plugin_debug_handler(force=True)``.
 
-_PLUGINS_DEBUG = korra_env("HERMES_PLUGINS_DEBUG", "").strip().lower() in {
+_PLUGINS_DEBUG = korra_env("KORRA_PLUGINS_DEBUG", "").strip().lower() in {
     "1", "true", "yes", "on",
 }
 _DEBUG_HANDLER_INSTALLED = False
@@ -136,7 +136,7 @@ def _install_plugin_debug_handler(force: bool = False) -> None:
     """
     global _DEBUG_HANDLER_INSTALLED, _PLUGINS_DEBUG
     if force:
-        _PLUGINS_DEBUG = korra_env("HERMES_PLUGINS_DEBUG", "").strip().lower() in {
+        _PLUGINS_DEBUG = korra_env("KORRA_PLUGINS_DEBUG", "").strip().lower() in {
             "1", "true", "yes", "on",
         }
     if not _PLUGINS_DEBUG or _DEBUG_HANDLER_INSTALLED:
@@ -4238,7 +4238,7 @@ class PluginManager:
                 # The ledger owns teardown.  Clearing manager-local containers by
                 # itself leaves process-global tools/platforms/providers installed.
                 self.unload()
-            if env_var_enabled("HERMES_SAFE_MODE"):
+            if env_var_enabled("KORRA_SAFE_MODE"):
                 logger.info("HERMES_SAFE_MODE=1 — plugin discovery skipped")
                 self._discovered = True
                 return
@@ -4577,7 +4577,7 @@ class PluginManager:
 
         # 3. Project plugins (./.hermes/plugins/), only when explicitly opted
         # in. This must match the full discovery gate exactly.
-        if _env_enabled("HERMES_ENABLE_PROJECT_PLUGINS"):
+        if _env_enabled("KORRA_ENABLE_PROJECT_PLUGINS"):
             project_dir = Path.cwd() / ".hermes" / "plugins"
             logger.debug("Scanning project plugins: %s", project_dir)
             project_manifests = self._scan_directory(project_dir, source="project")
@@ -4597,7 +4597,7 @@ class PluginManager:
         native ``plugin.yaml`` precedence, source ordering, depth limits, and
         project-plugin gating cannot diverge between startup and runtime.
         """
-        if _env_enabled("HERMES_SAFE_MODE"):
+        if _env_enabled("KORRA_SAFE_MODE"):
             return False
 
         plugins_config = raw_config.get("plugins")

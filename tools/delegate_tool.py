@@ -2734,7 +2734,7 @@ def _run_single_child(
             try:
                 from gateway.session_context import get_session_env
 
-                owner_session_id = get_session_env("HERMES_UI_SESSION_ID", "") or None
+                owner_session_id = get_session_env("KORRA_UI_SESSION_ID", "") or None
             except Exception:
                 owner_session_id = None
         if owner_session_id and (
@@ -4041,7 +4041,7 @@ def delegate_task(
     try:
         from gateway.session_context import get_session_env
 
-        _origin_ui_session_id = get_session_env("HERMES_UI_SESSION_ID", "")
+        _origin_ui_session_id = get_session_env("KORRA_UI_SESSION_ID", "")
     except Exception:
         _origin_ui_session_id = ""
     _origin_owner_transport, _origin_owner_session_record = (
@@ -4381,11 +4381,11 @@ def delegate_task(
         try:
             from gateway.session_context import get_session_env
 
-            _source = get_session_env("HERMES_SESSION_SOURCE", "")
+            _source = get_session_env("KORRA_SESSION_SOURCE", "")
             # Refresh from the same task-local source when available, but retain
             # the immutable value captured before child construction otherwise.
             _origin_ui_session_id = (
-                get_session_env("HERMES_UI_SESSION_ID", "") or _origin_ui_session_id
+                get_session_env("KORRA_UI_SESSION_ID", "") or _origin_ui_session_id
             )
             # In desktop/TUI, the routable session key is the durable
             # AIAgent.session_id. Context compression can rotate that id during
@@ -4930,7 +4930,7 @@ def _load_config() -> dict:
     flag is set we keep ``cli.CLI_CONFIG`` authoritative to preserve the
     flag's contract of suppressing user config.yaml settings.
     """
-    prefer_legacy = korra_env("HERMES_IGNORE_USER_CONFIG") == "1"
+    prefer_legacy = korra_env("KORRA_IGNORE_USER_CONFIG") == "1"
     if not prefer_legacy:
         try:
             from hermes_cli.config import load_config_readonly

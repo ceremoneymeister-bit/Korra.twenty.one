@@ -1522,7 +1522,7 @@ def _hermes_home_from_systemd_unit_file(system: bool = False) -> str | None:
         if not stripped.startswith("Environment="):
             continue
         body = stripped[len("Environment=") :].strip().strip('"')
-        if body.startswith("HERMES_HOME="):
+        if body.startswith(("KORRA_HOME=", "HERMES_HOME=")):
             value = body.split("=", 1)[1].strip().strip('"')
             return value or None
     return None
@@ -1543,13 +1543,13 @@ def _sync_hermes_home_from_systemd_unit(system: bool) -> None:
     # back to ``systemctl show`` for units that only exist in the manager.
     unit_home = (_hermes_home_from_systemd_unit_file(system=True) or "").strip()
     if not unit_home:
-        unit_home = _read_systemd_unit_environment(system=True).get("HERMES_HOME", "").strip()
+        unit_home = korra_env("KORRA_HOME", "", env=_read_systemd_unit_environment(system=True)).strip()
     if not unit_home:
         return
-    current = korra_env("HERMES_HOME", "").strip()
+    current = korra_env("KORRA_HOME", "").strip()
     if current == unit_home:
         return
-    korra_env_set(os.environ, "HERMES_HOME", unit_home)
+    korra_env_set(os.environ, "KORRA_HOME", unit_home)
 
 
 def _read_systemd_unit_properties(
@@ -2703,7 +2703,7 @@ def _windows_gateway_should_absorb_console_controls() -> bool:
     if not is_windows():
         return False
 
-    detached = korra_env("HERMES_GATEWAY_DETACHED", "").strip().lower()
+    detached = korra_env("KORRA_GATEWAY_DETACHED", "").strip().lower()
     if detached in {"1", "true", "yes", "on"}:
         return True
 
@@ -3811,7 +3811,7 @@ def _hermes_home_for_target_user(target_home_dir: str) -> str:
       /root/.hermes/profiles/coder     → /home/alice/.hermes/profiles/coder
       /opt/custom-hermes               → /opt/custom-hermes  (kept as-is)
     """
-    current_hermes_raw = korra_env("HERMES_HOME", "").strip()
+    current_hermes_raw = korra_env("KORRA_HOME", "").strip()
     current_hermes = (
         Path(current_hermes_raw).expanduser()
         if current_hermes_raw
@@ -4076,7 +4076,9 @@ Environment="USER={username}"
 Environment="LOGNAME={username}"
 Environment="PATH={sane_path}"
 Environment="VIRTUAL_ENV={venv_dir}"
+Environment="KORRA_HOME={hermes_home}"
 Environment="HERMES_HOME={hermes_home}"
+Environment="KORRA_SUPERVISED_CHILD=1"
 Environment="HERMES_SUPERVISED_CHILD=1"
 Restart=always
 RestartSec=5
@@ -4115,7 +4117,9 @@ Type={systemd_type}
 WorkingDirectory={working_dir}
 Environment="PATH={sane_path}"
 Environment="VIRTUAL_ENV={venv_dir}"
+Environment="KORRA_HOME={hermes_home}"
 Environment="HERMES_HOME={hermes_home}"
+Environment="KORRA_SUPERVISED_CHILD=1"
 Environment="HERMES_SUPERVISED_CHILD=1"
 Restart=always
 RestartSec=5
@@ -4239,9 +4243,9 @@ def _temp_home_in_service_definition(definition: str) -> str | None:
     import re
     import tempfile
 
-    candidates = re.findall(r'HERMES_HOME=([^"\n]+)', definition)
+    candidates = re.findall(r'(?:KORRA|HERMES)_HOME=([^"\n]+)', definition)
     candidates += re.findall(
-        r"<key>HERMES_HOME</key>\s*<string>(.*?)</string>", definition, flags=re.S
+        r"<key>(?:KORRA|HERMES)_HOME</key>\s*<string>(.*?)</string>", definition, flags=re.S
     )
     temp_roots = {
         Path(tempfile.gettempdir()).resolve(),
@@ -4436,7 +4440,7 @@ def _print_system_scope_remediation(action: str) -> None:
 
 def _get_restart_drain_timeout() -> float:
     """Return the configured gateway restart drain timeout in seconds."""
-    raw = korra_env("HERMES_RESTART_DRAIN_TIMEOUT", "").strip()
+    raw = korra_env("KORRA_RESTART_DRAIN_TIMEOUT", "").strip()
     if not raw:
         cfg = read_raw_config()
         agent_cfg = cfg.get("agent", {}) if isinstance(cfg, dict) else {}
@@ -4450,7 +4454,7 @@ def _get_restart_drain_timeout() -> float:
 
 def _get_cron_drain_timeout() -> float:
     """Return the configured cron-only drain floor in seconds (#82161)."""
-    env_raw = korra_env("HERMES_CRON_DRAIN_TIMEOUT")
+    env_raw = korra_env("KORRA_CRON_DRAIN_TIMEOUT")
     if env_raw is not None and str(env_raw).strip() != "":
         return parse_cron_drain_timeout(env_raw)
     cfg = read_raw_config()
@@ -4462,7 +4466,7 @@ def _get_cron_drain_timeout() -> float:
 
 def _get_restart_after_turn_timeout() -> float:
     """Return the in-band restart wait-for-idle timeout in seconds (#77184)."""
-    env_raw = korra_env("HERMES_RESTART_AFTER_TURN_TIMEOUT")
+    env_raw = korra_env("KORRA_RESTART_AFTER_TURN_TIMEOUT")
     if env_raw is not None and str(env_raw).strip() != "":
         return parse_restart_after_turn_timeout(env_raw)
     cfg = read_raw_config()
@@ -5401,8 +5405,12 @@ def generate_launchd_plist() -> str:
         <string>{sane_path}</string>
         <key>VIRTUAL_ENV</key>
         <string>{venv_dir}</string>
+        <key>KORRA_HOME</key>
+        <string>{hermes_home}</string>
         <key>HERMES_HOME</key>
         <string>{hermes_home}</string>
+        <key>KORRA_SUPERVISED_CHILD</key>
+        <string>1</string>
         <key>HERMES_SUPERVISED_CHILD</key>
         <string>1</string>
     </dict>
@@ -6404,7 +6412,7 @@ def _guard_official_docker_root_gateway() -> None:
     """Refuse gateway startup when the official Docker privilege drop was bypassed."""
     if not hasattr(os, "geteuid") or os.geteuid() != 0:
         return
-    if _truthy_env(korra_env("HERMES_ALLOW_ROOT_GATEWAY")):
+    if _truthy_env(korra_env("KORRA_ALLOW_ROOT_GATEWAY")):
         return
     if not _is_official_docker_checkout():
         return
@@ -6456,7 +6464,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
         _stdin_is_tty = False
     _console_window_attached = _windows_console_window_attached()
     _gateway_detached = (
-        korra_env("HERMES_GATEWAY_DETACHED", "").strip().lower()
+        korra_env("KORRA_GATEWAY_DETACHED", "").strip().lower()
         in {"1", "true", "yes", "on"}
     )
     _breakaway = _windows_gateway_breakaway_state()
@@ -6534,7 +6542,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
     from datetime import datetime as _dt, timezone as _tz
 
     def _exit_diag(tag: str, **extra: object) -> None:
-        if korra_env("HERMES_GATEWAY_EXIT_DIAG", "1") != "1":
+        if korra_env("KORRA_GATEWAY_EXIT_DIAG", "1") != "1":
             return
         try:
             from hermes_constants import get_hermes_home as _ghh
@@ -6604,13 +6612,13 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
             pass
         # Env vars override config for escape-hatch use.
         try:
-            _env_starts = korra_env("HERMES_GATEWAY_MAX_STARTS")
+            _env_starts = korra_env("KORRA_GATEWAY_MAX_STARTS")
             if _env_starts is not None:
                 _max_starts = int(_env_starts)
         except ValueError:
             pass
         try:
-            _env_win = korra_env("HERMES_GATEWAY_START_WINDOW_S")
+            _env_win = korra_env("KORRA_GATEWAY_START_WINDOW_S")
             if _env_win is not None:
                 _win = float(_env_win)
         except ValueError:
@@ -8299,10 +8307,10 @@ def _maybe_redirect_run_to_s6_supervision(args) -> bool:
     Returns True iff dispatched (caller should ``return``).
     """
     no_supervise = getattr(args, "no_supervise", False) or \
-        korra_env("HERMES_GATEWAY_NO_SUPERVISE", "").lower() in ("1", "true", "yes")
+        korra_env("KORRA_GATEWAY_NO_SUPERVISE", "").lower() in ("1", "true", "yes")
     if no_supervise:
         return False
-    if korra_env("HERMES_S6_SUPERVISED_CHILD"):
+    if korra_env("KORRA_S6_SUPERVISED_CHILD"):
         # We ARE the supervised child s6-supervise is running. Fall
         # through to the foreground code path so the gateway actually
         # starts.
@@ -8389,7 +8397,7 @@ def _gateway_command_inner(args):
         if _maybe_redirect_run_to_s6_supervision(args):
             return  # unreachable; execvp doesn't return
         if getattr(args, "external_supervisor", False):
-            os.environ[EXTERNAL_GATEWAY_SUPERVISOR_ENV] = "1"
+            korra_env_set(os.environ, EXTERNAL_GATEWAY_SUPERVISOR_ENV, "1")
         verbose = getattr(args, "verbose", 0)
         quiet = getattr(args, "quiet", False)
         replace = getattr(args, "replace", False)

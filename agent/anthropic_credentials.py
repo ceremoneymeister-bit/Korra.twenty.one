@@ -503,7 +503,7 @@ def _refresh_oauth_token(creds: Dict[str, Any]) -> Optional[str]:
         from hermes_cli.auth import AUTH_LOCK_TIMEOUT_SECONDS, _auth_store_lock, env_float
 
         refresh_timeout_seconds = env_float(
-            "HERMES_ANTHROPIC_REFRESH_TIMEOUT_SECONDS", 20
+            "KORRA_ANTHROPIC_REFRESH_TIMEOUT_SECONDS", 20
         )
         lock_timeout_seconds = max(
             float(AUTH_LOCK_TIMEOUT_SECONDS),

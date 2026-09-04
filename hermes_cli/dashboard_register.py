@@ -31,6 +31,7 @@ import sys
 import urllib.error
 import urllib.request
 from typing import Optional
+from hermes_constants import korra_env
 
 
 # Docker-style name generator. Same vibe as Docker's adjective_surname, but
@@ -268,7 +269,7 @@ def cmd_dashboard_register(args) -> None:
     # already exists in .env); a portal merely inferred from the stored login
     # keeps the older, more conservative write-only-if-absent behaviour so we
     # don't clutter .env for the common production case.
-    portal_override = getattr(args, "portal_url", None) or os.environ.get(
+    portal_override = getattr(args, "portal_url", None) or korra_env(
         "HERMES_DASHBOARD_PORTAL_URL"
     )
     custom_portal_supplied = bool(

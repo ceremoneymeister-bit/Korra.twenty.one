@@ -206,11 +206,11 @@ def _resolve_skill_commands_platform() -> Optional[str]:
         from gateway.session_context import get_session_env
 
         resolved_platform = (
-            korra_env("HERMES_PLATFORM")
-            or get_session_env("HERMES_SESSION_PLATFORM")
+            korra_env("KORRA_PLATFORM")
+            or get_session_env("KORRA_SESSION_PLATFORM")
         )
     except Exception:
-        resolved_platform = korra_env("HERMES_PLATFORM")
+        resolved_platform = korra_env("KORRA_PLATFORM")
     return resolved_platform or None
 
 

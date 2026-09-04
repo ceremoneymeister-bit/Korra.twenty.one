@@ -142,7 +142,7 @@ except ImportError:
             f"Install with: {sys.executable} -m pip install 'fastapi' 'uvicorn[standard]'"
         )
 
-WEB_DIST = Path(os.environ["HERMES_WEB_DIST"]) if korra_env_present("HERMES_WEB_DIST") else Path(__file__).parent / "web_dist"
+WEB_DIST = Path(korra_env("KORRA_WEB_DIST")) if korra_env_present("KORRA_WEB_DIST") else Path(__file__).parent / "web_dist"
 _log = logging.getLogger(__name__)
 
 
@@ -466,7 +466,7 @@ async def _lifespan(app: "FastAPI"):
     # dashboard` is unaffected — it relies on its own gateway.
     cron_stop: "threading.Event | None" = None
     cron_thread: "threading.Thread | None" = None
-    if korra_env("HERMES_DESKTOP") == "1":
+    if korra_env("KORRA_DESKTOP") == "1":
         # Before forking a fresh gateway, reap any orphan left by a previous
         # serve session. Graceful shutdown reaps the managed child, but an
         # abnormal exit (crash, SIGKILL, power loss, forced update) reparents
@@ -525,7 +525,7 @@ async def _lifespan(app: "FastAPI"):
         selftest_task.cancel()
         auto_archive_task.cancel()
         await PTY_REGISTRY.close_all()
-        if korra_env("HERMES_DESKTOP") == "1":
+        if korra_env("KORRA_DESKTOP") == "1":
             _terminate_desktop_managed_gateway()
 
 
@@ -588,7 +588,7 @@ app.include_router(_memory_oauth_router)
 
 
 def _resolve_session_token() -> str:
-    return korra_env("HERMES_DASHBOARD_SESSION_TOKEN") or secrets.token_urlsafe(32)
+    return korra_env("KORRA_DASHBOARD_SESSION_TOKEN") or secrets.token_urlsafe(32)
 
 
 _SESSION_TOKEN = _resolve_session_token()
@@ -866,10 +866,10 @@ def _desktop_loopback_auth_exempt(
     """
     if host not in _LOOPBACK_HOST_VALUES:
         return False
-    if korra_env("HERMES_DESKTOP") != "1":
+    if korra_env("KORRA_DESKTOP") != "1":
         return False
     return bool(
-        korra_env("HERMES_DASHBOARD_SESSION_TOKEN")
+        korra_env("KORRA_DASHBOARD_SESSION_TOKEN")
         or ssh_session_token
         or ssh_owner_nonce
     )
@@ -2191,7 +2191,7 @@ _MEDIA_CONTENT_TYPES = {
     ".ico": "image/x-icon",
 }
 _MEDIA_MAX_BYTES = 25 * 1024 * 1024
-_MANAGED_FILES_ROOT_ENV = "HERMES_DASHBOARD_FILES_ROOT"
+_MANAGED_FILES_ROOT_ENV = "KORRA_DASHBOARD_FILES_ROOT"
 _MANAGED_FILE_MAX_BYTES = 100 * 1024 * 1024
 _STREAMABLE_MEDIA_EXTENSIONS = frozenset(
     {
@@ -2602,7 +2602,7 @@ def _local_dashboard_request(request: Request) -> bool:
 
 
 def _default_hermes_root_is_opt_data() -> bool:
-    raw = korra_env("HERMES_HOME", "").strip()
+    raw = korra_env("KORRA_HOME", "").strip()
     if not raw:
         return False
     try:
@@ -2653,7 +2653,7 @@ def _dashboard_local_update_managed_externally() -> bool:
 
 
 def _managed_files_policy(request: Request, *, create_root: bool = True) -> ManagedFilesPolicy:
-    raw_forced_root = os.environ.get(_MANAGED_FILES_ROOT_ENV, "").strip()
+    raw_forced_root = korra_env(_MANAGED_FILES_ROOT_ENV, "").strip()
     if raw_forced_root:
         root = _ensure_managed_root(raw_forced_root) if create_root else _canonical_path(Path(raw_forced_root))
         return ManagedFilesPolicy(default_path=root, locked_root=root, can_change_path=False)
@@ -2665,7 +2665,7 @@ def _managed_files_policy(request: Request, *, create_root: bool = True) -> Mana
     # dedicated, persistent workspace while preserving the upstream admin/local
     # dashboard policy below. Operators can still override this with the
     # explicit HERMES_DASHBOARD_FILES_ROOT setting above.
-    if os.environ.get("KORRA_UI_MODE", "").strip().lower() == "fleet":
+    if korra_env("KORRA_UI_MODE", "").strip().lower() == "fleet":
         workspace = Path(get_hermes_home()) / "workspace"
         root = _ensure_managed_root(workspace) if create_root else _canonical_path(workspace)
         return ManagedFilesPolicy(default_path=root, locked_root=root, can_change_path=False)
@@ -3527,7 +3527,7 @@ def _chat_safe_stem(raw_name: str) -> str:
 
 def _chat_client_root(home: str | Path | None = None) -> Path:
     """Keep uploaded chat files inside the same root as the Files screen."""
-    forced = os.environ.get(_MANAGED_FILES_ROOT_ENV, "").strip()
+    forced = korra_env(_MANAGED_FILES_ROOT_ENV, "").strip()
     if forced:
         base = Path(forced)
     elif home:
@@ -3588,7 +3588,7 @@ async def upload_chat_file(
 
     profile_scope = (
         contextlib.nullcontext(None)
-        if os.environ.get(_MANAGED_FILES_ROOT_ENV, "").strip()
+        if korra_env(_MANAGED_FILES_ROOT_ENV, "").strip()
         else _profile_scope(profile_name or None)
     )
     with profile_scope as scoped_home:
@@ -3681,7 +3681,7 @@ def _apply_chat_attachments(
             detail=f"Не больше {_CHAT_MAX_ATTACHMENTS} файлов в одном сообщении",
         )
 
-    if os.environ.get(_MANAGED_FILES_ROOT_ENV, "").strip():
+    if korra_env(_MANAGED_FILES_ROOT_ENV, "").strip():
         root = _chat_client_root().resolve()
     else:
         with _profile_scope(profile) as scoped_home:
@@ -6533,7 +6533,7 @@ def _spawn_hermes_action(
     # trip the in-process restart-loop guard and exit 1 — silently failing the
     # dashboard's auto-restart paths. The gateway's own restart watcher already
     # drops it (gateway/run.py); mirror that here (#52470).
-    action_env = {**os.environ, **korra_env_expand({"HERMES_NONINTERACTIVE": "1"})}
+    action_env = {**os.environ, **korra_env_expand({"KORRA_NONINTERACTIVE": "1"})}
     action_env.pop("_HERMES_GATEWAY", None)
 
     popen_kwargs: Dict[str, Any] = {
@@ -6556,7 +6556,7 @@ def _spawn_hermes_action(
     _ACTION_RESULTS.pop(name, None)
     _ACTION_COMMANDS[name] = tuple(subcommand)
     _ACTION_PROCS[name] = proc
-    action_id = (env_overrides or {}).get("HERMES_ACTION_ID")
+    action_id = korra_env("KORRA_ACTION_ID", env=env_overrides or {})
     if action_id:
         _ACTION_IDS[name] = action_id
     else:
@@ -6941,7 +6941,7 @@ async def update_hermes():
         proc = _spawn_hermes_action(
             ["update"],
             "hermes-update",
-            env_overrides=korra_env_expand({"HERMES_ACTION_ID": action_id}),
+            env_overrides=korra_env_expand({"KORRA_ACTION_ID": action_id}),
         )
     except Exception as exc:
         _log.exception("Failed to spawn hermes update")
@@ -13348,7 +13348,7 @@ async def _start_device_code_flow(
         import httpx
         pconfig = PROVIDER_REGISTRY["nous"]
         portal_base_url = (
-            korra_env("HERMES_PORTAL_BASE_URL")
+            korra_env("KORRA_PORTAL_BASE_URL")
             or os.getenv("NOUS_PORTAL_BASE_URL")
             or pconfig.portal_base_url
         ).rstrip("/")
@@ -18387,7 +18387,7 @@ def _resolve_chat_argv(
     from tools.environments.local import build_subprocess_env
     env = build_subprocess_env(scrub_secrets=False, inherit_profile_home=True)
     if profile_dir is not None:
-        korra_env_set(env, "HERMES_HOME", str(profile_dir))
+        korra_env_set(env, "KORRA_HOME", str(profile_dir))
     try:
         from hermes_cli.config import (
             apply_terminal_config_to_env,
@@ -18418,8 +18418,8 @@ def _resolve_chat_argv(
     # makes browser-side transcript scrolling feel broken. Keep the terminal
     # build unchanged for native CLI usage; only disable mouse tracking for
     # the dashboard PTY path.
-    korra_env_setdefault(env, "HERMES_TUI_DISABLE_MOUSE", "1")
-    korra_env_setdefault(env, "HERMES_TUI_INLINE", "1")
+    korra_env_setdefault(env, "KORRA_TUI_DISABLE_MOUSE", "1")
+    korra_env_setdefault(env, "KORRA_TUI_INLINE", "1")
     # The dashboard terminal is xterm.js, which always renders 24-bit RGB.
     # But chalk inside the TUI child decides its color depth from the
     # SERVER process env — and hosted/cloud deploys run the dashboard under
@@ -18431,7 +18431,7 @@ def _resolve_chat_argv(
     # COLORTERM=truecolor into os.environ. Backfill it for the PTY child;
     # setdefault so an explicit operator value still wins.
     env.setdefault("COLORTERM", "truecolor")
-    korra_env_set(env, "HERMES_TUI_DASHBOARD", "1")
+    korra_env_set(env, "KORRA_TUI_DASHBOARD", "1")
 
     if resume:
         _resume_db = _open_session_db_for_profile(
@@ -18444,13 +18444,13 @@ def _resolve_chat_argv(
             _resume_db.close()
         if latest_resume:
             resume = latest_resume
-        korra_env_set(env, "HERMES_TUI_RESUME", resume)
+        korra_env_set(env, "KORRA_TUI_RESUME", resume)
 
     if sidecar_url:
-        korra_env_set(env, "HERMES_TUI_SIDECAR_URL", sidecar_url)
+        korra_env_set(env, "KORRA_TUI_SIDECAR_URL", sidecar_url)
 
     if active_session_file:
-        korra_env_set(env, "HERMES_TUI_ACTIVE_SESSION_FILE", active_session_file)
+        korra_env_set(env, "KORRA_TUI_ACTIVE_SESSION_FILE", active_session_file)
 
     # Profile-scoped chats must NOT attach to the dashboard's in-memory
     # gateway — it runs under the dashboard's own profile. Without the
@@ -18458,7 +18458,7 @@ def _resolve_chat_argv(
     # inherits the profile HERMES_HOME set above.
     if profile_dir is None:
         if gateway_ws_url := _build_gateway_ws_url():
-            korra_env_set(env, "HERMES_TUI_GATEWAY_URL", gateway_ws_url)
+            korra_env_set(env, "KORRA_TUI_GATEWAY_URL", gateway_ws_url)
 
     return list(argv), str(cwd) if cwd else None, env
 
@@ -18487,7 +18487,7 @@ def _resolve_client_ws_host() -> Optional[str]:
        run in the same container.
     3. Any other bind host (loopback or LAN IP) — preserved verbatim.
     """
-    explicit = korra_env("HERMES_DASHBOARD_WS_HOST", "").strip()
+    explicit = korra_env("KORRA_DASHBOARD_WS_HOST", "").strip()
     if explicit:
         return explicit
 
@@ -19337,7 +19337,7 @@ async def pty_ws(ws: WebSocket) -> None:
     attach_token = ws.query_params.get("attach") or None
     registry_resume = raw_resume
     if raw_resume and env:
-        registry_resume = env.get("HERMES_TUI_RESUME") or raw_resume
+        registry_resume = korra_env("KORRA_TUI_RESUME", env=env) or raw_resume
     if attach_token is not None and (registry_resume or profile):
         # Key explicit resumes on their canonical target, never the active-session fallback.
         attach_token = f"{attach_token}\0{profile or ''}\0{registry_resume or ''}"
@@ -19640,10 +19640,10 @@ def _read_dashboard_bubble_chat_flag() -> bool:
     """
     from pathlib import Path
 
-    val = os.environ.get("KORRA_DASHBOARD_CHAT", "")
+    val = korra_env("KORRA_DASHBOARD_CHAT", "")
     if val:
         return val == "1" or val.lower() == "true"
-    env_path = Path(korra_env("HERMES_HOME", "/opt/data")) / ".env"
+    env_path = Path(korra_env("KORRA_HOME", "/opt/data")) / ".env"
     if env_path.exists():
         try:
             for raw in env_path.read_text(encoding="utf-8").splitlines():
@@ -19683,7 +19683,7 @@ def mount_spa(application: FastAPI):
     # `hermes serve` is the headless backend: it must NEVER serve the browser
     # SPA, even if a dist is lying around from a prior `dashboard`/build. Take
     # the no-frontend path so only the JSON-RPC/WS/API surface is reachable.
-    _headless = korra_env("HERMES_SERVE_HEADLESS") == "1"
+    _headless = korra_env("KORRA_SERVE_HEADLESS") == "1"
     if _headless:
         _msg = (
             "Headless backend (hermes serve): web UI disabled — use "
@@ -19767,15 +19767,15 @@ def mount_spa(application: FastAPI):
         # "fleet" — основной флотовый интерфейс (решение Дмитрия 01.09).
         # Неизвестное значение = админская панель.
         bubble_js = "true" if _read_dashboard_bubble_chat_flag() else "false"
-        _ui_mode_env = os.environ.get("KORRA_UI_MODE", "").strip().lower()
+        _ui_mode_env = korra_env("KORRA_UI_MODE", "").strip().lower()
         ui_mode = _ui_mode_env if _ui_mode_env in ("client", "calc", "fleet") else "admin"
         ui_mode_js = json.dumps(ui_mode)
         owner_timezone_js = json.dumps(
-            os.environ.get("KORRA_OWNER_TIMEZONE", "").strip()
-            or korra_env("HERMES_TIMEZONE", "").strip()
+            korra_env("KORRA_OWNER_TIMEZONE", "").strip()
+            or korra_env("KORRA_TIMEZONE", "").strip()
         )
         schedule_timezone_js = json.dumps(
-            korra_env("HERMES_TIMEZONE", "").strip() or "UTC"
+            korra_env("KORRA_TIMEZONE", "").strip() or "UTC"
         )
         gated = bool(getattr(app.state, "auth_required", False))
         gated_js = "true" if gated else "false"
@@ -20347,7 +20347,7 @@ def _discover_dashboard_plugins() -> list:
     # opt-in into a sticky always-on switch.  Use the shared truthy
     # semantics (``1`` / ``true`` / ``yes`` / ``on``) so the gate matches
     # ``hermes_cli/plugins.py`` and the documented user contract.
-    if env_var_enabled("HERMES_ENABLE_PROJECT_PLUGINS"):
+    if env_var_enabled("KORRA_ENABLE_PROJECT_PLUGINS"):
         search_dirs.append((Path.cwd() / ".hermes" / "plugins", "project"))
 
     for plugins_root, source in search_dirs:
@@ -21084,7 +21084,7 @@ def _write_dashboard_ready_file(actual_port: int) -> None:
     so Electron passes ``HERMES_DESKTOP_READY_FILE`` and waits for this JSON.
     Normal CLI/dashboard launches still use the stdout READY line below.
     """
-    target = korra_env("HERMES_DESKTOP_READY_FILE")
+    target = korra_env("KORRA_DESKTOP_READY_FILE")
     if not target:
         return
 
@@ -21205,9 +21205,9 @@ def _start_parent_death_watchdog() -> None:
     Desktop versions that provide only ``HERMES_PARENT_PID`` retain PID-only
     tracking.
     """
-    raw_pid = korra_env("HERMES_PARENT_PID")
-    start_marker = korra_env("HERMES_PARENT_START_MARKER")
-    nonce = korra_env("HERMES_PARENT_NONCE")
+    raw_pid = korra_env("KORRA_PARENT_PID")
+    start_marker = korra_env("KORRA_PARENT_START_MARKER")
+    nonce = korra_env("KORRA_PARENT_NONCE")
 
     try:
         desktop_pid = int(raw_pid or "")
@@ -21228,7 +21228,7 @@ def _start_parent_death_watchdog() -> None:
         return
 
     try:
-        poll = max(0.5, float(korra_env("HERMES_SERVE_WATCHDOG_POLL_S", "2.0")))
+        poll = max(0.5, float(korra_env("KORRA_SERVE_WATCHDOG_POLL_S", "2.0")))
     except (TypeError, ValueError):
         poll = 2.0
 
@@ -21737,7 +21737,7 @@ def start_server(
             # Clear corpses left by a previous unclean Desktop exit before we
             # stack another backend + MCP tree (EMFILE / missing tabs).
             # Parent-death watchdog only protects *this* process going forward.
-            if korra_env("HERMES_DESKTOP") == "1":
+            if korra_env("KORRA_DESKTOP") == "1":
                 try:
                     from hermes_cli.dashboard_procs import (
                         _reap_orphaned_desktop_local_serves,

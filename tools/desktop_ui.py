@@ -36,5 +36,5 @@ def emit(event: str, payload: dict) -> bool:
     fn = _emit
     if fn is None:
         return False
-    fn(get_session_env("HERMES_UI_SESSION_ID", ""), event, payload)
+    fn(get_session_env("KORRA_UI_SESSION_ID", ""), event, payload)
     return True

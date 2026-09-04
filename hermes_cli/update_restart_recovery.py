@@ -32,9 +32,10 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
+from hermes_constants import korra_env_pop, korra_env_set
 
-_RECOVERY_ENV = "HERMES_UPDATE_RESTART_RECOVERY"
-_GATEWAY_MARKERS = ("_HERMES_GATEWAY", "HERMES_GATEWAY", "HERMES_GATEWAY_MODE")
+_RECOVERY_ENV = "KORRA_UPDATE_RESTART_RECOVERY"
+_GATEWAY_MARKERS = ("_HERMES_GATEWAY", "KORRA_GATEWAY", "KORRA_GATEWAY_MODE")
 _PROFILE_RESTART_TIMEOUT = 90
 _VERIFY_TIMEOUT = 15
 _PROFILE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -58,8 +59,8 @@ def _child_environment() -> dict[str, str]:
     """Return an environment that cannot self-identify as the gateway owner."""
     env = os.environ.copy()
     for marker in _GATEWAY_MARKERS:
-        env.pop(marker, None)
-    env[_RECOVERY_ENV] = "1"
+        korra_env_pop(env, marker)
+    korra_env_set(env, _RECOVERY_ENV, "1")
     return env
 
 

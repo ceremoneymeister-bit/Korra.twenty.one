@@ -713,7 +713,7 @@ _STATE_DB_GUARD_BYPASS = False
 #: cross a process boundary, so a test that deliberately points a *child* at
 #: the live DB has no way to opt out once ancestry arms the guard there.
 #: Export this in the child's env instead.
-_STATE_DB_GUARD_BYPASS_ENV = "HERMES_STATE_DB_GUARD_BYPASS"
+_STATE_DB_GUARD_BYPASS_ENV = "KORRA_STATE_DB_GUARD_BYPASS"
 
 #: Additional production roots to refuse (beyond the platform default
 #: ``~/.hermes``).  The test conftest injects the pre-sandbox production
@@ -756,7 +756,7 @@ def _real_platform_state_root() -> Optional[Path]:
 #: child that received the patched ``HERMES_HOME`` also received the marker,
 #: and a child that resolves a production DB while carrying it is, by
 #: definition, an isolation escape (#82770).
-_TEST_ISOLATION_MARKER_ENV = "HERMES_TEST_ISOLATION"
+_TEST_ISOLATION_MARKER_ENV = "KORRA_TEST_ISOLATION"
 
 
 def _running_under_pytest() -> bool:
@@ -4083,7 +4083,7 @@ END;
 
 def fts5_cjk_so_path() -> Path:
     """Location of the cjk_unicode61 loadable extension."""
-    env = korra_env("HERMES_FTS5_CJK_SO")
+    env = korra_env("KORRA_FTS5_CJK_SO")
     if env:
         return Path(env).expanduser()
     return get_hermes_home() / "lib" / "libfts5_cjk.so"
@@ -4091,7 +4091,7 @@ def fts5_cjk_so_path() -> Path:
 
 def _cjk_fts_config_enabled() -> bool:
     """config.yaml ``sessions.cjk_fts`` (default on), via its env bridge."""
-    return korra_env("HERMES_CJK_FTS", "1").strip().lower() not in (
+    return korra_env("KORRA_CJK_FTS", "1").strip().lower() not in (
         "0", "false", "off", "no",
     )
 

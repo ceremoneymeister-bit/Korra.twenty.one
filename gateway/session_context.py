@@ -72,49 +72,49 @@ def session_context_engaged() -> bool:
 # Per-task session variables
 # ---------------------------------------------------------------------------
 
-_SESSION_PLATFORM: ContextVar = ContextVar("HERMES_SESSION_PLATFORM", default=_UNSET)
-_SESSION_SOURCE: ContextVar = ContextVar("HERMES_SESSION_SOURCE", default=_UNSET)
-_SESSION_CHAT_ID: ContextVar = ContextVar("HERMES_SESSION_CHAT_ID", default=_UNSET)
-_SESSION_CHAT_TYPE: ContextVar = ContextVar("HERMES_SESSION_CHAT_TYPE", default=_UNSET)
-_SESSION_CHAT_NAME: ContextVar = ContextVar("HERMES_SESSION_CHAT_NAME", default=_UNSET)
-_SESSION_THREAD_ID: ContextVar = ContextVar("HERMES_SESSION_THREAD_ID", default=_UNSET)
-_SESSION_USER_ID: ContextVar = ContextVar("HERMES_SESSION_USER_ID", default=_UNSET)
-_SESSION_USER_ID_ALT: ContextVar = ContextVar("HERMES_SESSION_USER_ID_ALT", default=_UNSET)
-_SESSION_USER_NAME: ContextVar = ContextVar("HERMES_SESSION_USER_NAME", default=_UNSET)
+_SESSION_PLATFORM: ContextVar = ContextVar("KORRA_SESSION_PLATFORM", default=_UNSET)
+_SESSION_SOURCE: ContextVar = ContextVar("KORRA_SESSION_SOURCE", default=_UNSET)
+_SESSION_CHAT_ID: ContextVar = ContextVar("KORRA_SESSION_CHAT_ID", default=_UNSET)
+_SESSION_CHAT_TYPE: ContextVar = ContextVar("KORRA_SESSION_CHAT_TYPE", default=_UNSET)
+_SESSION_CHAT_NAME: ContextVar = ContextVar("KORRA_SESSION_CHAT_NAME", default=_UNSET)
+_SESSION_THREAD_ID: ContextVar = ContextVar("KORRA_SESSION_THREAD_ID", default=_UNSET)
+_SESSION_USER_ID: ContextVar = ContextVar("KORRA_SESSION_USER_ID", default=_UNSET)
+_SESSION_USER_ID_ALT: ContextVar = ContextVar("KORRA_SESSION_USER_ID_ALT", default=_UNSET)
+_SESSION_USER_NAME: ContextVar = ContextVar("KORRA_SESSION_USER_NAME", default=_UNSET)
 # Platform-neutral scope discriminator (Discord guild / Slack workspace /
 # Matrix server) of the originating chat. Captured at session-bind time so
 # async producers (delegate_task background=True, terminal watchers) can
 # persist a completion's full routing origin — on a relay-fronted deployment
 # the connector's fail-closed egress guard needs scope_id (or a user binding)
 # to resolve the tenant for a scoped reply after a restart.
-_SESSION_SCOPE_ID: ContextVar = ContextVar("HERMES_SESSION_SCOPE_ID", default=_UNSET)
-_SESSION_KEY: ContextVar = ContextVar("HERMES_SESSION_KEY", default=_UNSET)
-_SESSION_ID: ContextVar = ContextVar("HERMES_SESSION_ID", default=_UNSET)
+_SESSION_SCOPE_ID: ContextVar = ContextVar("KORRA_SESSION_SCOPE_ID", default=_UNSET)
+_SESSION_KEY: ContextVar = ContextVar("KORRA_SESSION_KEY", default=_UNSET)
+_SESSION_ID: ContextVar = ContextVar("KORRA_SESSION_ID", default=_UNSET)
 # In-process UI session/window id for multi-session desktop/TUI hosts. This is
 # intentionally separate from HERMES_SESSION_ID: the latter is the durable
 # conversation/session-db id, while the UI id is the live frontend tab/window
 # that commissioned a detached completion. Background completions use it as a
 # precise return address so a stale/rotated durable session key cannot be
 # consumed by whichever desktop poller wakes first.
-_SESSION_UI_SESSION_ID: ContextVar = ContextVar("HERMES_UI_SESSION_ID", default=_UNSET)
+_SESSION_UI_SESSION_ID: ContextVar = ContextVar("KORRA_UI_SESSION_ID", default=_UNSET)
 # ID of the message that triggered the current turn. Used as a reply anchor
 # so background-process notifications stay inside the originating Telegram
 # private-chat topic (those lanes route only with thread id + reply anchor).
-_SESSION_MESSAGE_ID: ContextVar = ContextVar("HERMES_SESSION_MESSAGE_ID", default=_UNSET)
+_SESSION_MESSAGE_ID: ContextVar = ContextVar("KORRA_SESSION_MESSAGE_ID", default=_UNSET)
 
-_SESSION_PROFILE: ContextVar = ContextVar("HERMES_SESSION_PROFILE", default=_UNSET)
+_SESSION_PROFILE: ContextVar = ContextVar("KORRA_SESSION_PROFILE", default=_UNSET)
 _BROWSER_CONTROL_PRINCIPAL: ContextVar = ContextVar(
-    "HERMES_BROWSER_CONTROL_PRINCIPAL", default=_UNSET
+    "KORRA_BROWSER_CONTROL_PRINCIPAL", default=_UNSET
 )
 _BROWSER_CONTROL_TRANSPORT_FAMILY: ContextVar = ContextVar(
-    "HERMES_BROWSER_CONTROL_TRANSPORT_FAMILY", default=_UNSET
+    "KORRA_BROWSER_CONTROL_TRANSPORT_FAMILY", default=_UNSET
 )
 
 # Per-session cron marker. Unlike the process-global legacy env var, this is
 # scoped to one cron job / inbound session. _UNSET preserves the legacy env
 # fallback for CLI/tests; "1" marks cron; "" explicitly marks non-cron and
 # masks any leaked process env value.
-_CRON_SESSION: ContextVar = ContextVar("HERMES_CRON_SESSION", default=_UNSET)
+_CRON_SESSION: ContextVar = ContextVar("KORRA_CRON_SESSION", default=_UNSET)
 
 # Whether the current session's delivery channel can route an ASYNC completion
 # back to the agent AFTER the current turn ends (i.e. wake a fresh turn).
@@ -134,36 +134,36 @@ _CRON_SESSION: ContextVar = ContextVar("HERMES_CRON_SESSION", default=_UNSET)
 # and any contextvar-unaware path keep working. Stateless adapters opt OUT by
 # setting ``supports_async_delivery = False`` on the adapter class; the gateway
 # propagates that into this contextvar at session-bind time.
-_SESSION_ASYNC_DELIVERY: ContextVar = ContextVar("HERMES_SESSION_ASYNC_DELIVERY", default=_UNSET)
+_SESSION_ASYNC_DELIVERY: ContextVar = ContextVar("KORRA_SESSION_ASYNC_DELIVERY", default=_UNSET)
 
 # Cron auto-delivery vars — set per-job in run_job() so concurrent jobs
 # don't clobber each other's delivery targets.
-_CRON_AUTO_DELIVER_PLATFORM: ContextVar = ContextVar("HERMES_CRON_AUTO_DELIVER_PLATFORM", default=_UNSET)
-_CRON_AUTO_DELIVER_CHAT_ID: ContextVar = ContextVar("HERMES_CRON_AUTO_DELIVER_CHAT_ID", default=_UNSET)
-_CRON_AUTO_DELIVER_THREAD_ID: ContextVar = ContextVar("HERMES_CRON_AUTO_DELIVER_THREAD_ID", default=_UNSET)
+_CRON_AUTO_DELIVER_PLATFORM: ContextVar = ContextVar("KORRA_CRON_AUTO_DELIVER_PLATFORM", default=_UNSET)
+_CRON_AUTO_DELIVER_CHAT_ID: ContextVar = ContextVar("KORRA_CRON_AUTO_DELIVER_CHAT_ID", default=_UNSET)
+_CRON_AUTO_DELIVER_THREAD_ID: ContextVar = ContextVar("KORRA_CRON_AUTO_DELIVER_THREAD_ID", default=_UNSET)
 
 _VAR_MAP = {
-    "HERMES_SESSION_PLATFORM": _SESSION_PLATFORM,
-    "HERMES_SESSION_SOURCE": _SESSION_SOURCE,
-    "HERMES_SESSION_CHAT_ID": _SESSION_CHAT_ID,
-    "HERMES_SESSION_CHAT_TYPE": _SESSION_CHAT_TYPE,
-    "HERMES_SESSION_CHAT_NAME": _SESSION_CHAT_NAME,
-    "HERMES_SESSION_THREAD_ID": _SESSION_THREAD_ID,
-    "HERMES_SESSION_USER_ID": _SESSION_USER_ID,
-    "HERMES_SESSION_USER_ID_ALT": _SESSION_USER_ID_ALT,
-    "HERMES_SESSION_USER_NAME": _SESSION_USER_NAME,
-    "HERMES_SESSION_SCOPE_ID": _SESSION_SCOPE_ID,
-    "HERMES_SESSION_KEY": _SESSION_KEY,
-    "HERMES_SESSION_ID": _SESSION_ID,
-    "HERMES_UI_SESSION_ID": _SESSION_UI_SESSION_ID,
-    "HERMES_SESSION_MESSAGE_ID": _SESSION_MESSAGE_ID,
-    "HERMES_SESSION_PROFILE": _SESSION_PROFILE,
-    "HERMES_BROWSER_CONTROL_PRINCIPAL": _BROWSER_CONTROL_PRINCIPAL,
-    "HERMES_BROWSER_CONTROL_TRANSPORT_FAMILY": _BROWSER_CONTROL_TRANSPORT_FAMILY,
-    "HERMES_CRON_SESSION": _CRON_SESSION,
-    "HERMES_CRON_AUTO_DELIVER_PLATFORM": _CRON_AUTO_DELIVER_PLATFORM,
-    "HERMES_CRON_AUTO_DELIVER_CHAT_ID": _CRON_AUTO_DELIVER_CHAT_ID,
-    "HERMES_CRON_AUTO_DELIVER_THREAD_ID": _CRON_AUTO_DELIVER_THREAD_ID,
+    "KORRA_SESSION_PLATFORM": _SESSION_PLATFORM,
+    "KORRA_SESSION_SOURCE": _SESSION_SOURCE,
+    "KORRA_SESSION_CHAT_ID": _SESSION_CHAT_ID,
+    "KORRA_SESSION_CHAT_TYPE": _SESSION_CHAT_TYPE,
+    "KORRA_SESSION_CHAT_NAME": _SESSION_CHAT_NAME,
+    "KORRA_SESSION_THREAD_ID": _SESSION_THREAD_ID,
+    "KORRA_SESSION_USER_ID": _SESSION_USER_ID,
+    "KORRA_SESSION_USER_ID_ALT": _SESSION_USER_ID_ALT,
+    "KORRA_SESSION_USER_NAME": _SESSION_USER_NAME,
+    "KORRA_SESSION_SCOPE_ID": _SESSION_SCOPE_ID,
+    "KORRA_SESSION_KEY": _SESSION_KEY,
+    "KORRA_SESSION_ID": _SESSION_ID,
+    "KORRA_UI_SESSION_ID": _SESSION_UI_SESSION_ID,
+    "KORRA_SESSION_MESSAGE_ID": _SESSION_MESSAGE_ID,
+    "KORRA_SESSION_PROFILE": _SESSION_PROFILE,
+    "KORRA_BROWSER_CONTROL_PRINCIPAL": _BROWSER_CONTROL_PRINCIPAL,
+    "KORRA_BROWSER_CONTROL_TRANSPORT_FAMILY": _BROWSER_CONTROL_TRANSPORT_FAMILY,
+    "KORRA_CRON_SESSION": _CRON_SESSION,
+    "KORRA_CRON_AUTO_DELIVER_PLATFORM": _CRON_AUTO_DELIVER_PLATFORM,
+    "KORRA_CRON_AUTO_DELIVER_CHAT_ID": _CRON_AUTO_DELIVER_CHAT_ID,
+    "KORRA_CRON_AUTO_DELIVER_THREAD_ID": _CRON_AUTO_DELIVER_THREAD_ID,
 }
 
 
@@ -202,7 +202,7 @@ def set_current_session_id(session_id: str) -> None:
     except Exception:
         pass
 
-    korra_env_set(os.environ, "HERMES_SESSION_ID", session_id)
+    korra_env_set(os.environ, "KORRA_SESSION_ID", session_id)
 
 
 @contextmanager
@@ -462,8 +462,8 @@ def session_is_messaging_surface() -> bool:
     """
     import os
 
-    platform = korra_env("HERMES_PLATFORM") or get_session_env("HERMES_SESSION_PLATFORM", "")
-    source = get_session_env("HERMES_SESSION_SOURCE", "")
+    platform = korra_env("KORRA_PLATFORM") or get_session_env("KORRA_SESSION_PLATFORM", "")
+    source = get_session_env("KORRA_SESSION_SOURCE", "")
     for identity in (platform, source):
         identity = str(identity or "").strip().lower()
         if identity and identity not in NON_MESSAGING_SESSION_SURFACES:
@@ -519,7 +519,7 @@ def async_delivery_supported() -> bool:
     # disappear after the quiet turn returns, so a completion queued later has
     # no durable consumer even though an ordinary CLI session can drain that
     # queue. Force tools onto their existing synchronous/polling fallbacks.
-    if korra_env("HERMES_KANBAN_TASK"):
+    if korra_env("KORRA_KANBAN_TASK"):
         return False
 
     value = _SESSION_ASYNC_DELIVERY.get()

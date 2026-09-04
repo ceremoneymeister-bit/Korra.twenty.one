@@ -44,11 +44,11 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
-from hermes_constants import korra_env
+from hermes_constants import korra_env, korra_env_expand
 
 logger = logging.getLogger(__name__)
 
-SPAWN_ENV_VAR = "HERMES_SPAWN"
+SPAWN_ENV_VAR = "KORRA_SPAWN"
 _TAG_VERSION = "v1"
 LEDGER_FILENAME = "spawn-ledger.json"
 
@@ -120,7 +120,7 @@ def build_spawn_tag(purpose: str, *, project_root: Optional[Path] = None) -> str
 
 def spawn_env(purpose: str, *, project_root: Optional[Path] = None) -> dict[str, str]:
     """Env fragment a spawner merges into a child's environment."""
-    return {SPAWN_ENV_VAR: build_spawn_tag(purpose, project_root=project_root)}
+    return korra_env_expand({SPAWN_ENV_VAR: build_spawn_tag(purpose, project_root=project_root)})
 
 
 def parse_spawn_tag(raw: object) -> Optional[SpawnTag]:
@@ -250,7 +250,7 @@ def register_self(
     manually-started serve with its real bind address instead of guessing
     from argv.
     """
-    tag = parse_spawn_tag(os.environ.get(SPAWN_ENV_VAR))
+    tag = parse_spawn_tag(korra_env(SPAWN_ENV_VAR))
     spawner_pid: Optional[int] = tag.spawner_pid if tag else None
     spawner_create: Optional[float] = tag.spawner_create if tag else None
     if spawner_pid is None:
@@ -259,12 +259,12 @@ def register_self(
         # parent-death watchdog. Reuse it as spawner identity so ledger
         # lineage works with every Desktop version, no TS change needed.
         try:
-            raw = int(korra_env("HERMES_PARENT_PID", ""))
+            raw = int(korra_env("KORRA_PARENT_PID", ""))
             if raw > 0:
                 spawner_pid = raw
         except (TypeError, ValueError):
             pass
-        marker = korra_env("HERMES_PARENT_START_MARKER", "")
+        marker = korra_env("KORRA_PARENT_START_MARKER", "")
         if spawner_pid is not None and marker.startswith("winms:"):
             try:
                 spawner_create = float(marker.split(":", 1)[1]) / 1000.0

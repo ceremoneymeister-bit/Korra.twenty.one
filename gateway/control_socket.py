@@ -57,6 +57,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,7 @@ def _detect_supervisor() -> str:
         or env.get("LAUNCHD_SOCKET")
     ):
         return "launchd"
-    if env.get("HERMES_DESKTOP_MANAGED"):
+    if korra_env("KORRA_DESKTOP_MANAGED", env=env):
         return "desktop"
     if "--external-supervisor" in sys.argv:
         return "external"

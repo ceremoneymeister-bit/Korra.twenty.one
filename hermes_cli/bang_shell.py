@@ -70,11 +70,11 @@ def bang_shell_enabled() -> bool:
         def env_var_enabled(name, default=""):  # type: ignore[misc]
             return str(korra_env(name, default)).strip().lower() in {"1", "true", "yes", "on"}
 
-    if env_var_enabled("HERMES_GATEWAY_SESSION"):
+    if env_var_enabled("KORRA_GATEWAY_SESSION"):
         return False
-    if env_var_enabled("HERMES_CRON_SESSION"):
+    if env_var_enabled("KORRA_CRON_SESSION"):
         return False
-    if (korra_env("HERMES_SESSION_PLATFORM") or "").strip():
+    if (korra_env("KORRA_SESSION_PLATFORM") or "").strip():
         return False
     return True
 

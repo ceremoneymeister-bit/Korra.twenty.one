@@ -1613,11 +1613,11 @@ class CredentialPool:
         override.
         """
         env_var = (
-            "HERMES_CODEX_REFRESH_TIMEOUT_SECONDS"
+            "KORRA_CODEX_REFRESH_TIMEOUT_SECONDS"
             if self.provider == "openai-codex"
-            else "HERMES_XAI_REFRESH_TIMEOUT_SECONDS"
+            else "KORRA_XAI_REFRESH_TIMEOUT_SECONDS"
             if self.provider == "xai-oauth"
-            else "HERMES_ANTHROPIC_REFRESH_TIMEOUT_SECONDS"
+            else "KORRA_ANTHROPIC_REFRESH_TIMEOUT_SECONDS"
         )
         refresh_timeout_seconds = auth_mod.env_float(env_var, 20)
         return max(

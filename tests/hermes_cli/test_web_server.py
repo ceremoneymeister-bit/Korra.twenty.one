@@ -1330,8 +1330,14 @@ class TestWebServerEndpoints:
             "name": "hermes-update",
             "action_id": "a" * 32,
         }
+        # Слой совместимости имён: переменная уезжает под обоими именами,
+        # чтобы внешние обёртки, читающие старое имя, продолжали работать.
         assert calls == [
-            (["update"], "hermes-update", {"HERMES_ACTION_ID": "a" * 32})
+            (
+                ["update"],
+                "hermes-update",
+                {"KORRA_ACTION_ID": "a" * 32, "HERMES_ACTION_ID": "a" * 32},
+            )
         ]
 
     def test_update_hermes_reuses_running_action(self, monkeypatch):

@@ -119,14 +119,14 @@ DEFAULT_LOCAL_STT_LANGUAGE = "en"
 # ``<каталог>/medium/model.bin``. Если каталога нет (исходная установка, а не
 # образ), имя размера уходит в faster-whisper как раньше и модель качается с
 # Hugging Face — поведение апстрима сохранено.
-LOCAL_STT_MODELS_DIR_ENV = "HERMES_STT_MODELS_DIR"
+LOCAL_STT_MODELS_DIR_ENV = "KORRA_STT_MODELS_DIR"
 DEFAULT_LOCAL_STT_MODELS_DIR = "/opt/hermes/models/whisper"
 DEFAULT_STT_MODEL = os.getenv("STT_OPENAI_MODEL", "whisper-1")
 DEFAULT_GROQ_STT_MODEL = os.getenv("STT_GROQ_MODEL", "whisper-large-v3-turbo")
 DEFAULT_MISTRAL_STT_MODEL = os.getenv("STT_MISTRAL_MODEL", "voxtral-mini-latest")
 DEFAULT_ELEVENLABS_STT_MODEL = os.getenv("STT_ELEVENLABS_MODEL", "scribe_v2")
-LOCAL_STT_COMMAND_ENV = "HERMES_LOCAL_STT_COMMAND"
-LOCAL_STT_LANGUAGE_ENV = "HERMES_LOCAL_STT_LANGUAGE"
+LOCAL_STT_COMMAND_ENV = "KORRA_LOCAL_STT_COMMAND"
+LOCAL_STT_LANGUAGE_ENV = "KORRA_LOCAL_STT_LANGUAGE"
 COMMON_LOCAL_BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
 
 GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
@@ -215,7 +215,7 @@ def _resolve_stt_language(
         candidates.append(provider_cfg.get(key))
     if isinstance(stt_config, dict):
         candidates.append(stt_config.get("language"))
-    candidates.append(os.getenv(LOCAL_STT_LANGUAGE_ENV))
+    candidates.append(korra_env(LOCAL_STT_LANGUAGE_ENV))
     for candidate in candidates:
         if isinstance(candidate, str) and candidate.strip():
             return candidate.strip()
@@ -303,7 +303,7 @@ def _find_whisper_binary() -> Optional[str]:
 
 
 def _get_local_command_template() -> Optional[str]:
-    configured = os.getenv(LOCAL_STT_COMMAND_ENV, "").strip()
+    configured = korra_env(LOCAL_STT_COMMAND_ENV, "").strip()
     if configured:
         return configured
 
@@ -379,7 +379,7 @@ LOCAL_STT_MISSING_WEIGHTS_ERROR = (
 
 def _local_stt_models_root() -> Optional[Path]:
     """Каталог с вшитыми в образ весами, если он вообще задан."""
-    root = str(os.getenv(LOCAL_STT_MODELS_DIR_ENV) or DEFAULT_LOCAL_STT_MODELS_DIR).strip()
+    root = str(korra_env(LOCAL_STT_MODELS_DIR_ENV) or DEFAULT_LOCAL_STT_MODELS_DIR).strip()
     return Path(root) if root else None
 
 

@@ -53,7 +53,7 @@ from typing import List, Dict, Any, Optional, Mapping
 logger = logging.getLogger(__name__)
 
 # Suppress startup messages for clean CLI experience
-korra_env_set(os.environ, "HERMES_QUIET", "1")  # Our own modules
+korra_env_set(os.environ, "KORRA_QUIET", "1")  # Our own modules
 
 from hermes_cli.fallback_config import get_fallback_chain
 from hermes_cli.cli_agent_setup_mixin import CLIAgentSetupMixin
@@ -381,7 +381,7 @@ def _resolve_prefill_messages_file(config: Dict[str, Any]) -> str:
     ``agent.prefill_messages_file`` remains a legacy fallback for older CLI and
     godmode-generated configs.
     """
-    env_path = korra_env("HERMES_PREFILL_MESSAGES_FILE", "").strip()
+    env_path = korra_env("KORRA_PREFILL_MESSAGES_FILE", "").strip()
     if env_path:
         return env_path
     top_level = str(config.get("prefill_messages_file", "") or "").strip()
@@ -439,7 +439,7 @@ def load_cli_config() -> Dict[str, Any]:
 
     # --ignore-user-config: force-skip the user config.yaml (still honor project
     # config as a fallback so defaults stay sensible).
-    ignore_user_config = korra_env("HERMES_IGNORE_USER_CONFIG") == "1"
+    ignore_user_config = korra_env("KORRA_IGNORE_USER_CONFIG") == "1"
 
     # Use user config if it exists, otherwise project config
     if user_config_path.exists() and not ignore_user_config:
@@ -769,16 +769,16 @@ def load_cli_config() -> Dict[str, Any]:
     if isinstance(security_config, dict):
         redact = security_config.get("redact_secrets")
         if redact is not None:
-            korra_env_set(os.environ, "HERMES_REDACT_SECRETS", str(redact).lower())
+            korra_env_set(os.environ, "KORRA_REDACT_SECRETS", str(redact).lower())
 
     # Session-search index knobs (hermes_state reads the env carriers).
     sessions_config = defaults.get("sessions", {})
     if isinstance(sessions_config, dict):
         if "cjk_fts" in sessions_config:
-            korra_env_set(os.environ, "HERMES_CJK_FTS", str(sessions_config["cjk_fts"]))
+            korra_env_set(os.environ, "KORRA_CJK_FTS", str(sessions_config["cjk_fts"]))
         if "search_slow_ms" in sessions_config:
             korra_env_set(
-                os.environ, "HERMES_SEARCH_SLOW_MS", str(sessions_config["search_slow_ms"])
+                os.environ, "KORRA_SEARCH_SLOW_MS", str(sessions_config["search_slow_ms"])
             )
 
     return defaults
@@ -1016,10 +1016,10 @@ def _prepare_deferred_agent_startup() -> None:
     global _deferred_agent_startup_done
     if _deferred_agent_startup_done:
         return
-    if korra_env("HERMES_DEFER_AGENT_STARTUP") != "1":
+    if korra_env("KORRA_DEFER_AGENT_STARTUP") != "1":
         return
     _deferred_agent_startup_done = True
-    _accept_hooks = korra_env("HERMES_ACCEPT_HOOKS", "").lower() in {
+    _accept_hooks = korra_env("KORRA_ACCEPT_HOOKS", "").lower() in {
         "1",
         "true",
         "yes",
@@ -1088,7 +1088,7 @@ def _arm_exit_watchdog(timeout_s: float | None = None, *, from_signal: bool = Fa
     """
     if timeout_s is None:
         try:
-            timeout_s = float(korra_env("HERMES_EXIT_WATCHDOG_S", "30"))
+            timeout_s = float(korra_env("KORRA_EXIT_WATCHDOG_S", "30"))
         except (TypeError, ValueError):
             timeout_s = 30.0
     if timeout_s <= 0:
@@ -1169,7 +1169,7 @@ def _arm_exit_watchdog_on_shutdown_signal() -> None:
         return
     _signal_watchdog_armed = True
     try:
-        base = float(korra_env("HERMES_EXIT_WATCHDOG_S", "30"))
+        base = float(korra_env("KORRA_EXIT_WATCHDOG_S", "30"))
     except (TypeError, ValueError):
         base = 30.0
     if base <= 0:
@@ -3342,8 +3342,8 @@ def _detect_light_mode() -> bool:
     result = False
     try:
         # 1. Explicit env override
-        for var in ("HERMES_LIGHT", "HERMES_TUI_LIGHT"):
-            v = (os.environ.get(var) or "").strip().lower()
+        for var in ("KORRA_LIGHT", "KORRA_TUI_LIGHT"):
+            v = (korra_env(var) or "").strip().lower()
             if _TRUE_RE.match(v):
                 result = True
                 _LIGHT_MODE_CACHE = result
@@ -3352,7 +3352,7 @@ def _detect_light_mode() -> bool:
                 _LIGHT_MODE_CACHE = result
                 return result
         # 2. Theme hint
-        theme = (korra_env("HERMES_TUI_THEME") or "").strip().lower()
+        theme = (korra_env("KORRA_TUI_THEME") or "").strip().lower()
         if theme == "light":
             result = True
             _LIGHT_MODE_CACHE = result
@@ -3361,7 +3361,7 @@ def _detect_light_mode() -> bool:
             _LIGHT_MODE_CACHE = result
             return result
         # 3. Explicit bg hex
-        bg_hint = korra_env("HERMES_TUI_BACKGROUND") or ""
+        bg_hint = korra_env("KORRA_TUI_BACKGROUND") or ""
         bg_lum = _luminance_from_hex(bg_hint)
         if bg_lum is not None:
             result = bg_lum >= 0.5
@@ -4895,7 +4895,7 @@ def _build_compact_banner() -> str:
         line1 = f"{agent_name} - AI Agent Framework"
         tiny_line = agent_name
 
-    if korra_env("HERMES_FAST_STARTUP_BANNER") == "1":
+    if korra_env("KORRA_FAST_STARTUP_BANNER") == "1":
         from hermes_cli import __release_date__ as _release_date
         from hermes_cli import __version__ as _version
 
@@ -5376,7 +5376,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         # model (#56828). A ``moa:`` prefix wins over an explicit ``--provider``.
         _moa_provider_override, self.model = _normalize_moa_model(self.model)
         # Read max_tokens from config (env var override: HERMES_MAX_TOKENS)
-        _env_mt = korra_env("HERMES_MAX_TOKENS")
+        _env_mt = korra_env("KORRA_MAX_TOKENS")
         if _env_mt:
             try:
                 self.max_tokens = int(_env_mt)
@@ -5414,7 +5414,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             or provider
             or _nested_provider
             or CLI_CONFIG["model"].get("provider")
-            or korra_env("HERMES_INFERENCE_PROVIDER")
+            or korra_env("KORRA_INFERENCE_PROVIDER")
             or "auto"
         )
         # `--provider <custom>` without `-m` must use that entry's
@@ -5475,7 +5475,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         else:
             # Env var bridge (set by gateway/run.py from config.yaml, or by the
             # user directly). Empty/unset → default (unlimited).
-            self.max_turns = _resolve_turn_limit(korra_env("HERMES_MAX_ITERATIONS"))
+            self.max_turns = _resolve_turn_limit(korra_env("KORRA_MAX_ITERATIONS"))
 
         # Wall-clock run budget: CLI flag wins over config; both optional.
         # None keeps the feature fully off (AIAgent stays dormant).
@@ -5512,7 +5512,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         # by `hermes chat --ignore-rules` in hermes_cli/main.py. When true we
         # pass skip_context_files=True and skip_memory=True to AIAgent so
         # AGENTS.md/SOUL.md/.cursorrules and persistent memory are not loaded.
-        self.ignore_rules = ignore_rules or korra_env("HERMES_IGNORE_RULES") == "1"
+        self.ignore_rules = ignore_rules or korra_env("KORRA_IGNORE_RULES") == "1"
         
         # Ephemeral system prompt: env var takes precedence, then
         # display.personality / agent.system_prompt from config.
@@ -5523,7 +5523,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         )
 
         self.system_prompt = (
-            korra_env("HERMES_EPHEMERAL_SYSTEM_PROMPT", "")
+            korra_env("KORRA_EPHEMERAL_SYSTEM_PROMPT", "")
             or resolve_ephemeral_system_prompt(CLI_CONFIG)
         )
         self.personalities = available_personalities(CLI_CONFIG)
@@ -9035,7 +9035,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         # On the snapshot fast path (warm launch), the check walks every
         # check_fn (~180ms) — run it in the background refresh thread instead
         # and let its output land above the prompt (patch_stdout-safe).
-        if korra_env("HERMES_DEFER_AGENT_STARTUP") != "1":
+        if korra_env("KORRA_DEFER_AGENT_STARTUP") != "1":
             if getattr(self, "_defer_tool_warnings", False):
                 threading.Thread(
                     target=self._show_tool_availability_warnings,
@@ -9659,7 +9659,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
     def _show_status(self):
         """Show compact startup status line."""
         # Avoid pulling the full tool registry into the bare Termux prompt path.
-        if korra_env("HERMES_DEFER_AGENT_STARTUP") == "1":
+        if korra_env("KORRA_DEFER_AGENT_STARTUP") == "1":
             tool_status = "tools deferred"
         else:
             tools = get_tool_definitions(enabled_toolsets=self.enabled_toolsets, quiet_mode=True)
@@ -10492,7 +10492,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                     self.agent._session_db_created = False
                     self._session_db.create_session(
                         session_id=self.session_id,
-                        source=korra_env("HERMES_SESSION_SOURCE", "cli"),
+                        source=korra_env("KORRA_SESSION_SOURCE", "cli"),
                         model=self.model,
                         model_config={
                             "max_iterations": self.max_turns,
@@ -18158,7 +18158,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         # main thread simply blocks on the remaining import work instead of
         # redoing it. Skipped when agent startup is explicitly deferred
         # (Termux) — that path defers heavy work on purpose.
-        if korra_env("HERMES_DEFER_AGENT_STARTUP") != "1":
+        if korra_env("KORRA_DEFER_AGENT_STARTUP") != "1":
             def _prewarm_agent_runtime() -> None:
                 try:
                     import run_agent  # noqa: F401  (imports model_tools + tool registry)
@@ -18177,7 +18177,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         # won't affect the running process — we just want the operator to
         # see that they're running without the safety net.
         try:
-            _redact_raw = korra_env("HERMES_REDACT_SECRETS", "true")
+            _redact_raw = korra_env("KORRA_REDACT_SECRETS", "true")
             if _redact_raw.lower() not in {"1", "true", "yes", "on"}:
                 self._console_print(
                     "[bold red]⚠  Secret redaction is DISABLED[/] "
@@ -18353,10 +18353,10 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         self._voice_last_tts_text = ""  # most recently spoken TTS text (echo guard, #75780)
         self._voice_barge_phase = None  # "generation" or "playback" phase of the last barge trip
 
-        if korra_env("HERMES_DEFER_AGENT_STARTUP") != "1":
+        if korra_env("KORRA_DEFER_AGENT_STARTUP") != "1":
             self._install_tool_callbacks()
 
-        if korra_env("HERMES_DEFER_AGENT_STARTUP") != "1":
+        if korra_env("KORRA_DEFER_AGENT_STARTUP") != "1":
             self._ensure_tirith_security()
         
         # Key bindings for the input area
@@ -21236,7 +21236,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                         _signal_agent, f"received signal {signum}"
                     )
                     try:
-                        _grace = float(korra_env("HERMES_SIGTERM_GRACE", "1.5"))
+                        _grace = float(korra_env("KORRA_SIGTERM_GRACE", "1.5"))
                     except (TypeError, ValueError):
                         _grace = 1.5
                     if _grace > 0:
@@ -21532,11 +21532,11 @@ def _run_kanban_goal_loop_q(cli: "HermesCLI", first_response: str) -> None:
     """
     import os as _os
 
-    task_id = (_os.environ.get("HERMES_KANBAN_TASK") or "").strip()
+    task_id = (korra_env("KORRA_KANBAN_TASK") or "").strip()
     if not task_id:
         return
     worker_run_id = None
-    raw_run_id = (_os.environ.get("HERMES_KANBAN_RUN_ID") or "").strip()
+    raw_run_id = (korra_env("KORRA_KANBAN_RUN_ID") or "").strip()
     if raw_run_id:
         try:
             worker_run_id = int(raw_run_id)
@@ -21700,7 +21700,7 @@ def main(
 
     # Signal to terminal_tool that we're in interactive mode
     # This enables interactive sudo password prompts with timeout
-    korra_env_set(os.environ, "HERMES_INTERACTIVE", "1")
+    korra_env_set(os.environ, "KORRA_INTERACTIVE", "1")
     
     # Handle gateway mode (messaging + cron)
     if gateway:
@@ -21937,7 +21937,7 @@ def main(
             if _agent is not None:
                 request_hard_interrupt(_agent, f"received signal {signum}")
                 try:
-                    _grace = float(korra_env("HERMES_SIGTERM_GRACE", "1.5"))
+                    _grace = float(korra_env("KORRA_SIGTERM_GRACE", "1.5"))
                 except (TypeError, ValueError):
                     _grace = 1.5
                 if _grace > 0:
@@ -21956,7 +21956,7 @@ def main(
         # first so the final debug trace isn't lost; SIGALRM deadman guards
         # the flush against any rare blocking-I/O case (the reporter measured
         # flush in <1ms; the alarm is a failsafe, not the common path).
-        if korra_env("HERMES_KANBAN_TASK"):
+        if korra_env("KORRA_KANBAN_TASK"):
             try:
                 import signal as _sig_mod
                 if hasattr(_sig_mod, "SIGALRM"):
@@ -22023,7 +22023,7 @@ def main(
         # back to os.environ when the session-context layer isn't engaged) and
         # takes the deterministic approvals.single_query_mode path instead of
         # waiting the full timeout. See #86878.
-        korra_env_set(os.environ, "HERMES_SINGLE_QUERY_SESSION", "1")
+        korra_env_set(os.environ, "KORRA_SINGLE_QUERY_SESSION", "1")
         if not cli._claim_active_session("cli", stderr=bool(quiet)):
             sys.exit(1)
         try:
@@ -22036,7 +22036,7 @@ def main(
             # path or URL into a kanban task body never get it routed to the
             # model's vision input.
             single_query_image_urls: list[str] = []
-            _kanban_task_id = korra_env("HERMES_KANBAN_TASK", "").strip()
+            _kanban_task_id = korra_env("KORRA_KANBAN_TASK", "").strip()
             if _kanban_task_id:
                 try:
                     from hermes_cli import kanban_db as _kb
@@ -22199,7 +22199,7 @@ def main(
                         # out (→ sticky block). Gated on the env vars the
                         # dispatcher sets in `_default_spawn`; a no-op for every
                         # normal worker and every non-kanban `-q` run.
-                        if korra_env("HERMES_KANBAN_GOAL_MODE") == "1":
+                        if korra_env("KORRA_KANBAN_GOAL_MODE") == "1":
                             try:
                                 _run_kanban_goal_loop_q(cli, response)
                             except Exception as _goal_exc:
@@ -22223,7 +22223,7 @@ def main(
                         _exit_code = 0
                         if isinstance(result, dict) and result.get("failed"):
                             _exit_code = 1
-                            if korra_env("HERMES_KANBAN_TASK") and result.get(
+                            if korra_env("KORRA_KANBAN_TASK") and result.get(
                                 "failure_reason"
                             ) in ("rate_limit", "billing"):
                                 try:

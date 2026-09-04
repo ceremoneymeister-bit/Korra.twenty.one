@@ -917,7 +917,7 @@ class GoogleChatAdapter(BasePlatformAdapter):
     # ------------------------------------------------------------------
     def _bot_id_cache_path(self) -> _Path:
         """Location where the resolved bot user_id is cached across restarts."""
-        base = korra_env("HERMES_HOME", str(_Path.home() / ".hermes"))
+        base = korra_env("KORRA_HOME", str(_Path.home() / ".hermes"))
         return _Path(base) / "google_chat_bot_id.json"
 
     def _load_cached_bot_id(self) -> Optional[str]:

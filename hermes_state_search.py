@@ -1452,7 +1452,7 @@ class SessionSearchMixin:
             return rows
         finally:
             try:
-                threshold = float(korra_env("HERMES_SEARCH_SLOW_MS", "1000"))
+                threshold = float(korra_env("KORRA_SEARCH_SLOW_MS", "1000"))
             except (TypeError, ValueError):
                 threshold = 1000.0
             elapsed_ms = (time.time() - started) * 1000.0

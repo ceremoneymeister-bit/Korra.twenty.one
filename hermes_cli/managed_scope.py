@@ -63,7 +63,7 @@ def get_managed_dir() -> Optional[Path]:
     A non-existent directory at either tier resolves to None (no managed scope),
     which is the common case and must be cheap + side-effect-free.
     """
-    override = korra_env("HERMES_MANAGED_DIR", "").strip()
+    override = korra_env("KORRA_MANAGED_DIR", "").strip()
     if override:
         p = Path(override)
         return p if p.is_dir() else None

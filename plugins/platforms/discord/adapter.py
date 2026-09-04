@@ -33,7 +33,7 @@ from agent.async_utils import (
     consume_detached_task_result as _consume_background_task_result,
 )
 from agent.display import ToolPreview
-from hermes_constants import korra_env
+from hermes_constants import korra_env, korra_env_set
 
 logger = logging.getLogger(__name__)
 
@@ -558,7 +558,7 @@ def _build_allowed_mentions():
 
 def _discord_ready_timeout_seconds() -> float:
     """Return the Discord ready wait timeout during gateway startup."""
-    raw = korra_env("HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "").strip()
+    raw = korra_env("KORRA_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "").strip()
     if raw:
         try:
             return max(0.0, float(raw))
@@ -1089,8 +1089,8 @@ class DiscordAdapter(BasePlatformAdapter):
         self._voice_clients: Dict[int, Any] = {}  # guild_id -> VoiceClient
         self._voice_locks: Dict[int, asyncio.Lock] = {}  # guild_id -> serialize join/leave
         # Text batching: merge rapid successive messages (Telegram-style)
-        self._text_batch_delay_seconds = env_float("HERMES_DISCORD_TEXT_BATCH_DELAY_SECONDS", 0.6)
-        self._text_batch_split_delay_seconds = env_float("HERMES_DISCORD_TEXT_BATCH_SPLIT_DELAY_SECONDS", 2.0)
+        self._text_batch_delay_seconds = env_float("KORRA_DISCORD_TEXT_BATCH_DELAY_SECONDS", 0.6)
+        self._text_batch_split_delay_seconds = env_float("KORRA_DISCORD_TEXT_BATCH_SPLIT_DELAY_SECONDS", 2.0)
         self._pending_text_batches: Dict[str, MessageEvent] = {}
         self._pending_text_batch_tasks: Dict[str, asyncio.Task] = {}
         self._voice_text_channels: Dict[int, int] = {}  # guild_id -> text_channel_id
@@ -1133,12 +1133,12 @@ class DiscordAdapter(BasePlatformAdapter):
         self._liveness_interval_seconds = self._finite_positive_config_float(
             "websocket_liveness_interval_seconds",
             15.0,
-            env_key="HERMES_DISCORD_LIVENESS_INTERVAL_SECONDS",
+            env_key="KORRA_DISCORD_LIVENESS_INTERVAL_SECONDS",
         )
         self._liveness_failure_threshold = self._config_int(
             "websocket_liveness_failure_threshold",
             2,
-            env_key="HERMES_DISCORD_LIVENESS_FAILURE_THRESHOLD",
+            env_key="KORRA_DISCORD_LIVENESS_FAILURE_THRESHOLD",
         )
         self._heartbeat_ack_max_age_seconds = self._finite_positive_config_float(
             "websocket_heartbeat_ack_max_age_seconds",
@@ -2141,7 +2141,7 @@ class DiscordAdapter(BasePlatformAdapter):
         ``GatewayRunner._adapter_disconnect_timeout_secs``.
         """
         budget = 5.0  # mirrors gateway _ADAPTER_DISCONNECT_TIMEOUT_SECS_DEFAULT
-        raw = korra_env("HERMES_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
+        raw = korra_env("KORRA_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
         if raw:
             try:
                 parsed = float(raw)
@@ -10553,12 +10553,12 @@ def _apply_yaml_config(yaml_cfg: dict, discord_cfg: dict) -> dict | None:
         (
             "websocket_liveness_interval_seconds",
             "liveness_interval_seconds",
-            "HERMES_DISCORD_LIVENESS_INTERVAL_SECONDS",
+            "KORRA_DISCORD_LIVENESS_INTERVAL_SECONDS",
         ),
         (
             "websocket_liveness_failure_threshold",
             "liveness_failure_threshold",
-            "HERMES_DISCORD_LIVENESS_FAILURE_THRESHOLD",
+            "KORRA_DISCORD_LIVENESS_FAILURE_THRESHOLD",
         ),
         ("websocket_heartbeat_ack_max_age_seconds", None, None),
         ("websocket_max_latency_seconds", None, None),
@@ -10569,8 +10569,8 @@ def _apply_yaml_config(yaml_cfg: dict, discord_cfg: dict) -> dict | None:
             value = _websocket_liveness_cfg.get(legacy_key)
         if value is not None:
             seeded_extra[primary_key] = value
-            if env_key and not os.getenv(env_key):
-                os.environ[env_key] = str(value)
+            if env_key and not korra_env(env_key):
+                korra_env_set(os.environ, env_key, str(value))
     return seeded_extra or None
 
 

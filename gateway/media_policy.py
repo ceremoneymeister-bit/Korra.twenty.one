@@ -32,12 +32,13 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any, Dict, Optional
+from hermes_constants import korra_env, korra_env_set
 
 logger = logging.getLogger(__name__)
 
-_STRICT_ENV = "HERMES_MEDIA_DELIVERY_STRICT"
-_ALLOW_DIRS_ENV = "HERMES_MEDIA_ALLOW_DIRS"
-_TRUST_RECENT_ENV = "HERMES_MEDIA_TRUST_RECENT_FILES"
+_STRICT_ENV = "KORRA_MEDIA_DELIVERY_STRICT"
+_ALLOW_DIRS_ENV = "KORRA_MEDIA_ALLOW_DIRS"
+_TRUST_RECENT_ENV = "KORRA_MEDIA_TRUST_RECENT_FILES"
 
 
 def _load_gateway_cfg(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -67,11 +68,11 @@ def apply_media_policy_env(config: Optional[Dict[str, Any]] = None) -> None:
             return
 
         strict = gateway_cfg.get("strict")
-        if strict is not None and not os.environ.get(_STRICT_ENV):
-            os.environ[_STRICT_ENV] = "1" if strict else "0"
+        if strict is not None and not korra_env(_STRICT_ENV):
+            korra_env_set(os.environ, _STRICT_ENV, "1" if strict else "0")
 
         allow_dirs = gateway_cfg.get("media_delivery_allow_dirs")
-        if allow_dirs and not os.environ.get(_ALLOW_DIRS_ENV):
+        if allow_dirs and not korra_env(_ALLOW_DIRS_ENV):
             if isinstance(allow_dirs, str):
                 allow_dirs_str = allow_dirs
             elif isinstance(allow_dirs, (list, tuple)):
@@ -79,10 +80,10 @@ def apply_media_policy_env(config: Optional[Dict[str, Any]] = None) -> None:
             else:
                 allow_dirs_str = ""
             if allow_dirs_str:
-                os.environ[_ALLOW_DIRS_ENV] = allow_dirs_str
+                korra_env_set(os.environ, _ALLOW_DIRS_ENV, allow_dirs_str)
 
         trust_recent = gateway_cfg.get("trust_recent_files")
-        if trust_recent is not None and not os.environ.get(_TRUST_RECENT_ENV):
-            os.environ[_TRUST_RECENT_ENV] = "1" if trust_recent else "0"
+        if trust_recent is not None and not korra_env(_TRUST_RECENT_ENV):
+            korra_env_set(os.environ, _TRUST_RECENT_ENV, "1" if trust_recent else "0")
     except Exception:  # noqa: BLE001 - policy bridge must never break delivery
         logger.debug("apply_media_policy_env failed", exc_info=True)

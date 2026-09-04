@@ -250,7 +250,7 @@ def _debug(msg: str) -> None:
     broken stderr pipe must not kill the whole gateway — the main
     command pipe (stdin+stdout) is what actually matters.
     """
-    if korra_env("HERMES_VOICE_DEBUG", "").strip() != "1":
+    if korra_env("KORRA_VOICE_DEBUG", "").strip() != "1":
         return
     try:
         print(f"[voice] {msg}", file=sys.stderr, flush=True)

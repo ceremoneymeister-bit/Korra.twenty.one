@@ -370,7 +370,7 @@ def _resolve_secret(cfg_section: dict) -> bytes:
     restart or span multiple workers — logged at INFO).
     """
     raw = _resolve(
-        "HERMES_DASHBOARD_BASIC_AUTH_SECRET", cfg_section, "secret"
+        "KORRA_DASHBOARD_BASIC_AUTH_SECRET", cfg_section, "secret"
     )
     if not raw:
         logger.info(
@@ -406,16 +406,16 @@ def register(ctx) -> None:
 
     section = _load_config_basic_auth_section()
     username = _resolve(
-        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME", section, "username"
+        "KORRA_DASHBOARD_BASIC_AUTH_USERNAME", section, "username"
     )
     password_hash = _resolve(
-        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH", section, "password_hash"
+        "KORRA_DASHBOARD_BASIC_AUTH_PASSWORD_HASH", section, "password_hash"
     )
     plaintext = _resolve(
-        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD", section, "password"
+        "KORRA_DASHBOARD_BASIC_AUTH_PASSWORD", section, "password"
     )
     ttl_raw = _resolve(
-        "HERMES_DASHBOARD_BASIC_AUTH_TTL_SECONDS", section, "session_ttl_seconds"
+        "KORRA_DASHBOARD_BASIC_AUTH_TTL_SECONDS", section, "session_ttl_seconds"
     )
 
     if not username:
@@ -448,8 +448,8 @@ def register(ctx) -> None:
     #   * env password set        → hash it (overrides any config hash)
     #   * else config password_hash set → use it
     #   * else config plaintext password → hash it in-memory
-    plaintext_from_env = os.environ.get(
-        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD", ""
+    plaintext_from_env = korra_env(
+        "KORRA_DASHBOARD_BASIC_AUTH_PASSWORD", ""
     ).strip()
     if plaintext_from_env:
         password_hash = hash_password(plaintext_from_env)

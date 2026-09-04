@@ -316,7 +316,7 @@ def resolve_sync_base_url() -> Optional[str]:
     env var and config key exist to point a dev/staging build at another
     plane. Returns None only if the default is somehow blanked out.
     """
-    env = korra_env("HERMES_SYNC_BASE_URL")
+    env = korra_env("KORRA_SYNC_BASE_URL")
     if env and env.strip():
         return env.strip().rstrip("/")
     try:
@@ -398,7 +398,7 @@ def sync_feature_enabled() -> bool:
     the Nous-admin token gate and a configured base URL — all three must hold for
     background sync to run.
     """
-    return _sync_config_bool("HERMES_SYNC_ENABLED", "enabled", default=False)
+    return _sync_config_bool("KORRA_SYNC_ENABLED", "enabled", default=False)
 
 
 def sync_org_auto_propose() -> bool:
@@ -416,7 +416,7 @@ def sync_org_auto_propose() -> bool:
     back without anyone remembering to push them.
     """
     return _sync_config_bool(
-        "HERMES_SYNC_ORG_AUTO_PROPOSE", "org_auto_propose", default=False
+        "KORRA_SYNC_ORG_AUTO_PROPOSE", "org_auto_propose", default=False
     )
 
 
@@ -433,7 +433,7 @@ def sync_default_opt_in() -> bool:
     provisional and expected to flip; exposing it as env config lets the
     operator choose per deployment without a protocol change.
     """
-    return _sync_config_bool("HERMES_SYNC_DEFAULT_OPT_IN", "default_opt_in", default=False)
+    return _sync_config_bool("KORRA_SYNC_DEFAULT_OPT_IN", "default_opt_in", default=False)
 
 
 # ---------------------------------------------------------------------------
@@ -701,7 +701,7 @@ def stable_device_id() -> str:
     # the env.
     import os
 
-    env_name = (korra_env("HERMES_SYNC_DEVICE_NAME") or "").strip()
+    env_name = (korra_env("KORRA_SYNC_DEVICE_NAME") or "").strip()
     val = env_name if env_name else _default_device_label()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

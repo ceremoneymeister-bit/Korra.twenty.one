@@ -1102,7 +1102,7 @@ def _token_fingerprint(token: Any) -> Optional[str]:
 
 
 def _oauth_trace_enabled() -> bool:
-    raw = korra_env("HERMES_OAUTH_TRACE", "").strip().lower()
+    raw = korra_env("KORRA_OAUTH_TRACE", "").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
@@ -2599,7 +2599,7 @@ def _nous_portal_env_override() -> Optional[str]:
     neither env var is set/blank.
     """
     return _optional_base_url(
-        korra_env("HERMES_PORTAL_BASE_URL") or os.getenv("NOUS_PORTAL_BASE_URL")
+        korra_env("KORRA_PORTAL_BASE_URL") or os.getenv("NOUS_PORTAL_BASE_URL")
     )
 
 
@@ -2984,7 +2984,7 @@ def resolve_qwen_runtime_credentials(
             code="qwen_access_token_missing",
         )
 
-    base_url = korra_env("HERMES_QWEN_BASE_URL", "").strip().rstrip("/") or DEFAULT_QWEN_BASE_URL
+    base_url = korra_env("KORRA_QWEN_BASE_URL", "").strip().rstrip("/") or DEFAULT_QWEN_BASE_URL
     return {
         "provider": "qwen-oauth",
         "base_url": base_url,
@@ -3085,7 +3085,7 @@ def _spotify_api_base_url(state: Optional[Dict[str, Any]] = None) -> str:
     from hermes_cli.config import get_env_value
 
     candidates = (
-        get_env_value("HERMES_SPOTIFY_API_BASE_URL"),
+        get_env_value("KORRA_SPOTIFY_API_BASE_URL"),
         state.get("api_base_url") if isinstance(state, dict) else None,
         DEFAULT_SPOTIFY_API_BASE_URL,
     )
@@ -3100,7 +3100,7 @@ def _spotify_accounts_base_url(state: Optional[Dict[str, Any]] = None) -> str:
     from hermes_cli.config import get_env_value
 
     candidates = (
-        get_env_value("HERMES_SPOTIFY_ACCOUNTS_BASE_URL"),
+        get_env_value("KORRA_SPOTIFY_ACCOUNTS_BASE_URL"),
         state.get("accounts_base_url") if isinstance(state, dict) else None,
         DEFAULT_SPOTIFY_ACCOUNTS_BASE_URL,
     )
@@ -4267,7 +4267,7 @@ def resolve_codex_runtime_credentials(
         pool_token = _pool_codex_access_token()
         if pool_token:
             base_url = (
-                korra_env("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
+                korra_env("KORRA_CODEX_BASE_URL", "").strip().rstrip("/")
                 or DEFAULT_CODEX_BASE_URL
             )
             return {
@@ -4297,7 +4297,7 @@ def resolve_codex_runtime_credentials(
                 pool_token = _pool_codex_access_token()
                 if pool_token:
                     base_url = (
-                        korra_env("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
+                        korra_env("KORRA_CODEX_BASE_URL", "").strip().rstrip("/")
                         or DEFAULT_CODEX_BASE_URL
                     )
                     return {
@@ -4337,7 +4337,7 @@ def resolve_codex_runtime_credentials(
 
     tokens = dict(data["tokens"])
     access_token = str(tokens.get("access_token", "") or "").strip()
-    refresh_timeout_seconds = env_float("HERMES_CODEX_REFRESH_TIMEOUT_SECONDS", 20)
+    refresh_timeout_seconds = env_float("KORRA_CODEX_REFRESH_TIMEOUT_SECONDS", 20)
 
     should_refresh = bool(force_refresh)
     if (not should_refresh) and refresh_if_expiring:
@@ -4358,7 +4358,7 @@ def resolve_codex_runtime_credentials(
                 access_token = str(tokens.get("access_token", "") or "").strip()
 
     base_url = (
-        korra_env("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
+        korra_env("KORRA_CODEX_BASE_URL", "").strip().rstrip("/")
         or DEFAULT_CODEX_BASE_URL
     )
 
@@ -4411,7 +4411,7 @@ def _codex_usage_probe_url(base_url: Optional[str]) -> str:
     normalized = str(base_url or "").strip().rstrip("/")
     if not normalized:
         normalized = (
-            korra_env("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
+            korra_env("KORRA_CODEX_BASE_URL", "").strip().rstrip("/")
             or DEFAULT_CODEX_BASE_URL
         )
     if normalized.endswith("/codex"):
@@ -5237,7 +5237,7 @@ def resolve_xai_oauth_runtime_credentials(
     data = _read_xai_oauth_tokens()
     tokens = dict(data["tokens"])
     access_token = str(tokens.get("access_token", "") or "").strip()
-    refresh_timeout_seconds = env_float("HERMES_XAI_REFRESH_TIMEOUT_SECONDS", 20)
+    refresh_timeout_seconds = env_float("KORRA_XAI_REFRESH_TIMEOUT_SECONDS", 20)
     discovery = dict(data.get("discovery") or {})
     token_endpoint = str(discovery.get("token_endpoint", "") or "").strip()
     redirect_uri = str(data.get("redirect_uri", "") or "").strip()
@@ -5306,7 +5306,7 @@ def resolve_xai_oauth_runtime_credentials(
                     raise
 
     base_url = _xai_validate_inference_base_url(
-        korra_env("HERMES_XAI_BASE_URL", "").strip().rstrip("/")
+        korra_env("KORRA_XAI_BASE_URL", "").strip().rstrip("/")
         or os.getenv("XAI_BASE_URL", "").strip().rstrip("/"),
         fallback=DEFAULT_XAI_OAUTH_BASE_URL,
     )
@@ -5361,7 +5361,7 @@ def _resolve_verify(
     effective_ca = (
         ca_bundle
         or tls_state.get("ca_bundle")
-        or korra_env("HERMES_CA_BUNDLE")
+        or korra_env("KORRA_CA_BUNDLE")
         or os.getenv("SSL_CERT_FILE")
         or os.getenv("REQUESTS_CA_BUNDLE")
     )
@@ -5522,7 +5522,7 @@ def _nous_shared_auth_dir() -> Path:
     ``<HERMES_HOME>/shared/``. Sits outside any named profile so all
     profiles under the same root share the store.
     """
-    override = korra_env("HERMES_SHARED_AUTH_DIR", "").strip()
+    override = korra_env("KORRA_SHARED_AUTH_DIR", "").strip()
     if override:
         return Path(override).expanduser()
     from hermes_constants import get_default_hermes_root
@@ -6488,7 +6488,7 @@ def resolve_nous_runtime_credentials(
             """Resolve every routing value that shared OAuth state can replace."""
             portal_url = (
                 _optional_base_url(state.get("portal_base_url"))
-                or korra_env("HERMES_PORTAL_BASE_URL")
+                or korra_env("KORRA_PORTAL_BASE_URL")
                 or os.getenv("NOUS_PORTAL_BASE_URL")
                 or DEFAULT_NOUS_PORTAL_URL
             ).rstrip("/")
@@ -7289,11 +7289,11 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
         return {"configured": False}
 
     command = (
-        korra_env("HERMES_COPILOT_ACP_COMMAND", "").strip()
+        korra_env("KORRA_COPILOT_ACP_COMMAND", "").strip()
         or os.getenv("COPILOT_CLI_PATH", "").strip()
         or "copilot"
     )
-    raw_args = korra_env("HERMES_COPILOT_ACP_ARGS", "").strip()
+    raw_args = korra_env("KORRA_COPILOT_ACP_ARGS", "").strip()
     args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
     base_url = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
     if not base_url:
@@ -7520,11 +7520,11 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
         base_url = pconfig.inference_base_url
 
     command = (
-        korra_env("HERMES_COPILOT_ACP_COMMAND", "").strip()
+        korra_env("KORRA_COPILOT_ACP_COMMAND", "").strip()
         or os.getenv("COPILOT_CLI_PATH", "").strip()
         or "copilot"
     )
-    raw_args = korra_env("HERMES_COPILOT_ACP_ARGS", "").strip()
+    raw_args = korra_env("KORRA_COPILOT_ACP_ARGS", "").strip()
     args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
     resolved_command = shutil.which(command) if command else None
     if not resolved_command and not base_url.startswith("acp+tcp://"):
@@ -8095,7 +8095,7 @@ def _login_openai_codex(
                 do_import = "n"
             if do_import in {"y", "yes"}:
                 _save_codex_tokens(cli_tokens)
-                base_url = korra_env("HERMES_CODEX_BASE_URL", "").strip().rstrip("/") or DEFAULT_CODEX_BASE_URL
+                base_url = korra_env("KORRA_CODEX_BASE_URL", "").strip().rstrip("/") or DEFAULT_CODEX_BASE_URL
                 config_path = _update_config_for_provider("openai-codex", base_url)
                 print()
                 print("Credentials imported. Note: if Codex CLI refreshes its token,")
@@ -8354,7 +8354,7 @@ def _xai_oauth_device_code_login(
             code="xai_device_token_invalid",
         )
     base_url = _xai_validate_inference_base_url(
-        korra_env("HERMES_XAI_BASE_URL", "").strip().rstrip("/")
+        korra_env("KORRA_XAI_BASE_URL", "").strip().rstrip("/")
         or os.getenv("XAI_BASE_URL", "").strip().rstrip("/"),
         fallback=DEFAULT_XAI_OAUTH_BASE_URL,
     )
@@ -8557,7 +8557,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
 
     # Return tokens for the caller to persist (no longer writes to ~/.codex/)
     base_url = (
-        korra_env("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
+        korra_env("KORRA_CODEX_BASE_URL", "").strip().rstrip("/")
         or DEFAULT_CODEX_BASE_URL
     )
 
@@ -9097,7 +9097,7 @@ def _nous_device_code_login(
     pconfig = PROVIDER_REGISTRY["nous"]
     portal_base_url = (
         portal_base_url
-        or korra_env("HERMES_PORTAL_BASE_URL")
+        or korra_env("KORRA_PORTAL_BASE_URL")
         or os.getenv("NOUS_PORTAL_BASE_URL")
         or pconfig.portal_base_url
     ).rstrip("/")
@@ -9312,7 +9312,7 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
     insecure = bool(getattr(args, "insecure", False))
     ca_bundle = (
         getattr(args, "ca_bundle", None)
-        or korra_env("HERMES_CA_BUNDLE")
+        or korra_env("KORRA_CA_BUNDLE")
         or os.getenv("SSL_CERT_FILE")
     )
 

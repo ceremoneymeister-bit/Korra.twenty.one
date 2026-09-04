@@ -119,6 +119,7 @@ from urllib.parse import urlparse
 
 from tools.registry import tool_error
 from tools.ansi_strip import strip_unicode_tags
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -1035,8 +1036,8 @@ def _resolve_stdio_command(command: str, env: dict) -> tuple[str, dict]:
             resolved_command = which_hit
         elif resolved_command in {"npx", "npm", "node"}:
             hermes_home = os.path.expanduser(
-                os.getenv(
-                    "HERMES_HOME", os.path.join(os.path.expanduser("~"), ".hermes")
+                korra_env(
+                    "KORRA_HOME", os.path.join(os.path.expanduser("~"), ".hermes")
                 )
             )
             candidates = [
@@ -5771,7 +5772,7 @@ def _load_mcp_config() -> Dict[str, dict]:
         from hermes_cli.config import load_config
         from utils import env_var_enabled as _env_enabled
 
-        if _env_enabled("HERMES_SAFE_MODE"):
+        if _env_enabled("KORRA_SAFE_MODE"):
             return {}
         config = load_config()
         servers = config.get("mcp_servers")

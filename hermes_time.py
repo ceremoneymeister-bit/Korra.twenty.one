@@ -45,7 +45,7 @@ _tz_cache: Dict[Tuple[str, str], Tuple[str, Optional[ZoneInfo]]] = {}
 
 def _timezone_cache_identity() -> Tuple[str, str]:
     """Return the active source identity for the timezone cache."""
-    tz_env = korra_env("HERMES_TIMEZONE", "").strip()
+    tz_env = korra_env("KORRA_TIMEZONE", "").strip()
     if tz_env:
         return ("environment", tz_env)
     return ("config", str(get_config_path()))
@@ -58,7 +58,7 @@ def _resolve_timezone_name() -> str:
     should cache the result rather than calling on every ``now()``.
     """
     # 1. Environment variable (highest priority — set by Supervisor, etc.)
-    tz_env = korra_env("HERMES_TIMEZONE", "").strip()
+    tz_env = korra_env("KORRA_TIMEZONE", "").strip()
     if tz_env:
         return tz_env
 

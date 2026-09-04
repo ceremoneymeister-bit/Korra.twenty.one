@@ -320,9 +320,9 @@ def check_fn_cache_scope() -> Optional[str]:
         from gateway.session_context import get_session_env
 
         browser_identity = (
-            get_session_env("HERMES_SESSION_ID", ""),
-            get_session_env("HERMES_BROWSER_CONTROL_PRINCIPAL", ""),
-            get_session_env("HERMES_BROWSER_CONTROL_TRANSPORT_FAMILY", ""),
+            get_session_env("KORRA_SESSION_ID", ""),
+            get_session_env("KORRA_BROWSER_CONTROL_PRINCIPAL", ""),
+            get_session_env("KORRA_BROWSER_CONTROL_TRANSPORT_FAMILY", ""),
         )
         if all(str(value or "").strip() for value in browser_identity):
             return CHECK_FN_CACHE_BYPASS

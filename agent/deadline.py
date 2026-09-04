@@ -73,6 +73,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Protocol
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -289,7 +290,7 @@ def resolve_timeout(
         )
 
     if env_var:
-        env_raw = os.getenv(env_var, "").strip()
+        env_raw = korra_env(env_var, "").strip()
         if env_raw:
             try:
                 return clamp_timeout(float(env_raw))

@@ -55,6 +55,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ MARKER_NAME = ".hermes-update-in-progress"
 # holds the marker for its whole run, so without this the child refuses its
 # own parent's lock and the GUI update can never complete. See update_child_env
 # in apps/bootstrap-installer/src-tauri/src/update.rs — keep the name in sync.
-HANDOFF_PID_ENV = "HERMES_UPDATE_HANDOFF_PID"
+HANDOFF_PID_ENV = "KORRA_UPDATE_HANDOFF_PID"
 
 # Exit code meaning "another updater/instance owns this install right now".
 # Already the de-facto contract: the Windows shim + venv-holder guards in
@@ -127,7 +128,7 @@ def _handoff_pid() -> int | None:
     Read from :data:`HANDOFF_PID_ENV`. Malformed values count as absent —
     a broken handoff must fall back to the normal refusal, never crash.
     """
-    raw = os.environ.get(HANDOFF_PID_ENV, "").strip()
+    raw = korra_env(HANDOFF_PID_ENV, "").strip()
     if not raw:
         return None
     try:

@@ -2059,8 +2059,8 @@ class HermesACPAgent(acp.Agent):
             # the new task so clients can render a per-session board). Save
             # and restore around the agent call so a re-used executor thread
             # never leaks one session's id into the next session's tools.
-            previous_session_id = korra_env("HERMES_SESSION_ID")
-            korra_env_set(os.environ, "HERMES_SESSION_ID", session_id)
+            previous_session_id = korra_env("KORRA_SESSION_ID")
+            korra_env_set(os.environ, "KORRA_SESSION_ID", session_id)
             # Auto-titling fires inside the turn prologue now; give the agent
             # this session's notifier so a new title reaches the client as a
             # session-info update instead of waiting for the next one.
@@ -2089,9 +2089,9 @@ class HermesACPAgent(acp.Agent):
                     reset_hermes_interactive_context(interactive_token)
                 # Restore HERMES_SESSION_ID symmetrically.
                 if previous_session_id is None:
-                    korra_env_pop(os.environ, "HERMES_SESSION_ID")
+                    korra_env_pop(os.environ, "KORRA_SESSION_ID")
                 else:
-                    korra_env_set(os.environ, "HERMES_SESSION_ID", previous_session_id)
+                    korra_env_set(os.environ, "KORRA_SESSION_ID", previous_session_id)
                 if approval_cb:
                     try:
                         from tools import terminal_tool as _terminal_tool

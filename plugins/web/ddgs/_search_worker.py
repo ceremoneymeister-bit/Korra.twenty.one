@@ -86,7 +86,12 @@ def main() -> int:
 
     hook = request.get("test_hook")
     if hook:
-        if os.environ.get("HERMES_DDGS_ALLOW_TEST_HOOKS") != "1":
+        # Дочерний процесс запускается своим интерпретатором и импортирует
+        # только стандартную библиотеку — оба имени проверяются здесь руками.
+        if "1" not in (
+            os.environ.get("KORRA_DDGS_ALLOW_TEST_HOOKS"),
+            os.environ.get("HERMES_DDGS_ALLOW_TEST_HOOKS"),
+        ):
             _write_envelope(
                 {"ok": False, "error": "test_hook refused (hooks not enabled)"}
             )

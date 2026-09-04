@@ -107,7 +107,7 @@ def _active_profile_name() -> str:
         from hermes_cli.profiles import get_active_profile_name
         return get_active_profile_name() or "default"
     except Exception:
-        return korra_env("HERMES_PROFILE", "default") or "default"
+        return korra_env("KORRA_PROFILE", "default") or "default"
 
 
 def _profile_home(profile: str) -> Optional[str]:
@@ -874,8 +874,8 @@ class A2AAdapter(BasePlatformAdapter):
             env = os.environ.copy()
             home = _profile_home(profile)
             if home:
-                korra_env_set(env, "HERMES_HOME", home)
-            korra_env_set(env, "HERMES_A2A_PEER", peer)
+                korra_env_set(env, "KORRA_HOME", home)
+            korra_env_set(env, "KORRA_A2A_PEER", peer)
             start = time.time()
             try:
                 proc = subprocess.run(

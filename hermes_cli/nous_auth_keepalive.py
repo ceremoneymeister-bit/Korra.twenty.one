@@ -32,7 +32,7 @@ def _timeout_seconds(value: Optional[float]) -> float:
     if value is not None:
         return float(value)
     try:
-        return float(korra_env("HERMES_NOUS_TIMEOUT_SECONDS", "15"))
+        return float(korra_env("KORRA_NOUS_TIMEOUT_SECONDS", "15"))
     except (TypeError, ValueError):
         return 15.0
 

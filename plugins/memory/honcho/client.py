@@ -83,7 +83,7 @@ def resolve_active_host() -> str:
       3. defaultHost from the active config, but only for the default profile
       4. Fallback: ``"hermes"`` (default profile)
     """
-    explicit = korra_env("HERMES_HONCHO_HOST", "").strip()
+    explicit = korra_env("KORRA_HONCHO_HOST", "").strip()
     if explicit:
         return explicit
 

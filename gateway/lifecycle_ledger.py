@@ -63,7 +63,7 @@ _LOW_MEM_AVAILABLE_FRACTION = 0.05  # < 5% of MemTotal available
 
 def _process_hermes_home() -> Path:
     """HERMES_HOME for process-level identity files (ignore task overrides)."""
-    val = korra_env("HERMES_HOME", "").strip()
+    val = korra_env("KORRA_HOME", "").strip()
     if val:
         return Path(val)
     from hermes_constants import get_hermes_home

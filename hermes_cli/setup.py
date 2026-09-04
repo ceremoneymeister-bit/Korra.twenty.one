@@ -357,7 +357,7 @@ def is_noninteractive() -> bool:
     installed (the start path asks "Install it now?" with no one to answer).
     Honour the explicit env flag here so callers fall back to their default.
     """
-    return korra_env("HERMES_NONINTERACTIVE", "").strip().lower() in {
+    return korra_env("KORRA_NONINTERACTIVE", "").strip().lower() in {
         "1",
         "true",
         "yes",

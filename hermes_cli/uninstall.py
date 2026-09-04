@@ -418,7 +418,9 @@ def remove_hermes_env_vars_windows() -> list[str]:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
                             winreg.KEY_READ | winreg.KEY_WRITE) as key:
-            for name in ("HERMES_HOME", "HERMES_GIT_BASH_PATH"):
+            # Оба имени пары: контур мог быть установлен до переименования.
+            for name in ("KORRA_HOME", "HERMES_HOME",
+                         "KORRA_GIT_BASH_PATH", "HERMES_GIT_BASH_PATH"):
                 try:
                     winreg.QueryValueEx(key, name)
                 except FileNotFoundError:

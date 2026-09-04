@@ -54,7 +54,7 @@ def _install_sidecar_publisher() -> None:
     ``/api/pty`` endpoint when a chat tab passes a ``channel`` query param.
     Best-effort: connect failure or runtime drop falls back to stdio-only.
     """
-    url = korra_env("HERMES_TUI_SIDECAR_URL")
+    url = korra_env("KORRA_TUI_SIDECAR_URL")
 
     if not url:
         return
@@ -78,7 +78,7 @@ _DEFAULT_SHUTDOWN_GRACE_S = 1.0
 
 
 def _shutdown_grace_seconds() -> float:
-    raw = (korra_env("HERMES_TUI_GATEWAY_SHUTDOWN_GRACE_S") or "").strip()
+    raw = (korra_env("KORRA_TUI_GATEWAY_SHUTDOWN_GRACE_S") or "").strip()
     if not raw:
         return _DEFAULT_SHUTDOWN_GRACE_S
     try:

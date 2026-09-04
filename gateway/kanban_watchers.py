@@ -1299,7 +1299,7 @@ class GatewayKanbanWatchersMixin:
         except Exception:
             logger.warning("kanban dispatcher: config loader unavailable; disabled")
             return
-        env_override = korra_env("HERMES_KANBAN_DISPATCH_IN_GATEWAY", "").strip().lower()
+        env_override = korra_env("KORRA_KANBAN_DISPATCH_IN_GATEWAY", "").strip().lower()
         if env_override in {"0", "false", "no", "off"}:
             logger.info("kanban dispatcher: disabled via HERMES_KANBAN_DISPATCH_IN_GATEWAY env")
             return
@@ -1716,9 +1716,9 @@ class GatewayKanbanWatchersMixin:
                 # pattern as the dashboard specify endpoint. The
                 # decomposer module connects with no board kwarg and
                 # relies on the env var.
-                prev_env = korra_env("HERMES_KANBAN_BOARD")
+                prev_env = korra_env("KORRA_KANBAN_BOARD")
                 try:
-                    korra_env_set(os.environ, "HERMES_KANBAN_BOARD", slug)
+                    korra_env_set(os.environ, "KORRA_KANBAN_BOARD", slug)
                     try:
                         triage_ids = _decomp.list_triage_ids()
                     except Exception as exc:
@@ -1762,9 +1762,9 @@ class GatewayKanbanWatchersMixin:
                             )
                 finally:
                     if prev_env is None:
-                        korra_env_pop(os.environ, "HERMES_KANBAN_BOARD")
+                        korra_env_pop(os.environ, "KORRA_KANBAN_BOARD")
                     else:
-                        korra_env_set(os.environ, "HERMES_KANBAN_BOARD", prev_env)
+                        korra_env_set(os.environ, "KORRA_KANBAN_BOARD", prev_env)
             return successes
 
         logger.info(

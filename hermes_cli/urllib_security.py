@@ -12,6 +12,7 @@ import urllib.request
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 _CROSS_ORIGIN_SAFE_HEADERS = frozenset({"accept", "user-agent"})
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _CA_BUNDLE_ENV_VARS = (
-    "HERMES_CA_BUNDLE",
+    "KORRA_CA_BUNDLE",
     "SSL_CERT_FILE",
     "REQUESTS_CA_BUNDLE",
     "CURL_CA_BUNDLE",
@@ -102,7 +103,7 @@ def _resolved_https_context() -> ssl.SSLContext | None:
         (
             value
             for name in _CA_BUNDLE_ENV_VARS
-            if (value := os.getenv(name, "").strip())
+            if (value := korra_env(name, "").strip())
         ),
         "",
     )

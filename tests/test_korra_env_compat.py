@@ -269,6 +269,41 @@ def test_default_root_of_docker_profile_layout(tmp_path, monkeypatch, name):
 # ── инвариант исходников ──────────────────────────────────────────────
 
 
+# Проверяется рантайм движка. Вне периметра: комплекты скиллов и
+# `scripts/` — самостоятельные файлы, которые запускаются своим
+# интерпретатором и не обязаны импортировать hermes_constants;
+# фронтенды и десктоп — отдельный слой.
+#
+# Каталоги отсекаются ПО ПУТИ ОТ КОРНЯ, а не по имени: отсечение по имени
+# заодно выкидывало `plugins/web/`, и пропущенная там запись пряталась от
+# проверки.
+_ENGINE_SKIP_ANY = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache",
+    ".pytest_cache", "hermes_agent.egg-info",
+}
+_ENGINE_SKIP_ROOTS = {
+    "graphify-out", "tests", "web", "apps", "ui-tui", "native", "nix",
+    "locales", "assets", "mcp-research-data", "docs", "skills",
+    "optional-skills", "scripts", "optional-mcps", "evals",
+    ".hermes-runtime",
+}
+
+
+def _engine_python_files():
+    for dirpath, dirnames, filenames in os.walk(REPO_ROOT):
+        rel_dir = Path(dirpath).relative_to(REPO_ROOT)
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in _ENGINE_SKIP_ANY
+            and not (rel_dir == Path(".") and d in _ENGINE_SKIP_ROOTS)
+        ]
+        for filename in sorted(filenames):
+            if not filename.endswith(".py") or filename == "setup.py":
+                continue
+            yield Path(dirpath) / filename
+
+
 def test_engine_code_has_no_raw_env_writes():
     """Запись переменной пары мимо хелпера снова разъедет имена.
 
@@ -280,25 +315,121 @@ def test_engine_code_has_no_raw_env_writes():
     import re
 
     write_re = re.compile(r'\[\s*["\'](?:HERMES|KORRA)_[A-Z0-9_]+["\']\s*\]\s*=(?!=)')
-    skip_dirs = {
-        ".git", "node_modules", "__pycache__", "graphify-out", ".venv", "venv",
-        "hermes_agent.egg-info", "tests", "web", "apps", "ui-tui", "native",
-        "nix", "locales", "assets", "mcp-research-data", ".mypy_cache",
-        ".pytest_cache", "docs", "skills", "optional-skills",
-    }
     offenders = []
-    for dirpath, dirnames, filenames in os.walk(REPO_ROOT):
-        dirnames[:] = [d for d in dirnames if d not in skip_dirs]
-        for filename in filenames:
-            if not filename.endswith(".py") or filename == "setup.py":
-                continue
-            path = Path(dirpath) / filename
-            for lineno, line in enumerate(
-                path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
-            ):
-                if write_re.search(line):
-                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
+    for path in _engine_python_files():
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if write_re.search(line):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {line.strip()}")
+        offenders.extend(_named_constant_env_writes(path, text))
     assert not offenders, (
         "Переменные пары KORRA_*/HERMES_* пишутся мимо korra_env_set/"
         "korra_env_expand:\n" + "\n".join(offenders)
+    )
+
+
+def _named_constant_env_writes(path, text):
+    """Записи вида ``env[_SOME_ENV] = ...``, где константа держит имя пары.
+
+    Литеральное имя видно грепом, а имя, спрятанное за модульной
+    константой, — нет; именно так `gateway/media_policy.py` писал только
+    одно имя из пары.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:  # pragma: no cover — синтаксис ловит компиляция
+        return []
+    names = {
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+        and node.value.value.startswith(("KORRA_", "HERMES_"))
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    if not names:
+        return []
+    found = []
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        for target in targets:
+            if (
+                isinstance(target, ast.Subscript)
+                and isinstance(target.slice, ast.Name)
+                and target.slice.id in names
+            ):
+                found.append(
+                    f"{path.relative_to(REPO_ROOT)}:{node.lineno}: "
+                    f"{ast.unparse(target)} = ..."
+                )
+    return found
+
+
+def test_engine_code_has_no_raw_env_reads_by_variable():
+    """Чтение ``os.environ.get(_SOME_ENV)`` мимо хелпера теряет второе имя.
+
+    Литеральное имя ловится глазами и грепом, спрятанное за константой или
+    переменной цикла — нет: так `hermes_cli/web_server.py` перестал бы
+    видеть `HERMES_DASHBOARD_FILES_ROOT`, который контур владельца задаёт
+    снаружи, а `hermes_cli/kanban.py` — `HERMES_PROFILE`.
+    """
+    import ast
+    import re as _re
+
+    pair_re = _re.compile(r"\b(?:KORRA|HERMES)_[A-Z0-9_]+\b")
+    readers = {"get", "getenv", "pop", "setdefault"}
+    offenders = []
+    for path in _engine_python_files():
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if not pair_re.search(text):
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:  # pragma: no cover — синтаксис ловит компиляция
+            continue
+        # Имена, которым где-либо в файле присваивается или в которые
+        # итерируется имя переменной окружения из нашей пары.
+        names: set[str] = set()
+
+        def _bind(target):
+            if isinstance(target, ast.Name):
+                names.add(target.id)
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                for element in target.elts:
+                    _bind(element)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and pair_re.search(ast.unparse(node.value)):
+                for target in node.targets:
+                    _bind(target)
+            elif isinstance(node, ast.For) and pair_re.search(ast.unparse(node.iter)):
+                _bind(node.target)
+        if not names:
+            continue
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in readers
+                and node.args
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id in names
+            ):
+                continue
+            base = ast.unparse(node.func.value)
+            if base == "os" or base.endswith(("environ", "env")):
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{node.lineno}: {ast.unparse(node)[:110]}"
+                )
+    assert not offenders, (
+        "Переменные пары KORRA_*/HERMES_* читаются мимо korra_env:\n"
+        + "\n".join(offenders)
     )

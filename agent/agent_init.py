@@ -1698,7 +1698,7 @@ def init_agent(
         except Exception:
             delegated_child = False
         if not delegated_child:
-            korra_env_set(os.environ, "HERMES_SESSION_ID", agent.session_id)
+            korra_env_set(os.environ, "KORRA_SESSION_ID", agent.session_id)
 
     # Session logs go into ~/.hermes/sessions/ alongside gateway sessions
     hermes_home = get_hermes_home()

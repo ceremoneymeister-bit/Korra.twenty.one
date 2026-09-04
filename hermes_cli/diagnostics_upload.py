@@ -23,12 +23,13 @@ Uses stdlib ``urllib`` only, matching ``debug.py`` style — no third-party deps
 import json
 import os
 import urllib.request
+from hermes_constants import korra_env
 
 # Base URL of the Nous account service that mints the signed upload URL.
 # Overridable via env so the feature can be pointed at staging / a local dev
 # NAS instance during testing.
-NAS_BASE = os.environ.get(
-    "HERMES_DIAGNOSTICS_BASE_URL", "https://portal.nousresearch.com"
+NAS_BASE = korra_env(
+    "KORRA_DIAGNOSTICS_BASE_URL", "https://portal.nousresearch.com"
 )
 
 # Network timeout for each request (seconds). The upload itself can be larger

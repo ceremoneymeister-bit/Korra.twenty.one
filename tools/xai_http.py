@@ -282,7 +282,7 @@ def _resolve_explicit_xai_base_url(default: str = "https://api.x.ai/v1") -> str:
     the default rather than raising.
     """
     override = str(
-        get_env_value("HERMES_XAI_BASE_URL")
+        get_env_value("KORRA_XAI_BASE_URL")
         or get_env_value("XAI_BASE_URL")
         or ""
     ).strip().rstrip("/")
@@ -359,7 +359,7 @@ def resolve_xai_http_credentials(
             or auth_mod.DEFAULT_XAI_OAUTH_BASE_URL
         ).strip().rstrip("/")
         override_base_url = str(
-            get_env_value("HERMES_XAI_BASE_URL")
+            get_env_value("KORRA_XAI_BASE_URL")
             or get_env_value("XAI_BASE_URL")
             or ""
         ).strip().rstrip("/")

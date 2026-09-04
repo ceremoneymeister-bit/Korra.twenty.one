@@ -90,16 +90,16 @@ RUN_ARGS=(
     --restart unless-stopped
     # Журнал контейнера без ротации за полгода съедает диск клиента молча.
     --log-opt max-size=50m --log-opt max-file=3
-    -e HERMES_UID="$ENGINE_UID" -e HERMES_GID="$ENGINE_GID"
+    -e KORRA_UID="$ENGINE_UID" -e KORRA_GID="$ENGINE_GID"
     -e KORRA_AGENT_SUDO="$AGENT_SUDO"
-    -e HERMES_DASHBOARD=1
-    -e HERMES_DASHBOARD_HOST=127.0.0.1
-    -e HERMES_DASHBOARD_PORT="$PANEL_PORT"
-    -e HERMES_DASHBOARD_FILES_ROOT=/opt/data
+    -e KORRA_DASHBOARD=1
+    -e KORRA_DASHBOARD_HOST=127.0.0.1
+    -e KORRA_DASHBOARD_PORT="$PANEL_PORT"
+    -e KORRA_DASHBOARD_FILES_ROOT=/opt/data
     -e KORRA_UI_MODE=fleet
     -e API_SERVER_PORT="$API_PORT"
     -e API_SERVER_PROXY_TARGET="http://127.0.0.1:$API_PORT"
-    -e HERMES_TIMEZONE="$TIMEZONE"
+    -e KORRA_TIMEZONE="$TIMEZONE"
     -e KORRA_OWNER_TIMEZONE="$TIMEZONE"
     -v "$DATA":/opt/data
     "$IMAGE" gateway run

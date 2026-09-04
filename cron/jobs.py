@@ -223,7 +223,7 @@ def _oneshot_run_claim_ttl_seconds() -> float:
     - positive N → ``max(N * headroom, ONESHOT_RUN_CLAIM_TTL_SECONDS)`` so a
       tiny configured timeout can never expire a claim mid-run.
     """
-    raw = korra_env("HERMES_CRON_TIMEOUT", "").strip()
+    raw = korra_env("KORRA_CRON_TIMEOUT", "").strip()
     timeout = _DEFAULT_CRON_INACTIVITY_TIMEOUT
     if raw:
         try:
@@ -3426,7 +3426,7 @@ def _machine_id() -> str:
     Uses ``HERMES_MACHINE_ID`` if set, else hostname + pid. The CAS correctness
     comes from the file lock + the fresh-claim check, not from this value.
     """
-    explicit = korra_env("HERMES_MACHINE_ID", "").strip()
+    explicit = korra_env("KORRA_MACHINE_ID", "").strip()
     if explicit:
         return explicit
     try:

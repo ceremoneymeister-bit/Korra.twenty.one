@@ -11,7 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from utils import atomic_replace, fast_safe_load
-from hermes_constants import korra_env, korra_env_set
+from hermes_constants import korra_env, korra_env_set, korra_env_pop, korra_env_present
 
 
 # Env var name suffixes that indicate credential values.  These are the
@@ -142,8 +142,10 @@ def _clear_known_keys_missing_from_dotenv(path: Path) -> None:
         return
     defined = _env_keys_defined_in_dotenv(path)
     for key in _PROFILE_MANAGED_ENV_KEYS:
-        if key not in defined and key in os.environ:
-            del os.environ[key]
+        # Снимаются оба имени пары: оставленное второе имя вернуло бы
+        # унаследованное значение обратно в резолв.
+        if key not in defined and korra_env_present(key):
+            korra_env_pop(os.environ, key)
 
 
 def get_secret_source(env_var: str) -> str | None:
@@ -218,7 +220,7 @@ def _hydrate_profile_secret_sources(home: Path) -> dict[str, str]:
         if op_env.exists():
             for _name, _value in load_env_file(op_env).items():
                 local_env.setdefault(_name, _value)
-        korra_env_set(local_env, "HERMES_HOME", str(home))
+        korra_env_set(local_env, "KORRA_HOME", str(home))
         report = apply_all(cfg, home, environ=local_env)
     except Exception:  # noqa: BLE001 — preserve fail-open startup behavior
         return {}
@@ -487,7 +489,7 @@ def load_hermes_dotenv(
     """
     loaded: list[Path] = []
 
-    home_path = Path(hermes_home or korra_env("HERMES_HOME", Path.home() / ".hermes"))
+    home_path = Path(hermes_home or korra_env("KORRA_HOME", Path.home() / ".hermes"))
     user_env = home_path / ".env"
     project_env_path = Path(project_env) if project_env else None
 

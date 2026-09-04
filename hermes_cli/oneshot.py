@@ -237,7 +237,7 @@ def run_oneshot(
     # not host it), and silently picking the provider's catalog default hides
     # the mismatch.  Require the caller to be explicit.  Validate BEFORE the
     # stderr redirect so the message actually reaches the terminal.
-    env_model_early = korra_env("HERMES_INFERENCE_MODEL", "").strip()
+    env_model_early = korra_env("KORRA_INFERENCE_MODEL", "").strip()
     if provider and not ((model or "").strip() or env_model_early):
         sys.stderr.write(
             "hermes -z: --provider requires --model (or HERMES_INFERENCE_MODEL). "
@@ -253,8 +253,8 @@ def run_oneshot(
 
     # Auto-approve any shell / tool approvals.  Non-interactive by
     # definition — a prompt would hang forever.
-    korra_env_set(os.environ, "HERMES_YOLO_MODE", "1")
-    korra_env_set(os.environ, "HERMES_ACCEPT_HOOKS", "1")
+    korra_env_set(os.environ, "KORRA_YOLO_MODE", "1")
+    korra_env_set(os.environ, "KORRA_ACCEPT_HOOKS", "1")
 
     # One-shot prints a single final response and exits: there is no later turn
     # for a detached subagent's completion to re-enter, and nothing here drains
@@ -387,7 +387,7 @@ def _run_agent(
         else:
             cfg_model = str(_raw or "")
 
-    env_model = korra_env("HERMES_INFERENCE_MODEL", "").strip()
+    env_model = korra_env("KORRA_INFERENCE_MODEL", "").strip()
     effective_model = (model or "").strip() or env_model or cfg_model
 
     # Resolve effective provider: explicit arg → (auto-detect from model if
@@ -441,7 +441,7 @@ def _run_agent(
                     cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
                 current_provider = (
                     cfg_provider
-                    or korra_env("HERMES_INFERENCE_PROVIDER", "").strip().lower()
+                    or korra_env("KORRA_INFERENCE_PROVIDER", "").strip().lower()
                     or "auto"
                 )
                 detected = detect_provider_for_model(explicit_model, current_provider)

@@ -177,7 +177,7 @@ def _hermes_home_for_pid(pid: int) -> str | None:
     try:
         import psutil
 
-        home = psutil.Process(pid).environ().get("HERMES_HOME")
+        home = korra_env("KORRA_HOME", env=psutil.Process(pid).environ())
         if home:
             return home
     except Exception:
@@ -187,7 +187,9 @@ def _hermes_home_for_pid(pid: int) -> str | None:
     except (OSError, PermissionError):
         return None
     for part in raw.split(b"\x00"):
-        if part.startswith(b"HERMES_HOME="):
+        # Окружение чужого процесса: он мог быть запущен образом любой из
+        # двух эпох, поэтому принимаются оба имени.
+        if part.startswith((b"KORRA_HOME=", b"HERMES_HOME=")):
             return part.split(b"=", 1)[1].decode("utf-8", errors="replace") or None
     return None
 
@@ -397,7 +399,7 @@ def _kill_stale_dashboard_processes(
     # backend child, it sets HERMES_DESKTOP_CHILD_PID so that the update
     # path can skip killing the desktop-managed process.  (#37532)
     exclude: set[int] = set()
-    raw_pid = korra_env("HERMES_DESKTOP_CHILD_PID")
+    raw_pid = korra_env("KORRA_DESKTOP_CHILD_PID")
     if raw_pid:
         # The desktop may manage several backends (one per active profile) and
         # passes them comma-separated; a lone int still parses for back-compat.
@@ -780,7 +782,7 @@ def _process_ppid(pid: int) -> int | None:
 
 def _exclude_pids_from_env() -> set[int]:
     """PIDs Desktop marks as live backends (HERMES_DESKTOP_CHILD_PID)."""
-    raw = korra_env("HERMES_DESKTOP_CHILD_PID", "")
+    raw = korra_env("KORRA_DESKTOP_CHILD_PID", "")
     out: set[int] = set()
     for part in raw.split(","):
         part = part.strip()
@@ -821,7 +823,7 @@ _HEX16 = _HEX32
 
 def _hermes_home_dir() -> Path:
     """Resolved Hermes home (HERMES_HOME override or ~/.hermes)."""
-    override = korra_env("HERMES_HOME", "").strip()
+    override = korra_env("KORRA_HOME", "").strip()
     if override:
         return Path(override).expanduser()
     return Path.home() / ".hermes"

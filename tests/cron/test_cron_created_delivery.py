@@ -38,17 +38,17 @@ def _enter_cron_context(platform=None, chat_id=None, thread_id=None):
     extra = []
     if platform is not None:
         extra.append(
-            (_VAR_MAP["HERMES_CRON_AUTO_DELIVER_PLATFORM"],
-             _VAR_MAP["HERMES_CRON_AUTO_DELIVER_PLATFORM"].set(platform))
+            (_VAR_MAP["KORRA_CRON_AUTO_DELIVER_PLATFORM"],
+             _VAR_MAP["KORRA_CRON_AUTO_DELIVER_PLATFORM"].set(platform))
         )
         extra.append(
-            (_VAR_MAP["HERMES_CRON_AUTO_DELIVER_CHAT_ID"],
-             _VAR_MAP["HERMES_CRON_AUTO_DELIVER_CHAT_ID"].set(str(chat_id)))
+            (_VAR_MAP["KORRA_CRON_AUTO_DELIVER_CHAT_ID"],
+             _VAR_MAP["KORRA_CRON_AUTO_DELIVER_CHAT_ID"].set(str(chat_id)))
         )
         if thread_id is not None:
             extra.append(
-                (_VAR_MAP["HERMES_CRON_AUTO_DELIVER_THREAD_ID"],
-                 _VAR_MAP["HERMES_CRON_AUTO_DELIVER_THREAD_ID"].set(str(thread_id)))
+                (_VAR_MAP["KORRA_CRON_AUTO_DELIVER_THREAD_ID"],
+                 _VAR_MAP["KORRA_CRON_AUTO_DELIVER_THREAD_ID"].set(str(thread_id)))
             )
     return tokens, extra
 

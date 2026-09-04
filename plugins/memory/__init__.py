@@ -97,7 +97,7 @@ def _get_project_plugins_dir() -> Optional[Path]:
     try:
         from hermes_cli.plugins import _env_enabled
 
-        if not _env_enabled("HERMES_ENABLE_PROJECT_PLUGINS"):
+        if not _env_enabled("KORRA_ENABLE_PROJECT_PLUGINS"):
             return None
         d = Path.cwd() / ".hermes" / "plugins"
         return d if d.is_dir() else None

@@ -115,7 +115,7 @@ def _check_kanban_mode() -> bool:
     """
     if _is_delegated_child_context():
         return False
-    if korra_env("HERMES_KANBAN_TASK") and _is_dispatcher_owned_worker():
+    if korra_env("KORRA_KANBAN_TASK") and _is_dispatcher_owned_worker():
         return True
     return _profile_has_kanban_toolset()
 
@@ -131,7 +131,7 @@ def _check_kanban_orchestrator_mode() -> bool:
     """
     if _is_delegated_child_context():
         return False
-    if korra_env("HERMES_KANBAN_TASK") and _is_dispatcher_owned_worker():
+    if korra_env("KORRA_KANBAN_TASK") and _is_dispatcher_owned_worker():
         return False
     return _profile_has_kanban_toolset()
 
@@ -150,15 +150,15 @@ def _default_task_id(arg: Optional[str]) -> Optional[str]:
         # A cron job fired in-process from a worker must never inherit the
         # worker's task id as an implicit default.
         return None
-    env_tid = korra_env("HERMES_KANBAN_TASK")
+    env_tid = korra_env("KORRA_KANBAN_TASK")
     return env_tid or None
 
 
 def _worker_run_id(task_id: str) -> Optional[int]:
     """Return this worker's dispatcher run id when it is scoped to task_id."""
-    if korra_env("HERMES_KANBAN_TASK") != task_id:
+    if korra_env("KORRA_KANBAN_TASK") != task_id:
         return None
-    raw = korra_env("HERMES_KANBAN_RUN_ID")
+    raw = korra_env("KORRA_KANBAN_RUN_ID")
     if not raw:
         return None
     try:
@@ -171,9 +171,9 @@ def _stamp_worker_session_metadata(
     task_id: str, metadata: Optional[dict]
 ) -> Optional[dict]:
     """Add trusted worker session id metadata for this worker's own task."""
-    if korra_env("HERMES_KANBAN_TASK") != task_id:
+    if korra_env("KORRA_KANBAN_TASK") != task_id:
         return metadata
-    session_id = korra_env("HERMES_SESSION_ID")
+    session_id = korra_env("KORRA_SESSION_ID")
     if not session_id:
         return metadata
     stamped = dict(metadata or {})
@@ -200,7 +200,7 @@ def _enforce_worker_task_ownership(tid: str) -> Optional[str]:
     when it must be rejected. Callers should ``return`` the error
     verbatim.
     """
-    env_tid = korra_env("HERMES_KANBAN_TASK")
+    env_tid = korra_env("KORRA_KANBAN_TASK")
     if not env_tid:
         # Orchestrator or CLI context — no task-scope restriction.
         return None
@@ -321,7 +321,7 @@ def heartbeat_current_worker_from_env() -> bool:
     the worst case is one extra DB write per race, which is harmless.
     """
     global _auto_heartbeat_last_attempt
-    tid = korra_env("HERMES_KANBAN_TASK")
+    tid = korra_env("KORRA_KANBAN_TASK")
     if not tid:
         return False
     import time as _time
@@ -332,12 +332,12 @@ def heartbeat_current_worker_from_env() -> bool:
     try:
         kb, conn = _connect()
         try:
-            claim_lock = korra_env("HERMES_KANBAN_CLAIM_LOCK")
+            claim_lock = korra_env("KORRA_KANBAN_CLAIM_LOCK")
             try:
                 kb.heartbeat_claim(conn, tid, claimer=claim_lock)
             except Exception:
                 logger.debug("auto-heartbeat: heartbeat_claim failed", exc_info=True)
-            run_id_raw = korra_env("HERMES_KANBAN_RUN_ID")
+            run_id_raw = korra_env("KORRA_KANBAN_RUN_ID")
             run_id: Optional[int]
             try:
                 run_id = int(run_id_raw) if run_id_raw else None
@@ -382,7 +382,7 @@ def inject_new_comments_from_env(agent: Any) -> bool:
     the run started are injected. The worker's own authored comments (matched
     by ``HERMES_PROFILE``) are skipped to avoid echoing itself.
     """
-    tid = korra_env("HERMES_KANBAN_TASK")
+    tid = korra_env("KORRA_KANBAN_TASK")
     if not tid or agent is None or not hasattr(agent, "steer"):
         return False
     global _comment_poll_last_attempt
@@ -417,7 +417,7 @@ def inject_new_comments_from_env(agent: Any) -> bool:
     # notes) so nothing is re-injected next poll.
     _comment_watermark[tid] = max(c.id for c in rows)
 
-    own = (korra_env("HERMES_PROFILE") or "").strip()
+    own = (korra_env("KORRA_PROFILE") or "").strip()
     fresh = [c for c in rows if (c.author or "").strip() != own and (c.body or "").strip()]
     if not fresh:
         return False
@@ -474,7 +474,7 @@ def _require_orchestrator_tool(tool_name: str) -> Optional[str]:
     structured tool_error so the model gets a clear refusal instead of
     silently mutating board state from a worker context.
     """
-    if korra_env("HERMES_KANBAN_TASK"):
+    if korra_env("KORRA_KANBAN_TASK"):
         return tool_error(
             f"{tool_name} is orchestrator-only; dispatcher-spawned workers "
             "must use kanban_complete, kanban_block, kanban_heartbeat, or "
@@ -1053,7 +1053,7 @@ def _handle_heartbeat(args: dict, **kw) -> str:
             # (see _default_spawn in kanban_db.py); falling back to the
             # default _claimer_id() covers locally-driven workers that
             # never went through the dispatcher path.
-            claim_lock = korra_env("HERMES_KANBAN_CLAIM_LOCK")
+            claim_lock = korra_env("KORRA_KANBAN_CLAIM_LOCK")
             kb.heartbeat_claim(conn, tid, claimer=claim_lock)
 
             ok = kb.heartbeat_worker(
@@ -1100,7 +1100,7 @@ def _handle_comment(args: dict, **kw) -> str:
     # the future-worker context with what reads as a system directive.
     # Cross-task commenting itself remains unrestricted (see #19713) —
     # comments are the deliberate handoff channel between tasks.
-    author = korra_env("HERMES_PROFILE") or "worker"
+    author = korra_env("KORRA_PROFILE") or "worker"
     board = args.get("board")
     try:
         kb, conn = _connect(board=board)
@@ -1361,7 +1361,7 @@ def _handle_create(args: dict, **kw) -> str:
         )
     body = args.get("body")
     parents = args.get("parents") or []
-    tenant = args.get("tenant") or korra_env("HERMES_TENANT")
+    tenant = args.get("tenant") or korra_env("KORRA_TENANT")
     # Stamp the originating session id when the agent loop runs under
     # ACP (which sets HERMES_SESSION_ID before invoking tools). NULL on
     # CLI / dashboard paths and on legacy hosts that don't set the env.
@@ -1374,7 +1374,7 @@ def _handle_create(args: dict, **kw) -> str:
     session_id = (
         args.get("session_id")
         or _current_origin_session_id()
-        or korra_env("HERMES_SESSION_ID")
+        or korra_env("KORRA_SESSION_ID")
     )
     priority = args.get("priority")
     # Resolve workspace. Workspace sharing is always explicit: omitted fields
@@ -1428,7 +1428,7 @@ def _handle_create(args: dict, **kw) -> str:
             # it into a fresh per-task worktree. Never inherit the parent's
             # literal workspace kind/path; directory sharing must be explicit.
             if _inherit_project and project_id is None:
-                _self_tid = korra_env("HERMES_KANBAN_TASK")
+                _self_tid = korra_env("KORRA_KANBAN_TASK")
                 if _self_tid:
                     _self_task = kb.get_task(conn, _self_tid)
                     if _self_task is not None and _self_task.project_id:
@@ -1460,7 +1460,7 @@ def _handle_create(args: dict, **kw) -> str:
                     int(goal_max_turns) if goal_max_turns is not None else None
                 ),
                 initial_status=str(initial_status),
-                created_by=korra_env("HERMES_PROFILE") or "worker",
+                created_by=korra_env("KORRA_PROFILE") or "worker",
                 session_id=session_id,
             )
             new_task = kb.get_task(conn, new_tid)
@@ -1533,8 +1533,8 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
     chat_id = ""
     try:
         from gateway.session_context import get_session_env
-        platform = get_session_env("HERMES_SESSION_PLATFORM", "")
-        chat_id = get_session_env("HERMES_SESSION_CHAT_ID", "")
+        platform = get_session_env("KORRA_SESSION_PLATFORM", "")
+        chat_id = get_session_env("KORRA_SESSION_CHAT_ID", "")
         if not platform or not chat_id:
             # TUI / desktop fallback: platform/chat_id ContextVars are
             # cleared for TUI sessions, but the parent process exports
@@ -1550,23 +1550,23 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
             # behaviour that got #19718 reverted upstream. The TUI
             # poller keys on HERMES_SESSION_KEY.
             session_key = (
-                get_session_env("HERMES_SESSION_KEY", "")
-                or korra_env("HERMES_SESSION_KEY", "")
+                get_session_env("KORRA_SESSION_KEY", "")
+                or korra_env("KORRA_SESSION_KEY", "")
             )
             if not session_key:
                 return False  # CLI / cron / test — no persistent channel
             platform = "tui"
             chat_id = session_key
         is_gateway_session = platform != "tui"
-        chat_type = get_session_env("HERMES_SESSION_CHAT_TYPE", "") or None
+        chat_type = get_session_env("KORRA_SESSION_CHAT_TYPE", "") or None
         delivery_mode = "notify+wake" if is_gateway_session else None
-        thread_id = get_session_env("HERMES_SESSION_THREAD_ID", "") or None
-        user_id = get_session_env("HERMES_SESSION_USER_ID", "") or None
-        user_id_alt = get_session_env("HERMES_SESSION_USER_ID_ALT", "") or None
-        message_id = get_session_env("HERMES_SESSION_MESSAGE_ID", "") or ""
+        thread_id = get_session_env("KORRA_SESSION_THREAD_ID", "") or None
+        user_id = get_session_env("KORRA_SESSION_USER_ID", "") or None
+        user_id_alt = get_session_env("KORRA_SESSION_USER_ID_ALT", "") or None
+        message_id = get_session_env("KORRA_SESSION_MESSAGE_ID", "") or ""
         notifier_profile = (
-            get_session_env("HERMES_SESSION_PROFILE", "")
-            or korra_env("HERMES_PROFILE")
+            get_session_env("KORRA_SESSION_PROFILE", "")
+            or korra_env("KORRA_PROFILE")
         )
         if not notifier_profile:
             try:

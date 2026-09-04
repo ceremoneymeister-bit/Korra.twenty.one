@@ -193,7 +193,7 @@ class SimplexAdapter(BasePlatformAdapter):
         # Text message batching — concatenate rapid-fire messages into one
         # event before dispatching, mirroring Telegram's batching.
         self._text_batch_delay = float(
-            korra_env("HERMES_SIMPLEX_TEXT_BATCH_DELAY", "0.8")
+            korra_env("KORRA_SIMPLEX_TEXT_BATCH_DELAY", "0.8")
         )
         self._pending_text_batches: Dict[str, MessageEvent] = {}
         self._pending_text_batch_tasks: Dict[str, asyncio.Task] = {}

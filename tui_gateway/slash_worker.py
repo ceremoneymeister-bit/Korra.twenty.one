@@ -47,8 +47,8 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-_WATCHDOG_POLL_S = max(0.05, _env_float("HERMES_SLASH_WATCHDOG_POLL_S", 2.0))
-_ORPHAN_GRACE_S = max(0.0, _env_float("HERMES_SLASH_WATCHDOG_GRACE_S", 5.0))
+_WATCHDOG_POLL_S = max(0.05, _env_float("KORRA_SLASH_WATCHDOG_POLL_S", 2.0))
+_ORPHAN_GRACE_S = max(0.0, _env_float("KORRA_SLASH_WATCHDOG_GRACE_S", 5.0))
 _in_flight = threading.Event()  # set while a command is executing
 logger = logging.getLogger(__name__)
 
@@ -132,8 +132,8 @@ def main():
     p.add_argument("--model", default="")
     args = p.parse_args()
 
-    korra_env_set(os.environ, "HERMES_SESSION_KEY", args.session_key)
-    korra_env_set(os.environ, "HERMES_INTERACTIVE", "1")
+    korra_env_set(os.environ, "KORRA_SESSION_KEY", args.session_key)
+    korra_env_set(os.environ, "KORRA_INTERACTIVE", "1")
 
     # Start before the (hundreds-of-ms) HermesCLI build — that window is itself
     # an orphan risk if the gateway dies mid-spawn.

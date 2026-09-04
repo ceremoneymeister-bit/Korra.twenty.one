@@ -194,7 +194,7 @@ def _run_helper(
         # process-global environment.  hydrate_profile_secret_sources seeds
         # only global-safe values plus this profile's own .env.
         env = dict(source_env)
-    korra_env_set(env, "HERMES_SECRET_KEY", secret_key)
+    korra_env_set(env, "KORRA_SECRET_KEY", secret_key)
 
     try:
         proc = subprocess.Popen(  # noqa: S602 — command is the user's own config

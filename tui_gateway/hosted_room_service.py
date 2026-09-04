@@ -45,7 +45,7 @@ _HOSTED_ROOM_TERMINAL_GRACE_SECONDS = 30.0
 
 def _hosted_room_turn_timeout_seconds() -> float:
     try:
-        agent_timeout = float(korra_env("HERMES_AGENT_TIMEOUT", "1800"))
+        agent_timeout = float(korra_env("KORRA_AGENT_TIMEOUT", "1800"))
     except (TypeError, ValueError):
         agent_timeout = 1800.0
     if agent_timeout <= 0:

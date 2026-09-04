@@ -25,7 +25,7 @@ except ImportError:
 from pathlib import Path
 from typing import Callable
 
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env
 from tools.environments.base import _file_mtime_key
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ _sleep = time.sleep
 _monotonic = time.monotonic
 
 _SYNC_INTERVAL_SECONDS = 5.0
-_FORCE_SYNC_ENV = "HERMES_FORCE_FILE_SYNC"
+_FORCE_SYNC_ENV = "KORRA_FORCE_FILE_SYNC"
 
 # Transport callbacks provided by each backend
 UploadFn = Callable[[str, str], None]  # (host_path, remote_path) -> raises on failure
@@ -177,7 +177,7 @@ class FileSyncManager:
 
     def _sync_transaction(self, *, force: bool = False) -> None:
         """Execute one sync cycle while holding the per-manager lock."""
-        if not force and not os.environ.get(_FORCE_SYNC_ENV):
+        if not force and not korra_env(_FORCE_SYNC_ENV):
             now = _monotonic()
             if now - self._last_sync_time < self._sync_interval:
                 return

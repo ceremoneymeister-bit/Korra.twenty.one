@@ -164,7 +164,7 @@ def _extract_json_blob(raw: str) -> Optional[dict]:
 def _profile_author() -> str:
     """Mirror of ``hermes_cli.kanban._profile_author``."""
     return (
-        korra_env("HERMES_PROFILE")
+        korra_env("KORRA_PROFILE")
         or os.environ.get("USER")
         or "decomposer"
     )

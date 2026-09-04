@@ -16,7 +16,7 @@ This module provides:
 
 # Хелперы совместимости имён переменных окружения нужны уже на этапе
 # импорта модуля, поэтому импорт стоит выше остальных.
-from hermes_constants import korra_env, korra_env_present
+from hermes_constants import korra_env, korra_env_present, korra_env_aliases, korra_env_pop, korra_env_set
 
 import copy
 from decimal import Decimal, InvalidOperation
@@ -260,7 +260,10 @@ def _reject_denylisted_env_var(key: str) -> None:
     Centralised so both the regular and "secure" env writers share the
     same gate, and so the message is consistent for callers.
     """
-    if _env_var_policy_name(key) in _ENV_VAR_NAME_DENYLIST:
+    # Оба имени пары KORRA_*/HERMES_*: запрет по одному имени иначе
+    # обходится вторым.
+    policy_name = _env_var_policy_name(key)
+    if any(alias in _ENV_VAR_NAME_DENYLIST for alias in korra_env_aliases(policy_name)):
         raise ValueError(
             f"Environment variable {key!r} is on the writer denylist. "
             "Names that influence subprocess execution (LD_PRELOAD, "
@@ -405,7 +408,7 @@ _IGNORED_MANAGED_VALUES = frozenset({"brew", "homebrew"})
 
 def get_managed_system() -> Optional[str]:
     """Return the package manager owning this install, if any."""
-    raw = korra_env("HERMES_MANAGED", "").strip()
+    raw = korra_env("KORRA_MANAGED", "").strip()
     marker = None
     if raw:
         marker = raw.lower()
@@ -729,7 +732,7 @@ def get_container_exec_info() -> Optional[dict]:
     container.enable = true. It tells the host CLI to exec into the container
     instead of running locally.
     """
-    if korra_env("HERMES_DEV") == "1":
+    if korra_env("KORRA_DEV") == "1":
         return None
 
     from hermes_constants import is_container
@@ -800,8 +803,8 @@ def _resolve_hermes_uid_gid() -> tuple[Optional[int], Optional[int]]:
     """
     if sys.platform == "win32":
         return None, None
-    uid_str = korra_env("HERMES_UID", "").strip()
-    gid_str = korra_env("HERMES_GID", "").strip()
+    uid_str = korra_env("KORRA_UID", "").strip()
+    gid_str = korra_env("KORRA_GID", "").strip()
     try:
         uid = int(uid_str) if uid_str else None
     except ValueError:
@@ -863,7 +866,7 @@ def _secure_dir(path):
     if is_managed():
         return
     try:
-        mode_str = korra_env("HERMES_HOME_MODE", "").strip()
+        mode_str = korra_env("KORRA_HOME_MODE", "").strip()
         mode = int(mode_str, 8) if mode_str else 0o700
     except ValueError:
         mode = 0o700
@@ -883,7 +886,7 @@ def _is_container() -> bool:
     permissions.
     """
     # Explicit opt-out
-    if korra_env("HERMES_CONTAINER") or korra_env("HERMES_SKIP_CHMOD"):
+    if korra_env("KORRA_CONTAINER") or korra_env("KORRA_SKIP_CHMOD"):
         return True
     # Docker / Podman marker file
     if os.path.exists("/.dockerenv"):
@@ -4633,7 +4636,7 @@ def save_env_value(key: str, value: str):
             pass
         raise
 
-    os.environ[key] = value
+    korra_env_set(os.environ, key, value)
     invalidate_env_cache()
 
 
@@ -4680,7 +4683,7 @@ def remove_env_value(key: str) -> bool:
         raise ValueError(f"Invalid environment variable name: {key!r}")
     env_path = get_env_path()
     if not env_path.exists():
-        os.environ.pop(key, None)
+        korra_env_pop(os.environ, key)
         return False
 
     read_kw = {"encoding": "utf-8-sig", "errors": "replace"}
@@ -4690,7 +4693,14 @@ def remove_env_value(key: str) -> bool:
         lines = f.readlines()
     lines = _sanitize_env_lines(lines)
 
-    new_lines = [line for line in lines if not _env_line_defines_key(line, key)]
+    # Оба имени пары: строка под вторым именем иначе пережила бы удаление
+    # и вернулась бы в резолв следующим же чтением.
+    aliases = korra_env_aliases(key)
+    new_lines = [
+        line
+        for line in lines
+        if not any(_env_line_defines_key(line, alias) for alias in aliases)
+    ]
     found = len(new_lines) < len(lines)
 
     if found:
@@ -4724,7 +4734,7 @@ def remove_env_value(key: str) -> bool:
                 pass
             raise
 
-    os.environ.pop(key, None)
+    korra_env_pop(os.environ, key)
     invalidate_env_cache()
     return found
 
@@ -5000,7 +5010,7 @@ def show_config():
     # config.yaml (issue #17534). Read the .env FILE directly so we catch the
     # ghost even when the gateway bridge already overrode os.environ.
     try:
-        _env_ghost = load_env().get("HERMES_MAX_ITERATIONS")
+        _env_ghost = korra_env("KORRA_MAX_ITERATIONS", env=load_env())
         if _env_ghost is not None and str(_env_ghost).strip() != str(_cfg_max_turns).strip():
             print(color(
                 f"                ⚠ .env has stale HERMES_MAX_ITERATIONS={_env_ghost} "
@@ -5270,7 +5280,7 @@ def resolve_cron_model_drift_defaults(
     """
     env = os.environ if environ is None else environ
     provider = ""
-    model = _model_assignment_text(env.get("HERMES_MODEL", ""))
+    model = _model_assignment_text(korra_env("KORRA_MODEL", "", env=env))
     model_config = config.get("model") if isinstance(config, dict) else None
     if isinstance(model_config, str):
         configured_model = model_config.strip()

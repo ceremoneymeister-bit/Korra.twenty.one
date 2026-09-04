@@ -535,7 +535,7 @@ def _buzz_terminal_context_active() -> bool:
     try:
         from gateway.session_context import get_session_env
 
-        return get_session_env("HERMES_SESSION_PLATFORM", "").strip().lower() == "buzz"
+        return get_session_env("KORRA_SESSION_PLATFORM", "").strip().lower() == "buzz"
     except Exception:
         return False
 
@@ -638,13 +638,20 @@ def _plugin_terminal_env_strip_keys() -> frozenset:
 
 
 def _inject_context_hermes_home(env: dict) -> None:
-    """Bridge the context-local Hermes home override into subprocess env."""
+    """Bridge the context-local Hermes home override into subprocess env.
+
+    Дополнительно выравнивает пару имён: домашний каталог — единственная
+    точка резолва профиля, и разъехавшиеся ``KORRA_HOME``/``HERMES_HOME``
+    в окружении ребёнка означали бы, что профиль пишет память соседа.
+    """
     try:
         from hermes_constants import get_hermes_home_override
 
         value = get_hermes_home_override()
+        if not value:
+            value = korra_env("KORRA_HOME", env=env)
         if value:
-            korra_env_set(env, "HERMES_HOME", value)
+            korra_env_set(env, "KORRA_HOME", value)
     except Exception:
         pass
 
@@ -878,7 +885,7 @@ def hermes_subprocess_env(*, inherit_credentials: bool = False) -> dict[str, str
 
     # Tier 1 — always strip.
     for key in _ALWAYS_STRIP_KEYS:
-        env.pop(key, None)
+        korra_env_pop(env, key)
     for key in _plugin_terminal_env_strip_keys():
         env.pop(key, None)
     # Internal routing hints and Hermes-internal dynamic secrets
@@ -1003,7 +1010,7 @@ def _find_bash() -> str:
 
     candidates: list[str] = []
 
-    custom = korra_env("HERMES_GIT_BASH_PATH")
+    custom = korra_env("KORRA_GIT_BASH_PATH")
     if custom and os.path.isfile(custom):
         candidates.append(custom)
 

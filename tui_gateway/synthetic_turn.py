@@ -40,7 +40,7 @@ from hermes_constants import korra_env
 
 def synth_turn_armed() -> bool:
     """True when the synthetic-turn test seam is armed via env."""
-    return korra_env("HERMES_ISO_CERTIFY_SYNTH_TURN") == "1"
+    return korra_env("KORRA_ISO_CERTIFY_SYNTH_TURN") == "1"
 
 
 def _env_float(name: str, default: float) -> float:
@@ -122,17 +122,17 @@ class SyntheticHeavyAgent:
                     spec = {}
         return {
             # Primary control: wall-clock seconds of GIL-holding compute.
-            "duration_s": float(spec.get("duration_s", _env_float("HERMES_ISO_CERTIFY_DURATION_S", 8.0))),
+            "duration_s": float(spec.get("duration_s", _env_float("KORRA_ISO_CERTIFY_DURATION_S", 8.0))),
             # Pure-Python integer ops per interrupt-check chunk. Small enough
             # that an interrupt is honored within a few ms; large enough that
             # the loop stays hot on the GIL between checks.
-            "chunk": int(spec.get("chunk", _env_int("HERMES_ISO_CERTIFY_CHUNK", 20_000))),
+            "chunk": int(spec.get("chunk", _env_int("KORRA_ISO_CERTIFY_CHUNK", 20_000))),
             # Streamed-delta cadence (seconds). Each delta is a loop wakeup that
             # marshals a frame across the transport — the serving-path pressure.
-            "delta_interval_s": float(spec.get("delta_interval_s", _env_float("HERMES_ISO_CERTIFY_DELTA_S", 0.05))),
+            "delta_interval_s": float(spec.get("delta_interval_s", _env_float("KORRA_ISO_CERTIFY_DELTA_S", 0.05))),
             # Notional output tokens attributed per streamed delta (drives the
             # 100K+-token "heavy turn" proxy in usage/metadata).
-            "tokens_per_delta": int(spec.get("tokens_per_delta", _env_int("HERMES_ISO_CERTIFY_TPD", 512))),
+            "tokens_per_delta": int(spec.get("tokens_per_delta", _env_int("KORRA_ISO_CERTIFY_TPD", 512))),
             # Optional per-chunk sleep to model a lighter/mixed regime (0 = pure
             # burn). --dry-run uses a short duration, NOT a sleep, so the smoke
             # path still exercises the real dispatch seam.

@@ -336,7 +336,7 @@ def _resolve_owner(task_id: str) -> str:
         if is_delegated_child_context():
             from gateway.session_context import get_session_env
 
-            child_id = get_session_env("HERMES_SESSION_ID", "") or (task_id or "")
+            child_id = get_session_env("KORRA_SESSION_ID", "") or (task_id or "")
             owner = f"{owner}::child::{child_id}"
     except Exception:
         pass
@@ -585,14 +585,14 @@ def _spawn(kernel: SessionKernel, *, task_id: str, child_python: str,
         tmpdir=kernel.tmpdir,
         child_python=child_python,
     )
-    korra_env_set(child_env, "HERMES_KERNEL_SENTINEL", kernel.sentinel)
+    korra_env_set(child_env, "KORRA_KERNEL_SENTINEL", kernel.sentinel)
     # Cells clip stdout to the inline cap; the full text spills to the
     # kernel's own tmpdir so the agent can read_file the middle instead of
     # re-running (host surfaces the path in the result).
-    korra_env_set(child_env, "HERMES_KERNEL_SPILL_DIR", kernel.tmpdir)
+    korra_env_set(child_env, "KORRA_KERNEL_SPILL_DIR", kernel.tmpdir)
     # Tell the generated client to reconnect after the RPC server's idle
     # timeout — a kernel outlives the 300s window between cells.
-    korra_env_set(child_env, "HERMES_RPC_PERSISTENT", "1")
+    korra_env_set(child_env, "KORRA_RPC_PERSISTENT", "1")
 
     kernel.proc = subprocess.Popen(
         [child_python, runner_path],

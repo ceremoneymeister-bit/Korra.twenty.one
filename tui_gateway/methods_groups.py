@@ -102,7 +102,7 @@ _WORKER_UNAVAILABLE = (
 
 
 def _profile_name() -> str:
-    return (korra_env("HERMES_PROFILE") or "default").strip() or "default"
+    return (korra_env("KORRA_PROFILE") or "default").strip() or "default"
 
 
 def _requested_profile(params: dict) -> str:

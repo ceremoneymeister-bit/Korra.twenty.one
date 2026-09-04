@@ -61,6 +61,7 @@ from tools.computer_use.backend import (
     ComputerUseBackend,
     UIElement,
 )
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ def _action_result_from(
 # only have *looked* like it pinned. For a reproducible version, point
 # `HERMES_CUA_DRIVER_CMD` at a specific binary instead.
 
-_CUA_DRIVER_CMD_ENV = "HERMES_CUA_DRIVER_CMD"
+_CUA_DRIVER_CMD_ENV = "KORRA_CUA_DRIVER_CMD"
 _CUA_DRIVER_DEFAULT_CMD = "cua-driver"
 _CUA_DRIVER_ARGS = ["mcp"]  # stdio MCP transport (fallback when the
                             # driver doesn't expose `manifest` — see
@@ -1068,7 +1069,7 @@ def _candidate_cua_driver_commands(override: Optional[str] = None) -> List[str]:
     Hermes Desktop/TUI session can otherwise filter out the `computer_use`
     tool even though `hermes computer-use doctor` succeeds from a login shell.
     """
-    configured = (override if override is not None else os.environ.get(_CUA_DRIVER_CMD_ENV, "")).strip()
+    configured = (override if override is not None else korra_env(_CUA_DRIVER_CMD_ENV, "")).strip()
     if configured:
         # An explicit override is authoritative: if it is wrong, report the
         # driver missing instead of silently picking a different binary.
@@ -1346,7 +1347,7 @@ def _maybe_repair_runtime_contract(contract: Dict[str, Any]) -> Dict[str, Any]:
         return contract
     if _contract_repair_attempted:
         return contract
-    if os.environ.get(_CUA_DRIVER_CMD_ENV, "").strip():
+    if korra_env(_CUA_DRIVER_CMD_ENV, "").strip():
         return contract
     if not contract.get("binary"):
         return contract
@@ -2706,7 +2707,7 @@ class CuaDriverBackend(ComputerUseBackend):
             contract = _maybe_repair_runtime_contract(contract)
         if not contract.get("ready"):
             reason = contract.get("reason") or "runtime contract is incomplete"
-            if os.environ.get(_CUA_DRIVER_CMD_ENV, "").strip():
+            if korra_env(_CUA_DRIVER_CMD_ENV, "").strip():
                 repair = (
                     "Update the binary selected by HERMES_CUA_DRIVER_CMD or "
                     "remove that override."

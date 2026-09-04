@@ -44,7 +44,7 @@ from agent.secret_sources.base import (
     reset_source_environment,
     set_source_environment,
 )
-from hermes_constants import hermes_home_key
+from hermes_constants import hermes_home_key, korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -395,8 +395,8 @@ def _active_profile_name(home_path: Optional[Path]) -> str:
         resolved = Path(home_path)
         if resolved.parent.name == "profiles" and resolved.name:
             return resolved.name
-    for env_name in ("HERMES_PROFILE_NAME", "HERMES_PROFILE"):
-        value = os.environ.get(env_name, "").strip()
+    for env_name in ("KORRA_PROFILE_NAME", "KORRA_PROFILE"):
+        value = korra_env(env_name, "").strip()
         if value and value != "default":
             return value
     return ""

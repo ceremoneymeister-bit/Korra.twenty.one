@@ -771,9 +771,9 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 get_document_cache_dir as _get_doc_dir,
                 get_image_cache_dir as _get_img_dir,
             )
-            korra_env_set(bridge_env, "HERMES_IMAGE_CACHE_DIR", str(_get_img_dir()))
-            korra_env_set(bridge_env, "HERMES_AUDIO_CACHE_DIR", str(_get_audio_dir()))
-            korra_env_set(bridge_env, "HERMES_DOCUMENT_CACHE_DIR", str(_get_doc_dir()))
+            korra_env_set(bridge_env, "KORRA_IMAGE_CACHE_DIR", str(_get_img_dir()))
+            korra_env_set(bridge_env, "KORRA_AUDIO_CACHE_DIR", str(_get_audio_dir()))
+            korra_env_set(bridge_env, "KORRA_DOCUMENT_CACHE_DIR", str(_get_doc_dir()))
 
             self._bridge_process = subprocess.Popen(
                 [

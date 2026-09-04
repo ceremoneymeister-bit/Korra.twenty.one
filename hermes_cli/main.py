@@ -289,7 +289,7 @@ def _config_default_interface_early() -> str:
         return _EARLY_INTERFACE_CACHE[0]
     value = "cli"
     try:
-        home = korra_env("HERMES_HOME")
+        home = korra_env("KORRA_HOME")
         if home:
             cfg_path = os.path.join(home, "config.yaml")
         else:
@@ -332,7 +332,7 @@ def _wants_tui_early(argv: "list[str] | None" = None) -> bool:
         argv = sys.argv[1:]
     if "--cli" in argv:
         return False
-    if korra_env("HERMES_TUI") == "1" or "--tui" in argv:
+    if korra_env("KORRA_TUI") == "1" or "--tui" in argv:
         return True
     try:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
@@ -351,7 +351,7 @@ def _wants_tui_early(argv: "list[str] | None" = None) -> bool:
 # `entry.tsx`; this is just the earlier cousin. ``HERMES_TUI_NO_EARLY_DISABLE``
 # escapes the behaviour for diagnostics.
 def _suppress_mouse_residue_early() -> None:
-    if korra_env("HERMES_TUI_NO_EARLY_DISABLE") == "1":
+    if korra_env("KORRA_TUI_NO_EARLY_DISABLE") == "1":
         return
     if not _wants_tui_early():
         return
@@ -627,7 +627,7 @@ def _apply_profile_override() -> None:
     # still read active_profile — the user may have switched profiles via
     # `hermes profile use` and the gateway should honour that choice.
     # See issue #22502.
-    hermes_home_env = korra_env("HERMES_HOME", "")
+    hermes_home_env = korra_env("KORRA_HOME", "")
     if profile_name is None and hermes_home_env:
         if Path(hermes_home_env).parent.name == "profiles":
             return
@@ -669,17 +669,17 @@ def _apply_profile_override() -> None:
     # terminals set it too, and a false positive would silently break the
     # sticky active_profile for every interactive command.
     def _under_gateway_supervisor() -> bool:
-        if korra_env("HERMES_SUPERVISED_CHILD"):
+        if korra_env("KORRA_SUPERVISED_CHILD"):
             return True
-        if korra_env("HERMES_S6_SUPERVISED_CHILD"):
+        if korra_env("KORRA_S6_SUPERVISED_CHILD"):
             return True
         is_gateway_cmd = next(
             (a for a in argv if not a.startswith("-")), None
         ) == "gateway"
         if is_gateway_cmd and os.environ.get("INVOCATION_ID"):
             return True
-        return os.environ.get(
-            "HERMES_GATEWAY_EXTERNAL_SUPERVISOR", ""
+        return korra_env(
+            "KORRA_GATEWAY_EXTERNAL_SUPERVISOR", ""
         ).strip().lower() in {"1", "true", "yes", "on"}
 
     if profile_name is None and not _under_gateway_supervisor():
@@ -716,7 +716,7 @@ def _apply_profile_override() -> None:
                 file=sys.stderr,
             )
             return
-        korra_env_set(os.environ, "HERMES_HOME", hermes_home)
+        korra_env_set(os.environ, "KORRA_HOME", hermes_home)
         # Strip the flag from argv so argparse doesn't choke
         if consume > 0 and profile_index is not None:
             start = profile_index + 1  # +1 because argv is sys.argv[1:]
@@ -797,12 +797,12 @@ try:
             _early_cfg_raw = managed_scope.apply_managed_overlay(_early_cfg_raw)
         except Exception:
             pass
-        if not korra_env_present("HERMES_REDACT_SECRETS"):
+        if not korra_env_present("KORRA_REDACT_SECRETS"):
             _early_sec_cfg = _early_cfg_raw.get("security", {})
             if isinstance(_early_sec_cfg, dict):
                 _early_redact = _early_sec_cfg.get("redact_secrets")
                 if _early_redact is not None:
-                    korra_env_set(os.environ, "HERMES_REDACT_SECRETS", str(_early_redact).lower())
+                    korra_env_set(os.environ, "KORRA_REDACT_SECRETS", str(_early_redact).lower())
         _early_net_cfg = _early_cfg_raw.get("network", {})
         if isinstance(_early_net_cfg, dict) and _early_net_cfg.get("force_ipv4"):
             _FORCE_IPV4_EARLY = True
@@ -971,7 +971,7 @@ def _termux_bundled_skills_stamp_path() -> Path:
 def _termux_bundled_skills_sync_needed() -> bool:
     if not _is_termux_startup_environment():
         return True
-    if korra_env("HERMES_TERMUX_FORCE_SKILLS_SYNC") == "1":
+    if korra_env("KORRA_TERMUX_FORCE_SKILLS_SYNC") == "1":
         return True
     try:
         stamp = _termux_bundled_skills_stamp_path()
@@ -1011,7 +1011,7 @@ def _sync_bundled_skills_for_startup() -> bool:
 def _termux_should_prefetch_update_check() -> bool:
     if not _is_termux_startup_environment():
         return True
-    return korra_env("HERMES_TERMUX_PREFETCH_UPDATES") == "1"
+    return korra_env("KORRA_TERMUX_PREFETCH_UPDATES") == "1"
 
 
 def _relative_time(ts) -> str:
@@ -2398,7 +2398,7 @@ def _tui_need_rebuild(root: Path) -> bool:
     check still rebuilds immediately after source updates, dependency updates,
     or local edits. Set ``HERMES_TUI_FORCE_BUILD=1`` to force the old behaviour.
     """
-    force = (korra_env("HERMES_TUI_FORCE_BUILD") or "").strip().lower()
+    force = (korra_env("KORRA_TUI_FORCE_BUILD") or "").strip().lower()
     if force in {"1", "true", "yes", "on"}:
         return True
 
@@ -2432,7 +2432,7 @@ def _ensure_tui_node() -> None:
     """
     if shutil.which("node") and shutil.which("npm"):
         return
-    if korra_env("HERMES_SKIP_NODE_BOOTSTRAP"):
+    if korra_env("KORRA_SKIP_NODE_BOOTSTRAP"):
         return
 
     helper = PROJECT_ROOT / "scripts" / "lib" / "node-bootstrap.sh"
@@ -2452,7 +2452,7 @@ def _ensure_tui_node() -> None:
                 "-c",
                 f'source "{helper}" >&2 && ensure_node >&2 && command -v node',
             ],
-            env={**os.environ, **korra_env_expand({"HERMES_HOME": hermes_home})},
+            env={**os.environ, **korra_env_expand({"KORRA_HOME": hermes_home})},
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -2526,7 +2526,7 @@ def _ensure_tui_workspace(tui_dir: Path) -> None:
         return
 
     if _restore_tui_workspace(tui_dir):
-        if not korra_env("HERMES_QUIET"):
+        if not korra_env("KORRA_QUIET"):
             print(f"Restored missing TUI workspace: {tui_dir}")
         return
 
@@ -2559,7 +2559,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
 
     def _node_bin(bin: str) -> str:
         if bin == "node":
-            env_node = korra_env("HERMES_NODE")
+            env_node = korra_env("KORRA_NODE")
             if env_node and os.path.isfile(env_node) and os.access(env_node, os.X_OK):
                 return env_node
         # find_node_executable() prefers the managed $HERMES_HOME/node tree,
@@ -2582,7 +2582,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
         return path
 
     # Footgun: --dev against a prebuilt bundle that has no source/node_modules.
-    ext_dir = korra_env("HERMES_TUI_DIR")
+    ext_dir = korra_env("KORRA_TUI_DIR")
     if tui_dev and ext_dir:
         print(
             f"Error: --dev is incompatible with HERMES_TUI_DIR={ext_dir}\n"
@@ -2638,7 +2638,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
         and _tui_need_npm_install(tui_dir)
     ):
         npm = _node_bin("npm")
-        if not korra_env("HERMES_QUIET"):
+        if not korra_env("KORRA_QUIET"):
             print("Installing TUI dependencies…")
         npm_cwd = _workspace_root(tui_dir)
         # --workspace ui-tui avoids resolving apps/desktop (Electron + node-pty).
@@ -2877,24 +2877,24 @@ def _safe_tui_cwd(env: Optional[dict] = None) -> str:
 
 def _apply_tui_python_env(env: dict) -> None:
     """Seed/repair Python-related env vars shared by CLI and dashboard TUI launches."""
-    src_root = str(env.get("HERMES_PYTHON_SRC_ROOT") or "").strip()
+    src_root = str(korra_env("KORRA_PYTHON_SRC_ROOT", env=env) or "").strip()
     if not src_root or not Path(src_root).is_dir():
-        korra_env_set(env, "HERMES_PYTHON_SRC_ROOT", str(PROJECT_ROOT))
+        korra_env_set(env, "KORRA_PYTHON_SRC_ROOT", str(PROJECT_ROOT))
 
-    cwd = str(env.get("HERMES_CWD") or "").strip()
+    cwd = str(korra_env("KORRA_CWD", env=env) or "").strip()
     if not cwd or not Path(cwd).is_dir():
-        korra_env_set(env, "HERMES_CWD", _safe_tui_cwd(env))
+        korra_env_set(env, "KORRA_CWD", _safe_tui_cwd(env))
 
-    python = str(env.get("HERMES_PYTHON") or "").strip()
+    python = str(korra_env("KORRA_PYTHON", env=env) or "").strip()
     if os.path.dirname(python):
         python_path = Path(python)
         if not python_path.is_absolute():
-            python_path = Path(env["HERMES_CWD"]) / python_path
+            python_path = Path(korra_env("KORRA_CWD", "", env=env)) / python_path
         python_is_executable = python_path.is_file() and os.access(python_path, os.X_OK)
     else:
         python_is_executable = bool(shutil.which(python, path=env.get("PATH")))
     if not python_is_executable:
-        korra_env_set(env, "HERMES_PYTHON", sys.executable)
+        korra_env_set(env, "KORRA_PYTHON", sys.executable)
 
 
 def _launch_tui(
@@ -2932,7 +2932,7 @@ def _launch_tui(
         prefix="hermes-tui-active-session-", suffix=".json"
     )
     os.close(active_session_fd)
-    korra_env_set(env, "HERMES_TUI_ACTIVE_SESSION_FILE", active_session_file)
+    korra_env_set(env, "KORRA_TUI_ACTIVE_SESSION_FILE", active_session_file)
     env.setdefault("NODE_ENV", "development" if tui_dev else "production")
 
     wt_info = None
@@ -2968,20 +2968,20 @@ def _launch_tui(
             wt_info = None
         if not wt_info:
             sys.exit(1)
-        korra_env_set(env, "HERMES_CWD", wt_info["path"])
+        korra_env_set(env, "KORRA_CWD", wt_info["path"])
         env["TERMINAL_CWD"] = wt_info["path"]
 
     _apply_tui_python_env(env)
 
     if model:
-        korra_env_set(env, "HERMES_MODEL", model)
-        korra_env_set(env, "HERMES_INFERENCE_MODEL", model)
+        korra_env_set(env, "KORRA_MODEL", model)
+        korra_env_set(env, "KORRA_INFERENCE_MODEL", model)
     if provider:
-        korra_env_set(env, "HERMES_TUI_PROVIDER", provider)
-        korra_env_set(env, "HERMES_INFERENCE_PROVIDER", provider)
+        korra_env_set(env, "KORRA_TUI_PROVIDER", provider)
+        korra_env_set(env, "KORRA_INFERENCE_PROVIDER", provider)
     tui_toolsets = _normalize_tui_toolsets(toolsets)
     if tui_toolsets:
-        korra_env_set(env, "HERMES_TUI_TOOLSETS", ",".join(tui_toolsets))
+        korra_env_set(env, "KORRA_TUI_TOOLSETS", ",".join(tui_toolsets))
     if skills:
         if isinstance(skills, (list, tuple)):
             flattened = []
@@ -2990,27 +2990,27 @@ def _launch_tui(
                     part.strip() for part in str(item).split(",") if part.strip()
                 )
             if flattened:
-                korra_env_set(env, "HERMES_TUI_SKILLS", ",".join(flattened))
+                korra_env_set(env, "KORRA_TUI_SKILLS", ",".join(flattened))
         else:
             value = str(skills).strip()
             if value:
-                korra_env_set(env, "HERMES_TUI_SKILLS", value)
+                korra_env_set(env, "KORRA_TUI_SKILLS", value)
     if query:
-        korra_env_set(env, "HERMES_TUI_QUERY", query)
+        korra_env_set(env, "KORRA_TUI_QUERY", query)
     if image:
-        korra_env_set(env, "HERMES_TUI_IMAGE", image)
+        korra_env_set(env, "KORRA_TUI_IMAGE", image)
     if checkpoints:
-        korra_env_set(env, "HERMES_TUI_CHECKPOINTS", "1")
+        korra_env_set(env, "KORRA_TUI_CHECKPOINTS", "1")
     if pass_session_id:
-        korra_env_set(env, "HERMES_TUI_PASS_SESSION_ID", "1")
+        korra_env_set(env, "KORRA_TUI_PASS_SESSION_ID", "1")
     if max_turns is not None:
-        korra_env_set(env, "HERMES_TUI_MAX_TURNS", str(max_turns))
+        korra_env_set(env, "KORRA_TUI_MAX_TURNS", str(max_turns))
     if verbose:
-        korra_env_set(env, "HERMES_TUI_TOOL_PROGRESS", "verbose")
+        korra_env_set(env, "KORRA_TUI_TOOL_PROGRESS", "verbose")
     elif quiet:
-        korra_env_set(env, "HERMES_TUI_TOOL_PROGRESS", "off")
+        korra_env_set(env, "KORRA_TUI_TOOL_PROGRESS", "off")
     if accept_hooks:
-        korra_env_set(env, "HERMES_ACCEPT_HOOKS", "1")
+        korra_env_set(env, "KORRA_ACCEPT_HOOKS", "1")
     # Guarantee a generous V8 heap for the TUI. Default node cap is ~1.5–4GB
     # depending on version and can fatal-OOM on long sessions with large
     # transcripts / reasoning blobs. We target 8GB on an unconstrained host,
@@ -3037,9 +3037,9 @@ def _launch_tui(
     # found" with no live session.  Only forward a resume id that argparse
     # resolved for this invocation; direct `node ui-tui/dist/entry.js` users can
     # still set HERMES_TUI_RESUME themselves.
-    korra_env_pop(env, "HERMES_TUI_RESUME")
+    korra_env_pop(env, "KORRA_TUI_RESUME")
     if resume_session_id:
-        korra_env_set(env, "HERMES_TUI_RESUME", resume_session_id)
+        korra_env_set(env, "KORRA_TUI_RESUME", resume_session_id)
 
     argv, cwd = _make_tui_argv(tui_dir, tui_dev)
     code: Optional[int] = None
@@ -3088,12 +3088,12 @@ def _pin_kanban_board_env() -> None:
     calls hit board B (#20074). Pinning at chat boot mirrors what the
     dispatcher already does for spawned workers.
     """
-    if korra_env("HERMES_KANBAN_BOARD"):
+    if korra_env("KORRA_KANBAN_BOARD"):
         return
     try:
         from hermes_cli.kanban_db import get_current_board
 
-        korra_env_set(os.environ, "HERMES_KANBAN_BOARD", get_current_board())
+        korra_env_set(os.environ, "KORRA_KANBAN_BOARD", get_current_board())
     except Exception:
         pass
 
@@ -3150,7 +3150,7 @@ def _resolve_use_tui(args) -> bool:
             return False
     except Exception:
         return False
-    if korra_env("HERMES_TUI") == "1":
+    if korra_env("KORRA_TUI") == "1":
         return True
     try:
         from hermes_cli.config import load_config
@@ -3396,7 +3396,7 @@ def cmd_chat(args):
     # _YOLO_MODE_FROZEN.  This redundant set is a safety net for callers
     # that invoke cmd_chat directly (e.g. subcommand dispatch).
     if getattr(args, "yolo", False):
-        korra_env_set(os.environ, "HERMES_YOLO_MODE", "1")
+        korra_env_set(os.environ, "KORRA_YOLO_MODE", "1")
 
     # --ignore-user-config: make load_cli_config() / load_config() skip the
     # user's ~/.hermes/config.yaml and return built-in defaults. Set BEFORE
@@ -3404,17 +3404,17 @@ def cmd_chat(args):
     # import time). Credentials in .env are still loaded — this flag only
     # ignores behavioral/config settings.
     if getattr(args, "ignore_user_config", False):
-        korra_env_set(os.environ, "HERMES_IGNORE_USER_CONFIG", "1")
+        korra_env_set(os.environ, "KORRA_IGNORE_USER_CONFIG", "1")
 
     # --ignore-rules: skip auto-injection of AGENTS.md/SOUL.md/.cursorrules
     # (rules), memory entries, and any preloaded skills coming from user config.
     # Maps to AIAgent(skip_context_files=True, skip_memory=True).
     if getattr(args, "ignore_rules", False):
-        korra_env_set(os.environ, "HERMES_IGNORE_RULES", "1")
+        korra_env_set(os.environ, "KORRA_IGNORE_RULES", "1")
 
     # --source: tag session source for filtering (e.g. 'tool' for third-party integrations)
     if getattr(args, "source", None):
-        korra_env_set(os.environ, "HERMES_SESSION_SOURCE", args.source)
+        korra_env_set(os.environ, "KORRA_SESSION_SOURCE", args.source)
 
     _pin_kanban_board_env()
     _confirm_startup_expensive_model_override(args)
@@ -3859,7 +3859,7 @@ def select_provider_and_model(args=None):
         config_provider = model_cfg.get("provider")
 
     effective_provider = (
-        config_provider or korra_env("HERMES_INFERENCE_PROVIDER") or "auto"
+        config_provider or korra_env("KORRA_INFERENCE_PROVIDER") or "auto"
     )
     compatible_custom_providers = get_compatible_custom_providers(config)
     def _named_custom_provider_map(cfg) -> dict[str, dict[str, str]]:
@@ -8334,15 +8334,15 @@ def cmd_gui(args: argparse.Namespace):
     # with_hermes_node_path() copies os.environ when called with no arg.
     env = with_hermes_node_path()
     if getattr(args, "fake_boot", False):
-        korra_env_set(env, "HERMES_DESKTOP_BOOT_FAKE", "1")
+        korra_env_set(env, "KORRA_DESKTOP_BOOT_FAKE", "1")
     if getattr(args, "ignore_existing", False):
-        korra_env_set(env, "HERMES_DESKTOP_IGNORE_EXISTING", "1")
+        korra_env_set(env, "KORRA_DESKTOP_IGNORE_EXISTING", "1")
     if getattr(args, "hermes_root", None):
-        korra_env_set(env, "HERMES_DESKTOP_HERMES_ROOT", str(Path(args.hermes_root).expanduser().resolve()))
+        korra_env_set(env, "KORRA_DESKTOP_HERMES_ROOT", str(Path(args.hermes_root).expanduser().resolve()))
     if getattr(args, "cwd", None):
-        korra_env_set(env, "HERMES_DESKTOP_CWD", str(Path(args.cwd).expanduser().resolve()))
+        korra_env_set(env, "KORRA_DESKTOP_CWD", str(Path(args.cwd).expanduser().resolve()))
     else:
-        korra_env_set(env, "HERMES_DESKTOP_CWD", os.getcwd())
+        korra_env_set(env, "KORRA_DESKTOP_CWD", os.getcwd())
 
     # Desktop launch options from config.yaml (`desktop.electron_flags`,
     # `desktop.disable_gpu`, `desktop.ozone_platform_hint`). The GPU policy
@@ -8353,8 +8353,8 @@ def cmd_gui(args: argparse.Namespace):
     config_electron_flags, config_disable_gpu, config_password_store, config_ozone_hint = (
         _desktop_launch_options()
     )
-    if config_disable_gpu != "auto" and not korra_env_present("HERMES_DESKTOP_DISABLE_GPU"):
-        korra_env_set(env, "HERMES_DESKTOP_DISABLE_GPU", config_disable_gpu)
+    if config_disable_gpu != "auto" and not korra_env_present("KORRA_DESKTOP_DISABLE_GPU"):
+        korra_env_set(env, "KORRA_DESKTOP_DISABLE_GPU", config_disable_gpu)
     if config_ozone_hint != "auto" and "ELECTRON_OZONE_PLATFORM_HINT" not in os.environ:
         env["ELECTRON_OZONE_PLATFORM_HINT"] = config_ozone_hint
 
@@ -8364,14 +8364,14 @@ def cmd_gui(args: argparse.Namespace):
     # desktop app refuses to persist remote gateway tokens. Config wins over
     # detection; an explicit env var wins over both so
     # `HERMES_DESKTOP_PASSWORD_STORE=... hermes desktop` keeps working.
-    if sys.platform == "linux" and not korra_env_present("HERMES_DESKTOP_PASSWORD_STORE"):
+    if sys.platform == "linux" and not korra_env_present("KORRA_DESKTOP_PASSWORD_STORE"):
         password_store = (
             config_password_store
             if config_password_store != "auto"
             else _detect_linux_password_store()
         )
         if password_store:
-            korra_env_set(env, "HERMES_DESKTOP_PASSWORD_STORE", password_store)
+            korra_env_set(env, "KORRA_DESKTOP_PASSWORD_STORE", password_store)
 
     source_mode = getattr(args, "source", False)
     skip_build = getattr(args, "skip_build", False)
@@ -9333,7 +9333,7 @@ def _windows_running_hermes_launcher_locked() -> bool:
 
 
 # Set on the re-exec'd child so it can never spawn another one.
-_UPDATE_REEXEC_ENV = "HERMES_UPDATE_REEXEC"
+_UPDATE_REEXEC_ENV = "KORRA_UPDATE_REEXEC"
 
 
 def _reexec_dependency_sync_off_windows_shim() -> bool:
@@ -9378,7 +9378,7 @@ def _reexec_dependency_sync_off_windows_shim() -> bool:
     python, spawn refused) returns False and syncs in-process, where the
     pre-existing os-error-32 path and its marker recovery still apply.
     """
-    if os.environ.get(_UPDATE_REEXEC_ENV) == "1":
+    if korra_env(_UPDATE_REEXEC_ENV) == "1":
         return False
     shim = _windows_shim_in_process_chain()
     if shim is None:
@@ -10928,7 +10928,7 @@ def cmd_update(args):
         # — the same treatment #79040's cron workaround applies. No-op on
         # every non-hand-off invocation: the marker env is set solely by
         # _reexec_dependency_sync_off_windows_shim when it spawns the child.
-        if _update_handoff_exit_code is not None and os.environ.get(_UPDATE_REEXEC_ENV) == "1":
+        if _update_handoff_exit_code is not None and korra_env(_UPDATE_REEXEC_ENV) == "1":
             logger.debug(
                 "Update hand-off child %s exiting via os._exit(%s)",
                 os.getpid(), _update_handoff_exit_code,
@@ -12042,12 +12042,12 @@ def cmd_dashboard(args):
     # HERMES_WEB_DIST overrides (dev / custom builds) must still work.
     # The desktop-spawned backend itself (HERMES_DESKTOP=1) keeps its dist.
     # Intentionally headless `serve` re-sets HERMES_SERVE_HEADLESS below.
-    if korra_env("HERMES_DESKTOP") != "1":
-        _inherited_web_dist = korra_env("HERMES_WEB_DIST", "")
+    if korra_env("KORRA_DESKTOP") != "1":
+        _inherited_web_dist = korra_env("KORRA_WEB_DIST", "")
         if _is_electron_packaged_web_dist(_inherited_web_dist):
-            korra_env_pop(os.environ, "HERMES_WEB_DIST")
+            korra_env_pop(os.environ, "KORRA_WEB_DIST")
     if not _headless_backend:
-        korra_env_pop(os.environ, "HERMES_SERVE_HEADLESS")
+        korra_env_pop(os.environ, "KORRA_SERVE_HEADLESS")
 
     # ── Unified profile launch routing ────────────────────────────────
     # The dashboard is a MACHINE management surface: it can read/write any
@@ -12073,7 +12073,7 @@ def cmd_dashboard(args):
         and not getattr(args, "isolated", False)
         and not getattr(args, "open_profile", "")
         # Desktop pool backends are intentionally per-profile.
-        and korra_env("HERMES_DESKTOP") != "1"
+        and korra_env("KORRA_DESKTOP") != "1"
     ):
         url = f"http://{args.host or '127.0.0.1'}:{args.port}/?profile={_launch_profile}"
         if _dashboard_listening(args.host, args.port):
@@ -12128,11 +12128,11 @@ def cmd_dashboard(args):
         # See the support report for the double-mount workaround this avoids.
         try:
             from hermes_constants import get_default_hermes_root
-            korra_env_set(env, "HERMES_HOME", str(get_default_hermes_root()))
+            korra_env_set(env, "KORRA_HOME", str(get_default_hermes_root()))
         except Exception:
             # Best-effort: if root resolution fails, fall back to the prior
             # behaviour (drop HERMES_HOME) rather than block the reroute.
-            korra_env_pop(env, "HERMES_HOME")
+            korra_env_pop(env, "KORRA_HOME")
         # On Windows, os.execvpe() does not truly replace the process — it
         # spawns via CreateProcess then the parent exits.  Under Python 3.14+
         # this can crash with STATUS_ACCESS_VIOLATION (0xC0000005) when
@@ -12204,8 +12204,8 @@ def cmd_dashboard(args):
     if _headless_backend:
         # Don't build the SPA, and tell mount_spa() (read at web_server import
         # below) to disable it even if a stray dist exists. Set it first.
-        korra_env_set(os.environ, "HERMES_SERVE_HEADLESS", "1")
-    elif not korra_env_present("HERMES_WEB_DIST") and not getattr(args, "skip_build", False):
+        korra_env_set(os.environ, "KORRA_SERVE_HEADLESS", "1")
+    elif not korra_env_present("KORRA_WEB_DIST") and not getattr(args, "skip_build", False):
         if not _build_web_ui(PROJECT_ROOT / "web", fatal=True):
             sys.exit(1)
     elif getattr(args, "skip_build", False):
@@ -12213,8 +12213,8 @@ def cmd_dashboard(args):
         # Verify the dist actually exists; otherwise the server will start
         # and serve 404s with no obvious cause (issue #23817).
         _dist_root = (
-            Path(os.environ["HERMES_WEB_DIST"])
-            if korra_env_present("HERMES_WEB_DIST")
+            Path(korra_env("KORRA_WEB_DIST"))
+            if korra_env_present("KORRA_WEB_DIST")
             else PROJECT_ROOT / "hermes_cli" / "web_dist"
         )
         if not (_dist_root / "index.html").exists():
@@ -12224,7 +12224,7 @@ def cmd_dashboard(args):
             # ONE recovery build through the normal build path. Only the
             # default dist location is recoverable: a custom HERMES_WEB_DIST
             # points at a caller-managed directory the build cannot populate.
-            _recoverable = not korra_env_present("HERMES_WEB_DIST")
+            _recoverable = not korra_env_present("KORRA_WEB_DIST")
             if _recoverable:
                 print(f"⚠ --skip-build was passed but no web dist found at: {_dist_root}")
                 print("  Attempting one recovery build of the web UI...")
@@ -12244,7 +12244,7 @@ def cmd_dashboard(args):
         # same way the --skip-build branch does — otherwise the server starts
         # and serves 404s with no obvious cause (same failure mode as #23817,
         # via the env-var path).
-        _dist_root = Path(os.environ["HERMES_WEB_DIST"]).expanduser()
+        _dist_root = Path(korra_env("KORRA_WEB_DIST", "")).expanduser()
         if not (_dist_root / "index.html").exists():
             print(f"✗ HERMES_WEB_DIST is set but no web dist found at: {_dist_root}")
             print("  Pre-build first:  npm install --workspace web && npm run build -w web")
@@ -12253,7 +12253,7 @@ def cmd_dashboard(args):
         # Write the expanded path back: web_server reads HERMES_WEB_DIST raw
         # at import (no expanduser), so a validated "~/dist" would otherwise
         # pass here and still 404 there.
-        korra_env_set(os.environ, "HERMES_WEB_DIST", str(_dist_root))
+        korra_env_set(os.environ, "KORRA_WEB_DIST", str(_dist_root))
         print(f"→ Using web dist from HERMES_WEB_DIST: {_dist_root}")
 
     # Discover and load plugins so any DashboardAuthProvider plugin
@@ -12526,7 +12526,7 @@ _AGENT_SUBCOMMANDS = {
 
 
 def _is_tui_chat_launch(args) -> bool:
-    return bool(getattr(args, "tui", False) or korra_env("HERMES_TUI") == "1")
+    return bool(getattr(args, "tui", False) or korra_env("KORRA_TUI") == "1")
 
 
 def _command_has_dedicated_mcp_startup(args) -> bool:
@@ -12555,7 +12555,7 @@ def _prepare_agent_startup(args) -> None:
     # so the guarantee lives here where the import is actually triggered
     # (#60328).
     if getattr(args, "yolo", False):
-        korra_env_set(os.environ, "HERMES_YOLO_MODE", "1")
+        korra_env_set(os.environ, "KORRA_YOLO_MODE", "1")
     _apply_safe_mode(args)
 
     _sub_attr, _sub_set = _AGENT_SUBCOMMANDS.get(args.command, (None, None))
@@ -12643,9 +12643,9 @@ def _prepare_agent_startup(args) -> None:
 def _apply_safe_mode(args) -> None:
     if not getattr(args, "safe_mode", False):
         return
-    korra_env_set(os.environ, "HERMES_SAFE_MODE", "1")
-    korra_env_set(os.environ, "HERMES_IGNORE_USER_CONFIG", "1")
-    korra_env_set(os.environ, "HERMES_IGNORE_RULES", "1")
+    korra_env_set(os.environ, "KORRA_SAFE_MODE", "1")
+    korra_env_set(os.environ, "KORRA_IGNORE_USER_CONFIG", "1")
+    korra_env_set(os.environ, "KORRA_IGNORE_RULES", "1")
 
 
 def _set_chat_arg_defaults(args) -> None:
@@ -12678,7 +12678,7 @@ def _try_fast_chat_launch() -> bool:
     ``_try_termux_fast_cli_launch`` minus the Termux-specific deferred
     startup; kept separate so phone-tuned behavior doesn't leak to desktops.
     """
-    if korra_env("HERMES_DISABLE_FAST_CHAT_LAUNCH") == "1":
+    if korra_env("KORRA_DISABLE_FAST_CHAT_LAUNCH") == "1":
         return False
     argv = sys.argv[1:]
     if "-h" in argv or "--help" in argv:
@@ -12716,7 +12716,7 @@ def _try_fast_chat_launch() -> bool:
         return False
 
     if getattr(args, "yolo", False):
-        korra_env_set(os.environ, "HERMES_YOLO_MODE", "1")
+        korra_env_set(os.environ, "KORRA_YOLO_MODE", "1")
     _prepare_agent_startup(args)
 
     if getattr(args, "oneshot", None):
@@ -12742,7 +12742,7 @@ def _try_termux_fast_cli_launch() -> bool:
     """Run obvious Termux non-TUI chat/oneshot/version paths on a light parser."""
     if not _is_termux_startup_environment():
         return False
-    if korra_env("HERMES_TERMUX_DISABLE_FAST_CLI") == "1":
+    if korra_env("KORRA_TERMUX_DISABLE_FAST_CLI") == "1":
         return False
 
     argv = sys.argv[1:]
@@ -12798,10 +12798,10 @@ def _try_termux_fast_cli_launch() -> bool:
             # Bare Termux CLI should reach the prompt first and do agent-only
             # discovery on the first submitted turn instead of before input.
             setattr(args, "compact", True)
-            korra_env_set(os.environ, "HERMES_DEFER_AGENT_STARTUP", "1")
-            korra_env_set(os.environ, "HERMES_FAST_STARTUP_BANNER", "1")
+            korra_env_set(os.environ, "KORRA_DEFER_AGENT_STARTUP", "1")
+            korra_env_set(os.environ, "KORRA_FAST_STARTUP_BANNER", "1")
             if getattr(args, "accept_hooks", False):
-                korra_env_set(os.environ, "HERMES_ACCEPT_HOOKS", "1")
+                korra_env_set(os.environ, "KORRA_ACCEPT_HOOKS", "1")
         else:
             _prepare_agent_startup(args)
         cmd_chat(args)
@@ -13147,7 +13147,7 @@ def _advertise_agent_env() -> None:
     terminal).
     """
     os.environ.setdefault("AI_AGENT", "hermes-agent")
-    korra_env_setdefault(os.environ, "HERMES_AGENT", "true")
+    korra_env_setdefault(os.environ, "KORRA_AGENT", "true")
 
 
 def main():
@@ -13982,7 +13982,7 @@ def main():
             # Must match the runtime resolver: Desktop/TUI processes can omit
             # ~/.local/bin even though the official installer put the driver there.
             path = resolve_cua_driver_cmd()
-            override = _os.environ.get("HERMES_CUA_DRIVER_CMD", "").strip()
+            override = korra_env("KORRA_CUA_DRIVER_CMD", "").strip()
             if path:
                 version = ""
                 try:
@@ -14763,7 +14763,7 @@ def main():
     # If the env var is set only later (e.g. inside cmd_chat), the frozen
     # value is already False and --yolo silently does nothing.
     if getattr(args, "yolo", False):
-        korra_env_set(os.environ, "HERMES_YOLO_MODE", "1")
+        korra_env_set(os.environ, "KORRA_YOLO_MODE", "1")
 
     # Discover Python plugins and register shell hooks once, before any
     # command that can fire lifecycle hooks.  Both are idempotent; gated

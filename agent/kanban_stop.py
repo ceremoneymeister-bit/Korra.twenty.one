@@ -29,10 +29,10 @@ def kanban_stop_nudge_enabled() -> bool:
     On when ``HERMES_KANBAN_TASK`` is set (dispatcher-spawned worker), unless
     ``HERMES_KANBAN_STOP_NUDGE`` explicitly disables it.
     """
-    env = korra_env("HERMES_KANBAN_STOP_NUDGE")
+    env = korra_env("KORRA_KANBAN_STOP_NUDGE")
     if env is not None and env.strip().lower() in {"0", "false", "no", "off"}:
         return False
-    task = (korra_env("HERMES_KANBAN_TASK") or "").strip()
+    task = (korra_env("KORRA_KANBAN_TASK") or "").strip()
     return bool(task)
 
 
@@ -86,7 +86,7 @@ def build_kanban_stop_nudge(
     if session_called_kanban_terminal(messages):
         return None
 
-    tid = (task_id or korra_env("HERMES_KANBAN_TASK") or "").strip() or "this task"
+    tid = (task_id or korra_env("KORRA_KANBAN_TASK") or "").strip() or "this task"
     return (
         "[System: You are a Korra kanban worker. A plain-text reply is NOT a "
         "terminal state for the board.\n\n"

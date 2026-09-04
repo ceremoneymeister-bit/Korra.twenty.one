@@ -923,7 +923,7 @@ def _inflight_min_allowance_minutes() -> float:
                 return val
     except Exception:
         pass
-    raw = korra_env("HERMES_CRON_INFLIGHT_MAX_MINUTES", "").strip()
+    raw = korra_env("KORRA_CRON_INFLIGHT_MAX_MINUTES", "").strip()
     if raw:
         try:
             val = float(raw)
@@ -1413,7 +1413,7 @@ def _cron_inactivity_seconds() -> float:
     the two sites cannot drift apart — the lock bound must stay at or above
     the inactivity limit or waiters would fail while a healthy holder runs.
     """
-    raw = korra_env("HERMES_CRON_TIMEOUT", "").strip()
+    raw = korra_env("KORRA_CRON_TIMEOUT", "").strip()
     if not raw:
         return 600.0
     try:
@@ -2664,7 +2664,7 @@ def _deliver_to_bot_chat(job: dict, content: str, profile: str) -> Optional[str]
         argv += ["-p", profile]
         # -p owns profile resolution in the child; a leftover HERMES_HOME
         # from THIS scheduler's profile must not shadow it.
-        korra_env_pop(env, "HERMES_HOME")
+        korra_env_pop(env, "KORRA_HOME")
 
     # The prefix tells the receiving bot this is scheduled output, not the
     # human typing — mirrors the Bot Mode sender-attribution convention.
@@ -3936,7 +3936,7 @@ def _get_script_timeout() -> int:
         except Exception:
             logger.warning("Invalid patched _SCRIPT_TIMEOUT=%r; using env/config/default", _SCRIPT_TIMEOUT)
 
-    env_value = korra_env("HERMES_CRON_SCRIPT_TIMEOUT", "").strip()
+    env_value = korra_env("KORRA_CRON_SCRIPT_TIMEOUT", "").strip()
     if env_value:
         try:
             timeout = int(float(env_value))
@@ -3971,7 +3971,7 @@ def _get_media_send_timeout() -> int:
     (300s — large attachments like long TTS audio can legitimately exceed
     the old fixed 30s upload window).
     """
-    env_value = korra_env("HERMES_CRON_MEDIA_SEND_TIMEOUT", "").strip()
+    env_value = korra_env("KORRA_CRON_MEDIA_SEND_TIMEOUT", "").strip()
     if env_value:
         try:
             timeout = int(float(env_value))
@@ -4007,7 +4007,7 @@ def _get_session_db_timeout() -> float:
     10s. Unlike the sibling timeouts, 0 is meaningful (unlimited — legacy
     behavior, opt-in for debugging), so values are passed through untouched.
     """
-    env_value = korra_env("HERMES_CRON_SESSION_DB_TIMEOUT", "").strip()
+    env_value = korra_env("KORRA_CRON_SESSION_DB_TIMEOUT", "").strip()
     if env_value:
         try:
             return float(env_value)
@@ -5114,7 +5114,7 @@ def _preflight_check_provider_key(job: dict, cfg: dict) -> Optional[str]:
         or str((_cron_cfg or {}).get("model_provider") or "").strip()
         or None
     )
-    model = job.get("model") or korra_env("HERMES_MODEL") or ""
+    model = job.get("model") or korra_env("KORRA_MODEL") or ""
 
     from hermes_cli.auth import AuthError
 
@@ -5842,9 +5842,9 @@ def run_job(
         cwd=_job_workdir or "",
     )
     _cron_delivery_vars = (
-        "HERMES_CRON_AUTO_DELIVER_PLATFORM",
-        "HERMES_CRON_AUTO_DELIVER_CHAT_ID",
-        "HERMES_CRON_AUTO_DELIVER_THREAD_ID",
+        "KORRA_CRON_AUTO_DELIVER_PLATFORM",
+        "KORRA_CRON_AUTO_DELIVER_CHAT_ID",
+        "KORRA_CRON_AUTO_DELIVER_THREAD_ID",
     )
     for _var_name in _cron_delivery_vars:
         _VAR_MAP[_var_name].set("")
@@ -5862,7 +5862,7 @@ def run_job(
     from tools.terminal_tool import record_session_cwd as _record_tool_session_cwd
     if _job_workdir:
         _record_tool_session_cwd(_cron_task_id, _job_workdir)
-    _cron_session_var = _VAR_MAP["HERMES_CRON_SESSION"]
+    _cron_session_var = _VAR_MAP["KORRA_CRON_SESSION"]
     _cron_session_token = None
     _non_dispatcher_token = None
     _session_db = None
@@ -5917,9 +5917,9 @@ def run_job(
 
         delivery_target = _resolve_delivery_target(job)
         if delivery_target:
-            _VAR_MAP["HERMES_CRON_AUTO_DELIVER_PLATFORM"].set(delivery_target["platform"])
-            _VAR_MAP["HERMES_CRON_AUTO_DELIVER_CHAT_ID"].set(str(delivery_target["chat_id"]))
-            _VAR_MAP["HERMES_CRON_AUTO_DELIVER_THREAD_ID"].set(
+            _VAR_MAP["KORRA_CRON_AUTO_DELIVER_PLATFORM"].set(delivery_target["platform"])
+            _VAR_MAP["KORRA_CRON_AUTO_DELIVER_CHAT_ID"].set(str(delivery_target["chat_id"]))
+            _VAR_MAP["KORRA_CRON_AUTO_DELIVER_THREAD_ID"].set(
                 ""
                 if delivery_target.get("thread_id") is None
                 else str(delivery_target["thread_id"])
@@ -5931,7 +5931,7 @@ def run_job(
         # re-read from storage every tick so a ``hermes cron edit --model``
         # after a failed run takes effect on the next tick — there is no
         # in-memory cache.
-        model = job.get("model") or korra_env("HERMES_MODEL") or ""
+        model = job.get("model") or korra_env("KORRA_MODEL") or ""
 
         # cron.model / cron.model_provider: a deliberate cron-fleet default
         # so unattended jobs stop shadowing chat `/model` switches. When an
@@ -5989,7 +5989,7 @@ def run_job(
             raise RuntimeError(
                 f"Cron job '{job_name}' has no model configured "
                 f"(job.model={job.get('model')!r}, "
-                f"HERMES_MODEL={korra_env('HERMES_MODEL', '')!r}, "
+                f"HERMES_MODEL={korra_env('KORRA_MODEL', '')!r}, "
                 "config.yaml model.default missing or empty). "
                 f"Set a per-job model via "
                 f"`hermes cron edit {job_id} --model <name>` or set a "
@@ -6016,7 +6016,7 @@ def run_job(
         prefill_messages = None
         agent_cfg = _cfg.get("agent", {}) if isinstance(_cfg.get("agent", {}), dict) else {}
         prefill_file = (
-            korra_env("HERMES_PREFILL_MESSAGES_FILE", "")
+            korra_env("KORRA_PREFILL_MESSAGES_FILE", "")
             or _cfg.get("prefill_messages_file", "")
             or agent_cfg.get("prefill_messages_file", "")
         )
@@ -8027,7 +8027,7 @@ def tick(
         # Set HERMES_CRON_MAX_PARALLEL=1 to restore old serial behaviour.
         _max_workers: Optional[int] = None
         try:
-            _env_par = korra_env("HERMES_CRON_MAX_PARALLEL", "").strip()
+            _env_par = korra_env("KORRA_CRON_MAX_PARALLEL", "").strip()
             if _env_par:
                 _max_workers = int(_env_par) or None
         except (ValueError, TypeError):

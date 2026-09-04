@@ -18,9 +18,13 @@ def test_unavailable_without_emitter():
 
 
 def test_routes_event_to_owning_window(monkeypatch):
+    # Двойник обязан вести себя как настоящий хелпер: тот принимает оба
+    # имени пары KORRA_*/HERMES_*.
     monkeypatch.setattr(
         desktop_ui, "get_session_env",
-        lambda name, default="": "win-7" if name == "HERMES_UI_SESSION_ID" else default,
+        lambda name, default="": (
+            "win-7" if name.endswith("_UI_SESSION_ID") else default
+        ),
     )
     seen = []
     desktop_ui.set_emitter(lambda sid, event, payload: seen.append((sid, event, payload)))

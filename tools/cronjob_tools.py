@@ -315,10 +315,10 @@ def _scan_cron_skill_assembled(assembled: str) -> tuple[str, str]:
 
 def _origin_from_env() -> Optional[Dict[str, str]]:
     from gateway.session_context import get_session_env
-    origin_platform = get_session_env("HERMES_SESSION_PLATFORM")
-    origin_chat_id = get_session_env("HERMES_SESSION_CHAT_ID")
+    origin_platform = get_session_env("KORRA_SESSION_PLATFORM")
+    origin_chat_id = get_session_env("KORRA_SESSION_CHAT_ID")
     if origin_platform and origin_chat_id:
-        thread_id = get_session_env("HERMES_SESSION_THREAD_ID") or None
+        thread_id = get_session_env("KORRA_SESSION_THREAD_ID") or None
         # Slack thread-per-message session keying (native parity: thread_ts =
         # event.thread_ts or ts) stamps every TOP-LEVEL message's own id as
         # the session thread. That stamp is a per-message session KEY, not a
@@ -329,7 +329,7 @@ def _origin_from_env() -> Optional[Dict[str, str]]:
         # A genuine in-thread creation (thread == the parent's id != this
         # message's id) keeps its thread.
         if thread_id and origin_platform == "slack":
-            message_id = get_session_env("HERMES_SESSION_MESSAGE_ID") or None
+            message_id = get_session_env("KORRA_SESSION_MESSAGE_ID") or None
             if message_id and str(thread_id) == str(message_id):
                 logger.debug(
                     "Cron origin: dropping synthetic per-message Slack "
@@ -344,14 +344,14 @@ def _origin_from_env() -> Optional[Dict[str, str]]:
         return {
             "platform": origin_platform,
             "chat_id": origin_chat_id,
-            "chat_name": get_session_env("HERMES_SESSION_CHAT_NAME") or None,
+            "chat_name": get_session_env("KORRA_SESSION_CHAT_NAME") or None,
             "thread_id": thread_id,
             # Captured so an opt-in delivery mirror (cron.mirror_delivery /
             # attach_to_session) can resolve the exact participant's session in
             # per-user-isolated group chats — parity with interactive
             # send_message, which passes HERMES_SESSION_USER_ID to
             # gateway.mirror.mirror_to_session. Harmless for DMs/shared sessions.
-            "user_id": get_session_env("HERMES_SESSION_USER_ID") or None,
+            "user_id": get_session_env("KORRA_SESSION_USER_ID") or None,
             # Workspace/server scope (Slack team, Discord guild, Matrix
             # server). build_session_key embeds it in every Slack session key
             # (dm/group/thread alike), so a continuable cron seed built
@@ -361,7 +361,7 @@ def _origin_from_env() -> Optional[Dict[str, str]]:
             # here so the scheduler's seed helpers can reproduce the reply's
             # exact key. Same session-context var async_delegation already
             # snapshots; None for platforms without scope.
-            "scope_id": get_session_env("HERMES_SESSION_SCOPE_ID") or None,
+            "scope_id": get_session_env("KORRA_SESSION_SCOPE_ID") or None,
         }
     return None
 
@@ -606,15 +606,15 @@ def _resolve_cron_context_deliver(deliver: Optional[str]) -> Optional[str]:
     from gateway.session_context import get_session_env
     from utils import is_truthy_value
 
-    if not is_truthy_value(get_session_env("HERMES_CRON_SESSION", "")):
+    if not is_truthy_value(get_session_env("KORRA_CRON_SESSION", "")):
         return deliver
 
     def _creator_target() -> str:
-        platform = get_session_env("HERMES_CRON_AUTO_DELIVER_PLATFORM", "").strip()
-        chat_id = get_session_env("HERMES_CRON_AUTO_DELIVER_CHAT_ID", "").strip()
+        platform = get_session_env("KORRA_CRON_AUTO_DELIVER_PLATFORM", "").strip()
+        chat_id = get_session_env("KORRA_CRON_AUTO_DELIVER_CHAT_ID", "").strip()
         if not platform or not chat_id:
             return "local"
-        thread_id = get_session_env("HERMES_CRON_AUTO_DELIVER_THREAD_ID", "").strip()
+        thread_id = get_session_env("KORRA_CRON_AUTO_DELIVER_THREAD_ID", "").strip()
         if thread_id:
             return f"{platform}:{chat_id}:{thread_id}"
         return f"{platform}:{chat_id}"
@@ -1306,7 +1306,7 @@ def _try_dispatch_background_run(
     try:
         from gateway.session_context import get_session_env
 
-        origin_ui_session_id = get_session_env("HERMES_UI_SESSION_ID", "") or ""
+        origin_ui_session_id = get_session_env("KORRA_UI_SESSION_ID", "") or ""
     except Exception:
         pass
 
@@ -2051,9 +2051,9 @@ def check_cronjob_requirements() -> bool:
     from utils import env_var_enabled
 
     return (
-        env_var_enabled("HERMES_INTERACTIVE")
-        or env_var_enabled("HERMES_GATEWAY_SESSION")
-        or env_var_enabled("HERMES_EXEC_ASK")
+        env_var_enabled("KORRA_INTERACTIVE")
+        or env_var_enabled("KORRA_GATEWAY_SESSION")
+        or env_var_enabled("KORRA_EXEC_ASK")
     )
 
 

@@ -221,11 +221,11 @@ _SECRET_SUBSTRINGS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL",
 # runtime location) that repo-root modules a sandbox script imports may read at
 # import time.  None match _SECRET_SUBSTRINGS.
 _HERMES_CHILD_ALLOWED = frozenset({
-    "HERMES_HOME",
-    "HERMES_PROFILE",
-    "HERMES_CONFIG",
-    "HERMES_ENV",
-    "HERMES_DELEGATED_CHILD_CONTEXT",
+    "KORRA_HOME",
+    "KORRA_PROFILE",
+    "KORRA_CONFIG",
+    "KORRA_ENV",
+    "KORRA_DELEGATED_CHILD_CONTEXT",
 })
 
 # Windows-only: a handful of variables are required by the OS/CRT itself.
@@ -1337,7 +1337,7 @@ def _execute_remote(
             f"HERMES_RPC_TOKEN={shlex.quote(rpc_token)} "
             f"PYTHONDONTWRITEBYTECODE=1"
         )
-        tz = korra_env("HERMES_TIMEZONE", "").strip()
+        tz = korra_env("KORRA_TIMEZONE", "").strip()
         if tz:
             env_prefix += f" TZ={shlex.quote(tz)}"
 
@@ -1450,8 +1450,8 @@ def _build_child_env(*, rpc_endpoint: str, rpc_token: str, tmpdir: str,
     """
     from hermes_constants import apply_subprocess_home_env
     child_env = _scrub_child_env(os.environ)
-    korra_env_set(child_env, "HERMES_RPC_SOCKET", rpc_endpoint)
-    korra_env_set(child_env, "HERMES_RPC_TOKEN", rpc_token)
+    korra_env_set(child_env, "KORRA_RPC_SOCKET", rpc_endpoint)
+    korra_env_set(child_env, "KORRA_RPC_TOKEN", rpc_token)
     child_env["PYTHONDONTWRITEBYTECODE"] = "1"
     # Force UTF-8 for the child's stdio and default file encoding.
     #
@@ -1476,10 +1476,10 @@ def _build_child_env(*, rpc_endpoint: str, rpc_token: str, tmpdir: str,
     # code reflects the correct wall-clock time.  Only TZ is set —
     # HERMES_TIMEZONE is an internal Hermes setting and must not leak
     # into child processes.
-    _tz_name = korra_env("HERMES_TIMEZONE", "").strip()
+    _tz_name = korra_env("KORRA_TIMEZONE", "").strip()
     if _tz_name:
         child_env["TZ"] = _tz_name
-    korra_env_pop(child_env, "HERMES_TIMEZONE")
+    korra_env_pop(child_env, "KORRA_TIMEZONE")
 
     apply_subprocess_home_env(child_env)
     # ``hermes_tools.py`` always lives in the staging directory, so that

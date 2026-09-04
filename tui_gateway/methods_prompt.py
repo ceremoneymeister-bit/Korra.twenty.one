@@ -311,8 +311,8 @@ def _(rid, params: dict) -> dict:
         except Exception:
             typed_stop = False
         if typed_stop:
-            korra_env_set(os.environ, "HERMES_VOICE", "0")
-            korra_env_set(os.environ, "HERMES_VOICE_TTS", "0")
+            korra_env_set(os.environ, "KORRA_VOICE", "0")
+            korra_env_set(os.environ, "KORRA_VOICE_TTS", "0")
             try:
                 from hermes_cli.voice import stop_continuous
 

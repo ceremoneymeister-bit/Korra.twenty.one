@@ -20,11 +20,20 @@ from tools.cronjob_tools import _origin_from_env
 
 
 def _session_env(env: dict):
-    """Patch gateway.session_context.get_session_env with a dict lookup."""
-    return patch(
-        "gateway.session_context.get_session_env",
-        side_effect=lambda name, default="": env.get(name, default),
-    )
+    """Patch gateway.session_context.get_session_env with a dict lookup.
+
+    Двойник обязан вести себя как настоящий хелпер: тот принимает оба имени
+    пары ``KORRA_*``/``HERMES_*``, а фикстуры ниже задают старые имена.
+    """
+    from hermes_constants import korra_env_aliases
+
+    def _lookup(name, default=""):
+        for alias in korra_env_aliases(name):
+            if alias in env:
+                return env[alias]
+        return default
+
+    return patch("gateway.session_context.get_session_env", side_effect=_lookup)
 
 
 class TestSlackSyntheticThreadCapture:

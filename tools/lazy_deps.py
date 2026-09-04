@@ -376,7 +376,7 @@ class _InstallResult:
 # not user-facing config: the user-facing knob remains
 # security.allow_lazy_installs in config.yaml. When unset, lazy installs go
 # into the active venv as before.
-_LAZY_TARGET_ENV = "HERMES_LAZY_INSTALL_TARGET"
+_LAZY_TARGET_ENV = "KORRA_LAZY_INSTALL_TARGET"
 
 # Name of the stamp file written into the target dir recording the Python
 # X.Y + ABI it was populated for. If a container rebuild bumps the
@@ -531,7 +531,7 @@ def _allow_lazy_installs() -> bool:
     # (2) Sealed-venv env var: blocks ONLY when there is no safe durable
     # target to redirect into. With a target set, the install goes to the
     # data volume (append-only on sys.path), so the seal is preserved.
-    if korra_env("HERMES_DISABLE_LAZY_INSTALLS") == "1":
+    if korra_env("KORRA_DISABLE_LAZY_INSTALLS") == "1":
         return _lazy_install_target() is not None
 
     return True
@@ -1058,7 +1058,7 @@ def install_specs(specs: list[str] | tuple[str, ...], *, timeout: int = 300) -> 
 
     if not _allow_lazy_installs():
         target = _lazy_install_target()
-        if korra_env("HERMES_DISABLE_LAZY_INSTALLS") == "1" and target is None:
+        if korra_env("KORRA_DISABLE_LAZY_INSTALLS") == "1" and target is None:
             reason = (
                 "runtime installs are disabled on this deployment: the agent "
                 "environment is immutable and no writable install target is "

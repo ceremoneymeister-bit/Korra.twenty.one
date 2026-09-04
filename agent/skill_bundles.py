@@ -69,7 +69,7 @@ def _bundles_dir() -> Path:
     Honors ``HERMES_BUNDLES_DIR`` for tests; falls back to
     ``<HERMES_HOME>/skill-bundles``.
     """
-    override = korra_env("HERMES_BUNDLES_DIR")
+    override = korra_env("KORRA_BUNDLES_DIR")
     if override:
         return Path(override).expanduser()
     return get_hermes_home() / "skill-bundles"

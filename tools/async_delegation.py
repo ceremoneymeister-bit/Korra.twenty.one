@@ -229,9 +229,9 @@ def _capture_routing_origin() -> Dict[str, Any]:
         from gateway.session_context import get_session_env
 
         for evt_key, env_name in (
-            ("scope_id", "HERMES_SESSION_SCOPE_ID"),
-            ("user_id", "HERMES_SESSION_USER_ID"),
-            ("user_name", "HERMES_SESSION_USER_NAME"),
+            ("scope_id", "KORRA_SESSION_SCOPE_ID"),
+            ("user_id", "KORRA_SESSION_USER_ID"),
+            ("user_name", "KORRA_SESSION_USER_NAME"),
         ):
             value = get_session_env(env_name, "")
             if value:
@@ -751,9 +751,9 @@ def _current_origin_session_id() -> str:
     try:
         from gateway.session_context import get_session_env
 
-        if get_session_env("HERMES_SESSION_PLATFORM", "") != "api_server":
+        if get_session_env("KORRA_SESSION_PLATFORM", "") != "api_server":
             return ""
-        return get_session_env("HERMES_SESSION_CHAT_ID", "") or ""
+        return get_session_env("KORRA_SESSION_CHAT_ID", "") or ""
     except Exception:
         return ""
 

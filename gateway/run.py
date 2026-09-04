@@ -1397,7 +1397,7 @@ def _startup_restore_drain_timeout_secs() -> float:
     startup, same pattern as the other ``agent.*`` knobs).  Non-positive
     disables the bound (restores the historical "wait forever" behaviour).
     """
-    raw = korra_env("HERMES_STARTUP_RESTORE_DRAIN_TIMEOUT")
+    raw = korra_env("KORRA_STARTUP_RESTORE_DRAIN_TIMEOUT")
     if raw is None or raw == "":
         return float(_STARTUP_RESTORE_DRAIN_TIMEOUT_SECS_DEFAULT)
     try:
@@ -1422,7 +1422,7 @@ def _startup_warmup_timeout_secs() -> float:
     pattern as the other ``agent.*`` knobs).  Non-positive disables the
     warm-up entirely (restores the historical lazy-init behaviour).
     """
-    raw = korra_env("HERMES_STARTUP_WARMUP_TIMEOUT")
+    raw = korra_env("KORRA_STARTUP_WARMUP_TIMEOUT")
     if raw is None or raw == "":
         return float(_STARTUP_WARMUP_TIMEOUT_SECS_DEFAULT)
     try:
@@ -2397,18 +2397,18 @@ def _bridge_max_turns_from_config(home: "Path") -> None:
         # Without this guard, str(None) → "None" → resolve_turn_limit maps it
         # to the unlimited sentinel instead of the default (90/500).
         if raw is not None:
-            korra_env_set(os.environ, "HERMES_MAX_ITERATIONS", str(raw))
-        elif korra_env_present("HERMES_MAX_ITERATIONS"):
+            korra_env_set(os.environ, "KORRA_MAX_ITERATIONS", str(raw))
+        elif korra_env_present("KORRA_MAX_ITERATIONS"):
             # Clear stale bridge so downstream resolver applies its default.
-            korra_env_pop(os.environ, "HERMES_MAX_ITERATIONS")
+            korra_env_pop(os.environ, "KORRA_MAX_ITERATIONS")
     # config-authoritative knobs for the session-search index (config.yaml
     # sessions.* wins over stale env; env stays the cross-process carrier).
     sessions_cfg = cfg.get("sessions", {})
     if isinstance(sessions_cfg, dict):
         if "cjk_fts" in sessions_cfg:
-            korra_env_set(os.environ, "HERMES_CJK_FTS", str(sessions_cfg["cjk_fts"]))
+            korra_env_set(os.environ, "KORRA_CJK_FTS", str(sessions_cfg["cjk_fts"]))
         if "search_slow_ms" in sessions_cfg:
-            korra_env_set(os.environ, "HERMES_SEARCH_SLOW_MS", str(sessions_cfg["search_slow_ms"]))
+            korra_env_set(os.environ, "KORRA_SEARCH_SLOW_MS", str(sessions_cfg["search_slow_ms"]))
 
 
 def _current_max_iterations() -> int:
@@ -2421,7 +2421,7 @@ def _current_max_iterations() -> int:
     """
     _reload_runtime_env_preserving_config_authority()
     from hermes_cli.config import resolve_turn_limit as _resolve_turn_limit
-    return _resolve_turn_limit(korra_env("HERMES_MAX_ITERATIONS"))
+    return _resolve_turn_limit(korra_env("KORRA_MAX_ITERATIONS"))
 
 
 from contextlib import contextmanager as _contextmanager
@@ -2648,7 +2648,7 @@ _DOCKER_MEDIA_OUTPUT_CONTAINER_PATHS = {"/output", "/outputs"}
 from hermes_cli.config_defaults import DEFAULT_CONFIG as _DEFAULT_CONFIG
 
 korra_env_set(
-    os.environ, "HERMES_TURN_LEASE_TIMEOUT", str(_DEFAULT_CONFIG["agent"]["gateway_turn_lease_timeout"])
+    os.environ, "KORRA_TURN_LEASE_TIMEOUT", str(_DEFAULT_CONFIG["agent"]["gateway_turn_lease_timeout"])
 )
 
 # Bridge config.yaml values into the environment so os.getenv() picks them up.
@@ -2797,83 +2797,83 @@ if _config_path.exists():
                 # Same None-guard as _bridge_max_turns_from_config: str(None)
                 # → "None" → resolve_turn_limit maps to unlimited, not default.
                 if _raw_mt is not None:
-                    korra_env_set(os.environ, "HERMES_MAX_ITERATIONS", str(_raw_mt))
-                elif korra_env_present("HERMES_MAX_ITERATIONS"):
-                    korra_env_pop(os.environ, "HERMES_MAX_ITERATIONS")
+                    korra_env_set(os.environ, "KORRA_MAX_ITERATIONS", str(_raw_mt))
+                elif korra_env_present("KORRA_MAX_ITERATIONS"):
+                    korra_env_pop(os.environ, "KORRA_MAX_ITERATIONS")
             if "gateway_timeout" in _agent_cfg:
-                korra_env_set(os.environ, "HERMES_AGENT_TIMEOUT", str(_agent_cfg["gateway_timeout"]))
+                korra_env_set(os.environ, "KORRA_AGENT_TIMEOUT", str(_agent_cfg["gateway_timeout"]))
             if "gateway_turn_lease_timeout" in _agent_cfg:
                 korra_env_set(
-                    os.environ, "HERMES_TURN_LEASE_TIMEOUT", str(_agent_cfg["gateway_turn_lease_timeout"])
+                    os.environ, "KORRA_TURN_LEASE_TIMEOUT", str(_agent_cfg["gateway_turn_lease_timeout"])
                 )
             if "gateway_timeout_warning" in _agent_cfg:
-                korra_env_set(os.environ, "HERMES_AGENT_TIMEOUT_WARNING", str(_agent_cfg["gateway_timeout_warning"]))
+                korra_env_set(os.environ, "KORRA_AGENT_TIMEOUT_WARNING", str(_agent_cfg["gateway_timeout_warning"]))
             if "gateway_notify_interval" in _agent_cfg:
-                korra_env_set(os.environ, "HERMES_AGENT_NOTIFY_INTERVAL", str(_agent_cfg["gateway_notify_interval"]))
+                korra_env_set(os.environ, "KORRA_AGENT_NOTIFY_INTERVAL", str(_agent_cfg["gateway_notify_interval"]))
             if "session_stall_timeout" in _agent_cfg:
                 korra_env_set(
-                    os.environ, "HERMES_SESSION_STALL_TIMEOUT", str(_agent_cfg["session_stall_timeout"])
+                    os.environ, "KORRA_SESSION_STALL_TIMEOUT", str(_agent_cfg["session_stall_timeout"])
                 )
             if "reconnect_attention_after" in _agent_cfg:
                 # Internal bridge only — config.yaml (agent.reconnect_attention_after)
                 # is the documented, user-facing setting.
                 korra_env_set(
-                    os.environ, "HERMES_RECONNECT_ATTENTION_AFTER_SECONDS", str(_agent_cfg["reconnect_attention_after"])
+                    os.environ, "KORRA_RECONNECT_ATTENTION_AFTER_SECONDS", str(_agent_cfg["reconnect_attention_after"])
                 )
             if "restart_drain_timeout" in _agent_cfg:
-                korra_env_set(os.environ, "HERMES_RESTART_DRAIN_TIMEOUT", str(_agent_cfg["restart_drain_timeout"]))
+                korra_env_set(os.environ, "KORRA_RESTART_DRAIN_TIMEOUT", str(_agent_cfg["restart_drain_timeout"]))
             if "cron_drain_timeout" in _agent_cfg:
-                korra_env_set(os.environ, "HERMES_CRON_DRAIN_TIMEOUT", str(_agent_cfg["cron_drain_timeout"]))
+                korra_env_set(os.environ, "KORRA_CRON_DRAIN_TIMEOUT", str(_agent_cfg["cron_drain_timeout"]))
             if "gateway_auto_continue_freshness" in _agent_cfg:
                 korra_env_set(
-                    os.environ, "HERMES_AUTO_CONTINUE_FRESHNESS", str(_agent_cfg["gateway_auto_continue_freshness"])
+                    os.environ, "KORRA_AUTO_CONTINUE_FRESHNESS", str(_agent_cfg["gateway_auto_continue_freshness"])
                 )
             if "gateway_startup_restore_drain_timeout" in _agent_cfg:
                 korra_env_set(
-                    os.environ, "HERMES_STARTUP_RESTORE_DRAIN_TIMEOUT", str(_agent_cfg["gateway_startup_restore_drain_timeout"])
+                    os.environ, "KORRA_STARTUP_RESTORE_DRAIN_TIMEOUT", str(_agent_cfg["gateway_startup_restore_drain_timeout"])
                 )
             if "gateway_startup_warmup_timeout" in _agent_cfg:
                 korra_env_set(
-                    os.environ, "HERMES_STARTUP_WARMUP_TIMEOUT", str(_agent_cfg["gateway_startup_warmup_timeout"])
+                    os.environ, "KORRA_STARTUP_WARMUP_TIMEOUT", str(_agent_cfg["gateway_startup_warmup_timeout"])
                 )
         # config-authoritative knobs for the session-search index; same
         # bridge semantics as the agent settings above.
         _sessions_cfg = _cfg.get("sessions", {})
         if _sessions_cfg and isinstance(_sessions_cfg, dict):
             if "cjk_fts" in _sessions_cfg:
-                korra_env_set(os.environ, "HERMES_CJK_FTS", str(_sessions_cfg["cjk_fts"]))
+                korra_env_set(os.environ, "KORRA_CJK_FTS", str(_sessions_cfg["cjk_fts"]))
             if "search_slow_ms" in _sessions_cfg:
                 korra_env_set(
-                    os.environ, "HERMES_SEARCH_SLOW_MS", str(_sessions_cfg["search_slow_ms"])
+                    os.environ, "KORRA_SEARCH_SLOW_MS", str(_sessions_cfg["search_slow_ms"])
                 )
         _display_cfg = _cfg.get("display", {})
         if _display_cfg and isinstance(_display_cfg, dict):
             if "busy_input_mode" in _display_cfg:
-                korra_env_set(os.environ, "HERMES_GATEWAY_BUSY_INPUT_MODE", str(_display_cfg["busy_input_mode"]))
+                korra_env_set(os.environ, "KORRA_GATEWAY_BUSY_INPUT_MODE", str(_display_cfg["busy_input_mode"]))
             if "busy_text_mode" in _display_cfg:
-                korra_env_set(os.environ, "HERMES_GATEWAY_BUSY_TEXT_MODE", str(_display_cfg["busy_text_mode"]))
+                korra_env_set(os.environ, "KORRA_GATEWAY_BUSY_TEXT_MODE", str(_display_cfg["busy_text_mode"]))
             if "busy_ack_enabled" in _display_cfg:
-                korra_env_set(os.environ, "HERMES_GATEWAY_BUSY_ACK_ENABLED", str(_display_cfg["busy_ack_enabled"]))
+                korra_env_set(os.environ, "KORRA_GATEWAY_BUSY_ACK_ENABLED", str(_display_cfg["busy_ack_enabled"]))
             # This process-level env var is documented as an override for
             # service managers, so preserve it when already set. Other display
             # bridges stay config-authoritative for backwards compatibility.
             if (
                 "busy_steer_ack_enabled" in _display_cfg
-                and not korra_env_present("HERMES_GATEWAY_BUSY_STEER_ACK_ENABLED")
+                and not korra_env_present("KORRA_GATEWAY_BUSY_STEER_ACK_ENABLED")
             ):
                 korra_env_set(
-                    os.environ, "HERMES_GATEWAY_BUSY_STEER_ACK_ENABLED", str(_display_cfg["busy_steer_ack_enabled"])
+                    os.environ, "KORRA_GATEWAY_BUSY_STEER_ACK_ENABLED", str(_display_cfg["busy_steer_ack_enabled"])
                 )
         # Timezone: bridge config.yaml → HERMES_TIMEZONE env var.
         _tz_cfg = _cfg.get("timezone", "")
         if _tz_cfg and isinstance(_tz_cfg, str):
-            korra_env_set(os.environ, "HERMES_TIMEZONE", _tz_cfg.strip())
+            korra_env_set(os.environ, "KORRA_TIMEZONE", _tz_cfg.strip())
         # Security settings
         _security_cfg = _cfg.get("security", {})
         if isinstance(_security_cfg, dict):
             _redact = _security_cfg.get("redact_secrets")
             if _redact is not None:
-                korra_env_set(os.environ, "HERMES_REDACT_SECRETS", str(_redact).lower())
+                korra_env_set(os.environ, "KORRA_REDACT_SECRETS", str(_redact).lower())
         # Gateway settings (media delivery allowlist + recency trust + strict mode)
         # Delegated to the shared bridge so standalone delivery entrypoints
         # (manual `hermes cron run`, ticks without the gateway) apply the SAME
@@ -2885,7 +2885,7 @@ if _config_path.exists():
             apply_media_policy_env(_cfg)
             _trust_recent_seconds = _gateway_cfg.get("trust_recent_files_seconds")
             if _trust_recent_seconds is not None:
-                korra_env_set(os.environ, "HERMES_MEDIA_TRUST_RECENT_SECONDS", str(_trust_recent_seconds))
+                korra_env_set(os.environ, "KORRA_MEDIA_TRUST_RECENT_SECONDS", str(_trust_recent_seconds))
             # Bridge gateway.platform_connect_timeout → the internal env var the
             # connect path + Discord adapter ready-wait both read (#19776).
             # Unlike the agent.*/display.* bridges above (config-authoritative),
@@ -2893,10 +2893,10 @@ if _config_path.exists():
             # already set explicitly; otherwise config.yaml supplies the value.
             if (
                 "platform_connect_timeout" in _gateway_cfg
-                and not korra_env("HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "").strip()
+                and not korra_env("KORRA_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "").strip()
             ):
                 korra_env_set(
-                    os.environ, "HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT", str(_gateway_cfg["platform_connect_timeout"])
+                    os.environ, "KORRA_GATEWAY_PLATFORM_CONNECT_TIMEOUT", str(_gateway_cfg["platform_connect_timeout"])
                 )
     except Exception as _bridge_err:
         # Previously this was silent (`except Exception: pass`), which
@@ -2941,7 +2941,7 @@ except Exception as _bootstrap_exc:
     print(f"  Warning: deprecation check failed: {_bootstrap_exc}", file=sys.stderr)
 
 # Gateway runs in quiet mode - suppress debug output and use cwd directly (no temp dirs)
-korra_env_set(os.environ, "HERMES_QUIET", "1")
+korra_env_set(os.environ, "KORRA_QUIET", "1")
 
 # HERMES_EXEC_ASK is set in start_gateway(), not at import time. Importing this
 # module from CLI tools (e.g. send_message → _gateway_runner_ref) must not flip
@@ -3194,7 +3194,7 @@ def _resolve_runtime_agent_kwargs() -> dict:
 
     model_cfg = _get_model_config()
     max_tokens = None
-    _env_mt = korra_env("HERMES_MAX_TOKENS")
+    _env_mt = korra_env("KORRA_MAX_TOKENS")
     if _env_mt:
         try:
             max_tokens = int(_env_mt)
@@ -4654,7 +4654,7 @@ _RECONNECT_BACKOFF_CAP = 300
 # User-facing setting: agent.reconnect_attention_after in config.yaml
 # (bridged to this env var above). 0 disables.
 _RECONNECT_ATTENTION_AFTER_SECONDS = _float_env(
-    "HERMES_RECONNECT_ATTENTION_AFTER_SECONDS", 7200
+    "KORRA_RECONNECT_ATTENTION_AFTER_SECONDS", 7200
 )
 
 
@@ -8281,7 +8281,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     def _adapter_disconnect_timeout_secs(self) -> float:
         """Return the per-adapter disconnect timeout used during shutdown."""
-        raw = korra_env("HERMES_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
+        raw = korra_env("KORRA_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
         if raw:
             try:
                 timeout = float(raw)
@@ -8306,7 +8306,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         the reconnect watcher, which retries with the full budget (and
         ``is_reconnect=True``, preserving the offline update queue — #46621).
         """
-        raw = korra_env("HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "").strip()
+        raw = korra_env("KORRA_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "").strip()
         if raw:
             try:
                 timeout = float(raw)
@@ -9992,7 +9992,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         agent.prefill_messages_file is accepted as a legacy fallback.
         Relative paths are resolved from ~/.hermes/.
         """
-        file_path = korra_env("HERMES_PREFILL_MESSAGES_FILE", "")
+        file_path = korra_env("KORRA_PREFILL_MESSAGES_FILE", "")
         if not file_path:
             cfg = _load_gateway_runtime_config()
             file_path = str(cfg.get("prefill_messages_file", "") or "")
@@ -10026,7 +10026,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
         from hermes_cli.config import resolve_ephemeral_system_prompt_from_config
 
-        prompt = korra_env("HERMES_EPHEMERAL_SYSTEM_PROMPT", "")
+        prompt = korra_env("KORRA_EPHEMERAL_SYSTEM_PROMPT", "")
         if prompt:
             return prompt
         cfg = _load_gateway_runtime_config()
@@ -10264,7 +10264,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     @staticmethod
     def _load_busy_input_mode() -> str:
         """Load gateway drain-time busy-input behavior from config/env."""
-        mode = korra_env("HERMES_GATEWAY_BUSY_INPUT_MODE", "").strip().lower()
+        mode = korra_env("KORRA_GATEWAY_BUSY_INPUT_MODE", "").strip().lower()
         if not mode:
             cfg = _load_gateway_runtime_config()
             mode = str(cfg_get(cfg, "display", "busy_input_mode", default="") or "").strip().lower()
@@ -10286,7 +10286,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         ``busy_input_mode`` and maps to non-queue text handling here).
         """
         # Legacy explicit override wins for backward compat.
-        legacy = korra_env("HERMES_GATEWAY_BUSY_TEXT_MODE", "").strip().lower()
+        legacy = korra_env("KORRA_GATEWAY_BUSY_TEXT_MODE", "").strip().lower()
         if not legacy:
             cfg = _load_gateway_runtime_config()
             legacy = str(cfg_get(cfg, "display", "busy_text_mode", default="") or "").strip().lower()
@@ -10371,7 +10371,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     @staticmethod
     def _load_restart_drain_timeout() -> float:
         """Load graceful gateway restart/stop drain timeout in seconds."""
-        raw = korra_env("HERMES_RESTART_DRAIN_TIMEOUT", "").strip()
+        raw = korra_env("KORRA_RESTART_DRAIN_TIMEOUT", "").strip()
         if not raw:
             cfg = _load_gateway_runtime_config()
             raw = str(cfg_get(cfg, "agent", "restart_drain_timeout", default="") or "").strip()
@@ -10390,7 +10390,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     @staticmethod
     def _load_restart_after_turn_timeout() -> float:
         """Load in-band restart wait-for-idle timeout in seconds (#77184)."""
-        env_raw = korra_env("HERMES_RESTART_AFTER_TURN_TIMEOUT")
+        env_raw = korra_env("KORRA_RESTART_AFTER_TURN_TIMEOUT")
         if env_raw is not None and str(env_raw).strip() != "":
             raw: object = env_raw
         else:
@@ -10413,7 +10413,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     @staticmethod
     def _load_cron_drain_timeout() -> float:
         """Load the cron-only floor under the stop()/drain wait (#82161)."""
-        env_raw = korra_env("HERMES_CRON_DRAIN_TIMEOUT")
+        env_raw = korra_env("KORRA_CRON_DRAIN_TIMEOUT")
         if env_raw is not None and str(env_raw).strip() != "":
             raw: object = env_raw
         else:
@@ -10485,7 +10485,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
           - ``error``  — only the final raw-output message when exit code is non-zero
           - ``off``    — no watcher messages at all
         """
-        mode = korra_env("HERMES_BACKGROUND_NOTIFICATIONS", "")
+        mode = korra_env("KORRA_BACKGROUND_NOTIFICATIONS", "")
         if not mode:
             cfg = _load_gateway_runtime_config()
             raw = cfg_get(cfg, "display", "background_process_notifications")
@@ -11172,7 +11172,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Check if busy ack is disabled — skip sending but still process the input.
         # Placed before debounce so we don't stamp a "last ack" timestamp that was
         # never actually delivered.
-        busy_ack_enabled = korra_env("HERMES_GATEWAY_BUSY_ACK_ENABLED", "true").lower() == "true"
+        busy_ack_enabled = korra_env("KORRA_GATEWAY_BUSY_ACK_ENABLED", "true").lower() == "true"
         if not busy_ack_enabled:
             logger.debug("Busy ack suppressed for session %s", session_key)
             return True  # input still processed, just no ack sent
@@ -11194,7 +11194,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # like STT transcript echo suppression: keep the behavior, drop only
         # the confirmation bubble.
         if is_steer_mode:
-            steer_ack_env = korra_env("HERMES_GATEWAY_BUSY_STEER_ACK_ENABLED")
+            steer_ack_env = korra_env("KORRA_GATEWAY_BUSY_STEER_ACK_ENABLED")
             if steer_ack_env is not None:
                 steer_ack_enabled = steer_ack_env.strip().lower() in {"1", "true", "yes", "on"}
             else:
@@ -12326,7 +12326,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         turns, never wedged. Fail-open per agent: an unreadable activity
         summary means "not wedged".
         """
-        timeout = _float_env("HERMES_AGENT_TIMEOUT", 1800)
+        timeout = _float_env("KORRA_AGENT_TIMEOUT", 1800)
         if timeout <= 0:
             return 0
         wedged = 0
@@ -13334,7 +13334,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         exact = 0
         fallback = 0
         try:
-            agent_timeout = max(1.0, _float_env("HERMES_AGENT_TIMEOUT", 1800))
+            agent_timeout = max(1.0, _float_env("KORRA_AGENT_TIMEOUT", 1800))
             marker_max_age = max(60 * 60, int(agent_timeout * 2))
             exact = await self.async_session_store.recover_interrupted_turns(
                 max_age_seconds=marker_max_age
@@ -13506,7 +13506,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # config.yaml → env bridge did the right thing at a glance (instead
         # of silently running at a stale .env value for weeks).
         try:
-            _effective_max_iter = int(korra_env("HERMES_MAX_ITERATIONS", "500"))
+            _effective_max_iter = int(korra_env("KORRA_MAX_ITERATIONS", "500"))
             logger.info(
                 "Agent budget: max_iterations=%d (agent.max_turns from config.yaml, "
                 "or HERMES_MAX_ITERATIONS from .env, or default 500)",
@@ -13520,7 +13520,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # state at import time, so this log line is the source of truth
         # for this process's lifetime.
         try:
-            _redact_raw = korra_env("HERMES_REDACT_SECRETS", "true")
+            _redact_raw = korra_env("KORRA_REDACT_SECRETS", "true")
             _redact_on = _redact_raw.lower() in {"1", "true", "yes", "on"}
             if _redact_on:
                 logger.info(
@@ -15206,7 +15206,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     def _session_stall_timeout_seconds(self) -> float:
         """Return configured stall timeout (seconds); 0 disables the watchdog."""
-        return _float_env("HERMES_SESSION_STALL_TIMEOUT", 300)
+        return _float_env("KORRA_SESSION_STALL_TIMEOUT", 300)
 
     def _iter_gateway_adapters(self):
         """Yield every live platform adapter (default + multiplex profiles)."""
@@ -18544,7 +18544,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # wall-clock age alone isn't sufficient.  Evict only when the agent
         # has been *idle* beyond the inactivity threshold (or when the agent
         # object has no activity tracker and wall-clock age is extreme).
-        _raw_stale_timeout = _float_env("HERMES_AGENT_TIMEOUT", 1800)
+        _raw_stale_timeout = _float_env("KORRA_AGENT_TIMEOUT", 1800)
         _quick_state = self._peek_session_state(_quick_key)
         _stale_ts = _quick_state.turn.started_ts if _quick_state else 0
         if _quick_state is not None and _quick_state.turn.agent is not None and _stale_ts:
@@ -18699,7 +18699,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
             effective_busy_input_mode = self._effective_busy_input_mode(source)
             _telegram_followup_grace = float(
-                korra_env("HERMES_TELEGRAM_FOLLOWUP_GRACE_SECONDS", "3.0")
+                korra_env("KORRA_TELEGRAM_FOLLOWUP_GRACE_SECONDS", "3.0")
             )
             _grace_state = self._peek_session_state(_quick_key)
             _started_at = _grace_state.turn.started_ts if _grace_state else 0
@@ -20785,7 +20785,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     owner_key=_quick_key,
                     generation=run_generation,
                     timeout=_float_env(
-                        "HERMES_TURN_LEASE_TIMEOUT", DEFAULT_LEASE_WAIT
+                        "KORRA_TURN_LEASE_TIMEOUT", DEFAULT_LEASE_WAIT
                     ),
                 )
             except TurnLeaseTimeoutError:
@@ -24857,7 +24857,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if not callable(wait_fn) or not source.chat_id:
             return None
         # 0 means the operator disabled the turn limit; the backstop still needs one.
-        timeout = _float_env("HERMES_AGENT_TIMEOUT", 1800) or 1800
+        timeout = _float_env("KORRA_AGENT_TIMEOUT", 1800) or 1800
         try:
             return _as_thread_info(await wait_fn(str(source.chat_id), timeout))
         except Exception:
@@ -30216,7 +30216,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         # Tool progress mode — resolved per-platform with env var fallback
         _resolved_tp = resolve_display_setting(user_config, platform_key, "tool_progress")
-        _env_tp = korra_env("HERMES_TOOL_PROGRESS_MODE")
+        _env_tp = korra_env("KORRA_TOOL_PROGRESS_MODE")
         _display_cfg = display_config if isinstance(display_config, dict) else {}
         _platforms_cfg = _display_cfg.get("platforms") or {}
         _platform_cfg = _platforms_cfg.get(platform_key) or {}
@@ -30890,7 +30890,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Config: agent.gateway_notify_interval in config.yaml, or
         # HERMES_AGENT_NOTIFY_INTERVAL env var.  Default 180s (3 min).
         # 0 = disable notifications.
-        _NOTIFY_INTERVAL_RAW = _float_env("HERMES_AGENT_NOTIFY_INTERVAL", 180)
+        _NOTIFY_INTERVAL_RAW = _float_env("KORRA_AGENT_NOTIFY_INTERVAL", 180)
         _NOTIFY_INTERVAL = _NOTIFY_INTERVAL_RAW if _NOTIFY_INTERVAL_RAW > 0 else None
         _long_running_mode = _display_surface_mode(
             "long_running_notifications",
@@ -31040,9 +31040,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # Config: agent.gateway_timeout in config.yaml, or
             # HERMES_AGENT_TIMEOUT env var (env var takes precedence).
             # Default 1800s (30 min inactivity).  0 = unlimited.
-            _agent_timeout_raw = _float_env("HERMES_AGENT_TIMEOUT", 1800)
+            _agent_timeout_raw = _float_env("KORRA_AGENT_TIMEOUT", 1800)
             _agent_timeout = _agent_timeout_raw if _agent_timeout_raw > 0 else None
-            _agent_warning_raw = _float_env("HERMES_AGENT_TIMEOUT_WARNING", 900)
+            _agent_warning_raw = _float_env("KORRA_AGENT_TIMEOUT_WARNING", 900)
             _agent_warning = _agent_warning_raw if _agent_warning_raw > 0 else None
             _warning_fired = False
 
@@ -32609,7 +32609,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     # Enable interactive exec approval for dangerous commands on messaging
     # platforms. Set here (not at module import) so incidental imports of
     # gateway.run from CLI/tool code do not poison HERMES_EXEC_ASK.
-    korra_env_set(os.environ, "HERMES_EXEC_ASK", "1")
+    korra_env_set(os.environ, "KORRA_EXEC_ASK", "1")
 
     from hermes_cli.resource_limits import apply_nofile_soft_limit
 
@@ -33407,7 +33407,7 @@ def main():
     # public agent-harness registry id (``hermes-agent``) — standard-var
     # matching is exact. setdefault so an outer harness is never clobbered.
     os.environ.setdefault("AI_AGENT", "hermes-agent")
-    korra_env_setdefault(os.environ, "HERMES_AGENT", "true")
+    korra_env_setdefault(os.environ, "KORRA_AGENT", "true")
 
     # Positive process identity: ledger registration + Windows job-object
     # self-attach, so update-time reapers can identify this gateway (and its

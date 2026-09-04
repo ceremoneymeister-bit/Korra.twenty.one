@@ -512,7 +512,7 @@ def _capture_required_environment_variables(
     # secret-capture callback that routes to a secure secret.request overlay, so
     # they fall through and actually prompt. (HERMES_INTERACTIVE is the same flag
     # tools/approval.py uses to tell an interactive surface from a messaging one.)
-    if _is_gateway_surface() and not env_var_enabled("HERMES_INTERACTIVE"):
+    if _is_gateway_surface() and not env_var_enabled("KORRA_INTERACTIVE"):
         return {
             "missing_names": missing_names,
             "setup_skipped": False,
@@ -573,10 +573,10 @@ def _capture_required_environment_variables(
 
 
 def _is_gateway_surface() -> bool:
-    if env_var_enabled("HERMES_GATEWAY_SESSION"):
+    if env_var_enabled("KORRA_GATEWAY_SESSION"):
         return True
     from gateway.session_context import get_session_env
-    return bool(get_session_env("HERMES_SESSION_PLATFORM"))
+    return bool(get_session_env("KORRA_SESSION_PLATFORM"))
 
 
 def _get_terminal_backend_name() -> str:
@@ -727,7 +727,7 @@ def _get_session_platform() -> str:
     """
     try:
         from gateway.session_context import get_session_env
-        return get_session_env("HERMES_SESSION_PLATFORM") or ""
+        return get_session_env("KORRA_SESSION_PLATFORM") or ""
     except Exception:
         return ""
 
@@ -744,7 +744,7 @@ def _is_skill_disabled(name: str, platform: str = None) -> bool:
         from hermes_cli.config import load_config
         config = load_config()
         skills_cfg = config.get("skills", {})
-        resolved_platform = platform or korra_env("HERMES_PLATFORM") or _get_session_platform()
+        resolved_platform = platform or korra_env("KORRA_PLATFORM") or _get_session_platform()
         global_disabled = skills_cfg.get("disabled", [])
         if resolved_platform:
             platform_disabled = cfg_get(skills_cfg, "platform_disabled", resolved_platform)

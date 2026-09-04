@@ -59,14 +59,14 @@ def _is_gh_copilot_deprecation_message(stderr_text: str) -> bool:
 
 def _resolve_command() -> str:
     return (
-        korra_env("HERMES_COPILOT_ACP_COMMAND", "").strip()
+        korra_env("KORRA_COPILOT_ACP_COMMAND", "").strip()
         or os.getenv("COPILOT_CLI_PATH", "").strip()
         or "copilot"
     )
 
 
 def _resolve_args() -> list[str]:
-    raw = korra_env("HERMES_COPILOT_ACP_ARGS", "").strip()
+    raw = korra_env("KORRA_COPILOT_ACP_ARGS", "").strip()
     if not raw:
         return ["--acp", "--stdio"]
     return shlex.split(raw)

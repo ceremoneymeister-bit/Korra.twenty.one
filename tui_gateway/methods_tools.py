@@ -1500,9 +1500,9 @@ def _(rid, params: dict) -> dict:
         model = _resolve_model()
         from agent.secret_scope import get_secret
 
-        api_key = get_secret("HERMES_API_KEY", "") or cfg.get("api_key", "")
+        api_key = get_secret("KORRA_API_KEY", "") or cfg.get("api_key", "")
         masked = f"****{api_key[-4:]}" if len(api_key) > 4 else "(not set)"
-        base_url = korra_env("HERMES_BASE_URL", "") or cfg.get("base_url", "")
+        base_url = korra_env("KORRA_BASE_URL", "") or cfg.get("base_url", "")
 
         sections = [
             {

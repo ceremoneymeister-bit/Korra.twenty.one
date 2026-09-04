@@ -191,7 +191,7 @@ def harden_import_path(src_root: str | None = None) -> None:
     repository root for every shipped entry point, so the guard is
     self-sufficient and does not depend on the spawner exporting an env var.
     """
-    root = src_root or korra_env("HERMES_PYTHON_SRC_ROOT") or os.path.dirname(
+    root = src_root or korra_env("KORRA_PYTHON_SRC_ROOT") or os.path.dirname(
         os.path.abspath(__file__)
     )
 
@@ -216,7 +216,7 @@ def activate_durable_lazy_target() -> None:
     always wins name collisions (see ``tools.lazy_deps`` for the full
     security rationale). Never raises; a missing/empty target is a no-op.
     """
-    if not korra_env("HERMES_LAZY_INSTALL_TARGET", "").strip():
+    if not korra_env("KORRA_LAZY_INSTALL_TARGET", "").strip():
         return
     try:
         from tools import lazy_deps

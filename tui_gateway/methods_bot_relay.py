@@ -45,7 +45,7 @@ def _(rid, params: dict) -> dict:
 
         from tools.bot_relay import write_remote_roster
 
-        home = Path(korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes"))
+        home = Path(korra_env("KORRA_HOME") or os.path.expanduser("~/.hermes"))
         root = home.parent.parent if home.parent.name == "profiles" else home
         count = write_remote_roster(root, params.get("agents"))
         return _ok(rid, {"count": count})
@@ -66,7 +66,7 @@ def _(rid, params: dict) -> dict:
 
         from tools.bot_relay import claim_pending_envelopes
 
-        home = Path(korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes"))
+        home = Path(korra_env("KORRA_HOME") or os.path.expanduser("~/.hermes"))
         root = home.parent.parent if home.parent.name == "profiles" else home
         return _ok(rid, {"envelopes": claim_pending_envelopes(root)})
     except Exception as e:
@@ -100,7 +100,7 @@ def _(rid, params: dict) -> dict:
         if len(message) > MESSAGE_MAX_CHARS + 200:  # + attribution headroom
             return _err(rid, 4091, "message too long")
 
-        home = Path(korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes"))
+        home = Path(korra_env("KORRA_HOME") or os.path.expanduser("~/.hermes"))
         root = home.parent.parent if home.parent.name == "profiles" else home
         known = {"default"}
         profiles_dir = root / "profiles"
@@ -195,7 +195,7 @@ def _(rid, params: dict) -> dict:
 
         from tools.bot_relay import write_reply
 
-        home = Path(korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes"))
+        home = Path(korra_env("KORRA_HOME") or os.path.expanduser("~/.hermes"))
         root = home.parent.parent if home.parent.name == "profiles" else home
         write_reply(
             root,

@@ -217,7 +217,7 @@ def start_loop_liveness_watchdog(
 
 def _process_hermes_home() -> Path:
     """HERMES_HOME for process-level identity files (ignore profile overrides)."""
-    val = korra_env("HERMES_HOME", "").strip()
+    val = korra_env("KORRA_HOME", "").strip()
     if val:
         return Path(val)
     return get_hermes_home()

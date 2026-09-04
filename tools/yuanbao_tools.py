@@ -228,7 +228,7 @@ async def send_sticker(
         get_random_sticker,
     )
 
-    target = (chat_id or "").strip() or get_session_env("HERMES_SESSION_CHAT_ID", "")
+    target = (chat_id or "").strip() or get_session_env("KORRA_SESSION_CHAT_ID", "")
     if not target:
         return {
             "success": False,
@@ -421,7 +421,7 @@ def _check_yuanbao():
     """Toolset availability check — True when running in a yuanbao gateway session."""
     try:
         from gateway.session_context import get_session_env
-        if get_session_env("HERMES_SESSION_PLATFORM", "") == "yuanbao":
+        if get_session_env("KORRA_SESSION_PLATFORM", "") == "yuanbao":
             return True
     except Exception:
         pass
@@ -449,7 +449,7 @@ async def _handle_yb_send_dm(args, **kw):
     if not group_code:
         try:
             from gateway.session_context import get_session_env
-            chat_id = get_session_env("HERMES_SESSION_CHAT_ID", "")
+            chat_id = get_session_env("KORRA_SESSION_CHAT_ID", "")
             # chat_id format: "group:<code>" → extract the code part
             if chat_id.startswith("group:"):
                 group_code = chat_id.split(":", 1)[1]

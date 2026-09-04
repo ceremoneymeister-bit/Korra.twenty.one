@@ -1561,7 +1561,7 @@ def _bypass_sdk_request_transform(stream_kwargs: dict) -> dict:
     the transform.  Set HERMES_CODEX_SDK_TRANSFORM=1 to restore the pre-fix
     behavior.
     """
-    if korra_env("HERMES_CODEX_SDK_TRANSFORM", "").strip().lower() in {
+    if korra_env("KORRA_CODEX_SDK_TRANSFORM", "").strip().lower() in {
         "1", "true", "yes", "on"
     }:
         return stream_kwargs

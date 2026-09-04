@@ -168,7 +168,7 @@ def register_from_config(cfg: Optional[Dict[str, Any]]) -> List[WebhookTarget]:
 
     from utils import env_var_enabled
 
-    if env_var_enabled("HERMES_SAFE_MODE"):
+    if env_var_enabled("KORRA_SAFE_MODE"):
         logger.info("HERMES_SAFE_MODE=1 — outbound webhook registration skipped")
         return []
 

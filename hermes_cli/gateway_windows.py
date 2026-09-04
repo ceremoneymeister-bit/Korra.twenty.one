@@ -46,7 +46,7 @@ from hermes_cli._subprocess_compat import (
     windows_detach_flags_without_breakaway,
     windows_hide_flags,
 )
-from hermes_constants import korra_env, korra_env_set, korra_env_expand
+from hermes_constants import korra_env, korra_env_set, korra_env_expand, korra_env_pop
 
 logger = logging.getLogger(__name__)
 
@@ -254,15 +254,15 @@ def _launch_elevated_install(
     start_on_login: bool | None = None,
 ) -> bool:
     """Launch an elevated gateway install via UAC and return True on handoff."""
-    old_start_now = korra_env("HERMES_GATEWAY_INSTALL_START_NOW")
-    old_start_on_login = korra_env("HERMES_GATEWAY_INSTALL_START_ON_LOGIN")
-    old_handoff = korra_env("HERMES_GATEWAY_ELEVATED_HANDOFF")
+    old_start_now = korra_env("KORRA_GATEWAY_INSTALL_START_NOW")
+    old_start_on_login = korra_env("KORRA_GATEWAY_INSTALL_START_ON_LOGIN")
+    old_handoff = korra_env("KORRA_GATEWAY_ELEVATED_HANDOFF")
     try:
         if start_now is not None:
-            korra_env_set(os.environ, "HERMES_GATEWAY_INSTALL_START_NOW", "1" if start_now else "0")
+            korra_env_set(os.environ, "KORRA_GATEWAY_INSTALL_START_NOW", "1" if start_now else "0")
         if start_on_login is not None:
-            korra_env_set(os.environ, "HERMES_GATEWAY_INSTALL_START_ON_LOGIN", "1" if start_on_login else "0")
-        korra_env_set(os.environ, "HERMES_GATEWAY_ELEVATED_HANDOFF", "1")
+            korra_env_set(os.environ, "KORRA_GATEWAY_INSTALL_START_ON_LOGIN", "1" if start_on_login else "0")
+        korra_env_set(os.environ, "KORRA_GATEWAY_ELEVATED_HANDOFF", "1")
         extra_args = ["--elevated-handoff"]
         if force:
             extra_args.append("--force")
@@ -273,14 +273,14 @@ def _launch_elevated_install(
         return _launch_elevated_gateway_command("install", extra_args)
     finally:
         for key, old in (
-            ("HERMES_GATEWAY_INSTALL_START_NOW", old_start_now),
-            ("HERMES_GATEWAY_INSTALL_START_ON_LOGIN", old_start_on_login),
-            ("HERMES_GATEWAY_ELEVATED_HANDOFF", old_handoff),
+            ("KORRA_GATEWAY_INSTALL_START_NOW", old_start_now),
+            ("KORRA_GATEWAY_INSTALL_START_ON_LOGIN", old_start_on_login),
+            ("KORRA_GATEWAY_ELEVATED_HANDOFF", old_handoff),
         ):
             if old is None:
-                os.environ.pop(key, None)
+                korra_env_pop(os.environ, key)
             else:
-                os.environ[key] = old
+                korra_env_set(os.environ, key, old)
 
 
 def _launch_elevated_uninstall() -> bool:
@@ -413,9 +413,14 @@ def _build_gateway_cmd_script(
     """
     lines = ["@echo off", f"rem {_TASK_DESCRIPTION}"]
     lines.append(f"cd /d {_quote_cmd_script_arg(working_dir)}")
+    # Оба имени пары: скрипт задаёт окружение внешнему процессу, где
+    # старое имя всё ещё может читаться сторонними обёртками.
+    lines.append(f'set "KORRA_HOME={hermes_home}"')
     lines.append(f'set "HERMES_HOME={hermes_home}"')
     lines.append('set "PYTHONIOENCODING=utf-8"')
+    lines.append('set "KORRA_GATEWAY_DETACHED=1"')
     lines.append('set "HERMES_GATEWAY_DETACHED=1"')
+    lines.append('set "KORRA_SUPERVISED_CHILD=1"')
     lines.append('set "HERMES_SUPERVISED_CHILD=1"')
     python_exe_path, venv_dir, extra_pythonpath = _resolve_detached_python(python_path)
     # VIRTUAL_ENV lets the gateway's own python detection find the venv
@@ -499,9 +504,12 @@ def _build_gateway_vbs_script(
         "Dim sh, env, existing_pp",
         'Set sh = CreateObject("WScript.Shell")',
         'Set env = sh.Environment("PROCESS")',
+        f"env.Item({_quote_vbs_string('KORRA_HOME')}) = {_quote_vbs_string(hermes_home)}",
         f"env.Item({_quote_vbs_string('HERMES_HOME')}) = {_quote_vbs_string(hermes_home)}",
         f"env.Item({_quote_vbs_string('PYTHONIOENCODING')}) = {_quote_vbs_string('utf-8')}",
+        f"env.Item({_quote_vbs_string('KORRA_GATEWAY_DETACHED')}) = {_quote_vbs_string('1')}",
         f"env.Item({_quote_vbs_string('HERMES_GATEWAY_DETACHED')}) = {_quote_vbs_string('1')}",
+        f"env.Item({_quote_vbs_string('KORRA_SUPERVISED_CHILD')}) = {_quote_vbs_string('1')}",
         f"env.Item({_quote_vbs_string('HERMES_SUPERVISED_CHILD')}) = {_quote_vbs_string('1')}",
         f"env.Item({_quote_vbs_string('VIRTUAL_ENV')}) = {_quote_vbs_string(_preserve_hermes_home_path(venv_dir))}",
         # Mirror the cmd wrapper's ``PYTHONPATH=<static>;%PYTHONPATH%``: chain onto
@@ -817,9 +825,9 @@ def _build_gateway_argv() -> tuple[list[str], str, dict[str, str]]:
         "PYTHONIOENCODING": "utf-8",
         "VIRTUAL_ENV": _preserve_hermes_home_path(venv_dir),
         **korra_env_expand({
-            "HERMES_HOME": hermes_home,
-            "HERMES_GATEWAY_DETACHED": "1",
-            "HERMES_SUPERVISED_CHILD": "1",
+            "KORRA_HOME": hermes_home,
+            "KORRA_GATEWAY_DETACHED": "1",
+            "KORRA_SUPERVISED_CHILD": "1",
         }),
     }
     _prepend_pythonpath(
@@ -887,10 +895,10 @@ def windowless_gateway_restart_spec(
     env_overlay: dict[str, str] = {
         "PYTHONIOENCODING": "utf-8",
         "VIRTUAL_ENV": str(venv_dir),
-        **korra_env_expand({"HERMES_GATEWAY_DETACHED": "1"}),
+        **korra_env_expand({"KORRA_GATEWAY_DETACHED": "1"}),
     }
     if hermes_home:
-        korra_env_set(env_overlay, "HERMES_HOME", hermes_home)
+        korra_env_set(env_overlay, "KORRA_HOME", hermes_home)
     _prepend_pythonpath(
         env_overlay,
         [project_root, *extra_pythonpath] if extra_pythonpath else [project_root],
@@ -1007,8 +1015,8 @@ def _prompt_install_choices(
     start_on_login: bool | None = None,
 ) -> tuple[bool, bool]:
     """Return (start_now, start_on_login), asking before any UAC escalation."""
-    env_start_now = _install_choice_from_env("HERMES_GATEWAY_INSTALL_START_NOW")
-    env_start_on_login = _install_choice_from_env("HERMES_GATEWAY_INSTALL_START_ON_LOGIN")
+    env_start_now = _install_choice_from_env("KORRA_GATEWAY_INSTALL_START_NOW")
+    env_start_on_login = _install_choice_from_env("KORRA_GATEWAY_INSTALL_START_ON_LOGIN")
     if start_now is None:
         start_now = env_start_now
     if start_on_login is None:

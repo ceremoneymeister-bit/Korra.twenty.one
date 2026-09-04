@@ -354,8 +354,8 @@ class WeComAdapter(BasePlatformAdapter):
 
         # Text batching: merge rapid successive messages (Telegram-style).
         # WeCom clients split long messages around 4000 chars.
-        self._text_batch_delay_seconds = env_float("HERMES_WECOM_TEXT_BATCH_DELAY_SECONDS", 0.6)
-        self._text_batch_split_delay_seconds = env_float("HERMES_WECOM_TEXT_BATCH_SPLIT_DELAY_SECONDS", 2.0)
+        self._text_batch_delay_seconds = env_float("KORRA_WECOM_TEXT_BATCH_DELAY_SECONDS", 0.6)
+        self._text_batch_split_delay_seconds = env_float("KORRA_WECOM_TEXT_BATCH_SPLIT_DELAY_SECONDS", 2.0)
         # Attachment/text merge window: WeCom clients send "image + text" as two
         # separate inbound callbacks (one attachment-only, one text) a few
         # hundred ms apart. Holding an attachment-only message for this window

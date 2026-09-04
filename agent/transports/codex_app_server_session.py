@@ -289,7 +289,7 @@ class CodexAppServerSession:
         self._codex_home = codex_home
         self._permission_profile = (
             permission_profile or _HERMES_TO_CODEX_PERMISSION_PROFILE.get(
-                korra_env("HERMES_TERMINAL_SECURITY_MODE", "auto"),
+                korra_env("KORRA_TERMINAL_SECURITY_MODE", "auto"),
                 "workspace-write",
             )
         )

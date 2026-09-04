@@ -169,7 +169,7 @@ _cfg_mtime: float | None = None
 _cfg_path = None
 _session_resume_lock = threading.Lock()
 try:
-    _slash_timeout = float(korra_env("HERMES_TUI_SLASH_TIMEOUT_S") or "45")
+    _slash_timeout = float(korra_env("KORRA_TUI_SLASH_TIMEOUT_S") or "45")
 except (ValueError, TypeError):
     _slash_timeout = 45.0
 _SLASH_WORKER_TIMEOUT_S = max(5.0, _slash_timeout)
@@ -191,7 +191,7 @@ def _resolve_ws_orphan_reap_grace() -> float:
     ``HERMES_TUI_WS_ORPHAN_REAP_GRACE_S`` env var is kept as an internal
     override for backward compatibility and wins when set.
     """
-    raw = korra_env("HERMES_TUI_WS_ORPHAN_REAP_GRACE_S")
+    raw = korra_env("KORRA_TUI_WS_ORPHAN_REAP_GRACE_S")
     if raw is None or not str(raw).strip():
         try:
             from hermes_cli.config import load_config
@@ -372,7 +372,7 @@ _LONG_HANDLERS = frozenset(
 
 try:
     _rpc_pool_workers = max(
-        2, int(korra_env("HERMES_TUI_RPC_POOL_WORKERS") or "8")
+        2, int(korra_env("KORRA_TUI_RPC_POOL_WORKERS") or "8")
     )
 except (ValueError, TypeError):
     _rpc_pool_workers = 8
@@ -484,7 +484,7 @@ class _SlashWorker:
             hermes_subprocess_env(inherit_credentials=True),
             scrub_secrets=False,
             inherit_profile_home=False,  # base already carries the HOME contract
-            extra=korra_env_expand({"HERMES_HOME": str(profile_home)}) if profile_home else None,
+            extra=korra_env_expand({"KORRA_HOME": str(profile_home)}) if profile_home else None,
         )
         # Prepend the Hermes venv bin dir and the user-local bin dir to PATH so
         # slash_worker child processes can resolve Hermes-managed CLIs
@@ -1607,7 +1607,7 @@ def _shutdown_sessions() -> None:
 # hours-scale because last_active freezes during a long turn and on passive
 # viewing — running/pending/starting/live-transport are hard exemptions instead.
 try:
-    _SESSION_TTL_S = float(korra_env("HERMES_TUI_SESSION_TTL_S") or 6 * 3600)
+    _SESSION_TTL_S = float(korra_env("KORRA_TUI_SESSION_TTL_S") or 6 * 3600)
 except (TypeError, ValueError):
     _SESSION_TTL_S = float(6 * 3600)
 _SESSION_TTL_S = max(0.0, _SESSION_TTL_S)
@@ -1626,7 +1626,7 @@ _REAPER_SCAN_S = 300.0
 #       a SIGKILL loses at most one flush interval.
 try:
     _EXIT_FLUSH_BUDGET_S = float(
-        korra_env("HERMES_TUI_EXIT_FLUSH_BUDGET_S") or 5.0
+        korra_env("KORRA_TUI_EXIT_FLUSH_BUDGET_S") or 5.0
     )
 except (TypeError, ValueError):
     _EXIT_FLUSH_BUDGET_S = 5.0
@@ -1634,7 +1634,7 @@ _EXIT_FLUSH_BUDGET_S = max(0.0, _EXIT_FLUSH_BUDGET_S)
 
 try:
     _INCREMENTAL_FLUSH_INTERVAL_S = float(
-        korra_env("HERMES_TUI_SESSION_FLUSH_INTERVAL_S") or _REAPER_SCAN_S
+        korra_env("KORRA_TUI_SESSION_FLUSH_INTERVAL_S") or _REAPER_SCAN_S
     )
 except (TypeError, ValueError):
     _INCREMENTAL_FLUSH_INTERVAL_S = _REAPER_SCAN_S
@@ -2060,7 +2060,7 @@ def _sweep_orphaned_session_rows() -> list[str]:
 # at which point the sweep treats it as dead.
 
 _HEARTBEAT_REFRESH_S = float(
-    korra_env("HERMES_GATEWAY_HEARTBEAT_REFRESH_S") or 60.0
+    korra_env("KORRA_GATEWAY_HEARTBEAT_REFRESH_S") or 60.0
 )
 _HEARTBEAT_REFRESH_S = max(0.0, _HEARTBEAT_REFRESH_S)
 
@@ -2583,7 +2583,7 @@ _compute_host_supervisor_lock = threading.Lock()
 
 
 def _inside_compute_host_child() -> bool:
-    return korra_env("HERMES_COMPUTE_HOST_CHILD") == "1"
+    return korra_env("KORRA_COMPUTE_HOST_CHILD") == "1"
 
 
 def _turn_isolation_enabled(cfg: dict | None = None) -> bool:
@@ -4670,9 +4670,9 @@ def _clear_session_context(tokens: list) -> None:
 
 def _enable_gateway_prompts() -> None:
     """Route approvals through gateway callbacks instead of CLI input()."""
-    korra_env_set(os.environ, "HERMES_GATEWAY_SESSION", "1")
-    korra_env_set(os.environ, "HERMES_EXEC_ASK", "1")
-    korra_env_set(os.environ, "HERMES_INTERACTIVE", "1")
+    korra_env_set(os.environ, "KORRA_GATEWAY_SESSION", "1")
+    korra_env_set(os.environ, "KORRA_EXEC_ASK", "1")
+    korra_env_set(os.environ, "KORRA_INTERACTIVE", "1")
 
 
 # ── Blocking prompt factory ──────────────────────────────────────────
@@ -5217,8 +5217,8 @@ def _ensure_skin_watcher() -> None:
 
 def _resolve_model() -> str:
     env = (
-        korra_env("HERMES_MODEL", "")
-        or korra_env("HERMES_INFERENCE_MODEL", "")
+        korra_env("KORRA_MODEL", "")
+        or korra_env("KORRA_INFERENCE_MODEL", "")
     ).strip()
     if env:
         return env
@@ -5257,8 +5257,8 @@ def _resolve_session_platform() -> str:
       * neither set → "tui"
         (standalone ``hermes --tui``.)
     """
-    if is_truthy_value(korra_env("HERMES_DESKTOP")) and not is_truthy_value(
-        korra_env("HERMES_DESKTOP_TERMINAL")
+    if is_truthy_value(korra_env("KORRA_DESKTOP")) and not is_truthy_value(
+        korra_env("KORRA_DESKTOP_TERMINAL")
     ):
         return "desktop"
     return "tui"
@@ -5315,13 +5315,13 @@ def _config_model_target() -> tuple[str, str]:
 
 def _resolve_startup_runtime() -> tuple[str, str | None]:
     model = _resolve_model()
-    explicit_provider = korra_env("HERMES_TUI_PROVIDER", "").strip()
+    explicit_provider = korra_env("KORRA_TUI_PROVIDER", "").strip()
     if explicit_provider:
         return model, explicit_provider
 
     explicit_model = (
-        korra_env("HERMES_MODEL", "")
-        or korra_env("HERMES_INFERENCE_MODEL", "")
+        korra_env("KORRA_MODEL", "")
+        or korra_env("KORRA_INFERENCE_MODEL", "")
     ).strip()
     if not explicit_model:
         return model, None
@@ -5336,7 +5336,7 @@ def _resolve_startup_runtime() -> tuple[str, str | None]:
                 if isinstance(cfg, dict)
                 else ""
             )
-            or korra_env("HERMES_INFERENCE_PROVIDER", "").strip().lower()
+            or korra_env("KORRA_INFERENCE_PROVIDER", "").strip().lower()
             or "auto"
         )
         detected = detect_static_provider_for_model(explicit_model, current_provider)
@@ -5980,7 +5980,7 @@ def _load_memory_notifications() -> str:
 
 
 def _load_tool_progress_mode() -> str:
-    env = korra_env("HERMES_TUI_TOOL_PROGRESS", "").strip().lower()
+    env = korra_env("KORRA_TUI_TOOL_PROGRESS", "").strip().lower()
     if env in {"off", "new", "all", "verbose"}:
         return env
     raw = (_load_cfg().get("display") or {}).get("tool_progress", "all")
@@ -6017,7 +6017,7 @@ def _load_enabled_toolsets(platform: str | None = None) -> list[str] | None:
     session_platform = platform or _resolve_session_platform()
     explicit = [
         item.strip()
-        for item in korra_env("HERMES_TUI_TOOLSETS", "").split(",")
+        for item in korra_env("KORRA_TUI_TOOLSETS", "").split(",")
         if item.strip()
     ]
     cfg = None
@@ -7357,7 +7357,7 @@ def _get_usage(agent) -> dict:
         pass
     # Dev-only live credits-spent readout (L0 usage-aware-credits). Gated on
     # HERMES_DEV_CREDITS so the payload stays clean when the flag is off.
-    if is_truthy_value(korra_env("HERMES_DEV_CREDITS")):
+    if is_truthy_value(korra_env("KORRA_DEV_CREDITS")):
         try:
             spent = agent.get_credits_spent_micros()
             if spent is not None:
@@ -8541,7 +8541,7 @@ def _apply_personality_to_session(
 def _cfg_max_turns(cfg: dict, default: int) -> int:
     from hermes_cli.config import resolve_turn_limit as _resolve_turn_limit
     # Env var override (highest priority)
-    env_val = korra_env("HERMES_TUI_MAX_TURNS")
+    env_val = korra_env("KORRA_TUI_MAX_TURNS")
     if env_val:
         return _resolve_turn_limit(env_val, default=default)
     # Config file value — route through resolve_turn_limit so that
@@ -8556,7 +8556,7 @@ def _cfg_max_turns(cfg: dict, default: int) -> int:
 
 
 def _parse_tui_skills_env() -> list[str]:
-    raw = korra_env("HERMES_TUI_SKILLS", "")
+    raw = korra_env("KORRA_TUI_SKILLS", "")
     skills: list[str] = []
     seen: set[str] = set()
     for part in raw.replace("\n", ",").split(","):
@@ -9121,10 +9121,10 @@ def _make_agent(
         session_id=session_id or key,
         session_db=session_db if session_db is not None else _get_db(),
         ephemeral_system_prompt=system_prompt or None,
-        checkpoints_enabled=is_truthy_value(korra_env("HERMES_TUI_CHECKPOINTS")),
-        pass_session_id=is_truthy_value(korra_env("HERMES_TUI_PASS_SESSION_ID")),
-        skip_context_files=is_truthy_value(korra_env("HERMES_IGNORE_RULES")),
-        skip_memory=is_truthy_value(korra_env("HERMES_IGNORE_RULES")),
+        checkpoints_enabled=is_truthy_value(korra_env("KORRA_TUI_CHECKPOINTS")),
+        pass_session_id=is_truthy_value(korra_env("KORRA_TUI_PASS_SESSION_ID")),
+        skip_context_files=is_truthy_value(korra_env("KORRA_IGNORE_RULES")),
+        skip_memory=is_truthy_value(korra_env("KORRA_IGNORE_RULES")),
         fallback_model=_load_fallback_model(),
         **_agent_cbs(sid),
     )
@@ -11303,7 +11303,7 @@ _PET_REFERENCE_MIME_EXT = {
 try:
     _PET_REFERENCE_MAX_BYTES = max(
         1,
-        int(korra_env("HERMES_PET_REFERENCE_MAX_BYTES") or str(16 * 1024 * 1024)),
+        int(korra_env("KORRA_PET_REFERENCE_MAX_BYTES") or str(16 * 1024 * 1024)),
     )
 except (TypeError, ValueError):
     _PET_REFERENCE_MAX_BYTES = 16 * 1024 * 1024
@@ -14509,13 +14509,13 @@ def _(rid, params: dict) -> dict:
                         _session_info(agent, session),
                     )
             else:
-                current = is_truthy_value(korra_env("HERMES_YOLO_MODE"))
+                current = is_truthy_value(korra_env("KORRA_YOLO_MODE"))
                 enable = _resolve_toggle(current)
                 if enable:
-                    korra_env_set(os.environ, "HERMES_YOLO_MODE", "1")
+                    korra_env_set(os.environ, "KORRA_YOLO_MODE", "1")
                     nv = "1"
                 else:
-                    korra_env_pop(os.environ, "HERMES_YOLO_MODE")
+                    korra_env_pop(os.environ, "KORRA_YOLO_MODE")
                     nv = "0"
             return _ok(rid, {"key": key, "value": nv, "scope": "session"})
         except Exception as e:
@@ -16534,12 +16534,12 @@ def _voice_mode_enabled() -> bool:
     avoids the TUI auto-starting in REC the next time the user opens it
     just because they happened to enable voice in a prior session.
     """
-    return korra_env("HERMES_VOICE", "").strip() == "1"
+    return korra_env("KORRA_VOICE", "").strip() == "1"
 
 
 def _voice_tts_enabled() -> bool:
     """Whether agent replies should be spoken back via TTS (runtime only)."""
-    return korra_env("HERMES_VOICE_TTS", "").strip() == "1"
+    return korra_env("KORRA_VOICE_TTS", "").strip() == "1"
 
 
 def _any_session_running() -> bool:
@@ -16788,8 +16788,8 @@ def _full_duplex_listener() -> None:
                     # Bare stop phrase — in EITHER phase the user means
                     # "stop everything": the turn was already interrupted /
                     # TTS cut at trip time; now end the voice chat.
-                    korra_env_set(os.environ, "HERMES_VOICE", "0")
-                    korra_env_set(os.environ, "HERMES_VOICE_TTS", "0")
+                    korra_env_set(os.environ, "KORRA_VOICE", "0")
+                    korra_env_set(os.environ, "KORRA_VOICE_TTS", "0")
                     try:
                         from hermes_cli.voice import stop_continuous
 
@@ -17358,7 +17358,7 @@ def _(rid, params: dict) -> dict:
         # Runtime-only flag (CLI parity) — no _write_config_key, so the
         # next TUI launch starts with voice OFF instead of auto-REC from a
         # persisted stale toggle.
-        korra_env_set(os.environ, "HERMES_VOICE", "1" if enabled else "0")
+        korra_env_set(os.environ, "KORRA_VOICE", "1" if enabled else "0")
 
         stop_hint = ""
         if enabled:
@@ -17386,7 +17386,7 @@ def _(rid, params: dict) -> dict:
 
             # Clear TTS so it can be toggled independently after voice is off,
             # and silence any in-flight streaming speech.
-            korra_env_set(os.environ, "HERMES_VOICE_TTS", "0")
+            korra_env_set(os.environ, "KORRA_VOICE_TTS", "0")
             _tts_stream_stop(user_barge=False)
 
         return _ok(
@@ -17404,7 +17404,7 @@ def _(rid, params: dict) -> dict:
             return _err(rid, 4014, "enable voice mode first: /voice on")
         new_value = not _voice_tts_enabled()
         # Runtime-only flag (CLI parity) — see voice.toggle on/off above.
-        korra_env_set(os.environ, "HERMES_VOICE_TTS", "1" if new_value else "0")
+        korra_env_set(os.environ, "KORRA_VOICE_TTS", "1" if new_value else "0")
         if not new_value:
             _tts_stream_stop(user_barge=False)
         # Include ``record_key`` on every branch so a /voice tts toggle
@@ -17517,8 +17517,8 @@ def _(rid, params: dict) -> dict:
                 # (TUI, desktop) end the conversation instead of treating
                 # it as a no-speech timeout. The continuous loop has
                 # already halted before this callback fires.
-                korra_env_set(os.environ, "HERMES_VOICE", "0")
-                korra_env_set(os.environ, "HERMES_VOICE_TTS", "0")
+                korra_env_set(os.environ, "KORRA_VOICE", "0")
+                korra_env_set(os.environ, "KORRA_VOICE_TTS", "0")
                 try:
                     _tts_stream_stop(user_barge=False)
                 except Exception:

@@ -264,8 +264,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     # Quiet mode: keep Hermes' own banners off stdout (which is the MCP wire).
-    korra_env_setdefault(os.environ, "HERMES_QUIET", "1")
-    korra_env_setdefault(os.environ, "HERMES_REDACT_SECRETS", "true")
+    korra_env_setdefault(os.environ, "KORRA_QUIET", "1")
+    korra_env_setdefault(os.environ, "KORRA_REDACT_SECRETS", "true")
 
     try:
         server = _build_server()

@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Freeze YOLO mode at module import time. Reading os.environ on every call
 # would allow any skill running inside the process to set this variable and
 # instantly bypass all approval checks — a prompt-injection escalation path.
-_YOLO_MODE_FROZEN: bool = is_truthy_value(korra_env("HERMES_YOLO_MODE", ""))
+_YOLO_MODE_FROZEN: bool = is_truthy_value(korra_env("KORRA_YOLO_MODE", ""))
 
 # Per-thread/per-task gateway session identity.
 # Gateway runs agent turns concurrently in executor threads, so reading a
@@ -103,7 +103,7 @@ def _is_interactive_cli() -> bool:
     ctx_val = _hermes_interactive_ctx.get()
     if ctx_val is not None:
         return is_truthy_value(ctx_val)
-    return env_var_enabled("HERMES_INTERACTIVE")
+    return env_var_enabled("KORRA_INTERACTIVE")
 
 
 def _fire_approval_hook(hook_name: str, **kwargs) -> None:
@@ -237,7 +237,7 @@ def get_current_session_key(default: str = "default") -> str:
     if session_key:
         return session_key
     from gateway.session_context import get_session_env
-    return get_session_env("HERMES_SESSION_KEY", default)
+    return get_session_env("KORRA_SESSION_KEY", default)
 
 
 def _get_session_platform() -> str:
@@ -245,9 +245,9 @@ def _get_session_platform() -> str:
     try:
         from gateway.session_context import get_session_env
 
-        return get_session_env("HERMES_SESSION_PLATFORM", "") or ""
+        return get_session_env("KORRA_SESSION_PLATFORM", "") or ""
     except Exception:
-        return korra_env("HERMES_SESSION_PLATFORM", "") or ""
+        return korra_env("KORRA_SESSION_PLATFORM", "") or ""
 
 
 def _is_cron_approval_context() -> bool:
@@ -261,9 +261,9 @@ def _is_cron_approval_context() -> bool:
     try:
         from gateway.session_context import get_session_env
 
-        return is_truthy_value(get_session_env("HERMES_CRON_SESSION", ""))
+        return is_truthy_value(get_session_env("KORRA_CRON_SESSION", ""))
     except Exception:
-        return env_var_enabled("HERMES_CRON_SESSION")
+        return env_var_enabled("KORRA_CRON_SESSION")
 
 
 #: Gateway platforms that are programmatic/unattended: no human is on the
@@ -345,9 +345,9 @@ def _is_single_query_approval_context() -> bool:
     try:
         from gateway.session_context import get_session_env
 
-        return is_truthy_value(get_session_env("HERMES_SINGLE_QUERY_SESSION", ""))
+        return is_truthy_value(get_session_env("KORRA_SINGLE_QUERY_SESSION", ""))
     except Exception:
-        return env_var_enabled("HERMES_SINGLE_QUERY_SESSION")
+        return env_var_enabled("KORRA_SINGLE_QUERY_SESSION")
 
 
 def _is_gateway_approval_context() -> bool:
@@ -376,7 +376,7 @@ def _is_gateway_approval_context() -> bool:
         return False
     if _is_unattended_platform_approval_context():
         return False
-    if env_var_enabled("HERMES_GATEWAY_SESSION"):
+    if env_var_enabled("KORRA_GATEWAY_SESSION"):
         return True
     return bool(_get_session_platform())
 
@@ -3439,7 +3439,7 @@ def _prompt_dangerous_approval_inner(command: str, description: str,
         # tests, sshd, etc.).
         pass
 
-    korra_env_set(os.environ, "HERMES_SPINNER_PAUSE", "1")
+    korra_env_set(os.environ, "KORRA_SPINNER_PAUSE", "1")
     try:
         # Resolve the active UI language once per prompt so we don't re-read
         # config/YAML inside the retry loop below.
@@ -3517,8 +3517,8 @@ def _prompt_dangerous_approval_inner(command: str, description: str,
         print("\n" + t("approval.cancelled"))
         return "deny"
     finally:
-        if korra_env_present("HERMES_SPINNER_PAUSE"):
-            korra_env_pop(os.environ, "HERMES_SPINNER_PAUSE")
+        if korra_env_present("KORRA_SPINNER_PAUSE"):
+            korra_env_pop(os.environ, "KORRA_SPINNER_PAUSE")
         print()
         sys.stdout.flush()
 
@@ -4033,7 +4033,7 @@ def _run_approval_gate(
         )
         return {"approved": True, "message": None}
 
-    if is_gateway or env_var_enabled("HERMES_EXEC_ASK"):
+    if is_gateway or env_var_enabled("KORRA_EXEC_ASK"):
         # Interactive gateway round-trip when a notify callback is
         # registered for this session (Discord/Telegram/Slack embed +
         # buttons, same mechanism as check_dangerous_command). Blocks the
@@ -4908,7 +4908,7 @@ def check_all_command_guards(command: str, env_type: str,
     approval_callback = _resolve_cli_approval_callback(approval_callback)
     is_cli = _is_interactive_cli()
     is_gateway = _is_gateway_approval_context()
-    is_ask = env_var_enabled("HERMES_EXEC_ASK")
+    is_ask = env_var_enabled("KORRA_EXEC_ASK")
 
     # Single-query (-q) sessions export HERMES_INTERACTIVE=1 but have no user
     # to answer approval prompts — an unanswered prompt just waits the full
@@ -5599,7 +5599,7 @@ def check_execute_code_guard(code: str, env_type: str,
         return {"approved": True, "message": None}
 
     is_gateway = _is_gateway_approval_context()
-    is_ask = env_var_enabled("HERMES_EXEC_ASK")
+    is_ask = env_var_enabled("KORRA_EXEC_ASK")
     is_cli = _is_interactive_cli()
     approval_callback = _resolve_cli_approval_callback()
 

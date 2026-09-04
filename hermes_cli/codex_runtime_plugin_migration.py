@@ -580,19 +580,19 @@ def _build_hermes_tools_mcp_entry() -> dict:
     # a sibling test's monkeypatch.setenv("HERMES_HOME", tmp_path) would
     # otherwise leak a transient pytest tempdir into the user's real
     # ~/.codex/config.toml and silently brick codex once the tempdir is GC'd.
-    hermes_home = korra_env("HERMES_HOME") or ""
+    hermes_home = korra_env("KORRA_HOME") or ""
     if hermes_home and _looks_like_test_tempdir(hermes_home):
         hermes_home = ""
     if hermes_home:
-        korra_env_set(env, "HERMES_HOME", hermes_home)
+        korra_env_set(env, "KORRA_HOME", hermes_home)
     # PYTHONPATH passes through so a worktree-launched hermes finds the
     # branch's modules instead of the installed package.
     pythonpath = os.environ.get("PYTHONPATH")
     if pythonpath:
         env["PYTHONPATH"] = pythonpath
     # Quiet mode + redaction defaults so the MCP wire stays clean.
-    korra_env_set(env, "HERMES_QUIET", "1")
-    korra_env_set(env, "HERMES_REDACT_SECRETS", env.get("HERMES_REDACT_SECRETS", "true"))
+    korra_env_set(env, "KORRA_QUIET", "1")
+    korra_env_set(env, "KORRA_REDACT_SECRETS", korra_env("KORRA_REDACT_SECRETS", "true", env=env))
 
     out: dict[str, Any] = {
         "command": sys.executable,

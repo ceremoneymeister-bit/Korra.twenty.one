@@ -1208,8 +1208,8 @@ def kanban_command(args: argparse.Namespace) -> int:
 
 def _profile_author() -> str:
     """Best-effort author name for an interactive CLI call."""
-    for env in ("HERMES_PROFILE_NAME", "HERMES_PROFILE"):
-        v = os.environ.get(env)
+    for env in ("KORRA_PROFILE_NAME", "KORRA_PROFILE"):
+        v = korra_env(env)
         if v:
             return v
     try:
@@ -1276,7 +1276,7 @@ def _is_delegated_child_cli_mutation(args: argparse.Namespace) -> bool:
 
         return is_delegated_child_process_context()
     except Exception:
-        return bool(korra_env("HERMES_DELEGATED_CHILD_CONTEXT"))
+        return bool(korra_env("KORRA_DELEGATED_CHILD_CONTEXT"))
 
 
 # ---------------------------------------------------------------------------
@@ -2301,9 +2301,9 @@ def _cmd_attach_rm(args: argparse.Namespace) -> int:
 
 
 def _worker_run_id_for(task_id: str) -> Optional[int]:
-    if korra_env("HERMES_KANBAN_TASK") != task_id:
+    if korra_env("KORRA_KANBAN_TASK") != task_id:
         return None
-    raw = korra_env("HERMES_KANBAN_RUN_ID")
+    raw = korra_env("KORRA_KANBAN_RUN_ID")
     if not raw:
         return None
     try:

@@ -2004,7 +2004,7 @@ DEFAULT_BARGE_MULTIPLIER = 3.0
 
 
 def _voice_debug_enabled() -> bool:
-    return korra_env("HERMES_VOICE_DEBUG", "").strip() == "1"
+    return korra_env("KORRA_VOICE_DEBUG", "").strip() == "1"
 
 
 def _vad_log(msg: str) -> None:

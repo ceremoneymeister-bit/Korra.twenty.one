@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 # those, JSON-RPC frames will accumulate in the buffer and the TUI
 # will hang waiting for ``gateway.ready``.  Default stays off so the
 # existing flush-after-write behaviour is unchanged.
-_DISABLE_FLUSH = (korra_env("HERMES_TUI_GATEWAY_NO_FLUSH", "") or "").strip().lower() in {
+_DISABLE_FLUSH = (korra_env("KORRA_TUI_GATEWAY_NO_FLUSH", "") or "").strip().lower() in {
     "1",
     "true",
     "yes",

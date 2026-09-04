@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # HERMES_DEBUG_INTERRUPT=1 to log loop entry/exit, periodic heartbeats, and
 # every is_interrupted() state change from _wait_for_process.  Off by default
 # to avoid flooding production gateway logs.
-_DEBUG_INTERRUPT = bool(korra_env("HERMES_DEBUG_INTERRUPT"))
+_DEBUG_INTERRUPT = bool(korra_env("KORRA_DEBUG_INTERRUPT"))
 
 # Extra seconds the ``run_bounded_sync`` backstop waits past the inner
 # ``_wait_for_process`` deadline. The inner poll loop is what returns
@@ -943,6 +943,7 @@ class BaseEnvironment(ABC):
         # process env (Hermes running inside another agent's terminal).
         parts.append(
             'export AI_AGENT="${AI_AGENT:-hermes-agent}" '
+            'KORRA_AGENT="${KORRA_AGENT:-true}" '
             'HERMES_AGENT="${HERMES_AGENT:-true}"'
         )
 

@@ -1226,16 +1226,16 @@ _CACHE_DIR_IMPORT_DEFAULTS = {
 
 _HERMES_HOME = get_hermes_home()
 _HERMES_ROOT = get_default_hermes_root()
-MEDIA_DELIVERY_ALLOW_DIRS_ENV = "HERMES_MEDIA_ALLOW_DIRS"
-MEDIA_DELIVERY_TRUST_RECENT_ENV = "HERMES_MEDIA_TRUST_RECENT_FILES"
-MEDIA_DELIVERY_TRUST_RECENT_SECONDS_ENV = "HERMES_MEDIA_TRUST_RECENT_SECONDS"
+MEDIA_DELIVERY_ALLOW_DIRS_ENV = "KORRA_MEDIA_ALLOW_DIRS"
+MEDIA_DELIVERY_TRUST_RECENT_ENV = "KORRA_MEDIA_TRUST_RECENT_FILES"
+MEDIA_DELIVERY_TRUST_RECENT_SECONDS_ENV = "KORRA_MEDIA_TRUST_RECENT_SECONDS"
 # Strict mode toggles the original allowlist+recency path-validation behavior.
 # Off by default — symmetric with inbound (we accept any document type the
 # user uploads), and with the denylist still blocking obvious credential /
 # system paths. Operators running public-facing gateways where prompt
 # injection from one user could exfiltrate the host's secrets to that same
 # user should set this to true.
-MEDIA_DELIVERY_STRICT_ENV = "HERMES_MEDIA_DELIVERY_STRICT"
+MEDIA_DELIVERY_STRICT_ENV = "KORRA_MEDIA_DELIVERY_STRICT"
 MEDIA_DELIVERY_SAFE_ROOTS = (
     IMAGE_CACHE_DIR,
     AUDIO_CACHE_DIR,
@@ -1338,10 +1338,10 @@ def _profile_cache_roots() -> List[Path]:
 
 def _kanban_attachment_roots() -> List[Path]:
     """Return durable Kanban attachment roots without importing kanban_db."""
-    override = korra_env("HERMES_KANBAN_ATTACHMENTS_ROOT", "").strip()
+    override = korra_env("KORRA_KANBAN_ATTACHMENTS_ROOT", "").strip()
     if override:
         return [Path(override).expanduser()]
-    home_override = korra_env("HERMES_KANBAN_HOME", "").strip()
+    home_override = korra_env("KORRA_KANBAN_HOME", "").strip()
     root = Path(home_override).expanduser() if home_override else _HERMES_ROOT
     roots = [root / "kanban" / "attachments"]
     boards_root = root / "kanban" / "boards"
@@ -1363,7 +1363,7 @@ def _media_delivery_allowed_roots() -> List[Path]:
     roots = [Path(root) for root in MEDIA_DELIVERY_SAFE_ROOTS]
     roots.extend(_profile_cache_roots())
     roots.extend(_kanban_attachment_roots())
-    extra_roots = os.environ.get(MEDIA_DELIVERY_ALLOW_DIRS_ENV, "")
+    extra_roots = korra_env(MEDIA_DELIVERY_ALLOW_DIRS_ENV, "")
     for chunk in extra_roots.split(os.pathsep):
         for raw_root in chunk.split(","):
             raw_root = raw_root.strip()
@@ -1380,11 +1380,11 @@ def _media_delivery_recency_seconds() -> float:
 
     0 disables recency-based trust entirely (pure-allowlist mode).
     """
-    raw = os.environ.get(MEDIA_DELIVERY_TRUST_RECENT_ENV, "1").strip().lower()
+    raw = korra_env(MEDIA_DELIVERY_TRUST_RECENT_ENV, "1").strip().lower()
     if raw in ("0", "false", "no", "off", ""):
         return 0.0
     try:
-        custom = os.environ.get(MEDIA_DELIVERY_TRUST_RECENT_SECONDS_ENV, "").strip()
+        custom = korra_env(MEDIA_DELIVERY_TRUST_RECENT_SECONDS_ENV, "").strip()
         if custom:
             seconds = float(custom)
             return max(0.0, seconds)
@@ -1404,7 +1404,7 @@ def _media_delivery_strict_mode() -> bool:
     gateways where prompt injection from one user shouldn't be able to
     exfiltrate the host's secrets to that same user.
     """
-    raw = os.environ.get(MEDIA_DELIVERY_STRICT_ENV, "0").strip().lower()
+    raw = korra_env(MEDIA_DELIVERY_STRICT_ENV, "0").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
 
@@ -3205,14 +3205,14 @@ class BasePlatformAdapter(ABC):
         # pre-sync read matches the single-knob default rather than silently
         # queueing.
         self._busy_text_mode: str = (
-            korra_env("HERMES_GATEWAY_BUSY_TEXT_MODE", "interrupt").strip().lower()
+            korra_env("KORRA_GATEWAY_BUSY_TEXT_MODE", "interrupt").strip().lower()
             or "interrupt"
         )
         self._busy_text_debounce_seconds: float = _float_env(
-            "HERMES_GATEWAY_BUSY_TEXT_DEBOUNCE_SECONDS", 0.35
+            "KORRA_GATEWAY_BUSY_TEXT_DEBOUNCE_SECONDS", 0.35
         )
         self._busy_text_hard_cap_seconds: float = _float_env(
-            "HERMES_GATEWAY_BUSY_TEXT_HARD_CAP_SECONDS", 1.0
+            "KORRA_GATEWAY_BUSY_TEXT_HARD_CAP_SECONDS", 1.0
         )
         self._text_debounce: dict[str, TextDebounceState] = {}
         # Background message-processing tasks spawned by handle_message().
@@ -6473,7 +6473,7 @@ class BasePlatformAdapter(ABC):
           HERMES_HUMAN_DELAY_MIN_MS: minimum delay in ms (default 800, custom mode)
           HERMES_HUMAN_DELAY_MAX_MS: maximum delay in ms (default 2500, custom mode)
         """
-        mode = korra_env("HERMES_HUMAN_DELAY_MODE", "off").lower()
+        mode = korra_env("KORRA_HUMAN_DELAY_MODE", "off").lower()
         if mode == "off":
             return 0.0
         if mode == "natural":
@@ -6481,11 +6481,11 @@ class BasePlatformAdapter(ABC):
             return random.uniform(min_ms / 1000.0, max_ms / 1000.0)
         # custom mode — tolerate malformed env vars instead of crashing.
         try:
-            min_ms = int(korra_env("HERMES_HUMAN_DELAY_MIN_MS", "800"))
+            min_ms = int(korra_env("KORRA_HUMAN_DELAY_MIN_MS", "800"))
         except (TypeError, ValueError):
             min_ms = 800
         try:
-            max_ms = int(korra_env("HERMES_HUMAN_DELAY_MAX_MS", "2500"))
+            max_ms = int(korra_env("KORRA_HUMAN_DELAY_MAX_MS", "2500"))
         except (TypeError, ValueError):
             max_ms = 2500
         return random.uniform(min_ms / 1000.0, max_ms / 1000.0)

@@ -191,7 +191,7 @@ def _hermes_home_from_env() -> Path:
     scope rather than a per-task profile.  Shared by :func:`get_hermes_home`
     and :func:`get_process_hermes_home` so the two never drift.
     """
-    val = korra_env("HERMES_HOME", "").strip()
+    val = korra_env("KORRA_HOME", "").strip()
     if val:
         return Path(val)
     return _get_platform_default_hermes_home()
@@ -256,7 +256,7 @@ def get_hermes_home() -> Path:
     if override:
         return Path(override)
 
-    if not korra_env("HERMES_HOME", "").strip():
+    if not korra_env("KORRA_HOME", "").strip():
         _warn_profile_fallback_once()
 
     return _hermes_home_from_env()
@@ -322,7 +322,7 @@ def get_default_hermes_root() -> Path:
     """
     global _default_hermes_root_memo
     native_home = _get_platform_default_hermes_home()
-    env_home = korra_env("HERMES_HOME", "")
+    env_home = korra_env("KORRA_HOME", "")
     if _default_hermes_root_memo is not None:
         memo_native, memo_env, memo_result = _default_hermes_root_memo
         if memo_native == str(native_home) and memo_env == env_home:
@@ -464,7 +464,7 @@ def get_optional_skills_dir(default: Path | None = None) -> Path:
     Packaged installs may ship ``optional-skills`` outside the Python package
     tree and expose it via ``HERMES_OPTIONAL_SKILLS``.
     """
-    override = korra_env("HERMES_OPTIONAL_SKILLS", "").strip()
+    override = korra_env("KORRA_OPTIONAL_SKILLS", "").strip()
     if override:
         return Path(override)
     if default is not None:
@@ -480,7 +480,7 @@ def get_optional_mcps_dir(default: Path | None = None) -> Path:
     default). Packaged installs may ship ``optional-mcps`` outside the Python
     package tree and expose it via ``HERMES_OPTIONAL_MCPS``.
     """
-    override = korra_env("HERMES_OPTIONAL_MCPS", "").strip()
+    override = korra_env("KORRA_OPTIONAL_MCPS", "").strip()
     if override:
         return Path(override)
     if default is not None:
@@ -496,7 +496,7 @@ def get_bundled_skills_dir(default: Path | None = None) -> Path:
         2. Caller-supplied ``default`` (typically the source-checkout path)
         3. ``<HERMES_HOME>/skills`` last-resort
     """
-    override = korra_env("HERMES_BUNDLED_SKILLS", "").strip()
+    override = korra_env("KORRA_BUNDLED_SKILLS", "").strip()
     if override:
         return Path(override)
     if default is not None:
@@ -577,7 +577,7 @@ def _candidate_node_command_names(command: str) -> list[str]:
     return [f"{base}.cmd", f"{base}.exe", base]
 
 
-_HERMES_NODE_TARGET_MAJOR = int(korra_env("HERMES_NODE_TARGET_MAJOR", "22"))
+_HERMES_NODE_TARGET_MAJOR = int(korra_env("KORRA_NODE_TARGET_MAJOR", "22"))
 _managed_node_heal_attempted = False
 _NODE_BOOTSTRAP_SCRIPT = Path(__file__).resolve().parent / "scripts" / "lib" / "node-bootstrap.sh"
 
@@ -909,11 +909,11 @@ def _bootstrap_managed_node_posix() -> bool:
             env={
                 **os.environ,
                 **korra_env_expand({
-                    "HERMES_HOME": str(get_hermes_home()),
+                    "KORRA_HOME": str(get_hermes_home()),
                     # Private provisioning: do not symlink node/npm/npx into
                     # ~/.local/bin — the user has their own toolchain on PATH
                     # and this tree must not shadow it.
-                    "HERMES_NODE_SKIP_LINKS": "1",
+                    "KORRA_NODE_SKIP_LINKS": "1",
                 }),
             },
             capture_output=True,
@@ -1000,7 +1000,7 @@ def heal_hermes_managed_node() -> bool:
                 "-c",
                 f'source "{_NODE_BOOTSTRAP_SCRIPT}" && heal_managed_node',
             ],
-            env={**os.environ, **korra_env_expand({"HERMES_HOME": str(get_hermes_home())})},
+            env={**os.environ, **korra_env_expand({"KORRA_HOME": str(get_hermes_home())})},
             capture_output=True,
             timeout=300,
             check=False,
@@ -1327,7 +1327,7 @@ def _norm_home_path(path: str | None) -> str:
 
 def _profile_home_path(env: dict[str, str] | None = None) -> str | None:
     """Return ``{HERMES_HOME}/home`` when the profile-home directory exists."""
-    hermes_home = get_hermes_home_override() or korra_env("HERMES_HOME", env=env or {}) or korra_env("HERMES_HOME")
+    hermes_home = get_hermes_home_override() or korra_env("KORRA_HOME", env=env or {}) or korra_env("KORRA_HOME")
     if not hermes_home:
         return None
     profile_home = os.path.join(hermes_home, "home")
@@ -1344,7 +1344,7 @@ def _iter_real_home_candidates(env: dict[str, str] | None = None) -> list[str]:
     """Return likely OS-user home candidates in trust order."""
     env = env or {}
     candidates: list[str] = []
-    explicit = str(korra_env("HERMES_REAL_HOME", env=env) or korra_env("HERMES_REAL_HOME", "")).strip()
+    explicit = str(korra_env("KORRA_REAL_HOME", env=env) or korra_env("KORRA_REAL_HOME", "")).strip()
     if explicit:
         candidates.append(explicit)
     home = str(env.get("HOME") or os.getenv("HOME", "")).strip()
@@ -1431,7 +1431,7 @@ def apply_subprocess_home_env(env: dict[str, str]) -> None:
     """Apply Hermes' subprocess HOME contract to *env* in-place."""
     real_home = get_real_home(env)
     if real_home:
-        korra_env_set(env, "HERMES_REAL_HOME", real_home)
+        korra_env_set(env, "KORRA_REAL_HOME", real_home)
     home = get_subprocess_home(env)
     if home:
         env["HOME"] = home

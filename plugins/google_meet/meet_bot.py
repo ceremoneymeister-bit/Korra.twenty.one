@@ -446,22 +446,22 @@ def _mac_audio_device_index(device_name: str) -> str:
 
 
 def run_bot() -> int:  # noqa: C901 — orchestration, explicit branches
-    url = korra_env("HERMES_MEET_URL", "").strip()
-    out_dir_env = korra_env("HERMES_MEET_OUT_DIR", "").strip()
-    headed = korra_env("HERMES_MEET_HEADED", "").lower() in {"1", "true", "yes"}
-    auth_state = korra_env("HERMES_MEET_AUTH_STATE", "").strip()
-    guest_name = korra_env("HERMES_MEET_GUEST_NAME", "Hermes Agent")
-    duration_s = _parse_duration(korra_env("HERMES_MEET_DURATION", ""))
+    url = korra_env("KORRA_MEET_URL", "").strip()
+    out_dir_env = korra_env("KORRA_MEET_OUT_DIR", "").strip()
+    headed = korra_env("KORRA_MEET_HEADED", "").lower() in {"1", "true", "yes"}
+    auth_state = korra_env("KORRA_MEET_AUTH_STATE", "").strip()
+    guest_name = korra_env("KORRA_MEET_GUEST_NAME", "Hermes Agent")
+    duration_s = _parse_duration(korra_env("KORRA_MEET_DURATION", ""))
     # v2: optional realtime mode. Enabled when HERMES_MEET_MODE=realtime.
-    mode = korra_env("HERMES_MEET_MODE", "transcribe").strip().lower()
-    realtime_model = korra_env("HERMES_MEET_REALTIME_MODEL", "gpt-realtime")
-    realtime_voice = korra_env("HERMES_MEET_REALTIME_VOICE", "alloy")
-    realtime_instructions = korra_env("HERMES_MEET_REALTIME_INSTRUCTIONS", "")
+    mode = korra_env("KORRA_MEET_MODE", "transcribe").strip().lower()
+    realtime_model = korra_env("KORRA_MEET_REALTIME_MODEL", "gpt-realtime")
+    realtime_voice = korra_env("KORRA_MEET_REALTIME_VOICE", "alloy")
+    realtime_instructions = korra_env("KORRA_MEET_REALTIME_INSTRUCTIONS", "")
     # HERMES_MEET_REALTIME_KEY is set explicitly by process_manager.start(),
     # which resolves it through the parent's profile secret scope at spawn
     # time. The bare OPENAI_API_KEY fallback only serves standalone
     # `python -m plugins.google_meet.meet_bot` runs outside the gateway.
-    realtime_api_key = korra_env("HERMES_MEET_REALTIME_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    realtime_api_key = korra_env("KORRA_MEET_REALTIME_KEY") or os.environ.get("OPENAI_API_KEY", "")
 
     if not url or not _is_safe_meet_url(url):
         sys.stderr.write(
@@ -621,7 +621,7 @@ def run_bot() -> int:  # noqa: C901 — orchestration, explicit branches
             #   * periodically flushing realtime counters into status.json
             deadline = (time.time() + duration_s) if duration_s else None
             lobby_deadline = time.time() + float(
-                korra_env("HERMES_MEET_LOBBY_TIMEOUT", "300")
+                korra_env("KORRA_MEET_LOBBY_TIMEOUT", "300")
             )
             last_admission_check = 0.0
             while not stop_flag["stop"]:

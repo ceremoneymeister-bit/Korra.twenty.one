@@ -127,7 +127,7 @@ def test_prefer_api_key_falls_back_to_oauth_without_explicit_key(monkeypatch):
 
 def test_prefer_api_key_honors_hermes_xai_base_url_with_validation(monkeypatch):
     """The preferred-key path reads the same override pair as the OAuth
-    branch (HERMES_XAI_BASE_URL first, then XAI_BASE_URL) behind the same
+    branch (KORRA_XAI_BASE_URL first, then XAI_BASE_URL) behind the same
     origin-pinning validation: an *.x.ai override is honored, a foreign
     origin is rejected in favor of the default."""
     from tools.xai_http import resolve_xai_http_credentials
@@ -137,7 +137,7 @@ def test_prefer_api_key_honors_hermes_xai_base_url_with_validation(monkeypatch):
         "tools.xai_http.get_env_value",
         lambda name, default=None: {
             "XAI_API_KEY": "paid-key-x1",
-            "HERMES_XAI_BASE_URL": "https://staging.x.ai/v1",
+            "KORRA_XAI_BASE_URL": "https://staging.x.ai/v1",
             "XAI_BASE_URL": "https://ignored.x.ai/v1",
         }.get(name, default),
     )
