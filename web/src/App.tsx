@@ -451,7 +451,8 @@ export default function App() {
   const isMobile = useBelowBreakpoint(1024);
   const isDesktopCollapsed = collapsed && !isMobile;
   const tooltipWarmRef = useRef(0);
-  const sidebarStatus = useSidebarStatus();
+  const { status: sidebarStatus, reachable: sidebarReachable } =
+    useSidebarStatus();
   const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const uiMode = productUiMode();
@@ -916,6 +917,7 @@ export default function App() {
             <SidebarSystemActions
               collapsed={isDesktopCollapsed}
               onNavigate={closeMobile}
+              reachable={sidebarReachable}
               status={sidebarStatus}
               tooltipWarmRef={tooltipWarmRef}
             />
@@ -1153,6 +1155,7 @@ function SidebarNavLink({
 function SidebarSystemActions({
   collapsed,
   onNavigate,
+  reachable,
   status,
   tooltipWarmRef,
 }: SidebarSystemActionsProps) {
@@ -1273,10 +1276,15 @@ function SidebarSystemActions({
       </span>
 
       <div className={cn(collapsed && "lg:hidden")}>
-        <SidebarStatusStrip status={status} />
+        <SidebarStatusStrip reachable={reachable} status={status} />
       </div>
 
-      <GatewayDot collapsed={collapsed} status={status} tooltipWarmRef={tooltipWarmRef} />
+      <GatewayDot
+        collapsed={collapsed}
+        reachable={reachable}
+        status={status}
+        tooltipWarmRef={tooltipWarmRef}
+      />
 
       <ul className="flex flex-col">
         {items.map((item) => (
@@ -1456,7 +1464,7 @@ function SidebarIconWithTooltip({
   );
 }
 
-function GatewayDot({ collapsed, status, tooltipWarmRef }: GatewayDotProps) {
+function GatewayDot({ collapsed, reachable, status, tooltipWarmRef }: GatewayDotProps) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [tooltipAnchor, setTooltipAnchor] = useState<HTMLElement | null>(null);
@@ -1471,7 +1479,12 @@ function GatewayDot({ collapsed, status, tooltipWarmRef }: GatewayDotProps) {
   let color: string;
   let label: string;
 
-  if (!status) {
+  // Свёрнутая панель показывает только точку — при обрыве она обязана
+  // покраснеть вместе с подписью, а не держать последний удачный ответ.
+  if (reachable === false) {
+    color = "bg-destructive";
+    label = "Панель недоступна";
+  } else if (!status) {
     color = "bg-midground/20";
     label = t.status.gateway;
   } else {
@@ -1558,6 +1571,7 @@ type TooltipWarmRef = React.RefObject<number>;
 
 interface GatewayDotProps {
   collapsed: boolean;
+  reachable: boolean | null;
   status: StatusResponse | null;
   tooltipWarmRef: TooltipWarmRef;
 }
@@ -1587,6 +1601,7 @@ interface SidebarNavLinkProps {
 interface SidebarSystemActionsProps {
   collapsed: boolean;
   onNavigate: () => void;
+  reachable: boolean | null;
   status: StatusResponse | null;
   tooltipWarmRef: TooltipWarmRef;
 }

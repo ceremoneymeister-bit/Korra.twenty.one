@@ -5,8 +5,30 @@ import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n";
 
 /** Gateway + session summary for the System sidebar block (no separate strip chrome). */
-export function SidebarStatusStrip({ status }: SidebarStatusStripProps) {
+export function SidebarStatusStrip({ status, reachable }: SidebarStatusStripProps) {
   const { t } = useI18n();
+
+  // Обрыв связи с панелью важнее любого прошлого ответа: пока опрос не
+  // доходит, про шлюз ничего не известно, и молчать об этом нельзя.
+  if (reachable === false) {
+    if (isProductUiMode()) {
+      return (
+        <div className="px-5 pb-2 pt-0.5">
+          <p className="font-sans text-xs leading-snug tracking-[0.08em] text-text-secondary">
+            <span className="font-medium text-destructive">Нет связи с Коррой</span>
+          </p>
+        </div>
+      );
+    }
+    return (
+      <div className="px-5 pb-2 pt-0.5">
+        <p className="font-sans text-xs leading-snug tracking-[0.08em] text-text-secondary">
+          <span className="text-text-tertiary">{t.app.gatewayStatusLabel}</span>{" "}
+          <span className="font-medium text-destructive">Панель недоступна</span>
+        </p>
+      </div>
+    );
+  }
 
   if (status === null) {
     return (
@@ -85,4 +107,6 @@ export function gatewayLine(
 
 interface SidebarStatusStripProps {
   status: StatusResponse | null;
+  /** `false` — последний опрос `/api/status` не дошёл. */
+  reachable: boolean | null;
 }
