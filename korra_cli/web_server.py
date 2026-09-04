@@ -2258,6 +2258,14 @@ _SENSITIVE_MANAGED_FILE_BASENAMES = frozenset({
     "bws_cache.enc.json",
     # git's credential-store helper cache (agent.file_safety blocks this too).
     ".git-credentials",
+    # Korra: база состояния контура. Ключей в ней нет (проверено), но лежит
+    # вся переписка владельца с агентами, включая пересланные в чат документы
+    # и то, что он диктовал голосом. Панель — рабочий инструмент, а не выгрузка
+    # архива: файл в 30+ МБ никто не «просматривает», его только скачивают
+    # целиком. Восстановление и перенос идут штатным бэкапом, которому этот
+    # запрет не мешает — он касается только файлового раздела панели.
+    "state.db",
+    "kanban.db",
 })
 
 # Directory names whose entire subtree is credential material. Both canonical

@@ -361,6 +361,31 @@ def test_stream_upload_does_not_resurrect_target_removed_before_replace(
     assert not any(".upload" in item.name for item in target.parent.iterdir())
 
 
+def test_state_databases_are_not_downloadable(forced_files_client):
+    """Базы контура не отдаются файловым разделом панели.
+
+    Ключей в них нет, но в `state.db` лежит вся переписка владельца с
+    агентами — включая пересланные документы и продиктованное голосом.
+    Файловый раздел панели — рабочий инструмент, а не выгрузка архива:
+    базу не «просматривают», её скачивают целиком. Перенос и восстановление
+    идут штатным бэкапом, которому этот запрет не мешает.
+    """
+    client, root = forced_files_client
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "state.db").write_bytes(b"SQLite format 3\x00")
+    (root / "kanban.db").write_bytes(b"SQLite format 3\x00")
+    # Похожее имя не должно попасть под запрет: это уже файл пользователя.
+    (root / "state.db.backup").write_bytes(b"copy")
+
+    names = [e["name"] for e in client.get("/api/files", params={"path": str(root)}).json()["entries"]]
+    assert "state.db" not in names
+    assert "kanban.db" not in names
+    assert "state.db.backup" in names
+
+    denied = client.get("/api/files/download", params={"path": str(root / "state.db")})
+    assert denied.status_code == 403
+
+
 def test_sensitive_env_files_hidden_from_listing(forced_files_client):
     """Regression test for #57505: .env files must not appear in directory listings."""
     client, root = forced_files_client
