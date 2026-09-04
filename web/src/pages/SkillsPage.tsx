@@ -754,8 +754,12 @@ function SkillRow({
             {skill.name}
           </span>
         </div>
+        {/* Описание навыка — содержимое его SKILL.md, а не подпись интерфейса.
+            Прогонять его через russianInterfaceText значило подменять
+            «Описанием отсутствует» всё английское: 53 карточки из 54 теряли
+            единственную строку, по которой понятно, что умеет навык. */}
         <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
-          {russianInterfaceText(skill.description, noDescriptionLabel)}
+          {skill.description?.trim() || noDescriptionLabel}
         </p>
       </div>
       <Button
@@ -1284,7 +1288,7 @@ function HubResultCard({
             )}
           </div>
           <p className="text-xs text-text-secondary line-clamp-2">
-            {russianInterfaceText(result.description, "Навык из каталога.")}
+            {result.description?.trim() || "Навык из каталога."}
           </p>
           <div className="flex flex-wrap items-center gap-1 mt-1">
             {result.tags.slice(0, 5).map((tag) => (
@@ -1404,7 +1408,7 @@ function SkillDetailDialog({
 
         <div className="mt-1 flex flex-col gap-1">
           <p className="text-xs text-text-secondary">
-            {russianInterfaceText(result.description, "Навык из каталога.")}
+            {result.description?.trim() || "Навык из каталога."}
           </p>
           <p className="text-xs font-mono text-text-tertiary truncate">
             {result.identifier}
