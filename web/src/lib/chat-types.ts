@@ -109,7 +109,7 @@ export interface SSEApprovalRequestData {
 /** Строка истории сессии сверх того, что описано в `SessionMessage`.
  *
  *  Панельный маршрут `GET /api/sessions/{id}/messages`
- *  (hermes_cli/web_routers/sessions.py) отдаёт строку таблицы `messages`
+ *  (korra_cli/web_routers/sessions.py) отдаёт строку таблицы `messages`
  *  целиком, без проекции api_server — поэтому `reasoning_content` доезжает
  *  до браузера как есть. */
 export interface SessionMessageReasoning {

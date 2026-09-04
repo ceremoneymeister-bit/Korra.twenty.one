@@ -49,7 +49,7 @@ const RELAY_DRAIN_INTERVAL_MS = 30_000
 //
 // These three are mirrors of backend values, so a change there must not
 // silently invalidate this constant: relay-deliver-budget.test.ts reads
-// hermes_cli/config_defaults.py and tui_gateway/methods_bot_relay.py and fails
+// korra_cli/config_defaults.py and tui_gateway/methods_bot_relay.py and fails
 // if the mirrors drift or the margin stops being positive.
 const RELAY_TURN_LOCK_WAIT_MS = 120_000 // bot_mode.turn_wait_seconds default
 const RELAY_TURN_ATTEMPT_MS = 600_000 // subprocess.run(..., timeout=600)

@@ -226,7 +226,7 @@ function pluginPath(name: string): string {
 /**
  * Fetch a single-use ticket for a WebSocket upgrade in gated mode.
  *
- * The dashboard's gated-mode WS auth (``hermes_cli.web_server._ws_auth_ok``)
+ * The dashboard's gated-mode WS auth (``korra_cli.web_server._ws_auth_ok``)
  * rejects the legacy ``?token=<_SESSION_TOKEN>`` path and only accepts
  * ``?ticket=<minted>`` consumed against the in-memory ticket store. Browsers
  * can't set ``Authorization`` on a WS upgrade, so this round-trip via the
@@ -339,7 +339,7 @@ function appendQueryParam(url: string, key: string, value?: string): string {
 /* ── Диктовка: распознавание речи ─────────────────────────────────── */
 
 /** Приёмник читает base64 и держит потолок в 25 МБ уже раскодированного
- *  звука (`_MAX_TRANSCRIPTION_UPLOAD_BYTES`, hermes_cli/web_server.py). */
+ *  звука (`_MAX_TRANSCRIPTION_UPLOAD_BYTES`, korra_cli/web_server.py). */
 const MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024;
 
 /** Ответ `POST /api/audio/transcribe` (`transcribe_audio_upload`). Тишина —
@@ -459,7 +459,7 @@ export interface ProfileProbeOutcome {
 }
 
 /** ID сообщения для журнала доставки: 16–80 символов из `[A-Za-z0-9._:-]`
- *  (`CLIENT_MESSAGE_ID_RE`, hermes_cli/chat_delivery.py). */
+ *  (`CLIENT_MESSAGE_ID_RE`, korra_cli/chat_delivery.py). */
 function clientMessageId(): string {
   const webCrypto = globalThis.crypto;
   if (webCrypto && typeof webCrypto.randomUUID === "function") {

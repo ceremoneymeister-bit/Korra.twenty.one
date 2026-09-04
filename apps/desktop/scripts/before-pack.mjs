@@ -83,7 +83,7 @@ export function cleanStaleAppOutDir(appOutDir) {
  * cleanStaleAppOutDir exists to remove). If the fresh pack then produces a
  * Hermes.exe that Windows can't load (truncated PE from a corrupt cached
  * Electron zip, wrong arch), the updater's integrity gate in
- * `hermes desktop --build-only` (hermes_cli/main.py
+ * `hermes desktop --build-only` (korra_cli/main.py
  * `_ensure_desktop_exe_launchable`) restores this .bak instead of leaving the
  * user with "This app can't run on your computer".
  *

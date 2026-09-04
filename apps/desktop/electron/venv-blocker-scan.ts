@@ -49,7 +49,7 @@ export type ScanOutcome =
 // hosts. Keep a watchdog for genuinely wedged probes, but leave enough headroom
 // for the scanner's conservative fallback checks.
 const SCAN_TIMEOUT_MS = 60000
-const SCAN_MODULE = 'hermes_cli._scan_venv_blockers'
+const SCAN_MODULE = 'korra_cli._scan_venv_blockers'
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -130,7 +130,7 @@ export async function stopSafeVenvBlockers(
     try {
       await execFn(
         pythonPath,
-        ['-m', 'hermes_cli._scan_venv_blockers', '--terminate-safe', String(process.pid), String(process.createTime)],
+        ['-m', 'korra_cli._scan_venv_blockers', '--terminate-safe', String(process.pid), String(process.createTime)],
         { cwd: updateRoot, windowsHide: true, timeout: 10_000, maxBuffer: 256 * 1024 }
       )
       stopped.push(process.pid)

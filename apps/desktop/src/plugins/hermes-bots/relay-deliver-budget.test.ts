@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 
 const relaySource = readFileSync(join(process.cwd(), 'src/plugins/hermes-bots/relay.ts'), 'utf8')
 const repoRoot = join(process.cwd(), '..', '..')
-const configDefaults = readFileSync(join(repoRoot, 'hermes_cli/config_defaults.py'), 'utf8')
+const configDefaults = readFileSync(join(repoRoot, 'korra_cli/config_defaults.py'), 'utf8')
 const relayHandler = readFileSync(join(repoRoot, 'tui_gateway/methods_bot_relay.py'), 'utf8')
 
 function tsConstant(name: string): number {

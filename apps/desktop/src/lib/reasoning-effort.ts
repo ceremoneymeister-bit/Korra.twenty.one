@@ -1,7 +1,7 @@
 import { normalize } from '@/lib/text'
 
 /** Hermes' reasoning levels, in ascending order — mirrors the backend's
- *  VALID_REASONING_EFFORTS (hermes_constants.py). `none` is not a level: it's
+ *  VALID_REASONING_EFFORTS (korra_constants.py). `none` is not a level: it's
  *  thinking disabled, owned by the Thinking toggle rather than the scale. */
 export const REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const
 

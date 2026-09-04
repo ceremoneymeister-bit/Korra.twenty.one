@@ -53,7 +53,7 @@ import { useI18n } from "@/i18n";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { cn, themedBody } from "@/lib/utils";
 
-// Mirrors hermes_cli/profiles.py::_PROFILE_ID_RE so we can reject obviously
+// Mirrors korra_cli/profiles.py::_PROFILE_ID_RE so we can reject obviously
 // invalid names (uppercase, spaces, …) before round-tripping a doomed POST.
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
@@ -86,7 +86,7 @@ const NO_KEY_MARK = "нет ключа";
  * Список моделей для мастера: сначала провайдеры с рабочими ключами.
  *
  * Признак готовности даёт сам движок — `authenticated` в строке провайдера
- * (`_apply_picker_hints`, hermes_cli/inventory.py): `false` стоит у строк-
+ * (`_apply_picker_hints`, korra_cli/inventory.py): `false` стоит у строк-
  * заготовок без ключа и у настроенного провайдера, потерявшего доступ.
  * Ровно так же его читает CronPage. Выбрать провайдера без ключа мастер даёт
  * — но подпись и подсказка под списком говорят, что агент промолчит, пока
