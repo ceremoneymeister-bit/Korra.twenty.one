@@ -879,9 +879,13 @@ export function useChatStream(
                 sawTerminalError = true;
                 // Сервер кладёт текст ошибки в content этого же чанка
                 // («HTTP 401: invalid x-api-key», «No credentials…») — показываем
-                // его человеку, а не общую фразу.
+                // его человеку, а не общую фразу. Если content пуст, причина
+                // приходит отдельным полем `error` финального чанка (так
+                // выглядит отказ провайдера на свежем контуре без ключа).
                 terminalErrorMessage =
-                  content.trim() || "Ответ агента завершился с ошибкой";
+                  content.trim() ||
+                  event.data.error?.message?.trim() ||
+                  "Ответ агента завершился с ошибкой";
                 void reader.cancel();
                 break;
               }

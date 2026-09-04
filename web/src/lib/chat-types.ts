@@ -51,6 +51,9 @@ export interface SSEChatChunkData {
     completion_tokens: number;
     total_tokens: number;
   };
+  /** Финальный чанк отказа: движок кладёт причину сюда, а `delta` оставляет
+   *  пустой (`gateway/platforms/api_server.py`, ветка finish_reason != stop). */
+  error?: { message?: string; type?: string };
 }
 
 /** Korra-specific tool progress event.

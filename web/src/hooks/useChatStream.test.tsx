@@ -90,6 +90,39 @@ describe("useChatStream durable errors", () => {
       text: "Проверить доставку",
     });
   });
+
+  it("показывает причину отказа из поля error финального чанка", async () => {
+    // Свежий контур без ключа: движок кладёт причину в `error`, а delta
+    // финального чанка остаётся пустой. Общая фраза «завершился с ошибкой»
+    // здесь врёт — человеку нужно знать, что не введён ключ.
+    const event = new TextEncoder().encode(
+      'data: {"choices":[{"delta":{},"finish_reason":"error"}],' +
+        '"error":{"message":"Провайдер ответа не настроен: добавьте ключ в разделе «Ключи».",' +
+        '"type":"agent_error"}}\n\n',
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(event);
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+      ),
+    );
+
+    await act(async () => {
+      await current.send("Привет! Кто ты?");
+    });
+
+    expect(current.error).toBe(
+      "Провайдер ответа не настроен: добавьте ключ в разделе «Ключи».",
+    );
+  });
 });
 
 describe("useChatStream — вызовы инструментов из живого потока", () => {

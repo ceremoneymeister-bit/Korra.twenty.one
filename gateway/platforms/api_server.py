@@ -5800,6 +5800,12 @@ class APIServerAdapter(BasePlatformAdapter):
             last_activity = time.monotonic()
 
             # Helper — route a queue item to the correct SSE event.
+            # Korra: были ли у хода текстовые дельты. Нужен для симметрии с
+            # /v1/responses (см. «If the agent produced a final_response but
+            # no text deltas»): агент может закончить ход, не отдав ни одной
+            # дельты, и тогда весь его ответ лежит в final_response.
+            saw_text_delta = False
+
             async def _emit(item):
                 """Write a single queue item to the SSE stream.
 
@@ -5826,6 +5832,8 @@ class APIServerAdapter(BasePlatformAdapter):
                         _sse_frame(item[1], event=CHAT_APPROVAL_SSE_EVENT)
                     )
                 else:
+                    nonlocal saw_text_delta
+                    saw_text_delta = True
                     content_chunk = {
                         "id": completion_id, "object": "chat.completion.chunk",
                         "created": created, "model": model,
@@ -5882,6 +5890,17 @@ class APIServerAdapter(BasePlatformAdapter):
                 logger.error(
                     "Agent task %s failed during SSE streaming: %s", completion_id, exc
                 )
+
+            # Korra: ход мог закончиться без единой текстовой дельты, а весь
+            # ответ остаться в final_response. Так ведёт себя ветка отказа
+            # провайдера в _run_agent: она возвращает готовый текст подсказки,
+            # но очередь дельт пуста, и клиент раньше видел пустой ответ с
+            # finish_reason "stop" — на свежем контуре без ключа это выглядело
+            # как молчание панели. /v1/responses такую подстраховку уже имеет.
+            if not saw_text_delta and isinstance(result, dict):
+                pending_final = result.get("final_response") or ""
+                if pending_final:
+                    await _emit(pending_final)
 
             # Inspect the result dict for a flagged (non-exception) failure.
             is_partial = bool(result.get("partial")) if isinstance(result, dict) else False
@@ -7818,12 +7837,19 @@ class APIServerAdapter(BasePlatformAdapter):
                     # /v1/runs has its own branch in its executor.
                     logger.warning("Provider authentication failed for session=%s: %s",
                                    session_id or "", exc)
+                    # Korra: текст по-русски (его читает владелец контура в
+                    # панели, а не разработчик в логе) и честные флаги отказа —
+                    # без них стриминговый путь отдавал finish_reason "stop",
+                    # то есть выдавал провал за успешный пустой ответ.
                     return (
                         {
-                            "final_response": f"⚠️ Provider authentication failed: {exc}",
+                            "final_response": f"⚠️ Не удалось обратиться к провайдеру ответа. {exc}",
                             "messages": [],
                             "api_calls": 0,
                             "tools": [],
+                            "completed": False,
+                            "failed": True,
+                            "error": str(exc),
                         },
                         {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
                     )

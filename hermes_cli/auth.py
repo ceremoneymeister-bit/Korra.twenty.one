@@ -2427,10 +2427,11 @@ def resolve_provider(
     except ImportError:
         pass  # boto3 not installed — skip Bedrock auto-detection
 
+    # Korra: текст по-русски и без имени апстрима — его видит владелец контура
+    # в панели (карточка «нет провайдера» в чате), а не только разработчик.
     raise AuthError(
-        "No inference provider configured. Run 'hermes model' to choose a "
-        "provider and model, or set an API key (OPENROUTER_API_KEY, "
-        "OPENAI_API_KEY, etc.) in ~/.hermes/.env.",
+        "Провайдер ответа не настроен: добавьте ключ в разделе «Ключи» "
+        "или выберите провайдера и модель командой «korra model».",
         code="no_provider_configured",
     )
 
