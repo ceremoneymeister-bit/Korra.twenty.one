@@ -97,6 +97,11 @@ const SOURCE_CONFIG: Record<string, { icon: typeof Terminal; color: string }> =
     cron: { icon: Clock, color: "text-warning" },
     tool: { icon: Play, color: "text-warning" },
     api_server: { icon: Globe, color: "text-muted-foreground" },
+    // Разговор из этой же панели: движок метит его `dashboard`, и он остаётся
+    // в «Чатах», а не уезжает к вызовам сторонних клиентов.
+    dashboard: { icon: MessageSquare, color: "text-primary" },
+    hermes_browser: { icon: MessageSquare, color: "text-primary" },
+    desktop: { icon: MessageSquare, color: "text-primary" },
     acp: { icon: Database, color: "text-muted-foreground" },
     hermes_flow: { icon: Play, color: "text-warning" },
     vulcan_delegate: { icon: Play, color: "text-warning" },
@@ -118,7 +123,7 @@ const NO_MATCHING_SESSION_SOURCE = "__hermes_dashboard_no_matching_source__";
 type SessionFilterCategory = "chats" | "automation" | "all";
 type SourceSelectionsByCategory = Record<SessionFilterCategory, string[] | null>;
 
-function isAutomationSource(source: string): boolean {
+export function isAutomationSource(source: string): boolean {
   return AUTOMATION_SESSION_SOURCE_SET.has(source);
 }
 
@@ -131,10 +136,15 @@ function sourceBelongsToCategory(
   return !isAutomationSource(source);
 }
 
-function sourceLabel(source: string): string {
+export function sourceLabel(source: string): string {
   switch (source) {
     case "api_server":
       return "API-сервер";
+    case "dashboard":
+    case "hermes_browser":
+      return "Панель";
+    case "desktop":
+      return "Приложение";
     case "acp":
       return "ACP";
     case "cli":
@@ -1734,7 +1744,13 @@ export default function SessionsPage() {
       </Dialog>}
 
       {stats && (
+        // Счётчики считают всё хранилище, а список под ними отфильтрован
+        // вкладкой. Без этой подписи «3 Всего» над пустым списком читается как
+        // «три чата, которые панель потеряла».
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border border-border bg-background-base/40 px-4 py-3">
+          <span className="w-full text-xs text-text-tertiary">
+            Во всём хранилище, включая автоматизацию
+          </span>
           <div className="flex flex-col">
             <span className="text-lg font-semibold tabular-nums leading-none">
               {stats.total}

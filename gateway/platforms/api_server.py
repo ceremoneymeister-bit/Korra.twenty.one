@@ -95,6 +95,17 @@ _api_request_browser_control_principal: ContextVar[str] = ContextVar(
 _api_request_browser_control_transport_family: ContextVar[str] = ContextVar(
     "api_server_browser_control_transport_family", default=""
 )
+#: Класс разговора, объявленный клиентом в ``X-Korra-Session-Source``.
+#: Пустая строка = клиент не назвался, сессия помечается платформой
+#: (``api_server``) как раньше. Панель называет себя ``dashboard``, и по этому
+#: полю «История» отличает разговор человека от вызова стороннего клиента.
+_api_request_session_source: ContextVar[str] = ContextVar(
+    "api_server_request_session_source", default=""
+)
+
+#: Заголовок, которым клиент объявляет класс разговора. Значение проходит через
+#: ``_normalize_session_source`` — тот же список, что и у ``POST /api/sessions``.
+SESSION_SOURCE_HEADER = "X-Korra-Session-Source"
 
 #: Minimal scope shape accepted by :func:`gateway.browser_control_artifacts
 #: .artifact_scope_key`: principal + session + transport family.  The API
@@ -2260,9 +2271,19 @@ class APIServerAdapter(BasePlatformAdapter):
                     family_token = _api_request_browser_control_transport_family.set(
                         self._browser_control_transport_family(request)
                     )
+                    # Класс разговора объявляет клиент: панель шлёт
+                    # `dashboard`, сторонний OpenAI-совместимый клиент не шлёт
+                    # ничего и остаётся `api_server`.
+                    raw_source = request.headers.get(SESSION_SOURCE_HEADER, "")
+                    source_token = _api_request_session_source.set(
+                        self._normalize_session_source(raw_source)
+                        if str(raw_source or "").strip()
+                        else ""
+                    )
                     try:
                         return await handler(request)
                     finally:
+                        _api_request_session_source.reset(source_token)
                         _api_request_browser_control_transport_family.reset(family_token)
                         _api_request_browser_control_principal.reset(principal_token)
             finally:
@@ -7590,6 +7611,7 @@ class APIServerAdapter(BasePlatformAdapter):
         session_id: str = "",
         browser_control_principal: str = "",
         browser_control_transport_family: str = "",
+        session_source: str = "",
     ) -> list:
         """Bind session contextvars for an API-server agent run.
 
@@ -7605,11 +7627,18 @@ class APIServerAdapter(BasePlatformAdapter):
         ``finally`` block (the binding is request-scoped and must not outlive
         the turn — a session resumed later on a delivering interface, e.g. the
         CLI or a gateway platform, re-binds fresh and is NOT blocked).
+
+        ``session_source`` — класс разговора для строки сессии
+        (``KORRA_SESSION_SOURCE``, читается ``run_agent``). Платформа остаётся
+        ``api_server`` всегда: транспорт тот же и правила доставки те же,
+        меняется только то, как разговор называется в истории. Пустая строка
+        сохраняет прежнее поведение — источник берётся из платформы.
         """
         from gateway.session_context import set_session_vars
 
         return set_session_vars(
             platform="api_server",
+            source=session_source,
             chat_id=chat_id,
             session_key=session_key,
             session_id=session_id,
@@ -7681,6 +7710,7 @@ class APIServerAdapter(BasePlatformAdapter):
         request_browser_control_transport_family = (
             _api_request_browser_control_transport_family.get()
         )
+        request_session_source = _api_request_session_source.get()
 
         def _run():
             from gateway.session_context import clear_session_vars
@@ -7694,6 +7724,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     browser_control_transport_family=(
                         request_browser_control_transport_family
                     ),
+                    session_source=request_session_source,
                 )
                 agent = None
                 try:

@@ -3255,6 +3255,14 @@ _CHAT_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 #: Значение обязано совпадать с `CHAT_ATTENDED_HEADER` в
 #: gateway/platforms/api_server.py — это одна договорённость на два процесса.
 _CHAT_ATTENDED_HEADER = "X-Korra-Attended"
+#: Заголовок, которым панель называет класс разговора для строки сессии.
+#: Значение обязано совпадать с `SESSION_SOURCE_HEADER` в
+#: gateway/platforms/api_server.py. Без него разговор из браузера попадал в
+#: историю как `api_server` — то есть в «Автоматизацию», рядом с вызовами
+#: сторонних клиентов, и вкладка «Чаты» оставалась пустой.
+_CHAT_SESSION_SOURCE_HEADER = "X-Korra-Session-Source"
+#: Значение из списка, который движок принимает в `_normalize_session_source`.
+_CHAT_SESSION_SOURCE = "dashboard"
 
 
 @app.post("/api/chat/completions")
@@ -3317,6 +3325,7 @@ async def chat_completions_proxy(
         # получает прежнее поведение, а не вопрос в поток, который никто не
         # смотрит.
         _CHAT_ATTENDED_HEADER: "1",
+        _CHAT_SESSION_SOURCE_HEADER: _CHAT_SESSION_SOURCE,
     }
     for header_name in ("X-Hermes-Session-Id", "X-Hermes-Session-Key"):
         value = request.headers.get(header_name)
