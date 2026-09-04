@@ -437,11 +437,13 @@ function ProviderGroupCard({
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           )}
           <span className="font-semibold text-sm tracking-wide">
-            {group.name === "Other" ? t.common.other : group.name}
+            {group.name}
           </span>
           {hasAnyConfigured && (
+            // `t.common.set` — надпись на кнопке («Задать»), в подписи
+            // количества она давала «1 задать».
             <Badge tone="success" className="text-xs">
-              {configuredCount} {t.common.set.toLowerCase()}
+              задано {configuredCount}
             </Badge>
           )}
         </div>
