@@ -10169,6 +10169,55 @@ def _catalog_provider_env_metadata() -> dict:
     return meta
 
 
+def _custom_provider_env_metadata() -> dict:
+    """Ключи провайдеров, объявленных в конфигурации, а не в каталоге.
+
+    ``custom_providers`` / ``providers`` — штатный способ подключить свой
+    endpoint; ключ такого провайдера называется в ``key_env``. Каталог
+    (``CANONICAL_PROVIDERS``) о нём ничего не знает, поэтому его ключ
+    приезжал на страницу «Ключи и доступы» безымянным `custom`-рядом: в
+    клиентском режиме такой ряд не показывается вовсе, а счётчик
+    «настроено N из M» его не считал. Контур, который работает именно на
+    этом ключе, при этом честно отвечал — экран противоречил факту.
+
+    Вызывается уже внутри ``_profile_scope``, чтобы читать конфигурацию того
+    профиля, чьи ключи запросили.
+    """
+    try:
+        from korra_cli.config import get_compatible_custom_providers, load_config
+
+        entries = get_compatible_custom_providers(load_config())
+    except Exception:
+        _log.debug("custom-provider env metadata unavailable", exc_info=True)
+        return {}
+
+    meta: dict = {}
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        key_env = str(entry.get("key_env") or "").strip()
+        if not key_env:
+            continue
+        name = str(entry.get("name") or "").strip() or key_env
+        base_url = str(entry.get("base_url") or "").strip()
+        meta.setdefault(
+            key_env,
+            {
+                "provider": f"custom:{name}",
+                "provider_label": name,
+                "description": (
+                    f"Ключ провайдера «{name}»"
+                    + (f" ({base_url})" if base_url else "")
+                ),
+                "url": None,
+                "is_password": True,
+                "advanced": False,
+                "category": "provider",
+            },
+        )
+    return meta
+
+
 @app.get("/api/env")
 async def get_env_vars(profile: Optional[str] = None):
     # _profile_scope takes _SKILLS_PROFILE_LOCK and load_env()/catalog
@@ -10179,8 +10228,12 @@ async def get_env_vars(profile: Optional[str] = None):
 def _get_env_vars_sync(profile: Optional[str] = None):
     with _profile_scope(profile):
         env_on_disk = load_env()
+        # Провайдеры из конфигурации профиля — их ключи каталог не знает.
+        custom_provider_meta = _custom_provider_env_metadata()
     channel_keys = _channel_managed_env_keys()
     catalog_meta = _catalog_provider_env_metadata()
+    for var_name, entry in custom_provider_meta.items():
+        catalog_meta.setdefault(var_name, entry)
 
     def _row(var_name: str, info: dict, *, custom: bool = False) -> dict:
         value = env_on_disk.get(var_name)

@@ -76,11 +76,22 @@ const PROVIDER_GROUPS: { prefix: string; name: string; priority: number }[] = [
   { prefix: "UPSTAGE_", name: "Upstage Solar", priority: 14 },
 ];
 
-function getProviderGroup(key: string): string {
+/** Заголовок для ключей, которые не назвал ни сервер, ни таблица префиксов. */
+const OTHER_PROVIDER_GROUP = "Прочие провайдеры";
+
+/** Имя карточки провайдера для ключа.
+ *
+ * Порядок намеренный: таблица префиксов задаёт привычные объединения
+ * (`GOOGLE_*` и `GEMINI_*` в одной карточке), а `provider_label` сервера
+ * закрывает всё остальное — это та самая единая личность провайдера, которую
+ * `/api/env` уже отдаёт, и без неё 60 ключей (включая ключ собственного
+ * провайдера контура) сваливались в безымянную группу «Other». */
+export function getProviderGroup(key: string, info?: EnvVarInfo): string {
   for (const g of PROVIDER_GROUPS) {
     if (key.startsWith(g.prefix)) return g.name;
   }
-  return "Other";
+  const label = info?.provider_label?.trim();
+  return label ? label : OTHER_PROVIDER_GROUP;
 }
 
 function getProviderPriority(groupName: string): number {
@@ -856,7 +867,7 @@ export default function EnvPage() {
     // Group by provider
     const groupMap = new Map<string, [string, EnvVarInfo][]>();
     for (const entry of providerEntries) {
-      const groupName = getProviderGroup(entry[0]);
+      const groupName = getProviderGroup(entry[0], entry[1]);
       if (!groupMap.has(groupName)) groupMap.set(groupName, []);
       groupMap.get(groupName)!.push(entry);
     }
@@ -868,7 +879,14 @@ export default function EnvPage() {
         entries,
         hasAnySet: entries.some(([, info]) => info.is_set),
       }))
-      .sort((a, b) => a.priority - b.priority);
+      // Заданные ключи наверх: владелец ищет глазами то, чем контур работает,
+      // а не место своего провайдера в алфавите каталога.
+      .sort(
+        (a, b) =>
+          Number(b.hasAnySet) - Number(a.hasAnySet) ||
+          a.priority - b.priority ||
+          a.name.localeCompare(b.name, "ru"),
+      );
 
     // Non-provider categories — use translated labels. Platform credentials
     // (channel_managed) are configured on the Channels page, so the messaging

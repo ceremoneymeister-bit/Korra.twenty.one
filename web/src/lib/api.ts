@@ -2315,6 +2315,10 @@ export interface EnvVarInfo {
   channel_managed?: boolean;
   /** True when this key is set in .env but not in any catalog (user-added custom key). */
   custom?: boolean;
+  /** Слаг провайдера из единого каталога движка (`custom:<имя>` — свой endpoint). */
+  provider?: string;
+  /** Имя провайдера для карточки ключей; сервер отдаёт его вместе с ключом. */
+  provider_label?: string;
 }
 
 export interface TelegramOnboardingStartResponse {
