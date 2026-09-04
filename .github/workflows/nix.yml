@@ -10,10 +10,12 @@ name: Nix flake check
 # in progress. One slow advisory job in the CI lane blocks every rerun of the
 # fast required jobs beside it. A separate run reruns and cancels on its own.
 
+# Korra: дорожка Nix у нас спит (решение владельца), но проверка гонялась на
+# каждый push в main — на нашем же раннере, и её store вырос до 9,9 ГБ мусора
+# на диске боевой машины. Оставлен ручной запуск и PR, автоматики на push нет.
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
