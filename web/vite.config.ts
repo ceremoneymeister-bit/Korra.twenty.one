@@ -19,7 +19,7 @@ const NOUS_UI_SRC = path.resolve(import.meta.dirname, "./src/vendor/nous-ui");
 
 /**
  * In production the Python `hermes dashboard` server injects a one-shot
- * session token into `index.html` (see `hermes_cli/web_server.py`). The
+ * session token into `index.html` (see `korra_cli/web_server.py`). The
  * Vite dev server serves its own `index.html`, so unless we forward that
  * token, every protected `/api/*` call 401s.
  *
@@ -132,7 +132,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "../hermes_cli/web_dist",
+    outDir: "../korra_cli/web_dist",
     emptyOutDir: true,
     // Shell stays a bit over Vite's 500 kB default after vendor splits;
     // page/xterm chunks load on demand. Keep a modest ceiling so a true

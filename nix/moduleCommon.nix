@@ -498,7 +498,7 @@ let
 
       # ── The backend: `hermes serve` or `hermes dashboard` ──────────────
       # `hermes serve` and `hermes dashboard` are the same entry point,
-      # hermes_cli.main:cmd_dashboard, with one flag of difference. serve runs
+      # korra_cli.main:cmd_dashboard, with one flag of difference. serve runs
       # without a user interface. dashboard also serves the web application.
       # Both give the /api/ws and /api/pty sockets that Hermes Desktop
       # connects to. They are one process, and you can run only one of them.

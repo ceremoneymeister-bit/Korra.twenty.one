@@ -564,7 +564,7 @@ install_uv() {
 
     # Hermes owns its own uv at $HERMES_HOME/bin/uv.  Always install there —
     # no PATH probing, no conda guards, no multi-location resolution chains.
-    # The runtime update path (hermes_cli/managed_uv.py) looks in the same
+    # The runtime update path (korra_cli/managed_uv.py) looks in the same
     # place, so install.sh and `hermes update` stay in sync.
     local _managed_uv="$HERMES_HOME/bin/uv"
 
@@ -1886,7 +1886,7 @@ install_deps() {
         # one subprocess while keeping ambient user/system uv config hidden
         # (redirected to an empty XDG dir), preserving the #21269 guarantee.
         # Runtime code does the same before its locked syncs
-        # (hermes_cli/managed_uv.py).
+        # (korra_cli/managed_uv.py).
         if run_locked_uv_sync "$INSTALL_DIR/venv"; then
             log_success "Main package installed (hash-verified via uv.lock)"
             log_success "All dependencies installed"
@@ -2066,7 +2066,7 @@ EOF
 
     # Korra: `korra` — каноническое имя команды форка, `hermes` остаётся
     # алиасом. Симлинк на уже созданный лаунчер, а не вторая копия шима: обе
-    # точки входа в pyproject.toml ведут в один и тот же hermes_cli.main:main,
+    # точки входа в pyproject.toml ведут в один и тот же korra_cli.main:main,
     # а argparse берёт имя из argv[0], поэтому usage сам назовётся правильно.
     rm -f "$command_link_dir/korra"
     ln -s "hermes" "$command_link_dir/korra"
@@ -2269,7 +2269,7 @@ copy_config_templates() {
     fi
 
     # Create SOUL.md if it doesn't exist (global persona file).
-    # This MUST match DEFAULT_SOUL_MD in hermes_cli/default_soul.py — the
+    # This MUST match DEFAULT_SOUL_MD in korra_cli/default_soul.py — the
     # runtime (_ensure_default_soul_md) treats the old comment-only scaffold as
     # "never customized" and upgrades it to this text on next run, so any drift
     # here is self-healing, but keep them in sync to avoid a churn on first run.
@@ -2602,7 +2602,7 @@ configure_browser_env_from_system_browser() {
 # --include-workspace-root keeps the root's own devDependencies (the shared
 # ESLint flat config each workspace imports) from being pruned by the scoped
 # install — the same closure `hermes update` installs
-# (hermes_cli/main.py::_update_node_dependencies). Prebuilt/partial checkouts
+# (korra_cli/main.py::_update_node_dependencies). Prebuilt/partial checkouts
 # can lack a workspace, and naming a missing one makes npm fail hard, so fall
 # back to a root-only install that still skips apps/*.
 node_deps_workspace_args() {
@@ -2926,9 +2926,9 @@ run_setup_wizard() {
     # Run hermes setup using the venv Python directly (no activation needed).
     # Redirect stdin from /dev/tty so interactive prompts work when piped from curl.
     if [ "$USE_VENV" = true ]; then
-        "$INSTALL_DIR/venv/bin/python" -m hermes_cli.main setup < /dev/tty
+        "$INSTALL_DIR/venv/bin/python" -m korra_cli.main setup < /dev/tty
     else
-        python -m hermes_cli.main setup < /dev/tty
+        python -m korra_cli.main setup < /dev/tty
     fi
 }
 
@@ -3622,7 +3622,7 @@ install_desktop() {
             if HERMES_HOME="$HERMES_HOME" "$config_python" - "$desktop_dir" <<'PYEOF'
 import sys
 from pathlib import Path
-from hermes_cli.main import _desktop_macos_relaunchable_fixup
+from korra_cli.main import _desktop_macos_relaunchable_fixup
 ok = _desktop_macos_relaunchable_fixup(
     Path(sys.argv[1]), publisher_signing_configured=False
 )
