@@ -95,7 +95,10 @@ RUN_ARGS=(
     -e KORRA_DASHBOARD=1
     -e KORRA_DASHBOARD_HOST=127.0.0.1
     -e KORRA_DASHBOARD_PORT="$PANEL_PORT"
-    -e KORRA_DASHBOARD_FILES_ROOT=/opt/data
+    # Файловый корень панели НЕ задаём намеренно: в режиме fleet движок сам
+    # сужает его до /opt/data/workspace. Явное значение перебивает эту защиту
+    # и открывает клиенту весь каталог данных — там ключи, базы и журналы.
+    # Рабочие файлы клиента живут в workspace, туда же агент их и кладёт.
     -e KORRA_UI_MODE=fleet
     -e API_SERVER_PORT="$API_PORT"
     -e API_SERVER_PROXY_TARGET="http://127.0.0.1:$API_PORT"
