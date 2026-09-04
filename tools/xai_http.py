@@ -7,6 +7,7 @@ import json
 import os
 import uuid
 from typing import Any, Dict, Optional
+from hermes_constants import korra_env
 
 
 MAX_XAI_STORAGE_EXPIRES_AFTER_SECONDS = 30 * 24 * 60 * 60
@@ -86,7 +87,7 @@ def get_env_value(name: str, default=None):
     try:
         from hermes_cli.config import get_env_value as _hermes_get_env_value
     except ImportError:
-        return os.environ.get(name, default)
+        return korra_env(name, default)
 
     value = _hermes_get_env_value(name)
     return value if value is not None else default

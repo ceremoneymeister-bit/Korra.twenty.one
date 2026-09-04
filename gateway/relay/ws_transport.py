@@ -41,6 +41,7 @@ from gateway.platforms.base import MessageEvent, MessageType
 from gateway.session import SessionSource
 from gateway.relay.descriptor import CapabilityDescriptor
 from gateway.relay.transport import InboundHandler
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def _env_disconnect_budget_s() -> float:
     variable, same default). Callers above the transport use this to
     apportion the budget across go_idle / monitor teardown / drain."""
     budget = 5.0  # _ADAPTER_DISCONNECT_TIMEOUT_SECS_DEFAULT in gateway/run.py
-    raw = os.getenv("HERMES_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
+    raw = korra_env("HERMES_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
     if raw:
         try:
             budget = max(0.0, float(raw))

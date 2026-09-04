@@ -11,6 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from utils import atomic_replace, fast_safe_load
+from hermes_constants import korra_env, korra_env_set
 
 
 # Env var name suffixes that indicate credential values.  These are the
@@ -217,7 +218,7 @@ def _hydrate_profile_secret_sources(home: Path) -> dict[str, str]:
         if op_env.exists():
             for _name, _value in load_env_file(op_env).items():
                 local_env.setdefault(_name, _value)
-        local_env["HERMES_HOME"] = str(home)
+        korra_env_set(local_env, "HERMES_HOME", str(home))
         report = apply_all(cfg, home, environ=local_env)
     except Exception:  # noqa: BLE001 — preserve fail-open startup behavior
         return {}
@@ -486,7 +487,7 @@ def load_hermes_dotenv(
     """
     loaded: list[Path] = []
 
-    home_path = Path(hermes_home or os.getenv("HERMES_HOME", Path.home() / ".hermes"))
+    home_path = Path(hermes_home or korra_env("HERMES_HOME", Path.home() / ".hermes"))
     user_env = home_path / ".env"
     project_env_path = Path(project_env) if project_env else None
 

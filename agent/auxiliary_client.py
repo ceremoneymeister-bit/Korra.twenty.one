@@ -174,7 +174,7 @@ from agent.model_metadata import (
     strip_codex_context_variant_suffix as _strip_codex_ctx_variant,
 )
 from hermes_cli.config import get_hermes_home
-from hermes_constants import OPENROUTER_BASE_URL
+from hermes_constants import OPENROUTER_BASE_URL, korra_env
 from utils import base_url_host_matches, base_url_hostname, env_float, is_truthy_value, model_forces_max_completion_tokens, normalize_proxy_env_vars
 
 logger = logging.getLogger(__name__)
@@ -1255,7 +1255,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
             or_config = {}
 
     # Determine cache enabled: env var overrides config.
-    env_cache = os.environ.get("HERMES_OPENROUTER_CACHE", "").strip().lower()
+    env_cache = korra_env("HERMES_OPENROUTER_CACHE", "").strip().lower()
     if env_cache:
         cache_enabled = env_cache in _TRUTHY_ENV_VALUES
     else:
@@ -1267,7 +1267,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
     headers["X-OpenRouter-Cache"] = "true"
 
     # Determine TTL: env var overrides config.
-    env_ttl = os.environ.get("HERMES_OPENROUTER_CACHE_TTL", "").strip()
+    env_ttl = korra_env("HERMES_OPENROUTER_CACHE_TTL", "").strip()
     if env_ttl:
         if env_ttl.isdigit():
             ttl = int(env_ttl)
@@ -1536,7 +1536,7 @@ def _is_anthropic_compatible_host(url: str) -> bool:
 
 def _nous_min_key_ttl_seconds() -> int:
     try:
-        return max(60, int(os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800")))
+        return max(60, int(korra_env("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800")))
     except (TypeError, ValueError):
         return 1800
 
@@ -2848,7 +2848,7 @@ def _resolve_xai_oauth_for_aux() -> Optional[Tuple[str, str]]:
                     or ""
                 ).strip()
                 base_url = _xai_validate_inference_base_url(
-                    os.getenv("HERMES_XAI_BASE_URL", "").strip().rstrip("/")
+                    korra_env("HERMES_XAI_BASE_URL", "").strip().rstrip("/")
                     or os.getenv("XAI_BASE_URL", "").strip().rstrip("/")
                     or str(getattr(entry, "runtime_base_url", None) or "").strip().rstrip("/")
                     or str(getattr(entry, "base_url", None) or "").strip().rstrip("/"),

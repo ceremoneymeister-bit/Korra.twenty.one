@@ -25,6 +25,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from agent.billing_view import parse_money
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -464,7 +465,7 @@ def dev_fixture_subscription_state() -> Optional[SubscriptionState]:
     Returns ``None`` when the env var is unset/empty (the real portal path runs).
     Throwaway scaffolding — mirrors ``HERMES_DEV_CREDITS_FIXTURE``.
     """
-    name = (os.getenv("HERMES_DEV_SUBSCRIPTION_FIXTURE") or "").strip().lower()
+    name = (korra_env("HERMES_DEV_SUBSCRIPTION_FIXTURE") or "").strip().lower()
     if not name:
         return None
 

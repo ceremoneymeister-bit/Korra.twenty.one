@@ -29,6 +29,7 @@ import logging
 import os
 import threading
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
+from hermes_constants import korra_env
 
 # Errno values that mean "the peer is gone" rather than "the host has a
 # real I/O problem".  Anything outside this set re-raises so it surfaces
@@ -55,7 +56,7 @@ logger = logging.getLogger(__name__)
 # those, JSON-RPC frames will accumulate in the buffer and the TUI
 # will hang waiting for ``gateway.ready``.  Default stays off so the
 # existing flush-after-write behaviour is unchanged.
-_DISABLE_FLUSH = (os.environ.get("HERMES_TUI_GATEWAY_NO_FLUSH", "") or "").strip().lower() in {
+_DISABLE_FLUSH = (korra_env("HERMES_TUI_GATEWAY_NO_FLUSH", "") or "").strip().lower() in {
     "1",
     "true",
     "yes",

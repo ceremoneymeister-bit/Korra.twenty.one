@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from hermes_constants import get_config_path, get_skills_dir, is_termux
+from hermes_constants import get_config_path, get_skills_dir, is_termux, korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -306,7 +306,7 @@ def _detect_environment(env: str) -> bool:
         # kanban toolset. Mirror the same signals the kanban tools themselves
         # gate on (``tools/kanban_tools.py``) so the offer filter agrees with
         # tool availability.
-        if os.getenv("HERMES_KANBAN_TASK") or os.getenv("HERMES_KANBAN_BOARD"):
+        if korra_env("HERMES_KANBAN_TASK") or korra_env("HERMES_KANBAN_BOARD"):
             # ...but only when this execution actually owns the dispatcher's
             # task. A delegate_task child or a cron job fired in-process from a
             # worker sees the worker's vars without being that worker.
@@ -476,7 +476,7 @@ def get_disabled_skill_names(platform: str | None = None) -> Set[str]:
     from gateway.session_context import get_session_env
     resolved_platform = (
         platform
-        or os.getenv("HERMES_PLATFORM")
+        or korra_env("HERMES_PLATFORM")
         or get_session_env("HERMES_SESSION_PLATFORM")
     )
     global_disabled = _normalize_string_set(skills_cfg.get("disabled"))

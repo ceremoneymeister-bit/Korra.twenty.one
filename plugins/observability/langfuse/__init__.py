@@ -34,6 +34,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ _LANGFUSE_KEY_PREFIXES: Dict[str, str] = {
 
 
 def _env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
+    return korra_env(name, default).strip()
 
 
 def _env_bool(*names: str) -> bool:

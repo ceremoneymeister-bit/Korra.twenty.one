@@ -28,7 +28,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 from hermes_cli.timeouts import get_provider_request_timeout, get_provider_stale_timeout
-from hermes_constants import PARTIAL_STREAM_STUB_ID, FINISH_REASON_LENGTH
+from hermes_constants import PARTIAL_STREAM_STUB_ID, FINISH_REASON_LENGTH, korra_env
 from agent.error_classifier import (
     FailoverReason,
     PROVIDER_STREAM_NON_JSON_ERROR_CODE,
@@ -618,7 +618,7 @@ def _merge_nous_portal_messages_extra_body(agent, anthropic_kwargs: dict) -> dic
 
 def _env_float(name: str, default: float) -> float:
     try:
-        return float(os.getenv(name, str(default)))
+        return float(korra_env(name, str(default)))
     except (TypeError, ValueError):
         return default
 
@@ -1556,7 +1556,7 @@ def interruptible_api_call(agent, api_kwargs: dict):
         _ttfb_enabled = False
     elif _openai_codex_backend:
         _ttfb_disable_above = _env_float("HERMES_CODEX_TTFB_DISABLE_ABOVE_TOKENS", 10_000.0)
-        _ttfb_strict = os.environ.get("HERMES_CODEX_TTFB_STRICT", "").strip().lower() in {
+        _ttfb_strict = korra_env("HERMES_CODEX_TTFB_STRICT", "").strip().lower() in {
             "1", "true", "yes", "on"
         }
         if (

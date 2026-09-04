@@ -47,6 +47,7 @@ import threading
 import time
 from pathlib import Path as _Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from hermes_constants import korra_env
 
 # Heavy google-cloud + googleapiclient imports are deferred to first
 # adapter use. Importing them eagerly here added ~110ms wall and ~33MB
@@ -916,7 +917,7 @@ class GoogleChatAdapter(BasePlatformAdapter):
     # ------------------------------------------------------------------
     def _bot_id_cache_path(self) -> _Path:
         """Location where the resolved bot user_id is cached across restarts."""
-        base = os.getenv("HERMES_HOME", str(_Path.home() / ".hermes"))
+        base = korra_env("HERMES_HOME", str(_Path.home() / ".hermes"))
         return _Path(base) / "google_chat_bot_id.json"
 
     def _load_cached_bot_id(self) -> Optional[str]:

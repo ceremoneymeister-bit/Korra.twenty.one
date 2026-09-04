@@ -7,6 +7,7 @@ import sys
 # runs (its name won't collide with a user package), and it owns the canonical
 # path-hardening logic shared with the other entry points.
 import hermes_bootstrap
+from hermes_constants import korra_env
 
 hermes_bootstrap.harden_import_path()
 
@@ -53,7 +54,7 @@ def _install_sidecar_publisher() -> None:
     ``/api/pty`` endpoint when a chat tab passes a ``channel`` query param.
     Best-effort: connect failure or runtime drop falls back to stdio-only.
     """
-    url = os.environ.get("HERMES_TUI_SIDECAR_URL")
+    url = korra_env("HERMES_TUI_SIDECAR_URL")
 
     if not url:
         return
@@ -77,7 +78,7 @@ _DEFAULT_SHUTDOWN_GRACE_S = 1.0
 
 
 def _shutdown_grace_seconds() -> float:
-    raw = (os.environ.get("HERMES_TUI_GATEWAY_SHUTDOWN_GRACE_S") or "").strip()
+    raw = (korra_env("HERMES_TUI_GATEWAY_SHUTDOWN_GRACE_S") or "").strip()
     if not raw:
         return _DEFAULT_SHUTDOWN_GRACE_S
     try:

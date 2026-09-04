@@ -29,6 +29,7 @@ from hermes_state_common import (
     escape_like as _escape_like,
     fts_rebuild_admission,
 )
+from hermes_constants import korra_env
 
 # Moved methods logged under the "hermes_state" logger before the split;
 # keep that logger identity so log filtering/capture behavior is unchanged.
@@ -1451,7 +1452,7 @@ class SessionSearchMixin:
             return rows
         finally:
             try:
-                threshold = float(os.getenv("HERMES_SEARCH_SLOW_MS", "1000"))
+                threshold = float(korra_env("HERMES_SEARCH_SLOW_MS", "1000"))
             except (TypeError, ValueError):
                 threshold = 1000.0
             elapsed_ms = (time.time() - started) * 1000.0

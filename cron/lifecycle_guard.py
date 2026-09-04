@@ -47,6 +47,7 @@ import shlex
 import stat
 from pathlib import Path
 from typing import Callable, Iterator, Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +158,7 @@ def _current_profile_name() -> Optional[str]:
     profile). Returns ``None`` when neither source yields a name.
     """
     for env_name in ("HERMES_PROFILE_NAME", "HERMES_PROFILE"):
-        value = os.environ.get(env_name)
+        value = korra_env(env_name)
         if value and value.strip():
             return value.strip()
     try:

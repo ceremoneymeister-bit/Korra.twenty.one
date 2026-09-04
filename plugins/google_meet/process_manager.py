@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env_set
 
 # File + directory layout (under $HERMES_HOME):
 #
@@ -133,25 +133,25 @@ def start(
                 pass
 
     env = os.environ.copy()
-    env["HERMES_MEET_URL"] = url
-    env["HERMES_MEET_OUT_DIR"] = str(out)
-    env["HERMES_MEET_GUEST_NAME"] = guest_name
+    korra_env_set(env, "HERMES_MEET_URL", url)
+    korra_env_set(env, "HERMES_MEET_OUT_DIR", str(out))
+    korra_env_set(env, "HERMES_MEET_GUEST_NAME", guest_name)
     if headed:
-        env["HERMES_MEET_HEADED"] = "1"
+        korra_env_set(env, "HERMES_MEET_HEADED", "1")
     if auth_state:
-        env["HERMES_MEET_AUTH_STATE"] = auth_state
+        korra_env_set(env, "HERMES_MEET_AUTH_STATE", auth_state)
     if duration:
-        env["HERMES_MEET_DURATION"] = duration
+        korra_env_set(env, "HERMES_MEET_DURATION", duration)
     # v2: realtime mode + passthroughs. The bot defaults to transcribe
     # mode if HERMES_MEET_MODE isn't set, matching v1 behavior.
     if mode:
-        env["HERMES_MEET_MODE"] = mode
+        korra_env_set(env, "HERMES_MEET_MODE", mode)
     if realtime_model:
-        env["HERMES_MEET_REALTIME_MODEL"] = realtime_model
+        korra_env_set(env, "HERMES_MEET_REALTIME_MODEL", realtime_model)
     if realtime_voice:
-        env["HERMES_MEET_REALTIME_VOICE"] = realtime_voice
+        korra_env_set(env, "HERMES_MEET_REALTIME_VOICE", realtime_voice)
     if realtime_instructions:
-        env["HERMES_MEET_REALTIME_INSTRUCTIONS"] = realtime_instructions
+        korra_env_set(env, "HERMES_MEET_REALTIME_INSTRUCTIONS", realtime_instructions)
     # Resolve the realtime key at SPAWN time, in the parent, where the
     # profile secret scope (a contextvar) is still installed. The detached
     # child inherits the process environment — NOT the scope — so under a
@@ -169,7 +169,7 @@ def start(
         except ImportError:  # pragma: no cover — secret_scope is in-repo
             pass
     if realtime_api_key:
-        env["HERMES_MEET_REALTIME_KEY"] = realtime_api_key
+        korra_env_set(env, "HERMES_MEET_REALTIME_KEY", realtime_api_key)
 
     log_path = out / "bot.log"
     # Detach: stdin=devnull, stdout/stderr → log file, new session so parent

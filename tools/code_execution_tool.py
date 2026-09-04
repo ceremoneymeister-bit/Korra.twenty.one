@@ -43,6 +43,7 @@ import tempfile
 import threading
 import time
 import uuid
+from hermes_constants import korra_env, korra_env_set, korra_env_pop, korra_env_aliases
 
 _IS_WINDOWS = platform.system() == "Windows"
 from typing import Any, Dict, List, Optional, Tuple
@@ -315,15 +316,17 @@ def _scrub_child_env(source_env, is_passthrough=None, is_windows=None):
         if any(k.startswith(p) for p in _SAFE_ENV_PREFIXES):
             scrubbed[k] = v
             continue
-        if k in _HERMES_CHILD_ALLOWED:
+        # Список ведётся под старыми именами; сверяем оба имени пары, иначе
+        # после переименования KORRA_HOME молча выпал бы из окружения ребёнка.
+        if any(alias in _HERMES_CHILD_ALLOWED for alias in korra_env_aliases(k)):
             scrubbed[k] = v
             continue
         if is_windows and k.upper() in _WINDOWS_ESSENTIAL_ENV_VARS:
             scrubbed[k] = v
             continue
-        if k.startswith("HERMES_"):
+        if k.startswith(("HERMES_", "KORRA_")):
             # Non-secret (secrets were already dropped above) and not in any
-            # allowlist — a deliberately-dropped HERMES_* var.
+            # allowlist — a deliberately-dropped HERMES_*/KORRA_* var.
             _dropped_hermes.append(k)
     if _dropped_hermes:
         logger.debug(
@@ -1334,7 +1337,7 @@ def _execute_remote(
             f"HERMES_RPC_TOKEN={shlex.quote(rpc_token)} "
             f"PYTHONDONTWRITEBYTECODE=1"
         )
-        tz = os.getenv("HERMES_TIMEZONE", "").strip()
+        tz = korra_env("HERMES_TIMEZONE", "").strip()
         if tz:
             env_prefix += f" TZ={shlex.quote(tz)}"
 
@@ -1447,8 +1450,8 @@ def _build_child_env(*, rpc_endpoint: str, rpc_token: str, tmpdir: str,
     """
     from hermes_constants import apply_subprocess_home_env
     child_env = _scrub_child_env(os.environ)
-    child_env["HERMES_RPC_SOCKET"] = rpc_endpoint
-    child_env["HERMES_RPC_TOKEN"] = rpc_token
+    korra_env_set(child_env, "HERMES_RPC_SOCKET", rpc_endpoint)
+    korra_env_set(child_env, "HERMES_RPC_TOKEN", rpc_token)
     child_env["PYTHONDONTWRITEBYTECODE"] = "1"
     # Force UTF-8 for the child's stdio and default file encoding.
     #
@@ -1473,10 +1476,10 @@ def _build_child_env(*, rpc_endpoint: str, rpc_token: str, tmpdir: str,
     # code reflects the correct wall-clock time.  Only TZ is set —
     # HERMES_TIMEZONE is an internal Hermes setting and must not leak
     # into child processes.
-    _tz_name = os.getenv("HERMES_TIMEZONE", "").strip()
+    _tz_name = korra_env("HERMES_TIMEZONE", "").strip()
     if _tz_name:
         child_env["TZ"] = _tz_name
-    child_env.pop("HERMES_TIMEZONE", None)
+    korra_env_pop(child_env, "HERMES_TIMEZONE")
 
     apply_subprocess_home_env(child_env)
     # ``hermes_tools.py`` always lives in the staging directory, so that

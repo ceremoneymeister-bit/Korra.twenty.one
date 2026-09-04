@@ -15,6 +15,7 @@ from tools.approval import (
     _iter_shell_command_starts,
     _read_shell_word,
 )
+from hermes_constants import korra_env
 
 
 _WORKTREE_MUTATIONS = frozenset({
@@ -743,6 +744,6 @@ def _block_message(operation: str, root: Path) -> str:
 
 def _scratch_dir_hint() -> str:
     """Disk-backed scratch location suggested to agents for temporary clones."""
-    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    hermes_home = korra_env("HERMES_HOME", "").strip()
     base = Path(hermes_home).expanduser() if hermes_home else Path.home() / ".hermes"
     return str(base / "scratch")

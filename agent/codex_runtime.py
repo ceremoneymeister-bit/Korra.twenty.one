@@ -24,6 +24,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, List
 
 from agent.stream_single_writer import claim_stream_writer, stream_writer_is_current
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -1560,7 +1561,7 @@ def _bypass_sdk_request_transform(stream_kwargs: dict) -> dict:
     the transform.  Set HERMES_CODEX_SDK_TRANSFORM=1 to restore the pre-fix
     behavior.
     """
-    if os.environ.get("HERMES_CODEX_SDK_TRANSFORM", "").strip().lower() in {
+    if korra_env("HERMES_CODEX_SDK_TRANSFORM", "").strip().lower() in {
         "1", "true", "yes", "on"
     }:
         return stream_kwargs

@@ -87,6 +87,13 @@ def _hermes_home_points_at_production(value: str) -> bool:
     return resolved.parent.name == "profiles" and resolved.parent.parent == real_root
 
 
+# Слой совместимости имён (KORRA_* побеждает HERMES_*) означает, что любая
+# оставленная в окружении KORRA_* перебила бы песочницу, которую ставит этот
+# файл. Тесты работают со старыми именами, поэтому новые имена снимаются
+# полностью — и здесь, до импорта любого тестового модуля, и в фикстуре ниже.
+for _korra_name in [k for k in os.environ if k.startswith("KORRA_")]:
+    os.environ.pop(_korra_name, None)
+
 if _hermes_home_points_at_production(os.environ.get("HERMES_HOME", "")):
     _SESSION_HERMES_HOME = tempfile.mkdtemp(prefix="hermes-test-home-")
     os.environ["HERMES_HOME"] = _SESSION_HERMES_HOME
@@ -466,6 +473,12 @@ def _hermetic_environment(tmp_path, monkeypatch):
 
     # 2. Blank behavioral HERMES_* vars that could change test semantics.
     for name in _HERMES_BEHAVIORAL_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    # 2b. Снять все KORRA_* — новое имя пары читается первым, а движок теперь
+    #     пишет оба имени, поэтому переменная, оставленная предыдущим тестом
+    #     под новым именем, перебила бы HERMES_*, которое ставит этот тест.
+    for name in [k for k in os.environ if k.startswith("KORRA_")]:
         monkeypatch.delenv(name, raising=False)
 
     # Honcho's fallback host/config resolution legitimately reads the user's

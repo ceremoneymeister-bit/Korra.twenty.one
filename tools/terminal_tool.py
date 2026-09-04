@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from utils import env_var_enabled
+from hermes_constants import korra_env_present, korra_env_set, korra_env_pop
 
 logger = logging.getLogger(__name__)
 
@@ -602,7 +603,7 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
             result["done"] = True
     
     try:
-        os.environ["HERMES_SPINNER_PAUSE"] = "1"
+        korra_env_set(os.environ, "HERMES_SPINNER_PAUSE", "1")
         time.sleep(0.2)
         
         print()
@@ -653,8 +654,8 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
         sys.stdout.flush()
         return ""
     finally:
-        if "HERMES_SPINNER_PAUSE" in os.environ:
-            del os.environ["HERMES_SPINNER_PAUSE"]
+        if korra_env_present("HERMES_SPINNER_PAUSE"):
+            korra_env_pop(os.environ, "HERMES_SPINNER_PAUSE")
 
 def _safe_command_preview(command: Any, limit: int = 200) -> str:
     """Return a log-safe preview for possibly-invalid command values."""

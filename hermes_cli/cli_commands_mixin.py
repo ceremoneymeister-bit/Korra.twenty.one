@@ -27,7 +27,7 @@ from rich import box as rich_box
 from rich.markup import escape as _escape
 from rich.panel import Panel
 
-from hermes_constants import display_hermes_home, is_termux as _is_termux_environment
+from hermes_constants import display_hermes_home, is_termux as _is_termux_environment, korra_env
 from agent.turn_context import extract_api_content_sidecar
 from hermes_cli.browser_connect import (
     DEFAULT_BROWSER_CDP_URL,
@@ -1533,7 +1533,7 @@ class CLICommandsMixin:
         try:
             self._session_db.create_session(
                 session_id=new_session_id,
-                source=os.environ.get("HERMES_SESSION_SOURCE", "cli"),
+                source=korra_env("HERMES_SESSION_SOURCE", "cli"),
                 model=self.model,
                 model_config={
                     "max_iterations": self.max_turns,

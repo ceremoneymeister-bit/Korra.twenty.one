@@ -26,6 +26,7 @@ from typing import Any, Optional
 
 from hermes_cli import kanban_db as kb
 from hermes_cli import kanban_swarm as ks
+from hermes_constants import korra_env
 
 
 # ---------------------------------------------------------------------------
@@ -1275,7 +1276,7 @@ def _is_delegated_child_cli_mutation(args: argparse.Namespace) -> bool:
 
         return is_delegated_child_process_context()
     except Exception:
-        return bool(os.environ.get("HERMES_DELEGATED_CHILD_CONTEXT"))
+        return bool(korra_env("HERMES_DELEGATED_CHILD_CONTEXT"))
 
 
 # ---------------------------------------------------------------------------
@@ -2300,9 +2301,9 @@ def _cmd_attach_rm(args: argparse.Namespace) -> int:
 
 
 def _worker_run_id_for(task_id: str) -> Optional[int]:
-    if os.environ.get("HERMES_KANBAN_TASK") != task_id:
+    if korra_env("HERMES_KANBAN_TASK") != task_id:
         return None
-    raw = os.environ.get("HERMES_KANBAN_RUN_ID")
+    raw = korra_env("HERMES_KANBAN_RUN_ID")
     if not raw:
         return None
     try:

@@ -158,7 +158,7 @@ try:
 except ImportError:  # pragma: no cover
     fcntl = None  # type: ignore[assignment]
 
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env
 from utils import atomic_replace
 
 logger = logging.getLogger(__name__)
@@ -1066,7 +1066,7 @@ def _resolve_effective_accept(
     """
     if accept_hooks_arg:
         return True
-    env = os.environ.get("HERMES_ACCEPT_HOOKS", "").strip().lower()
+    env = korra_env("HERMES_ACCEPT_HOOKS", "").strip().lower()
     if env in {"1", "true", "yes", "on"}:
         return True
     cfg_val = cfg.get("hooks_auto_accept", False)

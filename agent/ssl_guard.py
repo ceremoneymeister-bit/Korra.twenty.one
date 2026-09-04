@@ -12,6 +12,7 @@ import ssl
 from pathlib import Path
 
 from agent.errors import SSLConfigurationError
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ _SKIP_VALUES = {"1", "true", "yes", "on"}
 
 
 def _skip_ssl_guard_enabled() -> bool:
-    return os.getenv("HERMES_SKIP_SSL_GUARD", "").strip().lower() in _SKIP_VALUES
+    return korra_env("HERMES_SKIP_SSL_GUARD", "").strip().lower() in _SKIP_VALUES
 
 
 def _repair_hint() -> str:

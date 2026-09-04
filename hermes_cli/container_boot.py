@@ -25,6 +25,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Sequence
+from hermes_constants import korra_env
 
 log = logging.getLogger(__name__)
 
@@ -231,7 +232,7 @@ def _maybe_migrate_legacy_gateway_run_state(
     if state_file.exists():
         return None
 
-    if os.environ.get("HERMES_GATEWAY_NO_SUPERVISE", "").lower() in ("1", "true", "yes"):
+    if korra_env("HERMES_GATEWAY_NO_SUPERVISE", "").lower() in ("1", "true", "yes"):
         return None
 
     argv = tuple(container_argv) if container_argv is not None else _read_container_argv()
@@ -598,7 +599,7 @@ def main() -> int:
         )
         return 0
 
-    hermes_home = Path(os.environ.get("HERMES_HOME", "/opt/data"))
+    hermes_home = Path(korra_env("HERMES_HOME", "/opt/data"))
     scandir = Path(os.environ.get("S6_PROFILE_GATEWAY_SCANDIR", "/run/service"))
     actions = reconcile_profile_gateways(
         hermes_home=hermes_home, scandir=scandir,

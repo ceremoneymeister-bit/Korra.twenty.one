@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from hermes_constants import korra_env
 
 
 def _m():
@@ -396,7 +397,7 @@ def _kill_stale_dashboard_processes(
     # backend child, it sets HERMES_DESKTOP_CHILD_PID so that the update
     # path can skip killing the desktop-managed process.  (#37532)
     exclude: set[int] = set()
-    raw_pid = os.environ.get("HERMES_DESKTOP_CHILD_PID")
+    raw_pid = korra_env("HERMES_DESKTOP_CHILD_PID")
     if raw_pid:
         # The desktop may manage several backends (one per active profile) and
         # passes them comma-separated; a lone int still parses for back-compat.
@@ -779,7 +780,7 @@ def _process_ppid(pid: int) -> int | None:
 
 def _exclude_pids_from_env() -> set[int]:
     """PIDs Desktop marks as live backends (HERMES_DESKTOP_CHILD_PID)."""
-    raw = os.environ.get("HERMES_DESKTOP_CHILD_PID", "")
+    raw = korra_env("HERMES_DESKTOP_CHILD_PID", "")
     out: set[int] = set()
     for part in raw.split(","):
         part = part.strip()
@@ -820,7 +821,7 @@ _HEX16 = _HEX32
 
 def _hermes_home_dir() -> Path:
     """Resolved Hermes home (HERMES_HOME override or ~/.hermes)."""
-    override = os.environ.get("HERMES_HOME", "").strip()
+    override = korra_env("HERMES_HOME", "").strip()
     if override:
         return Path(override).expanduser()
     return Path.home() / ".hermes"

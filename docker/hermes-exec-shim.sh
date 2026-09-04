@@ -62,7 +62,7 @@ if [ "$(id -u)" != "0" ]; then
 fi
 
 # Root, with opt-out set? Honor it.
-case "${HERMES_DOCKER_EXEC_AS_ROOT:-}" in
+case "${KORRA_DOCKER_EXEC_AS_ROOT:-${HERMES_DOCKER_EXEC_AS_ROOT:-}}" in
     1|true|TRUE|True|yes|YES|Yes)
         exec "$REAL" "$@"
         ;;

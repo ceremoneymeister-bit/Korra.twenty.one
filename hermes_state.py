@@ -51,7 +51,7 @@ from agent.skill_commands import (
     SKILL_SCAFFOLD_SQL_LIKE,
     describe_skill_invocation,
 )
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env
 from hermes_cli.sqlite_runtime import (
     is_sqlite_wal_reset_vulnerable as _is_sqlite_wal_reset_vulnerable,
 )
@@ -764,7 +764,7 @@ def _running_under_pytest() -> bool:
     return bool(
         os.environ.get("PYTEST_CURRENT_TEST")
         or os.environ.get("PYTEST_VERSION")
-        or os.environ.get(_TEST_ISOLATION_MARKER_ENV)
+        or korra_env(_TEST_ISOLATION_MARKER_ENV)
     )
 
 
@@ -892,7 +892,7 @@ def _ensure_test_isolation(db_path: Path) -> None:
     a rebuilt environment loses ``PYTEST_*`` and ``HERMES_HOME`` together,
     which is precisely the state in which it writes to production (#82770).
     """
-    if _STATE_DB_GUARD_BYPASS or os.environ.get(_STATE_DB_GUARD_BYPASS_ENV):
+    if _STATE_DB_GUARD_BYPASS or korra_env(_STATE_DB_GUARD_BYPASS_ENV):
         return
     if not _in_test_context():
         return
@@ -4083,7 +4083,7 @@ END;
 
 def fts5_cjk_so_path() -> Path:
     """Location of the cjk_unicode61 loadable extension."""
-    env = os.getenv("HERMES_FTS5_CJK_SO")
+    env = korra_env("HERMES_FTS5_CJK_SO")
     if env:
         return Path(env).expanduser()
     return get_hermes_home() / "lib" / "libfts5_cjk.so"
@@ -4091,7 +4091,7 @@ def fts5_cjk_so_path() -> Path:
 
 def _cjk_fts_config_enabled() -> bool:
     """config.yaml ``sessions.cjk_fts`` (default on), via its env bridge."""
-    return os.getenv("HERMES_CJK_FTS", "1").strip().lower() not in (
+    return korra_env("HERMES_CJK_FTS", "1").strip().lower() not in (
         "0", "false", "off", "no",
     )
 

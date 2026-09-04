@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Optional
 
 from hermes_cli.config import get_hermes_home
-from hermes_constants import get_default_hermes_root, venv_python_path
+from hermes_constants import get_default_hermes_root, venv_python_path, korra_env, korra_env_set
 
 logger = logging.getLogger(__name__)
 
@@ -1509,7 +1509,7 @@ def _print_update_completion(message: str) -> None:
     so branch drift is visible at a glance (2026-08-17 parked-branch
     incident)."""
     print(f"{message}{_branch_head_suffix()}")
-    action_id = os.environ.get("HERMES_ACTION_ID", "")
+    action_id = korra_env("HERMES_ACTION_ID", "")
     if len(action_id) == 32 and all(char in "0123456789abcdef" for char in action_id):
         print(f"=== hermes-update completed {action_id} ===")
 
@@ -7002,7 +7002,7 @@ def _recover_gateway_restart_after_abort(
         "--stdin",
     ]
     env = os.environ.copy()
-    env["HERMES_UPDATE_RESTART_RECOVERY"] = "1"
+    korra_env_set(env, "HERMES_UPDATE_RESTART_RECOVERY", "1")
     for marker in ("_HERMES_GATEWAY", "HERMES_GATEWAY", "HERMES_GATEWAY_MODE"):
         env.pop(marker, None)
 

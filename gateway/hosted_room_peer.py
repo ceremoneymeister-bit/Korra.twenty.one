@@ -27,6 +27,7 @@ from gateway.hosted_room_execution_policy import (
     RoomExecutionPolicy,
     execution_policy_mapping,
 )
+from hermes_constants import korra_env
 
 
 # Version 2 adds authority/member lineage to scoped grants. It is intentionally
@@ -125,7 +126,7 @@ def gateway_room_grant_secret(root: Path | str | None = None) -> bytes:
 
         # Profile routing uses a context-local HERMES_HOME override. The process
         # environment retains the installation root and is the authority here.
-        root = os.environ.get("HERMES_HOME") or get_hermes_home()
+        root = korra_env("HERMES_HOME") or get_hermes_home()
     home = Path(root).expanduser().resolve()
     return _gateway_room_grant_secret_for_home(str(home))
 
@@ -365,13 +366,13 @@ def catalog_mapping(
     # A Desktop-managed gateway exits with the app.  Treat the caller's flag
     # as an upper bound so every local catalog construction site stays honest,
     # including older call sites that still pass ``True`` explicitly.
-    persistent_process = bool(persistent_process and os.getenv("HERMES_DESKTOP") != "1")
+    persistent_process = bool(persistent_process and korra_env("HERMES_DESKTOP") != "1")
     checked_policy = RoomExecutionPolicy.from_mapping(
         execution_policy
         or execution_policy_mapping(
             target_profile=(
                 str(target_profile or "").strip()
-                or (os.getenv("HERMES_PROFILE") or "default").strip()
+                or (korra_env("HERMES_PROFILE") or "default").strip()
                 or "default"
             )
         )
@@ -468,7 +469,7 @@ def _room_link_url_from_config(home: str) -> str | None:
 
 def _configured_room_link_url() -> str | None:
     """Resolve the explicit endpoint with environment override precedence."""
-    override = os.getenv("HERMES_ROOM_LINK_URL")
+    override = korra_env("HERMES_ROOM_LINK_URL")
     if override is not None:
         return override
     from hermes_constants import get_default_hermes_root, get_hermes_home

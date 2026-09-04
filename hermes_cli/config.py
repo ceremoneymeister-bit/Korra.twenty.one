@@ -14,6 +14,10 @@ This module provides:
 - hermes config wizard   - Re-run setup wizard
 """
 
+# Хелперы совместимости имён переменных окружения нужны уже на этапе
+# импорта модуля, поэтому импорт стоит выше остальных.
+from hermes_constants import korra_env, korra_env_present
+
 import copy
 from decimal import Decimal, InvalidOperation
 from hermes_cli.cli_output import line_input
@@ -401,7 +405,7 @@ _IGNORED_MANAGED_VALUES = frozenset({"brew", "homebrew"})
 
 def get_managed_system() -> Optional[str]:
     """Return the package manager owning this install, if any."""
-    raw = os.getenv("HERMES_MANAGED", "").strip()
+    raw = korra_env("HERMES_MANAGED", "").strip()
     marker = None
     if raw:
         marker = raw.lower()
@@ -725,7 +729,7 @@ def get_container_exec_info() -> Optional[dict]:
     container.enable = true. It tells the host CLI to exec into the container
     instead of running locally.
     """
-    if os.environ.get("HERMES_DEV") == "1":
+    if korra_env("HERMES_DEV") == "1":
         return None
 
     from hermes_constants import is_container
@@ -796,8 +800,8 @@ def _resolve_hermes_uid_gid() -> tuple[Optional[int], Optional[int]]:
     """
     if sys.platform == "win32":
         return None, None
-    uid_str = os.environ.get("HERMES_UID", "").strip()
-    gid_str = os.environ.get("HERMES_GID", "").strip()
+    uid_str = korra_env("HERMES_UID", "").strip()
+    gid_str = korra_env("HERMES_GID", "").strip()
     try:
         uid = int(uid_str) if uid_str else None
     except ValueError:
@@ -859,7 +863,7 @@ def _secure_dir(path):
     if is_managed():
         return
     try:
-        mode_str = os.environ.get("HERMES_HOME_MODE", "").strip()
+        mode_str = korra_env("HERMES_HOME_MODE", "").strip()
         mode = int(mode_str, 8) if mode_str else 0o700
     except ValueError:
         mode = 0o700
@@ -879,7 +883,7 @@ def _is_container() -> bool:
     permissions.
     """
     # Explicit opt-out
-    if os.environ.get("HERMES_CONTAINER") or os.environ.get("HERMES_SKIP_CHMOD"):
+    if korra_env("HERMES_CONTAINER") or korra_env("HERMES_SKIP_CHMOD"):
         return True
     # Docker / Podman marker file
     if os.path.exists("/.dockerenv"):
@@ -4802,22 +4806,22 @@ def get_env_value(key: str) -> Optional[str]:
             get_secret as _get_secret,
         )
     except Exception:
-        if key in os.environ:
-            return os.environ[key]
-        return load_env().get(key)
+        if korra_env_present(key):
+            return korra_env(key)
+        return korra_env(key, env=load_env())
 
     try:
         val = _get_secret(key)
     except UnscopedSecretError:
         raise
     except Exception:
-        val = os.environ.get(key)
+        val = korra_env(key)
     if val is not None:
         return val
 
     # Then check .env file
     env_vars = load_env()
-    return env_vars.get(key)
+    return korra_env(key, env=env_vars)
 
 
 def get_env_value_prefer_dotenv(key: str) -> Optional[str]:
@@ -4835,7 +4839,7 @@ def get_env_value_prefer_dotenv(key: str) -> Optional[str]:
     value — matching the credential-pool seeding path's behaviour.
     """
     env_vars = load_env()
-    val = env_vars.get(key)
+    val = korra_env(key, env=env_vars)
     if val:
         return val
     try:
@@ -4844,7 +4848,7 @@ def get_env_value_prefer_dotenv(key: str) -> Optional[str]:
             get_secret as _get_secret,
         )
     except Exception:
-        return os.environ.get(key)
+        return korra_env(key)
 
     try:
         return _get_secret(key)

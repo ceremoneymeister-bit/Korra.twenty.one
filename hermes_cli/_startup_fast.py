@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import sys
+from hermes_constants import korra_env
 
 __all__ = [
     "project_root_str",
@@ -106,7 +107,7 @@ def active_profile_may_override_home(hermes_root: str) -> bool:
 
 
 def _resolved_home() -> str:
-    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    hermes_home = korra_env("HERMES_HOME", "").strip()
     if hermes_home:
         return hermes_home
     return os.path.join(os.path.expanduser("~"), ".hermes")
@@ -121,12 +122,12 @@ def container_mode_may_be_active() -> bool:
     host's version instead of the container's. Hence: any profile
     ambiguity → assume container mode may be active.
     """
-    if os.environ.get("HERMES_DEV") == "1":
+    if korra_env("HERMES_DEV") == "1":
         return False
     if is_container_startup_environment():
         return False
 
-    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    hermes_home = korra_env("HERMES_HOME", "").strip()
     if hermes_home:
         if os.path.exists(os.path.join(hermes_home, ".container-mode")):
             return True
@@ -261,7 +262,7 @@ def try_fast_version(argv: list[str] | None = None) -> bool:
     if argv is None:
         argv = sys.argv[1:]
     is_termux = is_termux_env()
-    if is_termux and os.environ.get("HERMES_TERMUX_DISABLE_FAST_CLI") == "1":
+    if is_termux and korra_env("HERMES_TERMUX_DISABLE_FAST_CLI") == "1":
         return False
     if is_termux:
         if not is_termux_fast_version_argv(argv):

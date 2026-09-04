@@ -71,7 +71,7 @@ import logging
 import time
 import threading
 
-from hermes_constants import get_hermes_home, display_hermes_home
+from hermes_constants import get_hermes_home, display_hermes_home, korra_env
 import os
 import re
 from enum import Enum
@@ -744,7 +744,7 @@ def _is_skill_disabled(name: str, platform: str = None) -> bool:
         from hermes_cli.config import load_config
         config = load_config()
         skills_cfg = config.get("skills", {})
-        resolved_platform = platform or os.getenv("HERMES_PLATFORM") or _get_session_platform()
+        resolved_platform = platform or korra_env("HERMES_PLATFORM") or _get_session_platform()
         global_disabled = skills_cfg.get("disabled", [])
         if resolved_platform:
             platform_disabled = cfg_get(skills_cfg, "platform_disabled", resolved_platform)

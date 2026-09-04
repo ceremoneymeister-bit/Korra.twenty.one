@@ -41,6 +41,7 @@ from typing import Optional
 from hermes_cli import kanban_db as kb
 
 from utils import env_int
+from hermes_constants import korra_env
 
 HERMES_KANBAN_SPECIFY_MAX_TOKENS = max(
     1500,
@@ -133,7 +134,7 @@ def _profile_author() -> str:
     """Mirror of ``hermes_cli.kanban._profile_author``. Kept local to
     avoid a circular import when kanban.py imports this module."""
     return (
-        os.environ.get("HERMES_PROFILE")
+        korra_env("HERMES_PROFILE")
         or os.environ.get("USER")
         or "specifier"
     )

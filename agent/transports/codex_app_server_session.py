@@ -38,6 +38,7 @@ from agent.transports.codex_app_server import (
     CodexAppServerError,
 )
 from agent.transports.codex_event_projector import CodexEventProjector
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +289,7 @@ class CodexAppServerSession:
         self._codex_home = codex_home
         self._permission_profile = (
             permission_profile or _HERMES_TO_CODEX_PERMISSION_PROFILE.get(
-                os.environ.get("HERMES_TERMINAL_SECURITY_MODE", "auto"),
+                korra_env("HERMES_TERMINAL_SECURITY_MODE", "auto"),
                 "workspace-write",
             )
         )

@@ -50,7 +50,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def _bundles_dir() -> Path:
     Honors ``HERMES_BUNDLES_DIR`` for tests; falls back to
     ``<HERMES_HOME>/skill-bundles``.
     """
-    override = os.environ.get("HERMES_BUNDLES_DIR")
+    override = korra_env("HERMES_BUNDLES_DIR")
     if override:
         return Path(override).expanduser()
     return get_hermes_home() / "skill-bundles"

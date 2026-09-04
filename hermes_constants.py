@@ -27,6 +27,129 @@ INDICATOR_STYLES: tuple[str, ...] = ("ascii", "emoji", "kaomoji", "unicode")
 DEFAULT_INDICATOR_STYLE: str = "kaomoji"
 
 
+# ── Переменные окружения: KORRA_* с совместимостью по HERMES_* ─────────
+#
+# Форк переименовывает переменные окружения ``HERMES_*`` в ``KORRA_*``.
+# Живые контуры, комплекты развёртывания и клиентские скрипты задают старые
+# имена снаружи, поэтому оба имени обязаны работать неограниченно долго.
+#
+# Правило одно и держится этими хелперами:
+#   читаем  — ``KORRA_X``, при пустом или отсутствующем значении ``HERMES_X``;
+#   пишем   — всегда оба имени, чтобы внешние инструменты и скрипты контура
+#             видели переменную под привычным именем.
+#
+# Пока ни одна ``KORRA_*`` не задана — а именно так выглядит любой контур до
+# перехода — поведение чтения побайтово совпадает с прежним
+# ``os.environ.get("HERMES_X", default)``.
+#
+# Имя вне пары (``PATH``, ``TELEGRAM_BOT_TOKEN``, ``_HERMES_GATEWAY``)
+# проходит насквозь: хелперы остаются безопасной заменой ``os.environ.get``
+# в любом месте, где имя переменной приходит параметром.
+KORRA_ENV_PREFIX = "KORRA_"
+HERMES_ENV_PREFIX = "HERMES_"
+
+
+def korra_env_aliases(name: str) -> tuple[str, ...]:
+    """Вернуть оба имени переменной окружения, новое первым.
+
+    ``KORRA_HOME`` и ``HERMES_HOME`` дают одну и ту же пару
+    ``("KORRA_HOME", "HERMES_HOME")`` — вызывающему коду не важно, каким
+    именем он оперирует. Имя без нашего префикса возвращается как есть.
+    """
+    if name.startswith(KORRA_ENV_PREFIX):
+        return (name, HERMES_ENV_PREFIX + name[len(KORRA_ENV_PREFIX):])
+    if name.startswith(HERMES_ENV_PREFIX):
+        return (KORRA_ENV_PREFIX + name[len(HERMES_ENV_PREFIX):], name)
+    return (name,)
+
+
+def korra_env(name, default=None, *, env=None):
+    """Прочитать переменную окружения по новому имени с откатом на старое.
+
+    Замена ``os.environ.get(name, default)`` / ``os.getenv(name, default)``.
+
+    Порядок: непустая ``KORRA_X`` → ``HERMES_X`` (в том числе пустая строка,
+    чтобы «переменная задана пустой» осталась отличима от «не задана») →
+    пустая ``KORRA_X`` → *default*.
+
+    ``env`` позволяет читать не из ``os.environ``, а из подготовленного
+    словаря окружения дочернего процесса.
+    """
+    source = os.environ if env is None else env
+    names = korra_env_aliases(name)
+    if len(names) == 1:
+        return source.get(name, default)
+    new_name, legacy_name = names
+    value = source.get(new_name)
+    if value:
+        return value
+    legacy = source.get(legacy_name)
+    if legacy is not None:
+        return legacy
+    if value is not None:
+        return value
+    return default
+
+
+def korra_env_present(name, *, env=None) -> bool:
+    """Замена ``"HERMES_X" in os.environ``: задано любое из двух имён."""
+    source = os.environ if env is None else env
+    return any(alias in source for alias in korra_env_aliases(name))
+
+
+def korra_env_set(env, name, value) -> None:
+    """Записать переменную под обоими именами.
+
+    Так дочерний процесс — и наш, и любой внешний скрипт контура — видит её
+    и как ``KORRA_X``, и как ``HERMES_X``. ``env`` — ``os.environ`` или
+    словарь окружения, который собирается для ``subprocess``.
+    """
+    for alias in korra_env_aliases(name):
+        env[alias] = value
+
+
+def korra_env_setdefault(env, name, value):
+    """Замена ``env.setdefault(name, value)`` с учётом обоих имён.
+
+    Если ни одно из имён не задано — пишет оба и возвращает *value*. Если
+    задано хоть одно, ничего не пишет и возвращает разрешённое значение,
+    как это делал ``setdefault`` для одиночного имени.
+    """
+    if korra_env_present(name, env=env):
+        return korra_env(name, value, env=env)
+    korra_env_set(env, name, value)
+    return value
+
+
+def korra_env_pop(env, name, default=None):
+    """Удалить переменную под обоими именами, вернуть разрешённое значение.
+
+    Замена ``env.pop(name, default)`` и ``del env[name]``. Удаляются оба
+    имени: иначе после переименования в дочернем процессе осталось бы
+    старое имя со старым значением.
+    """
+    aliases = korra_env_aliases(name)
+    if not any(alias in env for alias in aliases):
+        return default
+    value = korra_env(name, default, env=env)
+    for alias in aliases:
+        env.pop(alias, None)
+    return value
+
+
+def korra_env_expand(pairs) -> "dict[str, str]":
+    """Развернуть словарь переменных в оба имени.
+
+    Для литералов окружения дочернего процесса:
+    ``env={**os.environ, **korra_env_expand({"KORRA_HOME": home})}``.
+    """
+    expanded: dict[str, str] = {}
+    for key, value in dict(pairs).items():
+        for alias in korra_env_aliases(key):
+            expanded[alias] = value
+    return expanded
+
+
 def set_hermes_home_override(path: str | Path | None) -> Token:
     """Set a context-local Hermes home override and return its reset token.
 
@@ -68,7 +191,7 @@ def _hermes_home_from_env() -> Path:
     scope rather than a per-task profile.  Shared by :func:`get_hermes_home`
     and :func:`get_process_hermes_home` so the two never drift.
     """
-    val = os.environ.get("HERMES_HOME", "").strip()
+    val = korra_env("HERMES_HOME", "").strip()
     if val:
         return Path(val)
     return _get_platform_default_hermes_home()
@@ -133,7 +256,7 @@ def get_hermes_home() -> Path:
     if override:
         return Path(override)
 
-    if not os.environ.get("HERMES_HOME", "").strip():
+    if not korra_env("HERMES_HOME", "").strip():
         _warn_profile_fallback_once()
 
     return _hermes_home_from_env()
@@ -199,7 +322,7 @@ def get_default_hermes_root() -> Path:
     """
     global _default_hermes_root_memo
     native_home = _get_platform_default_hermes_home()
-    env_home = os.environ.get("HERMES_HOME", "")
+    env_home = korra_env("HERMES_HOME", "")
     if _default_hermes_root_memo is not None:
         memo_native, memo_env, memo_result = _default_hermes_root_memo
         if memo_native == str(native_home) and memo_env == env_home:
@@ -341,7 +464,7 @@ def get_optional_skills_dir(default: Path | None = None) -> Path:
     Packaged installs may ship ``optional-skills`` outside the Python package
     tree and expose it via ``HERMES_OPTIONAL_SKILLS``.
     """
-    override = os.getenv("HERMES_OPTIONAL_SKILLS", "").strip()
+    override = korra_env("HERMES_OPTIONAL_SKILLS", "").strip()
     if override:
         return Path(override)
     if default is not None:
@@ -357,7 +480,7 @@ def get_optional_mcps_dir(default: Path | None = None) -> Path:
     default). Packaged installs may ship ``optional-mcps`` outside the Python
     package tree and expose it via ``HERMES_OPTIONAL_MCPS``.
     """
-    override = os.getenv("HERMES_OPTIONAL_MCPS", "").strip()
+    override = korra_env("HERMES_OPTIONAL_MCPS", "").strip()
     if override:
         return Path(override)
     if default is not None:
@@ -373,7 +496,7 @@ def get_bundled_skills_dir(default: Path | None = None) -> Path:
         2. Caller-supplied ``default`` (typically the source-checkout path)
         3. ``<HERMES_HOME>/skills`` last-resort
     """
-    override = os.getenv("HERMES_BUNDLED_SKILLS", "").strip()
+    override = korra_env("HERMES_BUNDLED_SKILLS", "").strip()
     if override:
         return Path(override)
     if default is not None:
@@ -454,7 +577,7 @@ def _candidate_node_command_names(command: str) -> list[str]:
     return [f"{base}.cmd", f"{base}.exe", base]
 
 
-_HERMES_NODE_TARGET_MAJOR = int(os.environ.get("HERMES_NODE_TARGET_MAJOR", "22"))
+_HERMES_NODE_TARGET_MAJOR = int(korra_env("HERMES_NODE_TARGET_MAJOR", "22"))
 _managed_node_heal_attempted = False
 _NODE_BOOTSTRAP_SCRIPT = Path(__file__).resolve().parent / "scripts" / "lib" / "node-bootstrap.sh"
 
@@ -785,11 +908,13 @@ def _bootstrap_managed_node_posix() -> bool:
             ],
             env={
                 **os.environ,
-                "HERMES_HOME": str(get_hermes_home()),
-                # Private provisioning: do not symlink node/npm/npx into
-                # ~/.local/bin — the user has their own toolchain on PATH and
-                # this tree must not shadow it.
-                "HERMES_NODE_SKIP_LINKS": "1",
+                **korra_env_expand({
+                    "HERMES_HOME": str(get_hermes_home()),
+                    # Private provisioning: do not symlink node/npm/npx into
+                    # ~/.local/bin — the user has their own toolchain on PATH
+                    # and this tree must not shadow it.
+                    "HERMES_NODE_SKIP_LINKS": "1",
+                }),
             },
             capture_output=True,
             timeout=600,
@@ -875,7 +1000,7 @@ def heal_hermes_managed_node() -> bool:
                 "-c",
                 f'source "{_NODE_BOOTSTRAP_SCRIPT}" && heal_managed_node',
             ],
-            env={**os.environ, "HERMES_HOME": str(get_hermes_home())},
+            env={**os.environ, **korra_env_expand({"HERMES_HOME": str(get_hermes_home())})},
             capture_output=True,
             timeout=300,
             check=False,
@@ -1202,7 +1327,7 @@ def _norm_home_path(path: str | None) -> str:
 
 def _profile_home_path(env: dict[str, str] | None = None) -> str | None:
     """Return ``{HERMES_HOME}/home`` when the profile-home directory exists."""
-    hermes_home = get_hermes_home_override() or (env or {}).get("HERMES_HOME") or os.getenv("HERMES_HOME")
+    hermes_home = get_hermes_home_override() or korra_env("HERMES_HOME", env=env or {}) or korra_env("HERMES_HOME")
     if not hermes_home:
         return None
     profile_home = os.path.join(hermes_home, "home")
@@ -1219,7 +1344,7 @@ def _iter_real_home_candidates(env: dict[str, str] | None = None) -> list[str]:
     """Return likely OS-user home candidates in trust order."""
     env = env or {}
     candidates: list[str] = []
-    explicit = str(env.get("HERMES_REAL_HOME") or os.getenv("HERMES_REAL_HOME", "")).strip()
+    explicit = str(korra_env("HERMES_REAL_HOME", env=env) or korra_env("HERMES_REAL_HOME", "")).strip()
     if explicit:
         candidates.append(explicit)
     home = str(env.get("HOME") or os.getenv("HOME", "")).strip()
@@ -1306,7 +1431,7 @@ def apply_subprocess_home_env(env: dict[str, str]) -> None:
     """Apply Hermes' subprocess HOME contract to *env* in-place."""
     real_home = get_real_home(env)
     if real_home:
-        env["HERMES_REAL_HOME"] = real_home
+        korra_env_set(env, "HERMES_REAL_HOME", real_home)
     home = get_subprocess_home(env)
     if home:
         env["HOME"] = home

@@ -63,7 +63,7 @@ def _load_auxiliary_client() -> None:
             extract_content_or_reasoning = _ecr
 
 
-from hermes_constants import get_hermes_dir
+from hermes_constants import get_hermes_dir, korra_env
 from tools.debug_helpers import DebugSession
 from tools.website_policy import check_website_access
 import sys
@@ -76,7 +76,7 @@ _debug = DebugSession("vision_tools", env_var="VISION_TOOLS_DEBUG")
 # Separate from auxiliary.vision.timeout which governs the LLM API call.
 # Resolution: config.yaml auxiliary.vision.download_timeout → env var → 30s default.
 def _resolve_download_timeout() -> float:
-    env_val = os.getenv("HERMES_VISION_DOWNLOAD_TIMEOUT", "").strip()
+    env_val = korra_env("HERMES_VISION_DOWNLOAD_TIMEOUT", "").strip()
     if env_val:
         try:
             return float(env_val)
@@ -158,7 +158,7 @@ def _resolve_vision_cpu_workers() -> int:
     that parses to < 1 is ignored in favor of the next source so the cap can
     never be disabled into an unbounded encode storm.
     """
-    env_val = os.getenv("HERMES_VISION_MAX_CONCURRENCY", "").strip()
+    env_val = korra_env("HERMES_VISION_MAX_CONCURRENCY", "").strip()
     if env_val:
         try:
             parsed = int(env_val)

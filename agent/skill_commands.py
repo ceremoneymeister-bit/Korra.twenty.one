@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hermes_constants import display_hermes_home
+from hermes_constants import display_hermes_home, korra_env
 from agent.prompt_cache_boundary import register_stable_prefix
 from agent.skill_preprocessing import (
     expand_inline_shell as _expand_inline_shell,
@@ -206,11 +206,11 @@ def _resolve_skill_commands_platform() -> Optional[str]:
         from gateway.session_context import get_session_env
 
         resolved_platform = (
-            os.getenv("HERMES_PLATFORM")
+            korra_env("HERMES_PLATFORM")
             or get_session_env("HERMES_SESSION_PLATFORM")
         )
     except Exception:
-        resolved_platform = os.getenv("HERMES_PLATFORM")
+        resolved_platform = korra_env("HERMES_PLATFORM")
     return resolved_platform or None
 
 

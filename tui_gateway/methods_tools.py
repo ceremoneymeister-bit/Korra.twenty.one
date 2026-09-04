@@ -5,6 +5,7 @@ are rebound onto server.py's globals at install time — see method_ctx.py.
 """
 
 from .method_ctx import HandlerRegistry
+from hermes_constants import korra_env
 
 _registry = HandlerRegistry()
 method = _registry.method
@@ -1501,7 +1502,7 @@ def _(rid, params: dict) -> dict:
 
         api_key = get_secret("HERMES_API_KEY", "") or cfg.get("api_key", "")
         masked = f"****{api_key[-4:]}" if len(api_key) > 4 else "(not set)"
-        base_url = os.environ.get("HERMES_BASE_URL", "") or cfg.get("base_url", "")
+        base_url = korra_env("HERMES_BASE_URL", "") or cfg.get("base_url", "")
 
         sections = [
             {

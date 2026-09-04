@@ -408,9 +408,17 @@ def test_every_dispatcher_kanban_var_is_identity_gated():
                 if key.startswith("HERMES_KANBAN_"):
                     injected.add(key)
         # env.update({"HERMES_KANBAN_X": ...}) / env.setdefault("HERMES_KANBAN_X", ...)
+        # и парная запись слоя совместимости имён:
+        # korra_env_set(env, "HERMES_KANBAN_X", ...) / korra_env_expand({...})
         elif isinstance(node, ast.Call):
             func = ast.unparse(node.func)
-            if func not in ("env.update", "env.setdefault"):
+            if func not in (
+                "env.update",
+                "env.setdefault",
+                "korra_env_set",
+                "korra_env_setdefault",
+                "korra_env_expand",
+            ):
                 continue
             literals = []
             for arg in node.args:

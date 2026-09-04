@@ -42,7 +42,7 @@ from hermes_cli.auth import (
 )
 from hermes_cli import config as _config_mod
 from hermes_cli.providers import custom_provider_aliases, custom_provider_slug
-from hermes_constants import OPENROUTER_BASE_URL
+from hermes_constants import OPENROUTER_BASE_URL, korra_env
 from hermes_cli.providers import is_official_openai_host
 
 
@@ -1111,7 +1111,7 @@ def canonical_custom_identity(
         except Exception:
             candidate = ""
     if not candidate:
-        candidate = os.environ.get("HERMES_INFERENCE_PROVIDER", "").strip()
+        candidate = korra_env("HERMES_INFERENCE_PROVIDER", "").strip()
 
     candidate_norm = _normalize_custom_provider_name(candidate)
     # A bare/non-routable candidate cannot heal a bare custom override.

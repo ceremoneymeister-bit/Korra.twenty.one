@@ -37,6 +37,7 @@ from hermes_cli.toolset_scope import (
 )
 from tools.tool_backend_helpers import NOUS_MANAGED_PROVIDER, fal_key_is_configured
 from utils import base_url_hostname, is_truthy_value
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -762,7 +763,7 @@ TOOLSET_ENV_REQUIREMENTS = {
 
 def _cua_driver_cmd() -> str:
     """Return the configured cua-driver override, or the bare default name."""
-    return os.environ.get("HERMES_CUA_DRIVER_CMD", "").strip() or "cua-driver"
+    return korra_env("HERMES_CUA_DRIVER_CMD", "").strip() or "cua-driver"
 
 
 def _cua_version_summary(raw: str, *, limit: int = 120) -> str:
@@ -1047,7 +1048,7 @@ def install_cua_driver(
     # An explicit override is authoritative even when it is currently broken.
     # Do not install or replace the standard system driver: that cannot repair
     # the configured path and would mutate an unrelated installation.
-    override = os.environ.get("HERMES_CUA_DRIVER_CMD", "").strip()
+    override = korra_env("HERMES_CUA_DRIVER_CMD", "").strip()
     if override and not binary:
         _print_warning(
             "    HERMES_CUA_DRIVER_CMD does not resolve to an executable: "
@@ -1123,7 +1124,7 @@ def install_cua_driver(
             f"    Found cua-driver {version}, but Korra cannot use its current "
             f"runtime contract: {reason}."
         )
-        if os.environ.get("HERMES_CUA_DRIVER_CMD", "").strip():
+        if korra_env("HERMES_CUA_DRIVER_CMD", "").strip():
             _print_info(
                 "    Update the binary selected by HERMES_CUA_DRIVER_CMD, or unset "
                 "the override and run: hermes computer-use install --upgrade"

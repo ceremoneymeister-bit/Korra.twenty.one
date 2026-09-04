@@ -33,6 +33,7 @@ from agent.async_utils import (
     consume_detached_task_result as _consume_background_task_result,
 )
 from agent.display import ToolPreview
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -557,7 +558,7 @@ def _build_allowed_mentions():
 
 def _discord_ready_timeout_seconds() -> float:
     """Return the Discord ready wait timeout during gateway startup."""
-    raw = os.getenv("HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "").strip()
+    raw = korra_env("HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "").strip()
     if raw:
         try:
             return max(0.0, float(raw))
@@ -2140,7 +2141,7 @@ class DiscordAdapter(BasePlatformAdapter):
         ``GatewayRunner._adapter_disconnect_timeout_secs``.
         """
         budget = 5.0  # mirrors gateway _ADAPTER_DISCONNECT_TIMEOUT_SECS_DEFAULT
-        raw = os.getenv("HERMES_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
+        raw = korra_env("HERMES_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
         if raw:
             try:
                 parsed = float(raw)

@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover - non-Windows
     msvcrt = None
 from datetime import datetime, timedelta
 from pathlib import Path
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env
 from typing import Optional, Dict, List, Any, Set, Tuple, Union, Collection
 
 logger = logging.getLogger(__name__)
@@ -223,7 +223,7 @@ def _oneshot_run_claim_ttl_seconds() -> float:
     - positive N → ``max(N * headroom, ONESHOT_RUN_CLAIM_TTL_SECONDS)`` so a
       tiny configured timeout can never expire a claim mid-run.
     """
-    raw = os.getenv("HERMES_CRON_TIMEOUT", "").strip()
+    raw = korra_env("HERMES_CRON_TIMEOUT", "").strip()
     timeout = _DEFAULT_CRON_INACTIVITY_TIMEOUT
     if raw:
         try:
@@ -3426,7 +3426,7 @@ def _machine_id() -> str:
     Uses ``HERMES_MACHINE_ID`` if set, else hostname + pid. The CAS correctness
     comes from the file lock + the fresh-claim check, not from this value.
     """
-    explicit = os.getenv("HERMES_MACHINE_ID", "").strip()
+    explicit = korra_env("HERMES_MACHINE_ID", "").strip()
     if explicit:
         return explicit
     try:

@@ -4,6 +4,10 @@ Gateway subcommand for hermes CLI.
 Handles: hermes gateway [run|start|stop|restart|status|install|uninstall|setup]
 """
 
+# Хелперы совместимости имён переменных окружения нужны уже на этапе
+# импорта модуля, поэтому импорт стоит выше остальных.
+from hermes_constants import korra_env, korra_env_set
+
 import asyncio
 from hermes_cli.cli_output import line_input
 import json
@@ -1542,10 +1546,10 @@ def _sync_hermes_home_from_systemd_unit(system: bool) -> None:
         unit_home = _read_systemd_unit_environment(system=True).get("HERMES_HOME", "").strip()
     if not unit_home:
         return
-    current = os.environ.get("HERMES_HOME", "").strip()
+    current = korra_env("HERMES_HOME", "").strip()
     if current == unit_home:
         return
-    os.environ["HERMES_HOME"] = unit_home
+    korra_env_set(os.environ, "HERMES_HOME", unit_home)
 
 
 def _read_systemd_unit_properties(
@@ -2699,7 +2703,7 @@ def _windows_gateway_should_absorb_console_controls() -> bool:
     if not is_windows():
         return False
 
-    detached = os.getenv("HERMES_GATEWAY_DETACHED", "").strip().lower()
+    detached = korra_env("HERMES_GATEWAY_DETACHED", "").strip().lower()
     if detached in {"1", "true", "yes", "on"}:
         return True
 
@@ -3807,7 +3811,7 @@ def _hermes_home_for_target_user(target_home_dir: str) -> str:
       /root/.hermes/profiles/coder     → /home/alice/.hermes/profiles/coder
       /opt/custom-hermes               → /opt/custom-hermes  (kept as-is)
     """
-    current_hermes_raw = os.environ.get("HERMES_HOME", "").strip()
+    current_hermes_raw = korra_env("HERMES_HOME", "").strip()
     current_hermes = (
         Path(current_hermes_raw).expanduser()
         if current_hermes_raw
@@ -4432,7 +4436,7 @@ def _print_system_scope_remediation(action: str) -> None:
 
 def _get_restart_drain_timeout() -> float:
     """Return the configured gateway restart drain timeout in seconds."""
-    raw = os.getenv("HERMES_RESTART_DRAIN_TIMEOUT", "").strip()
+    raw = korra_env("HERMES_RESTART_DRAIN_TIMEOUT", "").strip()
     if not raw:
         cfg = read_raw_config()
         agent_cfg = cfg.get("agent", {}) if isinstance(cfg, dict) else {}
@@ -4446,7 +4450,7 @@ def _get_restart_drain_timeout() -> float:
 
 def _get_cron_drain_timeout() -> float:
     """Return the configured cron-only drain floor in seconds (#82161)."""
-    env_raw = os.getenv("HERMES_CRON_DRAIN_TIMEOUT")
+    env_raw = korra_env("HERMES_CRON_DRAIN_TIMEOUT")
     if env_raw is not None and str(env_raw).strip() != "":
         return parse_cron_drain_timeout(env_raw)
     cfg = read_raw_config()
@@ -4458,7 +4462,7 @@ def _get_cron_drain_timeout() -> float:
 
 def _get_restart_after_turn_timeout() -> float:
     """Return the in-band restart wait-for-idle timeout in seconds (#77184)."""
-    env_raw = os.getenv("HERMES_RESTART_AFTER_TURN_TIMEOUT")
+    env_raw = korra_env("HERMES_RESTART_AFTER_TURN_TIMEOUT")
     if env_raw is not None and str(env_raw).strip() != "":
         return parse_restart_after_turn_timeout(env_raw)
     cfg = read_raw_config()
@@ -6400,7 +6404,7 @@ def _guard_official_docker_root_gateway() -> None:
     """Refuse gateway startup when the official Docker privilege drop was bypassed."""
     if not hasattr(os, "geteuid") or os.geteuid() != 0:
         return
-    if _truthy_env(os.getenv("HERMES_ALLOW_ROOT_GATEWAY")):
+    if _truthy_env(korra_env("HERMES_ALLOW_ROOT_GATEWAY")):
         return
     if not _is_official_docker_checkout():
         return
@@ -6452,7 +6456,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
         _stdin_is_tty = False
     _console_window_attached = _windows_console_window_attached()
     _gateway_detached = (
-        os.getenv("HERMES_GATEWAY_DETACHED", "").strip().lower()
+        korra_env("HERMES_GATEWAY_DETACHED", "").strip().lower()
         in {"1", "true", "yes", "on"}
     )
     _breakaway = _windows_gateway_breakaway_state()
@@ -6530,7 +6534,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
     from datetime import datetime as _dt, timezone as _tz
 
     def _exit_diag(tag: str, **extra: object) -> None:
-        if os.environ.get("HERMES_GATEWAY_EXIT_DIAG", "1") != "1":
+        if korra_env("HERMES_GATEWAY_EXIT_DIAG", "1") != "1":
             return
         try:
             from hermes_constants import get_hermes_home as _ghh
@@ -6600,13 +6604,13 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
             pass
         # Env vars override config for escape-hatch use.
         try:
-            _env_starts = os.getenv("HERMES_GATEWAY_MAX_STARTS")
+            _env_starts = korra_env("HERMES_GATEWAY_MAX_STARTS")
             if _env_starts is not None:
                 _max_starts = int(_env_starts)
         except ValueError:
             pass
         try:
-            _env_win = os.getenv("HERMES_GATEWAY_START_WINDOW_S")
+            _env_win = korra_env("HERMES_GATEWAY_START_WINDOW_S")
             if _env_win is not None:
                 _win = float(_env_win)
         except ValueError:
@@ -8295,10 +8299,10 @@ def _maybe_redirect_run_to_s6_supervision(args) -> bool:
     Returns True iff dispatched (caller should ``return``).
     """
     no_supervise = getattr(args, "no_supervise", False) or \
-        os.environ.get("HERMES_GATEWAY_NO_SUPERVISE", "").lower() in ("1", "true", "yes")
+        korra_env("HERMES_GATEWAY_NO_SUPERVISE", "").lower() in ("1", "true", "yes")
     if no_supervise:
         return False
-    if os.environ.get("HERMES_S6_SUPERVISED_CHILD"):
+    if korra_env("HERMES_S6_SUPERVISED_CHILD"):
         # We ARE the supervised child s6-supervise is running. Fall
         # through to the foreground code path so the gateway actually
         # starts.

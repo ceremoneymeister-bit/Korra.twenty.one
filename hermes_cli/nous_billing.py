@@ -31,6 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Optional
+from hermes_constants import korra_env
 
 DEFAULT_PORTAL_BASE_URL = "https://portal.nousresearch.com"
 
@@ -176,7 +177,7 @@ def resolve_portal_base_url(state: Optional[dict[str, Any]] = None) -> str:
     ``HERMES_PORTAL_BASE_URL`` → ``NOUS_PORTAL_BASE_URL`` → stored auth-state
     ``portal_base_url`` → registry default. Trailing slash stripped.
     """
-    env = os.getenv("HERMES_PORTAL_BASE_URL") or os.getenv("NOUS_PORTAL_BASE_URL")
+    env = korra_env("HERMES_PORTAL_BASE_URL") or os.getenv("NOUS_PORTAL_BASE_URL")
     if env and env.strip():
         return env.strip().rstrip("/")
     if state:

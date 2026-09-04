@@ -20,6 +20,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -414,7 +415,7 @@ def _dev_fixture_billing_state() -> Optional[BillingState]:
     Mirrors ``HERMES_DEV_CREDITS_FIXTURE``; the usage *bar* still comes from
     ``HERMES_DEV_CREDITS_FIXTURE`` (set both to pair a bar with a billing state).
     """
-    name = (os.getenv("HERMES_DEV_BILLING_FIXTURE") or "").strip().lower()
+    name = (korra_env("HERMES_DEV_BILLING_FIXTURE") or "").strip().lower()
     if not name:
         return None
 

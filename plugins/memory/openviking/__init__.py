@@ -55,6 +55,7 @@ from agent.skill_commands import extract_user_instruction_from_skill_message
 from hermes_cli import __version__ as _HERMES_VERSION
 from tools.registry import tool_error
 from utils import atomic_json_write, env_var_enabled
+from hermes_constants import korra_env
 
 try:
     import fcntl
@@ -1491,7 +1492,7 @@ def _openviking_server_log_path() -> Path:
         from hermes_constants import get_hermes_home
         home = get_hermes_home()
     except Exception:
-        home = Path(os.environ.get("HERMES_HOME", "")).expanduser() if os.environ.get("HERMES_HOME") else Path.home() / ".hermes"
+        home = Path(korra_env("HERMES_HOME", "")).expanduser() if korra_env("HERMES_HOME") else Path.home() / ".hermes"
     return home / _OPENVIKING_SERVER_LOG_RELATIVE_PATH
 
 

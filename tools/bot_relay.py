@@ -45,6 +45,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Iterator, Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -468,7 +469,7 @@ def cleanup_bot_relay_artifacts(max_age_hours: float | None = None) -> int:
     """
     del max_age_hours  # relay staleness is governed by STALE_AFTER_SECONDS
     try:
-        home = Path(os.getenv("HERMES_HOME") or os.path.expanduser("~/.hermes"))
+        home = Path(korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes"))
         root = home.parent.parent if home.parent.name == "profiles" else home
         base = relay_root(root)
         if not base.is_dir():

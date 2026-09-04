@@ -9,6 +9,7 @@ from .method_ctx import HandlerRegistry
 
 import os
 import threading
+from hermes_constants import korra_env
 
 _registry = HandlerRegistry()
 method = _registry.method
@@ -101,7 +102,7 @@ _WORKER_UNAVAILABLE = (
 
 
 def _profile_name() -> str:
-    return (os.getenv("HERMES_PROFILE") or "default").strip() or "default"
+    return (korra_env("HERMES_PROFILE") or "default").strip() or "default"
 
 
 def _requested_profile(params: dict) -> str:

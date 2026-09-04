@@ -14,6 +14,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from hermes_constants import (
+    korra_env,
     get_hermes_home,
     get_skills_dir,
     is_wsl,
@@ -1443,7 +1444,7 @@ def build_environment_hints() -> str:
     # it's part of the stable, cache-safe system prompt. The env var is the
     # build-time/embedder mechanism (set in a container ENV); config.yaml
     # ``agent.environment_hint`` is the user-facing surface. Env var wins.
-    extra = (os.getenv("HERMES_ENVIRONMENT_HINT") or "").strip()
+    extra = (korra_env("HERMES_ENVIRONMENT_HINT") or "").strip()
     if not extra:
         try:
             from hermes_cli.config import load_config_readonly
@@ -1785,7 +1786,7 @@ def _skill_should_show(
 
 def _current_session_platform_hint() -> str:
     """Return the active platform without importing the gateway package on CLI startup."""
-    platform = os.environ.get("HERMES_PLATFORM") or os.environ.get("HERMES_SESSION_PLATFORM")
+    platform = korra_env("HERMES_PLATFORM") or korra_env("HERMES_SESSION_PLATFORM")
     if platform:
         return platform
 

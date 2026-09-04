@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import subprocess
 from typing import Optional
+from hermes_constants import korra_env
 
 USAGE_HINT = "Usage: !<command> — run a shell command without spending a model turn (e.g. !git status)"
 
@@ -67,13 +68,13 @@ def bang_shell_enabled() -> bool:
         from utils import env_var_enabled
     except Exception:  # pragma: no cover - utils is always importable in-tree
         def env_var_enabled(name, default=""):  # type: ignore[misc]
-            return str(os.getenv(name, default)).strip().lower() in {"1", "true", "yes", "on"}
+            return str(korra_env(name, default)).strip().lower() in {"1", "true", "yes", "on"}
 
     if env_var_enabled("HERMES_GATEWAY_SESSION"):
         return False
     if env_var_enabled("HERMES_CRON_SESSION"):
         return False
-    if (os.getenv("HERMES_SESSION_PLATFORM") or "").strip():
+    if (korra_env("HERMES_SESSION_PLATFORM") or "").strip():
         return False
     return True
 

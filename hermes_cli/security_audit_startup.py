@@ -27,6 +27,7 @@ import os
 import re
 from pathlib import Path
 from typing import Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger("hermes.security_audit")
 
@@ -116,7 +117,7 @@ def _in_container() -> bool:
     """Best-effort container detection (Docker / Podman / generic OCI)."""
     if os.path.exists("/.dockerenv"):
         return True
-    if os.environ.get("HERMES_DESKTOP_CHILD_PID"):
+    if korra_env("HERMES_DESKTOP_CHILD_PID"):
         return False  # desktop child, not a server container
     try:
         cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="replace")

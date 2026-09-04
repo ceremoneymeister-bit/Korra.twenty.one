@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 
 from hermes_cli.config import get_hermes_home
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -452,7 +453,7 @@ class DeliveryRouter:
         otherwise the ``gateway.filter_silence_narration`` config flag wins
         (default True).
         """
-        env = os.getenv("HERMES_FILTER_SILENCE_NARRATION")
+        env = korra_env("HERMES_FILTER_SILENCE_NARRATION")
         if env is not None:
             return env.strip().lower() in ("1", "true", "yes", "on")
         return bool(getattr(self.config, "filter_silence_narration", True))

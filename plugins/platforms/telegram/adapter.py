@@ -20,6 +20,7 @@ import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterator, List, Optional, Set
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -4542,13 +4543,13 @@ class TelegramAdapter(BasePlatformAdapter):
             # during reconnect/bootstrap. Use safer defaults and allow env overrides.
             def _env_int(name: str, default: int) -> int:
                 try:
-                    return int(os.getenv(name, str(default)))
+                    return int(korra_env(name, str(default)))
                 except (TypeError, ValueError):
                     return default
 
             def _env_float(name: str, default: float) -> float:
                 try:
-                    return float(os.getenv(name, str(default)))
+                    return float(korra_env(name, str(default)))
                 except (TypeError, ValueError):
                     return default
 
@@ -4622,7 +4623,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 return kwargs
 
             disable_fallback = (
-                os.getenv("HERMES_TELEGRAM_DISABLE_FALLBACK_IPS", "")
+                korra_env("HERMES_TELEGRAM_DISABLE_FALLBACK_IPS", "")
                 .strip()
                 .lower()
                 in {"1", "true", "yes", "on"}
@@ -11046,7 +11047,7 @@ def _resolve_notifications_mode() -> str:
     config.yaml display.platforms.telegram.notifications, defaulting to
     'important'.  Mirrors the post-construction logic that used to live in
     gateway/run.py::_create_adapter()."""
-    mode = os.getenv("HERMES_TELEGRAM_NOTIFICATIONS", "")
+    mode = korra_env("HERMES_TELEGRAM_NOTIFICATIONS", "")
     if not mode:
         try:
             from gateway.config import load_gateway_config

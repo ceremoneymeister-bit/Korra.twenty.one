@@ -95,6 +95,7 @@ from hermes_cli.dashboard_auth import (
     RefreshExpiredError,
     Session,
 )
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -782,7 +783,7 @@ def _resolve_setting(env_var: str, cfg_value: Any) -> str:
     2. ``cfg_value`` from config.yaml.
     3. Empty string.
     """
-    env = os.environ.get(env_var, "").strip()
+    env = korra_env(env_var, "").strip()
     if env:
         return env
     return str(cfg_value or "").strip()

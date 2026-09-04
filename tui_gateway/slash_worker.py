@@ -13,6 +13,7 @@ Protocol: reads JSON lines from stdin {id, command}, writes {id, ok, output|erro
 # path-hardening logic shared with the other entry points — #51693 added the
 # guard to ``entry.py``/``acp_adapter/entry.py`` but missed this child.
 import hermes_bootstrap
+from hermes_constants import korra_env_set
 
 hermes_bootstrap.harden_import_path()
 
@@ -131,8 +132,8 @@ def main():
     p.add_argument("--model", default="")
     args = p.parse_args()
 
-    os.environ["HERMES_SESSION_KEY"] = args.session_key
-    os.environ["HERMES_INTERACTIVE"] = "1"
+    korra_env_set(os.environ, "HERMES_SESSION_KEY", args.session_key)
+    korra_env_set(os.environ, "HERMES_INTERACTIVE", "1")
 
     # Start before the (hundreds-of-ms) HermesCLI build — that window is itself
     # an orphan risk if the gateway dies mid-spawn.

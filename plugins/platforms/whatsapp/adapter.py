@@ -29,6 +29,7 @@ from typing import Dict, Optional, Any
 
 from hermes_cli._subprocess_compat import windows_detach_popen_kwargs
 from hermes_constants import (
+    korra_env_set,
     find_node_executable,
     get_hermes_dir,
     with_hermes_node_path,
@@ -770,9 +771,9 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 get_document_cache_dir as _get_doc_dir,
                 get_image_cache_dir as _get_img_dir,
             )
-            bridge_env["HERMES_IMAGE_CACHE_DIR"] = str(_get_img_dir())
-            bridge_env["HERMES_AUDIO_CACHE_DIR"] = str(_get_audio_dir())
-            bridge_env["HERMES_DOCUMENT_CACHE_DIR"] = str(_get_doc_dir())
+            korra_env_set(bridge_env, "HERMES_IMAGE_CACHE_DIR", str(_get_img_dir()))
+            korra_env_set(bridge_env, "HERMES_AUDIO_CACHE_DIR", str(_get_audio_dir()))
+            korra_env_set(bridge_env, "HERMES_DOCUMENT_CACHE_DIR", str(_get_doc_dir()))
 
             self._bridge_process = subprocess.Popen(
                 [

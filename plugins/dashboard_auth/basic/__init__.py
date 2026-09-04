@@ -74,6 +74,7 @@ from hermes_cli.dashboard_auth import (
     RefreshExpiredError,
     Session,
 )
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -355,7 +356,7 @@ def _load_config_basic_auth_section() -> dict:
 
 def _resolve(env_name: str, cfg_section: dict, cfg_key: str) -> str:
     """Env-wins-over-config resolution; empty env treated as unset."""
-    env = os.environ.get(env_name, "").strip()
+    env = korra_env(env_name, "").strip()
     if env:
         return env
     return str(cfg_section.get(cfg_key, "") or "").strip()

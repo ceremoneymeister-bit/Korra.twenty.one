@@ -104,7 +104,7 @@ from agent.trajectory import has_incomplete_scratchpad
 from agent.turn_finalizer import finalize_turn
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
 from agent import empty_response_guard as _empty_guard
-from hermes_constants import PARTIAL_STREAM_STUB_ID
+from hermes_constants import PARTIAL_STREAM_STUB_ID, korra_env
 from hermes_logging import set_session_context
 from tools.skill_provenance import set_current_write_origin
 from utils import base_url_host_matches, env_var_enabled
@@ -8740,7 +8740,7 @@ def run_conversation(
                     logger.info(
                         "kanban stop-loop nudge issued (attempt %d) task=%s",
                         agent._kanban_stop_nudges,
-                        os.environ.get("HERMES_KANBAN_TASK", ""),
+                        korra_env("HERMES_KANBAN_TASK", ""),
                     )
                     agent._emit_status(
                         "⚠️ Kanban worker tried to exit without "

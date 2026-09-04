@@ -5,6 +5,10 @@ All platform adapters (Telegram, Discord, WhatsApp, Weixin, and more) inherit fr
 and implement the required methods.
 """
 
+# Хелперы совместимости имён переменных окружения нужны уже на этапе
+# импорта модуля, поэтому импорт стоит выше остальных.
+from hermes_constants import korra_env
+
 import asyncio
 import inspect
 import ipaddress
@@ -122,7 +126,7 @@ def _platform_name(platform) -> str:
 
 
 def _float_env(name: str, default: float) -> float:
-    raw = os.environ.get(name, "").strip()
+    raw = korra_env(name, "").strip()
     if not raw:
         return default
     try:
@@ -1334,10 +1338,10 @@ def _profile_cache_roots() -> List[Path]:
 
 def _kanban_attachment_roots() -> List[Path]:
     """Return durable Kanban attachment roots without importing kanban_db."""
-    override = os.environ.get("HERMES_KANBAN_ATTACHMENTS_ROOT", "").strip()
+    override = korra_env("HERMES_KANBAN_ATTACHMENTS_ROOT", "").strip()
     if override:
         return [Path(override).expanduser()]
-    home_override = os.environ.get("HERMES_KANBAN_HOME", "").strip()
+    home_override = korra_env("HERMES_KANBAN_HOME", "").strip()
     root = Path(home_override).expanduser() if home_override else _HERMES_ROOT
     roots = [root / "kanban" / "attachments"]
     boards_root = root / "kanban" / "boards"
@@ -3201,7 +3205,7 @@ class BasePlatformAdapter(ABC):
         # pre-sync read matches the single-knob default rather than silently
         # queueing.
         self._busy_text_mode: str = (
-            os.environ.get("HERMES_GATEWAY_BUSY_TEXT_MODE", "interrupt").strip().lower()
+            korra_env("HERMES_GATEWAY_BUSY_TEXT_MODE", "interrupt").strip().lower()
             or "interrupt"
         )
         self._busy_text_debounce_seconds: float = _float_env(
@@ -6469,7 +6473,7 @@ class BasePlatformAdapter(ABC):
           HERMES_HUMAN_DELAY_MIN_MS: minimum delay in ms (default 800, custom mode)
           HERMES_HUMAN_DELAY_MAX_MS: maximum delay in ms (default 2500, custom mode)
         """
-        mode = os.getenv("HERMES_HUMAN_DELAY_MODE", "off").lower()
+        mode = korra_env("HERMES_HUMAN_DELAY_MODE", "off").lower()
         if mode == "off":
             return 0.0
         if mode == "natural":
@@ -6477,11 +6481,11 @@ class BasePlatformAdapter(ABC):
             return random.uniform(min_ms / 1000.0, max_ms / 1000.0)
         # custom mode — tolerate malformed env vars instead of crashing.
         try:
-            min_ms = int(os.getenv("HERMES_HUMAN_DELAY_MIN_MS", "800"))
+            min_ms = int(korra_env("HERMES_HUMAN_DELAY_MIN_MS", "800"))
         except (TypeError, ValueError):
             min_ms = 800
         try:
-            max_ms = int(os.getenv("HERMES_HUMAN_DELAY_MAX_MS", "2500"))
+            max_ms = int(korra_env("HERMES_HUMAN_DELAY_MAX_MS", "2500"))
         except (TypeError, ValueError):
             max_ms = 2500
         return random.uniform(min_ms / 1000.0, max_ms / 1000.0)

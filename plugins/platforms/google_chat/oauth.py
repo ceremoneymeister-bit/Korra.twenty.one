@@ -70,6 +70,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from packaging.requirements import Requirement
+from hermes_constants import korra_env
 
 # Pin the legacy logger name so operator-side log filters keep matching
 # after the in-tree → plugin migration. See adapter.py for context.
@@ -84,7 +85,7 @@ except (ModuleNotFoundError, ImportError):
     # (mirrors the same fallback used by the google-workspace skill's
     # _hermes_home.py shim).
     def get_hermes_home() -> Path:
-        val = os.environ.get("HERMES_HOME", "").strip()
+        val = korra_env("HERMES_HOME", "").strip()
         return Path(val) if val else Path.home() / ".hermes"
 
     def display_hermes_home() -> str:

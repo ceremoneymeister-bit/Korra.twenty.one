@@ -23,6 +23,7 @@ import logging
 import os
 import urllib.parse
 from typing import Optional
+from hermes_constants import korra_env
 
 _log = logging.getLogger(__name__)
 
@@ -220,7 +221,7 @@ def resolve_public_url() -> str:
     malformed config entry falls through to ``""``. This means a typo
     in one surface doesn't prevent the other from working.
     """
-    env_raw = os.environ.get("HERMES_DASHBOARD_PUBLIC_URL", "")
+    env_raw = korra_env("HERMES_DASHBOARD_PUBLIC_URL", "")
     env_clean = _normalise_public_url(env_raw)
     if env_clean:
         return env_clean

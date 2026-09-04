@@ -19,6 +19,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Any
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def auto_continue_freshness_window() -> float:
     disables the freshness gate (restores the pre-fix "always fresh" behaviour
     for users who want to opt out).
     """
-    raw = os.environ.get("HERMES_AUTO_CONTINUE_FRESHNESS")
+    raw = korra_env("HERMES_AUTO_CONTINUE_FRESHNESS")
     if raw is None or raw == "":
         return float(_AUTO_CONTINUE_FRESHNESS_SECS_DEFAULT)
     try:

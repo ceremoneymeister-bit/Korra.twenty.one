@@ -16,6 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from hermes_constants import korra_env
 
 
 def run_verify_command(args) -> int:
@@ -138,7 +139,7 @@ def _record_evidence(root: Path, recipe, result, *, partial: bool) -> None:
             tails.append(readiness_line)
         record_verify_run(
             root=root,
-            session_id=os.environ.get("HERMES_SESSION_ID"),
+            session_id=korra_env("HERMES_SESSION_ID"),
             ok=result.ok,
             command="hermes verify",
             scope="targeted" if partial else "full",

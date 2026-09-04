@@ -39,6 +39,7 @@ from tools.registry import (
     tool_error,
 )
 from toolsets import resolve_toolset, validate_toolset
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -369,7 +370,7 @@ def get_tool_definitions(
                 frozenset(disabled_toolsets) if disabled_toolsets else None,
                 registry._generation,
                 cfg_fp,
-                bool(os.environ.get("HERMES_KANBAN_TASK")),
+                bool(korra_env("HERMES_KANBAN_TASK")),
                 bool(skip_tool_search_assembly),
                 _is_delegated_child_context(),
                 _is_dispatcher_owned_worker(),
@@ -427,7 +428,7 @@ def _compute_tool_definitions(
     if enabled_toolsets is not None:
         effective_enabled_toolsets = list(enabled_toolsets)
         if (
-            os.environ.get("HERMES_KANBAN_TASK")
+            korra_env("HERMES_KANBAN_TASK")
             and not _is_delegated_child_context()
             and _is_dispatcher_owned_worker()
             and "kanban" not in effective_enabled_toolsets

@@ -63,7 +63,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env
 
 
 def _launch_cwd_for_session(source: str) -> Optional[str]:
@@ -96,7 +96,7 @@ def _session_source_for_agent(platform: Optional[str]) -> str:
 
         source = get_session_env("HERMES_SESSION_SOURCE", "")
     except Exception:
-        source = os.environ.get("HERMES_SESSION_SOURCE", "")
+        source = korra_env("HERMES_SESSION_SOURCE", "")
     source = str(source or "").strip()
     if source:
         return source
@@ -1495,7 +1495,7 @@ class AIAgent:
         if cfg is not None:
             return cfg, False
 
-        env_timeout = os.getenv("HERMES_API_CALL_STALE_TIMEOUT")
+        env_timeout = korra_env("HERMES_API_CALL_STALE_TIMEOUT")
         if env_timeout is not None:
             return float(env_timeout), False
 
@@ -1563,7 +1563,7 @@ class AIAgent:
         """
         if get_provider_stale_timeout(self.provider, self.model) is not None:
             return True
-        return os.getenv("HERMES_API_CALL_STALE_TIMEOUT") is not None
+        return korra_env("HERMES_API_CALL_STALE_TIMEOUT") is not None
 
     def _codex_silent_hang_hint(self, model: Optional[str] = None) -> Optional[str]:
         """Return an actionable hint when this request matches a known
@@ -2923,7 +2923,7 @@ class AIAgent:
 
     @staticmethod
     def _hook_payload_max_chars() -> int:
-        raw = os.getenv("HERMES_PLUGIN_PAYLOAD_MAX_CHARS", "50000")
+        raw = korra_env("HERMES_PLUGIN_PAYLOAD_MAX_CHARS", "50000")
         try:
             return max(1000, int(raw))
         except (TypeError, ValueError):
@@ -3792,7 +3792,7 @@ class AIAgent:
         """
         try:
             import os as _os
-            env = _os.environ.get("HERMES_FILE_MUTATION_VERIFIER")
+            env = korra_env("HERMES_FILE_MUTATION_VERIFIER")
             if env is not None:
                 return env.strip().lower() not in {"0", "false", "no", "off"}
             cached = getattr(self, "_file_mutation_verifier_enabled_cache", None)
@@ -3902,7 +3902,7 @@ class AIAgent:
         """
         try:
             import os as _os
-            env = _os.environ.get("HERMES_TURN_COMPLETION_EXPLAINER")
+            env = korra_env("HERMES_TURN_COMPLETION_EXPLAINER")
             if env is not None:
                 return env.strip().lower() not in {"0", "false", "no", "off"}
             cached = getattr(self, "_turn_completion_explainer_enabled_cache", None)
@@ -4138,7 +4138,7 @@ class AIAgent:
         self._last_activity_ts = time.time()
         self._last_activity_desc = bound_activity_description(desc)
         self._last_activity_provenance = normalize_activity_provenance(provenance)
-        if os.environ.get("HERMES_KANBAN_TASK"):
+        if korra_env("HERMES_KANBAN_TASK"):
             try:
                 from tools.kanban_tools import (
                     heartbeat_current_worker_from_env,
@@ -4304,7 +4304,7 @@ class AIAgent:
         headers = getattr(http_response, "headers", None)
         if not headers:
             return
-        _dev = is_truthy_value(os.environ.get("HERMES_DEV_CREDITS"))
+        _dev = is_truthy_value(korra_env("HERMES_DEV_CREDITS"))
 
         # ── Parse (fail-open → miss; never overwrite good state with None) ──
         try:

@@ -30,6 +30,7 @@ from gateway.restart import (
     DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT,
     resolve_systemd_timeout_stop_sec,
 )
+from hermes_constants import korra_env
 
 
 _SIGNAL_NAME_BY_NUM: Dict[int, str] = {}
@@ -173,7 +174,7 @@ def snapshot_shutdown_context(received_signal: Any = None) -> Dict[str, Any]:
     # _PLANNED_STOP_MARKER_FILENAME); we use string literals here so the
     # signal-handler path stays import-light.
     try:
-        hermes_home_str = os.environ.get("HERMES_HOME")
+        hermes_home_str = korra_env("HERMES_HOME")
         if hermes_home_str:
             takeover_path = Path(hermes_home_str) / ".gateway-takeover.json"
             if takeover_path.exists():

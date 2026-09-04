@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import os
 import sys
+from hermes_constants import korra_env
 
 __all__ = ["configure_windows_stdio", "is_windows"]
 
@@ -105,7 +106,7 @@ def configure_windows_stdio() -> bool:
         _CONFIGURED = True
         return False
 
-    if os.environ.get("HERMES_DISABLE_WINDOWS_UTF8") in {"1", "true", "True", "yes"}:
+    if korra_env("HERMES_DISABLE_WINDOWS_UTF8") in {"1", "true", "True", "yes"}:
         _CONFIGURED = True
         return False
 

@@ -17,6 +17,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def _forced_provider_from_env() -> str | None:
     active/default provider resolution for pet generation only. Unknown values are
     ignored so existing users are unaffected.
     """
-    forced = os.environ.get("HERMES_PET_IMAGE_PROVIDER", "").strip().lower()
+    forced = korra_env("HERMES_PET_IMAGE_PROVIDER", "").strip().lower()
     return forced if forced in _REF_CAPABLE else None
 
 

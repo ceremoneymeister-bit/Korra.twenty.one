@@ -118,7 +118,7 @@ def _default_input_samplerate(sd) -> int:
     return SAMPLE_RATE
 
 
-from hermes_constants import is_termux as _is_termux_environment
+from hermes_constants import is_termux as _is_termux_environment, korra_env
 
 
 def _voice_capture_install_hint() -> str:
@@ -2004,7 +2004,7 @@ DEFAULT_BARGE_MULTIPLIER = 3.0
 
 
 def _voice_debug_enabled() -> bool:
-    return os.environ.get("HERMES_VOICE_DEBUG", "").strip() == "1"
+    return korra_env("HERMES_VOICE_DEBUG", "").strip() == "1"
 
 
 def _vad_log(msg: str) -> None:

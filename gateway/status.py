@@ -26,7 +26,7 @@ import time
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
-from hermes_constants import get_hermes_home, _get_platform_default_hermes_home
+from hermes_constants import get_hermes_home, _get_platform_default_hermes_home, korra_env
 from typing import Any, Callable, NamedTuple, Optional
 from utils import atomic_json_write
 
@@ -139,7 +139,7 @@ def _get_process_hermes_home() -> Path:
     profile directory when a profile-context task happens to be active at write
     time.  See issue #56986.
     """
-    val = os.environ.get("HERMES_HOME", "").strip()
+    val = korra_env("HERMES_HOME", "").strip()
     if val:
         return Path(val)
     return _get_platform_default_hermes_home()
@@ -235,7 +235,7 @@ def _get_runtime_status_path() -> Path:
 
 def _get_lock_dir() -> Path:
     """Return the machine-local directory for token-scoped gateway locks."""
-    override = os.getenv("HERMES_GATEWAY_LOCK_DIR")
+    override = korra_env("HERMES_GATEWAY_LOCK_DIR")
     if override:
         return Path(override)
     state_home = Path(os.getenv("XDG_STATE_HOME", Path.home() / ".local" / "state"))

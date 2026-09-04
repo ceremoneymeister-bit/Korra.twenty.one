@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional
+from hermes_constants import korra_env
 
 
 def _hermes_home_path() -> Path:
@@ -94,7 +95,7 @@ def get_safe_write_roots() -> set[str]:
     """Return resolved HERMES_WRITE_SAFE_ROOT paths. Supports multiple directories
     separated by ``os.pathsep`` (``:`` on Unix, ``;`` on Windows).
     E.g., ``/opt/data:/var/www/html`` on Unix, ``C:\\data;D:\\www`` on Windows."""
-    env = os.getenv("HERMES_WRITE_SAFE_ROOT", "")
+    env = korra_env("HERMES_WRITE_SAFE_ROOT", "")
     if not env:
         return set()
     roots: set[str] = set()

@@ -27,6 +27,7 @@ import re
 from contextvars import ContextVar, Token
 from pathlib import Path
 from typing import Dict, Mapping, Optional
+from hermes_constants import korra_env, korra_env_aliases
 
 
 # ── multiplex-active flag ────────────────────────────────────────────────
@@ -141,9 +142,12 @@ _GLOBAL_ENV_PREFIXES = (
 
 def _is_global_env(name: str) -> bool:
     """Return True for genuinely process-global (non-profile-secret) env vars."""
-    if name in _GLOBAL_ENV_EXACT:
-        return True
-    return any(name.startswith(p) for p in _GLOBAL_ENV_PREFIXES)
+    for alias in korra_env_aliases(name):
+        if alias in _GLOBAL_ENV_EXACT:
+            return True
+        if any(alias.startswith(p) for p in _GLOBAL_ENV_PREFIXES):
+            return True
+    return False
 
 
 def get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -170,12 +174,12 @@ def get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
          missing scope is caught loudly instead of leaking a cross-profile value.
     """
     if _is_global_env(name):
-        val = os.environ.get(name)
+        val = korra_env(name)
         return val if val is not None else default
 
     scope = _SECRET_SCOPE.get()
     if scope is not None:
-        val = scope.get(name)
+        val = korra_env(name, env=scope)
         if val is not None:
             return val
         if _MULTIPLEX_ACTIVE:
@@ -186,7 +190,7 @@ def get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
         # environment vanish inside any set_secret_scope(...) block (the cron
         # scheduler installs one around every job), so cron jobs send a
         # placeholder API key and 401 while interactive turns keep working.
-        val = os.environ.get(name)
+        val = korra_env(name)
         return val if val is not None else default
 
     if _MULTIPLEX_ACTIVE:
@@ -199,7 +203,7 @@ def get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
             f"(Workstream A)."
         )
 
-    val = os.environ.get(name)
+    val = korra_env(name)
     return val if val is not None else default
 
 

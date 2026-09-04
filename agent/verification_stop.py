@@ -11,6 +11,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable
+from hermes_constants import korra_env
 
 
 _MAX_CHANGED_PATHS_IN_NUDGE = 8
@@ -106,7 +107,7 @@ def verify_on_stop_enabled(config: dict[str, Any] | None = None) -> bool:
     verification narrative would reach a human as chat noise. A missing or
     unrecognized value falls back to OFF.
     """
-    env = os.environ.get("HERMES_VERIFY_ON_STOP")
+    env = korra_env("HERMES_VERIFY_ON_STOP")
     if env is not None:
         return env.strip().lower() not in {"0", "false", "no", "off"}
     if config is None:

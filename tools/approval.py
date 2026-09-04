@@ -28,13 +28,14 @@ from hermes_cli.config import cfg_get
 
 from tools.interrupt import is_interrupted
 from utils import env_var_enabled, is_truthy_value
+from hermes_constants import korra_env, korra_env_present, korra_env_set, korra_env_pop
 
 logger = logging.getLogger(__name__)
 
 # Freeze YOLO mode at module import time. Reading os.environ on every call
 # would allow any skill running inside the process to set this variable and
 # instantly bypass all approval checks — a prompt-injection escalation path.
-_YOLO_MODE_FROZEN: bool = is_truthy_value(os.getenv("HERMES_YOLO_MODE", ""))
+_YOLO_MODE_FROZEN: bool = is_truthy_value(korra_env("HERMES_YOLO_MODE", ""))
 
 # Per-thread/per-task gateway session identity.
 # Gateway runs agent turns concurrently in executor threads, so reading a
@@ -246,7 +247,7 @@ def _get_session_platform() -> str:
 
         return get_session_env("HERMES_SESSION_PLATFORM", "") or ""
     except Exception:
-        return os.getenv("HERMES_SESSION_PLATFORM", "") or ""
+        return korra_env("HERMES_SESSION_PLATFORM", "") or ""
 
 
 def _is_cron_approval_context() -> bool:
@@ -3438,7 +3439,7 @@ def _prompt_dangerous_approval_inner(command: str, description: str,
         # tests, sshd, etc.).
         pass
 
-    os.environ["HERMES_SPINNER_PAUSE"] = "1"
+    korra_env_set(os.environ, "HERMES_SPINNER_PAUSE", "1")
     try:
         # Resolve the active UI language once per prompt so we don't re-read
         # config/YAML inside the retry loop below.
@@ -3516,8 +3517,8 @@ def _prompt_dangerous_approval_inner(command: str, description: str,
         print("\n" + t("approval.cancelled"))
         return "deny"
     finally:
-        if "HERMES_SPINNER_PAUSE" in os.environ:
-            del os.environ["HERMES_SPINNER_PAUSE"]
+        if korra_env_present("HERMES_SPINNER_PAUSE"):
+            korra_env_pop(os.environ, "HERMES_SPINNER_PAUSE")
         print()
         sys.stdout.flush()
 

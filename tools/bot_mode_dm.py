@@ -53,6 +53,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -558,7 +559,7 @@ def _delivery_lock(argv: list[str], *, stdin_file: bool):
         return contextlib.nullcontext()
     from tools.bot_relay import acquire_turn_lock
 
-    home = Path(os.getenv("HERMES_HOME") or os.path.expanduser("~/.hermes"))
+    home = Path(korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes"))
     return acquire_turn_lock(_hermes_root(home), argv[2])
 
 
@@ -761,7 +762,7 @@ def _agent_home(agent: Any) -> str:
             return str(Path(db_path).parent)
     except Exception:
         pass
-    return os.getenv("HERMES_HOME") or os.path.expanduser("~/.hermes")
+    return korra_env("HERMES_HOME") or os.path.expanduser("~/.hermes")
 
 
 def _session_title(agent: Any) -> str:

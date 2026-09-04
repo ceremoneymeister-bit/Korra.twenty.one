@@ -17,7 +17,7 @@ import logging
 import os
 import threading
 from datetime import datetime
-from hermes_constants import get_config_path
+from hermes_constants import get_config_path, korra_env
 from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ _tz_cache: Dict[Tuple[str, str], Tuple[str, Optional[ZoneInfo]]] = {}
 
 def _timezone_cache_identity() -> Tuple[str, str]:
     """Return the active source identity for the timezone cache."""
-    tz_env = os.getenv("HERMES_TIMEZONE", "").strip()
+    tz_env = korra_env("HERMES_TIMEZONE", "").strip()
     if tz_env:
         return ("environment", tz_env)
     return ("config", str(get_config_path()))
@@ -58,7 +58,7 @@ def _resolve_timezone_name() -> str:
     should cache the result rather than calling on every ``now()``.
     """
     # 1. Environment variable (highest priority — set by Supervisor, etc.)
-    tz_env = os.getenv("HERMES_TIMEZONE", "").strip()
+    tz_env = korra_env("HERMES_TIMEZONE", "").strip()
     if tz_env:
         return tz_env
 

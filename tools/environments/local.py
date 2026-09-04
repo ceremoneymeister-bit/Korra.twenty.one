@@ -15,7 +15,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from hermes_constants import get_process_hermes_home
+from hermes_constants import get_process_hermes_home, korra_env, korra_env_set, korra_env_pop, korra_env_aliases
 from tools.environments.base import BaseEnvironment, _pipe_stdin
 from hermes_cli._subprocess_compat import windows_hide_flags
 
@@ -446,6 +446,15 @@ def _build_provider_env_blocklist() -> frozenset:
 
 _HERMES_PROVIDER_ENV_BLOCKLIST = _build_provider_env_blocklist()
 
+
+def _in_provider_env_blocklist(name: str) -> bool:
+    """Проверить оба имени пары KORRA_*/HERMES_* против блоклиста.
+
+    Список ведётся под одним именем; секрет, доехавший до дочернего процесса
+    под вторым именем, был бы утечкой мимо этой границы.
+    """
+    return any(alias in _HERMES_PROVIDER_ENV_BLOCKLIST for alias in korra_env_aliases(name))
+
 # First-party platform credentials the agent's own platform adapters need in
 # terminal children (e.g. the ``BUZZ_*`` vars for the Buzz messaging
 # platform, which drive the platform-mandated ``buzz`` CLI: BUZZ_PRIVATE_KEY,
@@ -635,7 +644,7 @@ def _inject_context_hermes_home(env: dict) -> None:
 
         value = get_hermes_home_override()
         if value:
-            env["HERMES_HOME"] = value
+            korra_env_set(env, "HERMES_HOME", value)
     except Exception:
         pass
 
@@ -680,11 +689,13 @@ def _inject_session_context_env(env: dict) -> None:
         value = var.get()
         if value is not _UNSET:
             # Explicitly bound (including "") — authoritative for this task.
-            env[var_name] = "" if value is None else str(value)
+            korra_env_set(env, var_name, "" if value is None else str(value))
         elif _engaged:
             # Unset for THIS task while a concurrent host is engaged: drop any
             # inherited global so a sibling session's value can't leak in.
-            env.pop(var_name, None)
+            # Снимаются оба имени пары: иначе после переименования вторая
+            # переменная пережила бы зачистку и утекла в чужую сессию.
+            korra_env_pop(env, var_name)
 
 
 def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = None) -> dict:
@@ -710,7 +721,7 @@ def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = Non
             continue
         first_party = _is_terminal_first_party_env(key)
         passthrough = _is_passthrough(key)
-        if key in _HERMES_PROVIDER_ENV_BLOCKLIST and not (passthrough or first_party):
+        if _in_provider_env_blocklist(key) and not (passthrough or first_party):
             continue
         # First-party platform vars are the process's own env values: use them
         # directly, never scope-resolve (multiplex with no scope would raise
@@ -735,7 +746,7 @@ def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = Non
         else:
             first_party = _is_terminal_first_party_env(key)
             passthrough = _is_passthrough(key)
-            if key in _HERMES_PROVIDER_ENV_BLOCKLIST and not (passthrough or first_party):
+            if _in_provider_env_blocklist(key) and not (passthrough or first_party):
                 continue
             resolved = value
             if passthrough and not first_party:
@@ -884,7 +895,7 @@ def hermes_subprocess_env(*, inherit_credentials: bool = False) -> dict[str, str
     if not inherit_credentials:
         # Tier 2 — strip provider/tool credentials unless explicitly inherited.
         for key in _HERMES_PROVIDER_ENV_BLOCKLIST:
-            env.pop(key, None)
+            korra_env_pop(env, key)
 
     # Windows UTF-8 safety for spawned processes (#31420).
     env.setdefault("PYTHONUTF8", "1")
@@ -992,7 +1003,7 @@ def _find_bash() -> str:
 
     candidates: list[str] = []
 
-    custom = os.environ.get("HERMES_GIT_BASH_PATH")
+    custom = korra_env("HERMES_GIT_BASH_PATH")
     if custom and os.path.isfile(custom):
         candidates.append(custom)
 
@@ -1549,7 +1560,7 @@ def _make_run_env(env: dict) -> dict:
         else:
             first_party = _is_terminal_first_party_env(k)
             passthrough = _is_passthrough(k)
-            if k in _HERMES_PROVIDER_ENV_BLOCKLIST and not (passthrough or first_party):
+            if _in_provider_env_blocklist(k) and not (passthrough or first_party):
                 continue
             # First-party vars use the merged env value directly (see
             # _sanitize_subprocess_env); only passthrough names resolve.

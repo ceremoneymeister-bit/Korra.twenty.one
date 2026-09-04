@@ -30,6 +30,7 @@ from agent.context_compressor import _DB_PERSISTED_MARKER
 from agent.message_content import flatten_message_text
 from agent.message_metadata import append_message, stamp_message_timestamp
 from agent.message_sanitization import _sanitize_surrogates
+from hermes_constants import korra_env
 
 
 def _assistant_row_missing_visible_text(msg: dict) -> bool:
@@ -211,7 +212,7 @@ def finalize_turn(
         # We route through ``_record_task_failure(outcome="timed_out")``
         # rather than ``kanban_block`` so this counts toward the dispatcher's
         # consecutive-failure circuit breaker (#29747 gap 2).
-        _kanban_task = os.environ.get("HERMES_KANBAN_TASK")
+        _kanban_task = korra_env("HERMES_KANBAN_TASK")
         if _kanban_task:
             _record_kanban_budget_exhausted(
                 _kanban_task, api_call_count, agent.max_iterations, logger,
@@ -225,7 +226,7 @@ def finalize_turn(
         # ``_record_task_failure`` (compare-and-swap receipt path) which
         # is a no-op if another path closed it — the CAS invariant in
         # ``_end_run`` (``WHERE ended_at IS NULL``) guarantees idempotence.
-        _kanban_task = os.environ.get("HERMES_KANBAN_TASK")
+        _kanban_task = korra_env("HERMES_KANBAN_TASK")
         if _kanban_task:
             _record_kanban_budget_exhausted(
                 _kanban_task, api_call_count, agent.max_iterations, logger,

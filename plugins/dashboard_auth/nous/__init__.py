@@ -87,6 +87,7 @@ from hermes_cli.dashboard_auth import (
     RefreshExpiredError,
     Session,
 )
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -578,7 +579,7 @@ def _resolve_client_id() -> str:
       2. ``dashboard.oauth.client_id`` in ``config.yaml``.
       3. Empty string — signals "no client_id configured" to the caller.
     """
-    env = os.environ.get("HERMES_DASHBOARD_OAUTH_CLIENT_ID", "").strip()
+    env = korra_env("HERMES_DASHBOARD_OAUTH_CLIENT_ID", "").strip()
     if env:
         return env
     cfg_value = _load_config_oauth_section().get("client_id", "")
@@ -593,7 +594,7 @@ def _resolve_portal_url() -> str:
       2. ``dashboard.oauth.portal_url`` in ``config.yaml``.
       3. :data:`_DEFAULT_PORTAL_URL` (production Portal).
     """
-    env = os.environ.get("HERMES_DASHBOARD_PORTAL_URL", "").strip()
+    env = korra_env("HERMES_DASHBOARD_PORTAL_URL", "").strip()
     if env:
         return env
     cfg_value = str(

@@ -22,6 +22,7 @@ import contextvars
 import json
 import logging
 import re
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 import os
@@ -4929,7 +4930,7 @@ def _load_config() -> dict:
     flag is set we keep ``cli.CLI_CONFIG`` authoritative to preserve the
     flag's contract of suppressing user config.yaml settings.
     """
-    prefer_legacy = os.environ.get("HERMES_IGNORE_USER_CONFIG") == "1"
+    prefer_legacy = korra_env("HERMES_IGNORE_USER_CONFIG") == "1"
     if not prefer_legacy:
         try:
             from hermes_cli.config import load_config_readonly

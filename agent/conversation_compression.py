@@ -77,6 +77,7 @@ from agent.model_metadata import (
     estimate_request_tokens_rough,
 )
 from agent.session_activity import ActivityProvenance, normalize_activity_provenance
+from hermes_constants import korra_env, korra_env_set
 
 logger = logging.getLogger(__name__)
 
@@ -2002,7 +2003,7 @@ def _adopt_live_compression_child(
 
         set_current_session_id(child_session_id)
     except Exception:
-        os.environ["HERMES_SESSION_ID"] = child_session_id
+        korra_env_set(os.environ, "HERMES_SESSION_ID", child_session_id)
     try:
         from hermes_logging import set_session_context
 
@@ -4787,7 +4788,7 @@ def compress_context(
                         parent_session_id=old_session_id,
                         child_session_id=new_session_id,
                         source=agent.platform
-                        or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
+                        or korra_env("HERMES_SESSION_SOURCE", "cli"),
                         model=agent.model,
                         model_config=agent._session_init_model_config,
                         system_prompt=new_system_prompt,
@@ -4931,7 +4932,7 @@ def compress_context(
 
                         set_current_session_id(agent.session_id)
                     except Exception:
-                        os.environ["HERMES_SESSION_ID"] = agent.session_id
+                        korra_env_set(os.environ, "HERMES_SESSION_ID", agent.session_id)
                     try:
                         from hermes_logging import set_session_context
 

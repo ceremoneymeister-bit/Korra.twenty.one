@@ -27,7 +27,7 @@ from typing import Optional, Dict, Any, Callable
 from hermes_cli.curses_ui import MenuNavigationEvent, MenuNavigationStart
 from hermes_cli.nous_subscription import get_nous_subscription_features
 from tools.tool_backend_helpers import managed_nous_tools_enabled
-from hermes_constants import get_optional_skills_dir
+from hermes_constants import get_optional_skills_dir, korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -357,7 +357,7 @@ def is_noninteractive() -> bool:
     installed (the start path asks "Install it now?" with no one to answer).
     Honour the explicit env flag here so callers fall back to their default.
     """
-    return os.environ.get("HERMES_NONINTERACTIVE", "").strip().lower() in {
+    return korra_env("HERMES_NONINTERACTIVE", "").strip().lower() in {
         "1",
         "true",
         "yes",

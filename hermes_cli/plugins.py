@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import (Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Type, Union)
 
 from hermes_constants import (
+    korra_env,
     get_hermes_home,
     hermes_home_key,
     reset_hermes_home_override,
@@ -87,7 +88,7 @@ def get_bundled_plugins_dir() -> Path:
     installs) so read-only store paths are consulted first.  Falls back to
     the in-repo path used during development.
     """
-    env_override = os.getenv("HERMES_BUNDLED_PLUGINS")
+    env_override = korra_env("HERMES_BUNDLED_PLUGINS")
     if env_override:
         return Path(env_override)
     return Path(__file__).resolve().parent.parent / "plugins"
@@ -121,7 +122,7 @@ logger = logging.getLogger(__name__)
 # The env var is read once at import time; tests that need to flip it
 # mid-process can call ``_install_plugin_debug_handler(force=True)``.
 
-_PLUGINS_DEBUG = os.getenv("HERMES_PLUGINS_DEBUG", "").strip().lower() in {
+_PLUGINS_DEBUG = korra_env("HERMES_PLUGINS_DEBUG", "").strip().lower() in {
     "1", "true", "yes", "on",
 }
 _DEBUG_HANDLER_INSTALLED = False
@@ -135,7 +136,7 @@ def _install_plugin_debug_handler(force: bool = False) -> None:
     """
     global _DEBUG_HANDLER_INSTALLED, _PLUGINS_DEBUG
     if force:
-        _PLUGINS_DEBUG = os.getenv("HERMES_PLUGINS_DEBUG", "").strip().lower() in {
+        _PLUGINS_DEBUG = korra_env("HERMES_PLUGINS_DEBUG", "").strip().lower() in {
             "1", "true", "yes", "on",
         }
     if not _PLUGINS_DEBUG or _DEBUG_HANDLER_INSTALLED:

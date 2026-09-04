@@ -46,6 +46,7 @@ from typing import Dict, Optional
 from agent.secret_sources.base import ErrorKind, SecretSource
 from agent.secret_sources.base import get_source_environment
 from agent.secret_sources.bitwarden import FetchResult
+from hermes_constants import korra_env_set
 
 __all__ = [
     "FetchResult",
@@ -193,7 +194,7 @@ def _run_helper(
         # process-global environment.  hydrate_profile_secret_sources seeds
         # only global-safe values plus this profile's own .env.
         env = dict(source_env)
-    env["HERMES_SECRET_KEY"] = secret_key
+    korra_env_set(env, "HERMES_SECRET_KEY", secret_key)
 
     try:
         proc = subprocess.Popen(  # noqa: S602 — command is the user's own config

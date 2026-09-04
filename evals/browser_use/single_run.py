@@ -30,6 +30,7 @@ import re
 import sys
 import tempfile
 import time
+from hermes_constants import korra_env_set
 
 ARM, TASK_KEY, MODEL, REP = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
@@ -60,7 +61,7 @@ import yaml
 
 with open(os.path.join(hh, "config.yaml"), "w", encoding="utf-8") as f:
     yaml.safe_dump(cfg, f)
-os.environ["HERMES_HOME"] = hh
+korra_env_set(os.environ, "HERMES_HOME", hh)
 # Strip web-fetch shortcuts: every arm must drive the browser.
 os.environ.pop("BROWSER_USE_API_KEY", None)
 for k in ("FIRECRAWL_API_KEY", "NOUS_API_KEY", "SERPER_API_KEY"):

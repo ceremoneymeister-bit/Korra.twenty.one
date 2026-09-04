@@ -36,6 +36,7 @@ import math
 import os
 from dataclasses import dataclass
 from typing import Any, Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +268,7 @@ def _dev_fixture_usage_model() -> Optional[UsageModel]:
     Recognized names: ``free | healthy | low | topup | depleted``. Returns
     ``None`` when the env var is unset (real portal path runs).
     """
-    name = (os.getenv("HERMES_DEV_CREDITS_FIXTURE") or "").strip().lower()
+    name = (korra_env("HERMES_DEV_CREDITS_FIXTURE") or "").strip().lower()
     if not name:
         return None
 

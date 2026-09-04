@@ -58,7 +58,7 @@ from typing import Callable, Dict, Any, Iterator, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 from hermes_cli._subprocess_compat import windows_hide_flags
-from hermes_constants import display_hermes_home
+from hermes_constants import display_hermes_home, korra_env
 
 logger = logging.getLogger(__name__)
 def get_env_value(name, default=None):
@@ -71,7 +71,7 @@ def get_env_value(name, default=None):
     try:
         from hermes_cli.config import get_env_value as _get_env_value
     except ImportError:
-        return os.getenv(name, default)
+        return korra_env(name, default)
     value = _get_env_value(name)
     return default if value is None else value
 

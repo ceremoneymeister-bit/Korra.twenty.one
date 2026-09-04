@@ -7,6 +7,7 @@ are rebound onto server.py's globals at install time — see method_ctx.py.
 from .method_ctx import HandlerRegistry
 
 import types
+from hermes_constants import korra_env_set
 
 _registry = HandlerRegistry()
 method = _registry.method
@@ -310,8 +311,8 @@ def _(rid, params: dict) -> dict:
         except Exception:
             typed_stop = False
         if typed_stop:
-            os.environ["HERMES_VOICE"] = "0"
-            os.environ["HERMES_VOICE_TTS"] = "0"
+            korra_env_set(os.environ, "HERMES_VOICE", "0")
+            korra_env_set(os.environ, "HERMES_VOICE_TTS", "0")
             try:
                 from hermes_cli.voice import stop_continuous
 

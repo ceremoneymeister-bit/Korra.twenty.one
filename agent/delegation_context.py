@@ -16,6 +16,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import Iterator, Mapping, MutableMapping
+from hermes_constants import korra_env, korra_env_pop, korra_env_set
 
 _DELEGATED_CHILD_CONTEXT: ContextVar[bool] = ContextVar(
     "hermes_delegated_child_context",
@@ -126,7 +127,7 @@ def is_delegated_child_process_context() -> bool:
     import os
 
     return bool(_DELEGATED_CHILD_CONTEXT.get()) or bool(
-        os.environ.get(DELEGATED_CHILD_ENV_MARKER)
+        korra_env(DELEGATED_CHILD_ENV_MARKER)
     )
 
 
@@ -134,8 +135,10 @@ def scrub_kanban_env(env: Mapping[str, str] | MutableMapping[str, str]) -> dict[
     """Return *env* with dispatcher-only Kanban variables removed."""
     cleaned = dict(env)
     for key in KANBAN_ENV_KEYS:
-        cleaned.pop(key, None)
-    cleaned[DELEGATED_CHILD_ENV_MARKER] = "1"
+        # Оба имени пары: диспетчерская переменная под вторым именем иначе
+        # доехала бы до ребёнка и он писал бы в чужую доску.
+        korra_env_pop(cleaned, key)
+    korra_env_set(cleaned, DELEGATED_CHILD_ENV_MARKER, "1")
     return cleaned
 
 

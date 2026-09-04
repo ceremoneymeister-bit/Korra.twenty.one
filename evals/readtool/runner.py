@@ -25,6 +25,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from hermes_constants import korra_env_set
 
 EVAL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVAL_DIR.parent.parent
@@ -79,7 +80,7 @@ def run_task(task, model: str, provider: str, timeout_mult: float,
     build_workspace(ws)
 
     old_env = dict(os.environ)
-    os.environ["HERMES_HOME"] = str(hermes_home)
+    korra_env_set(os.environ, "HERMES_HOME", str(hermes_home))
     os.environ["TERMINAL_CWD"] = str(ws)
     # Keep only the API key the run needs; hide the rest so provider
     # auto-detection can't wander (mirrors run_tests.sh hermeticity).

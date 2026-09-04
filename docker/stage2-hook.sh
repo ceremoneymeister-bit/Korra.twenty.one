@@ -17,7 +17,10 @@
 
 set -eu
 
-HERMES_HOME="${HERMES_HOME:-/opt/data}"
+# Слой совместимости имён Korra 21: снаружи переменную задают и под новым
+# именем KORRA_*, и под старым HERMES_*. Читаются оба, новое сильнее; дальше
+# по скрипту работает одна переменная.
+HERMES_HOME="${KORRA_HOME:-${HERMES_HOME:-/opt/data}}"
 INSTALL_DIR="/opt/hermes"
 
 # Drop to hermes via s6-setuidgid, but skip it when already non-root.
@@ -101,8 +104,8 @@ validate_uid_gid() {
 # this alias those vars are silently ignored and the s6-setuidgid drop to
 # UID 10000 leaves the runtime unable to read the volume.  HERMES_UID/
 # HERMES_GID still win when both are set.  See #15290, salvages #25872.
-HERMES_UID="${HERMES_UID:-${PUID:-}}"
-HERMES_GID="${HERMES_GID:-${PGID:-}}"
+HERMES_UID="${KORRA_UID:-${HERMES_UID:-${PUID:-}}}"
+HERMES_GID="${KORRA_GID:-${HERMES_GID:-${PGID:-}}}"
 
 if [ -n "${HERMES_UID:-}" ] && validate_uid_gid "$HERMES_UID" && [ "$HERMES_UID" != "$(id -u hermes)" ]; then
     echo "[stage2] Changing hermes UID to $HERMES_UID"

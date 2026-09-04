@@ -62,6 +62,7 @@ import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
+from hermes_constants import korra_env, korra_env_set
 
 logger = logging.getLogger(__name__)
 
@@ -584,14 +585,14 @@ def _spawn(kernel: SessionKernel, *, task_id: str, child_python: str,
         tmpdir=kernel.tmpdir,
         child_python=child_python,
     )
-    child_env["HERMES_KERNEL_SENTINEL"] = kernel.sentinel
+    korra_env_set(child_env, "HERMES_KERNEL_SENTINEL", kernel.sentinel)
     # Cells clip stdout to the inline cap; the full text spills to the
     # kernel's own tmpdir so the agent can read_file the middle instead of
     # re-running (host surfaces the path in the result).
-    child_env["HERMES_KERNEL_SPILL_DIR"] = kernel.tmpdir
+    korra_env_set(child_env, "HERMES_KERNEL_SPILL_DIR", kernel.tmpdir)
     # Tell the generated client to reconnect after the RPC server's idle
     # timeout — a kernel outlives the 300s window between cells.
-    child_env["HERMES_RPC_PERSISTENT"] = "1"
+    korra_env_set(child_env, "HERMES_RPC_PERSISTENT", "1")
 
     kernel.proc = subprocess.Popen(
         [child_python, runner_path],

@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from agent.secret_scope import get_secret
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env
 from hermes_cli.profiles import _get_default_hermes_home
 from plugins.plugin_utils import SingletonSlot
 from typing import Any, TYPE_CHECKING
@@ -83,7 +83,7 @@ def resolve_active_host() -> str:
       3. defaultHost from the active config, but only for the default profile
       4. Fallback: ``"hermes"`` (default profile)
     """
-    explicit = os.environ.get("HERMES_HONCHO_HOST", "").strip()
+    explicit = korra_env("HERMES_HONCHO_HOST", "").strip()
     if explicit:
         return explicit
 

@@ -66,6 +66,7 @@ from hermes_cli.dashboard_auth import (
     Session,
     TokenPrincipal,
 )
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +237,7 @@ def register(ctx) -> None:
     global LAST_SKIP_REASON
     LAST_SKIP_REASON = ""
 
-    secret = os.environ.get("HERMES_DASHBOARD_DRAIN_SECRET", "").strip()
+    secret = korra_env("HERMES_DASHBOARD_DRAIN_SECRET", "").strip()
     if not secret:
         LAST_SKIP_REASON = (
             "HERMES_DASHBOARD_DRAIN_SECRET is not set. Set a per-agent "

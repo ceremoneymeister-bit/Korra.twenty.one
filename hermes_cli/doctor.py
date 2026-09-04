@@ -20,7 +20,7 @@ from hermes_cli.config import (
     recommended_update_command_for_method,
 )
 from hermes_cli.env_loader import load_hermes_dotenv
-from hermes_constants import display_hermes_home
+from hermes_constants import display_hermes_home, korra_env, korra_env_setdefault
 from hermes_constants import agent_browser_runnable
 
 PROJECT_ROOT = get_project_root()
@@ -282,7 +282,7 @@ def _is_kanban_worker_env_gate(item: dict) -> bool:
     """Return True when Kanban is unavailable only because this is not a worker process."""
     if item.get("name") != "kanban":
         return False
-    if os.environ.get("HERMES_KANBAN_TASK"):
+    if korra_env("HERMES_KANBAN_TASK"):
         return False
 
     tools = item.get("tools") or []
@@ -291,7 +291,7 @@ def _is_kanban_worker_env_gate(item: dict) -> bool:
 
 def _doctor_tool_availability_detail(toolset: str) -> str:
     """Optional explanatory suffix for toolsets whose doctor status needs context."""
-    if toolset == "kanban" and not os.environ.get("HERMES_KANBAN_TASK"):
+    if toolset == "kanban" and not korra_env("HERMES_KANBAN_TASK"):
         return "(runtime-gated; loaded only for dispatcher-spawned workers)"
     return ""
 
@@ -1046,7 +1046,7 @@ def managed_scope_check() -> None:
         f"Managed scope active: {n_cfg} config key(s), {n_env} env key(s) "
         f"pinned by {managed_dir}"
     )
-    if os.environ.get("HERMES_MANAGED_DIR", "").strip():
+    if korra_env("HERMES_MANAGED_DIR", "").strip():
         check_info(f"managed dir set via HERMES_MANAGED_DIR={managed_dir}")
 
 
@@ -1240,7 +1240,7 @@ def run_doctor(args):
 
     # Doctor runs from the interactive CLI, so CLI-gated tool availability
     # checks (like cronjob management) should see the same context as `hermes`.
-    os.environ.setdefault("HERMES_INTERACTIVE", "1")
+    korra_env_setdefault(os.environ, "HERMES_INTERACTIVE", "1")
 
     # Handle `hermes doctor --ack <id>` as a fast path. Persist the ack and
     # return without running the rest of the diagnostics — the user has

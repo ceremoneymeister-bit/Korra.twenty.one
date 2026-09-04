@@ -46,6 +46,7 @@ from hermes_cli._subprocess_compat import (
     windows_detach_flags_without_breakaway,
     windows_hide_flags,
 )
+from hermes_constants import korra_env, korra_env_set, korra_env_expand
 
 logger = logging.getLogger(__name__)
 
@@ -253,15 +254,15 @@ def _launch_elevated_install(
     start_on_login: bool | None = None,
 ) -> bool:
     """Launch an elevated gateway install via UAC and return True on handoff."""
-    old_start_now = os.environ.get("HERMES_GATEWAY_INSTALL_START_NOW")
-    old_start_on_login = os.environ.get("HERMES_GATEWAY_INSTALL_START_ON_LOGIN")
-    old_handoff = os.environ.get("HERMES_GATEWAY_ELEVATED_HANDOFF")
+    old_start_now = korra_env("HERMES_GATEWAY_INSTALL_START_NOW")
+    old_start_on_login = korra_env("HERMES_GATEWAY_INSTALL_START_ON_LOGIN")
+    old_handoff = korra_env("HERMES_GATEWAY_ELEVATED_HANDOFF")
     try:
         if start_now is not None:
-            os.environ["HERMES_GATEWAY_INSTALL_START_NOW"] = "1" if start_now else "0"
+            korra_env_set(os.environ, "HERMES_GATEWAY_INSTALL_START_NOW", "1" if start_now else "0")
         if start_on_login is not None:
-            os.environ["HERMES_GATEWAY_INSTALL_START_ON_LOGIN"] = "1" if start_on_login else "0"
-        os.environ["HERMES_GATEWAY_ELEVATED_HANDOFF"] = "1"
+            korra_env_set(os.environ, "HERMES_GATEWAY_INSTALL_START_ON_LOGIN", "1" if start_on_login else "0")
+        korra_env_set(os.environ, "HERMES_GATEWAY_ELEVATED_HANDOFF", "1")
         extra_args = ["--elevated-handoff"]
         if force:
             extra_args.append("--force")
@@ -813,11 +814,13 @@ def _build_gateway_argv() -> tuple[list[str], str, dict[str, str]]:
     argv.extend(["gateway", "run"])
 
     env_overlay = {
-        "HERMES_HOME": hermes_home,
         "PYTHONIOENCODING": "utf-8",
-        "HERMES_GATEWAY_DETACHED": "1",
-        "HERMES_SUPERVISED_CHILD": "1",
         "VIRTUAL_ENV": _preserve_hermes_home_path(venv_dir),
+        **korra_env_expand({
+            "HERMES_HOME": hermes_home,
+            "HERMES_GATEWAY_DETACHED": "1",
+            "HERMES_SUPERVISED_CHILD": "1",
+        }),
     }
     _prepend_pythonpath(
         env_overlay,
@@ -883,11 +886,11 @@ def windowless_gateway_restart_spec(
 
     env_overlay: dict[str, str] = {
         "PYTHONIOENCODING": "utf-8",
-        "HERMES_GATEWAY_DETACHED": "1",
         "VIRTUAL_ENV": str(venv_dir),
+        **korra_env_expand({"HERMES_GATEWAY_DETACHED": "1"}),
     }
     if hermes_home:
-        env_overlay["HERMES_HOME"] = hermes_home
+        korra_env_set(env_overlay, "HERMES_HOME", hermes_home)
     _prepend_pythonpath(
         env_overlay,
         [project_root, *extra_pythonpath] if extra_pythonpath else [project_root],
@@ -988,7 +991,7 @@ def _spawn_detached(script_path: Path | None = None) -> int:
 
 
 def _install_choice_from_env(name: str) -> bool | None:
-    raw = os.environ.get(name)
+    raw = korra_env(name)
     if raw is None:
         return None
     value = raw.strip().lower()

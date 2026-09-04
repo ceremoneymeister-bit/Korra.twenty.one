@@ -16,7 +16,7 @@
 # Arguments passed to a finish script: $1=run-exit-code, $2=signal-num,
 # $3=service-dir-name, $4=run-pgid. See servicedir(7).
 
-case "${HERMES_DASHBOARD:-}" in
+case "${KORRA_DASHBOARD:-${HERMES_DASHBOARD:-}}" in
     1|true|TRUE|True|yes|YES|Yes)
         # Dashboard was enabled — let s6-supervise restart on crash by
         # exiting non-125. (Pass-through any sensible default.)

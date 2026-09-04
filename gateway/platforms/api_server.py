@@ -60,6 +60,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from hermes_constants import korra_env
 
 # Sentinel returned by _resolve_request_profile when a /p/<profile>/ prefix
 # names a profile this gateway does not serve (→ 404). Distinct from None
@@ -521,7 +522,7 @@ def _resolve_request_runtime_agent_kwargs(provider: str, target_model: Optional[
 
     model_cfg = _get_model_config()
     max_tokens = None
-    env_max_tokens = os.environ.get("HERMES_MAX_TOKENS")
+    env_max_tokens = korra_env("HERMES_MAX_TOKENS")
     if env_max_tokens:
         try:
             max_tokens = int(env_max_tokens)

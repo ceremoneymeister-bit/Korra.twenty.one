@@ -22,7 +22,7 @@ from collections import deque
 from pathlib import Path
 from typing import IO, Callable, Iterable, Protocol
 
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env
 from hermes_cli._subprocess_compat import windows_hide_flags
 from tools.interrupt import is_interrupted, is_thread_interrupted
 from tools.environments.path_utils import (
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # HERMES_DEBUG_INTERRUPT=1 to log loop entry/exit, periodic heartbeats, and
 # every is_interrupted() state change from _wait_for_process.  Off by default
 # to avoid flooding production gateway logs.
-_DEBUG_INTERRUPT = bool(os.getenv("HERMES_DEBUG_INTERRUPT"))
+_DEBUG_INTERRUPT = bool(korra_env("HERMES_DEBUG_INTERRUPT"))
 
 # Extra seconds the ``run_bounded_sync`` backstop waits past the inner
 # ``_wait_for_process`` deadline. The inner poll loop is what returns
@@ -543,8 +543,9 @@ def _cwd_marker(session_id: str) -> str:
 # as the Python-side contract for the exclusion set; the dump path unsets by
 # name/prefix instead of grepping declare lines (see below / issue #71296).
 _SNAPSHOT_EXCLUDED_ENV_REGEX = (
-    "^declare -x (HERMES_SESSION_|HERMES_UI_SESSION_ID|HERMES_CRON_AUTO_DELIVER_|"
-    "HERMES_CRON_SESSION|HERMES_BROWSER_CONTROL_)"
+    "^declare -x ((HERMES|KORRA)_SESSION_|(HERMES|KORRA)_UI_SESSION_ID|"
+    "(HERMES|KORRA)_CRON_AUTO_DELIVER_|(HERMES|KORRA)_CRON_SESSION|"
+    "(HERMES|KORRA)_BROWSER_CONTROL_)"
 )
 _SHELL_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -589,14 +590,19 @@ def _export_dump_excluding_session_vars(
         "{ ( "
         "unset ${!HERMES_SESSION_*} ${!HERMES_CRON_AUTO_DELIVER_*} "
         "${!HERMES_BROWSER_CONTROL_*} "
+        # Оба имени: контур пишет каждую переменную и под KORRA_, и под
+        # HERMES_, снимок обязан терять обе, иначе идентичность сессии
+        # утечёт в следующую команду.
+        "${!KORRA_SESSION_*} ${!KORRA_CRON_AUTO_DELIVER_*} "
+        "${!KORRA_BROWSER_CONTROL_*} "
         # AI_AGENT / HERMES_AGENT are per-command attribution markers
         # (re-exported by every _wrap_command with outer-harness-preserving
         # ${VAR:-default} semantics).  Persisting them into the snapshot
         # would make the FIRST command's value override a later outer
         # harness value arriving via the process env, exactly like the
         # session-var leak this dump already guards against.
-        "AI_AGENT HERMES_AGENT "
-        f"HERMES_UI_SESSION_ID{extra_unset} 2>/dev/null; "
+        "AI_AGENT HERMES_AGENT KORRA_AGENT "
+        f"HERMES_UI_SESSION_ID KORRA_UI_SESSION_ID{extra_unset} 2>/dev/null; "
         "export -p; "
         ") || true; } "
         f"> {tmp_path}"

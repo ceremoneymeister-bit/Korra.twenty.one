@@ -10,7 +10,7 @@ Python's ``contextvars.ContextVar``.
 The gateway processes messages concurrently via ``asyncio``.  When two
 messages arrive at the same time the old code did:
 
-    os.environ["HERMES_SESSION_THREAD_ID"] = str(context.source.thread_id)
+    korra_env_set(os.environ, "HERMES_SESSION_THREAD_ID", str(context.source.thread_id))
 
 Because ``os.environ`` is *process-global*, Message A's value was
 silently overwritten by Message B before Message A's agent finished
@@ -29,7 +29,7 @@ needs to replace the import + call site:
 
     # before
     import os
-    platform = os.getenv("HERMES_SESSION_PLATFORM", "")
+    platform = korra_env("HERMES_SESSION_PLATFORM", "")
 
     # after
     from gateway.session_context import get_session_env
@@ -39,6 +39,7 @@ needs to replace the import + call site:
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator
+from hermes_constants import korra_env, korra_env_set, korra_env_aliases
 
 # Sentinel to distinguish "never set in this context" from "explicitly set to empty".
 # When a contextvar holds _UNSET, we fall back to os.environ (CLI/cron compat).
@@ -201,7 +202,7 @@ def set_current_session_id(session_id: str) -> None:
     except Exception:
         pass
 
-    os.environ["HERMES_SESSION_ID"] = session_id
+    korra_env_set(os.environ, "HERMES_SESSION_ID", session_id)
 
 
 @contextmanager
@@ -405,15 +406,17 @@ def get_session_env(name: str, default: str = "") -> str:
        don't use ``set_session_vars`` at all).
     3. *default*
     """
-    import os
-
-    var = _VAR_MAP.get(name)
+    var = None
+    for alias in korra_env_aliases(name):
+        var = _VAR_MAP.get(alias)
+        if var is not None:
+            break
     if var is not None:
         value = var.get()
         if value is not _UNSET:
             return value
     # Fall back to os.environ for CLI, cron, and test compatibility
-    return os.getenv(name, default)
+    return korra_env(name, default)
 
 
 # Surfaces that are not a human chat channel. The gateway binds a platform
@@ -459,7 +462,7 @@ def session_is_messaging_surface() -> bool:
     """
     import os
 
-    platform = os.getenv("HERMES_PLATFORM") or get_session_env("HERMES_SESSION_PLATFORM", "")
+    platform = korra_env("HERMES_PLATFORM") or get_session_env("HERMES_SESSION_PLATFORM", "")
     source = get_session_env("HERMES_SESSION_SOURCE", "")
     for identity in (platform, source):
         identity = str(identity or "").strip().lower()
@@ -516,7 +519,7 @@ def async_delivery_supported() -> bool:
     # disappear after the quiet turn returns, so a completion queued later has
     # no durable consumer even though an ordinary CLI session can drain that
     # queue. Force tools onto their existing synchronous/polling fallbacks.
-    if os.environ.get("HERMES_KANBAN_TASK"):
+    if korra_env("HERMES_KANBAN_TASK"):
         return False
 
     value = _SESSION_ASYNC_DELIVERY.get()

@@ -13,6 +13,7 @@ from typing import Any, Union
 from urllib.parse import urlparse
 
 import yaml
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def is_truthy_value(value: Any, default: bool = False) -> bool:
 
 def env_var_enabled(name: str, default: str = "") -> bool:
     """Return True when an environment variable is set to a truthy value."""
-    return is_truthy_value(os.getenv(name, default), default=False)
+    return is_truthy_value(korra_env(name, default), default=False)
 
 
 def _preserve_file_mode(path: Path) -> "int | None":
@@ -803,7 +804,7 @@ def fast_safe_load(stream: Any) -> Any:
 
 def env_int(key: str, default: int = 0) -> int:
     """Read an environment variable as an integer, with fallback."""
-    raw = os.getenv(key, "").strip()
+    raw = korra_env(key, "").strip()
     if not raw:
         return default
     try:
@@ -814,7 +815,7 @@ def env_int(key: str, default: int = 0) -> int:
 
 def env_float(key: str, default: float = 0.0) -> float:
     """Read an environment variable as a float, with fallback."""
-    raw = os.getenv(key, "").strip()
+    raw = korra_env(key, "").strip()
     if not raw:
         return default
     try:
@@ -825,7 +826,7 @@ def env_float(key: str, default: float = 0.0) -> float:
 
 def env_bool(key: str, default: bool = False) -> bool:
     """Read an environment variable as a boolean."""
-    return is_truthy_value(os.getenv(key, ""), default=default)
+    return is_truthy_value(korra_env(key, ""), default=default)
 
 
 # ─── Proxy Helpers ────────────────────────────────────────────────────────────

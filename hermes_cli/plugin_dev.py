@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import patch
 
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, korra_env_expand
 
 
 class _DoctorLoadError(RuntimeError):
@@ -64,11 +64,11 @@ def _doctor_runtime(plugin_path: Path):
         stack.enter_context(
             patch.dict(
                 os.environ,
-                {
+                korra_env_expand({
                     "HERMES_HOME": str(home),
                     "HERMES_BUNDLED_PLUGINS": str(bundled),
                     "HERMES_ENABLE_PROJECT_PLUGINS": "0",
-                },
+                }),
                 clear=False,
             )
         )

@@ -64,6 +64,7 @@ import stat as _stat
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,7 @@ def resolve_sync_base_url() -> Optional[str]:
     env var and config key exist to point a dev/staging build at another
     plane. Returns None only if the default is somehow blanked out.
     """
-    env = os.getenv("HERMES_SYNC_BASE_URL")
+    env = korra_env("HERMES_SYNC_BASE_URL")
     if env and env.strip():
         return env.strip().rstrip("/")
     try:
@@ -372,7 +373,7 @@ def _parse_bool(value: Any) -> Optional[bool]:
 
 def _sync_config_bool(env_var: str, config_key: str, *, default: bool) -> bool:
     """Resolve a boolean sync knob: ``env_var`` -> ``sync.<config_key>`` -> default."""
-    env_val = _parse_bool(os.getenv(env_var))
+    env_val = _parse_bool(korra_env(env_var))
     if env_val is not None:
         return env_val
     try:
@@ -700,7 +701,7 @@ def stable_device_id() -> str:
     # the env.
     import os
 
-    env_name = (os.environ.get("HERMES_SYNC_DEVICE_NAME") or "").strip()
+    env_name = (korra_env("HERMES_SYNC_DEVICE_NAME") or "").strip()
     val = env_name if env_name else _default_device_label()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

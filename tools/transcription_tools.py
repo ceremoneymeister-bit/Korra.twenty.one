@@ -50,6 +50,7 @@ from tools.tool_backend_helpers import (
     nous_tool_gateway_unavailable_message,
     resolve_openai_audio_api_key,
 )
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def get_env_value(name, default=None):
     try:
         from hermes_cli.config import get_env_value as _get_env_value
     except ImportError:
-        return os.getenv(name, default)
+        return korra_env(name, default)
     value = _get_env_value(name)
     return default if value is None else value
 

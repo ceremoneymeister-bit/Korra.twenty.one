@@ -16,6 +16,7 @@ from hermes_cli.auth import (
     get_provider_auth_state,
     resolve_nous_runtime_credentials,
 )
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def _timeout_seconds(value: Optional[float]) -> float:
     if value is not None:
         return float(value)
     try:
-        return float(os.getenv("HERMES_NOUS_TIMEOUT_SECONDS", "15"))
+        return float(korra_env("HERMES_NOUS_TIMEOUT_SECONDS", "15"))
     except (TypeError, ValueError):
         return 15.0
 

@@ -20,13 +20,14 @@
 # Drop to hermes via s6-setuidgid, but skip it when already non-root.
 set -e
 
-if [ -z "${HERMES_MAIN_WRAPPER_ENV_READY:-}" ] && \
-   [ -z "${HERMES_HOME:-}" ] && \
+# Слой совместимости имён: обе переменные пары равноправны на входе.
+if [ -z "${KORRA_MAIN_WRAPPER_ENV_READY:-${HERMES_MAIN_WRAPPER_ENV_READY:-}}" ] && \
+   [ -z "${KORRA_HOME:-${HERMES_HOME:-}}" ] && \
    [ -x /command/with-contenv ]; then
-    export HERMES_MAIN_WRAPPER_ENV_READY=1
+    export KORRA_MAIN_WRAPPER_ENV_READY=1 HERMES_MAIN_WRAPPER_ENV_READY=1
     exec /command/with-contenv sh "$0" "$@"
 fi
-unset HERMES_MAIN_WRAPPER_ENV_READY
+unset KORRA_MAIN_WRAPPER_ENV_READY HERMES_MAIN_WRAPPER_ENV_READY
 
 drop() { [ "$(id -u)" = 0 ] && set -- s6-setuidgid hermes "$@"; exec "$@"; }
 
@@ -67,7 +68,7 @@ export HOME=/opt/data
 # Save the Docker -w (or default) working directory before init
 # scripts cd to /opt/data, so the container starts in the
 # directory the user requested.
-_hermes_orig_cwd="${HERMES_ORIG_CWD:-$PWD}"
+_hermes_orig_cwd="${KORRA_ORIG_CWD:-${HERMES_ORIG_CWD:-$PWD}}"
 
 cd /opt/data
 # shellcheck disable=SC1091

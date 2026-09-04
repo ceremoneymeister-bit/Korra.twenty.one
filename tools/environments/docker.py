@@ -28,6 +28,7 @@ from tools.environments.local import (
     _HERMES_PROVIDER_ENV_BLOCKLIST,
     _is_hermes_internal_secret,
 )
+from hermes_constants import korra_env, korra_env_expand
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +322,7 @@ def find_docker() -> Optional[str]:
         return _docker_executable
 
     # 1. Explicit override via env var (e.g. for Podman on immutable distros)
-    override = os.getenv("HERMES_DOCKER_BINARY")
+    override = korra_env("HERMES_DOCKER_BINARY")
     if override and os.path.isfile(override) and os.access(override, os.X_OK):
         _docker_executable = override
         logger.info("Using HERMES_DOCKER_BINARY override: %s", override)
@@ -560,7 +561,7 @@ def _egress_proxy_args_for_docker() -> tuple[list[str], dict[str, str], list[str
         # --max-old-space-size=4096), not clobber it.  The append-merge
         # happens in DockerEnvironment._merge_node_options below.
         # For the agent inside the sandbox to identify itself as proxy-aware.
-        "HERMES_EGRESS_PROXY": "1",
+        **korra_env_expand({"HERMES_EGRESS_PROXY": "1"}),
         # Sentinel that DockerEnvironment uses to do the NODE_OPTIONS
         # append-merge.  Stripped from the final env before docker run.
         "_HERMES_EGRESS_NODE_OPTIONS_APPEND": "--use-openssl-ca",

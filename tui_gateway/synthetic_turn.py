@@ -35,11 +35,12 @@ import os
 import threading
 import time
 from typing import Any, Callable, Optional
+from hermes_constants import korra_env
 
 
 def synth_turn_armed() -> bool:
     """True when the synthetic-turn test seam is armed via env."""
-    return os.environ.get("HERMES_ISO_CERTIFY_SYNTH_TURN") == "1"
+    return korra_env("HERMES_ISO_CERTIFY_SYNTH_TURN") == "1"
 
 
 def _env_float(name: str, default: float) -> float:

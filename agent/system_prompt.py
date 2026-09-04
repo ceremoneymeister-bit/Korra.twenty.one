@@ -55,7 +55,7 @@ from agent.prompt_builder import (
     is_fable_51_model,
 )
 from agent.runtime_cwd import resolve_context_cwd
-from hermes_constants import get_default_hermes_root, get_hermes_home
+from hermes_constants import get_default_hermes_root, get_hermes_home, korra_env
 from pathlib import Path
 from utils import is_truthy_value
 
@@ -156,7 +156,7 @@ def _tui_embedded_pane_clarifier(hint: str) -> str:
         return hint
     if _TUI_EMBEDDED_PANE_CLARIFIER in hint:
         return hint
-    if not is_truthy_value(os.getenv("HERMES_DESKTOP_TERMINAL")):
+    if not is_truthy_value(korra_env("HERMES_DESKTOP_TERMINAL")):
         return hint
     return hint + _TUI_EMBEDDED_PANE_CLARIFIER
 

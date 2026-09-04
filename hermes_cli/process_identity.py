@@ -44,6 +44,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
+from hermes_constants import korra_env
 
 logger = logging.getLogger(__name__)
 
@@ -258,12 +259,12 @@ def register_self(
         # parent-death watchdog. Reuse it as spawner identity so ledger
         # lineage works with every Desktop version, no TS change needed.
         try:
-            raw = int(os.environ.get("HERMES_PARENT_PID", ""))
+            raw = int(korra_env("HERMES_PARENT_PID", ""))
             if raw > 0:
                 spawner_pid = raw
         except (TypeError, ValueError):
             pass
-        marker = os.environ.get("HERMES_PARENT_START_MARKER", "")
+        marker = korra_env("HERMES_PARENT_START_MARKER", "")
         if spawner_pid is not None and marker.startswith("winms:"):
             try:
                 spawner_create = float(marker.split(":", 1)[1]) / 1000.0
