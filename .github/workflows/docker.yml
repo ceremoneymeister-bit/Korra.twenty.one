@@ -179,9 +179,15 @@ jobs:
   # ---------------------------------------------------------------------------
   # Rebuild and push each architecture only after the unprivileged build/test
   # matrix passes. This job is the sole Docker Hub credential boundary.
+  #
+  # Korra: публикация раньше шла только с push в main. Мы сняли push-триггер с
+  # этого workflow (он занимал наш раннер на боевой машине), и сборка стала
+  # молча заканчиваться на build: образ собирался и никуда не уезжал.
+  # Ручной запуск и ночное расписание публикуют так же, но только с main —
+  # ветку в реестр не пускаем.
   # ---------------------------------------------------------------------------
   publish:
-    if: github.repository == 'ceremoneymeister-bit/Korra.twenty.one' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release')
+    if: github.repository == 'ceremoneymeister-bit/Korra.twenty.one' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main')
     needs: [build]
     environment: container-publish
     strategy:
@@ -260,7 +266,7 @@ jobs:
   # On releases: tags :<release_tag_name>.
   # ---------------------------------------------------------------------------
   merge:
-    if: github.repository == 'ceremoneymeister-bit/Korra.twenty.one' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release')
+    if: github.repository == 'ceremoneymeister-bit/Korra.twenty.one' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main')
     runs-on: [self-hosted, linux, x64]
     needs: [publish]
     timeout-minutes: 10
