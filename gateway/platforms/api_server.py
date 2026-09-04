@@ -5899,7 +5899,11 @@ class APIServerAdapter(BasePlatformAdapter):
             # как молчание панели. /v1/responses такую подстраховку уже имеет.
             if not saw_text_delta and isinstance(result, dict):
                 pending_final = result.get("final_response") or ""
-                if pending_final:
+                # Отказ сюда не попадает: его причина едет отдельным полем
+                # `error` финального чанка, и клиент показывает её плашкой.
+                # Иначе человек читал бы один и тот же текст дважды — ответом
+                # агента и сообщением об ошибке.
+                if pending_final and not result.get("failed"):
                     await _emit(pending_final)
 
             # Inspect the result dict for a flagged (non-exception) failure.

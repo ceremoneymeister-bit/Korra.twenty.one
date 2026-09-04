@@ -11,7 +11,8 @@
   • ход без единой текстовой дельты всё равно доносит ``final_response``
     (симметрия с ``/v1/responses``, где такая подстраховка уже была);
   • отказ провайдера виден как отказ: ``finish_reason: "error"`` и причина
-    в поле ``error`` финального чанка, а не молчаливый успех;
+    в поле ``error`` финального чанка, а не молчаливый успех — причём ровно
+    одним экземпляром, без дубля текстом ответа;
   • обычный ход не получает свой ответ дважды.
 """
 
@@ -126,7 +127,7 @@ class TestNoProviderReachesTheUser:
 
     @pytest.mark.asyncio
     async def test_provider_failure_is_not_reported_as_success(self):
-        """Отказ провайдера виден и текстом, и признаком отказа."""
+        """Отказ провайдера назван причиной, а не выдан за пустой успех."""
         app, adapter = _create_app()
 
         async def _mock_run_agent(**kwargs):
@@ -139,14 +140,14 @@ class TestNoProviderReachesTheUser:
             with patch.object(adapter, "_run_agent", side_effect=_mock_run_agent):
                 body = await _post(cli)
 
-        # Человек читает подсказку в чате...
-        assert _texts(body) == [_NO_PROVIDER_TEXT], body
-        assert "Ключи" in _texts(body)[0]
+        # Причина едет одним экземпляром — полем error финального чанка.
+        # Панель показывает её плашкой «Корра не смогла ответить: …», и текст
+        # не должен приезжать вторым экземпляром как ответ агента.
+        assert _texts(body) == [], body
 
-        # ...а программный клиент видит, что это отказ, а не пустой успех.
         finish = _finish(body)
         assert finish["choices"][0]["finish_reason"] == "error"
-        assert finish["error"]["message"]
+        assert "Ключи" in finish["error"]["message"]
         assert finish["hermes"]["failed"] is True
 
     @pytest.mark.asyncio
