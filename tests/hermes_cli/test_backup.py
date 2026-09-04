@@ -146,6 +146,22 @@ class TestShouldExclude:
         # The live DB is still backed up.
         assert not _should_exclude(Path("state.db"))
 
+    def test_excludes_lazy_install_target(self):
+        """lazy-packages/ — дерево зависимостей, а не состояние контура.
+
+        Движок ставит туда пакеты по требованию, потому что /opt/hermes в
+        образе доступен только на чтение. На контуре владельца это 403 МБ при
+        290 МБ собственно данных: без исключения архив клиента весит втрое
+        больше смысла и дольше уезжает в его облако.
+        """
+        from hermes_cli.backup import _should_exclude
+        assert _should_exclude(Path("lazy-packages/aiohttp/__init__.py"))
+        assert _should_exclude(Path("lazy-packages/aiohttp-3.14.3.dist-info/METADATA"))
+        # Профильные копии — тем же правилом.
+        assert _should_exclude(Path("profiles/secretary/lazy-packages/anyio/abc.py"))
+        # Похожее имя каталога с данными исключать нельзя.
+        assert not _should_exclude(Path("lazy-packages-notes.md"))
+
     def test_excludes_sqlite_sidecars(self):
         """SQLite WAL/SHM/journal sidecars must not ship alongside the
         safe-copied .db — pairing a fresh snapshot with stale sidecar state
