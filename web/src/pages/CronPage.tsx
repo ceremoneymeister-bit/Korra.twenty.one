@@ -628,14 +628,7 @@ export default function CronPage() {
   const [createForm, setCreateForm] = useState<CronJobEditorState>(
     emptyCronJobForm,
   );
-  const [createRequestId, setCreateRequestId] = useState("");
-  const openCreateModal = useCallback(() => {
-    setCreateRequestId(
-      globalThis.crypto?.randomUUID?.() ??
-        `owner-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
-    setCreateModalOpen(true);
-  }, []);
+  const openCreateModal = useCallback(() => setCreateModalOpen(true), []);
   const closeCreateModal = useCallback(() => setCreateModalOpen(false), []);
   const createModalRef = useModalBehavior({
     open: createModalOpen,
@@ -652,20 +645,10 @@ export default function CronPage() {
     emptyCronJobForm,
   );
   const [saving, setSaving] = useState(false);
-  const [resumeJob, setResumeJob] = useState<CronJob | null>(null);
-  const [resumeConfirmation, setResumeConfirmation] = useState("");
-  const [resuming, setResuming] = useState(false);
   const closeEditModal = useCallback(() => setEditJob(null), []);
   const editModalRef = useModalBehavior({
     open: editJob !== null,
     onClose: closeEditModal,
-  });
-  const closeResumeModal = useCallback(() => {
-    if (!resuming) setResumeJob(null);
-  }, [resuming]);
-  const resumeModalRef = useModalBehavior({
-    open: resumeJob !== null,
-    onClose: closeResumeModal,
   });
 
   // Skills installed in the profile a job will run under, for the
@@ -694,10 +677,10 @@ export default function CronPage() {
     setLoading(true);
     setError(null);
 
-    const request = clientMode
-      ? api.getOwnerCronJobs()
-      : api.getCronJobs(profile);
-    request
+    // Профиль передаём всегда: без `?profile=` движок отвечает списком по
+    // всем профилям сразу, и переключатель наверху ничего не меняет.
+    api
+      .getCronJobs(profile)
       .then((nextJobs) => {
         if (
           jobsRequestGenerationRef.current === generation &&
@@ -723,7 +706,7 @@ export default function CronPage() {
           selectedProfileRef.current === profile
         ) setLoading(false);
       });
-  }, [clientMode, selectedProfile, showToast]);
+  }, [selectedProfile, showToast]);
 
   useEffect(() => {
     if (clientMode) return;
@@ -734,10 +717,8 @@ export default function CronPage() {
   }, [clientMode]);
 
   useEffect(() => {
-    const request = clientMode
-      ? api.getOwnerCronDeliveryTargets()
-      : api.getCronDeliveryTargets();
-    request
+    api
+      .getCronDeliveryTargets()
       .then((res) => setDeliveryTargets(res.targets))
       .catch(() =>
         // Fall back to local-only so the modal still works if the endpoint fails.
@@ -745,7 +726,7 @@ export default function CronPage() {
           { id: "local", name: "Локально", home_target_set: true, home_env_var: null },
         ]),
       );
-  }, [clientMode]);
+  }, []);
 
   useEffect(() => {
     jobsActiveRef.current = true;
@@ -803,25 +784,17 @@ export default function CronPage() {
     }
     setCreating(true);
     try {
-      if (clientMode) {
-        await api.createOwnerCronJob({
-          request_id: createRequestId,
-          name: payload.name?.trim() ?? "",
-          prompt: payload.prompt?.trim() ?? "",
-          schedule: payload.schedule ?? "",
-          deliver: payload.deliver ?? "local",
-        });
-      } else {
-        await api.createCronJob(payload, createProfile);
-      }
+      await api.createCronJob(payload, createProfile);
+      // Движок создаёт задачу сразу включённой (`create_job` не умеет
+      // черновиков), поэтому и говорим о запуске по расписанию, а не о
+      // черновике, который «пока не запускается».
       showToast(
         clientMode
-          ? "Черновик добавлен и пока не запускается."
+          ? "Задача добавлена и будет запускаться по расписанию."
           : t.common.create + " ✓",
         "success",
       );
       setCreateForm(emptyCronJobForm());
-      setCreateRequestId("");
       setCreateModalOpen(false);
       loadJobs(selectedProfile);
     } catch (e) {
@@ -856,22 +829,7 @@ export default function CronPage() {
     }
     setSaving(true);
     try {
-      if (clientMode) {
-        if (!editJob.revision) throw new Error("Обновите страницу и повторите.");
-        await api.updateOwnerCronJob(editJob.id, {
-          expected_revision: editJob.revision,
-          name: payload.name?.trim() ?? "",
-          prompt: payload.prompt?.trim() ?? "",
-          schedule: payload.schedule ?? "",
-          deliver: payload.deliver ?? "local",
-        });
-      } else {
-        await api.updateCronJob(
-          editJob.id,
-          payload,
-          getJobProfile(editJob),
-        );
-      }
+      await api.updateCronJob(editJob.id, payload, getJobProfile(editJob));
       showToast(clientMode ? "Изменения сохранены." : tr("Saved changes ✓"), "success");
       setEditJob(null);
       loadJobs(selectedProfile);
@@ -883,63 +841,33 @@ export default function CronPage() {
   };
 
   const handlePauseResume = async (job: CronJob) => {
+    const isPaused = getJobState(job) === "paused";
+    const profile = getJobProfile(job);
+    const title = truncateText(getJobTitle(job), 30);
     try {
-      const isPaused = getJobState(job) === "paused";
-      if (clientMode && isPaused) {
-        setResumeJob(job);
-        setResumeConfirmation("");
-        return;
-      }
-      const profile = getJobProfile(job);
-      if (clientMode) {
-        if (!job.revision) throw new Error("Обновите страницу и повторите.");
-        await api.pauseOwnerCronJob(job.id, job.revision);
-        showToast(
-          `Новые запуски задачи «${truncateText(getJobTitle(job), 30)}» приостановлены. Уже начатая задача может завершиться.`,
-          "success",
-        );
-      } else if (isPaused) {
+      if (isPaused) {
         await api.resumeCronJob(job.id, profile);
         showToast(
-          `${t.cron.resume}: "${truncateText(getJobTitle(job), 30)}"`,
+          clientMode
+            ? `Задача «${title}» включена и снова пойдёт по расписанию.`
+            : `${t.cron.resume}: "${title}"`,
           "success",
         );
       } else {
         await api.pauseCronJob(job.id, profile);
         showToast(
-          `${t.cron.pause}: "${truncateText(getJobTitle(job), 30)}"`,
+          clientMode
+            ? `Новые запуски задачи «${title}» приостановлены. Уже начатая задача может завершиться.`
+            : `${t.cron.pause}: "${title}"`,
           "success",
         );
       }
-      loadJobs(selectedProfile);
     } catch (e) {
       showToast(ownerFacingError(e, "Не удалось изменить состояние задачи."), "error");
-      if (clientMode) loadJobs(selectedProfile);
     }
-  };
-
-  const handleConfirmedResume = async () => {
-    if (!resumeJob?.revision) return;
-    setResuming(true);
-    try {
-      await api.resumeOwnerCronJob(
-        resumeJob.id,
-        resumeJob.revision,
-        resumeConfirmation,
-      );
-      showToast(
-        `Задача «${truncateText(getJobTitle(resumeJob), 30)}» включена.`,
-        "success",
-      );
-      setResumeJob(null);
-      setResumeConfirmation("");
-      loadJobs(selectedProfile);
-    } catch (e) {
-      showToast(ownerFacingError(e, "Не удалось включить задачу."), "error");
-      loadJobs(selectedProfile);
-    } finally {
-      setResuming(false);
-    }
+    // Список перечитываем и после ошибки: состояние на сервере могло
+    // разойтись с карточкой, из которой пришёл клик.
+    loadJobs(selectedProfile);
   };
 
   const handleTrigger = async (job: CronJob) => {
@@ -983,23 +911,22 @@ export default function CronPage() {
       async (key: string) => {
         const { profile, id } = splitJobKey(key);
         const job = jobs.find((j) => getJobKey(j) === key);
+        const title = job ? truncateText(getJobTitle(job), 30) : id;
         try {
-          if (clientMode) {
-            if (!job?.revision) throw new Error("Обновите страницу и повторите.");
-            await api.archiveOwnerCronJob(id, job.revision);
-          } else {
-            await api.deleteCronJob(id, profile);
-          }
+          // Архива у движка нет: `remove_job` удаляет задачу вместе с её
+          // каталогом результатов и блокнотом (cron/jobs.py), поэтому здесь
+          // ровно одно действие — удаление, и говорим о нём прямо.
+          await api.deleteCronJob(id, profile);
           showToast(
             clientMode
-              ? `Задача «${job ? truncateText(getJobTitle(job), 30) : id}» убрана из расписания.`
-              : `${t.common.delete}: "${job ? truncateText(getJobTitle(job), 30) : id}"`,
+              ? `Задача «${title}» удалена.`
+              : `${t.common.delete}: "${title}"`,
             "success",
           );
           loadJobs(selectedProfile);
         } catch (e) {
-          showToast(ownerFacingError(e, "Не удалось убрать задачу из расписания."), "error");
-          if (clientMode) loadJobs(selectedProfile);
+          showToast(ownerFacingError(e, "Не удалось удалить задачу."), "error");
+          loadJobs(selectedProfile);
           throw e;
         }
       },
@@ -1055,8 +982,9 @@ export default function CronPage() {
       {clientMode && (
         <div className="space-y-1 text-sm text-muted-foreground">
           <p>
-            Добавляйте и меняйте задачи прямо здесь. Новая задача сохраняется
-            приостановленной: проверьте формулировку и время, затем включите её.
+            Добавляйте и меняйте задачи прямо здесь. Новая задача сразу встаёт в
+            расписание — приостановите её, если хотите сперва проверить
+            формулировку и время.
           </p>
           <p className="text-xs">Даты показаны по часовому поясу {ownerTimeZoneLabel()}.</p>
         </div>
@@ -1088,10 +1016,10 @@ export default function CronPage() {
         open={jobDelete.isOpen}
         onCancel={jobDelete.cancel}
         onConfirm={jobDelete.confirm}
-        title={clientMode ? "Убрать задачу из расписания?" : t.cron.confirmDeleteTitle}
+        title={clientMode ? "Удалить задачу?" : t.cron.confirmDeleteTitle}
         description={
           clientMode && pendingJob
-            ? `«${truncateText(getJobTitle(pendingJob), 40)}» будет убрана из списка. Новые запуски уже приостановлены, история результатов сохранится.`
+            ? `«${truncateText(getJobTitle(pendingJob), 40)}» исчезнет из расписания вместе с сохранёнными результатами её запусков. Отменить это нельзя.`
             : pendingJob
             ? `"${truncateText(getJobTitle(pendingJob), 40)}" — ${
                 t.cron.confirmDeleteMessage
@@ -1099,7 +1027,7 @@ export default function CronPage() {
             : t.cron.confirmDeleteMessage
         }
         loading={jobDelete.isDeleting}
-        confirmLabel={clientMode ? "Убрать из расписания" : undefined}
+        confirmLabel={clientMode ? "Удалить" : undefined}
       />
 
       {/* Create job modal */}
@@ -1173,7 +1101,7 @@ export default function CronPage() {
                   {creating
                     ? t.common.creating
                     : clientMode
-                      ? "Сохранить черновик"
+                      ? "Добавить в расписание"
                       : t.common.create}
                 </Button>
               </div>
@@ -1241,57 +1169,6 @@ export default function CronPage() {
                   {saving ? t.common.loading : clientMode ? "Сохранить" : tr("Save changes")}
                 </Button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {resumeJob && (
-        <div
-          ref={resumeModalRef}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-background/85 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="resume-cron-title"
-          onClick={(event) => {
-            if (event.target === event.currentTarget && !resuming) setResumeJob(null);
-          }}
-        >
-          <div className={cn(themedBody, "w-full max-w-md border border-border bg-card p-5 shadow-2xl")}>
-            <h2 id="resume-cron-title" className="font-mondwest text-display text-base tracking-wider">
-              Включить задачу?
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              После включения Корра будет выполнять её автоматически. Для подтверждения
-              введите название задачи точно:
-            </p>
-            <p className="mt-2 text-sm font-medium">{getJobTitle(resumeJob)}</p>
-            <Label htmlFor="resume-cron-confirmation" className="mt-4 block">
-              Название задачи
-            </Label>
-            <Input
-              id="resume-cron-confirmation"
-              autoFocus
-              className="mt-1"
-              value={resumeConfirmation}
-              onChange={(event) => setResumeConfirmation(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && resumeConfirmation === getJobTitle(resumeJob)) {
-                  void handleConfirmedResume();
-                }
-              }}
-            />
-            <div className="mt-5 flex justify-end gap-2">
-              <Button outlined onClick={() => setResumeJob(null)} disabled={resuming}>
-                Отмена
-              </Button>
-              <Button
-                onClick={() => void handleConfirmedResume()}
-                disabled={resuming || resumeConfirmation !== getJobTitle(resumeJob)}
-                prefix={resuming ? <Spinner /> : <Play />}
-              >
-                Включить
-              </Button>
             </div>
           </div>
         </div>
@@ -1447,25 +1324,27 @@ export default function CronPage() {
                     {state === "paused" ? <Play /> : <Pause />}
                   </Button>
 
-                  {!clientMode && (
-                    <Button
-                      ghost
-                      size="icon"
-                      disabled={triggeringJobKeys.has(jobKey)}
-                      title={t.cron.triggerNow}
-                      aria-label={t.cron.triggerNow}
-                      onClick={() => handleTrigger(job)}
-                    >
-                      {triggeringJobKeys.has(jobKey) ? <Spinner /> : <Zap />}
-                    </Button>
-                  )}
+                  {/* Ручной запуск доступен в обоих режимах: движок умеет
+                      запускать и приостановленную задачу (force-claim в
+                      _trigger_cron_job_sync), так что прятать кнопку не от
+                      чего. Правка и удаление тоже больше не требуют паузы —
+                      маршруты PUT и DELETE работают в любом состоянии. */}
+                  <Button
+                    ghost
+                    size="icon"
+                    disabled={triggeringJobKeys.has(jobKey)}
+                    title={t.cron.triggerNow}
+                    aria-label={t.cron.triggerNow}
+                    onClick={() => handleTrigger(job)}
+                  >
+                    {triggeringJobKeys.has(jobKey) ? <Spinner /> : <Zap />}
+                  </Button>
 
                   <Button
                     ghost
                     size="icon"
-                    title={clientMode && state !== "paused" ? "Сначала приостановите задачу" : "Изменить задачу"}
+                    title="Изменить задачу"
                     aria-label="Изменить задачу"
-                    disabled={clientMode && state !== "paused"}
                     onClick={() => openEditModal(job)}
                   >
                     <Pencil />
@@ -1475,9 +1354,8 @@ export default function CronPage() {
                     ghost
                     destructive
                     size="icon"
-                    title={clientMode && state !== "paused" ? "Сначала приостановите задачу" : clientMode ? "Убрать из расписания" : t.common.delete}
-                    aria-label={clientMode && state !== "paused" ? "Сначала приостановите задачу" : clientMode ? "Убрать из расписания" : t.common.delete}
-                    disabled={clientMode && state !== "paused"}
+                    title={clientMode ? "Удалить задачу" : t.common.delete}
+                    aria-label={clientMode ? "Удалить задачу" : t.common.delete}
                     onClick={() => jobDelete.requestDelete(jobKey)}
                   >
                     <Trash2 />

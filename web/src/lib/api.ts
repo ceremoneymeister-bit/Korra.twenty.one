@@ -963,40 +963,6 @@ export const api = {
     fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/trigger?profile=${encodeURIComponent(profile)}`, { method: "POST" }),
   deleteCronJob: (id: string, profile = "default") =>
     fetchJSON<{ ok: boolean }>(`/api/cron/jobs/${encodeURIComponent(id)}?profile=${encodeURIComponent(profile)}`, { method: "DELETE" }),
-  getOwnerCronJobs: () =>
-    fetchJSON<CronJob[]>("/api/cron/jobs"),
-  getOwnerCronDeliveryTargets: () =>
-    fetchJSON<{ targets: CronDeliveryTarget[] }>("/api/cron/delivery-targets"),
-  createOwnerCronJob: (job: OwnerCronJobCreate) =>
-    fetchJSON<CronJob>("/api/cron/jobs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(job),
-    }),
-  updateOwnerCronJob: (id: string, job: OwnerCronJobUpdate) =>
-    fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(job),
-    }),
-  pauseOwnerCronJob: (id: string, expectedRevision: string) =>
-    fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/pause`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expected_revision: expectedRevision }),
-    }),
-  resumeOwnerCronJob: (id: string, expectedRevision: string, confirmation: string) =>
-    fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/resume`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expected_revision: expectedRevision, confirmation }),
-    }),
-  archiveOwnerCronJob: (id: string, expectedRevision: string) =>
-    fetchJSON<CronJob>(`/api/cron/jobs/${encodeURIComponent(id)}/archive`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expected_revision: expectedRevision }),
-    }),
 
   // Automation Blueprints — parameterized automation blueprints
   getAutomationBlueprints: () =>
@@ -2676,18 +2642,12 @@ export interface CronJobMutation {
   workdir?: string | null;
 }
 
-export interface OwnerCronJobCreate {
-  request_id: string;
-  name: string;
-  prompt: string;
-  schedule: string;
-  deliver: string;
-}
-
-export interface OwnerCronJobUpdate extends Omit<OwnerCronJobCreate, "request_id"> {
-  expected_revision: string;
-}
-
+// Задачами управляет один набор маршрутов на все режимы панели:
+// POST/PUT /api/cron/jobs[/{id}], POST .../pause|resume|trigger и
+// DELETE /api/cron/jobs/{id} — все с `?profile=`, без тела и без ревизий
+// (korra_cli/web_routers/cron.py). Отдельного owner-контракта у движка нет:
+// параллельный набор `*OwnerCronJob*` слал `expected_revision` и звал
+// несуществующий `/archive`, из-за чего раздел «Задачи» не работал вовсе.
 export interface CronJob {
   id: string;
   profile?: string | null;
@@ -2716,8 +2676,6 @@ export interface CronJob {
   last_status?: string | null;
   last_error?: string | null;
   last_delivery_error?: string | null;
-  revision?: string | null;
-  archived_at?: string | null;
   last_fire_error?: { at?: string | null; detail?: string | null } | null;
 }
 
