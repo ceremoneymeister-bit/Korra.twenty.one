@@ -233,8 +233,10 @@ function EnvVarRow({
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <Label className="font-mono-ui text-xs" title={varKey}>{displayKey(varKey)}</Label>
+          {/* Это подпись состояния, а не кнопка: «Задать» на заданном ключе
+              читается как предложение действия. */}
           <Badge tone={info.is_set ? "success" : "outline"}>
-            {info.is_set ? t.common.set : t.env.notSet}
+            {info.is_set ? "Задано" : t.env.notSet}
           </Badge>
         </div>
         {info.url && (
