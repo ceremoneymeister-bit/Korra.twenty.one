@@ -188,7 +188,7 @@ function UserBubble({
       ) : message.delivery === "failed" ? (
         <div
           className="flex flex-wrap justify-end gap-1"
-          aria-label="Действия с недоставленным сообщением"
+          aria-label="Действия с сообщением, оставшимся без ответа"
         >
           <Button
             type="button"
@@ -198,7 +198,11 @@ function UserBubble({
             prefix={<RotateCcw aria-hidden />}
             className="normal-case tracking-normal"
           >
-            Не отправлено · Повторить
+            {/* «Не отправлено» годилось, пока сюда попадал только обрыв
+                доставки. Ход, который сервер принял и завершил отказом
+                (например, ключ провайдера ещё не введён), тоже приходит
+                сюда — и такому сообщению надпись врала. */}
+            Без ответа · Повторить
           </Button>
           <Button
             type="button"
