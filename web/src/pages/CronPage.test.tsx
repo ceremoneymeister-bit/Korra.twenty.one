@@ -112,6 +112,7 @@ async function renderPage(profile = "secretary") {
           currentProfile: "default",
           profiles: [],
           setProfile: () => {},
+          refreshProfiles: async () => {},
         }}
       >
         <PageHeaderHost>
