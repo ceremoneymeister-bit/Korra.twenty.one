@@ -546,10 +546,7 @@ describe('useVirtualHistory offset cache reuse', () => {
       // нагрузкой планировщик отдаёт этому потоку время не сразу. Прошлый
       // подъём (21286ba456) до двух секунд нагрузку сборки образа пережил,
       // а полный прогон CI — уже нет.
-      await vi.waitFor(
-        () => expect(adjustScrollTop).toHaveBeenCalledOnce(),
-        { timeout: 15000, interval: 10 },
-      )
+      await vi.waitFor(() => expect(adjustScrollTop).toHaveBeenCalledOnce(), { timeout: 15000, interval: 10 })
       expect(adjustScrollTop).toHaveBeenCalledWith(1)
       expect(scroll.getScrollTop()).toBe(6)
       expect(scroll.isSticky()).toBe(false)
