@@ -1438,6 +1438,8 @@ def create_profile(
     no_alias: bool = False,
     no_skills: bool = False,
     description: Optional[str] = None,
+    display_name: Optional[str] = None,
+    soul: Optional[str] = None,
 ) -> Path:
     """Create a new profile directory.
 
@@ -1460,6 +1462,11 @@ def create_profile(
         a marker file so ``hermes update`` skips re-seeding this profile's
         skills. Mutually exclusive with ``clone_config``/``clone_all`` (those
         explicitly copy skills from the source).
+    display_name:
+        Optional human-readable name (up to 64 characters).
+    soul:
+        Optional exact SOUL.md content. Omission preserves the default or
+        cloned persona; an empty string explicitly clears it.
 
     Returns
     -------
@@ -1473,6 +1480,8 @@ def create_profile(
         )
     canon = normalize_profile_name(name)
     validate_profile_name(canon)
+    if display_name is not None and len(display_name.strip()) > 64:
+        raise ValueError("Имя агента не должно быть длиннее 64 символов.")
 
     if canon == "default":
         raise ValueError(
@@ -1520,7 +1529,10 @@ def create_profile(
             (profile_dir / stale).unlink(missing_ok=True)
     else:
         # Bootstrap directory structure
-        profile_dir.mkdir(parents=True, exist_ok=True)
+        # Own this directory exclusively, including when two requests use the
+        # same name. Identity failure cleanup below must never remove a
+        # concurrent creator's profile.
+        profile_dir.mkdir(parents=True, exist_ok=False)
         for subdir in _PROFILE_DIRS:
             (profile_dir / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -1582,6 +1594,25 @@ def create_profile(
             os.chmod(str(env_path), 0o600)
         except OSError:
             pass  # best-effort — save_env_value creates the file on demand
+
+    # Explicit identity is part of creation, not optional post-setup. Fail
+    # before registering the gateway; a retry must not find a half-created
+    # agent with the default persona. Only this call's newly created directory
+    # is removed: existing profiles were rejected above.
+    if soul is not None or display_name is not None:
+        try:
+            if soul is not None:
+                from utils import atomic_write_text
+
+                atomic_write_text(
+                    profile_dir / "SOUL.md", soul,
+                    preserve_mode=True, create_mode=0o644,
+                )
+            if display_name is not None:
+                write_profile_meta(profile_dir, display_name=display_name)
+        except Exception:
+            shutil.rmtree(profile_dir)
+            raise
 
     # Seed a default SOUL.md so the user has a file to customize immediately.
     # Skipped when the profile already has one (from --clone / --clone-all).

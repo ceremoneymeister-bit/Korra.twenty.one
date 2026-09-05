@@ -609,6 +609,9 @@ class SkillsUpdateRequest(BaseModel):
 
 class ProfileCreate(BaseModel):
     name: str
+    display_name: Optional[str] = None
+    # Exact SOUL.md text. None preserves the default/cloned persona.
+    soul: Optional[str] = None
     clone_from: Optional[str] = None
     # Backward compatibility for older dashboard/desktop clients. New clients
     # send clone_from="default" (or another profile name) explicitly.

@@ -814,6 +814,8 @@ async def create_profile_endpoint(body: ProfileCreate):
             clone_config=clone_config,
             no_skills=body.no_skills,
             description=body.description,
+            display_name=body.display_name,
+            soul=body.soul,
         )
         # Match the CLI's profile-create flow: fresh named profiles get the
         # bundled skills installed. When cloning from default, create_profile()
@@ -912,7 +914,7 @@ async def create_profile_endpoint(body: ProfileCreate):
 
     return {
         "ok": True,
-        "name": body.name,
+        "name": profiles_mod.normalize_profile_name(body.name),
         "path": str(path),
         "model_set": model_set,
         "seeded_credentials": seeded_credentials,

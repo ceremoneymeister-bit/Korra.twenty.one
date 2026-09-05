@@ -990,6 +990,8 @@ export const api = {
     }),
   createProfile: (body: {
     name: string;
+    display_name?: string;
+    soul?: string;
     clone_from?: string | null;
     clone_from_default?: boolean;
     clone_all?: boolean;
