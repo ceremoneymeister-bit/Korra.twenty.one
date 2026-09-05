@@ -2,7 +2,7 @@
 
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, useLocation } from "react-router";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const workbenchMocks = vi.hoisted(() => ({
@@ -70,6 +70,16 @@ const DEFAULT_TABS = [
 function LocationProbe() {
   const { pathname, search } = useLocation();
   return <output data-testid="location">{`${pathname}${search}`}</output>;
+}
+
+/** Кнопка «Открыть чат» карточки агента — переход по ссылке снаружи экрана. */
+function NavigateButton({ to }: { to: string }) {
+  const navigate = useNavigate();
+  return (
+    <button type="button" data-testid="navigate" onClick={() => navigate(to)}>
+      перейти
+    </button>
+  );
 }
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -311,6 +321,37 @@ describe("AgentWorkbenchPage", () => {
     expect(
       container.querySelector('[data-testid="location"]')?.textContent,
     ).toBe("/profiles/new");
+  });
+
+  it("по ссылке /agents?agent=default возвращается на главную вкладку", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents?agent=calculator"]}>
+        <AgentWorkbenchPage />
+        <NavigateButton to="/agents?agent=default" />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    expect(
+      container
+        .querySelector<HTMLButtonElement>("#agent-tab-calculator")
+        ?.getAttribute("aria-selected"),
+    ).toBe("true");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[data-testid="navigate"]')
+        ?.click();
+    });
+
+    expect(
+      container
+        .querySelector<HTMLButtonElement>("#agent-tab-")
+        ?.getAttribute("aria-selected"),
+    ).toBe("true");
+    // Параметр снят: возврат назад-вперёд не должен переключать вкладку снова.
+    expect(
+      container.querySelector('[data-testid="location"]')?.textContent,
+    ).toBe("/agents");
   });
 
   it("из меню вкладки ведёт к роли и модели именно этого агента", async () => {

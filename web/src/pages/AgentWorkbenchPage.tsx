@@ -171,9 +171,14 @@ export default function AgentWorkbenchPage() {
     // Читаем и снимаем параметр только у себя, иначе диплинк соседнего
     // раздела терял бы имя агента, не успев открыться.
     if (!onAgentsRoute) return;
-    const agent = searchParams.get("agent")?.trim();
+    const requested = searchParams.get("agent")?.trim();
     const draft = searchParams.get("draft")?.trim();
-    if (!agent) return;
+    if (!requested) return;
+    // Снаружи главный агент известен под серверным именем `default` (карточка
+    // в «Настройках агентов» шлёт `/agents?agent=default`), а вкладка у него —
+    // пустой профиль панели.
+    const agent =
+      requested === "default" ? MAIN_AGENT_TAB.profile : requested;
     if (!tabs.some((tab) => tab.profile === agent)) {
       // Диплинк на профиль, которого в составе ещё нет (только что создан):
       // перечитываем список и оставляем параметры до его появления.
