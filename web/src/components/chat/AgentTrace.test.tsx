@@ -72,11 +72,14 @@ describe("AgentTrace — сворачивание", () => {
 
     await render(<AgentTrace tools={tools} active startedAt={1_000} />);
     expect(panel().dataset.open).toBe("true");
+    expect(panel().hasAttribute("inert")).toBe(false);
     expect(container.querySelector("[data-testid='orb']")).not.toBeNull();
     expect(text()).toContain("Думаю");
 
     await render(<AgentTrace tools={tools} active={false} startedAt={1_000} />);
     expect(panel().dataset.open).toBe("false");
+    expect(panel().hasAttribute("inert")).toBe(true);
+    expect(panel().getAttribute("aria-hidden")).toBe("true");
     expect(container.querySelector("[data-testid='orb']")).toBeNull();
   });
 
@@ -102,6 +105,19 @@ describe("AgentTrace — сворачивание", () => {
   it("ничего не рисует, когда показывать нечего", async () => {
     await render(<AgentTrace tools={[]} active={false} startedAt={1_000} />);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("оставляет ошибку заметной, даже когда подробности свёрнуты", async () => {
+    await render(<AgentTrace tools={[
+      tool({ id: "1", name: "read_file", status: "error", error: "Файл не найден" }),
+      tool({ id: "2", name: "terminal" }),
+    ]} startedAt={0} />);
+    const header = container.querySelector<HTMLButtonElement>("button[aria-expanded]");
+    expect(header?.textContent).toContain("1 с ошибкой");
+    expect(header?.getAttribute("aria-expanded")).toBe("false");
+    await click(header!);
+    await click(rowButtons()[0]);
+    expect(text()).toContain("Файл не найден");
   });
 });
 

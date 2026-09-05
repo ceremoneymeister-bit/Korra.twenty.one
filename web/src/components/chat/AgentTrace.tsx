@@ -153,11 +153,12 @@ export function AgentTrace({
     active,
     elapsedMs,
     calls: tools.length,
+    errors: tools.filter((tool) => tool.status === "error").length,
     hasReasoning,
   });
 
   return (
-    <div className="mb-2 font-sans normal-case tracking-normal">
+    <div className="mb-4 font-sans normal-case tracking-normal">
       <button
         type="button"
         onClick={() => setOverride(!open)}
@@ -191,10 +192,9 @@ export function AgentTrace({
         />
       </button>
 
-      <div className="korra-trace__panel" data-open={open}>
+      <div className="korra-trace__panel" data-open={open} inert={!open} aria-hidden={!open}>
         <div className="korra-trace__panel-inner">
           <div className="flex gap-2.5 pt-1.5 pl-2">
-            <div className="korra-trace__guide" aria-hidden />
             <ul className="flex min-w-0 flex-1 list-none flex-col gap-0.5 p-0">
               {tools.map((tool, index) => {
                 const meta = toolMeta(tool.name);
@@ -241,17 +241,20 @@ function headerSummary({
   active,
   elapsedMs,
   calls,
+  errors,
   hasReasoning,
 }: {
   active: boolean;
   elapsedMs: number | null;
   calls: number;
+  errors: number;
   hasReasoning: boolean;
 }): string {
   if (active) return "Думаю…";
   const parts: string[] = [];
   if (elapsedMs !== null) parts.push(`Думал ${formatSeconds(elapsedMs)}`);
   if (calls > 0) parts.push(pluralCalls(calls));
+  if (errors > 0) parts.push(`${errors} с ошибкой`);
   if (parts.length > 0) return parts.join(" · ");
   return hasReasoning ? "Размышление" : "Ход работы";
 }
@@ -369,7 +372,7 @@ function TraceRow({
               {prose}
             </p>
           ) : (
-            <p className="line-clamp-6 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap break-words text-[var(--neo-text-secondary)]">
+            <p className="max-h-64 overflow-y-auto text-xs leading-relaxed whitespace-pre-wrap break-words text-[var(--neo-text-secondary)]">
               {detail}
             </p>
           )}
