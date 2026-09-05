@@ -52,6 +52,7 @@ import {
 } from "@/lib/model-choices";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { usePageHeader } from "@/contexts/usePageHeader";
+import { useProfileScope } from "@/contexts/useProfileScope";
 import { useTheme } from "@/themes";
 
 /**
@@ -82,6 +83,10 @@ export default function ProfileBuilderPage() {
   const navigate = useNavigate();
   const { toast, showToast } = useToast();
   const { setTitle } = usePageHeader();
+  // Каталог профилей разделов «Ключи», «Навыки», «Задачи» грузится один раз;
+  // без обновления ссылка на нового агента там молча выбирала бы главного
+  // (находка Астры, 05.09).
+  const { refreshProfiles } = useProfileScope();
   // Орбита шага «Проверка» рисуется в теме панели — как в чате.
   const { themeName } = useTheme();
 
@@ -245,6 +250,9 @@ export default function ProfileBuilderPage() {
       // Каноническое имя решает сервер — и вкладка, и контрольное сообщение
       // адресуются им, а не тем, что вывел транслит.
       const created = res.name || profileId;
+      // Агент уже есть на диске: неудача обновления каталога — не повод
+      // считать создание провалившимся и тем более повторять его.
+      void refreshProfiles().catch(() => undefined);
       if (picked && res.model_set === false) {
         showToast(
           "Агент создан, но модель не сохранилась — задайте её в настройках агента.",

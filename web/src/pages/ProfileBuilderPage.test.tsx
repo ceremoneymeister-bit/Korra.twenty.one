@@ -25,6 +25,20 @@ vi.mock("thinking-orbs", () => ({
   ),
 }));
 
+// Каталог профилей разделов панели — мастер обязан его обновить после
+// создания, иначе «Ключи» нового агента откроются для главного.
+const scopeMocks = vi.hoisted(() => ({ refreshProfiles: vi.fn() }));
+
+vi.mock("@/contexts/useProfileScope", () => ({
+  useProfileScope: () => ({
+    profile: "",
+    currentProfile: "default",
+    profiles: [],
+    setProfile: () => {},
+    refreshProfiles: scopeMocks.refreshProfiles,
+  }),
+}));
+
 import ProfileBuilderPage, { PROBE_PROMPT } from "./ProfileBuilderPage";
 
 let container: HTMLDivElement;
@@ -200,6 +214,8 @@ beforeEach(() => {
     model_set: true,
   });
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okReply("Я — Учитель китайского.")));
+  scopeMocks.refreshProfiles.mockReset();
+  scopeMocks.refreshProfiles.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -300,6 +316,9 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     expect(body.soul).toContain("Ты — Учитель китайского, агент в системе Korra.");
     expect(body.soul).toContain("Проверяешь домашние задания.");
     expect(body.soul).toContain("## Как общаться");
+    // Каталог профилей разделов обновлён — «Ключи»/«Навыки» нового агента
+    // откроются для него, а не для главного.
+    expect(scopeMocks.refreshProfiles).toHaveBeenCalledTimes(1);
 
     // Проверка идёт тем же маршрутом, что и чат, и просит представиться.
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
@@ -351,6 +370,18 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     ).toBe("/env?profile=uchitel-kitayskogo");
   });
 
+  it("сбой обновления каталога не мешает проверке и не повторяет создание", async () => {
+    scopeMocks.refreshProfiles.mockRejectedValueOnce(new Error("503: занято"));
+    await openWizard();
+    await enterText(nameInput(), "Учитель китайского");
+    await click(findButton("Создать агента"));
+    await flush();
+
+    expect(apiMocks.createProfile).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Агент отвечает: «Я — Учитель китайского.»");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it("ошибку создания показывает на форме и не уходит в проверку", async () => {
     apiMocks.createProfile.mockRejectedValueOnce(
       new Error('400: {"detail":"Профиль с таким именем уже есть"}'),
@@ -365,6 +396,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     );
     expect(container.textContent).not.toContain("Проверка агента");
     expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(scopeMocks.refreshProfiles).not.toHaveBeenCalled();
     expect(nameInput().value).toBe("Учитель китайского");
   });
 
