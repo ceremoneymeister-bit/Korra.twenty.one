@@ -38,6 +38,7 @@ import { Separator } from "@nous-research/ui/ui/components/separator";
 import { Tabs, TabsList, TabsTrigger } from "@nous-research/ui/ui/components/tabs";
 import { useI18n } from "@/i18n";
 import { registerSlot, PluginSlot } from "./slots";
+import { Markdown } from "@/components/Markdown";
 
 // ---------------------------------------------------------------------------
 // Plugin registry — plugins call register() to add their component.
@@ -156,6 +157,8 @@ export function exposePluginSDK() {
 
     // UI components — Nous DS where available, shadcn/ui primitives elsewhere.
     components: {
+      // Карточки поручений используют тот же вывод текста, что и остальные экраны.
+      Markdown,
       Card,
       CardHeader,
       CardTitle,
