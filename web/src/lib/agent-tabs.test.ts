@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agentSettingsHref,
   buildAgentTabs,
   MAIN_AGENT_TAB,
   MAX_AGENT_TABS,
@@ -139,5 +140,22 @@ describe("sameAgentTabs", () => {
     expect(sameAgentTabs(a, buildAgentTabs([profile("x", { display_name: "X" })]))).toBe(false);
     expect(sameAgentTabs(a, buildAgentTabs([]))).toBe(false);
     expect(sameAgentTabs(a, buildAgentTabs([profile("y", { description: "d" })]))).toBe(false);
+  });
+});
+
+describe("agentSettingsHref", () => {
+  it("ведёт к роли или модели именно этого агента", () => {
+    expect(agentSettingsHref("calculator", "role")).toBe(
+      "/profiles?agent=calculator&edit=role",
+    );
+    expect(agentSettingsHref("calculator", "model")).toBe(
+      "/profiles?agent=calculator&edit=model",
+    );
+  });
+
+  it("главная вкладка — профиль панели, в настройках он default", () => {
+    expect(agentSettingsHref(MAIN_AGENT_TAB.profile, "role")).toBe(
+      "/profiles?agent=default&edit=role",
+    );
   });
 });

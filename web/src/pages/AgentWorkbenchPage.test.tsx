@@ -68,7 +68,8 @@ const DEFAULT_TABS = [
 ];
 
 function LocationProbe() {
-  return <output data-testid="location">{useLocation().pathname}</output>;
+  const { pathname, search } = useLocation();
+  return <output data-testid="location">{`${pathname}${search}`}</output>;
 }
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -140,7 +141,8 @@ describe("AgentWorkbenchPage", () => {
     let menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
     expect(menu.className).toContain("neo-select-menu");
     expect(menu.textContent).toContain("Переименовать");
-    expect(menu.textContent).toContain("Открыть настройки профиля");
+    expect(menu.textContent).toContain("Роль и поведение");
+    expect(menu.textContent).toContain("Модель");
     expect(menu.textContent).toContain("Новый чат");
 
     await act(async () => {
@@ -309,5 +311,46 @@ describe("AgentWorkbenchPage", () => {
     expect(
       container.querySelector('[data-testid="location"]')?.textContent,
     ).toBe("/profiles/new");
+  });
+
+  it("из меню вкладки ведёт к роли и модели именно этого агента", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Меню агента «Сметчик»"]')
+        ?.click();
+    });
+    let menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    await act(async () => {
+      Array.from(menu.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("Роль и поведение"))
+        ?.click();
+    });
+    expect(
+      container.querySelector('[data-testid="location"]')?.textContent,
+    ).toBe("/profiles?agent=calculator&edit=role");
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+
+    // Главная вкладка — профиль самой панели, в настройках он `default`.
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Меню агента «Корра»"]')
+        ?.click();
+    });
+    menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    await act(async () => {
+      Array.from(menu.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("Модель"))
+        ?.click();
+    });
+    expect(
+      container.querySelector('[data-testid="location"]')?.textContent,
+    ).toBe("/profiles?agent=default&edit=model");
   });
 });

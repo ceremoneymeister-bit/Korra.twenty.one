@@ -28,12 +28,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Cpu,
   EyeOff,
+  FileText,
   MessageSquarePlus,
   MoreVertical,
   Pencil,
   Plus,
-  Settings,
   UserRoundPlus,
   X,
 } from "lucide-react";
@@ -43,7 +44,7 @@ import { useToast } from "@nous-research/ui/hooks/use-toast";
 import BubbleChatPage from "@/pages/BubbleChatPage";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
-import { MAIN_AGENT_TAB } from "@/lib/agent-tabs";
+import { agentSettingsHref, MAIN_AGENT_TAB } from "@/lib/agent-tabs";
 import { useAgentTabs } from "@/hooks/useAgentTabs";
 
 /* ------------------------------------------------------------------ */
@@ -159,11 +160,17 @@ export default function AgentWorkbenchPage() {
   // не монтирование, а смена маршрута. Владелец создал профиль на соседнем
   // экране и вернулся сюда — вкладка должна быть уже здесь, а не через
   // полминуты опроса.
+  const onAgentsRoute = (pathname.replace(/\/$/, "") || "/") === "/agents";
   useEffect(() => {
-    if ((pathname.replace(/\/$/, "") || "/") === "/agents") void refresh();
-  }, [pathname, refresh]);
+    if (onAgentsRoute) void refresh();
+  }, [onAgentsRoute, refresh]);
 
   useEffect(() => {
+    // Экран живёт смонтированным и на чужих маршрутах, а `?agent=` — ещё и
+    // адрес редактора в «Настройках агентов» (`/profiles?agent=…&edit=role`).
+    // Читаем и снимаем параметр только у себя, иначе диплинк соседнего
+    // раздела терял бы имя агента, не успев открыться.
+    if (!onAgentsRoute) return;
     const agent = searchParams.get("agent")?.trim();
     const draft = searchParams.get("draft")?.trim();
     if (!agent) return;
@@ -186,7 +193,7 @@ export default function AgentWorkbenchPage() {
       },
       { replace: true },
     );
-  }, [searchParams, setSearchParams, tabs, refresh]);
+  }, [onAgentsRoute, searchParams, setSearchParams, tabs, refresh]);
 
   const clearDraft = useCallback((profile: string) => {
     setDraftByProfile((previous) => {
@@ -468,17 +475,33 @@ export default function AgentWorkbenchPage() {
                   <Pencil size={15} aria-hidden />
                   Переименовать
                 </button>
+                {/* Настройки *этого* агента, а не список всех: редактор роли
+                    и модели в «Настройках агентов» открывается по адресу
+                    `/profiles?agent=<профиль>&edit=role|model` (договорённость с
+                    Астрой 05.09). Главная вкладка — профиль панели, `default`. */}
                 <button
                   type="button"
                   role="menuitem"
                   className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
                   onClick={() => {
                     setOpenMenu(null);
-                    navigate("/profiles");
+                    navigate(agentSettingsHref(menuTab.profile, "role"));
                   }}
                 >
-                  <Settings size={15} aria-hidden />
-                  Открыть настройки профиля
+                  <FileText size={15} aria-hidden />
+                  Роль и поведение
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
+                  onClick={() => {
+                    setOpenMenu(null);
+                    navigate(agentSettingsHref(menuTab.profile, "model"));
+                  }}
+                >
+                  <Cpu size={15} aria-hidden />
+                  Модель
                 </button>
                 <button
                   type="button"

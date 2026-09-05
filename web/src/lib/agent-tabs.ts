@@ -91,3 +91,18 @@ export function sameAgentTabs(
     );
   });
 }
+
+/**
+ * Адрес редактора выбранного агента в «Настройках агентов»
+ * (`/profiles?agent=<профиль>&edit=role|model`, договорённость с Астрой 05.09).
+ *
+ * Пустой профиль — главная вкладка, то есть профиль самой панели; в списке
+ * профилей он значится как `default`.
+ */
+export function agentSettingsHref(
+  profile: string,
+  edit: "role" | "model",
+): string {
+  const target = profile || "default";
+  return `/profiles?agent=${encodeURIComponent(target)}&edit=${edit}`;
+}
