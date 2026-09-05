@@ -1,0 +1,67 @@
+vite v8.2.0 building client environment for production...
+[2Ktransforming...✓ 2189 modules transformed.
+rendering chunks...
+computing gzip size...
+../../../tmp/astra-agents-dist/index.html                                       1.98 kB │ gzip:   0.66 kB
+../../../tmp/astra-agents-dist/assets/Mondwest-Regular-CWscgue7.woff2          23.82 kB
+../../../tmp/astra-agents-dist/assets/RulesExpanded-Regular-l8uVympt.woff2     33.82 kB
+../../../tmp/astra-agents-dist/assets/RulesExpanded-Bold-DZA7s8Pa.woff2        35.01 kB
+../../../tmp/astra-agents-dist/assets/RulesCompressed-Regular-BSXFyF4x.woff2   37.76 kB
+../../../tmp/astra-agents-dist/assets/RulesCompressed-Medium-CA76_CrB.woff2    38.84 kB
+../../../tmp/astra-agents-dist/assets/Collapse-Bold-mgICk9-_.woff2             59.14 kB
+../../../tmp/astra-agents-dist/assets/Collapse-Regular-DysayoTY.woff2          62.81 kB
+../../../tmp/astra-agents-dist/assets/ui-MuxHbYX7.css                           0.83 kB │ gzip:   0.30 kB
+../../../tmp/astra-agents-dist/assets/Markdown-dTWNsWDZ.css                     2.93 kB │ gzip:   0.94 kB
+../../../tmp/astra-agents-dist/assets/xterm-BrP-ENHg.css                        3.93 kB │ gzip:   1.01 kB
+../../../tmp/astra-agents-dist/assets/BubbleChatPage-CNZ6X-ja.css               8.62 kB │ gzip:   1.82 kB
+../../../tmp/astra-agents-dist/assets/index-B-hyoInJ.css                      151.08 kB │ gzip:  22.76 kB
+../../../tmp/astra-agents-dist/assets/chat-activation-BiaqYo9D.js               0.04 kB │ gzip:   0.06 kB
+../../../tmp/astra-agents-dist/assets/page-header-context-5VdCcWt3.js           0.15 kB │ gzip:   0.14 kB
+../../../tmp/astra-agents-dist/assets/useProfileScope-OXVnsYzk.js               0.29 kB │ gzip:   0.22 kB
+../../../tmp/astra-agents-dist/assets/usePageHeader-CMQM05ja.js                 0.30 kB │ gzip:   0.23 kB
+../../../tmp/astra-agents-dist/assets/model-choices-MKFJCmRU.js                 0.46 kB │ gzip:   0.37 kB
+../../../tmp/astra-agents-dist/assets/rolldown-runtime-CbXtAM7H.js              0.58 kB │ gzip:   0.36 kB
+../../../tmp/astra-agents-dist/assets/DeleteConfirmDialog-BXWngx2u.js           0.61 kB │ gzip:   0.37 kB
+../../../tmp/astra-agents-dist/assets/useModalBehavior-nFNWNOS1.js              0.62 kB │ gzip:   0.39 kB
+../../../tmp/astra-agents-dist/assets/dashboard-flags-DfdeeLTO.js               0.71 kB │ gzip:   0.35 kB
+../../../tmp/astra-agents-dist/assets/clipboard-owkvc3zk.js                     0.73 kB │ gzip:   0.44 kB
+../../../tmp/astra-agents-dist/assets/KorraLoader-PJdAKDUk.js                   1.07 kB │ gzip:   0.65 kB
+../../../tmp/astra-agents-dist/assets/ProductButton-Cx8uCdBV.js                 1.33 kB │ gzip:   0.62 kB
+../../../tmp/astra-agents-dist/assets/ProfileScopeChip-DZykJF1Z.js              1.75 kB │ gzip:   0.89 kB
+../../../tmp/astra-agents-dist/assets/DocsPage-C3-3wOsQ.js                      1.93 kB │ gzip:   1.07 kB
+../../../tmp/astra-agents-dist/assets/chat-artifacts-DbsWpE36.js                2.52 kB │ gzip:   1.45 kB
+../../../tmp/astra-agents-dist/assets/PairingPage-frSnozma.js                   5.28 kB │ gzip:   1.83 kB
+../../../tmp/astra-agents-dist/assets/plugins-DTL5g2sB.js                       5.57 kB │ gzip:   2.61 kB
+../../../tmp/astra-agents-dist/assets/LogsPage-BXzT8Z7F.js                      7.41 kB │ gzip:   3.35 kB
+../../../tmp/astra-agents-dist/assets/Markdown-BYQcWG6Z.js                      8.77 kB │ gzip:   3.51 kB
+../../../tmp/astra-agents-dist/assets/themes-BHoRdfIc.js                        9.99 kB │ gzip:   3.54 kB
+../../../tmp/astra-agents-dist/assets/ClientHelpPage-DSAGgz4Q.js               13.26 kB │ gzip:   3.74 kB
+../../../tmp/astra-agents-dist/assets/WebhooksPage-DqcbAitb.js                 13.40 kB │ gzip:   4.20 kB
+../../../tmp/astra-agents-dist/assets/ProfileBuilderPage-BEeNv8Cz.js           14.03 kB │ gzip:   5.31 kB
+../../../tmp/astra-agents-dist/assets/AgentWorkbenchPage-DicUjR6x.js           14.22 kB │ gzip:   4.71 kB
+../../../tmp/astra-agents-dist/assets/ModelReloadConfirm-DBC9M5vp.js           14.22 kB │ gzip:   5.46 kB
+../../../tmp/astra-agents-dist/assets/UiKitPage-BTbVHUZD.js                    14.66 kB │ gzip:   5.22 kB
+../../../tmp/astra-agents-dist/assets/McpPage-CycWgdd4.js                      19.30 kB │ gzip:   5.73 kB
+../../../tmp/astra-agents-dist/assets/AnalyticsPage-CCwQRJGo.js                20.31 kB │ gzip:   6.29 kB
+../../../tmp/astra-agents-dist/assets/ConfigPage-CKLVcWM_.js                   21.26 kB │ gzip:   7.68 kB
+../../../tmp/astra-agents-dist/assets/ProfilesPage-Cuvq-FVM.js                 21.64 kB │ gzip:   7.05 kB
+../../../tmp/astra-agents-dist/assets/PluginsPage-FeP5A2Cd.js                  26.05 kB │ gzip:   8.20 kB
+../../../tmp/astra-agents-dist/assets/api-CA5j3Mqz.js                          28.55 kB │ gzip:   7.43 kB
+../../../tmp/astra-agents-dist/assets/ChannelsPage-DBKCrcw_.js                 30.91 kB │ gzip:   8.81 kB
+../../../tmp/astra-agents-dist/assets/EnvPage-ZomvEGE8.js                      31.92 kB │ gzip:   9.14 kB
+../../../tmp/astra-agents-dist/assets/ModelsPage-BC-oJwYD.js                   36.37 kB │ gzip:  11.35 kB
+../../../tmp/astra-agents-dist/assets/FilesPage-CNbKEfEX.js                    39.13 kB │ gzip:  11.72 kB
+../../../tmp/astra-agents-dist/assets/SystemPage-DdBGLUkZ.js                   41.95 kB │ gzip:  11.52 kB
+../../../tmp/astra-agents-dist/assets/SessionsPage-XEdJXe86.js                 43.45 kB │ gzip:  13.61 kB
+../../../tmp/astra-agents-dist/assets/SkillsPage-CmpXIWzv.js                   47.39 kB │ gzip:  14.46 kB
+../../../tmp/astra-agents-dist/assets/ChatPage-fKcgy_nq.js                     50.94 kB │ gzip:  17.56 kB
+../../../tmp/astra-agents-dist/assets/CronPage-ikbHMdc-.js                     51.05 kB │ gzip:  17.37 kB
+../../../tmp/astra-agents-dist/assets/vendor-Dcu2mjDT.js                       75.19 kB │ gzip:  26.49 kB
+../../../tmp/astra-agents-dist/assets/index-Bm4-f4aG.js                        76.68 kB │ gzip:  24.85 kB
+../../../tmp/astra-agents-dist/assets/BubbleChatPage-B9xAv-L2.js               86.88 kB │ gzip:  27.38 kB
+../../../tmp/astra-agents-dist/assets/i18n-DD78dv5a.js                        116.08 kB │ gzip:  34.47 kB
+../../../tmp/astra-agents-dist/assets/ui-BAbTfywf.js                          138.19 kB │ gzip:  45.28 kB
+../../../tmp/astra-agents-dist/assets/react-vendor-DT2lG2lE.js                227.02 kB │ gzip:  72.78 kB
+../../../tmp/astra-agents-dist/assets/xterm-CXxU4Y2B.js                       474.38 kB │ gzip: 122.64 kB
+
+✓ built in 9.07s
