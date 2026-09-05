@@ -23,6 +23,7 @@ import { ConfirmDialog } from "@nous-research/ui/ui/components/confirm-dialog";
 import { OAuthLoginModal } from "@/components/OAuthLoginModal";
 import { useI18n } from "@/i18n";
 import { ownerFacingError } from "@/lib/owner-facing-error";
+import { presentOAuthProvider } from "@/lib/oauth-presentation";
 
 function oauthSourceLabel(value: string): string {
   if (value === "Managed by the GitHub Copilot CLI") {
@@ -77,7 +78,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
     setLoading(true);
     api
       .getOAuthProviders()
-      .then((resp) => setProviders(resp.providers.filter((p) => p.id !== "nous" && !/nous/i.test(p.name))))
+      .then((resp) => setProviders(resp.providers.filter((p) => p.id !== "nous" && !/nous/i.test(p.name)).map(presentOAuthProvider)))
       .catch((error) =>
         onErrorRef.current?.(
           ownerFacingError(error, "Не удалось загрузить провайдеров."),

@@ -24,6 +24,10 @@ const t = {
 } as unknown as Translations;
 
 describe("resolvePageTitle", () => {
+  it("называет мастер и раздел пользы даже со старым манифестом", () => {
+    expect(resolvePageTitle("/profiles/new/", t, [])).toBe("Создать агента");
+    expect(resolvePageTitle("/achievements", t, [{ path: "/achievements", label: "Achievements" }])).toBe("Польза от агентов");
+  });
   it("uses i18n nav keys for translated routes", () => {
     expect(resolvePageTitle("/sessions", t, [])).toBe("Sessions");
     expect(resolvePageTitle("/env", t, [])).toBe("Keys");

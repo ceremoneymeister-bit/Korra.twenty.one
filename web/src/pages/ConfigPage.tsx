@@ -53,6 +53,7 @@ import { ownerFacingError } from "@/lib/owner-facing-error";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
+import { configCategoryName } from "@/lib/config-presentation";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -164,8 +165,7 @@ export default function ConfigPage() {
 
   function prettyCategoryName(cat: string): string {
     const key = cat as keyof typeof t.config.categories;
-    if (t.config.categories[key]) return t.config.categories[key];
-    return cat.charAt(0).toUpperCase() + cat.slice(1);
+    return configCategoryName(cat, t.config.categories[key]);
   }
 
   useEffect(() => {

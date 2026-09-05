@@ -176,7 +176,13 @@ function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
     // Render nothing during the plugin-load window — a spinner here would just flash.
     return null;
   }
-  return <Navigate to={productHomePath(productUiMode())} replace />;
+  return (
+    <div className="mx-auto flex max-w-lg flex-col gap-4 py-16">
+      <h2 className="text-xl font-semibold">Такого раздела нет</h2>
+      <p className="text-muted-foreground">Возможно, ссылка устарела. Откройте нужный раздел в меню или вернитесь к агентам.</p>
+      <NavLink to={productHomePath(productUiMode())} className="neo-button w-fit px-5 py-3">К агентам</NavLink>
+    </div>
+  );
 }
 
 const CHAT_NAV_ITEM: NavItem = {
@@ -320,7 +326,7 @@ function buildNavItems(
 
     const pluginItem: NavItem = {
       path: manifest.tab.path,
-      label: manifest.name === "kanban" ? "Канбан-доска" : russianInterfaceLabel(manifest.label, manifest.name),
+      label: ({ "/kanban": "Канбан-доска", "/achievements": "Польза от агентов" } as Record<string, string>)[manifest.tab.path] ?? russianInterfaceLabel(manifest.label, manifest.name),
       icon: resolveIcon(manifest.icon),
     };
 
@@ -783,7 +789,7 @@ export default function App() {
             </div>
 
             <nav
-              className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden border-t border-current/10 py-2"
+              className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden py-2"
               aria-label={t.app.navigation}
             >
               <ul className="flex flex-col">
@@ -802,7 +808,7 @@ export default function App() {
               {!isProductUiMode() && sidebarNav.pluginItems.length > 0 && (
                 <div
                   aria-labelledby="hermes-sidebar-plugin-nav-heading"
-                  className="flex flex-col border-t border-current/10 pb-2"
+                  className="flex flex-col pb-2"
                   role="group"
                 >
                   <span
@@ -832,7 +838,7 @@ export default function App() {
               )}
 
               {productSettingsNav.length > 0 && (
-                <div className="flex flex-col border-t border-current/10 pb-2" role="group">
+                <div className="flex flex-col pb-2" role="group">
                   <button
                     type="button"
                     onClick={() => toggleGroup("settings")}
@@ -873,7 +879,7 @@ export default function App() {
               )}
 
               {productServiceNav.length > 0 && (
-                <div className="flex flex-col border-t border-current/10 pb-2" role="group">
+                <div className="flex flex-col pb-2" role="group">
                   <button
                     type="button"
                     onClick={() => toggleGroup("service")}
@@ -1197,12 +1203,12 @@ function SidebarSystemActions({
     if (updateConfirmInfo?.behind && updateConfirmInfo.behind > 0) {
       const cmd = updateConfirmInfo.update_command;
       const n = updateConfirmInfo.behind;
-      return `Будет выполнена команда hermes update (${cmd}) и загружено новых коммитов: ${n}. После обновления шлюз перезапустится; текущая сессия до этого сохранит кэш промпта.`;
+      return `Будет выполнена команда korra update (${cmd}) и загружено новых коммитов: ${n}. После обновления шлюз перезапустится; текущая сессия до этого сохранит кэш промпта.`;
     }
-    const cmd = updateConfirmInfo?.update_command ?? "hermes update";
+    const cmd = updateConfirmInfo?.update_command ?? "korra update";
     return (
       t.status.updateHermesConfirmMessage ??
-      `Будет выполнена команда hermes update (${cmd}), затем шлюз перезапустится.`
+      `Будет выполнена команда korra update (${cmd}), затем шлюз перезапустится.`
     );
   }, [t.status.updateHermesConfirmMessage, updateConfirmInfo]);
 

@@ -4,9 +4,10 @@ import { Input } from "@nous-research/ui/ui/components/input";
 import { Label } from "@nous-research/ui/ui/components/label";
 import { useI18n } from "@/i18n";
 import { russianInterfaceText } from "@/lib/russian-interface-text";
+import { presentToolsets, parseToolsets } from "@/lib/config-presentation";
 
 function FieldHint({ schema, schemaKey }: { schema: Record<string, unknown>; schemaKey: string }) {
-  const keyPath = schemaKey.includes(".") ? schemaKey : "";
+  const keyPath = schemaKey.includes(".") && russianInterfaceText(schema.title) ? schemaKey : "";
   const description = russianInterfaceText(schema.description);
 
   if (!keyPath && !description) return null;
@@ -94,7 +95,17 @@ export function AutoField({
   onChange,
 }: AutoFieldProps) {
   const { tr } = useI18n();
-  const label = russianInterfaceText(schema.title, schemaKey);
+  const label = schemaKey === "toolsets" ? "Наборы инструментов" : russianInterfaceText(schema.title, schemaKey);
+
+  if (schemaKey === "toolsets") {
+    return (
+      <div className="grid gap-1.5">
+        <Label htmlFor="config-toolsets">{label}</Label>
+        <Input id="config-toolsets" value={presentToolsets(value)} onChange={(e) => onChange(parseToolsets(e.target.value))} />
+        <p className="text-xs text-muted-foreground">Возможности, доступные агенту. Несколько наборов разделяются запятыми.</p>
+      </div>
+    );
+  }
 
   if (isRecord(value) || (Array.isArray(value) && value.some((item) => isRecord(item)))) {
     return (

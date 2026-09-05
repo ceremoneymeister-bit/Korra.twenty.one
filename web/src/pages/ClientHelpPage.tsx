@@ -90,7 +90,7 @@ export default function ClientHelpPage() {
         <ol className="grid gap-3 md:grid-cols-3">
           <Card className="rounded-xl"><CardContent className="p-5"><Step number={1}>Откройте чат и опишите результат, который нужен.</Step></CardContent></Card>
           <Card className="rounded-xl"><CardContent className="p-5"><Step number={2}>Приложите исходники кнопкой или перетащите их в поле сообщения.</Step></CardContent></Card>
-          <Card className="rounded-xl"><CardContent className="p-5"><Step number={3}>Не закрывайте ответ: при обрыве сообщение останется в outbox и его можно повторить.</Step></CardContent></Card>
+          <Card className="rounded-xl"><CardContent className="p-5"><Step number={3}>Не закрывайте ответ: при обрыве сообщение останется в очереди отправки и его можно повторить.</Step></CardContent></Card>
         </ol>
         <RouteLink to="/chat">Открыть чат</RouteLink>
       </section>

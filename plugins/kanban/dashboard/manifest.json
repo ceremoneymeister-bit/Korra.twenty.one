@@ -1,7 +1,7 @@
 {
   "name": "kanban",
-  "label": "Kanban",
-  "description": "Multi-agent collaboration board — drag-drop cards across columns, read comment threads, see which profile is running what",
+  "label": "Канбан-доска",
+  "description": "Поручайте задачи агентам, следите за ходом работы и проверяйте результат.",
   "icon": "Package",
   "version": "1.0.0",
   "tab": {

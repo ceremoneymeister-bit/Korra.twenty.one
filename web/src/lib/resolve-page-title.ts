@@ -28,12 +28,15 @@ const BUILTIN_LITERAL: Record<string, string> = {
   "/webhooks": "Вебхуки",
   "/pairing": "Подключения",
   "/system": "Система",
+  "/profiles/new": "Создать агента",
+  "/help": "Помощь",
 };
 
 // Плагины поставки: их подпись задана продуктом, а не манифестом, поэтому она
 // нужна и здесь — на случай, если у вкладки не оказалось русского имени.
 const PLUGIN_LITERAL: Record<string, string> = {
   "/kanban": "Канбан-доска",
+  "/achievements": "Польза от агентов",
 };
 
 export function resolvePageTitle(
@@ -45,6 +48,8 @@ export function resolvePageTitle(
   if (normalized === "/") {
     return t.app.nav.sessions;
   }
+  if (normalized === "/profiles/new") return BUILTIN_LITERAL[normalized];
+  if (PLUGIN_LITERAL[normalized]) return PLUGIN_LITERAL[normalized];
   const plugin = pluginTabs.find((p) => p.path === normalized);
   if (plugin) {
     // Заголовок обязан совпадать с пунктом меню, по которому сюда пришли, —

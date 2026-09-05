@@ -1,7 +1,7 @@
 {
   "name": "hermes-achievements",
-  "label": "Achievements",
-  "description": "Steam-style achievements for vibe coding and agentic Hermes workflows.",
+  "label": "Польза от агентов",
+  "description": "Подтверждённые результаты и следующие шаги в освоении Korra.",
   "icon": "Star",
   "version": "0.4.0",
   "tab": { "path": "/achievements", "position": "after:analytics" },
