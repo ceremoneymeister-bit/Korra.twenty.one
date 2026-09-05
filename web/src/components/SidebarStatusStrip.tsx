@@ -48,7 +48,8 @@ export function SidebarStatusStrip({ status, reachable }: SidebarStatusStripProp
     return (
       <div className="px-5 pb-2 pt-0.5">
         <p className="font-sans text-xs leading-snug tracking-[0.08em] text-text-secondary">
-          <span className={cn("font-medium", gw.tone)}>
+          <span className="inline-flex items-center gap-2 font-medium text-text-primary">
+            <span aria-hidden className={cn("size-2 rounded-full", online ? "bg-primary" : "bg-muted-foreground")} />
             {online ? "Корра на связи" : "Корра сейчас недоступна"}
           </span>
         </p>

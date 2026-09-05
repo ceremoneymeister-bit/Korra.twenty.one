@@ -75,6 +75,6 @@ export function resolvePageTitle(
   if (literal) {
     return literal;
   }
-  if (normalized.slice(1)) return "Раздел Korra";
+  if (normalized.slice(1)) return "Раздел не найден";
   return t.app.webUi;
 }

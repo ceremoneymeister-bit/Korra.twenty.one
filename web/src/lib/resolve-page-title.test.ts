@@ -72,8 +72,8 @@ describe("resolvePageTitle", () => {
     ).toBe("Плагин Korra");
   });
 
-  it("falls back to capitalized path segment for unknown routes", () => {
-    expect(resolvePageTitle("/whatever", t, [])).toBe("Раздел Korra");
+  it("объясняет неизвестный маршрут без заглушки в заголовке", () => {
+    expect(resolvePageTitle("/whatever", t, [])).toBe("Раздел не найден");
   });
 
   it("treats root as sessions and trailing slashes as equivalent", () => {

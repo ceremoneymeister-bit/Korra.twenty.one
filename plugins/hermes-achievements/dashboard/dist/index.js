@@ -92,7 +92,7 @@
         attention > 0 && h("a", { href: "/kanban" }, `Задач для решения или проверки: ${attention}. Открыть доску →`),
         failingJobs > 0 && h("a", { href: "/cron" }, `Расписаний с ошибкой запуска или доставки: ${failingJobs}. Проверить →`)),
       !loading && next && h("section", { className: "kb-benefit-next" },
-        h("strong", null, "Следующий шаг: ", next.title.toLocaleLowerCase("ru-RU")),
+        h("strong", null, "Следующий шаг: ", next.action.toLocaleLowerCase("ru-RU")),
         h("p", null, next.description),
         h("a", { className: "neo-button", "data-neo-variant": "primary", href: next.href }, next.action, " →")),
       !loading && !next && !unavailable && h("p", null, "Основа готова. Теперь улучшайте качество: уточняйте инструкции на примерах реальных результатов."),

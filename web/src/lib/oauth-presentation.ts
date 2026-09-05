@@ -6,6 +6,8 @@ const NAMES: Record<string, string> = {
   "minimax-oauth": "MiniMax — вход в аккаунт",
   "xai-oauth": "Grok — подписка SuperGrok / Premium+",
   "copilot-acp": "GitHub Copilot",
+  anthropic: "Anthropic — ключ API",
+  "claude-code": "Claude Code — требуется дополнительный баланс",
 };
 
 /** Старые серверы возвращают прежнюю команду; исправляем и показ, и копирование. */

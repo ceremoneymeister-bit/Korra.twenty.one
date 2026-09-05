@@ -70,7 +70,7 @@ function DialogContent({
             data-slot="dialog-close"
           >
             <XIcon className="h-3.5 w-3.5" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">Закрыть</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Content>

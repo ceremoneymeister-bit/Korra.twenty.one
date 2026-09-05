@@ -115,6 +115,7 @@ export default function ConfigPage() {
     null,
   );
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [yamlMode, setYamlMode] = useState(false);
   const [yamlText, setYamlText] = useState("");
@@ -172,7 +173,7 @@ export default function ConfigPage() {
     api
       .getConfig()
       .then(setConfig)
-      .catch(() => {});
+      .catch((error) => setLoadError(ownerFacingError(error, "Не удалось загрузить настройки.")));
     api
       .getSchema()
       .then((resp) => {
@@ -188,7 +189,7 @@ export default function ConfigPage() {
         setSchema(fields);
         setCategoryOrder(resp.category_order ?? []);
       })
-      .catch(() => {});
+      .catch((error) => setLoadError(ownerFacingError(error, "Не удалось загрузить описание настроек.")));
     api
       .getDefaults()
       .then(setDefaults)
@@ -352,7 +353,7 @@ export default function ConfigPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "hermes-config.json";
+    a.download = "korra-config.json";
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -375,6 +376,15 @@ export default function ConfigPage() {
 
   /* ---- Loading ---- */
   if (!config || !schema) {
+    if (loadError) {
+      return (
+        <div role="alert" className="mx-auto grid max-w-lg gap-4 py-16">
+          <h2 className="text-lg font-semibold">Настройки пока недоступны</h2>
+          <p className="text-muted-foreground">{loadError}</p>
+          <Button onClick={() => window.location.reload()}>Повторить загрузку</Button>
+        </div>
+      );
+    }
     return (
       <KorraLoader className="py-24" />
     );

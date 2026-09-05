@@ -117,8 +117,8 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
             aria-label={sheetTitle}
             className={cn(
               "min-w-[240px] max-h-[70dvh] overflow-y-auto",
-              "border border-current/20 bg-background-base/95",
-              "shadow-[0_12px_32px_-8px_rgba(0,0,0,0.6)]",
+              "rounded-2xl bg-[var(--neo-surface)]",
+              "shadow-[var(--neo-depth-3)]",
               dropUp ? "fixed z-[100]" : "absolute z-50 right-0 top-full mt-1",
             )}
             style={
@@ -127,7 +127,7 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
                 : undefined
             }
           >
-            <div className="border-b border-current/20 px-3 py-2">
+            <div className="px-3 py-2">
               <Typography
                 className="text-display text-xs tracking-[0.12em] text-text-tertiary"
               >
@@ -174,11 +174,11 @@ function ThemeSwitcherOptions({
           <button
             aria-checked={isActive}
             className={cn(
-              "flex min-h-11 items-center justify-center gap-2 rounded-lg border px-3 py-2",
+              "flex min-h-11 items-center justify-center gap-2 neo-button rounded-lg px-3 py-2",
               "text-sm font-medium transition-colors",
               isActive
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card text-card-foreground hover:border-primary/60 hover:bg-accent",
+                ? "bg-primary text-primary-foreground"
+                : "bg-card text-card-foreground",
             )}
             key={th.name}
             onClick={() => {
@@ -211,7 +211,7 @@ function FontSection({ fontChoices, fontId, setFont }: FontSectionProps) {
   const order: FontChoice["category"][] = ["sans", "serif", "mono"];
   return (
     <div aria-label={t.theme?.fontTitle ?? "Шрифт"} role="listbox">
-      <div className="mt-1 border-t border-current/20 px-3 pb-1 pt-2">
+      <div className="mt-1 px-3 pb-1 pt-2">
         <span className="inline-flex items-center gap-1.5">
           <Type className="h-3 w-3 text-text-tertiary" />
           <Typography

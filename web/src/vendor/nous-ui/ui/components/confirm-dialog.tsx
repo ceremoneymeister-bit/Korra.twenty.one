@@ -26,8 +26,8 @@ function WarningTriangle({ className }: { className?: string }) {
 }
 
 export function ConfirmDialog({
-  cancelLabel = 'Cancel',
-  confirmLabel = 'Confirm',
+  cancelLabel = 'Отмена',
+  confirmLabel = 'Подтвердить',
   description,
   destructive = false,
   loading = false,

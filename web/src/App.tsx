@@ -547,18 +547,14 @@ export default function App() {
   const sidebarNav = useMemo(
     () => {
       const partitioned = partitionSidebarNav(builtinNav, manifests);
-      const kanban = partitioned.pluginItems.find((item) => item.path === "/kanban");
-      if (!kanban || !isProductUiMode()) return partitioned;
+      const workspacePlugins = ["/kanban", "/achievements"].flatMap(path => partitioned.pluginItems.filter(item => item.path === path));
+      if (!workspacePlugins.length || !isProductUiMode()) return partitioned;
       const coreItems = [...partitioned.coreItems];
       const afterTasks = coreItems.findIndex((item) => item.path === "/cron");
-      coreItems.splice(afterTasks < 0 ? coreItems.length : afterTasks + 1, 0, {
-        ...kanban,
-        label: "Канбан-доска",
-        labelKey: undefined,
-      });
+      coreItems.splice(afterTasks < 0 ? coreItems.length : afterTasks + 1, 0, ...workspacePlugins);
       return {
         coreItems,
-        pluginItems: partitioned.pluginItems.filter((item) => item.path !== "/kanban"),
+        pluginItems: partitioned.pluginItems.filter((item) => !["/kanban", "/achievements"].includes(item.path)),
       };
     },
     [builtinNav, manifests],
@@ -577,7 +573,7 @@ export default function App() {
       : BUILTIN_NAV_REST;
     // Канбан живёт в главном списке под «Задачами» (решение владельца 03.09).
     const pluginItems = partitionSidebarNav(source, manifests).pluginItems.filter(
-      (item) => item.path !== "/kanban",
+      (item) => !["/kanban", "/achievements"].includes(item.path),
     );
     return [...selectServiceNav(source), ...pluginItems];
   }, [bubbleChat, embeddedChat, manifests]);
@@ -678,7 +674,7 @@ export default function App() {
         className={cn(
           "lg:hidden fixed top-0 left-0 right-0 z-40 min-h-14",
           "flex items-center gap-2 px-4 py-2",
-          "border-b border-current/20",
+
           "bg-background-base",
         )}
         style={{
@@ -729,7 +725,7 @@ export default function App() {
             aria-label={t.app.navigation}
             className={cn(
               "fixed top-0 left-0 z-50 flex h-dvh max-h-dvh w-64 min-h-0 flex-col font-sans",
-              "border-r border-current/20",
+
               "bg-background-base",
               "transition-[transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
               mobileOpen ? "translate-x-0" : "-translate-x-full",
@@ -746,7 +742,7 @@ export default function App() {
             <div
               className={cn(
                 "flex h-14 shrink-0 items-center gap-2",
-                "border-b border-current/20",
+
                 collapsed ? "lg:justify-center lg:px-0" : "px-4 justify-between",
               )}
             >
@@ -932,7 +928,7 @@ export default function App() {
               className={cn(
                 "flex shrink-0 items-center gap-2",
                 "px-3 py-2",
-                "border-t border-current/20",
+
                 isDesktopCollapsed
                   ? "lg:flex-col lg:items-start lg:gap-3 lg:py-3"
                   : "justify-between",
@@ -1267,7 +1263,7 @@ function SidebarSystemActions({
     <div
       className={cn(
         "shrink-0 flex flex-col",
-        "border-t border-current/10",
+
         "py-1",
       )}
     >

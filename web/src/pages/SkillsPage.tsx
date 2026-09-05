@@ -1,3 +1,4 @@
+import { skillSourceLabel } from "@/lib/skill-source-label";
 import { useEffect, useLayoutEffect, useState, useMemo, useCallback } from "react";
 import { KorraLoader } from "@/components/KorraLoader";
 import { useNavigate } from "react-router";
@@ -1173,7 +1174,7 @@ function ConnectedHubs({
     return (
       <p className="text-xs text-muted-foreground">
         {tr("Results come from the same sources as")}{" "}
-        <span className="font-mono">hermes skills search</span>.
+        <span className="font-mono">korra skills search</span>.
       </p>
     );
   }
@@ -1200,7 +1201,7 @@ function ConnectedHubs({
                   : undefined
             }
           >
-            {russianInterfaceText(s.label, s.id)}
+            {russianInterfaceText(s.label, skillSourceLabel(s.id))}
             {s.id === "github" && s.rate_limited ? tr(" (rate-limited)") : ""}
           </Badge>
         );
@@ -1228,12 +1229,12 @@ function SearchMeta({
       <Badge tone="secondary" className="text-xs">
         {tr(count === 1 ? "{count} result" : "{count} results", { count })}
       </Badge>
-      {ms != null && <span>{(ms / 1000).toFixed(1)}s</span>}
+      {ms != null && <span>{(ms / 1000).toFixed(1)} с</span>}
       {entries.length > 0 && (
         <span className="flex flex-wrap items-center gap-1.5">
           {entries.map(([sid, n]) => (
             <span key={sid} className="font-mono">
-              {sid}:{n}
+              {skillSourceLabel(sid)}: {n}
             </span>
           ))}
         </span>
@@ -1241,7 +1242,7 @@ function SearchMeta({
       {timedOut.length > 0 && (
         <span className="flex items-center gap-1 text-amber-400">
           <AlertTriangle className="h-3 w-3" />
-          {tr("{sources} timed out", { sources: timedOut.join(", ") })}
+          {tr("{sources} timed out", { sources: timedOut.map(skillSourceLabel).join(", ") })}
         </span>
       )}
     </div>
@@ -1279,7 +1280,7 @@ function HubResultCard({
               {tr(trust.label)}
             </Badge>
             <Badge tone="secondary" className="text-xs">
-              {result.source}
+              {skillSourceLabel(result.source)}
             </Badge>
             {installed && (
               <Badge tone="success" className="text-xs">
@@ -1393,7 +1394,7 @@ function SkillDetailDialog({
               {tr(trust.label)}
             </Badge>
             <Badge tone="secondary" className="text-xs">
-              {result.source}
+              {skillSourceLabel(result.source)}
             </Badge>
             {installed && (
               <Badge tone="success" className="text-xs">

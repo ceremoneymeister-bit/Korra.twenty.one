@@ -631,11 +631,13 @@
 @keyframes neo-fade-in { from { opacity: 0; } }
 @keyframes neo-fade-out { to { opacity: 0; } }
 @keyframes neo-dialog-in {
-  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(0.97); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  /* Центрирование уже задано свойством translate у окна. Повторный сдвиг
+     в transform уводил высокие диалоги за верхнюю границу экрана. */
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes neo-dialog-out {
-  to { opacity: 0; transform: translate(-50%, calc(-50% + 4px)) scale(0.985); }
+  to { opacity: 0; transform: translateY(4px) scale(0.985); }
 }
 @keyframes neo-toast-in {
   from { opacity: 0; transform: translateX(12px) scale(0.98); }
