@@ -19,6 +19,7 @@ import argparse
 import json
 import urllib.error
 from io import BytesIO
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -235,7 +236,7 @@ class TestCustomPortalPersistence:
         with patch(
             "korra_cli.auth.resolve_nous_access_token", return_value="tok"
         ), patch("korra_cli.config.is_managed", return_value=False), patch.dict(
-            dr.os.environ, {}, clear=False
+            os.environ, {}, clear=False
         ), patch.object(
             dr, "_resolve_portal_base_url", return_value=portal
         ), patch(
@@ -248,7 +249,7 @@ class TestCustomPortalPersistence:
             # The ambient process env may carry HERMES_DASHBOARD_PORTAL_URL
             # (e.g. staging dev shells); drop it so `custom_portal_supplied`
             # is driven solely by the args.portal_url under test.
-            dr.os.environ.pop("HERMES_DASHBOARD_PORTAL_URL", None)
+            os.environ.pop("HERMES_DASHBOARD_PORTAL_URL", None)
             dr.cmd_dashboard_register(args)
         return saved
 
@@ -307,7 +308,7 @@ class TestPublicUrlPersistence:
         with patch(
             "korra_cli.auth.resolve_nous_access_token", return_value="tok"
         ), patch("korra_cli.config.is_managed", return_value=False), patch.dict(
-            dr.os.environ, {}, clear=False
+            os.environ, {}, clear=False
         ), patch.object(
             dr, "_resolve_portal_base_url", return_value="https://portal.nousresearch.com"
         ), patch(
@@ -317,7 +318,7 @@ class TestPublicUrlPersistence:
         ), patch.object(
             dr.urllib.request, "urlopen", return_value=_fake_http_ok(response)
         ):
-            dr.os.environ.pop("HERMES_DASHBOARD_PORTAL_URL", None)
+            os.environ.pop("HERMES_DASHBOARD_PORTAL_URL", None)
             dr.cmd_dashboard_register(args)
         return saved
 
@@ -359,7 +360,7 @@ class TestPublicUrlPersistence:
         with patch(
             "korra_cli.auth.resolve_nous_access_token", return_value="tok"
         ), patch("korra_cli.config.is_managed", return_value=False), patch.dict(
-            dr.os.environ, {}, clear=False
+            os.environ, {}, clear=False
         ), patch.object(
             dr, "_resolve_portal_base_url", return_value="https://preview.example.com"
         ), patch(
@@ -369,7 +370,7 @@ class TestPublicUrlPersistence:
         ), patch.object(
             dr.urllib.request, "urlopen", return_value=_fake_http_ok(response)
         ):
-            dr.os.environ.pop("HERMES_DASHBOARD_PORTAL_URL", None)
+            os.environ.pop("HERMES_DASHBOARD_PORTAL_URL", None)
             dr.cmd_dashboard_register(
                 _ns(
                     portal_url="https://preview.example.com",

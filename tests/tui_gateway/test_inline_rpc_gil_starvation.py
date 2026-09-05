@@ -37,8 +37,20 @@ def server():
     # Mocks are scoped to the initial import only — keeping them active for
     # the whole test would poison modules first imported inside test bodies
     # (see tests/tui_gateway/test_protocol.py for the full rationale).
+    # Сервер читает через korra_env размер пула воркеров. Заглушка обязана
+    # сохранить эту функцию настоящей: MagicMock приводится к int как 1, и
+    # пул молча становится минимальным — тест поймал бы «2 вместо 8» и указал
+    # на несуществующий дефект вместо подмены модуля.
+    import korra_constants as real_korra_constants
+
     with patch.dict("sys.modules", {
-        "korra_constants": MagicMock(get_hermes_home=MagicMock(return_value="/tmp/hermes_test")),
+        "korra_constants": MagicMock(
+            get_hermes_home=MagicMock(return_value="/tmp/hermes_test"),
+            korra_env=real_korra_constants.korra_env,
+            korra_env_set=real_korra_constants.korra_env_set,
+            korra_env_expand=real_korra_constants.korra_env_expand,
+            korra_env_aliases=real_korra_constants.korra_env_aliases,
+        ),
         "korra_cli.env_loader": MagicMock(),
         "korra_cli.banner": MagicMock(),
         "korra_state": MagicMock(),

@@ -9,9 +9,18 @@ def test_slash_worker_accepts_profile_home():
     # korra_state evaluates get_hermes_home() / "state.db" at import time, so
     # the mock must return a Path (a bare str raises TypeError under per-file
     # subprocess isolation).
+    # Модуль подменяется целиком ради get_hermes_home, но сервер берёт отсюда
+    # же korra_env_expand — развёртку имени переменной в пару KORRA_*/HERMES_*.
+    # Заглушка обязана её сохранить: иначе домашний каталог профиля не доедет
+    # до дочернего процесса, и проверка ниже поймает не тот дефект, о котором
+    # написана.
+    import korra_constants as real_korra_constants
+
     with patch.dict("sys.modules", {
         "korra_constants": MagicMock(
             get_hermes_home=MagicMock(return_value=Path("/tmp/hermes_test")),
+            korra_env_expand=real_korra_constants.korra_env_expand,
+            korra_env_aliases=real_korra_constants.korra_env_aliases,
         ),
     }):
         with patch("subprocess.Popen") as mock_popen:
