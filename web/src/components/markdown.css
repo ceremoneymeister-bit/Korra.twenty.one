@@ -1,0 +1,189 @@
+/* Ответ читается как текст: иерархия и отступы, без рамок и цветных кромок.
+   Стили ограничены рендерером; исходная разметка и другие поверхности не меняются. */
+.korra-markdown {
+  min-width: 0;
+  color: var(--neo-text-primary);
+  font-family: var(--theme-font-sans);
+  font-size: 16px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.korra-markdown :where(p, ul, ol, blockquote, pre, h1, h2, h3, h4, h5, h6) {
+  margin: 0;
+}
+
+.korra-markdown > * + *,
+.korra-markdown blockquote > * + * {
+  margin-top: 0.85em;
+}
+
+.korra-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 1.6em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+
+.korra-markdown h1 {
+  font-size: 1.5em;
+}
+.korra-markdown h2 {
+  font-size: 1.25em;
+}
+.korra-markdown h3 {
+  font-size: 1.125em;
+}
+.korra-markdown :is(h4, h5, h6) {
+  font-size: 1em;
+}
+.korra-markdown :is(h1, h2, h3, h4, h5, h6) + * {
+  margin-top: 0;
+}
+.korra-markdown > :first-child,
+.korra-markdown blockquote > :first-child,
+.korra-markdown li > :first-child {
+  margin-top: 0;
+}
+
+.korra-markdown ul {
+  list-style: disc;
+}
+.korra-markdown ol {
+  list-style: decimal;
+}
+.korra-markdown :is(ul, ol) {
+  padding-left: 1.6em;
+}
+.korra-markdown li {
+  padding-left: 0.25em;
+}
+.korra-markdown li + li {
+  margin-top: 0.6em;
+}
+.korra-markdown li > * + * {
+  margin-top: 0.45em;
+}
+.korra-markdown li::marker {
+  color: var(--neo-text-secondary);
+}
+.korra-markdown li :is(ul, ol) {
+  margin-block: 0.5em;
+}
+.korra-markdown ul ul {
+  list-style: circle;
+}
+
+.korra-markdown blockquote {
+  padding: 0.85em 1.1em;
+  border: 0;
+  border-radius: var(--neo-radius-control);
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset-compact);
+}
+
+.korra-markdown__separator {
+  height: 0.75em;
+}
+
+.korra-markdown__code,
+.korra-markdown__table {
+  min-width: 0;
+  border-radius: var(--neo-radius-control);
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset-compact);
+  overflow: hidden;
+}
+
+.korra-markdown__code-language {
+  padding: 10px 16px 0;
+  color: var(--neo-text-secondary);
+  font-size: 12px;
+}
+
+.korra-markdown pre {
+  padding: 12px 16px;
+  overflow-x: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+  font-size: 13px;
+  line-height: 1.7;
+  outline: none;
+}
+
+/* Общий стиль дизайн-системы красит каждый code как выделенный текст.
+   У блока уже есть своя поверхность; буквам нужна обычная контрастная краска. */
+.korra-markdown pre code {
+  padding: 0;
+  background: transparent;
+  color: var(--neo-text-primary);
+  font-size: inherit;
+}
+
+.korra-markdown__inline-code {
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+  background: var(--neo-surface);
+  color: var(--neo-text-primary);
+  box-shadow: var(--neo-inset-compact);
+  font-size: 0.88em;
+}
+
+.korra-markdown__table {
+  overflow-x: auto;
+  outline: none;
+}
+.korra-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow-wrap: normal;
+  font-size: 14px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+.korra-markdown :is(th, td) {
+  min-width: 7em;
+  padding: 10px 14px;
+  border: 0;
+  vertical-align: top;
+}
+.korra-markdown th {
+  font-weight: 600;
+}
+.korra-markdown thead,
+.korra-markdown tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--neo-shadow) 28%, transparent);
+}
+
+.korra-markdown__link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.korra-markdown__link:hover {
+  text-decoration-thickness: 2px;
+}
+.korra-markdown__highlight {
+  padding-inline: 0.15em;
+  border-radius: 3px;
+  background: var(--neo-accent);
+  color: var(--neo-accent-foreground);
+}
+
+.korra-markdown--document h1 {
+  font-size: 1.75em;
+}
+.korra-markdown--document h2 {
+  font-size: 1.4em;
+}
+
+@media (max-width: 640px) {
+  .korra-markdown {
+    font-size: 15px;
+  }
+  .korra-markdown :is(th, td) {
+    padding: 8px 10px;
+  }
+}

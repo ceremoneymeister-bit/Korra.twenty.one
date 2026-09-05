@@ -1,16 +1,11 @@
 import { useMemo, type ReactNode } from "react";
 import { isTableDelimiter, splitTableRow } from "@/lib/markdown-tables";
 import { cn } from "@/lib/utils";
+import "./markdown.css";
 
-/**
- * Lightweight markdown renderer for LLM output.
- * Handles: code blocks, inline code, bold, italic, headers, links, lists, horizontal rules.
- * NOT a full CommonMark parser — optimized for typical assistant message patterns.
- *
- * `streaming` renders a blinking caret at the tail of the last block so it
- * appears to hug the final character instead of wrapping onto a new line
- * after a block element (paragraph/list/code/…).
- */
+/** Разметка ответа остаётся текстом до браузера. Здесь разбираем привычные
+ * блоки ответа, не исполняя HTML и не меняя содержимое истории или Telegram.
+ * Это ограниченный рендерер ответов, а не полный парсер CommonMark. */
 export function Markdown({
   content,
   highlightTerms,
@@ -23,7 +18,7 @@ export function Markdown({
   streaming?: boolean;
   className?: string;
   /**
-   * `message` — реплика в чате: плотно, заголовки почти вровень с текстом.
+   * `message` — реплика в чате: читаемая строка и заметные смысловые блоки.
    * `document` — файл, который человек открыл, чтобы прочитать: заголовки
    * должны быть видны как заголовки, иначе документ читается сплошняком.
    */
@@ -35,10 +30,8 @@ export function Markdown({
   return (
     <div
       className={cn(
-        "text-foreground",
-        variant === "document"
-          ? "space-y-4 text-[0.95rem] leading-7"
-          : "space-y-3 text-[15px] leading-[1.65]",
+        "korra-markdown",
+        variant === "document" && "korra-markdown--document",
         className,
       )}
     >
@@ -46,7 +39,6 @@ export function Markdown({
         <Block
           key={i}
           block={block}
-          variant={variant}
           highlightTerms={highlightTerms}
           caret={caret && i === blocks.length - 1 ? caret : null}
         />
@@ -69,125 +61,191 @@ function StreamingCaret() {
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
+type Alignment = "left" | "center" | "right";
+
 type BlockNode =
   | { type: "code"; lang: string; content: string }
   | { type: "heading"; level: number; content: string }
   | { type: "hr" }
-  | { type: "list"; ordered: boolean; items: string[] }
-  | { type: "table"; header: string[]; rows: string[][] }
+  | { type: "quote"; blocks: BlockNode[] }
+  | { type: "list"; ordered: boolean; start: number; items: BlockNode[][] }
+  | { type: "table"; header: string[]; rows: string[][]; align: Alignment[] }
   | { type: "paragraph"; content: string };
 
-/* ------------------------------------------------------------------ */
-/*  Block parser                                                       */
-/* ------------------------------------------------------------------ */
+const LIST_MARKER = /^( *)([-*+]|\d+[.)])\s+(.*)$/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})([^`~]*)$/;
+const HEADING = /^ {0,3}(#{1,6})\s+(.+)/;
+const QUOTE = /^ {0,3}> ?/;
+const RULE = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/;
 
-function parseBlocks(text: string): BlockNode[] {
-  const lines = text.split("\n");
+function isBlockStart(lines: string[], i: number): boolean {
+  const line = lines[i];
+  return (
+    FENCE.test(line) ||
+    HEADING.test(line) ||
+    QUOTE.test(line) ||
+    RULE.test(line) ||
+    LIST_MARKER.test(line) ||
+    (line.includes("|") &&
+      i + 1 < lines.length &&
+      isTableDelimiter(lines[i + 1]))
+  );
+}
+
+function parseBlocks(text: string, depth = 0): BlockNode[] {
+  // Чрезмерная вложенность из внешнего текста не должна обрушить весь чат.
+  if (depth >= 24) return [{ type: "paragraph", content: text }];
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const blocks: BlockNode[] = [];
   let i = 0;
 
   while (i < lines.length) {
     const line = lines[i];
-
-    // Fenced code block
-    const fenceMatch = line.match(/^```(\w*)/);
-    if (fenceMatch) {
-      const lang = fenceMatch[1] || "";
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing ```
-      blocks.push({ type: "code", lang, content: codeLines.join("\n") });
-      continue;
-    }
-
-    // Heading
-    const headingMatch = line.match(/^(#{1,4})\s+(.+)/);
-    if (headingMatch) {
-      blocks.push({
-        type: "heading",
-        level: headingMatch[1].length,
-        content: headingMatch[2],
-      });
-      i++;
-      continue;
-    }
-
-    // Таблица: строка ячеек, под ней разделитель. Без разделителя это обычный
-    // текст с палками — превращать его в таблицу опаснее, чем оставить как есть.
-    if (line.includes("|") && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
-      const header = splitTableRow(line);
-      i += 2;
-      const rows: string[][] = [];
-      while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
-        const cells = splitTableRow(lines[i]);
-        while (cells.length < header.length) cells.push("");
-        rows.push(cells.slice(0, header.length));
-        i++;
-      }
-      blocks.push({ type: "table", header, rows });
-      continue;
-    }
-
-    // Horizontal rule
-    if (/^[-*_]{3,}\s*$/.test(line)) {
-      blocks.push({ type: "hr" });
-      i++;
-      continue;
-    }
-
-    // Unordered list
-    if (/^[-*+]\s/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^[-*+]\s/.test(lines[i])) {
-        items.push(lines[i].replace(/^[-*+]\s/, ""));
-        i++;
-      }
-      blocks.push({ type: "list", ordered: false, items });
-      continue;
-    }
-
-    // Ordered list
-    if (/^\d+[.)]\s/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\d+[.)]\s/.test(lines[i])) {
-        items.push(lines[i].replace(/^\d+[.)]\s/, ""));
-        i++;
-      }
-      blocks.push({ type: "list", ordered: true, items });
-      continue;
-    }
-
-    // Empty line
     if (line.trim() === "") {
       i++;
       continue;
     }
 
-    // Paragraph — collect consecutive non-empty, non-special lines
-    const paraLines: string[] = [];
+    const fence = line.match(FENCE);
+    if (fence) {
+      const codeLines: string[] = [];
+      const close = new RegExp(
+        `^ {0,3}${fence[1][0]}{${fence[1].length},}\\s*$`,
+      );
+      i++;
+      while (i < lines.length && !close.test(lines[i]))
+        codeLines.push(lines[i++]);
+      if (i < lines.length) i++;
+      blocks.push({
+        type: "code",
+        lang: fence[2].trim(),
+        content: codeLines.join("\n"),
+      });
+      continue;
+    }
+
+    const heading = line.match(HEADING);
+    if (heading) {
+      blocks.push({
+        type: "heading",
+        level: heading[1].length,
+        content: heading[2],
+      });
+      i++;
+      continue;
+    }
+
+    if (QUOTE.test(line)) {
+      const quote: string[] = [];
+      while (i < lines.length && QUOTE.test(lines[i]))
+        quote.push(lines[i++].replace(QUOTE, ""));
+      blocks.push({
+        type: "quote",
+        blocks: parseBlocks(quote.join("\n"), depth + 1),
+      });
+      continue;
+    }
+
+    if (
+      line.includes("|") &&
+      i + 1 < lines.length &&
+      isTableDelimiter(lines[i + 1])
+    ) {
+      const header = splitTableRow(line);
+      const delimiters = splitTableRow(lines[i + 1]);
+      const align = header.map((_, index): Alignment => {
+        const delimiter = delimiters[index] ?? "";
+        return delimiter.endsWith(":")
+          ? delimiter.startsWith(":")
+            ? "center"
+            : "right"
+          : "left";
+      });
+      i += 2;
+      const rows: string[][] = [];
+      while (
+        i < lines.length &&
+        lines[i].includes("|") &&
+        lines[i].trim() !== ""
+      ) {
+        const cells = splitTableRow(lines[i++]);
+        while (cells.length < header.length) cells.push("");
+        rows.push(cells.slice(0, header.length));
+      }
+      blocks.push({ type: "table", header, rows, align });
+      continue;
+    }
+
+    if (RULE.test(line)) {
+      blocks.push({ type: "hr" });
+      i++;
+      continue;
+    }
+
+    const firstItem = line.match(LIST_MARKER);
+    if (firstItem) {
+      const indent = firstItem[1].length;
+      const ordered = /^\d/.test(firstItem[2]);
+      const items: BlockNode[][] = [];
+      const isSibling = (match: RegExpMatchArray | null) =>
+        Boolean(
+          match &&
+          match[1].length === indent &&
+          /^\d/.test(match[2]) === ordered,
+        );
+      while (i < lines.length) {
+        const marker = lines[i].match(LIST_MARKER);
+        if (!marker || !isSibling(marker) || RULE.test(lines[i])) break;
+        const contentIndent = lines[i].length - marker[3].length;
+        const itemLines = [marker[3]];
+        i++;
+        while (i < lines.length) {
+          if (lines[i].trim() === "") {
+            let next = i + 1;
+            while (next < lines.length && lines[next].trim() === "") next++;
+            const nextLine = lines[next];
+            if (nextLine === undefined) {
+              i = next;
+              break;
+            }
+            // Пустая строка внутри шага или между шагами не обрывает список.
+            if (isSibling(nextLine.match(LIST_MARKER))) {
+              i = next;
+              break;
+            }
+            if (nextLine.search(/\S/) < contentIndent) break;
+            itemLines.push("");
+            i = next;
+            continue;
+          }
+          if (lines[i].search(/\S/) >= contentIndent) {
+            itemLines.push(lines[i++].slice(contentIndent));
+          } else {
+            if (isBlockStart(lines, i)) break;
+            // Перенос абзаца без пустой строки остаётся в текущем пункте.
+            itemLines.push(lines[i++].trimStart());
+          }
+        }
+        items.push(parseBlocks(itemLines.join("\n"), depth + 1));
+      }
+      blocks.push({
+        type: "list",
+        ordered,
+        start: ordered ? parseInt(firstItem[2], 10) : 1,
+        items,
+      });
+      continue;
+    }
+
+    const paragraph = [lines[i++]];
     while (
       i < lines.length &&
       lines[i].trim() !== "" &&
-      !lines[i].match(/^```/) &&
-      !lines[i].match(/^#{1,4}\s/) &&
-      !lines[i].match(/^[-*+]\s/) &&
-      !lines[i].match(/^\d+[.)]\s/) &&
-      !lines[i].match(/^[-*_]{3,}\s*$/) &&
-      // Шапка таблицы, идущая сразу за абзацем, принадлежит таблице, а не ему.
-      !(lines[i].includes("|") && i + 1 < lines.length && isTableDelimiter(lines[i + 1]))
-    ) {
-      paraLines.push(lines[i]);
-      i++;
-    }
-    if (paraLines.length > 0) {
-      blocks.push({ type: "paragraph", content: paraLines.join("\n") });
-    }
+      !isBlockStart(lines, i)
+    )
+      paragraph.push(lines[i++]);
+    blocks.push({ type: "paragraph", content: paragraph.join("\n") });
   }
-
   return blocks;
 }
 
@@ -199,68 +257,89 @@ function Block({
   block,
   highlightTerms,
   caret,
-  variant = "message",
 }: {
   block: BlockNode;
   highlightTerms?: string[];
   caret?: ReactNode;
-  variant?: "message" | "document";
 }) {
   switch (block.type) {
     case "code":
       return (
-        <pre className="rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-4 py-3 text-[13px] font-mono leading-relaxed overflow-x-auto shadow-[var(--neo-inset-compact)]">
-          <code>
-            {block.content}
-            {caret}
-          </code>
-        </pre>
+        <div className="korra-markdown__code">
+          {block.lang && (
+            <div className="korra-markdown__code-language">{block.lang}</div>
+          )}
+          <pre tabIndex={0} aria-label="Код">
+            <code>
+              {block.content}
+              {caret}
+            </code>
+          </pre>
+        </div>
       );
 
     case "heading": {
-      const Tag = `h${Math.min(block.level, 4)}` as "h1" | "h2" | "h3" | "h4";
-      const messageSizes: Record<string, string> = {
-        h1: "mt-3 text-lg font-semibold",
-        h2: "mt-3 text-base font-semibold",
-        h3: "mt-2 text-[15px] font-semibold",
-        h4: "mt-2 text-[15px] font-medium",
-      };
-      // В документе заголовок обязан читаться как заголовок: иначе длинный
-      // текст выглядит сплошной простынёй и его перестают читать.
-      const documentSizes: Record<string, string> = {
-        h1: "mt-2 text-2xl font-semibold tracking-tight",
-        h2: "mt-6 border-b border-border pb-2 text-xl font-semibold tracking-tight",
-        h3: "mt-4 text-lg font-semibold",
-        h4: "mt-3 text-base font-semibold",
-      };
-      const sizes = variant === "document" ? documentSizes : messageSizes;
+      const Tag = `h${block.level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
       return (
-        <Tag className={sizes[Tag]}>
+        <Tag>
           <InlineContent text={block.content} highlightTerms={highlightTerms} />
           {caret}
         </Tag>
       );
     }
 
+    case "quote":
+      return (
+        <blockquote>
+          {block.blocks.length === 0 && caret}
+          {block.blocks.map((child, i) => (
+            <Block
+              key={i}
+              block={child}
+              highlightTerms={highlightTerms}
+              caret={i === block.blocks.length - 1 ? caret : null}
+            />
+          ))}
+        </blockquote>
+      );
+
     case "table":
       return (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
+        <div
+          className="korra-markdown__table"
+          role="region"
+          aria-label="Таблица, можно прокручивать по горизонтали"
+          tabIndex={0}
+        >
+          <table>
             <thead>
-              <tr className="border-b border-border">
+              <tr>
                 {block.header.map((cell, index) => (
-                  <th key={index} className="px-3 py-2 font-semibold">
-                    <InlineContent text={cell} highlightTerms={highlightTerms} />
+                  <th
+                    key={index}
+                    scope="col"
+                    style={{ textAlign: block.align[index] }}
+                  >
+                    <InlineContent
+                      text={cell}
+                      highlightTerms={highlightTerms}
+                    />
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {block.rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="border-b border-border/60 last:border-0">
+                <tr key={rowIndex}>
                   {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} className="px-3 py-2 align-top">
-                      <InlineContent text={cell} highlightTerms={highlightTerms} />
+                    <td
+                      key={cellIndex}
+                      style={{ textAlign: block.align[cellIndex] }}
+                    >
+                      <InlineContent
+                        text={cell}
+                        highlightTerms={highlightTerms}
+                      />
                     </td>
                   ))}
                 </tr>
@@ -273,23 +352,30 @@ function Block({
 
     case "hr":
       return (
-        <>
-          <hr className="border-border" />
+        <div className="korra-markdown__separator" role="separator">
           {caret}
-        </>
+        </div>
       );
 
     case "list": {
       const Tag = block.ordered ? "ol" : "ul";
-      const last = block.items.length - 1;
       return (
-        <Tag
-          className={`space-y-0.5 ${block.ordered ? "list-decimal" : "list-disc"} pl-5`}
-        >
+        <Tag start={block.ordered ? block.start : undefined}>
           {block.items.map((item, i) => (
             <li key={i}>
-              <InlineContent text={item} highlightTerms={highlightTerms} />
-              {i === last ? caret : null}
+              {item.length === 0 && i === block.items.length - 1 && caret}
+              {item.map((child, j) => (
+                <Block
+                  key={j}
+                  block={child}
+                  highlightTerms={highlightTerms}
+                  caret={
+                    i === block.items.length - 1 && j === item.length - 1
+                      ? caret
+                      : null
+                  }
+                />
+              ))}
             </li>
           ))}
         </Tag>
@@ -384,10 +470,7 @@ function InlineContent({
             );
           case "code":
             return (
-              <code
-                key={i}
-                className="bg-secondary/60 px-1.5 py-0.5 text-xs font-mono text-primary/90"
-              >
+              <code key={i} className="korra-markdown__inline-code">
                 {node.content}
               </code>
             );
@@ -423,7 +506,7 @@ function InlineContent({
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="text-primary underline underline-offset-2 decoration-primary/30 hover:decoration-primary/60 transition-colors"
+                className="korra-markdown__link"
               >
                 {node.text}
               </a>
@@ -442,7 +525,7 @@ function HighlightedText({ text, terms }: { text: string; terms?: string[] }) {
   if (!terms || terms.length === 0) return <>{text}</>;
 
   // Build a regex that matches any of the search terms (case-insensitive)
-  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const escaped = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const regex = new RegExp(`(${escaped.join("|")})`, "gi");
   const parts = text.split(regex);
 
@@ -450,7 +533,7 @@ function HighlightedText({ text, terms }: { text: string; terms?: string[] }) {
     <>
       {parts.map((part, i) =>
         regex.test(part) ? (
-          <mark key={i} className="bg-warning/30 text-warning px-0.5">
+          <mark key={i} className="korra-markdown__highlight">
             {part}
           </mark>
         ) : (
