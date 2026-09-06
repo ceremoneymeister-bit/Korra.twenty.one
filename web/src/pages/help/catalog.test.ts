@@ -48,7 +48,7 @@ describe('Оглавление помощи', () => {
 
   it.each([
     ['  ГОЛОС  ', 'chat'], ['телеграм', 'telegram'], ['ЕЖЕНЕДЕЛЬНО', 'tasks'],
-    ['не отвечает', 'troubleshooting'], ['роль агента', 'agents'], ['исходники', 'files'], ['доработку', 'kanban'],
+    ['не отвечает', 'troubleshooting'], ['Как мне восстановить файл?', 'files'], ['Что делать, если агент молчит?', 'troubleshooting'], ['роль агента', 'agents'], ['исходники', 'files'], ['доработку', 'kanban'],
   ])('поиск «%s» находит нужный рабочий сценарий', (query, id) => {
     expect(searchHelp(HELP_ARTICLES, query).map(article => article.id)).toContain(id);
   });

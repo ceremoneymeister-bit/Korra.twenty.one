@@ -37,7 +37,7 @@ function HelpIndex() {
   return <>
     <header className="help-welcome">
       <div className="help-welcome-copy">
-        <p className="help-eyebrow"><BookOpen size={17} aria-hidden />Помощь по Korra 21</p>
+        <p className="help-eyebrow"><BookOpen size={17} aria-hidden />Как здесь работать</p>
         <h2 id="help-heading" tabIndex={-1}>Что вы хотите сделать?</h2>
         <p>Короткие инструкции: куда нажать, что написать и какой результат ждать.</p>
       </div>
@@ -167,7 +167,9 @@ export default function ClientHelpPage() {
     try { id = decodeURIComponent(location.hash.slice(1)); } catch { /* Повреждённая ссылка открывает начало инструкции. */ }
     const target = (id ? document.getElementById(id) : null) ?? container.current?.querySelector<HTMLElement>('#help-heading');
     if (target && container.current?.contains(target)) {
-      target.scrollIntoView({ block: 'start' });
+      const scroller = container.current.closest('main');
+      if (!id && scroller) scroller.scrollTop = 0;
+      else (id ? target : container.current).scrollIntoView({ block: 'start' });
       target.focus({ preventScroll: true });
     }
   }, [location.pathname, location.hash]);

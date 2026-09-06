@@ -48,7 +48,8 @@ export const helpPath = (id: string) => `/help/${id}`;
 /** Поиск по смысловым подсказкам и всему тексту, включая шаги и частые ошибки. */
 export function searchHelp(articles: HelpArticle[], query: string): HelpArticle[] {
   const normalize = (value: string) => value.toLocaleLowerCase('ru').replaceAll('ё', 'е');
-  const words = normalize(query).trim().split(/\s+/).filter(Boolean);
+  const filler = new Set(['как', 'мне', 'что', 'если', 'где', 'в', 'на', 'и', 'к', 'по', 'для', 'из', 'с', 'со', 'у', 'а', 'это', 'делать']);
+  const words = normalize(query).split(/[^\p{L}\p{N}]+/u).filter(word => word && !filler.has(word));
   return articles.filter(article => {
     const text = normalize([
       article.label, article.title, article.summary, article.keywords,

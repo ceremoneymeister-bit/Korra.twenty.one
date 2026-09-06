@@ -1,5 +1,5 @@
 /* Помощь использует принятую палитру и глубину панели; своих цветов нет. */
-.korra-help { width: 100%; max-width: 1160px; margin: 0 auto; padding-bottom: 4rem; color: var(--neo-text-primary); font-family: var(--font-sans); font-size: 0.9375rem; line-height: 1.65; overflow-wrap: anywhere; }
+.korra-help { width: 100%; max-width: 1160px; margin: 0 auto; padding-bottom: 4rem; color: var(--neo-text-primary); font-family: var(--theme-font-sans); font-size: 0.9375rem; line-height: 1.65; overflow-wrap: anywhere; }
 .korra-help > section { margin-top: 2.5rem; }
 .korra-help h2 { font-size: clamp(1.6rem, 2.6vw, 2.25rem); line-height: 1.22; font-weight: 650; letter-spacing: -0.035em; }
 .korra-help h3 { font-size: 1.2rem; line-height: 1.4; font-weight: 650; margin-bottom: 1.2rem; letter-spacing: -0.02em; }
@@ -22,6 +22,8 @@
 .help-search-field { display: flex; align-items: center; gap: 0.8rem; min-height: 56px; padding: 0.35rem 1rem; border-radius: var(--neo-radius-control); box-shadow: var(--neo-inset); background: var(--neo-surface); }
 .help-search-field > svg { color: var(--neo-text-secondary); }
 .help-search-field input { min-width: 0; flex: 1; width: 100%; min-height: 44px; padding: 0; background: transparent; box-shadow: none; font: inherit; color: inherit; }
+.korra-help #help-search { box-shadow: none; background: transparent; border-radius: 0; }
+.help-search-field:focus-within { box-shadow: var(--neo-focus-visible); }
 .help-search-field input::placeholder { color: var(--neo-text-secondary); font-size: 0.875rem; }
 .help-search-field button { background: transparent; color: inherit; cursor: pointer; padding: 0.5rem; border-radius: 0.6rem; font-size: 0.8125rem; }
 .help-search > p { margin-top: 0.75rem; color: var(--neo-text-secondary); font-size: 0.875rem; }
