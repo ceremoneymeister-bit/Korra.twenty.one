@@ -74,7 +74,9 @@ describe("Общий роутер панели и плагинов", () => {
     await click(Array.from(host.querySelectorAll("a")).find(a => a.textContent === "Открыть доску")!);
     await act(async () => (host.querySelector("button") as HTMLButtonElement).click());
     expect(decodeURI(window.location.pathname)).toBe(`${prefix}/achievements`);
-  });
+  // Импортируем настоящий SDK со всеми компонентами: параллельная сборка
+  // соседних тестов может занять больше стандартных пяти секунд.
+  }, 20000);
 
   it("не переносит список плагинов между кабинетами одного домена", async () => {
     vi.resetModules(); window.__HERMES_BASE_PATH__ = "/c/first";
