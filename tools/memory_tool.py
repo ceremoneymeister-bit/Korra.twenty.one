@@ -470,8 +470,8 @@ class MemoryStore:
 
         return self._success_response(target, "Entry added.")
 
-    def replace(self, target: str, old_text: str, new_content: str) -> Dict[str, Any]:
-        """Find entry containing old_text substring, replace it with new_content."""
+    def replace(self, target: str, old_text: str, new_content: str, *, exact: bool = False) -> Dict[str, Any]:
+        """Replace a matching entry; GUI edits use exact text to detect stale cards."""
         old_text = old_text.strip()
         new_content = new_content.strip()
         if not old_text:
@@ -492,7 +492,7 @@ class MemoryStore:
                 return _drift_error(self._path_for(target), bak)
 
             entries = self._entries_for(target)
-            matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
+            matches = [(i, e) for i, e in enumerate(entries) if (old_text == e if exact else old_text in e)]
 
             if not matches:
                 return self._consolidation_failure({
@@ -541,8 +541,8 @@ class MemoryStore:
 
         return self._success_response(target, "Entry replaced.")
 
-    def remove(self, target: str, old_text: str) -> Dict[str, Any]:
-        """Remove the entry containing old_text substring."""
+    def remove(self, target: str, old_text: str, *, exact: bool = False) -> Dict[str, Any]:
+        """Remove a matching entry; exact mode never deletes a changed card."""
         old_text = old_text.strip()
         if not old_text:
             return {"success": False, "error": "old_text cannot be empty."}
@@ -555,7 +555,7 @@ class MemoryStore:
                 return _drift_error(self._path_for(target), bak)
 
             entries = self._entries_for(target)
-            matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
+            matches = [(i, e) for i, e in enumerate(entries) if (old_text == e if exact else old_text in e)]
 
             if not matches:
                 return self._consolidation_failure({

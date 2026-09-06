@@ -20,6 +20,13 @@ class ConfigUpdate(BaseModel):
     profile: Optional[str] = None
 
 
+class ProfileMemoryMutation(BaseModel):
+    action: Literal["add", "replace", "remove"]
+    target: Literal["memory", "user"]
+    content: str = ""
+    old_text: str = ""
+
+
 class EnvVarUpdate(BaseModel):
     key: str
     value: str

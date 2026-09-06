@@ -27,7 +27,7 @@ from collections import OrderedDict
 from pathlib import Path  # noqa: F401
 from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
 
-from fastapi import APIRouter, HTTPException, Query  # noqa: F401
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile  # noqa: F401
 
 from korra_cli.web_deps import late
 from korra_cli.web_models import (
@@ -40,6 +40,7 @@ from korra_cli.web_models import (
     ProfileSoulUpdate,
     ProfileDescriptionUpdate,
     ProfileModelUpdate,
+    ProfileMemoryMutation,
     ProfileDescribeAuto,
     SessionPrScanBody,
 )
@@ -79,6 +80,8 @@ _open_session_db_at_path = late("_open_session_db_at_path")
 _profile_setup_command = late("_profile_setup_command")
 _profile_to_dict = late("_profile_to_dict")
 _resolve_profile_dir = late("_resolve_profile_dir")
+_profile_scope = late("_profile_scope")
+_clear_skills_prompt_cache = late("_clear_skills_prompt_cache")
 _spawn_hermes_action = late("_spawn_hermes_action")
 run_in_threadpool = late("run_in_threadpool")
 _strip_session_list_rows = late("_strip_session_list_rows")
@@ -1324,3 +1327,91 @@ async def get_profile_desktop_overlay(name: str):
         return {"exists": True, "desktop": _json.loads(overlay_path.read_text(encoding="utf-8"))}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not read desktop.json: {e}")
+
+
+async def _run_profile_learning(name, fn, *args):
+    """Диск и блокировка профиля остаются вне event loop."""
+    from korra_cli.profile_learning import LearningConflict
+
+    def run():
+        from korra_constants import set_hermes_home_override, reset_hermes_home_override
+
+        # В именованном URL нет псевдонимов "current"/пустого профиля.
+        # Сначала разрешаем конкретный каталог, затем штатно настраиваем
+        # память и обе реализации навыков для этого запроса.
+        home = _resolve_profile_dir(name)
+        token = set_hermes_home_override(str(home))
+        try:
+            with _profile_scope(None):
+                return fn(*args)
+        finally:
+            reset_hermes_home_override(token)
+
+    try:
+        return await asyncio.to_thread(run)
+    except HTTPException:
+        raise
+    except LearningConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        _log.exception("Profile learning operation failed for %s", name)
+        raise HTTPException(status_code=500, detail="Не удалось прочитать или сохранить знания агента. Повторите попытку.")
+
+
+@router.get("/api/profiles/{name}/memory")
+async def get_profile_memory(name: str):
+    from korra_cli.profile_learning import read_memory
+
+    return await _run_profile_learning(name, read_memory)
+
+
+@router.post("/api/profiles/{name}/memory")
+async def change_profile_memory(name: str, body: ProfileMemoryMutation):
+    from korra_cli.profile_learning import change_memory
+
+    return await _run_profile_learning(name, change_memory, body.action, body.target, body.content, body.old_text)
+
+
+@router.get("/api/profiles/{name}/materials")
+async def get_profile_materials(name: str):
+    from korra_cli.profile_learning import list_materials
+
+    return await _run_profile_learning(name, list_materials)
+
+
+@router.post("/api/profiles/{name}/materials")
+async def create_profile_material(
+    name: str,
+    title: str = Form(..., max_length=120),
+    text: str = Form("", max_length=90_000),
+    url: str = Form("", max_length=2048),
+    file: Optional[UploadFile] = File(None),
+):
+    from korra_cli.profile_learning import MAX_MATERIAL_BYTES, create_material
+
+    _resolve_profile_dir(name)
+    filename, data = "", None
+    if file is not None:
+        try:
+            filename = file.filename or ""
+            data = await file.read(MAX_MATERIAL_BYTES + 1)
+            if len(data) > MAX_MATERIAL_BYTES:
+                raise HTTPException(status_code=413, detail="Файл больше 10 МБ. Разделите его на несколько материалов.")
+        finally:
+            await file.close()
+    result = await _run_profile_learning(name, create_material, title, text, url, filename, data)
+    _clear_skills_prompt_cache()
+    return result
+
+
+@router.delete("/api/profiles/{name}/materials/{material_name}")
+async def delete_profile_material(name: str, material_name: str):
+    from korra_cli.profile_learning import delete_material
+
+    result = await _run_profile_learning(name, delete_material, material_name)
+    _clear_skills_prompt_cache()
+    return result
