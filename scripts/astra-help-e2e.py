@@ -142,7 +142,8 @@ def main():
                     assert src.startswith(prefix + '/help/') and src.endswith('.webp')
                     assert int(image.get_attribute('width')) == dims[0]
                     assert int(image.get_attribute('height')) == dims[1]
-                    response = context.request.get(urlparse(base)._replace(path=src, query='', fragment='').geturl())
+                    # Повторяется только обрыв соединения; HTTP-ошибки остаются ошибками проверки.
+                    response = context.request.get(urlparse(base)._replace(path=src, query='', fragment='').geturl(), max_retries=2)
                     assert response.ok and response.headers['content-type'].startswith('image/webp')
                     assets.add(src)
                 checks += 1
@@ -152,7 +153,7 @@ def main():
         page.evaluate('window.helpNavigationMarker = 21')
         page.locator('.help-quick').filter(has_text='Дать агенту поручение').click()
         expect(page).to_have_url(proxy + '/help/kanban#create')
-        assert page.evaluate('document.activeElement.id') == 'create'
+        expect(page.locator('#create')).to_be_focused()
         top = page.locator('#create').bounding_box()['y']
         assert page.locator('main').bounding_box()['y'] <= top < 150
         page.locator('.help-article-header a').click()
@@ -182,7 +183,7 @@ def main():
             fits(page)
             for asset in assets:
                 filename = asset.rsplit('/', 1)[1].replace('-light.webp', '-' + theme + '.webp').replace('-dark.webp', '-' + theme + '.webp')
-                image_response = context.request.get(proxy + '/help/' + filename)
+                image_response = context.request.get(proxy + '/help/' + filename, max_retries=2)
                 assert image_response.ok and image_response.headers['content-type'].startswith('image/webp')
             assert page.locator('.help-welcome').bounding_box()['y'] >= page.locator('main').bounding_box()['y'] - 1
             shot(page, 'index-' + theme)
