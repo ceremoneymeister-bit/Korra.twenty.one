@@ -1,187 +1,181 @@
-import {
-  ArrowRight,
-  Bot,
-  CalendarClock,
-  CircleHelp,
-  History,
-  MessageCircle,
-  Settings2,
-  ShieldCheck,
-  Upload,
-  Users,
-} from "lucide-react";
-import { Link } from "react-router";
-import { Card, CardContent } from "@nous-research/ui/ui/components/card";
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronRight, Clock3, Search } from 'lucide-react';
+import { Link, useHref, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { usePageHeader } from '@/contexts/usePageHeader';
+import { useTheme } from '@/themes';
+import { HELP_ARTICLES, HELP_GROUPS, QUICK_HELP } from './help/articles';
+import { helpPath, searchHelp, type HelpArticle, type HelpImage, type HelpLink } from './help/catalog';
+import './help/help.css';
 
-const SECTIONS = [
-  ["#start", "С чего начать"],
-  ["#agents", "Агенты"],
-  ["#files", "Файлы"],
-  ["#chat", "Чат и история"],
-  ["#schedule", "Задачи"],
-  ["#settings", "Настройки"],
-  ["#recovery", "Если что-то не работает"],
-] as const;
-
-function RouteLink({ to, children }: { to: string; children: React.ReactNode }) {
-  return (
-    <Link
-      to={to}
-      className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:border-primary/45 hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-    >
-      {children}
-      <ArrowRight className="size-4" aria-hidden />
-    </Link>
-  );
+function ActionLink({ to, children, primary = false }: { to: string; children: ReactNode; primary?: boolean }) {
+  return <Link to={to} className="help-action" data-primary={primary || undefined}>
+    {children}<ArrowRight size={16} aria-hidden />
+  </Link>;
 }
 
-function Step({ number, children }: { number: number; children: React.ReactNode }) {
-  return (
-    <li className="flex gap-3 text-sm leading-6 text-muted-foreground">
-      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-        {number}
-      </span>
-      <span>{children}</span>
-    </li>
-  );
+function HelpLinks({ links }: { links: HelpLink[] }) {
+  return <div className="help-links">{links.map(item => <ActionLink key={item.to} to={item.to}>{item.label}</ActionLink>)}</div>;
+}
+
+function HelpFigure({ illustration }: { illustration: HelpImage }) {
+  const { themeName } = useTheme();
+  // Роутер добавляет префикс кабинета и к статическим иллюстрациям.
+  const src = useHref(`/help/${illustration.name}-${themeName === 'dark' ? 'dark' : 'light'}.webp`);
+  return <details className="help-illustration">
+    <summary>Посмотреть в интерфейсе<ChevronRight size={16} aria-hidden /></summary>
+    <figure>
+      <img src={src} alt={illustration.alt} width={illustration.width} height={illustration.height} loading="lazy" decoding="async" />
+      <figcaption>{illustration.caption}</figcaption>
+    </figure>
+  </details>;
+}
+
+function HelpIndex() {
+  const [params, setParams] = useSearchParams();
+  const query = params.get('q') ?? '';
+  const filtered = searchHelp(HELP_ARTICLES, query);
+  return <>
+    <header className="help-welcome">
+      <div className="help-welcome-copy">
+        <p className="help-eyebrow"><BookOpen size={17} aria-hidden />Помощь по Korra 21</p>
+        <h2 id="help-heading" tabIndex={-1}>Что вы хотите сделать?</h2>
+        <p>Короткие инструкции: куда нажать, что написать и какой результат ждать.</p>
+      </div>
+      <Link to="/help/start" className="help-start">
+        <span className="help-start-icon"><Clock3 size={23} aria-hidden /></span>
+        <span><strong>Первые 10 минут</strong><span>От первого сообщения к полезному результату</span></span>
+        <ArrowRight size={20} aria-hidden />
+      </Link>
+    </header>
+    <section className="help-search" aria-label="Поиск по помощи">
+      <label htmlFor="help-search">Найти инструкцию</label>
+      <div className="help-search-field">
+        <Search size={20} aria-hidden />
+        <input id="help-search" type="search" placeholder="Например: голос, роль агента или Telegram" value={query}
+          onChange={event => setParams(event.target.value ? { q: event.target.value } : {}, { replace: true })} />
+        {query && <button type="button" onClick={() => setParams({}, { replace: true })}>Очистить</button>}
+      </div>
+      {query && <p role="status">{filtered.length ? `Найдено инструкций: ${filtered.length}` : 'По этому запросу ничего не найдено. Попробуйте «файлы», «голос» или «не отвечает».'}</p>}
+    </section>
+    {!query.trim() && <section aria-labelledby="help-popular">
+      <h3 id="help-popular">Частые задачи</h3>
+      <div className="help-quick-grid">{QUICK_HELP.map(item => <Link key={item.to} to={item.to} className="help-quick">
+        <span><strong>{item.title}</strong><span>{item.detail}</span></span><ArrowRight size={18} aria-hidden />
+      </Link>)}</div>
+    </section>}
+    {HELP_GROUPS.map(group => {
+      const articles = filtered.filter(article => article.group === group);
+      return articles.length > 0 && <section key={group} aria-label={group}>
+        <h3>{group}</h3>
+        <div className="help-catalog">{articles.map(article => <Link key={article.id} to={helpPath(article.id)} className="help-catalog-item">
+          <span><strong>{article.label}</strong><span>{article.title}</span></span><ChevronRight size={17} aria-hidden />
+        </Link>)}</div>
+      </section>;
+    })}
+    {filtered.length === 0 && <HelpLinks links={[{ to: '/help/troubleshooting', label: 'Помочь с неполадкой' }, { to: '/help', label: 'Показать все инструкции' }]} />}
+  </>;
+}
+
+function HelpNavigation({ current }: { current: HelpArticle }) {
+  const navigate = useNavigate();
+  return <>
+    <div className="help-mobile-nav">
+      <label htmlFor="help-page-select">Другие инструкции</label>
+      <select id="help-page-select" value={current.id} onChange={event => void navigate(helpPath(event.target.value))}>
+        {HELP_GROUPS.map(group => <optgroup key={group} label={group}>
+          {HELP_ARTICLES.filter(article => article.group === group).map(article => <option key={article.id} value={article.id}>{article.label}</option>)}
+        </optgroup>)}
+      </select>
+    </div>
+    <aside className="help-sidebar">
+      <nav aria-label="Все инструкции">
+        <Link to="/help" className="help-back"><ArrowLeft size={16} aria-hidden />Оглавление и поиск</Link>
+        {HELP_GROUPS.map(group => <div key={group} className="help-nav-group">
+          <p>{group}</p>
+          {HELP_ARTICLES.filter(article => article.group === group).map(article => <Link key={article.id} to={helpPath(article.id)}
+            aria-current={current.id === article.id ? 'page' : undefined}>{article.label}</Link>)}
+        </div>)}
+      </nav>
+    </aside>
+  </>;
+}
+
+function HelpArticleView({ article }: { article: HelpArticle }) {
+  const related = article.related.map(id => HELP_ARTICLES.find(item => item.id === id)).filter(item => item !== undefined);
+  return <>
+    <nav aria-label="Путь в помощи" className="help-breadcrumbs">
+      <Link to="/help"><ArrowLeft size={16} aria-hidden />Вся помощь</Link><ChevronRight size={14} aria-hidden /><span>{article.label}</span>
+    </nav>
+    <div className="help-article-layout">
+      <HelpNavigation current={article} />
+      <article className="help-article" aria-labelledby="help-heading">
+        <header className="help-article-header">
+          <p className="help-eyebrow">{article.label}</p>
+          <h2 id="help-heading" tabIndex={-1}>{article.title}</h2>
+          <p>{article.summary}</p>
+          <ActionLink to={article.action.to} primary>{article.action.label}</ActionLink>
+        </header>
+        <nav className="help-on-page" aria-label="На этой странице">
+          <p>В этой инструкции</p>
+          <ol>{article.sections.map(section => <li key={section.id}><Link to={`${helpPath(article.id)}#${section.id}`}>{section.title}</Link></li>)}</ol>
+        </nav>
+        {article.sections.map(section => <section key={section.id} id={section.id} className="help-procedure" aria-labelledby={`title-${section.id}`} tabIndex={-1}>
+          <h3 id={`title-${section.id}`}>{section.title}</h3>
+          {section.intro && <p className="help-muted">{section.intro}</p>}
+          <ol className="help-steps">{section.steps.map((item, index) => <li key={item.title}>
+            <span className="help-step-number" aria-hidden>{index + 1}</span>
+            <div><h4>{item.title}</h4><p>{item.action}</p>
+              <p className="help-result"><Check size={15} aria-hidden /><span><strong>Что вы увидите: </strong>{item.result}</span></p>
+            </div>
+          </li>)}</ol>
+          {section.example && <aside className="help-example" aria-label="Пример поручения"><p>Пример — замените детали своими</p><blockquote>{section.example}</blockquote></aside>}
+          {section.note && <aside className="help-note"><p>{section.note}</p></aside>}
+          {section.image && <HelpFigure illustration={section.image} />}
+          {section.links && <HelpLinks links={section.links} />}
+        </section>)}
+        <section className="help-problems" aria-labelledby="help-problems-title">
+          <h3 id="help-problems-title">Если не получилось</h3>
+          {article.problems.map(problem => <details key={problem.question}>
+            <summary>{problem.question}<ChevronRight size={17} aria-hidden /></summary>
+            <p>{problem.answer}</p>
+            {problem.link && <HelpLinks links={[problem.link]} />}
+          </details>)}
+        </section>
+        <footer className="help-related">
+          <h3>Может пригодиться</h3>
+          <HelpLinks links={related.map(item => ({ label: item.label, to: helpPath(item.id) }))} />
+          <Link to="/help" className="help-back"><ArrowLeft size={16} aria-hidden />Вернуться к оглавлению</Link>
+        </footer>
+      </article>
+    </div>
+  </>;
 }
 
 export default function ClientHelpPage() {
-  return (
-    <section className="mx-auto flex w-full max-w-6xl flex-col gap-8 pb-16">
-      <header className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.10] via-card to-card p-5 sm:p-8">
-        <div className="flex items-start gap-4">
-          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
-            <CircleHelp className="size-5" aria-hidden />
-          </span>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
-              Инструкция по Korra 21
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold leading-tight sm:text-3xl">
-              Как здесь работать
-            </h2>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-              Начните с чата, выберите нужного агента, передайте материалы и
-              возвращайтесь к результатам через историю. Редкие настройки и
-              технические экраны собраны отдельно внизу меню.
-            </p>
-          </div>
-        </div>
-      </header>
-
-      <nav aria-label="Разделы инструкции" className="flex gap-2 overflow-x-auto pb-1">
-        {SECTIONS.map(([href, label]) => (
-          <a
-            key={href}
-            href={href}
-            className="shrink-0 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            {label}
-          </a>
-        ))}
-      </nav>
-
-      <section id="start" className="scroll-mt-20 space-y-4">
-        <div className="flex items-center gap-3">
-          <Bot className="size-5 text-primary" aria-hidden />
-          <h2 className="text-xl font-semibold">С чего начать</h2>
-        </div>
-        <ol className="grid gap-3 md:grid-cols-3">
-          <Card className="rounded-xl"><CardContent className="p-5"><Step number={1}>Откройте чат и опишите результат, который нужен.</Step></CardContent></Card>
-          <Card className="rounded-xl"><CardContent className="p-5"><Step number={2}>Приложите исходники кнопкой или перетащите их в поле сообщения.</Step></CardContent></Card>
-          <Card className="rounded-xl"><CardContent className="p-5"><Step number={3}>Не закрывайте ответ: при обрыве сообщение останется в очереди отправки и его можно повторить.</Step></CardContent></Card>
-        </ol>
-        <RouteLink to="/chat">Открыть чат</RouteLink>
-      </section>
-
-      <section id="agents" className="scroll-mt-20 space-y-4">
-        <div className="flex items-center gap-3">
-          <Users className="size-5 text-primary" aria-hidden />
-          <h2 className="text-xl font-semibold">Агенты</h2>
-        </div>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          Вкладки показывают агентов, настроенных для этого контура. Можно
-          запустить несколько разговоров и переключаться между ними: скрытая
-          вкладка продолжает получать ответ в фоне.
-        </p>
-        <RouteLink to="/agents">Открыть агентов</RouteLink>
-      </section>
-
-      <section id="files" className="scroll-mt-20 space-y-4">
-        <div className="flex items-center gap-3">
-          <Upload className="size-5 text-primary" aria-hidden />
-          <h2 className="text-xl font-semibold">Файлы</h2>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Card className="rounded-xl"><CardContent className="p-5"><h3 className="font-semibold">Мои загрузки</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">Исходники попадают в отдельную входящую папку. Их можно переименовать или убрать в восстановимую корзину.</p></CardContent></Card>
-          <Card className="rounded-xl"><CardContent className="p-5"><h3 className="font-semibold">Готовые материалы</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">Изображения, PDF и текст открываются в предпросмотре; оригинал скачивается отдельной кнопкой.</p></CardContent></Card>
-        </div>
-        <RouteLink to="/files">Открыть материалы</RouteLink>
-      </section>
-
-      <section id="chat" className="scroll-mt-20 space-y-4">
-        <div className="flex items-center gap-3">
-          <MessageCircle className="size-5 text-primary" aria-hidden />
-          <h2 className="text-xl font-semibold">Чат и история</h2>
-        </div>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          В истории доступны прежние разговоры из браузера и подключённых
-          каналов. Ссылку на конкретный диалог можно открыть напрямую.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <RouteLink to="/chat">Открыть чат</RouteLink>
-          <RouteLink to="/sessions">Открыть историю</RouteLink>
-        </div>
-      </section>
-
-      <section id="schedule" className="scroll-mt-20 space-y-4">
-        <div className="flex items-center gap-3">
-          <CalendarClock className="size-5 text-primary" aria-hidden />
-          <h2 className="text-xl font-semibold">Задачи</h2>
-        </div>
-        <ol className="grid gap-3 md:grid-cols-2">
-          <Step number={1}>Добавьте понятное название, действие и время. Новая задача сохранится приостановленной.</Step>
-          <Step number={2}>Проверьте карточку и включите задачу, подтвердив её точное название.</Step>
-          <Step number={3}>Пауза остановит будущие запуски; уже начатый запуск может завершиться.</Step>
-          <Step number={4}>После паузы задачу можно убрать из списка, сохранив историю результатов.</Step>
-        </ol>
-        <RouteLink to="/cron">Открыть задачи</RouteLink>
-      </section>
-
-      <section id="settings" className="scroll-mt-20 space-y-4">
-        <div className="flex items-center gap-3">
-          <Settings2 className="size-5 text-primary" aria-hidden />
-          <h2 className="text-xl font-semibold">Настройки и служебное</h2>
-        </div>
-        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          «Настройки» содержит ключи, модель, журналы и эту справку.
-          «Служебное» открывает расширенные возможности и конфигурацию.
-        </p>
-      </section>
-
-      <section id="recovery" className="scroll-mt-20 space-y-4">
-        <div className="flex items-center gap-3">
-          <ShieldCheck className="size-5 text-primary" aria-hidden />
-          <h2 className="text-xl font-semibold">Если что-то не работает</h2>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Card className="rounded-xl"><CardContent className="p-5"><h3 className="font-semibold">Сообщение не отправилось</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">Черновик остаётся в чате. Проверьте историю перед повтором, если доставка отмечена как неизвестная.</p></CardContent></Card>
-          <Card className="rounded-xl"><CardContent className="p-5"><h3 className="font-semibold">Файл не открылся</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">Нажмите «Повторить» или скачайте оригинал, если формат нельзя показать в браузере.</p></CardContent></Card>
-          <Card className="rounded-xl"><CardContent className="p-5"><h3 className="font-semibold">Данные изменились</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">Обновите экран, прочитайте текущую версию и повторите действие.</p></CardContent></Card>
-          <Card className="rounded-xl"><CardContent className="p-5"><h3 className="font-semibold">Интерфейс обновился</h3><p className="mt-2 text-sm leading-6 text-muted-foreground">Нажмите «Обновить» в уведомлении о новой сборке; сохранённые диалоги и задачи останутся на месте.</p></CardContent></Card>
-        </div>
-      </section>
-
-      <aside className="rounded-xl border border-success/25 bg-success/[0.06] p-5">
-        <div className="flex gap-3">
-          <History className="mt-0.5 size-5 shrink-0 text-success" aria-hidden />
-          <p className="text-sm leading-6 text-muted-foreground">
-            Если нужен контекст прежней работы, откройте историю и продолжите
-            нужный диалог — начинать объяснение заново не требуется.
-          </p>
-        </div>
-      </aside>
-    </section>
-  );
+  const { article: articleId } = useParams();
+  const location = useLocation();
+  const { setTitle } = usePageHeader();
+  const container = useRef<HTMLDivElement>(null);
+  const article = HELP_ARTICLES.find(item => item.id === articleId);
+  useLayoutEffect(() => {
+    setTitle('Помощь');
+    return () => setTitle(null);
+  }, [setTitle, location.pathname]);
+  useLayoutEffect(() => {
+    // Прокручиваем основной контейнер панели, а не окно: он живёт внутри кабинета.
+    let id = '';
+    try { id = decodeURIComponent(location.hash.slice(1)); } catch { /* Повреждённая ссылка открывает начало инструкции. */ }
+    const target = (id ? document.getElementById(id) : null) ?? container.current?.querySelector<HTMLElement>('#help-heading');
+    if (target && container.current?.contains(target)) {
+      target.scrollIntoView({ block: 'start' });
+      target.focus({ preventScroll: true });
+    }
+  }, [location.pathname, location.hash]);
+  return <div ref={container} className="korra-help">
+    {!articleId ? <HelpIndex /> : article ? <HelpArticleView key={article.id} article={article} /> : <section className="help-missing">
+      <h2 id="help-heading" tabIndex={-1}>Такой инструкции пока нет</h2>
+      <p>Откройте оглавление или найдите нужное действие через поиск.</p>
+      <ActionLink to="/help" primary>Оглавление и поиск</ActionLink>
+    </section>}
+  </div>;
 }
