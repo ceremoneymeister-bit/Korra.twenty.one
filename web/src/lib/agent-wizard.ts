@@ -338,7 +338,7 @@ export const ROLE_STARTERS: readonly RoleStarter[] = [
 
 /** Почему проверка не прошла — в словах владельца и с верным следующим шагом. */
 export interface ProbeFailureAdvice {
-  kind: "access" | "busy" | "timeout" | "network" | "unknown";
+  kind: "access" | "busy" | "timeout" | "network" | "config" | "unknown";
   /** Короткий заголовок рядом с пометкой «не отвечает». */
   title: string;
   /** Что делать; всегда напоминает, что сам агент сохранён. */
@@ -367,6 +367,21 @@ export function explainProbeFailure(
       title: "Панель не достучалась до сервера",
       advice: `${saved} Проверьте интернет и повторите проверку.`,
       keys: false,
+    };
+  }
+  // Движок не знает провайдера у этого профиля: настройки провайдера не
+  // доехали до его config.yaml/.env (живьём 06.09: главный агент на Codex,
+  // новому выбрали dario — «Unknown provider 'custom:dario'»). Это не ключ и
+  // не подписка: лечится повторным выбором модели у агента.
+  if (/unknown provider|no llm provider configured|no credentials found|provider .* not configured/i.test(text)) {
+    return {
+      kind: "config",
+      title: "Провайдер не подключён к агенту",
+      advice:
+        `${saved} Настройки выбранного провайдера не перенеслись в агента. ` +
+        "Откройте «Модель» в меню вкладки и выберите модель ещё раз; если не " +
+        "поможет — проверьте «Ключи» этого агента.",
+      keys: true,
     };
   }
   if (/\b(401|403)\b|unauthori[sz]ed|forbidden|expired|invalid (x-)?api[- ]key|re-?authenticate|auth cool-?down|authentication/i.test(text)) {

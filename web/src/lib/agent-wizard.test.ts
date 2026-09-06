@@ -198,6 +198,16 @@ describe("explainProbeFailure", () => {
     expect(advice.advice).toContain("Сам агент сохранён");
   });
 
+  it("неизвестный провайдер у профиля — настройки, а не ключ и не подписка", () => {
+    const advice = explainProbeFailure(
+      "Агент ответил ошибкой.",
+      "Unknown provider 'custom:dario'. Check 'hermes model' for available providers, or run 'hermes doctor' to diagnose config issues.",
+    );
+    expect(advice.kind).toBe("config");
+    expect(advice.advice).toContain("Сам агент сохранён");
+    expect(advice.advice).toMatch(/выберите модель ещё раз/);
+  });
+
   it("сеть, таймаут и неизвестное различаются", () => {
     expect(explainProbeFailure("Не удалось связаться с сервером. Проверьте интернет и повторите.").kind).toBe("network");
     expect(explainProbeFailure("Проверка не дождалась ответа.", "timeout 90s").kind).toBe("timeout");
