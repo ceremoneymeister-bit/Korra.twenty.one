@@ -12,9 +12,15 @@ const apiMocks = vi.hoisted(() => ({
   getActiveProfile: vi.fn(),
   getModelOptions: vi.fn(),
   createProfile: vi.fn(),
+  renameProfile: vi.fn(),
+  updateProfileDisplayName: vi.fn(),
+  deleteProfile: vi.fn(),
   getProfileSoul: vi.fn(),
   updateProfileSoul: vi.fn()
 }))
+
+const scopeMocks = vi.hoisted(() => ({ setProfile: vi.fn(), refreshProfiles: vi.fn() }))
+vi.mock('@/contexts/useProfileScope', () => ({ useProfileScope: () => scopeMocks }))
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -142,6 +148,12 @@ const editor = () => document.querySelector<HTMLTextAreaElement>('#profile-soul-
 const save = () => findButton('Сохранить', dialog())!
 
 beforeEach(() => {
+  scopeMocks.refreshProfiles.mockResolvedValue(undefined)
+  apiMocks.updateProfileDisplayName.mockImplementation(async (_name: string, displayName: string) => ({
+    ok: true,
+    display_name: displayName.trim()
+  }))
+  apiMocks.deleteProfile.mockResolvedValue({ ok: true })
   vi.stubGlobal(
     'matchMedia',
     vi.fn((query: string) => ({
@@ -187,6 +199,58 @@ afterEach(async () => {
 })
 
 describe('ProfilesPage — создание и роль агента', () => {
+  it('меняет русское имя, сохраняя адрес, разговоры и роль агента', async () => {
+    await openPage()
+    await click(container.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')[1])
+    await click(findButton('Изменить имя', document.querySelector('[role="menu"]')!))
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Имя агента"]')!
+    expect(input.value).toBe('Секретарь')
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '  Менеджер магазина  ')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await click(findButton('Сохранить'))
+    expect(apiMocks.updateProfileDisplayName).toHaveBeenCalledWith('secretary', 'Менеджер магазина')
+    expect(apiMocks.renameProfile).not.toHaveBeenCalled()
+    expect(apiMocks.updateProfileSoul).not.toHaveBeenCalled()
+    expect(scopeMocks.refreshProfiles).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toContain('Менеджер магазина')
+    const chatButtons = [...container.querySelectorAll('button')].filter(b => b.textContent === 'Открыть чат')
+    await click(chatButtons[1])
+    expect(container.querySelector('[data-testid="location"]')?.textContent).toBe('/agents?agent=secretary')
+  })
+
+  it('при отказе сохранения имени оставляет введённый текст для повторной попытки', async () => {
+    apiMocks.updateProfileDisplayName.mockRejectedValueOnce(new Error('503: недоступно'))
+    await openPage()
+    await click(container.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')[1])
+    await click(findButton('Изменить имя', document.querySelector('[role="menu"]')!))
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Имя агента"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Помощник')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await click(findButton('Сохранить'))
+    expect(input.value).toBe('Помощник')
+    expect(scopeMocks.refreshProfiles).not.toHaveBeenCalled()
+    await click(findButton('Сохранить'))
+    expect(apiMocks.updateProfileDisplayName).toHaveBeenLastCalledWith('secretary', 'Помощник')
+    expect(scopeMocks.refreshProfiles).toHaveBeenCalledOnce()
+  })
+
+  it('подтверждает удаление человеческим именем и обновляет каталог после успеха', async () => {
+    await openPage()
+    await click(container.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')[1])
+    await click(findButton('Удалить', document.querySelector('[role="menu"]')!))
+    const confirmation = document.querySelector('[role="alertdialog"]') || dialog()
+    expect(confirmation?.textContent).toContain('Удалить агента «Секретарь»?')
+    expect(confirmation?.textContent).toContain('разговоры, сохранённые знания')
+    expect(apiMocks.deleteProfile).not.toHaveBeenCalled()
+    await click(findButton('Удалить', confirmation!))
+    expect(apiMocks.deleteProfile).toHaveBeenCalledWith('secretary')
+    expect(scopeMocks.refreshProfiles).toHaveBeenCalledOnce()
+  })
+
   it('ведёт кнопку создания в единый мастер', async () => {
     await openPage()
     await click(findButton('Создать агента'))

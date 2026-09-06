@@ -37,10 +37,6 @@ import { useI18n } from '@/i18n'
 import { usePageHeader } from '@/contexts/usePageHeader'
 import { cn, themedBody } from '@/lib/utils'
 
-// Mirrors korra_cli/profiles.py::_PROFILE_ID_RE so we can reject obviously
-// invalid names (uppercase, spaces, …) before round-tripping a doomed POST.
-const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
-
 /** Braille unicode spinner (`unicode-animations`); static first frame when reduced motion is preferred. */
 function ProfilesLoadingSpinner() {
   const { frames, interval } = spinners.braille
@@ -210,7 +206,7 @@ export default function ProfilesPage() {
   const { toast, showToast } = useToast()
   const { t, tr } = useI18n()
   const { setEnd, setTitle } = usePageHeader()
-  const { setProfile } = useProfileScope()
+  const { setProfile, refreshProfiles } = useProfileScope()
 
   // Locale strings with English fallbacks. The enriched keys are optional in
   // the i18n type so untranslated locales don't break the build — they render
@@ -255,6 +251,7 @@ export default function ProfilesPage() {
   // Inline rename state
   const [renamingFrom, setRenamingFrom] = useState<string | null>(null)
   const [renameTo, setRenameTo] = useState('')
+  const [renameSaving, setRenameSaving] = useState(false)
 
   // Inline SOUL editor state
   const [editingSoulFor, setEditingSoulFor] = useState<string | null>(null)
@@ -321,25 +318,25 @@ export default function ProfilesPage() {
   )
 
   const handleRenameSubmit = async () => {
-    if (!renamingFrom) return
+    if (!renamingFrom || renameSaving) return
+    const name = renamingFrom
     const target = renameTo.trim()
-    if (!target || target === renamingFrom) {
-      setRenamingFrom(null)
-      setRenameTo('')
+    if (!target || Array.from(target).length > 64) {
+      showToast('Введите имя агента — до 64 символов.', 'error')
       return
     }
-    if (!PROFILE_NAME_RE.test(target)) {
-      showToast(`${t.profiles.invalidName}: ${t.profiles.nameRule}`, 'error')
-      return
-    }
+    setRenameSaving(true)
     try {
-      await api.renameProfile(renamingFrom, target)
-      showToast(`${t.profiles.renamed}: ${renamingFrom} → ${target}`, 'success')
+      const result = await api.updateProfileDisplayName(name, target)
+      setProfiles(previous => previous.map(p => (p.name === name ? { ...p, display_name: result.display_name } : p)))
+      showToast(`Имя сохранено: ${result.display_name}`, 'success')
       setRenamingFrom(null)
       setRenameTo('')
-      load()
+      void refreshProfiles().catch(() => {})
     } catch (e) {
-      showToast(ownerFacingError(e, 'Не удалось переименовать агента.'), 'error')
+      showToast(ownerFacingError(e, 'Не удалось сохранить имя агента.'), 'error')
+    } finally {
+      setRenameSaving(false)
     }
   }
 
@@ -597,22 +594,23 @@ export default function ProfilesPage() {
       async (name: string) => {
         try {
           await api.deleteProfile(name)
-          showToast(`${t.profiles.deleted}: ${name}`, 'success')
+          showToast('Агент удалён.', 'success')
           load()
+          void refreshProfiles().catch(() => {})
         } catch (e) {
           showToast(ownerFacingError(e, 'Не удалось удалить агента.'), 'error')
           throw e
         }
       },
-      [load, showToast, t.profiles.deleted]
+      [load, showToast, refreshProfiles]
     )
   })
 
   const pendingName = profileDelete.pendingId
   const pendingProfile = pendingName ? profiles.find(p => p.name === pendingName) : undefined
   const deleteMessage = (() => {
-    if (!pendingName) return t.profiles.confirmDeleteMessage
-    const base = t.profiles.confirmDeleteMessage.replace('{name}', pendingName)
+    const base =
+      'Будут удалены его разговоры, сохранённые знания, навыки, настройки доступа и задачи по расписанию. Восстановить их после удаления нельзя.'
     return pendingProfile?.gateway_running ? `${base}\n\n${L.gatewayRunningWarning}` : base
   })()
 
@@ -647,7 +645,7 @@ export default function ProfilesPage() {
         open={profileDelete.isOpen}
         onCancel={profileDelete.cancel}
         onConfirm={profileDelete.confirm}
-        title={t.profiles.confirmDeleteTitle}
+        title={`Удалить агента «${pendingProfile?.display_name?.trim() || pendingName || ''}»?`}
         description={deleteMessage}
         loading={profileDelete.isDeleting}
       />
@@ -700,33 +698,39 @@ export default function ProfilesPage() {
                     <div className="flex flex-col gap-2">
                       <Input
                         autoFocus
+                        aria-label="Имя агента"
+                        disabled={renameSaving}
                         value={renameTo}
                         onChange={e => setRenameTo(e.target.value)}
                         onKeyDown={e => {
                           if (e.key === 'Enter') handleRenameSubmit()
-                          if (e.key === 'Escape') setRenamingFrom(null)
+                          if (e.key === 'Escape' && !renameSaving) setRenamingFrom(null)
                         }}
-                        aria-invalid={
-                          renameTo.trim() !== '' && renameTo.trim() !== p.name && !PROFILE_NAME_RE.test(renameTo.trim())
-                        }
+                        aria-invalid={Array.from(renameTo.trim()).length > 64}
                       />
 
                       {(() => {
                         const trimmed = renameTo.trim()
-                        const invalid = trimmed !== '' && trimmed !== p.name && !PROFILE_NAME_RE.test(trimmed)
+                        const invalid = Array.from(trimmed).length > 64
                         return (
                           <p className={cn('text-xs', invalid ? 'text-destructive' : 'text-muted-foreground')}>
-                            {invalid ? `${t.profiles.invalidName}: ${t.profiles.nameRule}` : t.profiles.nameRule}
+                            {invalid
+                              ? 'Имя должно быть не длиннее 64 символов.'
+                              : 'Имя на карточке и вкладке. Можно писать по-русски, до 64 символов.'}
                           </p>
                         )
                       })()}
 
                       <div className="flex gap-1.5">
-                        <Button size="sm" onClick={handleRenameSubmit}>
-                          {t.common.save}
+                        <Button
+                          size="sm"
+                          disabled={renameSaving || !renameTo.trim() || Array.from(renameTo.trim()).length > 64}
+                          onClick={() => void handleRenameSubmit()}
+                        >
+                          {renameSaving ? 'Сохраняю…' : t.common.save}
                         </Button>
 
-                        <Button size="sm" ghost onClick={() => setRenamingFrom(null)}>
+                        <Button size="sm" ghost disabled={renameSaving} onClick={() => setRenamingFrom(null)}>
                           {t.common.cancel}
                         </Button>
                       </div>
@@ -769,7 +773,7 @@ export default function ProfilesPage() {
                             editSoul: 'Роль и поведение',
                             manageSkills: L.manageSkills,
                             openInTerminal: t.profiles.openInTerminal,
-                            rename: t.profiles.rename,
+                            rename: 'Изменить имя',
                             delete: t.common.delete
                           }}
                           onCopyCommand={() => handleCopyTerminalCommand(p.name)}
@@ -779,8 +783,9 @@ export default function ProfilesPage() {
                           onEditSoul={() => openSoulEditor(p.name)}
                           onManageSkills={() => navigate(`/skills?profile=${encodeURIComponent(p.name)}`)}
                           onRename={() => {
+                            if (renameSaving) return
                             setRenamingFrom(p.name)
-                            setRenameTo(p.name)
+                            setRenameTo(p.display_name?.trim() || p.name)
                           }}
                           onSetActive={() => handleSetActive(p.name)}
                         />
