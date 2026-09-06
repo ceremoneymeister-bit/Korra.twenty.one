@@ -28,20 +28,27 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Clock,
   Cpu,
   EyeOff,
   FileText,
   MessageSquarePlus,
   MoreVertical,
+  Package,
   Pencil,
   Plus,
+  Trash2,
   UserRoundPlus,
   X,
 } from "lucide-react";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
+import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
 
 import BubbleChatPage from "@/pages/BubbleChatPage";
+import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { api } from "@/lib/api";
+import { soulNamedAs } from "@/lib/agent-wizard";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import { agentSettingsHref, MAIN_AGENT_TAB } from "@/lib/agent-tabs";
@@ -271,17 +278,51 @@ export default function AgentWorkbenchPage() {
     setRenamingProfile(null);
   }, []);
 
+  /**
+   * После переименования сказать, что роль агента имя не сменила.
+   *
+   * `PUT /display-name` меняет только подпись вкладки; в SOUL.md остаётся
+   * «Ты — {старое имя}», и агент представляется по-старому (аудит 06.09,
+   * F13). Роль здесь не переписываем — решение с Астрой 06.09: запись из
+   * браузера поверх прочитанного могла бы затереть параллельную правку, а
+   * `display_name` в движке намеренно только подпись. Читаем роль и, если она
+   * начинается с нашего шаблона со старым именем, говорим человеку, где
+   * поправить. Чужие инструкции и дефолт движка не трактуем — молчим.
+   */
+  const noteSoulName = useCallback(
+    async (profile: string, oldName: string) => {
+      try {
+        const { content } = await api.getProfileSoul(profile);
+        if (!soulNamedAs(content, oldName)) return;
+        showToast(
+          `Вкладка переименована. В роли агент по-прежнему зовётся «${oldName}» — при желании поправьте в «Роль и поведение».`,
+          "success",
+        );
+      } catch {
+        // Подсказка необязательна: переименование уже удалось.
+      }
+    },
+    [showToast],
+  );
+
   const submitDisplayName = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const profile = renamingProfile;
       const displayName = renameValue.trim();
       if (profile === null || !displayName || savingName) return;
+      const previousLabel =
+        tabs.find((tab) => tab.profile === profile)?.label ?? "";
       setSavingName(true);
       try {
         await updateDisplayName(profile, displayName);
         setOpenMenu(null);
         setRenamingProfile(null);
+        // Главная вкладка — профиль самой панели: её подпись «Корра» не из
+        // SOUL, роль главного агента не трогаем.
+        if (profile && previousLabel && previousLabel !== displayName) {
+          void noteSoulName(profile, previousLabel);
+        }
       } catch (error) {
         const isMissingEndpoint =
           error instanceof Error && /^404(?:\s|:)/.test(error.message);
@@ -295,8 +336,41 @@ export default function AgentWorkbenchPage() {
         setSavingName(false);
       }
     },
-    [renameValue, renamingProfile, savingName, showToast, updateDisplayName],
+    [
+      renameValue,
+      renamingProfile,
+      savingName,
+      showToast,
+      noteSoulName,
+      tabs,
+      updateDisplayName,
+    ],
   );
+
+  // Удаление агента — из меню его вкладки, с подтверждением. Раньше путь
+  // «создал → поговорил → удалил» из «Агентов» не замыкался: удалить можно
+  // было только в карточке «Профилей» под «Настройками» (аудит 06.09, F12).
+  const profileDelete = useConfirmDelete<string>({
+    onDelete: useCallback(
+      async (profile: string) => {
+        try {
+          await api.deleteProfile(profile);
+        } catch (error) {
+          showToast(ownerFacingError(error, "Не удалось удалить агента."), "error");
+          throw error;
+        }
+        setOpenMenu(null);
+        setRenamingProfile(null);
+        // Вкладки читаются из /api/profiles — после удаления состав другой.
+        await refresh();
+        showToast("Агент удалён.", "success");
+      },
+      [refresh, showToast],
+    ),
+  });
+  const deletingTab = profileDelete.pendingId
+    ? tabs.find((tab) => tab.profile === profileDelete.pendingId) ?? null
+    : null;
 
   // role="tablist" обещает управление стрелками — выполняем обещание, иначе
   // роль врёт скринридеру. Фокус ведём за активной вкладкой: панели всё равно
@@ -508,6 +582,33 @@ export default function AgentWorkbenchPage() {
                   <Cpu size={15} aria-hidden />
                   Модель
                 </button>
+                {/* Обучение агента живёт в трёх разделах панели; из меню
+                    вкладки они открываются сразу для этого агента (адрес
+                    несёт `?profile=`), а не для запомненного в разделе. */}
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
+                  onClick={() => {
+                    setOpenMenu(null);
+                    navigate(agentSettingsHref(menuTab.profile, "skills"));
+                  }}
+                >
+                  <Package size={15} aria-hidden />
+                  Навыки
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
+                  onClick={() => {
+                    setOpenMenu(null);
+                    navigate(agentSettingsHref(menuTab.profile, "schedule"));
+                  }}
+                >
+                  <Clock size={15} aria-hidden />
+                  Расписание
+                </button>
                 <button
                   type="button"
                   role="menuitem"
@@ -558,11 +659,36 @@ export default function AgentWorkbenchPage() {
                     Скрыть вкладку
                   </button>
                 )}
+                {menuTab.profile !== MAIN_AGENT_TAB.profile && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal text-destructive"
+                    onClick={() => {
+                      setOpenMenu(null);
+                      setRenamingProfile(null);
+                      profileDelete.requestDelete(menuTab.profile);
+                    }}
+                  >
+                    <Trash2 size={15} aria-hidden />
+                    Удалить агента…
+                  </button>
+                )}
               </>
             )}
           </div>,
           document.body,
         )}
+
+      <DeleteConfirmDialog
+        open={profileDelete.isOpen}
+        onCancel={profileDelete.cancel}
+        onConfirm={profileDelete.confirm}
+        loading={profileDelete.isDeleting}
+        title={`Удалить агента «${deletingTab?.label ?? profileDelete.pendingId ?? ""}»?`}
+        description="Вместе с агентом удалятся его роль, настройки, навыки и вся история разговоров. Отменить это нельзя."
+        confirmLabel="Удалить агента"
+      />
 
       {openMenu?.kind === "add" &&
         createPortal(

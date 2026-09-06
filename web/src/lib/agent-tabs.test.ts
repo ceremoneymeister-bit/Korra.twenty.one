@@ -158,4 +158,16 @@ describe("agentSettingsHref", () => {
       "/profiles?agent=default&edit=role",
     );
   });
+
+  it("навыки и расписание открываются в своих разделах с явным профилем", () => {
+    expect(agentSettingsHref("calculator", "skills")).toBe(
+      "/skills?profile=calculator",
+    );
+    expect(agentSettingsHref("calculator", "schedule")).toBe(
+      "/cron?profile=calculator",
+    );
+    expect(agentSettingsHref(MAIN_AGENT_TAB.profile, "skills")).toBe(
+      "/skills?profile=default",
+    );
+  });
 });

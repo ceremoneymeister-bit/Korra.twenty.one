@@ -92,17 +92,27 @@ export function sameAgentTabs(
   });
 }
 
+/** Что можно открыть для конкретного агента из меню его вкладки. */
+export type AgentSettingsKind = "role" | "model" | "skills" | "schedule";
+
 /**
- * Адрес редактора выбранного агента в «Настройках агентов»
- * (`/profiles?agent=<профиль>&edit=role|model`, договорённость с Астрой 05.09).
+ * Адрес настроек выбранного агента.
+ *
+ * Роль и модель — редактор в «Настройках агентов»
+ * (`/profiles?agent=<профиль>&edit=role|model`, договорённость с Астрой 05.09);
+ * навыки и расписание — их разделы с явным `?profile=` (оба в
+ * `PROFILE_SCOPED_ROUTES` контекста профилей, поэтому адрес выбирает именно
+ * этого агента, а не запомненного в разделе).
  *
  * Пустой профиль — главная вкладка, то есть профиль самой панели; в списке
  * профилей он значится как `default`.
  */
 export function agentSettingsHref(
   profile: string,
-  edit: "role" | "model",
+  edit: AgentSettingsKind,
 ): string {
-  const target = profile || "default";
-  return `/profiles?agent=${encodeURIComponent(target)}&edit=${edit}`;
+  const target = encodeURIComponent(profile || "default");
+  if (edit === "skills") return `/skills?profile=${target}`;
+  if (edit === "schedule") return `/cron?profile=${target}`;
+  return `/profiles?agent=${target}&edit=${edit}`;
 }

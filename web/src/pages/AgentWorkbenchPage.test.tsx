@@ -38,6 +38,19 @@ vi.mock("@/hooks/useAgentTabs", () => ({
   }),
 }));
 
+// Удаление и подтягивание имени в роль ходят в API напрямую: вкладки об этом
+// не знают, а сервер — единственный источник правды про роль.
+const apiMocks = vi.hoisted(() => ({
+  deleteProfile: vi.fn(),
+  getProfileSoul: vi.fn(),
+  updateProfileSoul: vi.fn(),
+}));
+
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return { ...actual, api: { ...actual.api, ...apiMocks } };
+});
+
 vi.mock("@/pages/BubbleChatPage", () => ({
   default: ({
     agentProfile = "",
@@ -54,9 +67,13 @@ vi.mock("@/pages/BubbleChatPage", () => ({
 }));
 
 import AgentWorkbenchPage from "./AgentWorkbenchPage";
+import { composeSoul } from "@/lib/agent-wizard";
 
 let container: HTMLDivElement;
 let root: Root;
+
+const ENGINE_DEFAULT_SOUL =
+  "You are Korra. Be direct: match the length of your reply to the weight of the ask.";
 
 const DEFAULT_TABS = [
   { profile: "", label: "Корра" },
@@ -113,7 +130,48 @@ beforeEach(() => {
   workbenchMocks.hideTab.mockReset();
   workbenchMocks.showTab.mockReset();
   workbenchMocks.moveTab.mockReset();
+  apiMocks.deleteProfile.mockReset();
+  apiMocks.deleteProfile.mockResolvedValue({ ok: true });
+  apiMocks.getProfileSoul.mockReset();
+  apiMocks.getProfileSoul.mockResolvedValue({
+    content: composeSoul("Сметчик", "Считаешь сметы по моим расценкам."),
+    exists: true,
+  });
+  apiMocks.updateProfileSoul.mockReset();
+  apiMocks.updateProfileSoul.mockResolvedValue({ ok: true });
 });
+
+/** Открыть меню вкладки и нажать пункт по тексту. */
+async function pickMenuItem(tabLabel: string, itemText: string) {
+  await act(async () => {
+    container
+      .querySelector<HTMLButtonElement>(`button[aria-label="Меню агента «${tabLabel}»"]`)
+      ?.click();
+  });
+  const menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+  await act(async () => {
+    Array.from(menu.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes(itemText))
+      ?.click();
+    await Promise.resolve();
+  });
+}
+
+async function renameTab(tabLabel: string, id: string, newName: string) {
+  await pickMenuItem(tabLabel, "Переименовать");
+  const input = document.body.querySelector<HTMLInputElement>(
+    `#agent-display-name-${id}`,
+  )!;
+  await enterText(input, newName);
+  await act(async () => {
+    document.body
+      .querySelector<HTMLButtonElement>('button[aria-label="Сохранить имя"]')
+      ?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
 
 afterEach(async () => {
   await act(async () => root?.unmount());
@@ -393,5 +451,112 @@ describe("AgentWorkbenchPage", () => {
     expect(
       container.querySelector('[data-testid="location"]')?.textContent,
     ).toBe("/profiles?agent=default&edit=model");
+  });
+
+  it("из меню вкладки открывает навыки и расписание этого агента", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    await pickMenuItem("Сметчик", "Навыки");
+    expect(
+      container.querySelector('[data-testid="location"]')?.textContent,
+    ).toBe("/skills?profile=calculator");
+
+    await pickMenuItem("Корра", "Расписание");
+    expect(
+      container.querySelector('[data-testid="location"]')?.textContent,
+    ).toBe("/cron?profile=default");
+  });
+
+  it("удаляет агента из меню вкладки после подтверждения, но не Корру", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Меню агента «Корра»"]')
+        ?.click();
+    });
+    expect(document.body.querySelector('[role="menu"]')?.textContent).not.toContain(
+      "Удалить агента",
+    );
+
+    await pickMenuItem("Сметчик", "Удалить агента…");
+    expect(apiMocks.deleteProfile).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Удалить агента «Сметчик»?");
+    expect(document.body.textContent).toContain("вся история разговоров");
+
+    await act(async () => {
+      Array.from(document.body.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Удалить агента")
+        ?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiMocks.deleteProfile).toHaveBeenCalledWith("calculator");
+    expect(workbenchMocks.refresh).toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Агент удалён.");
+  });
+
+  it("после переименования предупреждает, что в роли имя прежнее, и роль не пишет", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+
+    await renameTab("Сметчик", "calculator", "Главный сметчик");
+
+    expect(workbenchMocks.updateDisplayName).toHaveBeenCalledWith(
+      "calculator",
+      "Главный сметчик",
+    );
+    expect(apiMocks.getProfileSoul).toHaveBeenCalledWith("calculator");
+    // Роль из браузера не переписываем (решение с Астрой 06.09): только
+    // читаем и подсказываем.
+    expect(apiMocks.updateProfileSoul).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      "В роли агент по-прежнему зовётся «Сметчик»",
+    );
+  });
+
+  it("чужие инструкции с тем же словом при переименовании оставляет без замечаний", async () => {
+    // Слово «Сметчик» есть, но это не наш шаблон имени — подсказка была бы
+    // домыслом (замечание Астры 06.09).
+    apiMocks.getProfileSoul.mockResolvedValue({
+      content: "Ты — Сметчик, считаешь по прайсу. Сметчик отвечает кратко.",
+      exists: true,
+    });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+
+    await renameTab("Сметчик", "calculator", "Главный сметчик");
+
+    expect(apiMocks.updateProfileSoul).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain("по-прежнему зовётся");
+  });
+
+  it("роль-дефолт движка при переименовании оставляет без замечаний", async () => {
+    apiMocks.getProfileSoul.mockResolvedValue({ content: ENGINE_DEFAULT_SOUL, exists: true });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+
+    await renameTab("Сметчик", "calculator", "Главный сметчик");
+
+    expect(apiMocks.updateProfileSoul).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain("по-прежнему зовётся");
   });
 });
