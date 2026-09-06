@@ -225,6 +225,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/env": EnvPage,
   "/docs": DocsPage,
   "/help": ClientHelpPage,
+  "/help/:article": ClientHelpPage,
   "/ui-kit": UiKitPage,
 };
 
