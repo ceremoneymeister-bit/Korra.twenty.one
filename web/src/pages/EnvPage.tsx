@@ -174,7 +174,7 @@ function EnvVarRow({
               href={info.url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
             >
               {t.env.getKey} <ExternalLink className="h-2.5 w-2.5" />
             </a>
@@ -195,7 +195,7 @@ function EnvVarRow({
   // Non-compact unset row
   if (!info.is_set && !isEditing) {
     return (
-      <div className="flex items-center justify-between gap-3 border border-border/50 px-4 py-2.5 min-w-0 overflow-hidden text-text-secondary hover:text-foreground transition-colors">
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5 min-w-0 overflow-hidden text-text-secondary hover:text-foreground transition-colors">
         <div className="flex items-center gap-3 min-w-0">
           <Label className="font-mono-ui text-xs">
             <span title={varKey}>{displayKey(varKey)}</span>
@@ -210,7 +210,7 @@ function EnvVarRow({
               href={info.url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
             >
               {t.env.getKey} <ExternalLink className="h-2.5 w-2.5" />
             </a>
@@ -230,13 +230,13 @@ function EnvVarRow({
 
   // Full expanded row for set keys or keys being edited
   return (
-    <div className="grid gap-2 border border-border p-4 min-w-0 overflow-hidden">
+    <div className="grid gap-2 p-4 min-w-0 overflow-hidden">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <Label className="font-mono-ui text-xs" title={varKey}>{displayKey(varKey)}</Label>
           {/* Это подпись состояния, а не кнопка: «Задать» на заданном ключе
               читается как предложение действия. */}
-          <Badge tone={info.is_set ? "success" : "outline"}>
+          <Badge tone="secondary">
             {info.is_set ? "Задано" : t.env.notSet}
           </Badge>
         </div>
@@ -245,7 +245,7 @@ function EnvVarRow({
             href={info.url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
           >
             {t.env.getKey} <ExternalLink className="h-2.5 w-2.5" />
           </a>
@@ -271,7 +271,7 @@ function EnvVarRow({
       {!isEditing && (
         <div className="flex items-center gap-2">
           <div
-            className={`flex-1 border border-border px-3 py-2 font-mono-ui text-xs ${
+            className={`flex-1 px-3 py-2 font-mono-ui text-xs ${
               isRevealed
                 ? "bg-background text-foreground select-all"
                 : "bg-muted/30 text-muted-foreground"
@@ -426,7 +426,7 @@ function ProviderGroupCard({
   const keyUrl = apiKeys.find(([, info]) => info.url)?.[1]?.url ?? null;
 
   return (
-    <div className="border border-border">
+    <div className="rounded-xl">
       {/* Header — always visible */}
       <ListItem
         onClick={() => setExpanded(!expanded)}
@@ -445,7 +445,7 @@ function ProviderGroupCard({
           {hasAnyConfigured && (
             // `t.common.set` — надпись на кнопке («Задать»), в подписи
             // количества она давала «1 задать».
-            <Badge tone="success" className="text-xs">
+            <Badge tone="secondary" className="text-xs">
               задано {configuredCount}
             </Badge>
           )}
@@ -456,7 +456,7 @@ function ProviderGroupCard({
               href={keyUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
               onClick={(e) => e.stopPropagation()}
             >
               {t.env.getKey} <ExternalLink className="h-2.5 w-2.5" />
@@ -469,7 +469,7 @@ function ProviderGroupCard({
       </ListItem>
 
       {expanded && (
-        <div className="border-t border-border px-4 py-3 grid gap-2">
+        <div className="px-4 py-3 grid gap-2">
           {apiKeys.map(([key, info]) => (
             <EnvVarRow
               key={key}
@@ -588,7 +588,7 @@ function CustomKeysCard({
 
   return (
     <Card id="section-custom">
-      <CardHeader className="border-b border-border bg-card">
+      <CardHeader className="bg-transparent">
         <div className="flex items-center gap-2">
           <KeyRound className="h-5 w-5 text-muted-foreground" />
           <CardTitle className="text-base">{t.env.customTitle}</CardTitle>
@@ -609,7 +609,7 @@ function CustomKeysCard({
         ))}
 
         {/* Add-key form */}
-        <div className="grid gap-2 border border-dashed border-border p-4">
+        <div className="grid gap-2 p-4">
           <Label className="text-xs font-semibold tracking-wide">
             {t.env.addCustomKey}
           </Label>
@@ -1013,7 +1013,7 @@ export default function EnvPage() {
       </div>
 
       <Card id="section-providers">
-        <CardHeader className="border-b border-border bg-card">
+        <CardHeader className="bg-transparent">
           <div className="flex items-center gap-2">
             <Zap className="h-5 w-5 text-muted-foreground" />
             <CardTitle className="text-base">Сервисы ответов</CardTitle>
@@ -1148,7 +1148,7 @@ function EnvCategoryCard({
   return (
     <Card id={`section-${section.category}`}>
       <CardHeader
-        className={`bg-card${hasContent ? " border-b border-border" : ""}`}
+        className="bg-transparent"
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">

@@ -164,7 +164,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
               >
                 <div className="flex items-start gap-3 min-w-0 flex-1">
                   {p.status.logged_in ? (
-                    <ShieldCheck className="h-5 w-5 text-success shrink-0 mt-0.5" />
+                    <ShieldCheck className="h-5 w-5 text-foreground shrink-0 mt-0.5" />
                   ) : (
                     <ShieldOff className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
                   )}
@@ -178,7 +178,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
                         {t.oauth.flowLabels[p.flow]}
                       </Badge>
                       {p.status.logged_in && (
-                        <Badge tone="success" className="text-xs">
+                        <Badge tone="secondary" className="text-xs">
                           {t.oauth.connected}
                         </Badge>
                       )}
