@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PageHeaderContext } from "@/contexts/page-header-context";
+import { ROLE_STARTERS } from "@/lib/agent-wizard";
 
 const apiMocks = vi.hoisted(() => ({
   getProfiles: vi.fn(),
@@ -94,6 +95,8 @@ const PROVIDERS = [
     models: ["claude-opus-5[1m]", "claude-sonnet-5"],
     authenticated: true,
   },
+  // Виртуальный агрегатор: в мастере не показывается.
+  { name: "Mixture of Agents", slug: "moa", models: ["default"], authenticated: true },
 ];
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -137,11 +140,28 @@ function findButton(text: string, scope: ParentNode = container) {
   );
 }
 
-async function click(element: Element | undefined) {
+async function click(element: Element | undefined | null) {
   expect(element).toBeTruthy();
   await act(async () => {
     (element as HTMLElement).click();
   });
+}
+
+/** Открыть Select и выбрать пункт по подписи. */
+async function pickOption(trigger: Element | null, text: string) {
+  await click(trigger);
+  const option = Array.from(
+    document.body.querySelectorAll('[role="option"]'),
+  ).find((node) => node.textContent?.includes(text));
+  await click(option);
+}
+
+/** Пункты списка именно этого Select — соседний может ещё дозакрываться. */
+function optionLabels(trigger: Element | null): string[] {
+  const listbox = document.getElementById(trigger?.getAttribute("aria-controls") ?? "");
+  return Array.from(listbox?.querySelectorAll('[role="option"]') ?? []).map(
+    (node) => node.textContent ?? "",
+  );
 }
 
 async function enterText(
@@ -168,6 +188,13 @@ function okReply(content: string) {
   );
 }
 
+function failedReply(status: number, message: string) {
+  return new Response(
+    JSON.stringify({ error: { message, type: "server_error" } }),
+    { status, headers: { "Content-Type": "application/json" } },
+  );
+}
+
 /** Открыть мастер и дождаться списка профилей и моделей. */
 async function openWizard() {
   await render(
@@ -184,6 +211,9 @@ async function openWizard() {
 const nameInput = () => container.querySelector<HTMLInputElement>("#pb-name")!;
 const idInput = () => container.querySelector<HTMLInputElement>("#pb-id")!;
 const roleInput = () => container.querySelector<HTMLTextAreaElement>("#pb-role")!;
+const providerSelect = () => container.querySelector<HTMLButtonElement>("#pb-provider");
+const modelSelect = () => container.querySelector<HTMLButtonElement>("#pb-model");
+const location = () => container.querySelector('[data-testid="location"]')?.textContent;
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -223,6 +253,7 @@ afterEach(async () => {
   container?.remove();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("ProfileBuilderPage — мастер создания агента", () => {
@@ -269,25 +300,89 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     expect(idInput().value).toBe("sekretar-2");
   });
 
-  it("подставляет модель главного агента и показывает, что ключ настроен", async () => {
+  it("заготовка роли подставляет имя и текст, а свой текст можно вернуть", async () => {
+    await openWizard();
+    const secretary = ROLE_STARTERS.find((starter) => starter.id === "secretary")!;
+    const requests = ROLE_STARTERS.find((starter) => starter.id === "requests")!;
+
+    await click(container.querySelector('[data-starter="secretary"]'));
+    expect(nameInput().value).toBe("Секретарь");
+    expect(roleInput().value).toBe(secretary.role);
+    expect(
+      container.querySelector('[data-starter="secretary"]')?.getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    // Имя уже есть — вторая заготовка его не перебивает, а текст меняет
+    // без предупреждения: он был заготовкой, а не словами владельца.
+    await click(container.querySelector('[data-starter="requests"]'));
+    expect(nameInput().value).toBe("Секретарь");
+    expect(roleInput().value).toBe(requests.role);
+    expect(container.textContent).not.toContain("Вернуть мой текст");
+
+    await enterText(roleInput(), "Считаешь сметы по моим расценкам.");
+    await click(container.querySelector('[data-starter="secretary"]'));
+    expect(roleInput().value).toBe(secretary.role);
+    expect(container.textContent).toContain("Заготовка заменила ваш текст.");
+    await click(findButton("Вернуть мой текст"));
+    expect(roleInput().value).toBe("Считаешь сметы по моим расценкам.");
+    expect(container.textContent).not.toContain("Вернуть мой текст");
+  });
+
+  it("подставляет модель главного агента и показывает, что доступ настроен", async () => {
     await openWizard();
 
-    const trigger = container.querySelector<HTMLButtonElement>("#pb-model");
-    expect(trigger?.textContent).toContain("dario · claude-opus-5[1m] — готов");
-    expect(container.textContent).toContain("Ключ провайдера dario настроен.");
+    expect(providerSelect()?.textContent).toContain("Как у главного агента");
+    expect(modelSelect()).toBeNull();
+    expect(container.textContent).toContain(
+      "dario · claude-opus-5[1m] — доступ настроен, агент ответит сразу.",
+    );
+  });
+
+  it("выбирает модель в два шага: провайдер по-русски, потом его модели", async () => {
+    await openWizard();
+
+    await click(providerSelect());
+    expect(optionLabels(providerSelect())).toEqual([
+      "Как у главного агента",
+      "dario",
+      "Anthropic (Claude) — нет ключа",
+    ]);
+    await click(
+      Array.from(document.body.querySelectorAll('[role="option"]')).find((node) =>
+        node.textContent?.trim() === "dario",
+      ),
+    );
+
+    // Модель провайдера по умолчанию — та же, что у главного агента.
+    expect(modelSelect()?.textContent).toContain("claude-opus-5[1m]");
+    await click(modelSelect());
+    expect(optionLabels(modelSelect())).toEqual(["claude-opus-5[1m]", "claude-sonnet-5"]);
+    const modelListbox = document.getElementById(
+      modelSelect()?.getAttribute("aria-controls") ?? "",
+    );
+    await click(
+      Array.from(modelListbox?.querySelectorAll('[role="option"]') ?? []).find((node) =>
+        node.textContent?.includes("claude-sonnet-5"),
+      ),
+    );
+    expect(container.textContent).toContain("Доступ к «dario» настроен");
+
+    await enterText(nameInput(), "Учитель китайского");
+    await click(findButton("Создать агента"));
+    await flush();
+    expect(apiMocks.createProfile.mock.calls[0][0]).toMatchObject({
+      provider: "custom:dario",
+      model: "claude-sonnet-5",
+    });
   });
 
   it("предупреждает о провайдере без ключа", async () => {
     await openWizard();
 
-    await click(container.querySelector("#pb-model")!);
-    const option = Array.from(
-      document.body.querySelectorAll('[role="option"]'),
-    ).find((node) => node.textContent?.includes("Anthropic"));
-    await click(option);
-
+    await pickOption(providerSelect(), "Anthropic (Claude)");
+    expect(modelSelect()?.textContent).toContain("claude-opus-5[1m]");
     expect(container.textContent).toContain(
-      "Агент не ответит, пока ключ провайдера Anthropic не появится в «Ключах».",
+      "Агент не ответит, пока в «Ключах» не появится доступ к «Anthropic (Claude)».",
     );
   });
 
@@ -328,27 +423,25 @@ describe("ProfileBuilderPage — мастер создания агента", ()
       messages: [{ role: "user", content: PROBE_PROMPT }],
       stream: false,
     });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(container.textContent).toContain("Проверка агента");
+    // Сохранённое видно отдельно от ответа.
+    expect(container.textContent).toContain("Сохранено");
+    expect(container.textContent).toContain("своими словами, плюс правила общения по-русски");
+    expect(container.textContent).toContain("dario · claude-opus-5[1m]");
     expect(container.textContent).toContain(
       "Агент отвечает: «Я — Учитель китайского.»",
     );
 
     await click(findButton("Открыть чат"));
-    expect(
-      container.querySelector('[data-testid="location"]')?.textContent,
-    ).toBe("/agents?agent=uchitel-kitayskogo");
+    expect(location()).toBe("/agents?agent=uchitel-kitayskogo");
   });
 
-  it("при отказе провайдера объясняет, куда идти, и даёт повторить", async () => {
+  it("отказ доступа (401 подписки) объясняет как доступ, а не как сломанного агента", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            error: { message: "HTTP 401: invalid x-api-key", type: "server_error" },
-          }),
-          { status: 502, headers: { "Content-Type": "application/json" } },
-        ),
+        failedReply(502, "HTTP 401: OAuth access token has expired. Re-authenticate to continue."),
       ),
     );
     await openWizard();
@@ -357,17 +450,64 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     await flush();
 
     expect(container.textContent).toContain("не отвечает");
-    expect(container.textContent).toContain("HTTP 401: invalid x-api-key");
-    expect(container.textContent).toContain("проверьте его в «Ключах»");
+    expect(container.textContent).toContain("Нет доступа к модели");
+    expect(container.textContent).toContain("Сам агент сохранён: имя, роль и модель на месте.");
+    expect(container.textContent).toContain("Ответ сервера: HTTP 401: OAuth access token has expired.");
+    // Роль не писали — шаг проверки говорит об этом прямо.
+    expect(container.textContent).toContain("не задана — только имя и правила общения");
 
     await click(findButton("Повторить проверку"));
     await flush();
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
 
     await click(findButton("Открыть «Ключи»"));
-    expect(
-      container.querySelector('[data-testid="location"]')?.textContent,
-    ).toBe("/env?profile=uchitel-kitayskogo");
+    expect(location()).toBe("/env?profile=uchitel-kitayskogo");
+  });
+
+  it("перегрузка провайдера (503) не отправляет в «Ключи»", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        failedReply(503, "HTTP 503: all accounts are rate-limited or in auth cool-down"),
+      ),
+    );
+    await openWizard();
+    await enterText(nameInput(), "Учитель китайского");
+    await click(findButton("Создать агента"));
+    await flush();
+
+    expect(container.textContent).toContain("Сам агент сохранён");
+    expect(container.textContent).not.toContain("проверьте его в «Ключах»");
+    expect(findButton("Повторить проверку")).toBeTruthy();
+    expect(findButton("Открыть чат")).toBeTruthy();
+  });
+
+  it("проверку можно не ждать, а по истечении срока она завершается сама", async () => {
+    vi.useFakeTimers();
+    const pending = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", pending);
+    await openWizard();
+    await enterText(nameInput(), "Учитель китайского");
+    await click(findButton("Создать агента"));
+    await flush();
+
+    expect(container.textContent).toContain("Спрашиваю агента, кто он…");
+    expect(findButton("Не ждать — открыть чат")).toBeTruthy();
+
+    await act(async () => {
+      vi.advanceTimersByTime(90_001);
+      await Promise.resolve();
+    });
+    await flush();
+    expect(container.textContent).toContain("Модель не ответила вовремя");
+    expect(findButton("Повторить проверку")).toBeTruthy();
   });
 
   it("сбой обновления каталога не мешает проверке и не повторяет создание", async () => {
@@ -405,16 +545,11 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     expect(container.querySelector("#pb-clone")).toBeNull();
 
     await click(findButton("Дополнительно"));
-    await click(container.querySelector("#pb-clone")!);
-    const option = Array.from(
-      document.body.querySelectorAll('[role="option"]'),
-    ).find((node) => node.textContent?.includes("Секретарь (sekretar)"));
-    await click(option);
+    await pickOption(container.querySelector("#pb-clone"), "Секретарь (sekretar)");
     await flush();
 
-    expect(
-      container.querySelector<HTMLButtonElement>("#pb-model")?.textContent,
-    ).toContain("claude-sonnet-5");
+    expect(providerSelect()?.textContent).toContain("Как у агента-источника");
+    expect(container.textContent).toContain("dario · claude-sonnet-5 — доступ настроен");
 
     await enterText(nameInput(), "Второй секретарь");
     await click(findButton("Создать агента"));

@@ -203,8 +203,204 @@ export const DEFAULT_CONDUCT_RU =
 export function composeSoul(displayName: string, role: string): string {
   const name = displayName.trim();
   const body = role.trim();
-  const parts = [`# ${name}`, `Ты — ${name}, агент в системе Korra.`];
+  const parts = [`# ${name}`, soulIntro(name)];
   if (body) parts.push(body);
   parts.push("## Как общаться", DEFAULT_CONDUCT_RU);
   return `${parts.join("\n\n")}\n`;
+}
+
+/** Первая строка роли по нашему шаблону — по ней же узнаём шаблон при
+ *  переименовании. */
+function soulIntro(name: string): string {
+  return `Ты — ${name}, агент в системе Korra.`;
+}
+
+/**
+ * Роль начинается с нашего шаблона для этого имени («# Имя» и «Ты — Имя,
+ * агент в системе Korra.»).
+ *
+ * Переименование вкладки меняет лишь `display_name` в profile.yaml, а в
+ * SOUL.md остаётся «Ты — {старое имя}», и агент представляется старым именем
+ * (аудит 06.09, F13). Роль из интерфейса не переписываем (решение с Астрой
+ * 06.09) — только предупреждаем, и лишь когда имя в роли действительно наше
+ * шаблонное, а не случайное слово в чужих инструкциях.
+ */
+export function soulNamedAs(soul: string, name: string): boolean {
+  const who = name.trim();
+  if (!who) return false;
+  const normalized = soul.replace(/\r\n/g, "\n").replace(/^\uFEFF/, "");
+  return normalized.startsWith(`# ${who}\n\n${soulIntro(who)}`);
+}
+
+/**
+ * Английские тексты SOUL.md, которые движок подкладывает сам
+ * (`korra_cli/default_soul.py`: `DEFAULT_SOUL_MD` и `_LEGACY_TEMPLATE_SOULS`).
+ * Совпадение означает, что роль агенту никто не задавал: он «Korra, be direct»
+ * — как «Секретарь» на контуре владельца (аудит 06.09, F11).
+ */
+const ENGINE_DEFAULT_SOUL_STARTS = [
+  "You are Korra. Be direct:",
+  "You are Hermes Agent, built by Nous Research. Be direct:",
+  "You are Hermes Agent, an intelligent AI assistant created by Nous Research.",
+  "# Hermes Agent Persona",
+];
+
+/** Роль не задана: в SOUL.md лежит дефолт движка, пустота или его
+ *  комментарий-заготовка. Точный текст движка дублировать не нужно —
+ *  достаточно узнаваемого начала, а любой абзац владельца сверх него делает
+ *  текст «настоящей» ролью. */
+export function isEngineDefaultSoul(soul: string | null | undefined): boolean {
+  const text = (soul ?? "").replace(/\r\n/g, "\n").replace(/^\uFEFF/, "").trim();
+  if (!text) return true;
+  if (text.startsWith("# Hermes Agent Persona")) {
+    // Заготовка старых установщиков: заголовок и HTML-комментарий, ничего
+    // своего. Любой текст вне комментария — уже роль.
+    const rest = text
+      .replace(/^# Hermes Agent Persona/, "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .trim();
+    return rest === "";
+  }
+  const start = ENGINE_DEFAULT_SOUL_STARTS.find((prefix) => text.startsWith(prefix));
+  if (!start) return false;
+  // Дефолт движка — один абзац. Второй абзац — уже слова владельца.
+  return !/\n\s*\n\s*\S/.test(text.slice(start.length));
+}
+
+/** Заготовка роли: имя агента и текст, который человек может взять как есть
+ *  или поправить. */
+export interface RoleStarter {
+  id: string;
+  name: string;
+  role: string;
+}
+
+/**
+ * Заготовки ролей для мастера — «с чего начать», когда не знаешь, что писать.
+ *
+ * Каждая обещает только то, что агент умеет из коробки: читать, уточнять,
+ * считать, готовить текст, держать в голове сказанное в разговоре. Никаких
+ * «подключённой почты», «календаря» и «напомню сам» — этого SOUL.md не даёт
+ * (замечание Астры 05.09, распространено на заготовки 06.09).
+ */
+export const ROLE_STARTERS: readonly RoleStarter[] = [
+  {
+    id: "secretary",
+    name: "Секретарь",
+    role:
+      "Помогаешь мне вести дела: составляешь и правишь письма, готовишь короткие " +
+      "ответы, приводишь в порядок заметки после встреч. Договорённости, о " +
+      "которых я рассказал в разговоре, держишь списком и показываешь по " +
+      "запросу. Если не хватает данных — спрашивай, факты не выдумывай.",
+  },
+  {
+    id: "requests",
+    name: "Помощник по заявкам",
+    role:
+      "Помогаешь разбирать заявки клиентов. Уточняешь количество, сроки и бюджет. " +
+      "Готовишь ответ клиенту в вежливом деловом тоне, спорные вопросы передаёшь мне.",
+  },
+  {
+    id: "sales",
+    name: "Продавец-консультант",
+    role:
+      "Отвечаешь на вопросы клиентов о наших товарах и условиях так, как я тебе " +
+      "объяснил. Уточняешь потребность, предлагаешь подходящий вариант, цены " +
+      "называешь только из моих данных. Если чего-то не знаешь — так и говоришь и " +
+      "передаёшь вопрос мне.",
+  },
+  {
+    id: "accounting",
+    name: "Помощник бухгалтера",
+    role:
+      "Помогаешь с расчётами и документами: проверяешь цифры в том, что я " +
+      "присылаю, считаешь суммы и сроки по правилам, которые я задам, готовишь " +
+      "понятные пояснения. Спорное помечаешь для проверки бухгалтером и не " +
+      "даёшь гарантий по налогам и закону.",
+  },
+  {
+    id: "teacher",
+    name: "Учитель китайского",
+    role:
+      "Учишь меня китайскому короткими занятиями по 15 минут: объясняешь простыми " +
+      "словами, даёшь упражнения, проверяешь ответы и мягко исправляешь ошибки. " +
+      "Объяснения — по-русски, примеры — с пиньинем и переводом.",
+  },
+  {
+    id: "content",
+    name: "Контент-менеджер",
+    role:
+      "Пишешь посты и тексты для нашего бизнеса по моим тезисам: предлагаешь " +
+      "два-три варианта, держишь стиль, который я задам, без канцелярита и " +
+      "штампов. Сам ничего не публикуешь — только готовишь текст.",
+  },
+];
+
+/** Почему проверка не прошла — в словах владельца и с верным следующим шагом. */
+export interface ProbeFailureAdvice {
+  kind: "access" | "busy" | "timeout" | "network" | "unknown";
+  /** Короткий заголовок рядом с пометкой «не отвечает». */
+  title: string;
+  /** Что делать; всегда напоминает, что сам агент сохранён. */
+  advice: string;
+  /** Показывать ли кнопку «Открыть „Ключи“». */
+  keys: boolean;
+}
+
+/**
+ * Разобрать отказ контрольного сообщения.
+ *
+ * Раньше любой отказ объяснялся ключом провайдера. 06.09 провайдер владельца
+ * отвечал 401 «OAuth access token has expired» и 503 «all accounts are
+ * rate-limited» — это подписка и лимит, а не ключ и не агент: имя, роль и
+ * модель на диске уже есть. Человек должен видеть эту разницу, иначе он идёт
+ * чинить то, что не сломано.
+ */
+export function explainProbeFailure(
+  ...texts: Array<string | null | undefined>
+): ProbeFailureAdvice {
+  const text = texts.filter(Boolean).join(" \n ");
+  const saved = "Сам агент сохранён: имя, роль и модель на месте.";
+  if (/не удалось связаться с сервером|failed to fetch|networkerror|load failed/i.test(text)) {
+    return {
+      kind: "network",
+      title: "Панель не достучалась до сервера",
+      advice: `${saved} Проверьте интернет и повторите проверку.`,
+      keys: false,
+    };
+  }
+  if (/\b(401|403)\b|unauthori[sz]ed|forbidden|expired|invalid (x-)?api[- ]key|re-?authenticate|auth cool-?down|authentication/i.test(text)) {
+    return {
+      kind: "access",
+      title: "Нет доступа к модели",
+      advice:
+        `${saved} Провайдер не принял ключ или подписку — проверьте их в «Ключах» ` +
+        "или продлите подписку, затем повторите проверку.",
+      keys: true,
+    };
+  }
+  if (/\b(429|503|502)\b|rate[- ]?limit|too many requests|overloaded|cool-?down|temporarily unavailable|capacity/i.test(text)) {
+    return {
+      kind: "busy",
+      title: "Провайдер перегружен или исчерпан лимит",
+      advice: `${saved} Повторите проверку через несколько минут.`,
+      keys: false,
+    };
+  }
+  if (/\b504\b|time[d]? ?out|deadline/i.test(text)) {
+    return {
+      kind: "timeout",
+      title: "Модель не ответила вовремя",
+      advice: `${saved} Повторите проверку; если повторяется — выберите другую модель.`,
+      keys: false,
+    };
+  }
+  return {
+    kind: "unknown",
+    title: "Агент не ответил",
+    advice:
+      `${saved} Повторите проверку; если ответа нет — посмотрите ключ провайдера ` +
+      "в «Ключах» или выберите другую модель.",
+    keys: true,
+  };
 }
