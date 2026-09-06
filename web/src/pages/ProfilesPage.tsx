@@ -22,6 +22,7 @@ import { buildModelChoices, choiceKey, modelKey, type ModelChoice } from '@/lib/
 import type { ActiveProfileInfo, ProfileInfo } from '@/lib/api'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { ownerFacingError } from '@/lib/owner-facing-error'
+import ProfileLearningPanel, { type LearningSection } from '@/components/agents/ProfileLearningPanel'
 import { DeleteConfirmDialog } from '@/components/DeleteConfirmDialog'
 import { useToast } from '@nous-research/ui/hooks/use-toast'
 import { useConfirmDelete } from '@nous-research/ui/hooks/use-confirm-delete'
@@ -36,6 +37,10 @@ import { Select, SelectOption } from '@nous-research/ui/ui/components/select'
 import { useI18n } from '@/i18n'
 import { usePageHeader } from '@/contexts/usePageHeader'
 import { cn, themedBody } from '@/lib/utils'
+
+function profileLabel(profile: ProfileInfo) {
+  return profile.display_name?.trim() || (profile.is_default ? 'Главный агент' : profile.name)
+}
 
 /** Braille unicode spinner (`unicode-animations`); static first frame when reduced motion is preferred. */
 function ProfilesLoadingSpinner() {
@@ -157,7 +162,7 @@ function ProfileActionsMenu({
               <ChevronDown className="h-4 w-4" />
             ) : (
               <span aria-hidden className="w-4 text-center text-xs font-bold">
-                S
+                <Sparkles className="h-4 w-4" />
               </span>
             )}
             {labels.editSoul}
@@ -206,7 +211,7 @@ export default function ProfilesPage() {
   const { toast, showToast } = useToast()
   const { t, tr } = useI18n()
   const { setEnd, setTitle } = usePageHeader()
-  const { setProfile, refreshProfiles } = useProfileScope()
+  const { refreshProfiles } = useProfileScope()
 
   // Locale strings with English fallbacks. The enriched keys are optional in
   // the i18n type so untranslated locales don't break the build — they render
@@ -214,10 +219,8 @@ export default function ProfilesPage() {
   const L = useMemo(() => {
     const p = t.profiles
     return {
-      activeProfile: p.activeProfile ?? tr('Active profile'),
-      activeBadge: p.activeBadge ?? tr('active'),
-      setActive: p.setActive ?? tr('Set as active'),
-      activeSet: p.activeSet ?? tr('Active profile set'),
+      activeBadge: 'По умолчанию в терминале',
+      setActive: 'По умолчанию в терминале',
       gatewayRunningWarning: p.gatewayRunningWarning ?? tr("This profile's gateway is running — it will be stopped."),
       aliasBadge: p.aliasBadge ?? tr('alias'),
       description: 'Описание для списка и канбана',
@@ -238,9 +241,7 @@ export default function ProfilesPage() {
       modelSaved: p.modelSaved ?? tr('Model updated'),
       modelSelect: p.modelSelect ?? tr('Select a model'),
       actions: p.actions ?? tr('Actions'),
-      manageSkills: p.manageSkills ?? tr('Manage skills & tools'),
-      activeSetHint:
-        p.activeSetHint ?? tr('Dashboard switched to manage {name}. New CLI/gateway runs will use this profile too.')
+      manageSkills: 'Навыки и инструменты'
     }
   }, [t.profiles, tr])
 
@@ -253,14 +254,16 @@ export default function ProfilesPage() {
   const [renameTo, setRenameTo] = useState('')
   const [renameSaving, setRenameSaving] = useState(false)
 
-  // Inline SOUL editor state
-  const [editingSoulFor, setEditingSoulFor] = useState<string | null>(null)
-  const [soulText, setSoulText] = useState('')
-  const [soulSaving, setSoulSaving] = useState(false)
-  // Tracks the latest SOUL request so out-of-order responses don't overwrite
-  // newer state when the user switches profiles or closes the editor.
-  const activeSoulRequest = useRef(0)
-  const [soulLoadState, setSoulLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const addressedAgent = searchParams.get('agent')
+  const addressedEditor = searchParams.get('edit')
+  const addressedSection = searchParams.get('section')
+  const editingLearningFor =
+    ['role', 'learning'].includes(addressedEditor ?? '') && profiles.some(p => p.name === addressedAgent)
+      ? addressedAgent
+      : null
+  const learningSection: LearningSection = ['role', 'memory', 'materials', 'check'].includes(addressedSection ?? '')
+    ? (addressedSection as LearningSection)
+    : 'role'
 
   // Inline description editor state
   const [editingDescFor, setEditingDescFor] = useState<string | null>(null)
@@ -346,8 +349,8 @@ export default function ProfilesPage() {
       // The backend normalizes/validates the name; trust the canonical
       // value it returns rather than the raw input.
       const { active } = await api.setActiveProfile(name)
-      setProfile(active)
-      showToast(`${L.activeSet}: ${active} — ${L.activeSetHint.replace('{name}', active)}`, 'success')
+      const selected = profiles.find(p => p.name === active)
+      showToast(`Для новых запусков терминала выбран агент «${selected ? profileLabel(selected) : active}».`, 'success')
       setActiveInfo(prev => (prev ? { ...prev, active } : { active, current: active }))
     } catch (e) {
       showToast(ownerFacingError(e, 'Не удалось изменить активный профиль.'), 'error')
@@ -358,66 +361,24 @@ export default function ProfilesPage() {
 
   // Закрытие убирает адрес редактора, чтобы ссылка могла открыть его заново.
   const closeEditor = useCallback(() => {
-    activeSoulRequest.current += 1
     activeDescRequest.current = null
     setEditingModelFor(null)
     setEditingDescFor(null)
-    setEditingSoulFor(null)
     setSearchParams(
       previous => {
         const next = new URLSearchParams(previous)
         next.delete('edit')
+        next.delete('section')
         return next
       },
       { replace: true }
     )
   }, [setSearchParams])
 
-  const loadSoul = useCallback(async (name: string) => {
-    const ticket = ++activeSoulRequest.current
-    setSoulText('')
-    setSoulLoadState('loading')
-    try {
-      const soul = await api.getProfileSoul(name)
-      if (activeSoulRequest.current !== ticket) return
-      setSoulText(soul.content)
-      setSoulLoadState('ready')
-    } catch {
-      if (activeSoulRequest.current === ticket) setSoulLoadState('error')
-    }
-  }, [])
-
-  const openSoulEditor = useCallback(
-    (name: string) => {
-      if (editingSoulFor === name) {
-        closeEditor()
-        return
-      }
-      setEditingDescFor(null)
-      setEditingModelFor(null)
-      setEditingSoulFor(name)
-      void loadSoul(name)
-    },
-    [closeEditor, editingSoulFor, loadSoul]
-  )
-
-  const handleSaveSoul = async (name: string) => {
-    if (soulLoadState !== 'ready' || soulSaving) return
-    const ticket = activeSoulRequest.current
-    setSoulSaving(true)
-    try {
-      await api.updateProfileSoul(name, soulText)
-      if (activeSoulRequest.current === ticket) {
-        showToast('Роль сохранена. Изменения применятся в новом разговоре.', 'success')
-        closeEditor()
-      }
-    } catch (e) {
-      if (activeSoulRequest.current === ticket) {
-        showToast(ownerFacingError(e, 'Не удалось сохранить роль агента.'), 'error')
-      }
-    } finally {
-      setSoulSaving(false)
-    }
+  const openLearningAddress = (name: string) => {
+    setEditingModelFor(null)
+    setEditingDescFor(null)
+    setSearchParams({ agent: name, edit: 'learning' })
   }
 
   const openDescEditor = useCallback(
@@ -426,9 +387,8 @@ export default function ProfilesPage() {
         closeEditor()
         return
       }
+      closeEditor()
       activeDescRequest.current = p.name
-      activeSoulRequest.current += 1
-      setEditingSoulFor(null)
       setEditingModelFor(null)
       setEditingDescFor(p.name)
       setDescText(p.description ?? '')
@@ -509,14 +469,13 @@ export default function ProfilesPage() {
         closeEditor()
         return
       }
-      activeSoulRequest.current += 1
-      setEditingSoulFor(null)
+      if (addressedEditor !== 'model') closeEditor()
       setEditingDescFor(null)
       setEditingModelFor(p.name)
       setModelEditChoice(modelKey(p.provider, p.model))
       loadModelChoices()
     },
-    [closeEditor, editingModelFor, loadModelChoices]
+    [closeEditor, editingModelFor, loadModelChoices, addressedEditor]
   )
 
   const handleSaveModel = async (name: string) => {
@@ -537,8 +496,6 @@ export default function ProfilesPage() {
     }
   }
 
-  const addressedAgent = searchParams.get('agent')
-  const addressedEditor = searchParams.get('edit')
   const openedAddress = useRef<string | null>(null)
   useEffect(() => {
     if (!addressedAgent || !addressedEditor) {
@@ -546,7 +503,7 @@ export default function ProfilesPage() {
       return
     }
     if (loading) return
-    const address = `${addressedAgent}:${addressedEditor}`
+    const address = `${addressedAgent}:${addressedEditor}:${addressedSection ?? ''}`
     if (openedAddress.current === address) return
     openedAddress.current = address
     const profile = profiles.find(item => item.name === addressedAgent)
@@ -554,20 +511,28 @@ export default function ProfilesPage() {
       showToast('Агент не найден. Выберите его в списке.', 'error')
       return
     }
-    if (addressedEditor === 'role') openSoulEditor(profile.name)
     if (addressedEditor === 'model') openModelEditor(profile)
-  }, [addressedAgent, addressedEditor, loading, profiles, openSoulEditor, openModelEditor, showToast])
+  }, [
+    addressedAgent,
+    addressedEditor,
+    addressedSection,
+    loading,
+    profiles,
+    openModelEditor,
+    showToast
+  ])
 
   // Exactly one editor is open at a time; derive which profile + kind so a
   // single dialog can render the right body.
-  const editorName = editingModelFor ?? editingDescFor ?? editingSoulFor
-  const editorKind: 'model' | 'desc' | 'soul' | null = editingModelFor
+  const editorName = editingModelFor ?? editingDescFor ?? editingLearningFor
+  const editorKind: 'model' | 'desc' | 'learning' | null = editingModelFor
     ? 'model'
     : editingDescFor
       ? 'desc'
-      : editingSoulFor
-        ? 'soul'
+      : editingLearningFor
+        ? 'learning'
         : null
+  const editingProfile = profiles.find(p => p.name === editorName)
   const editorModalRef = useModalBehavior({
     open: editorName != null,
     onClose: closeEditor
@@ -650,24 +615,10 @@ export default function ProfilesPage() {
         loading={profileDelete.isDeleting}
       />
 
-      {/* Active profile banner */}
-      {activeInfo && (
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3 text-xs">
-            <span className="flex items-center gap-2 text-muted-foreground">
-              <Check className="h-3.5 w-3.5 text-success" />
-
-              <span>
-                {L.activeProfile}: <span className="font-medium text-foreground">{activeInfo.active}</span>
-              </span>
-            </span>
-
-            {activeInfo.current !== activeInfo.active && (
-              <span className="text-muted-foreground/80">({activeInfo.current})</span>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      <p className="text-sm text-muted-foreground">
+        Выберите агента, задайте правила работы и добавьте знания о своём деле. В обучении можно проверить результат
+        вопросом, подключить инструменты и настроить расписание.
+      </p>
 
       {/* List */}
       <div className="flex flex-col gap-3">
@@ -687,7 +638,7 @@ export default function ProfilesPage() {
         <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 xl:grid-cols-3">
           {profiles.map(p => {
             const isRenaming = renamingFrom === p.name
-            const isEditingSoul = editingSoulFor === p.name
+            const isEditingSoul = editingLearningFor === p.name
             const isEditingDesc = editingDescFor === p.name
             const isEditingModel = editingModelFor === p.name
             const active = isActive(p)
@@ -739,23 +690,9 @@ export default function ProfilesPage() {
                     <>
                       <div className="flex items-start gap-2">
                         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                          <span className="font-medium text-sm truncate">
-                            {p.display_name?.trim() ? `${p.display_name.trim()} (${p.name})` : p.name}
-                          </span>
+                          <span className="font-medium text-sm truncate">{profileLabel(p)}</span>
 
-                          {active && <Badge tone="success">{L.activeBadge}</Badge>}
-
-                          {p.is_default && <Badge tone="secondary">{t.profiles.defaultBadge}</Badge>}
-
-                          {p.has_alias && <Badge tone="outline">{L.aliasBadge}</Badge>}
-
-                          {p.distribution_name && (
-                            <Badge tone="outline" className="gap-1">
-                              <Package className="h-3 w-3" />
-                              {p.distribution_name}
-                              {p.distribution_version ? `@${p.distribution_version}` : ''}
-                            </Badge>
-                          )}
+                          {p.is_default && <Badge tone="secondary">Главный</Badge>}
                         </div>
 
                         <ProfileActionsMenu
@@ -770,7 +707,7 @@ export default function ProfilesPage() {
                             setActive: L.setActive,
                             editModel: L.editModel,
                             editDescription: L.editDescription,
-                            editSoul: 'Роль и поведение',
+                            editSoul: 'Обучение и настройки',
                             manageSkills: L.manageSkills,
                             openInTerminal: t.profiles.openInTerminal,
                             rename: 'Изменить имя',
@@ -780,7 +717,7 @@ export default function ProfilesPage() {
                           onDelete={() => profileDelete.requestDelete(p.name)}
                           onEditDescription={() => openDescEditor(p)}
                           onEditModel={() => openModelEditor(p)}
-                          onEditSoul={() => openSoulEditor(p.name)}
+                          onEditSoul={() => openLearningAddress(p.name)}
                           onManageSkills={() => navigate(`/skills?profile=${encodeURIComponent(p.name)}`)}
                           onRename={() => {
                             if (renameSaving) return
@@ -808,28 +745,33 @@ export default function ProfilesPage() {
                         )}
                       </div>
 
-                      <div className="mt-auto flex flex-col gap-0.5 pt-1 text-xs text-muted-foreground">
-                        {p.model && (
-                          <span className="truncate">
-                            {t.profiles.model}: {p.model}
-                            {p.provider ? ` (${p.provider})` : ''}
-                          </span>
-                        )}
-
-                        <span>
-                          {t.profiles.skills}: {p.skill_count}
-                        </span>
-
-                        <span className="truncate">{p.path}</span>
-                      </div>
+                      {p.model && (
+                        <p className="mt-auto pt-2 text-xs text-muted-foreground truncate">Модель: {p.model}</p>
+                      )}
                       <div className="flex flex-wrap gap-2 pt-3">
-                        <Button size="sm" onClick={() => navigate(`/agents?agent=${encodeURIComponent(p.name)}`)}>
+                        <Button size="sm" onClick={() => openLearningAddress(p.name)}>
+                          Обучение и настройки
+                        </Button>
+                        <Button size="sm" ghost onClick={() => navigate(`/agents?agent=${encodeURIComponent(p.name)}`)}>
                           Открыть чат
                         </Button>
-                        <Button size="sm" ghost onClick={() => openSoulEditor(p.name)}>
-                          Роль и поведение
-                        </Button>
                       </div>
+                      <details className="pt-2 text-xs text-muted-foreground">
+                        <summary className="cursor-pointer py-1">Служебные сведения</summary>
+                        <div className="grid gap-1 pt-2 break-all">
+                          <span>Адрес агента: {p.name}</span>
+                          <span>Каталог: {p.path}</span>
+                          {p.provider && <span>Подключение модели: {p.provider}</span>}
+                          <span>Навыков и материалов: {p.skill_count}</span>
+                          {active && <span>{L.activeBadge}</span>}
+                          {p.has_alias && <span>Есть команда для запуска в терминале</span>}
+                          {p.distribution_name && (
+                            <span>
+                              Сборка: {p.distribution_name} {p.distribution_version}
+                            </span>
+                          )}
+                        </div>
+                      </details>
                     </>
                   )}
                 </CardContent>
@@ -839,143 +781,124 @@ export default function ProfilesPage() {
         </div>
       </div>
 
-      {/* Editor dialog — model / description / SOUL for the selected profile */}
-      {editorName && (
+      {/* Один редактор роли: общая панель обучения, в том числе по старым ссылкам. */}
+      {editorName && editingProfile && (
         <div
           ref={editorModalRef}
           className="fixed inset-0 z-[100] flex items-center justify-center bg-background/85 p-4"
           onClick={e => e.target === e.currentTarget && closeEditor()}
           role="dialog"
           aria-modal="true"
-          aria-labelledby="profile-editor-title"
+          aria-labelledby={editorKind === 'learning' ? undefined : 'profile-editor-title'}
+          aria-label={editorKind === 'learning' ? `Обучение агента «${profileLabel(editingProfile)}»` : undefined}
         >
-          <div className={cn(themedBody, 'relative w-full max-w-lg bg-card shadow-2xl flex flex-col max-h-[90vh]')}>
-            <Button
-              ghost
-              size="icon"
-              onClick={closeEditor}
-              className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
-              aria-label={t.common.close}
-            >
-              <X />
-            </Button>
+          <div
+            className={cn(
+              themedBody,
+              'relative w-full bg-card shadow-2xl flex flex-col max-h-[90vh]',
+              editorKind === 'learning' ? 'max-w-3xl' : 'max-w-lg'
+            )}
+          >
+            {editorKind === 'learning' ? (
+              <div className="p-5 min-h-0 overflow-y-auto">
+                <ProfileLearningPanel
+                  key={`${editorName}:${learningSection}`}
+                  profile={editingProfile}
+                  section={learningSection}
+                  onClose={closeEditor}
+                  onProfileChanged={load}
+                />
+              </div>
+            ) : (
+              <>
+                <Button
+                  ghost
+                  size="icon"
+                  onClick={closeEditor}
+                  className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                  aria-label={t.common.close}
+                >
+                  <X />
+                </Button>
 
-            <header className="p-5 pb-3 ">
-              <h2 id="profile-editor-title" className="text-base">
-                {editorKind === 'model' ? L.editModel : editorKind === 'desc' ? L.description : 'Роль и поведение'}
-                <span className="text-muted-foreground">
-                  {' '}
-                  · {profiles.find(p => p.name === editorName)?.display_name || editorName}
-                </span>
-              </h2>
-            </header>
+                <header className="p-5 pb-3 ">
+                  <h2 id="profile-editor-title" className="text-base">
+                    {editorKind === 'model' ? L.editModel : editorKind === 'desc' ? L.description : L.description}
+                    <span className="text-muted-foreground">
+                      {' '}
+                      · {profiles.find(p => p.name === editorName)?.display_name || editorName}
+                    </span>
+                  </h2>
+                </header>
 
-            <div className={cn('p-5 grid gap-4', editorKind === 'soul' && 'min-h-0 overflow-y-auto')}>
-              {editorKind === 'model' &&
-                (modelChoices !== null && modelChoices.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">{L.modelNone}</p>
-                ) : (
-                  <>
-                    <Select
-                      value={modelEditChoice}
-                      disabled={modelChoices === null}
-                      placeholder={modelChoices === null ? L.modelLoading : L.modelSelect}
-                      onValueChange={setModelEditChoice}
-                    >
-                      {(modelChoices ?? []).map(c => (
-                        <SelectOption key={choiceKey(c)} value={choiceKey(c)}>
-                          {c.label}
-                        </SelectOption>
-                      ))}
-                    </Select>
+                <div className="p-5 grid gap-4 min-h-0 overflow-y-auto">
+                  {editorKind === 'model' &&
+                    (modelChoices !== null && modelChoices.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">{L.modelNone}</p>
+                    ) : (
+                      <>
+                        <Select
+                          value={modelEditChoice}
+                          disabled={modelChoices === null}
+                          placeholder={modelChoices === null ? L.modelLoading : L.modelSelect}
+                          onValueChange={setModelEditChoice}
+                        >
+                          {(modelChoices ?? []).map(c => (
+                            <SelectOption key={choiceKey(c)} value={choiceKey(c)}>
+                              {c.label}
+                            </SelectOption>
+                          ))}
+                        </Select>
 
-                    <div className="flex justify-end">
-                      <Button
-                        size="sm"
-                        onClick={() => handleSaveModel(editorName)}
-                        disabled={modelSaving || !modelChoices?.some(c => choiceKey(c) === modelEditChoice)}
-                      >
-                        {modelSaving ? t.common.saving : t.common.save}
-                      </Button>
-                    </div>
-                  </>
-                ))}
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            onClick={() => handleSaveModel(editorName)}
+                            disabled={modelSaving || !modelChoices?.some(c => choiceKey(c) === modelEditChoice)}
+                          >
+                            {modelSaving ? t.common.saving : t.common.save}
+                          </Button>
+                        </div>
+                      </>
+                    ))}
 
-              {editorKind === 'desc' && (
-                <>
-                  <div className="flex items-center justify-between gap-2">
-                    <Label htmlFor="profile-desc-editor" className="text-xs text-muted-foreground">
-                      {L.description}
-                    </Label>
+                  {editorKind === 'desc' && (
+                    <>
+                      <div className="flex items-center justify-between gap-2">
+                        <Label htmlFor="profile-desc-editor" className="text-xs text-muted-foreground">
+                          {L.description}
+                        </Label>
 
-                    <Button
-                      size="sm"
-                      ghost
-                      className="gap-1.5"
-                      disabled={describing}
-                      onClick={() => handleAutoDescribe(editorName)}
-                    >
-                      <Sparkles className="h-3.5 w-3.5" />
-                      {describing ? L.generating : L.autoGenerate}
-                    </Button>
-                  </div>
+                        <Button
+                          size="sm"
+                          ghost
+                          className="gap-1.5"
+                          disabled={describing}
+                          onClick={() => handleAutoDescribe(editorName)}
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                          {describing ? L.generating : L.autoGenerate}
+                        </Button>
+                      </div>
 
-                  <textarea
-                    id="profile-desc-editor"
-                    className="flex min-h-[96px] w-full bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none"
-                    placeholder={L.descriptionPlaceholder}
-                    value={descText}
-                    onChange={e => setDescText(e.target.value)}
-                  />
+                      <textarea
+                        id="profile-desc-editor"
+                        className="flex min-h-[96px] w-full bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none"
+                        placeholder={L.descriptionPlaceholder}
+                        value={descText}
+                        onChange={e => setDescText(e.target.value)}
+                      />
 
-                  <div className="flex justify-end">
-                    <Button size="sm" onClick={() => handleSaveDesc(editorName)} disabled={descSaving}>
-                      {descSaving ? t.common.saving : t.common.save}
-                    </Button>
-                  </div>
-                </>
-              )}
-
-              {editorKind === 'soul' && (
-                <>
-                  <Label htmlFor="profile-soul-editor" className="text-xs text-muted-foreground">
-                    {'Роль и поведение'}
-                  </Label>
-
-                  <p className="text-sm text-muted-foreground">
-                    Напишите обычными словами, что агент делает, какие правила соблюдает и что должен знать о вашем
-                    бизнесе. Изменения роли применятся в новом разговоре.
-                  </p>
-                  {soulLoadState === 'loading' && <p role="status">Загружаем роль…</p>}
-                  {soulLoadState === 'error' && (
-                    <div role="alert" className="grid gap-3 text-sm">
-                      <p>Не удалось загрузить роль. Повторите загрузку, чтобы сохранить ваши инструкции.</p>
-                      <Button size="sm" onClick={() => void loadSoul(editorName)}>
-                        Повторить загрузку
-                      </Button>
-                    </div>
+                      <div className="flex justify-end">
+                        <Button size="sm" onClick={() => handleSaveDesc(editorName)} disabled={descSaving}>
+                          {descSaving ? t.common.saving : t.common.save}
+                        </Button>
+                      </div>
+                    </>
                   )}
-                  <textarea
-                    id="profile-soul-editor"
-                    disabled={soulLoadState !== 'ready' || soulSaving}
-                    className="flex min-h-[280px] w-full bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none"
-                    placeholder="Опишите задачи агента, правила работы и важные факты о вашем бизнесе."
-                    value={soulText}
-                    onChange={e => setSoulText(e.target.value)}
-                  />
-
-                  <div className="flex justify-end">
-                    <Button
-                      size="sm"
-                      onClick={() => void handleSaveSoul(editorName)}
-                      disabled={soulSaving || soulLoadState !== 'ready'}
-                    >
-                      {soulSaving ? t.common.saving : t.common.save}
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

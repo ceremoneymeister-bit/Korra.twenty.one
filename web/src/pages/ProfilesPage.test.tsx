@@ -16,6 +16,9 @@ const apiMocks = vi.hoisted(() => ({
   updateProfileDisplayName: vi.fn(),
   deleteProfile: vi.fn(),
   getProfileSoul: vi.fn(),
+  getProfileMemory: vi.fn(),
+  getProfileMaterials: vi.fn(),
+  setActiveProfile: vi.fn(),
   updateProfileSoul: vi.fn()
 }))
 
@@ -144,7 +147,7 @@ async function openPage(path = '/profiles') {
 }
 
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')!
-const editor = () => document.querySelector<HTMLTextAreaElement>('#profile-soul-editor')!
+const editor = () => document.querySelector<HTMLTextAreaElement>('#learning-role')!
 const save = () => findButton('Сохранить', dialog())!
 
 beforeEach(() => {
@@ -187,6 +190,15 @@ beforeEach(() => {
     path: '/root/.korra-buhgalter',
     model_set: true
   })
+  apiMocks.setActiveProfile.mockResolvedValue({ active: 'secretary' })
+  apiMocks.getProfileMemory.mockResolvedValue({
+    memory: [],
+    user: [],
+    limits: { memory: 2200, user: 1375 },
+    used: { memory: 0, user: 0 },
+    enabled: { memory: true, user: true }
+  })
+  apiMocks.getProfileMaterials.mockResolvedValue({ materials: [] })
   apiMocks.getProfileSoul.mockResolvedValue({ content: 'Готовь повестки встреч.', exists: true })
   apiMocks.updateProfileSoul.mockResolvedValue({ ok: true })
 })
@@ -272,11 +284,13 @@ describe('ProfilesPage — создание и роль агента', () => {
     await openPage('/profiles?agent=secretary&edit=role')
     expect(apiMocks.getProfileSoul).toHaveBeenCalledWith('secretary')
     expect(dialog().textContent).toContain('Секретарь')
-    expect(dialog().textContent).toContain('Изменения роли применятся в новом разговоре')
+    expect(dialog().textContent).toContain('Изменения применятся в новом разговоре')
     expect(editor().value).toBe('Готовь повестки встреч.')
     await enterText(editor(), 'Запрашивай сроки и собирай повестку.')
     await click(save())
     expect(apiMocks.updateProfileSoul).toHaveBeenCalledWith('secretary', 'Запрашивай сроки и собирай повестку.')
+    expect(dialog().textContent).toContain('Сохранено. Изменения применятся в новом разговоре.')
+    await click(findButton('Закрыть', dialog()))
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(container.querySelector('[data-testid="location"]')?.textContent).toBe('/profiles?agent=secretary')
   })
@@ -295,6 +309,7 @@ describe('ProfilesPage — создание и роль агента', () => {
     expect(apiMocks.updateProfileSoul).not.toHaveBeenCalled()
     await act(async () => resolve({ content: 'Существующая роль', exists: true }))
     expect(editor().value).toBe('Существующая роль')
+    await enterText(editor(), 'Существующая роль с уточнением')
     expect(save().disabled).toBe(false)
   })
 
@@ -307,6 +322,7 @@ describe('ProfilesPage — создание и роль агента', () => {
     expect(apiMocks.updateProfileSoul).not.toHaveBeenCalled()
     await click(findButton('Повторить загрузку', dialog()))
     expect(editor().value).toBe('Готовь повестки встреч.')
+    await enterText(editor(), 'Готовь повестки и протоколы встреч.')
     expect(save().disabled).toBe(false)
   })
 
@@ -318,14 +334,47 @@ describe('ProfilesPage — создание и роль агента', () => {
       })
     )
     await openPage('/profiles?agent=secretary&edit=role')
-    await click(dialog().querySelector('button[aria-label="Закрыть"]')!)
+    await click(findButton('Закрыть', dialog()))
     const actionButtons = container.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')
     await click(actionButtons[1])
-    await click(findButton('Роль и поведение', document.querySelector('[role="menu"]')!))
+    await click(findButton('Обучение и настройки', document.querySelector('[role="menu"]')!))
     expect(editor().value).toBe('Готовь повестки встреч.')
     await enterText(editor(), 'Мои новые инструкции')
     await act(async () => oldResponse({ content: 'Устаревшие инструкции', exists: true }))
     expect(editor().value).toBe('Мои новые инструкции')
+  })
+
+  it.each(['memory', 'materials'])(
+    'открывает адресованный раздел обучения %s и убирает адрес при закрытии',
+    async section => {
+      await openPage(`/profiles?agent=secretary&edit=learning&section=${section}`)
+      expect(dialog().getAttribute('aria-label')).toBe('Обучение агента «Секретарь»')
+      if (section === 'memory') expect(apiMocks.getProfileMemory).toHaveBeenCalledWith('secretary')
+      else expect(apiMocks.getProfileMaterials).toHaveBeenCalledWith('secretary')
+      expect(apiMocks.getProfileSoul).not.toHaveBeenCalled()
+      await click(findButton('Закрыть', dialog()))
+      expect(container.querySelector('[data-testid="location"]')?.textContent).toBe('/profiles?agent=secretary')
+    }
+  )
+
+  it('на карточке открывает общую панель обучения выбранного агента', async () => {
+    await openPage()
+    const buttons = [...container.querySelectorAll('button')].filter(b => b.textContent === 'Обучение и настройки')
+    await click(buttons[1])
+    expect(apiMocks.getProfileSoul).toHaveBeenCalledWith('secretary')
+    expect(container.querySelector('[data-testid="location"]')?.textContent).toBe(
+      '/profiles?agent=secretary&edit=learning'
+    )
+    expect(dialog().querySelectorAll('#learning-role')).toHaveLength(1)
+  })
+
+  it('выбор агента по умолчанию относится к терминалу и не обещает смену чата', async () => {
+    await openPage()
+    await click(container.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')[1])
+    await click(findButton('По умолчанию в терминале', document.querySelector('[role="menu"]')!))
+    expect(apiMocks.setActiveProfile).toHaveBeenCalledWith('secretary')
+    expect(scopeMocks.setProfile).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('Для новых запусков терминала выбран агент «Секретарь».')
   })
 
   it('по ссылке на модель выбирает модель адресованного агента', async () => {
