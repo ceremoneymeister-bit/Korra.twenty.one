@@ -677,6 +677,9 @@ def init_agent(
     agent.tool_progress_mode = tool_progress_mode
     agent.ephemeral_system_prompt = ephemeral_system_prompt
     agent.platform = platform  # "cli", "telegram", "discord", "whatsapp", etc.
+    # Источник фиксируем при создании: следующий запрос в том же процессе
+    # не должен менять подсказку оформления и кэш системного промпта.
+    agent._session_source = _ra()._session_source_for_agent(platform)
     agent._user_id = user_id  # Platform user identifier (gateway sessions)
     agent._user_id_alt = user_id_alt  # Optional stable alternate platform identifier
     agent._user_name = user_name

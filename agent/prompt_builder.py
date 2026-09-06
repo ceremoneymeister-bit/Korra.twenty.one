@@ -1055,15 +1055,33 @@ PLATFORM_HINTS = {
         "a raw host filesystem path. For those cases, state the plain file path "
         "in your response text instead of a MEDIA: tag."
     ),
-    # NOTE: a "webui" hint lived here until 2026-08-29. It was a ghost
-    # (verified in the all-platform hint audit, PR #97873): no code path
-    # constructs platform="webui" — the dashboard chat resolves to
-    # 'desktop' or 'tui' (tui_gateway/server.py:_resolve_session_platform),
-    # and the browser chat tab is an xterm.js PTY hosting the TUI, not an
-    # HTML chat renderer. Its content (tables/LaTeX/Mermaid, MEDIA: rich
-    # previews incl. Excalidraw) described a renderer that does not exist
-    # anywhere in web/. If a real WebUI chat surface ships, write a hint
-    # from its actual renderer — do not resurrect this text.
+    # Чат Korra в браузере: source=dashboard, transport=api_server.
+    "dashboard": (
+        "Ты отвечаешь в веб-панели Korra. Здесь ответы читают как аккуратно "
+        "написанный документ: интерфейс поддерживает Markdown. Пиши по-русски, "
+        "понятно человеку без технического образования. Начинай с ответа на вопрос "
+        "или главного результата. Короткому ответу достаточно одного-двух абзацев. "
+        "Длинный ответ разделяй на смысловые части с короткими заголовками ## и ###; "
+        "не заменяй заголовки словами в верхнем регистре. Между абзацами оставляй "
+        "пустую строку, в абзаце обычно 2–4 предложения. Используй нумерованные "
+        "списки для последовательных шагов, маркированные — для вариантов и "
+        "перечислений. Выделяй **жирным** несколько ключевых выводов или условий, "
+        "а не целые абзацы. Сравнения по одинаковым критериям и небольшие наборы "
+        "данных оформляй Markdown-таблицей с заголовками столбцов; обычному "
+        "объяснению таблица не нужна. Код и команды помещай в блоки с тройными "
+        "обратными кавычками и языком, короткие имена файлов и команды — в `код`. "
+        "Цитаты оформляй через >, ссылки — с понятными подписями. Не используй "
+        "HTML, LaTeX или Mermaid: чат не исполняет такую разметку. Избегай "
+        "декоративных эмодзи, повторов и обязательного заключения к каждому ответу. "
+        "Не растягивай текст ради оформления. Ход работы инструментов интерфейс "
+        "показывает отдельно: в ответе дай результат, существенные ограничения "
+        "и нужный следующий шаг. При ошибке ясно скажи, что не получилось и "
+        "что можно сделать; не выдавай предположение за выполненную работу. "
+        "Доставка файлов остаётся такой же, как в API: изображения до 5 МБ "
+        "(.png/.jpg/.jpeg/.gif/.webp/.bmp) через MEDIA:/absolute/path встраиваются "
+        "в ответы chat/completions/responses. Для остальных файлов, а также "
+        "в runs, указывай путь обычным текстом, без MEDIA:."
+    ),
 }
 
 # Telegram rich-messages extension — only injected when the user has opted in

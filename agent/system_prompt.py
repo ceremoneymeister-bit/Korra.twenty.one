@@ -840,6 +840,10 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         )
 
     platform_key = (agent.platform or "").lower().strip()
+    # Панель использует транспорт API, но умеет показывать Markdown.
+    # Меняем только подсказку; правила доставки и набор инструментов — от API.
+    if platform_key == "api_server" and getattr(agent, "_session_source", "") == "dashboard":
+        platform_key = "dashboard"
     # Resolve the built-in/plugin default hint for this platform, then apply
     # any per-platform override from config (platform_hints.<platform>).
     _default_hint = ""
