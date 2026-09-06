@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { KorraLoader } from "@/components/KorraLoader";
 import {
@@ -657,7 +658,9 @@ export default function EnvPage() {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(true); // Show all providers by default
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
+  const [providerQuery, setProviderQuery] = useState("");
   const { toast, showToast } = useToast();
   const { t } = useI18n();
   const { setAfterTitle } = usePageHeader();
@@ -681,14 +684,14 @@ export default function EnvPage() {
   // Scroll-to sub-nav in the page header
   const sections = useMemo(() => {
     const items: { id: string; label: string }[] = [
-      { id: "section-oauth", label: "OAuth" },
-      { id: "section-providers", label: "Провайдеры" },
+      { id: "section-oauth", label: "Аккаунты" },
+      { id: "section-providers", label: "Сервисы ответов" },
     ];
     if (vars) {
       const categories = ["tool", "messaging", "setting"];
       const CATEGORY_LABELS: Record<string, string> = {
         tool: "Инструменты",
-        messaging: t.common.gateway ?? "Шлюз",
+        messaging: "Общие подключения",
         setting: "Настройки",
       };
       for (const cat of categories) {
@@ -724,7 +727,7 @@ export default function EnvPage() {
                 key={s.id}
                 type="button"
                 onClick={() => scrollTo(s.id)}
-                className="shrink-0 cursor-pointer px-2 py-0.5 font-mondwest text-display text-xs tracking-wider text-text-secondary hover:text-foreground border border-border/50 hover:border-foreground/30 transition-colors"
+                className="shrink-0 cursor-pointer px-2 py-1 text-xs text-text-secondary hover:text-foreground transition-colors"
               >
                 {s.label}
               </button>
@@ -865,7 +868,7 @@ export default function EnvPage() {
 
     const providerEntries = Object.entries(vars).filter(
       ([, info]) =>
-        info.category === "provider" && (showAdvanced || !info.advanced),
+        info.category === "provider" && (showAdvanced || !info.advanced || info.is_set),
     );
 
     // Group by provider
@@ -897,14 +900,12 @@ export default function EnvPage() {
     // category here is trimmed down to cross-cutting gateway / API / proxy
     // settings and relabelled accordingly.
     const CATEGORY_META_LABELS: Record<string, string> = {
-      tool: t.app.nav.keys,
-      messaging: t.common.gateway ?? "Шлюз",
+      tool: "Подключения инструментов",
+      messaging: "Общие подключения",
       setting: t.app.nav.config,
     };
     const CATEGORY_META_HINTS: Record<string, string | undefined> = {
-      messaging:
-        t.common.gatewayHint ??
-        "Messaging platforms, the API server and webhooks are configured on the Channels page. These are gateway-wide settings (proxy/relay mode and the global allowlist).",
+      messaging: "Мессенджеры и другие каналы настраиваются в разделе «Каналы». Здесь — общие параметры подключений.",
     };
     const otherCategories = ["tool", "messaging", "setting"];
     const nonProvider = otherCategories.map((cat) => {
@@ -912,7 +913,7 @@ export default function EnvPage() {
         ([, info]) =>
           info.category === cat &&
           !info.channel_managed &&
-          (showAdvanced || !info.advanced),
+          (showAdvanced || !info.advanced || info.is_set),
       );
       const setEntries = entries.filter(([, info]) => info.is_set);
       const unsetEntries = entries.filter(([, info]) => !info.is_set);
@@ -986,13 +987,13 @@ export default function EnvPage() {
         loading={keyClear.isDeleting}
       />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
           <p className="text-sm text-muted-foreground">
-            {t.env.description} <code>.env</code> в папке данных Korra
+            Подключайте сервисы, которыми будут пользоваться ваши агенты.
           </p>
           <p className="text-xs text-text-tertiary">
-            {t.env.changesNote}
+            Сначала показаны настроенные подключения. Сохранение ключа не проверяет его работоспособность.
           </p>
         </div>
         <Button
@@ -1015,7 +1016,7 @@ export default function EnvPage() {
         <CardHeader className="border-b border-border bg-card">
           <div className="flex items-center gap-2">
             <Zap className="h-5 w-5 text-muted-foreground" />
-            <CardTitle className="text-base">{t.env.llmProviders}</CardTitle>
+            <CardTitle className="text-base">Сервисы ответов</CardTitle>
           </div>
           <CardDescription>
             {t.env.providersConfigured
@@ -1024,8 +1025,18 @@ export default function EnvPage() {
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="grid gap-0 p-0">
-          {providerGroups.map((group) => (
+        <CardContent className="grid gap-3 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button size="sm" onClick={() => setShowCatalog(value => !value)} aria-expanded={showCatalog}>
+              {showCatalog ? "Показать подключённые" : "Подключить сервис"}
+            </Button>
+            {showCatalog && <Input value={providerQuery} onChange={event => setProviderQuery(event.target.value)} aria-label="Найти сервис" placeholder="Название сервиса или ключа" className="max-w-sm" />}
+          </div>
+          {!showCatalog && configuredProviders === 0 && <p className="text-sm text-muted-foreground">Ключи сервисов пока не добавлены. Можно подключить сервис здесь или войти через аккаунт выше.</p>}
+          {showCatalog && providerQuery && !providerGroups.some(group => [group.name, ...group.entries.map(([key]) => key)].join(" ").toLowerCase().includes(providerQuery.toLowerCase())) && <p role="status">Сервис не найден. Попробуйте другое название или имя ключа.</p>}
+          {providerGroups.filter(group => showCatalog
+            ? [group.name, ...group.entries.map(([key]) => key)].join(" ").toLowerCase().includes(providerQuery.toLowerCase())
+            : group.hasAnySet).map((group) => (
             <ProviderGroupCard
               key={group.name}
               group={group}
@@ -1043,6 +1054,7 @@ export default function EnvPage() {
         </CardContent>
       </Card>
 
+      <p className="text-sm text-muted-foreground">Telegram, почта и другие способы связи с агентами — в разделе <Link to="/channels" className="underline">Каналы</Link>.</p>
       {nonProviderGrouped.map((section) => {
         if (section.totalEntries === 0) return null;
 
@@ -1117,8 +1129,7 @@ function EnvCategoryCard({
   onCancelEdit: (key: string) => void;
   clearDialogOpen?: boolean;
 }) {
-  const noneConfigured = section.setEntries.length === 0;
-  const [showAll, setShowAll] = useState(noneConfigured);
+  const [showAll, setShowAll] = useState(false);
   const { t } = useI18n();
   const Icon = section.icon;
   const hasContent = section.setEntries.length > 0 || showAll;
@@ -1152,7 +1163,7 @@ function EnvCategoryCard({
               aria-expanded={showAll}
               className="shrink-0 cursor-pointer border-0 bg-transparent p-0 font-mondwest text-xs tracking-[0.08em] text-text-secondary transition-colors hover:text-foreground"
             >
-              {showAll ? t.env.showLess : t.env.showMore}
+              {showAll ? "Скрыть неподключённые" : "Добавить подключение"}
             </button>
           )}
         </div>

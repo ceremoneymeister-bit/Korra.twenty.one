@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useEffect, useLayoutEffect, useRef, useState, useMemo } from "react";
 import { KorraLoader } from "@/components/KorraLoader";
 import {
@@ -53,7 +54,7 @@ import { ownerFacingError } from "@/lib/owner-facing-error";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { ProfileScopeChip } from "@/components/ProfileScopeChip";
 import { PluginSlot } from "@/plugins";
-import { configCategoryName } from "@/lib/config-presentation";
+import { configCategoryName, configFieldMatches } from "@/lib/config-presentation";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -259,20 +260,7 @@ export default function ConfigPage() {
 
   const searchMatchedFields = useMemo(() => {
     if (!isSearching || !schema) return [];
-    return Object.entries(schema).filter(([key, s]) => {
-      const label = key.split(".").pop() ?? key;
-      const humanLabel = label.replace(/_/g, " ");
-      return (
-        key.toLowerCase().includes(lowerSearch) ||
-        humanLabel.toLowerCase().includes(lowerSearch) ||
-        String(s.category ?? "")
-          .toLowerCase()
-          .includes(lowerSearch) ||
-        String(s.description ?? "")
-          .toLowerCase()
-          .includes(lowerSearch)
-      );
-    });
+    return Object.entries(schema).filter(([key, s]) => configFieldMatches(key, s, lowerSearch));
   }, [isSearching, lowerSearch, schema]);
 
   /* ---- Active tab fields ---- */
@@ -448,6 +436,14 @@ export default function ConfigPage() {
   return (
     <div className="flex flex-col gap-4">
       <PluginSlot name="config:top" />
+      <div className="rounded-2xl bg-card p-4 text-sm text-muted-foreground space-y-2">
+        <p>Здесь — подробные параметры работы системы. Настроить обязанности и обучение можно в карточке агента.</p>
+        <div className="flex flex-wrap gap-4">
+          <Link to="/agents" className="underline">Настроить агента</Link>
+          <Link to="/models" className="underline">Выбрать модель</Link>
+          <Link to="/channels" className="underline">Подключить канал</Link>
+        </div>
+      </div>
       <Toast toast={toast} />
 
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">

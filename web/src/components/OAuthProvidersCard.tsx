@@ -65,6 +65,7 @@ function formatExpiresAt(
 export function OAuthProvidersCard({ onError, onSuccess }: Props) {
   const [providers, setProviders] = useState<OAuthProvider[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showOptions, setShowOptions] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loginFor, setLoginFor] = useState<OAuthProvider | null>(null);
   const [disconnectTarget, setDisconnectTarget] =
@@ -109,7 +110,6 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
 
   const connectedCount =
     providers?.filter((p) => p.status.logged_in).length ?? 0;
-  const totalCount = providers?.length ?? 0;
 
   return (
     <Card>
@@ -118,7 +118,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-muted-foreground" />
             <CardTitle className="text-base">
-              {t.oauth.providerLogins}
+              Вход через аккаунт
             </CardTitle>
           </div>
           <Button
@@ -133,9 +133,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
           </Button>
         </div>
         <CardDescription>
-          {t.oauth.description
-            .replace("{connected}", String(connectedCount))
-            .replace("{total}", String(totalCount))}
+          Аккаунтов подключено: {connectedCount}. Новое подключение можно выбрать ниже. Статус входа не гарантирует доступность сервиса ответов.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -147,8 +145,13 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
             {t.oauth.noProviders}
           </p>
         )}
-        <div className="flex flex-col divide-y divide-border">
-          {providers?.map((p) => {
+        {providers && providers.some(provider => !provider.status.logged_in) && (
+          <Button size="sm" outlined onClick={() => setShowOptions(value => !value)} aria-expanded={showOptions}>
+            {showOptions ? "Скрыть способы входа" : "Подключить аккаунт"}
+          </Button>
+        )}
+        <div className="flex flex-col">
+          {providers?.filter(provider => showOptions || provider.status.logged_in).map((p) => {
             const expiresLabel = formatExpiresAt(
               p.status.expires_at,
               t.oauth.expiresIn,
@@ -157,7 +160,7 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
             return (
               <div
                 key={p.id}
-                className="flex items-center justify-between gap-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-4 py-3"
               >
                 <div className="flex items-start gap-3 min-w-0 flex-1">
                   {p.status.logged_in ? (
@@ -205,11 +208,12 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
                     {!p.status.logged_in && (
                       <>
                         <span className="text-xs text-text-secondary">
-                          {t.oauth.notConnected.split("{command}")[0].trimEnd()}
-                          {t.oauth.notConnected.split("{command}")[1] ?? ""}
+                          {p.flow === "external" ? "Подключается через терминал. Инструкция и команда — ниже." : "Нажмите «Войти» и подтвердите доступ в своём аккаунте."}
                         </span>
 
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <details>
+                          <summary className="cursor-pointer py-2 text-xs text-text-secondary">Подключение через терминал</summary>
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <code className="font-courier truncate text-xs opacity-60">
                             {p.cli_command}
                           </code>
@@ -219,7 +223,8 @@ export function OAuthProvidersCard({ onError, onSuccess }: Props) {
                             label={t.oauth.cli}
                             copiedLabel={t.oauth.copied}
                           />
-                        </div>
+                          </div>
+                        </details>
                       </>
                     )}
                     {p.status.error && (

@@ -4,7 +4,7 @@ import { Input } from "@nous-research/ui/ui/components/input";
 import { Label } from "@nous-research/ui/ui/components/label";
 import { useI18n } from "@/i18n";
 import { russianInterfaceText } from "@/lib/russian-interface-text";
-import { presentToolsets, parseToolsets } from "@/lib/config-presentation";
+import { presentToolsets, parseToolsets, configFieldLabel } from "@/lib/config-presentation";
 
 function FieldHint({ schema, schemaKey }: { schema: Record<string, unknown>; schemaKey: string }) {
   const keyPath = schemaKey.includes(".") && russianInterfaceText(schema.title) ? schemaKey : "";
@@ -95,7 +95,7 @@ export function AutoField({
   onChange,
 }: AutoFieldProps) {
   const { tr } = useI18n();
-  const label = schemaKey === "toolsets" ? "Наборы инструментов" : russianInterfaceText(schema.title, schemaKey);
+  const label = configFieldLabel(schemaKey, schema.title);
 
   if (schemaKey === "toolsets") {
     return (
