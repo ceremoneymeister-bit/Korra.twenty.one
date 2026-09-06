@@ -110,3 +110,11 @@
   .korra-help :is(a, button, summary, select, input):focus-visible { outline: 2px solid Highlight; }
   .help-step-number, .help-action, .help-start, .help-quick { outline: 1px solid ButtonText; }
 }
+
+.help-enlarge { margin-top: 0.9rem; cursor: pointer; color: inherit; }
+.help-image-viewer { margin: auto; width: min(1280px, calc(100vw - 2rem)); max-width: calc(100vw - 2rem); max-height: calc(100dvh - 2rem); padding: 1rem; border: 0; border-radius: var(--neo-radius-card); background: var(--neo-surface); color: var(--neo-text-primary); box-shadow: var(--neo-depth-3); }
+.help-image-viewer::backdrop { background: color-mix(in srgb, var(--neo-background) 85%, transparent); }
+.help-image-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; font-size: 0.8125rem; }
+.help-image-toolbar button { cursor: pointer; color: inherit; flex-shrink: 0; }
+.help-image-scroll { max-height: calc(100dvh - 10rem); overflow: auto; }
+.korra-help .help-image-scroll img { max-width: none; width: auto; }

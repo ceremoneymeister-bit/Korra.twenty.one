@@ -19,6 +19,7 @@ function HelpLinks({ links }: { links: HelpLink[] }) {
 
 function HelpFigure({ illustration }: { illustration: HelpImage }) {
   const { themeName } = useTheme();
+  const viewer = useRef<HTMLDialogElement>(null);
   // Роутер добавляет префикс кабинета и к статическим иллюстрациям.
   const src = useHref(`/help/${illustration.name}-${themeName === 'dark' ? 'dark' : 'light'}.webp`);
   return <details className="help-illustration">
@@ -26,7 +27,15 @@ function HelpFigure({ illustration }: { illustration: HelpImage }) {
     <figure>
       <img src={src} alt={illustration.alt} width={illustration.width} height={illustration.height} loading="lazy" decoding="async" />
       <figcaption>{illustration.caption}</figcaption>
+      <button type="button" className="help-action help-enlarge" onClick={() => viewer.current?.showModal()}>Увеличить снимок</button>
     </figure>
+    <dialog ref={viewer} className="help-image-viewer" aria-label="Снимок интерфейса"
+      onClick={event => { if (event.target === event.currentTarget) viewer.current?.close(); }}>
+      <div className="help-image-toolbar"><p>Снимок можно прокручивать</p>
+        <button type="button" className="help-action" onClick={() => viewer.current?.close()}>Закрыть снимок</button>
+      </div>
+      <div className="help-image-scroll"><img src={src} alt={illustration.alt} width={illustration.width} height={illustration.height} loading="lazy" /></div>
+    </dialog>
   </details>;
 }
 

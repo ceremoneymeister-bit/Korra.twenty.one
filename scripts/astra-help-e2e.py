@@ -132,7 +132,7 @@ def main():
                     assert page.locator('#' + item).count() == 1, item
                 for details in page.locator('.help-illustration').all():
                     details.locator('summary').click()
-                    image = details.locator('img')
+                    image = details.locator('figure > img')
                     image.scroll_into_view_if_needed()
                     expect(image).to_be_visible()
                     image.evaluate('(el) => el.decode()')
@@ -191,10 +191,15 @@ def main():
             goto(page, proxy, '/help/agents#create')
             illustration = page.locator('.help-illustration').first
             illustration.locator('summary').click()
-            illustration.locator('img').scroll_into_view_if_needed()
-            illustration.locator('img').evaluate('(el) => el.decode()')
-            assert illustration.locator('img').get_attribute('src').endswith('-' + theme + '.webp')
+            illustration.locator('figure > img').scroll_into_view_if_needed()
+            illustration.locator('figure > img').evaluate('(el) => el.decode()')
+            assert illustration.locator('figure > img').get_attribute('src').endswith('-' + theme + '.webp')
             shot(page, 'illustration-' + theme)
+            illustration.get_by_role('button', name='Увеличить снимок').click()
+            expect(page.get_by_role('dialog', name='Снимок интерфейса')).to_be_visible()
+            page.keyboard.press('Escape')
+            expect(page.get_by_role('dialog', name='Снимок интерфейса')).to_have_count(0)
+            expect(illustration.get_by_role('button', name='Увеличить снимок')).to_be_focused()
             for width in [390, 320]:
                 page.set_viewport_size({'width': width, 'height': 844})
                 for path in ['/help', '/help/kanban', '/help/chat#voice', '/help/telegram']:
@@ -205,6 +210,13 @@ def main():
                 if width == 390:
                     page.get_by_label('Другие инструкции').select_option('files')
                     expect(page).to_have_url(proxy + '/help/files')
+                    page.locator('.help-illustration summary').click()
+                    page.get_by_role('button', name='Увеличить снимок').click()
+                    viewer = page.get_by_role('dialog', name='Снимок интерфейса')
+                    expect(viewer).to_be_visible()
+                    assert viewer.bounding_box()['width'] <= width
+                    assert viewer.locator('img').evaluate('(el) => el.clientWidth === el.naturalWidth')
+                    page.get_by_role('button', name='Закрыть снимок').click()
                     page.locator('.help-breadcrumbs a').click()
                     expect(page.locator('#help-search')).to_be_visible()
             page.set_viewport_size({'width': 1440, 'height': 1000})
