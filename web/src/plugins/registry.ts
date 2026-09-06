@@ -17,6 +17,7 @@ import React, {
   useContext,
   createContext,
 } from "react";
+import { Link, NavLink, useNavigate, useLocation, useHref, useSearchParams } from "react-router";
 import { api, fetchJSON, authedFetch, buildWsUrl, buildWsAuthParam } from "@/lib/api";
 import { cn, timeAgo, isoTimeAgo } from "@/lib/utils";
 import { Badge } from "@nous-research/ui/ui/components/badge";
@@ -138,6 +139,9 @@ export function exposePluginSDK() {
       useToast,
       useConfirmDelete,
     },
+
+    // Тот же роутер, что у панели: префикс кабинета добавляет BrowserRouter.
+    router: { Link, NavLink, useNavigate, useLocation, useHref, useSearchParams },
 
     // Hermes API client
     api,

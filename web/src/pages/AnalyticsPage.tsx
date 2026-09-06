@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { KorraLoader } from "@/components/KorraLoader";
 import {
@@ -509,7 +510,7 @@ export default function AnalyticsPage() {
                 <span className="font-mono">
                   dashboard.show_token_analytics: true
                 </span>{" "}
-                {tr("in")} <a href="/config" className="underline">{tr("Config")}</a>.
+                {tr("in")} <Link to="/config" className="underline">{tr("Config")}</Link>.
               </p>
             </div>
           </CardContent>

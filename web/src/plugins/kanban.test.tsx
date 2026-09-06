@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
+import * as router from "react-router";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,12 +16,13 @@ function Content({ children }: { children?: React.ReactNode }) { return <div rol
 async function renderPage() {
   let Page: React.ComponentType | undefined;
   Object.assign(window, {
-    __HERMES_PLUGIN_SDK__: { React, fetchJSON, api: { getProfiles: profiles }, components: { Dialog: Children, DialogContent: Content, DialogTitle: Children, DialogDescription: Children } },
-    __HERMES_PLUGINS__: { register: (_name: string, component: React.ComponentType) => { Page = component; } },
+    __HERMES_PLUGIN_SDK__: { React, router, fetchJSON, api: { getProfiles: profiles }, components: { Dialog: Children, DialogContent: Content, DialogTitle: Children, DialogDescription: Children } },
+    __HERMES_PLUGINS__: { registerSlot: vi.fn(), register: (_name: string, component: React.ComponentType) => { Page = component; } },
   });
   // @ts-expect-error Плагин исполняется браузером напрямую, без сборщика TypeScript.
   await import("../../../plugins/kanban/dashboard/dist/index.js");
-  await act(async () => root.render(React.createElement(Page!)));
+  const Component = Page!;
+  await act(async () => root.render(<router.MemoryRouter><Component /></router.MemoryRouter>));
 }
 function button(name: string) {
   const found = Array.from(host.querySelectorAll("button")).find(el => el.textContent === name);

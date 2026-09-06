@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { KorraLoader } from "@/components/KorraLoader";
 import { createPortal } from "react-dom";
@@ -1316,7 +1317,7 @@ export default function ModelsPage() {
                   вспомогательные вызовы и повторные запросы провайдера, поэтому
                   может отличаться от счёта. Для отладочной оценки включите{" "}
                   <span className="font-mono">dashboard.show_token_analytics</span>{" "}
-                  в <a href="/config" className="underline">конфигурации</a>.
+                  в <Link to="/config" className="underline">конфигурации</Link>.
                 </p>
               )}
             </CardContent>

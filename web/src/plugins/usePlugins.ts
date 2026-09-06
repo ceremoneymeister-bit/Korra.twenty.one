@@ -17,7 +17,8 @@ import {
   setPluginLoadError,
 } from "./registry";
 
-export const MANIFEST_CACHE_KEY = "hermes:plugin-manifests";
+// Кабинеты на одном домене имеют независимые наборы плагинов.
+export const MANIFEST_CACHE_KEY = `hermes:plugin-manifests:${HERMES_BASE_PATH || "root"}`;
 
 export function getCachedManifests(): PluginManifest[] | null {
   try {

@@ -6,6 +6,7 @@
   if (!SDK || !window.__HERMES_PLUGINS__) return;
   const { React } = SDK;
   const h = React.createElement;
+  const { Link } = SDK.router;
   const { useState, useEffect, useRef } = React;
 
   function BenefitsPage() {
@@ -47,25 +48,25 @@
     const steps = [
       {
         id: "task", group: "Работа с задачами", title: "Поручения собраны в одном месте",
-        value: total, unit: "задач на досках", href: "/kanban", action: "Открыть доску",
+        value: total, unit: "задач на досках", to: "/kanban", action: "Открыть доску",
         description: "Вынесите из переписки одно конкретное поручение: кто делает, что должно получиться и как проверить результат.",
         evidence: "Учитываются задачи на доступных досках, кроме архивных. Создание карточки ещё не означает запуск агента.",
       },
       {
         id: "result", group: "Работа с задачами", title: "Есть завершённая работа",
-        value: done, unit: "задач в колонке «Готово»", href: "/kanban", action: "Посмотреть результаты",
+        value: done, unit: "задач в колонке «Готово»", to: "/kanban", action: "Посмотреть результаты",
         description: "Откройте итог в карточке задачи. Если нужна доработка, опишите её и верните поручение агенту.",
         evidence: "Считаются завершённые карточки. Статус показывает итог работы; качество результата оцениваете вы.",
       },
       {
         id: "routine", group: "Регулярные процессы", title: "Рутина выполняется по расписанию",
-        value: successfulJobs, unit: "расписаний с успешным последним запуском", href: "/cron", action: "Настроить расписание",
+        value: successfulJobs, unit: "расписаний с успешным последним запуском", to: "/cron", action: "Настроить расписание",
         description: "Начните с одного повторяющегося дела: утренней сводки, проверки заявок или еженедельного отчёта.",
         evidence: "Учитываются расписания всех агентов, у которых последний запуск завершился успешно. Приостановленные тоже сохраняют этот результат.",
       },
       {
         id: "team", group: "Своя команда", title: "У каждого агента своя роль",
-        value: specialists, unit: "агентов помимо Корры", href: "/profiles/new", action: "Создать агента",
+        value: specialists, unit: "агентов помимо Корры", to: "/profiles/new", action: "Создать агента",
         description: "Выделите повторяющийся бизнес-процесс отдельному помощнику. Опишите его обязанности и дайте пример хорошего результата.",
         evidence: "Количество созданных агентов без основного. Само создание ещё не подтверждает, что агент обучен и решает ваши задачи.",
       },
@@ -89,12 +90,12 @@
         "Часть данных сейчас недоступна. Известные результаты показаны ниже; остальные можно проверить кнопкой «Обновить данные»."),
       !loading && (attention > 0 || failingJobs > 0) && h("section", { className: "kb-benefit-next" },
         h("strong", null, "Сейчас нужно ваше внимание"),
-        attention > 0 && h("a", { href: "/kanban" }, `Задач для решения или проверки: ${attention}. Открыть доску →`),
-        failingJobs > 0 && h("a", { href: "/cron" }, `Расписаний с ошибкой запуска или доставки: ${failingJobs}. Проверить →`)),
+        attention > 0 && h(Link, { to: "/kanban" }, `Задач для решения или проверки: ${attention}. Открыть доску →`),
+        failingJobs > 0 && h(Link, { to: "/cron" }, `Расписаний с ошибкой запуска или доставки: ${failingJobs}. Проверить →`)),
       !loading && next && h("section", { className: "kb-benefit-next" },
         h("strong", null, "Следующий шаг: ", next.action.toLocaleLowerCase("ru-RU")),
         h("p", null, next.description),
-        h("a", { className: "neo-button", "data-neo-variant": "primary", href: next.href }, next.action, " →")),
+        h(Link, { className: "neo-button", "data-neo-variant": "primary", to: next.to }, next.action, " →")),
       !loading && !next && !unavailable && h("p", null, "Основа готова. Теперь улучшайте качество: уточняйте инструкции на примерах реальных результатов."),
       h("div", { className: "kb-benefit-grid" }, steps.map(function (step) {
         const achieved = step.value !== null && step.value > 0;
@@ -109,7 +110,7 @@
             h("strong", null, loading || step.value === null ? "—" : step.value.toLocaleString("ru-RU")),
             h("span", null, step.unit)),
           h("details", null, h("summary", null, "Как считаем"), h("p", null, step.evidence)),
-          h("a", { href: step.href, className: "kb-benefit-link" }, step.action, " →"));
+          h(Link, { to: step.to, className: "kb-benefit-link" }, step.action, " →"));
       })),
       !loading && ready > 0 && h("p", { className: "kb-benefit-updated" }, `В очереди на досках: ${ready}. Проверьте назначенных исполнителей, если задачи долго не начинают выполняться.`));
   }

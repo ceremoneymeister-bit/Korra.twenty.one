@@ -6,6 +6,7 @@
   if (!SDK || !window.__HERMES_PLUGINS__) return;
   const { React } = SDK;
   const h = React.createElement;
+  const { Link } = SDK.router;
   const { useState, useEffect, useRef, useCallback } = React;
   const C = SDK.components;
   const API = "/api/plugins/kanban";
@@ -389,5 +390,12 @@
       modal && modal.kind.startsWith("board-") && h(BoardSettings, { board: meta, creating: modal.kind === "board-new", onClose: () => setModal(null), onSaved: next => { setBoards(list => [...list.filter(item => item.slug !== next.slug), next]); setBoard(next.slug); setModal(null); void loadLists(); } }),
       modal && modal.kind === "task" && h(TaskDetail, { key: modal.id, taskId: modal.id, board, profiles, onClose: () => setModal(null), onRefresh: () => void load(), onMove: move, onEdit: task => setModal({ kind: "edit", task }), onOpenTask: openTask }));
   }
+  function KanbanEntry() {
+    return h("section", { className: "k21-note k21-board-header" },
+      h("div", null, h("h2", null, "Разовые поручения"),
+        h("p", null, "Поручите агенту конкретную работу и получите результат на доске. Ниже — задачи по расписанию.")),
+      h(Link, { to: "/kanban", className: "neo-button" }, "Открыть доску"));
+  }
+  window.__HERMES_PLUGINS__.registerSlot("kanban", "cron:top", KanbanEntry);
   window.__HERMES_PLUGINS__.register("kanban", KanbanPage);
 })();

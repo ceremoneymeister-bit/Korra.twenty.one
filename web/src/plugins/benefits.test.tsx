@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
+import * as router from "react-router";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,12 +13,13 @@ const profiles = vi.fn();
 async function renderPage() {
   let Page: React.ComponentType | undefined;
   Object.assign(window, {
-    __HERMES_PLUGIN_SDK__: { React, fetchJSON: boards, api: { getCronJobs: jobs, getProfiles: profiles } },
-    __HERMES_PLUGINS__: { register: (_name: string, component: React.ComponentType) => { Page = component; } },
+    __HERMES_PLUGIN_SDK__: { React, router, fetchJSON: boards, api: { getCronJobs: jobs, getProfiles: profiles } },
+    __HERMES_PLUGINS__: { registerSlot: vi.fn(), register: (_name: string, component: React.ComponentType) => { Page = component; } },
   });
   // @ts-expect-error Плагин поставляется как исполняемый браузерный JavaScript.
   await import("../../../plugins/hermes-achievements/dashboard/dist/index.js");
-  await act(async () => { root.render(React.createElement(Page!)); });
+  const Component = Page!;
+  await act(async () => { root.render(<router.MemoryRouter><Component /></router.MemoryRouter>); });
 }
 
 beforeEach(() => {

@@ -84,7 +84,7 @@ export interface PluginRegistry {
   /** Register the plugin's main tab component by manifest name. */
   register(name: string, component: ComponentType<Record<string, never>>): void;
   /** Register a component into a named host slot. */
-  registerSlot(slot: string, name: string, component: ComponentType): void;
+  registerSlot(name: string, slot: string, component: ComponentType): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +130,16 @@ export interface HermesPluginSDK {
       pendingId: TId | null;
     };
   };
+
+  /**
+   * Навигация внутри панели через роутер хоста. В `to` передавайте путь
+   * раздела (`/kanban`), без префикса кабинета. Link сохраняет открытие
+   * в новой вкладке; useNavigate меняет экран без перезагрузки документа.
+   * useHref строит адрес для копирования; useSearchParams — адресное состояние.
+   * Плагин не создаёт собственный BrowserRouter и не включает react-router в сборку.
+   */
+  router: Pick<typeof import("react-router"),
+    "Link" | "NavLink" | "useNavigate" | "useLocation" | "useHref" | "useSearchParams">;
 
   /**
    * Typed convenience client for core dashboard endpoints. Typed permissively
