@@ -1,0 +1,251 @@
+{
+  "wizardAndLearning": {
+    "panel": "http://127.0.0.1:9142",
+    "profile": "menedzher-opta",
+    "events": [],
+    "created": {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "name": "menedzher-opta",
+        "path": "/opt/data/profiles/menedzher-opta",
+        "model_set": true,
+        "seeded_credentials": [],
+        "mcp_written": 0,
+        "skills_disabled": 0,
+        "hub_installs": []
+      },
+      "request": {
+        "name": "menedzher-opta",
+        "clone_from": null,
+        "clone_all": false,
+        "no_skills": false,
+        "description": "Ты помогаешь магазину «Липа» разбирать оптовые заявки.",
+        "provider": "custom:dario",
+        "model": "claude-sonnet-5",
+        "display_name": "Менеджер опта",
+        "soul": "# Менеджер опта\n\nТы — Менеджер опта, агент в системе Korra.\n\nТы помогаешь магазину «Липа» разбирать оптовые заявки. Минимальная партия — 12 изделий. Отвечай коротко по-русски. Готовь тексты для владельца, самостоятельно никому их не отправляй.\n\n## Как общаться\n\nОтвечай по-русски и по существу: короткий вопрос — короткий ответ, законченная работа — краткий отчёт (что сделано, что проверено, что осталось). Без воды и повторов. Соглашайся потому, что это верно, а не потому, что так сказал собеседник; если не уверен — скажи прямо.\n"
+      }
+    },
+    "wizardProbeText": "К основному содержанию\nАгенты\nФайлы\nИстория\nЗадачи\nКанбан-доска\nПольза от агентов\nНастройки\nСлужебное\nСистема\n\nКорра на связи\n\nСветлая\nv0.21.0\nНовый агент\nПроверка агента\nМенеджер опта\n\nСохранено\n\nИмя\nМенеджер опта\nРоль\nсвоими словами, плюс правила общения по-русски\nМодель\ndario · claude-sonnet-5\n\nОтвет агента\n\nне отвечает\n\nНет доступа к модели\n\nСам агент сохранён: имя, роль и модель на месте. Провайдер не принял ключ или подписку — проверьте их в «Ключах» или продлите подписку, затем повторите проверку.\n\nОтвет сервера: HTTP 401: OAuth access token has expired. Re-authenticate to continue.\n\nОткрыть «Ключи»\nОткрыть чат\nПовторить проверку",
+    "activeTab": "Менеджер опта",
+    "roleSaved": 200,
+    "memoryAdded": 200,
+    "memoryReplaced": 200,
+    "textMaterial": {
+      "ok": true,
+      "name": "material-ad6a5666ae2c4a7c974e32b1e8c4e15b"
+    },
+    "materialsSection": "Обучение и настройки · Менеджер опта\nЗакрыть\nРоль и правила\nЧто важно помнить\nМатериалы и инструкции\nПроверить вопросом\n\nПрайс, регламент, инструкция, ссылка на документ — всё, к чему агент должен обращаться по делу. Сохранение не значит, что агент это прочитал: он открывает материал, когда его просят, — проверьте вопросом.\n\nТекст\nДоставка по городу\nПроверить\nУдалить\n\nсохранено\nМатериал сохранён. Проверьте вопросом, как агент его использует.\nПроверить вопросом\n\nНазвание материала\nТекст\nСсылка\nФайл\nТекст материала\nСохранить материал\nНавыки\nРасписание\nМодель\nОткрыть чат",
+    "phase": "learning-complete",
+    "linkMaterial": {
+      "ok": true,
+      "name": "material-9240b22018874c8faf2a837495aeb30f"
+    },
+    "fileMaterial": {
+      "ok": true,
+      "name": "material-641284afccd94b64931f50671e5318a5"
+    },
+    "materialProbeTemplate": "Прочитай навык «material-641284afccd94b64931f50671e5318a5» и его источники, затем ответь: ",
+    "materialProbe": {
+      "status": 200,
+      "request": {
+        "model": "korra-agent",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Прочитай навык «material-641284afccd94b64931f50671e5318a5» и его источники, затем ответь: Сколько изделий помещается в одну коробку? Укажи источник."
+          }
+        ],
+        "stream": false
+      },
+      "response": {
+        "id": "chatcmpl-5364d08aada6427a8766511c6b185",
+        "object": "chat.completion",
+        "created": 1788670690,
+        "model": "korra-agent",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "API call failed after 3 retries: HTTP 503: all accounts are rate-limited or in auth cool-down; retry shortly"
+            },
+            "finish_reason": "error"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "hermes": {
+          "completed": false,
+          "partial": false,
+          "failed": true,
+          "error": "HTTP 503: all accounts are rate-limited or in auth cool-down; retry shortly",
+          "error_code": "agent_error"
+        }
+      }
+    },
+    "checkText": "Обучение и настройки · Менеджер опта\nЗакрыть\nРоль и правила\nЧто важно помнить\nМатериалы и инструкции\nПроверить вопросом\n\nСпросите то, что агент должен был усвоить. Каждая проверка — новый разговор: агент читает роль, память и материалы заново, поэтому ответ показывает, что он действительно знает.\n\nВопрос агенту\nСпросить агента\n\nне отвечает\nНет доступа к модели\n\nСам агент сохранён: имя, роль и модель на месте. Провайдер не принял ключ или подписку — проверьте их в «Ключах» или продлите подписку, затем повторите проверку.\n\nОтвет сервера: HTTP 503: all accounts are rate-limited or in auth cool-down; retry shortly\n\nНавыки\nРасписание\nМодель\nОткрыть чат",
+    "memoryRemoved": 200,
+    "linkArchived": 200,
+    "scheduleUrl": "http://127.0.0.1:9142/cron?profile=menedzher-opta"
+  },
+  "nativeEngine": {
+    "profile": "menedzher-opta",
+    "roleContainsEditedRule": true,
+    "displayName": "Менеджер опта",
+    "model": {
+      "provider": "custom:dario",
+      "default": "claude-sonnet-5"
+    },
+    "providerResolves": true,
+    "providerKeyMatchesRoot": true,
+    "noTelegram": true,
+    "freshConversationMemory": "══════════════════════════════════════════════\nMEMORY (your personal notes) [1% — 39/2,200 chars]\n══════════════════════════════════════════════\nСамовывоз магазина «Липа» — с 10 до 18.",
+    "fileReadThroughSkillView": true,
+    "fileReadContent": "В одну коробку помещается ровно 27 изделий. Это правило упаковки магазина «Липа».",
+    "materialPinned": true,
+    "archivedLinkExists": true,
+    "siblingHasMaterial": false
+  },
+  "selectedProvider": {
+    "rootProvider": "openai-codex",
+    "status": 200,
+    "created": {
+      "ok": true,
+      "name": "drugoy-provayder",
+      "path": "/opt/data/profiles/drugoy-provayder",
+      "model_set": true,
+      "seeded_credentials": [
+        "DARIO_API_KEY"
+      ],
+      "mcp_written": 0,
+      "skills_disabled": 0,
+      "hub_installs": []
+    },
+    "request": {
+      "name": "drugoy-provayder",
+      "clone_from": null,
+      "clone_all": false,
+      "no_skills": false,
+      "description": "Помогай проверять подключение.",
+      "provider": "custom:dario",
+      "model": "claude-sonnet-5",
+      "display_name": "Другой провайдер",
+      "soul": "# Другой провайдер\n\nТы — Другой провайдер, агент в системе Korra.\n\nПомогай проверять подключение. Отвечай по-русски.\n\n## Как общаться\n\nОтвечай по-русски и по существу: короткий вопрос — короткий ответ, законченная работа — краткий отчёт (что сделано, что проверено, что осталось). Без воды и повторов. Соглашайся потому, что это верно, а не потому, что так сказал собеседник; если не уверен — скажи прямо.\n"
+    },
+    "profileProvider": "custom:dario",
+    "selectedConnectionPresent": true,
+    "providerKeyPresent": true,
+    "noTelegram": true,
+    "rootRestored": true
+  },
+  "finalUI": {
+    "secondEditor": 200,
+    "staleWriteStatus": 409,
+    "changedFactPreserved": true,
+    "disabledMemoryCannotWrite": true,
+    "mobileWidth": {
+      "viewport": 390,
+      "document": 390
+    },
+    "questionShowsTitleOnly": true,
+    "finalProbe": {
+      "status": 200,
+      "request": {
+        "model": "korra-agent",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Прочитай навык «material-641284afccd94b64931f50671e5318a5» и его источники, затем ответь: Сколько изделий помещается в одну коробку? Укажи источник."
+          }
+        ],
+        "stream": false
+      },
+      "response": {
+        "id": "chatcmpl-16b8f1fb24dc496e9ec6882b21239",
+        "object": "chat.completion",
+        "created": 1788671517,
+        "model": "korra-agent",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "HTTP 401: OAuth access token has expired. Re-authenticate to continue."
+            },
+            "finish_reason": "error"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "hermes": {
+          "completed": false,
+          "partial": false,
+          "failed": true,
+          "error": "HTTP 401: OAuth access token has expired. Re-authenticate to continue.",
+          "error_code": "agent_error"
+        }
+      }
+    },
+    "skillsUrl": "http://127.0.0.1:9142/skills?profile=menedzher-opta",
+    "noPrematurePromise": true
+  },
+  "chatRenameDelete": {
+    "chatStatus": 200,
+    "chatRequest": {
+      "model": "korra-agent",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Какие часы самовывоза у магазина «Липа»?"
+        }
+      ],
+      "stream": true
+    },
+    "chatStream": "data: {\"id\": \"chatcmpl-193224101ec14f99aef8b754cacf7\", \"object\": \"chat.completion.chunk\", \"created\": 1788671626, \"model\": \"korra-agent\", \"choices\": [{\"index\": 0, \"delta\": {\"role\": \"assistant\"}, \"finish_reason\": null}]}\n\ndata: {\"id\": \"chatcmpl-193224101ec14f99aef8b754cacf7\", \"object\": \"chat.completion.chunk\", \"created\": 1788671626, \"model\": \"korra-agent\", \"choices\": [{\"index\": 0, \"delta\": {}, \"finish_reason\": \"error\"}], \"usage\": {\"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_tokens\": 0}, \"error\": {\"message\": \"HTTP 503: all accounts are rate-limited or in auth cool-down; retry shortly\", \"type\": \"agent_error\"}, \"hermes\": {\"completed\": false, \"partial\": false, \"failed\": true, \"error\": \"HTTP 503: all accounts are rate-limited or in auth cool-down; retry shortly\", \"error_code\": \"agent_error\"}}\n\ndata: [DONE]\n\n",
+    "renameFields": 1,
+    "renameStatus": 200,
+    "roleAndKnowledgePreserved": true,
+    "deleteStatus": 200,
+    "profileDirectoryRemoved": true
+  },
+  "providerStatus": {
+    "authenticated": false,
+    "status": "broken",
+    "expiresIn": "all accounts in auth-cooldown"
+  },
+  "checks": {
+    "web": {
+      "command": "cd web && npm run -s check",
+      "files": 91,
+      "passed": 686,
+      "errors": 0,
+      "eslintWarnings": 41
+    },
+    "python": {
+      "command": "HERMES_PYTHON=/usr/bin/python3 scripts/run_tests.sh tests/korra_cli/test_profile_learning.py tests/tools/test_memory_tool.py tests/korra_cli/test_web_profile_creation_identity.py tests/korra_cli/test_web_profile_soul_writes.py tests/korra_cli/test_web_server_skills_profiles.py tests/korra_cli/test_web_server_profile_unification.py tests/korra_cli/test_profiles.py tests/korra_cli/test_web_profile_selected_provider.py -q",
+      "files": 8,
+      "passed": 174,
+      "failed": 0,
+      "skippedWindowsOnly": 2
+    },
+    "build": {
+      "revision": "a97906e637",
+      "detachedWorktree": true,
+      "dockerImageBuilt": false
+    }
+  },
+  "cleanup": {
+    "containerRemoved": true,
+    "temporaryDataRemoved": true,
+    "detachedWorktreeRemoved": true,
+    "ownerAndOtherContainersUntouched": true
+  }
+}
