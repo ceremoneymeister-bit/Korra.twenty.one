@@ -41,8 +41,9 @@
     const ready = boards ? boards.reduce((sum, board) => sum + Number((board.counts || {}).ready || 0), 0) : null;
     const attention = boards ? boards.reduce((sum, board) => sum + Number((board.counts || {}).blocked || 0) + Number((board.counts || {}).review || 0), 0) : null;
     const jobs = Array.isArray(data.jobs) ? data.jobs : null;
-    const successfulJobs = jobs ? jobs.filter(job => job.last_status === "ok" && job.last_run_at).length : null;
-    const failingJobs = jobs ? jobs.filter(job => job.last_status === "error" || job.last_delivery_error || job.last_fire_error).length : null;
+    const successfulJobs = jobs ? jobs.filter(job => job.enabled && job.last_status === "ok" && job.last_run_at).length : null;
+    const pausedJobs = jobs ? jobs.filter(job => !job.enabled).length : null;
+    const failingJobs = jobs ? jobs.filter(job => job.enabled && (job.last_status === "error" || job.last_delivery_error || job.last_fire_error)).length : null;
     const team = data.profiles && data.profiles.profiles;
     const specialists = team ? team.filter(profile => !profile.is_default).length : null;
     const steps = [
@@ -54,24 +55,23 @@
       },
       {
         id: "result", group: "Работа с задачами", title: "Есть завершённая работа",
-        value: done, unit: "задач в колонке «Готово»", to: "/kanban", action: "Посмотреть результаты",
+        value: done, unit: "задач в колонке «Готово»", to: "/kanban?view=done", action: "Посмотреть результаты",
         description: "Откройте итог в карточке задачи. Если нужна доработка, опишите её и верните поручение агенту.",
         evidence: "Считаются завершённые карточки. Статус показывает итог работы; качество результата оцениваете вы.",
       },
       {
         id: "routine", group: "Регулярные процессы", title: "Рутина выполняется по расписанию",
-        value: successfulJobs, unit: "расписаний с успешным последним запуском", to: "/cron", action: "Настроить расписание",
+        value: successfulJobs, unit: "включённых расписаний с успешным последним запуском", to: "/cron", action: "Настроить расписание",
         description: "Начните с одного повторяющегося дела: утренней сводки, проверки заявок или еженедельного отчёта.",
-        evidence: "Учитываются расписания всех агентов, у которых последний запуск завершился успешно. Приостановленные тоже сохраняют этот результат.",
+        evidence: "Учитываются только включённые расписания всех агентов, у которых последний запуск завершился успешно. Приостановленные здесь не считаются работающей автоматизацией.",
       },
       {
-        id: "team", group: "Своя команда", title: "У каждого агента своя роль",
+        id: "team", group: "Своя команда", title: "Агенты для ваших процессов",
         value: specialists, unit: "агентов помимо Корры", to: "/profiles/new", action: "Создать агента",
         description: "Выделите повторяющийся бизнес-процесс отдельному помощнику. Опишите его обязанности и дайте пример хорошего результата.",
         evidence: "Количество созданных агентов без основного. Само создание ещё не подтверждает, что агент обучен и решает ваши задачи.",
       },
     ];
-    const completed = steps.filter(step => step.value !== null && step.value > 0).length;
     const unavailable = steps.some(step => step.value === null);
     const next = steps.find(step => step.value === 0);
 
@@ -83,14 +83,16 @@
         h("button", { type: "button", className: "neo-button", onClick: () => void refresh(), disabled: loading }, loading ? "Обновляем…" : "Обновить данные")),
       h("section", { className: "kb-benefit-overview" },
         h("div", null,
-          h("strong", null, loading ? "Загружаем результаты…" : `Освоено ${completed} из ${steps.length} возможностей`),
-          h("p", null, "Основано на задачах, расписаниях и агентах этого контура. Экономию времени и денег здесь не оцениваем.")),
+          h("strong", null, loading ? "Загружаем результаты…" : "Работа вашей команды"),
+          h("p", null, "Что уже сделано, что требует вашего решения и какое дело можно поручить следующим.")),
         !loading && h("p", { className: "kb-benefit-updated" }, "Проверено в ", updatedAt && updatedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }))),
       !loading && unavailable && h("div", { className: "kb-benefit-notice", role: "status" },
         "Часть данных сейчас недоступна. Известные результаты показаны ниже; остальные можно проверить кнопкой «Обновить данные»."),
       !loading && (attention > 0 || failingJobs > 0) && h("section", { className: "kb-benefit-next" },
         h("strong", null, "Сейчас нужно ваше внимание"),
-        attention > 0 && h(Link, { to: "/kanban" }, `Задач для решения или проверки: ${attention}. Открыть доску →`),
+        attention > 0 && boards.filter(board => (board.counts?.blocked || 0) + (board.counts?.review || 0) > 0).map(board =>
+          h(Link, { key: board.slug, to: "/kanban?" + new URLSearchParams({ board: board.slug, view: "attention" }) },
+            `${board.slug === "default" && (!board.name || board.name === "Default") ? "Основная доска" : board.name || board.slug}: нужно решение — ${board.counts?.blocked || 0}, на проверке — ${board.counts?.review || 0}. Открыть →`)),
         failingJobs > 0 && h(Link, { to: "/cron" }, `Расписаний с ошибкой запуска или доставки: ${failingJobs}. Проверить →`)),
       !loading && next && h("section", { className: "kb-benefit-next" },
         h("strong", null, "Следующий шаг: ", next.action.toLocaleLowerCase("ru-RU")),
@@ -103,12 +105,13 @@
           h("div", { className: "kb-benefit-card-top" },
             h("span", null, step.group),
             h("span", { className: achieved ? "kb-benefit-state is-complete" : "kb-benefit-state" },
-              loading ? "Проверяем" : step.value === null ? "Нет данных" : achieved ? "Освоено" : "Можно начать")),
+              loading ? "Проверяем" : step.value === null ? "Нет данных" : achieved ? "Есть данные" : "Можно начать")),
           h("h3", null, step.title),
           h("p", null, step.description),
           h("div", { className: "kb-benefit-metric" },
             h("strong", null, loading || step.value === null ? "—" : step.value.toLocaleString("ru-RU")),
             h("span", null, step.unit)),
+          step.id === "routine" && pausedJobs > 0 && h("p", { className: "kb-benefit-updated" }, `Приостановлено расписаний: ${pausedJobs}. Они сохраняют историю, но больше не запускаются.`),
           h("details", null, h("summary", null, "Как считаем"), h("p", null, step.evidence)),
           h(Link, { to: step.to, className: "kb-benefit-link" }, step.action, " →"));
       })),

@@ -6,11 +6,10 @@
   if (!SDK || !window.__HERMES_PLUGINS__) return;
   const { React } = SDK;
   const h = React.createElement;
-  const { Link } = SDK.router;
+  const { Link, useSearchParams, useHref } = SDK.router;
   const { useState, useEffect, useRef, useCallback } = React;
   const C = SDK.components;
   const API = "/api/plugins/kanban";
-  const BOARD_KEY = "hermes.kanban.selectedBoard";
   const STATUS = {
     triage: ["Уточняется", "Агент готовит подробное задание из идеи."],
     todo: ["Ждёт других задач", "Продолжится после выполнения зависимостей."],
@@ -27,6 +26,7 @@
   const RUN_LABEL = { running: "В работе", completed: "Завершён", done: "Завершён", success: "Успешно", failed: "Ошибка", error: "Ошибка", blocked: "Нужно решение", review: "На проверке", reclaimed: "Остановлен", cancelled: "Отменён", timeout: "Время истекло", gave_up: "Требуется помощь", scheduled: "Отложен", claimed: "Запускается" };
 
   function statusLabel(status) { return (STATUS[status] || ["Другой этап"])[0]; }
+  function completionLabel(task) { return task.status === "review" ? "Принять результат" : "Завершить поручение"; }
   function profileLabel(profile) { return profile.display_name || (profile.is_default || profile.name === "default" ? "Корра" : profile.name); }
   function dateLabel(value) {
     if (!value) return "ещё не было";
@@ -42,6 +42,11 @@
     if (/403|401/.test(raw)) return "Не удалось подтвердить доступ. Перезагрузите страницу.";
     if (/413/.test(raw)) return "Файл слишком большой. Выберите файл меньшего размера.";
     return "Не удалось выполнить действие. Проверьте соединение и повторите попытку.";
+  }
+  function runErrorText(error) {
+    if (/401|403|oauth|token.*expired|authentication/i.test(String(error))) return "Сервис ответов отклонил подключение. Нужно восстановить доступ к нему; само поручение сохранено.";
+    if (/429|503|rate.?limit|cool.?down/i.test(String(error))) return "Сервис ответов временно недоступен или достиг лимита. Поручение сохранено — его можно повторить после восстановления сервиса.";
+    return "Во время выполнения возникла ошибка. Поручение и вложения сохранены; проверьте последний результат перед повтором.";
   }
   function request(path, board, method, payload) {
     return SDK.fetchJSON(API + path + (path.includes("?") ? "&" : "?") + "board=" + encodeURIComponent(board), method ? {
@@ -87,6 +92,11 @@
     const [priority, setPriority] = useState(task ? task.priority || 0 : 0);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
+    const [files, setFiles] = useState([]);
+    const fileInput = useRef(null);
+    const draftId = useRef(null);
+    const uploaded = useRef(new Set());
+    const handoffStarted = useRef(false);
     const key = useRef(null);
     if (!key.current) key.current = "panel-" + crypto.randomUUID();
     const saving = useRef(false);
@@ -95,6 +105,11 @@
       if (saving.current || !title.trim() || !body.trim() || !assignee) return;
       saving.current = true; setBusy(true); setError("");
       try {
+        if (handoffStarted.current && draftId.current) {
+          const current = await request("/tasks/" + encodeURIComponent(draftId.current), board);
+          if (current.task?.assignee) { onSaved("Поручение уже передано. Проверьте его состояние в карточке.", draftId.current); return; }
+          handoffStarted.current = false;
+        }
         const payload = { title: title.trim(), body: body.trim(), assignee, priority: Number(priority) || 0 };
         if (!task) {
           payload.tenant = tenant.trim() || null;
@@ -105,35 +120,59 @@
             payload.workspace_path = boardMeta.default_workdir;
           }
         }
-        const result = await request(task ? "/tasks/" + encodeURIComponent(task.id) : "/tasks", board, task ? "PATCH" : "POST", payload);
-        onSaved(result.warning ? "Задача сохранена, но автоматический запуск сейчас недоступен. Проверьте настройки выполнения." : task ? "Изменения сохранены." : "Поручение добавлено в очередь. Агент может начать его автоматически.");
-      } catch (err) { setError(errorText(err)); }
+        // Сначала прикрепляем исходные файлы, затем назначаем исполнителя.
+        // Без назначения диспетчер не запустит незавершённую передачу.
+        const hasFiles = !task && files.length > 0;
+        const result = await request(task || draftId.current ? "/tasks/" + encodeURIComponent(task ? task.id : draftId.current) : "/tasks", board, task || draftId.current ? "PATCH" : "POST", hasFiles ? { ...payload, assignee: null } : payload);
+        if (hasFiles) {
+          draftId.current = draftId.current || result.task?.id;
+          if (!draftId.current) throw new Error("Не получен номер поручения");
+          for (const file of files) {
+            if (uploaded.current.has(file)) continue;
+            const form = new FormData(); form.append("file", file);
+            const response = await SDK.authedFetch(API + "/tasks/" + encodeURIComponent(draftId.current) + "/attachments?board=" + encodeURIComponent(board), { method: "POST", body: form });
+            if (!response.ok) throw new Error(String(response.status));
+            uploaded.current.add(file);
+          }
+          handoffStarted.current = true;
+          await request("/tasks/" + encodeURIComponent(draftId.current), board, "PATCH", { assignee });
+        }
+        onSaved(result.warning ? "Задача сохранена, но автоматический запуск сейчас недоступен. Проверьте настройки выполнения." : task ? "Изменения сохранены." : "Поручение добавлено в очередь. Агент может начать его автоматически.", draftId.current || result.task && result.task.id);
+      } catch (err) { setError((handoffStarted.current ? "Не удалось подтвердить передачу. Повторите запрос или откройте сохранённую карточку. " : draftId.current ? "Поручение сохранено без запуска. " : "") + errorText(err)); }
       finally { saving.current = false; setBusy(false); }
     }
-    return h(Modal, { title: task ? "Изменить поручение" : "Новое поручение", description: task ? "Уточните задание и ожидаемый результат." : "После создания задача попадёт в очередь выбранного агента и сможет запуститься автоматически.", busy, onClose },
+    function close() { if (draftId.current) onSaved(handoffStarted.current ? "Проверьте состояние передачи в карточке поручения." : "Поручение сохранено без исполнителя. Его можно дополнить и передать агенту позже.", draftId.current); else onClose(); }
+    return h(Modal, { title: task ? "Изменить поручение" : "Новое поручение", description: task ? "Уточните задание и ожидаемый результат." : "Агент получит задание вместе с исходными файлами. После передачи он сможет начать работу автоматически.", busy, onClose: close },
       h("form", { onSubmit: event => void submit(event), className: "k21-form" },
         h(Field, { label: "Что нужно сделать" }, h("input", { value: title, onChange: e => setTitle(e.target.value), required: true, maxLength: 300, placeholder: "Например, сравнить предложения трёх поставщиков" })),
         h(Field, { label: "Задание и ожидаемый результат", hint: "Укажите исходные данные, ограничения и что вы хотите получить. Ссылки можно вставить прямо сюда." },
           h("textarea", { value: body, onChange: e => setBody(e.target.value), required: true, rows: 5, placeholder: "Сравни цену, сроки и условия. Результат — таблица и рекомендация с объяснением." })),
         h(Field, { label: "Кому поручить" }, h(AgentSelect, { value: assignee, onChange: setAssignee, profiles, required: true, disabled: task && task.status === "running" })),
+        !task && h("div", { className: "k21-field" },
+          h("input", { type: "file", multiple: true, hidden: true, ref: fileInput, "aria-label": "Исходные файлы", disabled: busy || !!draftId.current,
+            onChange: event => setFiles(Array.from(event.target.files || [])) }),
+          h(Button, { disabled: busy || !!draftId.current, onClick: () => fileInput.current.click() }, files.length ? "Изменить исходные файлы" : "Прикрепить исходные файлы"),
+          files.map((file, index) => h("small", { key: index }, file.name, uploaded.current.has(file) ? " · загружен" : ""))),
         profiles.length === 0 && h("p", { className: "k21-muted" }, "Не удалось получить список агентов. Закройте окно, обновите доску и повторите."),
         h("details", null, h("summary", null, "Дополнительно"),
           !task && h(Field, { label: "Проект или клиент", hint: "Необязательная метка для поиска на доске." }, h("input", { value: tenant, onChange: e => setTenant(e.target.value), placeholder: "Например, магазин на Лесной" })),
-          h(Field, { label: "Приоритет", hint: "Задачи с большим числом начнутся раньше. Обычный приоритет — 0." }, h("input", { type: "number", value: priority, onChange: e => setPriority(e.target.value) }))),
-        !task && !(boardMeta && boardMeta.default_workdir) && h("p", { className: "k21-muted" }, "Файлы рабочего процесса временные. Попросите агента прикрепить итог к карточке; вложения и текст результата сохранятся."),
+          h(Field, { label: "Приоритет" }, h("select", { value: priority, onChange: e => setPriority(Number(e.target.value)) },
+            h("option", { value: 0 }, "Обычный"), h("option", { value: 10 }, "Срочный — раньше остальных"),
+            ![0, 10].includes(Number(priority)) && h("option", { value: priority }, "Сохранённый приоритет: " + priority)))),
+        !task && !(boardMeta && boardMeta.default_workdir) && h("p", { className: "k21-muted" }, "Текст результата и вложения сохранятся в карточке поручения."),
         error && h("p", { role: "alert", className: "k21-error" }, error),
-        h("div", { className: "k21-actions" }, h(Button, { onClick: onClose, disabled: busy }, "Отмена"),
+        h("div", { className: "k21-actions" }, h(Button, { onClick: close, disabled: busy }, "Отмена"),
           h(Button, { type: "submit", primary: true, disabled: busy || !title.trim() || !body.trim() || !assignee }, busy ? "Сохраняем…" : task ? "Сохранить" : "Передать агенту"))));
   }
 
   function MoveDialog({ task, target, profiles, board, onClose, onSaved }) {
-    const [text, setText] = useState(target === "done" && task.status === "review" ? task.latest_summary || task.result || "" : "");
+    const [text, setText] = useState(target === "done" && task.status === "review" ? task.result || task.latest_summary || "" : "");
     const [assignee, setAssignee] = useState(task.assignee || "");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const saving = useRef(false);
     const needsText = target === "done" || target === "blocked" || (target === "ready" && task.status === "review");
-    const action = target === "ready" && task.status === "review" ? "Вернуть на доработку" : ACTION[target];
+    const action = target === "done" ? completionLabel(task) : target === "ready" && task.status === "review" ? "Вернуть на доработку" : ACTION[target];
     const explanation = {
       ready: "Задача вернётся в очередь и сможет запуститься автоматически. Если она уже выполняется, текущая попытка будет остановлена.",
       blocked: "Текущая попытка будет остановлена. Задача останется ждать вашего решения.",
@@ -200,10 +239,14 @@
     const [busy, setBusy] = useState(false);
     const [version, setVersion] = useState(0);
     const uploadInput = useRef(null);
+    const taskAddress = useHref("/kanban?" + new URLSearchParams({ board, task: taskId }));
+    const [copied, setCopied] = useState(false);
     useEffect(function () {
       let live = true;
-      request("/tasks/" + encodeURIComponent(taskId), board).then(result => { if (live) setData(result); }).catch(err => { if (live) setError(errorText(err)); });
-      return function () { live = false; };
+      const refresh = () => request("/tasks/" + encodeURIComponent(taskId), board).then(result => { if (live) setData(result); }).catch(err => { if (live) setError(errorText(err)); });
+      void refresh();
+      const timer = setInterval(() => { if (document.visibilityState !== "hidden") void refresh(); }, 10000);
+      return function () { live = false; clearInterval(timer); };
     }, [taskId, board, version]);
     async function addComment(event) {
       event.preventDefault(); if (busy || !comment.trim()) return;
@@ -235,20 +278,26 @@
     }
     const task = data && data.task;
     const profile = task && profiles.find(p => p.name === task.assignee);
-    const summary = task && (task.latest_summary || task.result);
-    const blockReason = task && task.status === "blocked" && (task.block_reason || summary);
+    const summary = task && (task.result || task.latest_summary);
+    const blockReason = task && task.status === "blocked" && (task.block_reason || task.latest_summary || task.result);
     return h(Modal, { title: task ? task.title : "Поручение", description: task ? `${statusLabel(task.status)} · ${profile ? profileLabel(profile) : task.assignee || (task.status === "review" ? "Ждёт вашей проверки" : "Исполнитель не назначен")}` : "Загружаем карточку…", busy, onClose },
       error && h("div", { role: "alert", className: "k21-error" }, error, " ", h(Button, { onClick: () => { setError(""); setVersion(v => v + 1); } }, "Повторить")),
       task && h("div", { className: "k21-task-detail" },
         blockReason && h("section", { className: "k21-note" }, h("h3", null, "Что мешает продолжить"), h(RichText, null, blockReason)),
-        h("section", null, h("h3", null, "Задание"), h(RichText, null, task.body || "Описание пока не добавлено. Уточните, какой результат нужен.")),
         !blockReason && h("section", { className: "k21-note" }, h("h3", null, ["done", "review"].includes(task.status) ? "Результат" : "Последняя запись агента"), h(RichText, null, summary || "Здесь появится итог работы агента. Он останется в карточке после завершения.")),
+        h(["done", "review"].includes(task.status) ? "details" : "section", null,
+          h(["done", "review"].includes(task.status) ? "summary" : "h3", null, "Задание"),
+          h(RichText, null, task.body || "Описание пока не добавлено. Уточните, какой результат нужен.")),
         h("div", { className: "k21-actions" },
           task.status !== "ready" && task.status !== "running" && h(Button, { primary: task.status !== "review", onClick: () => onMove(task, "ready") }, task.status === "review" ? "На доработку" : "Передать агенту"),
-          task.status !== "done" && task.status !== "archived" && h(Button, { primary: task.status === "review", onClick: () => onMove(task, "done") }, "Принять результат"),
+          task.status !== "done" && task.status !== "archived" && h(Button, { primary: task.status === "review", onClick: () => onMove(task, "done") }, completionLabel(task)),
           (task.status === "ready" || task.status === "running") && h(Button, { onClick: () => onMove(task, "blocked") }, "Приостановить"),
           task.status !== "running" && h(Button, { onClick: () => onEdit(task) }, "Изменить задание"),
           task.status !== "archived" && h(Button, { onClick: () => onMove(task, "archived") }, "В архив")),
+        h(Button, { onClick: async () => {
+          try { await navigator.clipboard.writeText(new URL(taskAddress, window.location.origin).href); setCopied(true); }
+          catch (_) { setError("Браузер не разрешил копирование. Скопируйте адрес из адресной строки."); }
+        } }, copied ? "Ссылка скопирована" : "Скопировать ссылку на поручение"),
         h("section", null, h("h3", null, "Файлы"),
           (data.attachments || []).map(a => h(Button, { key: a.id, disabled: busy, onClick: () => void download(a) }, a.filename || "Скачать файл")),
           !(data.attachments || []).length && h("p", { className: "k21-muted" }, "Прикрепите исходные данные. Здесь же можно скачать файлы результата."),
@@ -273,13 +322,30 @@
             h("strong", null, RUN_LABEL[run.outcome || run.status] || "Попытка завершена"),
             h("small", null, " · ", dateLabel(run.started_at)),
             run.summary && h(RichText, null, run.summary),
-            run.error && h("p", null, "Во время выполнения возникла ошибка. Уточните задание перед повторным запуском."))))));
+            run.error && h("p", null, runErrorText(run.error)))))));
   }
 
   function KanbanPage() {
-    const [board, setBoard] = useState(() => { try { return localStorage.getItem(BOARD_KEY) || "default"; } catch (_) { return "default"; } });
+    const [params, setParams] = useSearchParams();
+    const boardKey = "korra.kanban.selectedBoard:" + useHref("/");
+    const [rememberedBoard] = useState(() => { try { return localStorage.getItem(boardKey) || "default"; } catch (_) { return "default"; } });
+    const board = params.get("board") || rememberedBoard;
+    const taskId = params.get("task");
+    const view = params.get("view") || "all";
+    function setBoard(value) {
+      setModal(null); setSearch(""); setAssignee("");
+      setParams(current => { const next = new URLSearchParams(current); next.set("board", value); next.delete("task"); return next; });
+    }
+    function setView(value) {
+      setParams(current => { const next = new URLSearchParams(current); if (value === "all") next.delete("view"); else next.set("view", value); return next; });
+    }
+    function closeTask() {
+      setModal(null);
+      setParams(current => { const next = new URLSearchParams(current); next.delete("task"); return next; }, { replace: true });
+    }
     const [boards, setBoards] = useState([]);
     const [profiles, setProfiles] = useState([]);
+    const [listsError, setListsError] = useState("");
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -305,38 +371,43 @@
       if (current !== listsGeneration.current) return;
       if (results[0].status === "fulfilled") {
         const list = results[0].value.boards || []; setBoards(list);
-        setBoard(value => list.some(b => b.slug === value) ? value : "default");
+
       }
       if (results[1].status === "fulfilled") setProfiles(results[1].value.profiles || []);
+      setListsError(results.some(result => result.status === "rejected") ? "Не удалось обновить список досок или агентов. Уже загруженные данные сохранены." : "");
     }, []);
     useEffect(() => { void loadLists(); return () => { listsGeneration.current++; }; }, [loadLists]);
     useEffect(function () {
       setLoading(true); setData(null); setNotice(""); setError("");
-      try { localStorage.setItem(BOARD_KEY, board); } catch (_) { /* Хранилище может быть запрещено настройками браузера. */ }
+      try { localStorage.setItem(boardKey, board); } catch (_) { /* Хранилище может быть запрещено настройками браузера. */ }
       void load();
       const timer = setInterval(() => { if (document.visibilityState !== "hidden") void load(); }, 10000);
       return function () { clearInterval(timer); generation.current++; };
-    }, [board, load]);
+    }, [board, boardKey, load]);
     const tasks = data ? data.columns.flatMap(column => column.tasks) : [];
-    const visible = tasks.filter(task => (!assignee || task.assignee === assignee) && (!search || [task.title, task.body, task.tenant, task.id].join(" ").toLocaleLowerCase("ru-RU").includes(search.toLocaleLowerCase("ru-RU"))));
+    const visible = tasks.filter(task => (view !== "attention" || ["review", "blocked"].includes(task.status)) && (view !== "done" || task.status === "done") && (!assignee || task.assignee === assignee) && (!search || [task.title, task.body, task.tenant, task.id].join(" ").toLocaleLowerCase("ru-RU").includes(search.toLocaleLowerCase("ru-RU"))));
     const columns = ["triage", "todo", "scheduled", ...PRIMARY, "archived"].filter(status => PRIMARY.includes(status) || visible.some(task => task.status === status));
     const meta = boards.find(b => b.slug === board) || { slug: board, name: board === "default" ? "Основная доска" : board };
     const attention = tasks.filter(task => ["review", "blocked"].includes(task.status)).length;
-    function saved(message) { setModal(null); setNotice(message); void load(); void loadLists(); }
+    const activeModal = modal || (taskId ? { kind: "task", id: taskId } : null);
+    function saved(message, id) { setModal(null); setNotice(message); if (id) openTask(id); void load(); void loadLists(); }
     function move(task, target) {
       setDragged(null);
       if (!task || task.status === target) return;
       if (!ACTION[target]) { setNotice("Этот этап меняется автоматически. Для запуска передайте задачу в очередь агенту."); return; }
       setModal({ kind: "move", task, target });
     }
-    function openTask(id) { setModal({ kind: "task", id }); }
+    function openTask(id) {
+      setModal(null);
+      setParams(current => { const next = new URLSearchParams(current); next.set("board", board); next.set("task", id); return next; });
+    }
     return h("div", { className: "k21-board", "aria-busy": loading },
       h("header", { className: "k21-board-header" },
         h("div", null, h("h2", null, "От поручения к результату"), h("p", null, "Поставьте задачу агенту, следите за ходом работы и проверяйте итог.")),
         h(Button, { primary: true, onClick: () => setModal({ kind: "create" }), disabled: loading || !data }, "Новое поручение")),
       h("div", { className: "k21-board-controls" },
-        h(Field, { label: "Доска" }, h("select", { value: board, onChange: e => { setBoard(e.target.value); setSearch(""); setAssignee(""); }, disabled: !!modal },
-          !boards.length && h("option", { value: board }, meta.name),
+        h(Field, { label: "Доска" }, h("select", { value: board, onChange: e => { setBoard(e.target.value); setSearch(""); setAssignee(""); }, disabled: !!activeModal },
+          !boards.some(b => b.slug === board) && h("option", { value: board }, meta.name),
           boards.map(b => h("option", { key: b.slug, value: b.slug }, b.slug === "default" && (!b.name || b.name === "Default") ? "Основная доска" : b.name || b.slug)))),
         h(Button, { onClick: () => setModal({ kind: "board-new" }) }, "Новая доска"),
         h(Button, { onClick: () => setModal({ kind: "board-settings" }) }, "Настройки доски"),
@@ -348,10 +419,14 @@
           h("option", { value: "" }, "Все агенты"),
           Array.from(new Set([...profiles.map(p => p.name), ...tasks.map(t => t.assignee).filter(Boolean)])).map(name => h("option", { key: name, value: name }, profileLabel(profiles.find(p => p.name === name) || { name }))))),
         h("label", { className: "k21-checkbox" }, h("input", { type: "checkbox", checked: archived, onChange: e => setArchived(e.target.checked) }), "Показать архив"),
-        (search || assignee) && h(Button, { onClick: () => { setSearch(""); setAssignee(""); } }, "Сбросить фильтры")),
+        (search || assignee || view !== "all") && h(Button, { onClick: () => { setSearch(""); setAssignee(""); setView("all"); } }, "Сбросить фильтры")),
+      h("div", { className: "k21-view-tabs", "aria-label": "Какие поручения показать" },
+        [["all", "Все поручения"], ["attention", "Нужно ваше внимание · " + attention], ["done", "Результаты"]].map(([value, label]) =>
+          h(Button, { key: value, "aria-pressed": view === value, onClick: () => setView(value) }, label))),
+      listsError && h("div", { role: "alert", className: "k21-error" }, listsError, " ", h(Button, { onClick: () => void loadLists() }, "Повторить загрузку списков")),
       h("p", { className: "k21-muted" }, attention ? `Нужно ваше внимание: ${attention}. Откройте карточки в колонках «Нужно решение» и «На проверке».` : "Перетаскивайте карточки между этапами или откройте поручение и выберите действие. Доска обновляется автоматически."),
       notice && h("div", { role: "status", className: "k21-note" }, notice),
-      error && h("div", { role: "alert", className: "k21-error" }, error, " ", h(Button, { onClick: () => void load() }, "Повторить")),
+      error && h("div", { role: "alert", className: "k21-error" }, error, " ", h(Button, { onClick: () => void load() }, "Повторить"), board !== "default" && h(Button, { onClick: () => setBoard("default") }, "На основную доску")),
       loading && h("p", { role: "status" }, "Загружаем доску…"),
       !loading && data && !tasks.length && h("section", { className: "k21-empty" },
         h("h3", null, "Начните с одного понятного поручения"),
@@ -384,11 +459,11 @@
                 task.comment_count > 0 && h("span", { className: "k21-task-meta" }, "Комментариев: ", task.comment_count));
             }));
         }))),
-      modal && modal.kind === "create" && h(TaskForm, { board, profiles, boardMeta: meta, onClose: () => setModal(null), onSaved: saved }),
-      modal && modal.kind === "edit" && h(TaskForm, { board, profiles, task: modal.task, onClose: () => openTask(modal.task.id), onSaved: saved }),
-      modal && modal.kind === "move" && h(MoveDialog, { board, profiles, task: modal.task, target: modal.target, onClose: () => setModal(null), onSaved: saved }),
-      modal && modal.kind.startsWith("board-") && h(BoardSettings, { board: meta, creating: modal.kind === "board-new", onClose: () => setModal(null), onSaved: next => { setBoards(list => [...list.filter(item => item.slug !== next.slug), next]); setBoard(next.slug); setModal(null); void loadLists(); } }),
-      modal && modal.kind === "task" && h(TaskDetail, { key: modal.id, taskId: modal.id, board, profiles, onClose: () => setModal(null), onRefresh: () => void load(), onMove: move, onEdit: task => setModal({ kind: "edit", task }), onOpenTask: openTask }));
+      activeModal && activeModal.kind === "create" && h(TaskForm, { board, profiles, boardMeta: meta, onClose: () => setModal(null), onSaved: saved }),
+      activeModal && activeModal.kind === "edit" && h(TaskForm, { board, profiles, task: activeModal.task, onClose: () => openTask(activeModal.task.id), onSaved: saved }),
+      activeModal && activeModal.kind === "move" && h(MoveDialog, { board, profiles, task: activeModal.task, target: activeModal.target, onClose: () => setModal(null), onSaved: saved }),
+      activeModal && activeModal.kind.startsWith("board-") && h(BoardSettings, { board: meta, creating: activeModal.kind === "board-new", onClose: () => setModal(null), onSaved: next => { setBoards(list => [...list.filter(item => item.slug !== next.slug), next]); setBoard(next.slug); setModal(null); void loadLists(); } }),
+      activeModal && activeModal.kind === "task" && h(TaskDetail, { key: activeModal.id, taskId: activeModal.id, board, profiles, onClose: closeTask, onRefresh: () => void load(), onMove: move, onEdit: task => setModal({ kind: "edit", task }), onOpenTask: openTask }));
   }
   function KanbanEntry() {
     return h("section", { className: "k21-note k21-board-header" },

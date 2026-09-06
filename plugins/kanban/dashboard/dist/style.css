@@ -56,3 +56,9 @@
   .k21-board-modal { padding: 18px; }
 }
 @media (forced-colors: active) { .k21-task { border: 1px solid ButtonText; } }
+
+/* Быстрые представления работают и на телефоне, без перетаскивания. */
+.k21-view-tabs { display: flex; gap: 12px; flex-wrap: wrap; }
+.k21-view-tabs [aria-pressed=true] { box-shadow: var(--neo-inset); }
+.k21-note.k21-board-header { font-family: Onest, sans-serif; font-size: 14px; }
+.k21-note.k21-board-header .neo-button { padding: 10px 15px; white-space: nowrap; }
