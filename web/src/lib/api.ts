@@ -1034,6 +1034,39 @@ export const api = {
         body: JSON.stringify({ display_name: displayName }),
       },
     ),
+  getProfileMemory: (name: string) =>
+    fetchJSON<ProfileMemoryData>(`/api/profiles/${encodeURIComponent(name)}/memory`),
+  addProfileMemory: (name: string, target: "memory" | "user", text: string) =>
+    fetchJSON<{ ok: true }>(`/api/profiles/${encodeURIComponent(name)}/memory`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add", target, content: text }),
+    }),
+  replaceProfileMemory: (name: string, target: "memory" | "user", oldText: string, newText: string) =>
+    fetchJSON<{ ok: true }>(`/api/profiles/${encodeURIComponent(name)}/memory`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "replace", target, old_text: oldText, content: newText }),
+    }),
+  removeProfileMemory: (name: string, target: "memory" | "user", oldText: string) =>
+    fetchJSON<{ ok: true }>(`/api/profiles/${encodeURIComponent(name)}/memory`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "remove", target, old_text: oldText }),
+    }),
+  getProfileMaterials: (name: string) =>
+    fetchJSON<{ materials: ProfileMaterialInfo[] }>(`/api/profiles/${encodeURIComponent(name)}/materials`),
+  createProfileMaterial: (name: string, input: { title: string; text?: string; url?: string; file?: File }) => {
+    const form = new FormData();
+    form.append("title", input.title);
+    if (input.text) form.append("text", input.text);
+    if (input.url) form.append("url", input.url);
+    if (input.file) form.append("file", input.file, input.file.name);
+    return fetchJSON<{ ok: true; name: string }>(`/api/profiles/${encodeURIComponent(name)}/materials`, {
+      method: "POST", body: form,
+    });
+  },
+  deleteProfileMaterial: (name: string, materialName: string) =>
+    fetchJSON<{ ok: true }>(`/api/profiles/${encodeURIComponent(name)}/materials/${encodeURIComponent(materialName)}`, {
+      method: "DELETE",
+    }),
   describeProfileAuto: (name: string, overwrite = true) =>
     fetchJSON<ProfileDescribeAutoResult>(
       `/api/profiles/${encodeURIComponent(name)}/describe-auto`,
@@ -2567,6 +2600,23 @@ export interface ProfileDescribeAutoResult {
   reason: string;
   description: string | null;
   description_auto: boolean;
+}
+
+export interface ProfileMemoryData {
+  memory: string[];
+  user: string[];
+  limits: { memory: number; user: number };
+  used: { memory: number; user: number };
+  enabled: { memory: boolean; user: boolean };
+}
+
+export interface ProfileMaterialInfo {
+  name: string;
+  title: string;
+  kind: "text" | "link" | "file";
+  filename?: string;
+  updated_at?: string;
+  url?: string;
 }
 
 export interface ProfileInfo {
