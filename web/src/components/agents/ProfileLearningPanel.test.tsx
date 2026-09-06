@@ -300,14 +300,21 @@ describe("ProfileLearningPanel — что важно помнить", () => {
     await open("memory");
 
     expect(container.textContent).toContain("отключено");
-    await enterText(field<HTMLTextAreaElement>("#learning-memory-add-user"), "Люблю кратко.");
-    const section = container.querySelector('[data-memory-target="user"]')!;
+    const disabled = container.querySelector('[data-memory-target="user"]')!;
+    expect(field<HTMLTextAreaElement>("#learning-memory-add-user").disabled).toBe(true);
+    expect([...disabled.querySelectorAll<HTMLButtonElement>('button')].every(button => button.disabled)).toBe(true);
+    await click(findButton("Добавить запись", disabled));
+    expect(apiMocks.addProfileMemory).not.toHaveBeenCalled();
+    await enterText(field<HTMLTextAreaElement>("#learning-memory-add-memory"), "Люблю кратко.");
+    const section = container.querySelector('[data-memory-target="memory"]')!;
     await click(findButton("Добавить запись", section));
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(
       "Запись не помещается: лимит 2200 знаков.",
     );
-    // Черновик остаётся — человек поправит и отправит снова.
-    expect(field<HTMLTextAreaElement>("#learning-memory-add-user").value).toBe("Люблю кратко.");
+    // После перечитывания не теряется текст для исправления и повтора.
+    await click(findButton("Обновить память"));
+    expect(apiMocks.getProfileMemory).toHaveBeenCalledTimes(2);
+    expect(field<HTMLTextAreaElement>("#learning-memory-add-memory").value).toBe("Люблю кратко.");
   });
 });
 
@@ -337,8 +344,19 @@ describe("ProfileLearningPanel — материалы и инструкции", 
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
       "Проверить вопросом",
     );
-    expect(field<HTMLTextAreaElement>("#learning-check-prompt").value).toBe(
-      "Прочитай навык «korra-material-new» и его источники, затем ответь: ",
+    expect(field<HTMLTextAreaElement>("#learning-check-prompt").value).toBe("");
+    expect(container.textContent).toContain("Проверяем материал: Условия доставки");
+    expect(container.textContent).not.toContain("korra-material-new");
+    await enterText(field<HTMLTextAreaElement>("#learning-check-prompt"), "Сколько стоит доставка?");
+    await click(findButton("Спросить агента"));
+    expect(apiMocks.probeProfileChat).toHaveBeenCalledWith(
+      "sekretar", materialProbePrompt({ name: "korra-material-new" }, "Сколько стоит доставка?"),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    await click(findButton("Убрать материал из вопроса"));
+    await click(findButton("Спросить агента"));
+    expect(apiMocks.probeProfileChat).toHaveBeenLastCalledWith(
+      "sekretar", "Сколько стоит доставка?", expect.anything(),
     );
   });
 
@@ -352,7 +370,7 @@ describe("ProfileLearningPanel — материалы и инструкции", 
     await act(async () => {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    expect(container.textContent).toContain("Такой файл агент прочитать не сможет");
+    expect(container.textContent).toContain("Этот формат здесь не поддерживается");
     await enterText(field<HTMLInputElement>("#learning-material-title"), "Что-то");
     expect(findButton("Сохранить материал")?.disabled).toBe(true);
 
@@ -399,7 +417,7 @@ describe("ProfileLearningPanel — проверить вопросом и ссы
 
   it("ведёт в навыки, расписание, модель и чат именно этого агента", async () => {
     await open();
-    await click(findButton("Навыки"));
+    await click(findButton("Навыки и инструменты"));
     expect(location()).toBe("/skills?profile=sekretar");
     await click(findButton("Расписание"));
     expect(location()).toBe("/cron?profile=sekretar");
@@ -427,7 +445,8 @@ describe("помощники панели", () => {
 
   it("файл проверяется по расширению и размеру до отправки", () => {
     expect(materialFileProblem({ name: "price.PDF", size: 1024 })).toBeNull();
-    expect(materialFileProblem({ name: "price.exe", size: 1024 })).toMatch(/прочитать не сможет/);
+    expect(materialFileProblem({ name: "empty.txt", size: 0 })).toMatch(/пуст/);
+    expect(materialFileProblem({ name: "price.exe", size: 1024 })).toMatch(/не поддерживается/);
     expect(materialFileProblem({ name: "big.pdf", size: 11 * 1024 * 1024 })).toMatch(/10 МБ/);
   });
 });

@@ -6,7 +6,7 @@
  * собирает в одном месте четыре настоящих механизма движка и называет их
  * человеческими словами (парная работа с Астрой, РЕШЕНО 06.09):
  *
- * - **Роль и правила** — `SOUL.md` профиля: единственное, что попадает в
+ * - **Роль и правила** — `SOUL.md` профиля: правила, которые попадают в
  *   системный промпт на каждый разговор. Дефолт движка — английский
  *   «You are Korra. Be direct…» — здесь распознаётся как «роль не задана».
  * - **Что важно помнить** — встроенная память `memories/MEMORY.md` и
@@ -187,10 +187,12 @@ export default function ProfileLearningPanel({
   const baseId = useId();
   const [section, setSection] = useState<LearningSection>(initialSection);
   const [checkPrompt, setCheckPrompt] = useState("");
+  const [checkMaterial, setCheckMaterial] = useState<ProfileMaterialInfo | null>(null);
   const displayName = profile.display_name?.trim() || profile.name;
 
-  const openCheck = useCallback((prompt: string) => {
-    setCheckPrompt(prompt);
+  const openCheck = useCallback((material: ProfileMaterialInfo) => {
+    setCheckMaterial(material);
+    setCheckPrompt("");
     setSection("check");
   }, []);
 
@@ -252,6 +254,9 @@ export default function ProfileLearningPanel({
         )}
         {section === "check" && (
           <CheckSection
+            key={checkMaterial?.name ?? "general"}
+            material={checkMaterial}
+            onClearMaterial={() => setCheckMaterial(null)}
             profileName={profile.name}
             prompt={checkPrompt}
             onPromptChange={setCheckPrompt}
@@ -261,9 +266,14 @@ export default function ProfileLearningPanel({
 
       {/* Остальные механизмы обучения живут в своих разделах — открываем их
           сразу для этого агента, а не для запомненного в разделе. */}
+      <p className="text-xs text-[var(--neo-text-secondary)]">
+        В «Навыках и инструментах» выберите, что агент умеет делать. В «Расписании»
+        опишите регулярную задачу и время запуска. Добавьте в неё все важные условия:
+        по умолчанию такие задания выполняются без заметок памяти.
+      </p>
       <nav aria-label="Ещё для этого агента" className="flex flex-wrap gap-2">
         <Button ghost size="sm" onClick={() => navigate(agentSettingsHref(profile.name, "skills"))}>
-          Навыки
+          Навыки и инструменты
         </Button>
         <Button ghost size="sm" onClick={() => navigate(agentSettingsHref(profile.name, "schedule"))}>
           Расписание
@@ -467,9 +477,14 @@ function MemorySection({
         </div>
       )}
       {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
+        <div className="grid gap-2">
+          <p role="alert" className="text-sm text-destructive">{error}</p>
+          <div>
+            <Button ghost size="sm" disabled={busy} onClick={() => { setError(""); resource.retry(); }}>
+              Обновить память
+            </Button>
+          </div>
+        </div>
       )}
 
       {memory &&
@@ -500,7 +515,7 @@ function MemorySection({
                   <Badge tone="warning" className="shrink-0">
                     отключено
                   </Badge>
-                  Этот вид памяти выключен в настройках: записи сохранятся, но
+                  Этот вид памяти выключен. Сохранённые записи останутся, но
                   агент их не прочтёт, пока память не включат.
                 </p>
               )}
@@ -528,18 +543,18 @@ function MemorySection({
                               id={`learning-memory-edit-${target.id}`}
                               className="min-h-20"
                               value={editing.draft}
-                              disabled={busy}
+                              disabled={busy || !enabled}
                               onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
                                 setEditing({ ...editing, draft: event.target.value })
                               }
                             />
                             <div className="flex flex-wrap justify-end gap-2">
-                              <Button ghost size="sm" disabled={busy} onClick={() => setEditing(null)}>
+                              <Button ghost size="sm" disabled={busy || !enabled} onClick={() => setEditing(null)}>
                                 Отмена
                               </Button>
                               <Button
                                 size="sm"
-                                disabled={busy || !editing.draft.trim() || editing.draft.trim() === entry}
+                                disabled={busy || !enabled || !editing.draft.trim() || editing.draft.trim() === entry}
                                 onClick={() =>
                                   void run(
                                     () =>
@@ -564,12 +579,12 @@ function MemorySection({
                               <span className="mr-auto text-[var(--neo-text-secondary)]">
                                 Удалить эту запись?
                               </span>
-                              <Button ghost size="sm" disabled={busy} onClick={() => setRemoving(null)}>
+                              <Button ghost size="sm" disabled={busy || !enabled} onClick={() => setRemoving(null)}>
                                 Отмена
                               </Button>
                               <Button
                                 size="sm"
-                                disabled={busy}
+                                disabled={busy || !enabled}
                                 onClick={() =>
                                   void run(
                                     () => api.removeProfileMemory(profileName, target.id, entry),
@@ -588,7 +603,7 @@ function MemorySection({
                               <Button
                                 ghost
                                 size="sm"
-                                disabled={busy}
+                                disabled={busy || !enabled}
                                 aria-label={`Изменить запись: ${entry.slice(0, 40)}`}
                                 onClick={() => {
                                   setRemoving(null);
@@ -600,7 +615,7 @@ function MemorySection({
                               <Button
                                 ghost
                                 size="sm"
-                                disabled={busy}
+                                disabled={busy || !enabled}
                                 aria-label={`Удалить запись: ${entry.slice(0, 40)}`}
                                 onClick={() => {
                                   setEditing(null);
@@ -623,7 +638,7 @@ function MemorySection({
                 onSubmit={(event: FormEvent<HTMLFormElement>) => {
                   event.preventDefault();
                   const value = draft.trim();
-                  if (!value) return;
+                  if (!value || !enabled) return;
                   void run(
                     () => api.addProfileMemory(profileName, target.id, value),
                     () => setDrafts((previous) => ({ ...previous, [target.id]: "" })),
@@ -638,7 +653,7 @@ function MemorySection({
                   className="min-h-20"
                   placeholder={target.placeholder}
                   value={draft}
-                  disabled={busy}
+                  disabled={busy || !enabled}
                   onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
                     setDrafts((previous) => ({ ...previous, [target.id]: event.target.value }))
                   }
@@ -647,7 +662,7 @@ function MemorySection({
                   <span className="text-xs text-[var(--neo-text-secondary)]">
                     Агент увидит запись в новом разговоре.
                   </span>
-                  <Button type="submit" size="sm" disabled={busy || !draft.trim()}>
+                  <Button type="submit" size="sm" disabled={busy || !enabled || !draft.trim()}>
                     Добавить запись
                   </Button>
                 </div>
@@ -668,7 +683,7 @@ function MaterialsSection({
   onCheck,
 }: {
   profileName: string;
-  onCheck: (prompt: string) => void;
+  onCheck: (material: ProfileMaterialInfo) => void;
 }) {
   const resource = useProfileResource(profileName, api.getProfileMaterials);
   const materials = resource.value?.materials ?? null;
@@ -773,15 +788,18 @@ function MaterialsSection({
               className="neo-field flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
               data-material={material.name}
             >
+              <div className="flex min-w-0 flex-1 basis-full items-start gap-2 sm:basis-auto">
               <Badge tone="secondary" className="shrink-0">
                 {MATERIAL_KIND_LABEL[material.kind]}
               </Badge>
-              <span className="min-w-0 flex-1 truncate">
+              <span className="min-w-0 flex-1 break-words">
                 {material.title}
                 {material.filename ? (
                   <span className="text-[var(--neo-text-secondary)]"> · {material.filename}</span>
                 ) : null}
               </span>
+              </div>
+              <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               {removing === material.name ? (
                 <>
                   <span className="text-[var(--neo-text-secondary)]">Удалить материал?</span>
@@ -798,7 +816,7 @@ function MaterialsSection({
                     ghost
                     size="sm"
                     aria-label={`Проверить материал «${material.title}»`}
-                    onClick={() => onCheck(materialProbePrompt(material))}
+                    onClick={() => onCheck(material)}
                   >
                     Проверить
                   </Button>
@@ -813,6 +831,7 @@ function MaterialsSection({
                   </Button>
                 </>
               )}
+              </div>
             </li>
           ))}
         </ul>
@@ -824,7 +843,7 @@ function MaterialsSection({
             сохранено
           </Badge>
           Материал сохранён. Проверьте вопросом, как агент его использует.
-          <Button ghost size="sm" onClick={() => onCheck(materialProbePrompt(saved))}>
+          <Button ghost size="sm" onClick={() => onCheck(saved)}>
             Проверить вопросом
           </Button>
         </p>
@@ -930,10 +949,14 @@ function MaterialsSection({
 /* ------------------------------------------------------------------ */
 
 function CheckSection({
+  material,
+  onClearMaterial,
   profileName,
   prompt,
   onPromptChange,
 }: {
+  material: ProfileMaterialInfo | null;
+  onClearMaterial: () => void;
   profileName: string;
   prompt: string;
   onPromptChange: (value: string) => void;
@@ -943,7 +966,7 @@ function CheckSection({
   const [failure, setFailure] = useState<{ title: string; advice: string; detail: string } | null>(null);
   const ticket = useRef(0);
   const abort = useRef<AbortController | null>(null);
-  useEffect(() => () => abort.current?.abort(), []);
+  useEffect(() => () => { ticket.current += 1; abort.current?.abort(); }, []);
 
   const ask = async () => {
     const question = prompt.trim();
@@ -956,7 +979,10 @@ function CheckSection({
     setReply("");
     setFailure(null);
     try {
-      const outcome = await probeProfileChat(profileName, question, { signal: controller.signal });
+      const outcome = await probeProfileChat(
+        profileName, material ? materialProbePrompt(material, question) : question,
+        { signal: controller.signal },
+      );
       if (ticket.current !== mine) return;
       if (outcome.ok) {
         setReply(outcome.reply);
@@ -978,15 +1004,25 @@ function CheckSection({
   return (
     <div className="grid gap-3">
       <p className="text-sm text-[var(--neo-text-secondary)]">
-        Спросите то, что агент должен был усвоить. Каждая проверка — новый
-        разговор: агент читает роль, память и материалы заново, поэтому ответ
-        показывает, что он действительно знает.
+        Это новый разговор с актуальными ролью и памятью. Задайте вопрос,
+        ответ на который вам известен, и сравните результат.
+        Материалы агент открывает по необходимости; проверка выбранного материала
+        отдельно попросит прочитать его источники.
       </p>
+      {material && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span>Проверяем материал: <strong>{material.title}</strong></span>
+          <Button ghost size="sm" disabled={state === "sending"} onClick={onClearMaterial}>
+            Убрать материал из вопроса
+          </Button>
+        </div>
+      )}
       <Label htmlFor="learning-check-prompt" className="sr-only">
         Вопрос агенту
       </Label>
       <Textarea
         id="learning-check-prompt"
+        disabled={state === "sending"}
         className="min-h-24"
         placeholder="Например: какой у нас минимальный заказ и срок изготовления?"
         value={prompt}

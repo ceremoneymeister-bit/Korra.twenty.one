@@ -334,7 +334,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     expect(providerSelect()?.textContent).toContain("Как у главного агента");
     expect(modelSelect()).toBeNull();
     expect(container.textContent).toContain(
-      "dario · claude-opus-5[1m] — доступ настроен, агент ответит сразу.",
+      "dario · claude-opus-5[1m] — настройки подключения найдены. После создания проверим ответ.",
     );
   });
 
@@ -365,7 +365,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
         node.textContent?.includes("claude-sonnet-5"),
       ),
     );
-    expect(container.textContent).toContain("Доступ к «dario» настроен");
+    expect(container.textContent).toContain("Настройки подключения к «dario» найдены.");
 
     await enterText(nameInput(), "Учитель китайского");
     await click(findButton("Создать агента"));
@@ -549,7 +549,7 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     await flush();
 
     expect(providerSelect()?.textContent).toContain("Как у агента-источника");
-    expect(container.textContent).toContain("dario · claude-sonnet-5 — доступ настроен");
+    expect(container.textContent).toContain("dario · claude-sonnet-5 — настройки подключения найдены.");
 
     await enterText(nameInput(), "Второй секретарь");
     await click(findButton("Создать агента"));

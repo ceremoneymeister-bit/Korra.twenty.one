@@ -42,8 +42,9 @@ export function materialFileProblem(file: Pick<File, "name" | "size">): string |
     const allowed = MATERIAL_FILE_EXTENSIONS.map((extension) =>
       extension.slice(1).toUpperCase(),
     ).join(", ");
-    return `Такой файл агент прочитать не сможет. Подходят ${allowed}.`;
+    return `Этот формат здесь не поддерживается. Подходят ${allowed}.`;
   }
+  if (file.size === 0) return "Файл пуст. Выберите файл с содержимым.";
   if (file.size > MATERIAL_FILE_LIMIT_BYTES) {
     return "Файл больше 10 МБ — разбейте его или сохраните только нужную часть.";
   }

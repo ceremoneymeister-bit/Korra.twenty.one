@@ -753,11 +753,11 @@ export default function ProfileBuilderPage() {
             {pickedModel?.ready && (
               <p className="flex flex-wrap items-center gap-2 text-sm text-[var(--neo-text-secondary)]">
                 <Badge tone="success" className="shrink-0">
-                  {READY_MARK}
+                  настроено
                 </Badge>
                 {providerChoice
-                  ? `Доступ к «${pickedModel.providerName}» настроен — агент ответит сразу.`
-                  : `${pickedModel.providerName} · ${pickedModel.model} — доступ настроен, агент ответит сразу.`}
+                  ? `Настройки подключения к «${pickedModel.providerName}» найдены. После создания проверим ответ.`
+                  : `${pickedModel.providerName} · ${pickedModel.model} — настройки подключения найдены. После создания проверим ответ.`}
               </p>
             )}
 
