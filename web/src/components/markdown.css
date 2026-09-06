@@ -4,8 +4,8 @@
   min-width: 0;
   color: var(--neo-text-primary);
   font-family: var(--theme-font-sans);
-  font-size: 16px;
-  line-height: 1.75;
+  font-size: 17px;
+  line-height: 1.8;
   overflow-wrap: anywhere;
 }
 
@@ -15,25 +15,25 @@
 
 .korra-markdown > * + *,
 .korra-markdown blockquote > * + * {
-  margin-top: 0.85em;
+  margin-top: 1.05em;
 }
 
 .korra-markdown :is(h1, h2, h3, h4, h5, h6) {
-  margin-top: 1.6em;
-  margin-bottom: 0.5em;
+  margin-top: 1.75em;
+  margin-bottom: 0.65em;
   font-weight: 600;
   line-height: 1.4;
   text-wrap: pretty;
 }
 
 .korra-markdown h1 {
-  font-size: 1.5em;
+  font-size: 1.65em;
 }
 .korra-markdown h2 {
-  font-size: 1.25em;
+  font-size: 1.4em;
 }
 .korra-markdown h3 {
-  font-size: 1.125em;
+  font-size: 1.18em;
 }
 .korra-markdown :is(h4, h5, h6) {
   font-size: 1em;
@@ -60,7 +60,7 @@
   padding-left: 0.25em;
 }
 .korra-markdown li + li {
-  margin-top: 0.6em;
+  margin-top: 0.7em;
 }
 .korra-markdown li > * + * {
   margin-top: 0.45em;
@@ -96,18 +96,27 @@
   overflow: hidden;
 }
 
+.korra-markdown__code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px 8px 18px;
+  background: color-mix(in srgb, var(--neo-shadow) 32%, transparent);
+}
 .korra-markdown__code-language {
-  padding: 10px 16px 0;
   color: var(--neo-text-secondary);
-  font-size: 12px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .korra-markdown pre {
-  padding: 12px 16px;
+  padding: 18px;
   overflow-x: auto;
   white-space: pre;
   overflow-wrap: normal;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.7;
   outline: none;
 }
@@ -134,22 +143,51 @@
   overflow-x: auto;
   outline: none;
 }
+.korra-markdown__table-hint {
+  margin-bottom: 8px;
+  color: var(--neo-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .korra-markdown table {
   width: 100%;
   border-collapse: collapse;
   overflow-wrap: normal;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
 .korra-markdown :is(th, td) {
   min-width: 7em;
-  padding: 10px 14px;
+  padding: 14px 18px;
   border: 0;
   vertical-align: top;
 }
 .korra-markdown th {
   font-weight: 600;
+}
+.korra-markdown strong {
+  font-weight: 650;
+}
+
+.korra-chat-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 0;
+  outline: none;
+  border-radius: var(--neo-radius-control);
+  background: transparent;
+  color: var(--neo-text-secondary);
+  font: 400 12px/1.4 var(--theme-font-sans);
+  cursor: pointer;
+}
+.korra-chat-copy:is(:hover, :focus-visible) {
+  color: var(--neo-text-primary);
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset-compact);
 }
 .korra-markdown thead,
 .korra-markdown tbody tr:nth-child(even) {
@@ -181,7 +219,7 @@
 
 @media (max-width: 640px) {
   .korra-markdown {
-    font-size: 15px;
+    font-size: 16px;
   }
   .korra-markdown :is(th, td) {
     padding: 8px 10px;

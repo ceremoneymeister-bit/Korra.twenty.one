@@ -1,6 +1,8 @@
 import { useMemo, type ReactNode } from "react";
 import { isTableDelimiter, splitTableRow } from "@/lib/markdown-tables";
 import { cn } from "@/lib/utils";
+import { CopyTextButton } from "./chat/CopyTextButton";
+import { ScrollableTable } from "./chat/ScrollableTable";
 import "./markdown.css";
 
 /** Разметка ответа остаётся текстом до браузера. Здесь разбираем привычные
@@ -52,7 +54,7 @@ function StreamingCaret() {
   return (
     <span
       aria-hidden
-      className="inline-block w-[0.5em] h-[1em] ml-0.5 align-[-0.15em] bg-foreground/50 animate-pulse"
+      className="korra-markdown__caret inline-block w-[0.5em] h-[1em] ml-0.5 align-[-0.15em] bg-foreground/50 animate-pulse"
     />
   );
 }
@@ -266,9 +268,10 @@ function Block({
     case "code":
       return (
         <div className="korra-markdown__code">
-          {block.lang && (
-            <div className="korra-markdown__code-language">{block.lang}</div>
-          )}
+          <div className="korra-markdown__code-header">
+            <span className="korra-markdown__code-language">{block.lang || "Код"}</span>
+            <CopyTextButton text={block.content} label="Скопировать код" />
+          </div>
           <pre tabIndex={0} aria-label="Код">
             <code>
               {block.content}
@@ -305,12 +308,7 @@ function Block({
 
     case "table":
       return (
-        <div
-          className="korra-markdown__table"
-          role="region"
-          aria-label="Таблица, можно прокручивать по горизонтали"
-          tabIndex={0}
-        >
+        <ScrollableTable>
           <table>
             <thead>
               <tr>
@@ -347,7 +345,7 @@ function Block({
             </tbody>
           </table>
           {caret}
-        </div>
+        </ScrollableTable>
       );
 
     case "hr":

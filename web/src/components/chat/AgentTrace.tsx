@@ -119,6 +119,8 @@ export interface AgentTraceProps {
   reasoning?: string;
   /** Агент ещё работает: заголовок с бликом, блок раскрыт сам. */
   active?: boolean;
+  /** Текст уже приходит; завершённые шаги уступают место чтению. */
+  answering?: boolean;
   /** Момент начала хода — от него считается «Думал N с». */
   startedAt: number;
 }
@@ -127,22 +129,24 @@ export function AgentTrace({
   tools,
   reasoning,
   active = false,
+  answering = false,
   startedAt,
 }: AgentTraceProps) {
   const { themeName } = useTheme();
-  // Раскрытие: `null` — «как решает состояние работы», bool — выбор человека.
-  // Ручной выбор сбрасывается при смене состояния работы, поэтому блок сам
-  // раскрывается на время хода и сам сворачивается после ответа.
+  const writing = active && answering && !tools.some(tool => tool.status === "running");
+  const working = active && !writing;
+  // Ручной выбор действует до смены этапа: работа → текст → завершение.
   const [override, setOverride] = useState<boolean | null>(null);
   const [openRow, setOpenRow] = useState<string | null>(null);
   // Пересчёт производного состояния прямо в рендере, а не в эффекте: эффект
   // здесь дал бы лишний каскадный рендер на каждый ход агента.
-  const [wasActive, setWasActive] = useState(active);
-  if (wasActive !== active) {
-    setWasActive(active);
+  const phase = working ? "working" : writing ? "writing" : "done";
+  const [previousPhase, setPreviousPhase] = useState(phase);
+  if (previousPhase !== phase) {
+    setPreviousPhase(phase);
     setOverride(null);
   }
-  const open = override ?? active;
+  const open = override ?? working;
   const elapsedMs = measuredElapsed(tools, startedAt);
 
   const trimmedReasoning = reasoning?.trim() ?? "";
@@ -151,6 +155,7 @@ export function AgentTrace({
 
   const summary = headerSummary({
     active,
+    writing,
     elapsedMs,
     calls: tools.length,
     errors: tools.filter((tool) => tool.status === "error").length,
@@ -239,21 +244,23 @@ export function AgentTrace({
 
 function headerSummary({
   active,
+  writing,
   elapsedMs,
   calls,
   errors,
   hasReasoning,
 }: {
   active: boolean;
+  writing: boolean;
   elapsedMs: number | null;
   calls: number;
   errors: number;
   hasReasoning: boolean;
 }): string {
-  if (active) return "Думаю…";
   const parts: string[] = [];
-  if (elapsedMs !== null) parts.push(`Думал ${formatSeconds(elapsedMs)}`);
-  if (calls > 0) parts.push(pluralCalls(calls));
+  if (active) parts.push(writing ? "Пишу ответ…" : "Думаю…");
+  else if (elapsedMs !== null) parts.push(`Думал ${formatSeconds(elapsedMs)}`);
+  if (!active && calls > 0) parts.push(pluralCalls(calls));
   if (errors > 0) parts.push(`${errors} с ошибкой`);
   if (parts.length > 0) return parts.join(" · ");
   return hasReasoning ? "Размышление" : "Ход работы";

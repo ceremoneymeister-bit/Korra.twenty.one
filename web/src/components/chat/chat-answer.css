@@ -1,0 +1,22 @@
+/* У ответа своя спокойная поверхность, служебный ход остаётся снаружи. */
+.korra-chat-answer {
+  min-width: 0;
+  padding: 28px 32px 16px;
+  border: 0;
+  border-radius: 24px;
+  background: var(--neo-surface);
+  box-shadow: var(--neo-depth-1);
+}
+
+.korra-chat-answer__footer {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 24px;
+}
+
+@media (max-width: 640px) {
+  .korra-chat-answer {
+    padding: 20px 18px 12px;
+    border-radius: 20px;
+  }
+}

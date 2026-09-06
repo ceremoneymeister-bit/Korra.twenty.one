@@ -91,14 +91,14 @@ describe("Чтение ответа агента", () => {
     const host = render("- Пример:\n  ```python\n  total = 2", true);
     const code = host.querySelector("li pre code");
     expect(code?.textContent).toBe("total = 2");
-    expect(code?.querySelectorAll('[aria-hidden="true"]')).toHaveLength(1);
-    expect(host.querySelectorAll('[aria-hidden="true"]')).toHaveLength(1);
+    expect(code?.querySelectorAll(".korra-markdown__caret")).toHaveLength(1);
+    expect(host.querySelectorAll(".korra-markdown__caret")).toHaveLength(1);
   });
 
   it("поток сохраняет один курсор даже на пустой цитате или пункте", () => {
     for (const content of ["", "> ", "- ", "1. ", "## Начало\n\n> - "]) {
       const host = render(content, true);
-      expect(host.querySelectorAll('[aria-hidden="true"]')).toHaveLength(1);
+      expect(host.querySelectorAll(".korra-markdown__caret")).toHaveLength(1);
     }
   });
 

@@ -33,8 +33,6 @@ import {
   BotMessageSquare,
   Square,
   X,
-  Copy,
-  Check,
   Paperclip,
   RotateCcw,
   Mic,
@@ -43,6 +41,7 @@ import type { ComponentType } from "react";
 import { ThinkingOrb } from "thinking-orbs";
 
 import { Markdown } from "@/components/Markdown";
+import { TranscriptViewport } from "@/components/chat/TranscriptViewport";
 import { AgentTrace } from "@/components/chat/AgentTrace";
 import { CommandApprovalCard } from "@/components/chat/CommandApprovalCard";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
@@ -69,7 +68,8 @@ import {
 } from "@/lib/chat-attachments";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { Button } from "@nous-research/ui/ui/components/button";
-import { copyTextToClipboard } from "@/lib/clipboard";
+import { CopyTextButton } from "@/components/chat/CopyTextButton";
+import "@/components/chat/chat-answer.css";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import type { ApprovalChoiceValue, ChatMessage } from "@/lib/chat-types";
@@ -241,16 +241,7 @@ function AssistantBubble({
 }) {
   const tools = message.toolCalls ?? [];
   const hasTrace = tools.length > 0 || Boolean(message.reasoning?.trim());
-  const [copied, setCopied] = useState(false);
   const artifactSplit = splitArtifacts(message.content ?? "");
-
-  const onCopy = useCallback(async () => {
-    if (!message.content) return;
-    if (await copyTextToClipboard(message.content)) {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    }
-  }, [message.content]);
 
   // Пузырь ответа рождается пустым в момент отправки. Пока не пришло ни
   // одного события — показываем орбиту и честную подпись «работает»: сказать
@@ -267,12 +258,12 @@ function AssistantBubble({
   }
 
   return (
-    <div className="group flex justify-start pl-2">
+    <div className="flex justify-start">
       <div
         className={cn(
           // Владелец 03.09: текст агента не должен упираться в правый край.
-          "max-w-[72ch]",
-          "relative w-full min-w-0 pr-8",
+          "max-w-[780px]",
+          "w-full min-w-0",
           "text-[var(--neo-text-primary)]",
           // Chat content must be readable — opt out of Korra's UPPERCASE body style.
           "font-sans normal-case tracking-normal",
@@ -283,44 +274,29 @@ function AssistantBubble({
             tools={tools}
             reasoning={message.reasoning}
             active={Boolean(streaming)}
+            answering={Boolean(message.content)}
             startedAt={message.timestamp}
           />
         )}
         {message.content && (
-          <Markdown content={artifactSplit.text} streaming={streaming} />
-        )}
-        {/* Артефакты показываем после текста: сначала «что я сделал»,
-            потом сам результат. Во время потока не рисуем — маркер может
-            быть ещё недописан и путь получится обрезанным. */}
-        {!streaming && (
-          <ChatArtifactList
-            items={artifactSplit.artifacts}
-            onDecision={onDecision}
-            busy={decisionsBusy}
-            decided={decided}
-          />
-        )}
-        {/* Copy button — visible on hover. Streaming bubbles still get one
-            (you can grab whatever has already arrived). */}
-        {message.content && !streaming && (
-          <button
-            type="button"
-            onClick={onCopy}
-            className={cn(
-              "absolute top-1 right-1 rounded-md p-1",
-              "opacity-0 group-hover:opacity-100 transition-opacity",
-              "text-[var(--neo-text-secondary)] hover:shadow-[var(--neo-inset-compact)]",
-              "border-0 bg-transparent outline-0 focus-visible:opacity-100 focus-visible:outline-0",
+          <article className="korra-chat-answer" aria-label="Ответ агента">
+            <Markdown content={artifactSplit.text} streaming={streaming} />
+            {/* Готовое вложение идёт после пояснения. Недописанный маркер
+                потока пока не превращаем в карточку файла. */}
+            {!streaming && (
+              <>
+                <ChatArtifactList
+                  items={artifactSplit.artifacts}
+                  onDecision={onDecision}
+                  busy={decisionsBusy}
+                  decided={decided}
+                />
+                <div className="korra-chat-answer__footer">
+                  <CopyTextButton text={message.content} label="Скопировать ответ" />
+                </div>
+              </>
             )}
-            aria-label={copied ? "Скопировано" : "Скопировать"}
-            title={copied ? "Скопировано" : "Скопировать"}
-          >
-            {copied ? (
-              <Check size={12} aria-hidden />
-            ) : (
-              <Copy size={12} aria-hidden />
-            )}
-          </button>
+          </article>
         )}
       </div>
     </div>
@@ -485,26 +461,16 @@ function BubbleChatTranscript({
   const lastIsAssistant =
     lastIdx >= 0 && messages[lastIdx]!.role === "assistant";
 
-  // Autoscroll to the bottom whenever a new message is added or the last
-  // message's content grows during streaming. We scroll the container
-  // directly — scrollIntoView's "closest scrollable ancestor" search was
-  // unreliable in our flex layout. The effect sees the updated scrollHeight
-  // after React has committed the newest message to the DOM.
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const lastContentLen = messages[lastIdx]?.content.length ?? 0;
-  const approvalCount = approvals?.length ?? 0;
-  useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    // Вопрос по команде докатываем в поле зрения наравне с сообщением: агент
-    // стоит и ждёт ответа, а карточка появляется внизу ленты.
-  }, [messages.length, lastContentLen, error, approvalCount]);
+  const lastUser = [...messages].reverse().find(message => message.role === "user");
 
   return (
-    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+    <TranscriptViewport
+      key={messages[0]?.id ?? "empty"}
+      followKey={lastUser?.id}
+      awaitingApproval={approvals?.some(entry => entry.status === "pending")}
+    >
       <div className="px-4">
-        <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-7 pt-6">
+        <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-8 pt-6">
           {pendingElsewhere && (
             <div
               role="status"
@@ -592,7 +558,7 @@ function BubbleChatTranscript({
           )}
         </div>
       </div>
-    </div>
+    </TranscriptViewport>
   );
 }
 

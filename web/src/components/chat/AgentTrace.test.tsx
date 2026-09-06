@@ -67,6 +67,20 @@ afterEach(async () => {
 });
 
 describe("AgentTrace — сворачивание", () => {
+  it("уступает место поступающему ответу и снова открывается при новом вызове", async () => {
+    const done = tool({ id: "1", name: "read_file", status: "error", error: "Файл не найден" });
+    await render(<AgentTrace tools={[done]} active answering startedAt={0} />);
+    expect(panel().dataset.open).toBe("false");
+    expect(text()).toContain("Пишу ответ… · 1 с ошибкой");
+    await click(container.querySelector<HTMLButtonElement>("button[aria-expanded]")!);
+    expect(panel().dataset.open).toBe("true");
+    await render(<AgentTrace tools={[done, tool({ id: "2", name: "terminal", status: "running" })]} active answering startedAt={0} />);
+    expect(panel().dataset.open).toBe("true");
+    expect(text()).toContain("Думаю… · 1 с ошибкой");
+    await render(<AgentTrace tools={[done]} startedAt={0} />);
+    expect(panel().dataset.open).toBe("false");
+  });
+
   it("свёрнут после ответа и раскрыт, пока агент работает", async () => {
     const tools = [tool({ id: "1", name: "terminal", context: "ls -la" })];
 
