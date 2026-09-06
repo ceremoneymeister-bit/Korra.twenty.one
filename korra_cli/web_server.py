@@ -16924,12 +16924,27 @@ def _write_profile_model(profile_dir: Path, provider: str, model: str) -> None:
     Clears any stale ``base_url`` / ``context_length`` the same way
     ``POST /api/model/set`` does, since the new model may differ.
     """
-    from korra_constants import set_hermes_home_override, reset_hermes_home_override
+    from korra_constants import get_process_hermes_home, set_hermes_home_override, reset_hermes_home_override
+    from korra_cli.config import read_user_config_raw
+    from korra_cli.profiles import _matching_model_provider_config
 
     token = set_hermes_home_override(str(profile_dir))
     try:
         provider, model = _normalize_main_model_assignment(provider, model)
         cfg = load_config()
+        # Выбор в мастере может отличаться от модели главного агента.
+        # Копируем только недостающее определение выбранного подключения:
+        # без него provider не разрешается, а следом не переносится и ключ.
+        # Свои настройки профиля и остальные подключения сохраняются.
+        root = get_process_hermes_home()
+        if profile_dir.resolve() != root.resolve() and not _matching_model_provider_config(cfg, provider):
+            selected = _matching_model_provider_config(
+                read_user_config_raw(root / "config.yaml"), provider,
+            )
+            if "providers" in selected:
+                cfg["providers"] = {**(cfg.get("providers") or {}), **selected["providers"]}
+            if "custom_providers" in selected:
+                cfg["custom_providers"] = [*(cfg.get("custom_providers") or []), *selected["custom_providers"]]
         cfg["model"] = _apply_main_model_assignment(cfg.get("model", {}), provider, model)
         save_config(cfg)
     finally:
