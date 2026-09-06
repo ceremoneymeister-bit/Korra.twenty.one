@@ -259,6 +259,23 @@ describe("AgentWorkbenchPage", () => {
     );
   });
 
+  it("не закрывает форму из-за прокрутки длинного имени, но закрывает при прокрутке страницы", async () => {
+    await render(<MemoryRouter initialEntries={["/agents"]}><AgentWorkbenchPage /></MemoryRouter>);
+    await pickMenuItem("Сметчик", "Переименовать");
+    const input = document.body.querySelector<HTMLInputElement>("#agent-display-name-calculator")!;
+    await enterText(input, "Помощник владельца магазина");
+    await act(async () => { input.dispatchEvent(new Event("scroll")); });
+    expect(document.body.contains(input)).toBe(true);
+    expect(input.value).toBe("Помощник владельца магазина");
+    await act(async () => {
+      document.body.querySelector<HTMLButtonElement>('button[aria-label="Сохранить имя"]')!.click();
+    });
+    expect(workbenchMocks.updateDisplayName).toHaveBeenCalledWith("calculator", "Помощник владельца магазина");
+    await pickMenuItem("Сметчик", "Переименовать");
+    await act(async () => { window.dispatchEvent(new Event("scroll")); });
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+  });
+
   it("объясняет 404 старой версией движка", async () => {
     workbenchMocks.updateDisplayName.mockRejectedValueOnce(
       new Error("404: Данные не найдены."),

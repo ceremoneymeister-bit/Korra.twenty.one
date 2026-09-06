@@ -147,7 +147,10 @@ export default function AgentWorkbenchPage() {
       setOpenMenu(null);
       setRenamingProfile(null);
     };
-    const closeFromViewport = () => {
+    const closeFromViewport = (event: Event) => {
+      // Длинное имя прокручивает сам input. Якорь меню при этом не
+      // перемещается, и форму нельзя закрывать посреди ввода.
+      if (event.type === "scroll" && event.target instanceof Node && menuRef.current?.contains(event.target)) return;
       setOpenMenu(null);
       setRenamingProfile(null);
     };
