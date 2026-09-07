@@ -23,7 +23,7 @@ export function TranscriptViewport({ children, followKey, awaitingApproval, stor
   useLayoutEffect(() => {
     if (previousKey.current !== followKey) {
       previousKey.current = followKey;
-      if (restoringTop.current === null) following.current = true;
+      if (followKey && restoringTop.current === null) following.current = true;
     }
     const el = viewport.current;
     if (!el || !el.clientHeight) return;

@@ -472,7 +472,7 @@ function BubbleChatTranscript({
     <TranscriptViewport
       key={scrollKey ?? messages[0]?.id ?? "empty"}
       storageKey={scrollKey}
-      followKey={lastUser?.id}
+      followKey={lastUser?.delivery === "sending" ? lastUser.id : undefined}
       awaitingApproval={approvals?.some(entry => entry.status === "pending")}
     >
       <div className="px-4">
