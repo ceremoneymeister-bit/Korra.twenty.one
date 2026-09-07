@@ -89,3 +89,28 @@ async def queued_upstream_stream(client, run, url, body, headers):
             run.mark_started(200, "text/event-stream")
             await run.publish(b'event: korra.run.status\ndata: {"status":"queued"}\n\n')
         await asyncio.sleep(1)
+
+
+@router.post("/api/chat/runs/{message_id}/cancel")
+async def cancel_chat_run(message_id: str, session_id: str, profile: str = ""):
+    from contextlib import suppress
+    server = _server()
+    ledger = server._chat_delivery_ledger()
+    record = await server.run_in_threadpool(ledger.response, message_id, profile, session_id)
+    if record is None:
+        raise HTTPException(404, "Ход пока не найден. Попробуйте остановить ещё раз.")
+    run = server._CHAT_DELIVERY_STREAMS.get(f"{ledger.path}:{message_id}")
+    if run is None or run.done:
+        return {"stopped": False}
+    terminal = server._durable_stream_error_event("Ход остановлен пользователем.") + b"data: [DONE]\n\n"
+    await run.publish(terminal)
+    if run.task:
+        # Explicit Stop closes the upstream SSE: its existing disconnect
+        # handler interrupts the executor-backed agent and drains it.
+        run.task.cancel()
+        with suppress(asyncio.CancelledError):
+            await run.task
+    await server.run_in_threadpool(ledger.complete, message_id,
+                                  response_body=b"".join(run.chunks), status_code=200,
+                                  content_type="text/event-stream")
+    return {"stopped": True}

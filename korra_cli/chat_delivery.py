@@ -94,6 +94,8 @@ class DeliveryLedger:
                     if "profile" not in columns:
                         connection.execute("ALTER TABLE browser_chat_delivery ADD COLUMN profile TEXT")
                         connection.execute("ALTER TABLE browser_chat_delivery ADD COLUMN request_meta TEXT")
+                    if "outcome" not in columns:
+                        connection.execute("ALTER TABLE browser_chat_delivery ADD COLUMN outcome TEXT")
                     connection.execute("CREATE INDEX IF NOT EXISTS browser_chat_session ON browser_chat_delivery(profile, session_id)")
                     connection.commit()
                     _INITIALIZED_PATHS.add(path_key)
@@ -178,7 +180,7 @@ class DeliveryLedger:
             args.append(session_id)
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT message_id, session_id, profile, status, updated_at, request_meta FROM browser_chat_delivery "
+                "SELECT message_id, session_id, profile, COALESCE(outcome, status), updated_at, request_meta FROM browser_chat_delivery "
                 "WHERE " + " AND ".join(where) + " ORDER BY rowid DESC LIMIT 1000", args,
             ).fetchall()
         result, seen = [], set()
@@ -216,13 +218,24 @@ class DeliveryLedger:
         status_code: int,
         content_type: str,
     ) -> None:
+        outcome = "completed"
+        if content_type == "text/event-stream":
+            for line in response_body.splitlines():
+                if not line.startswith(b"data: "):
+                    continue
+                try:
+                    payload = json.loads(line[6:])
+                    if any(c.get("finish_reason") == "error" for c in payload.get("choices", [])):
+                        outcome = "failed"
+                except (ValueError, AttributeError):
+                    pass
         with self._connect() as connection:
             connection.execute(
                 """UPDATE browser_chat_delivery
-                      SET status='completed', response_body=?, status_code=?,
+                      SET status='completed', outcome=?, response_body=?, status_code=?,
                           content_type=?, updated_at=?
                     WHERE message_id=?""",
-                (response_body, status_code, content_type, time.time(), message_id),
+                (outcome, response_body, status_code, content_type, time.time(), message_id),
             )
             self._prune(connection)
 
