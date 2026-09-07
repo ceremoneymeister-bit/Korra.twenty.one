@@ -677,37 +677,36 @@ export function BubbleChatComposer({
       if (incoming.length === 0) return;
       setComposerError(null);
 
-      setAttachments((list) => {
-        const room = MAX_ATTACHMENTS - list.length;
-        if (room <= 0) {
-          setComposerError(`Не больше ${MAX_ATTACHMENTS} файлов в сообщении`);
-          return list;
-        }
-        if (incoming.length > room) {
-          setComposerError(`Не больше ${MAX_ATTACHMENTS} файлов в сообщении`);
-        }
-        const accepted: PendingAttachment[] = [];
-        for (const file of incoming.slice(0, room)) {
-          if (file.size > MAX_ATTACHMENT_BYTES) {
-            setComposerError(`«${file.name}» больше 50 МБ`);
-            continue;
-          }
-          const kind = kindOf(file.name);
-          accepted.push({
-            id: crypto.randomUUID(),
-            name: file.name,
-            size: file.size,
-            kind,
-            status: "uploading",
-            progress: 0,
-            file,
-            previewUrl: isImageKind(kind) ? URL.createObjectURL(file) : undefined,
-          });
-        }
-        // Upload outside the state updater so React stays pure.
-        queueMicrotask(() => accepted.forEach(startUpload));
-        return [...list, ...accepted];
+      const list = attachmentsRef.current;
+      const seen = new Set(list.map(item => `${item.name}:${item.size}:${item.file.lastModified}`));
+      const unique = incoming.filter(file => {
+        const key = `${file.name}:${file.size}:${file.lastModified}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
+      const room = MAX_ATTACHMENTS - list.length;
+      if (unique.length > room) {
+        setComposerError(`Не больше ${MAX_ATTACHMENTS} файлов в сообщении`);
+      }
+      const accepted: PendingAttachment[] = [];
+      for (const file of unique.slice(0, Math.max(0, room))) {
+        if (file.size === 0 || file.size > MAX_ATTACHMENT_BYTES) {
+          setComposerError(file.size === 0 ? `«${file.name}» — пустой файл` : `«${file.name}» больше 50 МБ`);
+          continue;
+        }
+        const kind = kindOf(file.name);
+        accepted.push({
+          id: crypto.randomUUID(), name: file.name, size: file.size, kind,
+          status: "uploading", progress: 0, file,
+          previewUrl: isImageKind(kind) ? URL.createObjectURL(file) : undefined,
+        });
+      }
+      // Reserve immediately, then upload outside React's replayable updater.
+      // Repeated drops and StrictMode must never create duplicate disk files.
+      attachmentsRef.current = [...list, ...accepted];
+      setAttachments(attachmentsRef.current);
+      accepted.forEach(startUpload);
     },
     [startUpload],
   );
