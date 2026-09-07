@@ -9,7 +9,7 @@ async def complete(request):
     marker = re.search(r'SESSION_TEST_[A-Z0-9_]+', prompt)
     text = 'Готово: ' + (marker.group() if marker else 'проверка') + '. Ответ сохранён.'
     delay = 14 if marker else 0
-    calls.append({'marker': marker.group() if marker else 'auxiliary', 'time': time.time()})
+    calls.append({'marker': marker.group() if marker else 'auxiliary', 'time': time.time(), 'stream': bool(body.get('stream')), 'tool_count': len(body.get('tools') or []), 'model': body.get('model')})
     if not body.get('stream'):
         await asyncio.sleep(delay)
         return web.json_response({'id':'mock', 'object':'chat.completion','model':body.get('model'), 'choices':[{'index':0,'message':{'role':'assistant','content':text},'finish_reason':'stop'}], 'usage':{'prompt_tokens':10,'completion_tokens':10,'total_tokens':20}})

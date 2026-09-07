@@ -174,10 +174,13 @@ async def main(base, artifacts):
         assert not errors, errors
         provider = await page.request.get("http://127.0.0.1:8677/status")
         calls = [call for call in (await provider.json())["calls"] if call["marker"].endswith(suffix)]
-        markers = [call["marker"] for call in calls]
+        # The engine also asks its auxiliary client for a session title.
+        # Count agent invocations separately from that deliberate LLM call.
+        agent_calls = [call for call in calls if call["tool_count"] > 0]
+        markers = [call["marker"] for call in agent_calls]
         assert len(markers) == len(set(markers)), "Reattachment invoked the model twice"
         assert f"SESSION_TEST_CAP_QUEUE_{suffix}" not in markers, "Cancelled queue reached the provider"
-        starts = {call["marker"]: call["time"] for call in calls}
+        starts = {call["marker"]: call["time"] for call in agent_calls}
         assert abs(starts[f"SESSION_TEST_TWO_AGENTS_A_{suffix}"] - starts[f"SESSION_TEST_TWO_AGENTS_B_{suffix}"]) < 10
         results.append("provider receipts: simultaneous starts, no duplicate calls, cancelled queue never executes")
         (artifacts / "sessions-browser-results.json").write_text(json.dumps({"passed": results, "page_errors": errors, "provider_calls": calls}, ensure_ascii=False, indent=2))
