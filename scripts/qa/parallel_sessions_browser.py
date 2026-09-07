@@ -80,8 +80,19 @@ async def main(base, artifacts):
         assert (await wait_status(a, {"running", "completed"}))["status"] == "running"
         await expect(page.locator("#agent-panel-lawyer").get_by_role("button", name="Остановить генерацию")).to_be_visible()
         await snapshot("two-agents-streaming")
+        directory_requested = asyncio.Event()
+        async def delayed_directory(route):
+            response = await route.fetch()
+            directory_requested.set()
+            await asyncio.sleep(1)
+            await route.fulfill(response=response)
+        await page.route("**/api/files**", delayed_directory)
         await page.get_by_role("link", name="Файлы", exact=True).click()
+        await asyncio.wait_for(directory_requested.wait(), timeout=10)
         await page.get_by_role("link", name="Агенты", exact=True).click()
+        await asyncio.sleep(1.25)
+        await page.unroute("**/api/files**", delayed_directory)
+        assert page.url.endswith("/agents"), "A late file response stole the chat route"
         await expect(page.locator("#agent-panel-lawyer")).to_be_visible()
         await wait_status(b, {"completed"})
         await expect(page.get_by_role("link", name="Бухгалтер ответил · Открыть чат")).to_be_visible(timeout=10000)

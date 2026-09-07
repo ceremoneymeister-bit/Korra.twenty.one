@@ -1,3 +1,4 @@
+import { loadChatOutbox } from "@/lib/chat-outbox";
 import { atom, onMount } from "nanostores";
 import { withBasePath } from "@/lib/api";
 
@@ -46,7 +47,8 @@ export function refreshChatRuns(): Promise<void> {
     const viewed = $viewedChat.get();
     const newlyReady = runs.filter(run => run.status === "completed" &&
       (previous.some(old => old.message_id === run.message_id && isRunBusy(old)) ||
-        (!previous.some(old => old.message_id === run.message_id) && run.updated_at * 1000 >= monitoringStarted)) &&
+        (!previous.some(old => old.message_id === run.message_id) &&
+          (run.updated_at * 1000 >= monitoringStarted || loadChatOutbox(run.profile, run.session_id)?.messageId === run.message_id))) &&
       !(viewed?.profile === run.profile && viewed.sessionId === run.session_id));
     if (newlyReady.length) {
       $unreadChatRuns.set([...newlyReady, ...$unreadChatRuns.get()].filter((run, i, all) => all.findIndex(r => r.message_id === run.message_id) === i));
