@@ -585,3 +585,18 @@ describe("восстановление серверного хода", () => {
     expect(fetcher.mock.calls.every(([url]) => !url.includes("/cancel"))).toBe(true);
   });
 });
+
+
+it("после возврата отказ сервера не превращается в молчание", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockResolvedValueOnce([{
+    message_id: "server-failed-123456", session_id: "failed-session", profile: "",
+    status: "failed", updated_at: 123, history_count: 0,
+    user_message: { role: "user", content: "Вопрос" },
+  }]);
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "failed-session", messages: [{ role: "user", content: "Вопрос" }] as SessionMessage[] });
+  await act(async () => { await current.loadSession("failed-session"); });
+  expect(current.error).toContain("Ответ завершился с ошибкой");
+  expect(current.isStreaming).toBe(false);
+  expect(current.messages[0].content).toBe("Вопрос");
+});

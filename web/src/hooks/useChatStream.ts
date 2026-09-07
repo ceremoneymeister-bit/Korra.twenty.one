@@ -655,6 +655,7 @@ export function useChatStream(
       if (!run || newerHistory || (!isRunBusy(run) && run.status !== "completed")) {
         dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages });
         if (run?.status === "interrupted") dispatch({ type: "SET_ERROR", error: "Связь с ходом потеряна. Проверьте историю перед повторной отправкой." });
+        if (run?.status === "failed") dispatch({ type: "SET_ERROR", error: "Ответ завершился с ошибкой. Проверьте историю и сохранённое сообщение перед повторной отправкой." });
         return;
       }
       // The durable stream replays from byte zero. Remove this turn's saved
