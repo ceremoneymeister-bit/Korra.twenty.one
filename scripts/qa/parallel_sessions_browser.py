@@ -183,7 +183,7 @@ async def main(base, artifacts):
         starts = {call["marker"]: call["time"] for call in agent_calls}
         assert abs(starts[f"SESSION_TEST_TWO_AGENTS_A_{suffix}"] - starts[f"SESSION_TEST_TWO_AGENTS_B_{suffix}"]) < 10
         results.append("provider receipts: simultaneous starts, no duplicate calls, cancelled queue never executes")
-        (artifacts / "sessions-browser-results.json").write_text(json.dumps({"passed": results, "page_errors": errors, "provider_calls": calls}, ensure_ascii=False, indent=2))
+        (artifacts / "sessions-browser-results.json").write_text(json.dumps({"passed": results, "page_errors": errors, "provider_calls": calls}, ensure_ascii=False, indent=2), encoding="utf-8")
         await browser.close()
         print(json.dumps(results, ensure_ascii=False, indent=2))
 
