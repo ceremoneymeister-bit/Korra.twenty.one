@@ -4599,6 +4599,7 @@ async def restore_managed_trash(payload: ManagedTrashAction, request: Request):
             meta_path = trash_root / f"{trash_id}.meta.json"
             meta = _read_managed_trash_meta(meta_path)
             destination = _managed_restore_destination(base, meta)
+            _resolve_managed_path(str(destination), request, for_write=True)
             if destination.exists():
                 raise HTTPException(status_code=409, detail="На исходном месте уже есть файл или папка.")
             try:

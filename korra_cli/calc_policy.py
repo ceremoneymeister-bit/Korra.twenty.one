@@ -26,6 +26,7 @@ def _allows_mutation(path: str) -> bool:
         "/api/chat/completions", "/api/chat/upload", "/api/chat/approval",
         "/api/files/upload", "/api/files/upload-stream", "/api/files/mkdir",
         "/api/files/text", "/api/files/rename", "/api/files/trash",
+        "/api/files/trash/restore", "/api/files/trash/purge",
     }:
         return True
     if path.startswith(("/api/providers/oauth/", "/api/providers/custom-endpoints")):

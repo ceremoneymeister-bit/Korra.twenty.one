@@ -66,6 +66,36 @@ def test_files_only_expose_client_and_only_mutate_inbox(cabinet):
     assert secret.read_text() == "secret runtime settings"
 
 
+def test_calc_trash_round_trip_and_protected_restore(cabinet):
+    client, root = cabinet
+    source = root / "client" / "inbox" / "request.txt"
+    assert client.post("/api/files/upload", json={
+        "path": str(source), "data_url": "data:text/plain;base64,dGVzdA==",
+    }).status_code == 200
+
+    def trash():
+        entries = client.get("/api/files", params={"path": str(source.parent)}).json()["entries"]
+        entry = next(item for item in entries if item["name"] == source.name)
+        response = client.post("/api/files/trash", json={"path": str(source), "expected_revision": entry["revision"]})
+        assert response.status_code == 200
+        return response.json()["trash_id"]
+
+    trash_id = trash()
+    assert client.post("/api/files/trash/restore", json={"trash_id": trash_id}).status_code == 200
+    assert source.read_text() == "test"
+    trash_id = trash()
+    metadata = root / "client" / ".trash" / f"{trash_id}.meta.json"
+    original = json.loads(metadata.read_text())
+    protected = root / "client" / "artifacts"
+    protected.mkdir(exist_ok=True)
+    metadata.write_text(json.dumps({**original, "original_path": "artifacts/forged.txt"}))
+    assert client.post("/api/files/trash/restore", json={"trash_id": trash_id}).status_code == 403
+    assert not (protected / "forged.txt").exists()
+    metadata.write_text(json.dumps(original))
+    assert client.post("/api/files/trash/purge", json={"trash_id": trash_id}).status_code == 200
+    assert client.get("/api/files/trash").json()["entries"] == []
+
+
 @pytest.mark.parametrize("path", [
     "/api/profiles", "/api/profiles/raschet-route/soul", "/api/config/raw",
     "/api/tools", "/api/cron", "/api/profiles/raschet-route/open-terminal",
