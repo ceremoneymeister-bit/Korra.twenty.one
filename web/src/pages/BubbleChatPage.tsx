@@ -572,6 +572,7 @@ function BubbleChatTranscript({
 /* ------------------------------------------------------------------ */
 
 interface BubbleChatComposerProps {
+  active?: boolean;
   /** Имя агента вкладки для подсказок; пусто — главная Корра. */
   agentLabel?: string;
   disabled?: boolean;
@@ -606,6 +607,7 @@ const DICTATION_LABEL: Record<DictationState, string> = {
 };
 
 export function BubbleChatComposer({
+  active = true,
   disabled,
   streaming,
   responding,
@@ -1089,7 +1091,7 @@ export function BubbleChatComposer({
           >
             <div className="korra-chat-composer__left-controls">
               {allowAttachments && <WorkspaceFilePicker
-                disabled={disabled || submitting || attachments.length >= MAX_ATTACHMENTS}
+                disabled={!active || disabled || submitting || attachments.length >= MAX_ATTACHMENTS}
                 onPick={pickWorkspaceFile}
               />}
               {allowAttachments && (
@@ -1482,6 +1484,7 @@ export default function BubbleChatPage({
           onApprovalDecision={handleApprovalDecision}
         />
         <BubbleChatComposer
+          active={active}
           key={sessionId ?? "new"}
           draftKey={chatViewKey(agentProfile, sessionId)}
           agentLabel={agentLabel}
