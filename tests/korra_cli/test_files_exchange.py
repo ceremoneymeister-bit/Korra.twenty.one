@@ -102,3 +102,27 @@ def test_fleet_profile_scope_uses_shared_workspace(files, monkeypatch):
     assert result.status_code == 200, result.text
     assert Path(result.json()['path']).is_relative_to(workspace)
     assert not list(profile.rglob('*.txt'))
+
+
+def test_telegram_and_dashboard_resolve_the_same_media_file(files):
+    from gateway.platforms.base import BasePlatformAdapter
+    client, _, workspace = files
+    path = workspace / 'Продажи за сентябрь.xlsx'
+    path.write_bytes(b'xlsx')
+    text = f'Готово.\nMEDIA:"{path}"'
+    media, caption = BasePlatformAdapter.extract_media(text)
+    assert media == [(str(path), False)]
+    info = client.get('/api/files/attachment', params={'path': f'MEDIA:"{path}"'})
+    assert info.json()['path'] == media[0][0]
+    assert 'MEDIA:' not in caption
+
+
+def test_large_download_reports_limit_without_reading_file(files):
+    client, _, workspace = files
+    path = workspace / 'big.zip'
+    with path.open('wb') as f:
+        f.truncate(101 * 1024 * 1024)
+    for endpoint in ['/api/files/attachment', '/api/files/download']:
+        response = client.get(endpoint, params={'path': str(path), 'chat': 1})
+        assert response.status_code == 413
+        assert '100 МБ' in response.json()['detail']
