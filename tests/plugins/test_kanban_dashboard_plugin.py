@@ -178,16 +178,26 @@ def test_tenant_filter(client):
 
 
 def test_dashboard_markdown_html_is_sanitized_before_render():
-    """Markdown rendering must sanitize HTML before dangerouslySetInnerHTML."""
+    """Текст задач, комментариев и результатов не должен попадать в DOM как HTML.
+
+    Апстримовый бандл держал собственный `sanitizeMarkdownHtml` перед
+    `dangerouslySetInnerHTML`. Доска поручений Korra свой рендер не держит:
+    весь пользовательский текст идёт через компонент панели `Markdown`
+    (`SDK.components.Markdown`, тесты инъекций — `web/src/components/Markdown.test.tsx`),
+    а запасной путь — обычный текстовый `<p>`. Инвариант тот же: в бандле нет
+    ни одного пути, где строка из API стала бы разметкой.
+    """
 
     repo_root = Path(__file__).resolve().parents[2]
     bundle = repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js"
     js = bundle.read_text(encoding="utf-8")
 
-    assert "function sanitizeMarkdownHtml(html)" in js
-    assert "MARKDOWN_ALLOWED_TAGS" in js
-    assert "sanitizeMarkdownHtml(renderMarkdown(props.source || \"\"))" in js
-    assert "dangerouslySetInnerHTML: { __html: renderMarkdown(props.source || \"\") }" not in js
+    assert "dangerouslySetInnerHTML" not in js
+    assert "innerHTML" not in js
+    assert "insertAdjacentHTML" not in js
+    # Пользовательский текст рендерится только через панельный Markdown.
+    assert 'h(C.Markdown, { content: String(children || "") })' in js
+    assert 'h("p", { className: "k21-preserve" }, children)' in js
 
 
 # ---------------------------------------------------------------------------
@@ -736,38 +746,23 @@ def test_dashboard_done_actions_prompt_for_completion_summary():
     """
 
     repo_root = Path(__file__).resolve().parents[2]
-    js = (repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js").read_text()
+    js = (repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js").read_text(encoding="utf-8")
 
-    import re
-
-    # Match ``if (!r.confirmed)``, ``if (!r1.confirmed)``, ``if (r.confirmed)``
-    # (positive-form gate). The bundle uses both polarities:
-    # - negative ``if (!r.confirmed) return null;`` in dialog flow bodies
-    # - positive ``if (r.confirmed) props.onDeleteBoard(...);`` in JSX handlers
-    cancel_guard_pattern = re.compile(
-        r"if\s*\(\s*!?\s*r\d?\.confirmed\s*\)",
-        re.IGNORECASE,
-    )
-    guards = cancel_guard_pattern.findall(js)
-    # 8 migrated sites per the PR description:
-    # moveTask (1), moveSelected (1), applyBulk (1), deleteTask (1),
-    # deleteSelected (1), archiveBoard (1), removeAttachment (1), doPatch (1).
-    # Plus performMoveTask callers (moveTask/moveSelected each have
-    # ``r1.confirmed`` + ``r2.confirmed`` for the two-stage flow) → up to
-    # 10 guards. Loose lower bound to avoid brittleness.
-    assert len(guards) >= 8, (
-        f"expected >= 8 `if (r?.confirmed)` cancel guards in bundle (one "
-        f"per migrated site, plus extras for two-stage flows); found {len(guards)}"
-    )
-
-    # Visual affordance: every destructive requestDialog call must mark
-    # ``destructive: true`` so the host renders the destructive variant.
-    # deleteTask, deleteSelected, archiveBoard → at least 3.
-    destructive_call_count = js.count("destructive: true")
-    assert destructive_call_count >= 3, (
-        f"expected >= 3 `destructive: true` requestDialog calls (single "
-        f"delete, bulk delete, archive-board); found {destructive_call_count}"
-    )
+    # Доска поручений Korra: любой переход статуса — перетаскиванием или
+    # кнопкой в карточке — идёт через один диалог `MoveDialog`, а не прямым
+    # PATCH. Диалог требует текста для «Готово» (итог), «Нужно решение»
+    # (причина) и возврата на доработку, и только он шлёт PATCH со статусом.
+    assert 'setModal({ kind: "move", task, target })' in js
+    assert 'const needsText = target === "done" || target === "blocked" || (target === "ready" && task.status === "review");' in js
+    assert 'if (target === "done") { patch.summary = text.trim(); patch.result = text.trim(); }' in js
+    assert 'if (target === "blocked") patch.block_reason = text.trim();' in js
+    # Кнопка отправки заблокирована, пока обязательный текст пуст, и после
+    # неё нет второго пути: PATCH со статусом встречается только в диалоге.
+    assert 'disabled: busy || (needsText && !text.trim()) || (target === "ready" && !assignee)' in js
+    assert js.count('const patch = { status: target };') == 1
+    assert '"PATCH", { status' not in js
+    # Сброс перетаскивания и отказ от «автоматических» этапов без диалога.
+    assert 'if (!ACTION[target]) { setNotice(' in js
 
 
 def test_dashboard_cancel_keeps_task_in_old_status(client):
@@ -831,49 +826,43 @@ def test_dashboard_surfaces_ready_blocked_error_inline():
     repo_root = Path(__file__).resolve().parents[2]
     bundle = (
         repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js"
-    ).read_text()
+    ).read_text(encoding="utf-8")
 
-    # Helper that strips ``"409: {\"detail\":\"…\"}"`` down to the
-    # human-readable message before it lands in any banner.
-    assert "function parseApiErrorMessage(err)" in bundle
-    assert "parsed.detail" in bundle
+    # Доска поручений Korra переводит ответ API в человеческое объяснение
+    # (`errorText`): причина «сначала завершите связанные задачи», конфликт
+    # версий, недоступность — без HTTP-кухни в тексте.
+    assert "function errorText(error)" in bundle
+    assert "/parent|dependenc|prerequisite/i.test(raw)" in bundle
+    # Каждое действие показывает ошибку рядом с собой (`role: "alert"`),
+    # а не глотает её: форма, диалог перехода, карточка, доска.
+    assert bundle.count('role: "alert"') >= 5
+    assert bundle.count("setError(errorText(err))") >= 4
+    # Сырое сообщение сервера в интерфейс не попадает.
+    assert "setError(err.message)" not in bundle
+    assert "setError(String(err))" not in bundle
+    # Ошибка карточки очищается при повторе и перед каждым действием.
+    assert 'onClick: () => { setError(""); setVersion(v => v + 1); } }, "Повторить")' in bundle
 
-    # Drag/drop banner now uses the parsed message instead of raw
-    # ``err.message`` so it no longer leaks HTTP plumbing.
-    assert "setError(tx(t, \"moveFailed\", \"Move failed: \") + parseApiErrorMessage(err))" in bundle
 
-    # Drawer action row has its own visible error surface and clears it
-    # on success/refresh so stale failures don't follow the operator
-    # around.
-    assert "const [patchErr, setPatchErr] = useState(null);" in bundle
-    assert "setPatchErr(parseApiErrorMessage(e))" in bundle
-    assert "setPatchErr(null)" in bundle
+def test_dashboard_dependency_links_open_related_tasks():
+    """Зависимости задачи видны в карточке и открываются по клику.
 
-
-def test_dashboard_dependency_selects_use_value_change_handler():
-    """Regression for the dependency selects in the task drawer: the
-    add-parent / add-child dropdowns must wire through the shared
-    selectChangeHandler helper so their value actually lands on the
-    underlying React state. Salvaged from #20019 @LeonSGP43.
+    Апстримовый ящик умел добавлять родителей и детей выпадающими списками;
+    доска поручений Korra этот сценарий сознательно не показывает
+    пользователю (связи создаёт диспетчер и API), но обязана объяснять,
+    почему задача ждёт, и давать открыть связанную карточку.
     """
     repo_root = Path(__file__).resolve().parents[2]
     bundle = (
         repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js"
-    ).read_text()
+    ).read_text(encoding="utf-8")
 
-    parent_select = (
-        'value: newParent,\n'
-        '          className: "h-7 text-xs flex-1",\n'
-        '        }, selectChangeHandler(setNewParent))'
-    )
-    child_select = (
-        'value: newChild,\n'
-        '          className: "h-7 text-xs flex-1",\n'
-        '        }, selectChangeHandler(setNewChild))'
-    )
-
-    assert parent_select in bundle
-    assert child_select in bundle
+    assert 'h("h3", null, "Сначала должны завершиться")' in bundle
+    assert "data.links.parents.map(id => h(Button, { key: id, onClick: () => onOpenTask(id) }" in bundle
+    assert 'h("h3", null, "Связанные поручения")' in bundle
+    assert "data.child_results.map(child => h(Button, { key: child.id, onClick: () => onOpenTask(child.id) }" in bundle
+    # Статус «Ждёт других задач» объясняет ожидание словами, а не кодом.
+    assert 'todo: ["Ждёт других задач", "Продолжится после выполнения зависимостей."]' in bundle
 
 
 def test_bulk_archive(client):
