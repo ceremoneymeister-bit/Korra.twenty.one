@@ -91,6 +91,10 @@ class DeliveryLedger:
                         connection.execute(
                             "ALTER TABLE browser_chat_delivery ADD COLUMN boot_id TEXT"
                         )
+                    if "profile" not in columns:
+                        connection.execute("ALTER TABLE browser_chat_delivery ADD COLUMN profile TEXT")
+                        connection.execute("ALTER TABLE browser_chat_delivery ADD COLUMN request_meta TEXT")
+                    connection.execute("CREATE INDEX IF NOT EXISTS browser_chat_session ON browser_chat_delivery(profile, session_id)")
                     connection.commit()
                     _INITIALIZED_PATHS.add(path_key)
         except Exception:
@@ -150,6 +154,50 @@ class DeliveryLedger:
                     message_id, fingerprint, session_id, "pending", None, None, None, now, boot_id
                 )
             return record.status, record
+
+    def remember_request(self, message_id: str, profile: str, body: dict) -> None:
+        """Store only the current intent and its transcript boundary, never credentials."""
+        messages = body.get("messages") or []
+        user = next((m for m in reversed(messages) if m.get("role") == "user"), {})
+        meta = json.dumps({"user_message": user, "history_count": max(0, len(messages) - 1)}, ensure_ascii=False)
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE browser_chat_delivery SET profile=?, request_meta=? WHERE message_id=? AND request_meta IS NULL",
+                (profile, meta, message_id),
+            )
+
+    def runs(self, profile: str | None = None, session_id: str | None = None) -> list[dict]:
+        """Latest intent per conversation; reads never claim or restart work."""
+        where = ["request_meta IS NOT NULL"]
+        args = []
+        if profile is not None:
+            where.append("profile = ?")
+            args.append(profile)
+        if session_id is not None:
+            where.append("session_id = ?")
+            args.append(session_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT message_id, session_id, profile, status, updated_at, request_meta FROM browser_chat_delivery "
+                "WHERE " + " AND ".join(where) + " ORDER BY rowid DESC LIMIT 1000", args,
+            ).fetchall()
+        result, seen = [], set()
+        for message_id, sid, prof, status, updated_at, meta in rows:
+            if (prof, sid) in seen:
+                continue
+            seen.add((prof, sid))
+            result.append(dict(message_id=message_id, session_id=sid, profile=prof,
+                               status=status, updated_at=updated_at, **json.loads(meta)))
+        return result
+
+    def response(self, message_id: str, profile: str, session_id: str) -> DeliveryRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT message_id, fingerprint, session_id, status, response_body, status_code, content_type, updated_at, boot_id "
+                "FROM browser_chat_delivery WHERE message_id=? AND profile=? AND session_id=?",
+                (message_id, profile, session_id),
+            ).fetchone()
+        return self._row(row) if row else None
 
     def reclaim_after_restart(self, message_id: str, boot_id: str | None) -> None:
         """Запись «в работе» осталась от прежнего процесса панели — берём её себе."""

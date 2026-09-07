@@ -3104,6 +3104,8 @@ async def _durable_browser_chat_response(
             detail="Этот ID сообщения уже относится к другому тексту",
         ) from exc
 
+    await run_in_threadpool(ledger.remember_request, message_id, target_profile, body)
+
     task_key = f"{ledger.path}:{message_id}"
     if state == "completed" and record.response_body is not None:
         return Response(
@@ -3260,6 +3262,10 @@ _CHAT_ATTENDED_HEADER = "X-Korra-Attended"
 _CHAT_SESSION_SOURCE_HEADER = "X-Korra-Session-Source"
 #: Значение из списка, который движок принимает в `_normalize_session_source`.
 _CHAT_SESSION_SOURCE = "dashboard"
+
+
+from korra_cli.chat_runs import router as _chat_runs_router
+app.include_router(_chat_runs_router)
 
 
 @app.post("/api/chat/completions")
