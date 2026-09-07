@@ -41,6 +41,7 @@ import type { ComponentType } from "react";
 import { ThinkingOrb } from "thinking-orbs";
 
 import { Markdown } from "@/components/Markdown";
+import { WorkspaceFilePicker } from "@/components/chat/WorkspaceFilePicker";
 import { TranscriptViewport } from "@/components/chat/TranscriptViewport";
 import { AgentTrace } from "@/components/chat/AgentTrace";
 import { CommandApprovalCard } from "@/components/chat/CommandApprovalCard";
@@ -631,6 +632,15 @@ export function BubbleChatComposer({
     );
   }, []);
 
+  const pickWorkspaceFile = useCallback((uploaded: UploadedAttachment) => {
+    setAttachments(list => {
+      if (list.some(item => item.uploaded?.path === uploaded.path)) return list;
+      if (list.length >= MAX_ATTACHMENTS) return list;
+      return [...list, { ...uploaded, id: crypto.randomUUID(), status: "ready",
+        progress: 100, uploaded, file: new File([], uploaded.name) }];
+    });
+  }, []);
+
   const startUpload = useCallback(
     (item: PendingAttachment) => {
       patch(item.id, { status: "uploading", progress: 0, error: undefined });
@@ -1072,6 +1082,10 @@ export function BubbleChatComposer({
             data-attachments={allowAttachments ? "true" : "false"}
           >
             <div className="korra-chat-composer__left-controls">
+              {allowAttachments && <WorkspaceFilePicker
+                disabled={disabled || submitting || attachments.length >= MAX_ATTACHMENTS}
+                onPick={pickWorkspaceFile}
+              />}
               {allowAttachments && (
                 <button
                   type="button"
