@@ -438,6 +438,7 @@ function BubbleChatTranscript({
   onRetry,
   onDiscard,
   pendingElsewhere,
+  scrollKey,
   agentLabel,
   approvals,
   onApprovalDecision,
@@ -446,6 +447,7 @@ function BubbleChatTranscript({
   agentLabel?: string;
   /** Черновик этого профиля из другого чата — напоминаем баннером. */
   pendingElsewhere?: ChatOutboxRecord | null;
+  scrollKey?: string;
   messages: ChatMessage[];
   streaming?: boolean;
   error?: string | null;
@@ -467,7 +469,8 @@ function BubbleChatTranscript({
 
   return (
     <TranscriptViewport
-      key={messages[0]?.id ?? "empty"}
+      key={scrollKey ?? messages[0]?.id ?? "empty"}
+      storageKey={scrollKey}
       followKey={lastUser?.id}
       awaitingApproval={approvals?.some(entry => entry.status === "pending")}
     >
@@ -1464,6 +1467,7 @@ export default function BubbleChatPage({
       />
       <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label="Разговор с Коррой">
         <BubbleChatTranscript
+          scrollKey={`${chatViewKey(agentProfile, sessionId)}:scroll`}
           messages={messages}
           streaming={isStreaming}
           error={error}
