@@ -65,7 +65,7 @@ export function localFilePath(reference: string): string | null {
     value = value.slice(7);
   }
   try { value = decodeURIComponent(value); } catch { return null; }
-  if (!value.startsWith("/") || value.startsWith("//") || /[\x00-\x1f]/.test(value)) return null;
+  if (!value.startsWith("/") || value.startsWith("//") || [...value].some(char => char.charCodeAt(0) < 32)) return null;
   if (value.split("/").includes("..")) return null;
   return value;
 }
@@ -94,7 +94,10 @@ export function splitFileReferences(content: string): { text: string; paths: str
     (full, double: string, single: string, bare: string) => take(full, double || single || bare.replace(/[.,;:!?)]+$/, "")));
   text = text.replace(/^\s*((?:sandbox:|file:\/\/)?\/[^\n]*\.[\p{L}\d]{1,12})\s*$/gmu,
     (full, path: string) => take(full, path));
-  text = text.replace(/\u0000(\d+)\u0000/g, (_full, index: string) => protectedText[Number(index)]);
+  // Null delimiters cannot occur in a filesystem path; these placeholders
+  // restore protected code after extracting file references.
+  // eslint-disable-next-line no-control-regex
+  text = text.replace(/\u0000(\d+)\u0000/g, (_full, index: string) => protectedText[Number(index)] ?? "");
   return { text: text.trim(), paths: [...paths] };
 }
 
