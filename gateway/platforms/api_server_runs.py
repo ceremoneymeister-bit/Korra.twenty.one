@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import time
+import traceback
 import uuid
 from contextlib import suppress
 from typing import Any, Dict, List, Optional
@@ -24,6 +25,70 @@ _ROOM_RETENTION_REQUEST_KEY = (
     if RequestKey is not None
     else "hermes.room_run_retention_until"
 )
+
+
+class _RunScopeRedactor:
+    """Private run-lifetime capability filter; never part of public run state."""
+
+    def __init__(self, capability: str):
+        self._capability = capability
+
+    def __call__(self, value):
+        if isinstance(value, str):
+            return value.replace(self._capability, "[REDACTED]")
+        if isinstance(value, dict):
+            return {self(key): self(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self(item) for item in value)
+        return value
+
+
+class _ScopedRunEventQueue(asyncio.Queue):
+    """Sanitize before buffering; retain possible token prefixes across deltas."""
+
+    def __init__(self, redactor):
+        super().__init__()
+        self._redactor = redactor
+        self._pending_delta = ""
+        self._delta_event = None
+
+    def put_nowait(self, event):
+        if event and event.get("event") == "message.delta":
+            self._delta_event = {key: value for key, value in event.items() if key != "delta"}
+            text = self._redactor(self._pending_delta + (event.get("delta") or ""))
+            secret = self._redactor._capability
+            keep = 0
+            for length in range(min(len(secret) - 1, len(text)), 0, -1):
+                if text.endswith(secret[:length]):
+                    keep = length
+                    break
+            self._pending_delta = text[-keep:] if keep else ""
+            text = text[:-keep] if keep else text
+            if text:
+                super().put_nowait(self._redactor({**self._delta_event, "delta": text}))
+            return
+        if event is None or event.get("event") in {"run.completed", "run.failed", "run.cancelled"}:
+            if self._pending_delta:
+                super().put_nowait(self._redactor({**self._delta_event, "delta": self._pending_delta}))
+                self._pending_delta = ""
+        super().put_nowait(self._redactor(event))
+
+
+def _redact_run_value(self, run_id, value):
+    redactor = getattr(self, "_run_scope_redactors", {}).get(run_id)
+    return redactor(value) if redactor else value
+
+
+def _log_run_exception(self, run_id, message, exc):
+    if run_id in getattr(self, "_run_scope_redactors", {}):
+        # Do not attach raw exc_info to a LogRecord: formatters and handlers
+        # can otherwise publish the original capability-bearing traceback.
+        trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        logger.error(message + "\n%s", run_id, _redact_run_value(self, run_id, trace))
+    else:
+        logger.exception(message, run_id)
 
 
 def _remember_room_retention(request: "web.Request", claims: dict[str, Any]) -> None:
@@ -78,6 +143,9 @@ def _initialize_run_state(self, *, store_factory) -> None:
     # Active approval session key for each run_id. The approval core resolves
     # requests by session key, while API clients address them by run_id.
     self._run_approval_sessions: Dict[str, str] = {}
+    # Exact capability values stay in private memory only, bounded by the
+    # existing terminal-status TTL (including late executor callbacks).
+    self._run_scope_redactors: Dict[str, _RunScopeRedactor] = {}
 
 
 def _http_routes(self) -> list[tuple[str, str, Any]]:
@@ -100,6 +168,7 @@ def _idempotency_capabilities(self, *, store_type) -> dict[str, Any]:
 
 
 def _close_run_state(self) -> None:
+    getattr(self, "_run_scope_redactors", {}).clear()
     store = getattr(self, "_run_idempotency_store", None)
     if store is None:
         return
@@ -121,7 +190,9 @@ def _set_run_status(
 ) -> Dict[str, Any]:
     """Update pollable run status without exposing private agent objects."""
     now = time.time()
-    current = self._run_statuses.get(run_id, {})
+    # A worker callback can update status while an HTTP reader holds the last
+    # published dict. Sanitize a new snapshot before replacing that reference.
+    current = dict(self._run_statuses.get(run_id, {}))
     previous_status = str(current.get("status") or "")
     field_names = set(fields)
     current.update({
@@ -132,6 +203,7 @@ def _set_run_status(
     })
     current.setdefault("created_at", fields.pop("created_at", now))
     current.update(fields)
+    current = _redact_run_value(self, run_id, current)
     if status != "waiting_for_approval":
         current.pop("approval", None)
     self._run_statuses[run_id] = current
@@ -146,10 +218,8 @@ def _set_run_status(
     if run_id in self._run_idempotency_ids and should_persist:
         try:
             self._run_idempotency_store.update_status(run_id, current)
-        except Exception:
-            logger.exception(
-                "[api_server] failed to persist idempotent run status %s", run_id
-            )
+        except Exception as exc:
+            _log_run_exception(self, run_id, "[api_server] failed to persist idempotent run status %s", exc)
     return current
 
 
@@ -427,6 +497,9 @@ async def _handle_runs(
     gateway_session_key, key_err = self._parse_session_key_header(request)
     if key_err is not None:
         return key_err
+    trusted_tool_scope, scope_err = self._parse_tool_scope_header(request)
+    if scope_err is not None:
+        return scope_err
 
     try:
         body = await request.json()
@@ -461,6 +534,23 @@ async def _handle_runs(
             ),
             status=400,
         )
+    if trusted_tool_scope and not idempotency_key:
+        return web.json_response(
+            _openai_error(
+                "Scoped runs require an Idempotency-Key",
+                code="idempotency_key_required",
+            ),
+            status=400,
+        )
+    if trusted_tool_scope and not self._run_idempotency_store.durable:
+        return web.json_response(
+            _openai_error(
+                "Durable run idempotency storage is unavailable",
+                err_type="server_error",
+                code="run_idempotency_unavailable",
+            ),
+            status=503,
+        )
     idempotency_scope = (
         self._run_idempotency_scope(request) if idempotency_key else ""
     )
@@ -479,6 +569,13 @@ async def _handle_runs(
         if idempotency_key
         else ""
     )
+    if trusted_tool_scope:
+        # Bind replay to this capability without persisting its bearer value.
+        # Keep the existing fingerprint unchanged for unscoped requests so
+        # their durable reservations still replay after this upgrade.
+        idempotency_fingerprint = hashlib.sha256(
+            f"{idempotency_fingerprint}\0{trusted_tool_scope}".encode()
+        ).hexdigest()
 
     raw_input = body.get("input")
     if not raw_input:
@@ -613,7 +710,12 @@ async def _handle_runs(
     approval_session_key = run_id
     ephemeral_system_prompt = instructions
     loop = asyncio.get_running_loop()
-    q: "asyncio.Queue[Optional[Dict]]" = asyncio.Queue()
+    if trusted_tool_scope:
+        self._run_scope_redactors[run_id] = _RunScopeRedactor(trusted_tool_scope)
+    q: "asyncio.Queue[Optional[Dict]]" = (
+        _ScopedRunEventQueue(self._run_scope_redactors[run_id])
+        if trusted_tool_scope else asyncio.Queue()
+    )
     created_at = time.time()
     self._run_streams[run_id] = q
     self._run_streams_created[run_id] = created_at
@@ -666,6 +768,7 @@ async def _handle_runs(
             self._run_approval_sessions.pop(run_id, None)
             self._run_statuses.pop(run_id, None)
             self._run_owners.pop(run_id, None)
+            self._run_scope_redactors.pop(run_id, None)
             if outcome == "conflict":
                 return web.json_response(
                     _openai_error(
@@ -783,6 +886,7 @@ async def _handle_runs(
                         # environment state.
                         approval_token = set_current_session_key(approval_session_key)
                         session_tokens = self._bind_api_server_session(
+                            trusted_tool_scope=trusted_tool_scope,
                             # chat_id carries the raw session id (the
                             # X-Hermes-Session-Id equivalent) exactly like
                             # the other agent-entry routes bind it via
@@ -938,8 +1042,8 @@ async def _handle_runs(
             # message the other endpoints give a provider auth/credential
             # failure, instead of falling through to the generic
             # except-Exception branch below.
-            logger.warning("Provider authentication failed for run=%s: %s", run_id, exc)
-            error_msg = f"⚠️ Provider authentication failed: {exc}"
+            error_msg = _redact_run_value(self, run_id, f"⚠️ Provider authentication failed: {exc}")
+            logger.warning("Provider authentication failed for run=%s: %s", run_id, error_msg)
             self._set_run_status(
                 run_id,
                 "failed",
@@ -956,7 +1060,7 @@ async def _handle_runs(
             except Exception:
                 pass
         except Exception as exc:
-            logger.exception("[api_server] run %s failed", run_id)
+            _log_run_exception(self, run_id, "[api_server] run %s failed", exc)
             self._set_run_status(
                 run_id,
                 "failed",
@@ -1236,8 +1340,8 @@ async def _handle_run_approval(
             request_id=request_id or None,
         )
     except Exception as exc:
-        logger.exception("[api_server] approval resolution failed for run %s", run_id)
-        return web.json_response(_openai_error(str(exc)), status=500)
+        _log_run_exception(self, run_id, "[api_server] approval resolution failed for run %s", exc)
+        return web.json_response(_openai_error(_redact_run_value(self, run_id, str(exc))), status=500)
 
     if resolved <= 0:
         return web.json_response(
@@ -1329,8 +1433,10 @@ async def _handle_steer_run(
     try:
         accepted = bool(agent.steer(steer_text))
     except Exception as exc:
-        logger.exception("[api_server] steer failed for run %s", run_id)
-        return web.json_response(_openai_error(_redact_api_error_text(exc), code="steer_failed"), status=500)
+        _log_run_exception(self, run_id, "[api_server] steer failed for run %s", exc)
+        return web.json_response(_openai_error(
+            _redact_run_value(self, run_id, _redact_api_error_text(exc)), code="steer_failed"
+        ), status=500)
     if not accepted:
         return web.json_response(
             _openai_error(f"Run did not accept steer text: {run_id}", code="steer_not_accepted"),
@@ -1472,3 +1578,4 @@ def _sweep_orphaned_runs_once(self, now: Optional[float] = None) -> None:
         self._run_statuses.pop(run_id, None)
         self._run_idempotency_ids.discard(run_id)
         self._run_owners.pop(run_id, None)
+        getattr(self, "_run_scope_redactors", {}).pop(run_id, None)
