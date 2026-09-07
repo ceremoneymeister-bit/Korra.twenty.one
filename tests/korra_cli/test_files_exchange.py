@@ -1,0 +1,104 @@
+"""Real HTTP paths: files, chat attachment admission, and download policy."""
+from pathlib import Path
+from urllib.parse import quote
+
+import pytest
+from starlette.requests import Request
+from starlette.testclient import TestClient
+from korra_cli import web_server as server
+
+
+@pytest.fixture
+def files(tmp_path, monkeypatch):
+    root = tmp_path / 'data'
+    root.mkdir()
+    monkeypatch.setenv('KORRA_HOME', str(root))
+    monkeypatch.setenv('KORRA_DASHBOARD_FILES_ROOT', str(root))
+    monkeypatch.setenv('KORRA_UI_MODE', 'fleet')
+    monkeypatch.setattr(server.app.state, 'auth_required', False, raising=False)
+    monkeypatch.setattr(server.app.state, 'bound_host', None, raising=False)
+    with TestClient(server.app) as client:
+        client.headers[server._SESSION_HEADER_NAME] = server._SESSION_TOKEN
+        workspace = Path(client.get('/api/files').json()['path'])
+        assert workspace == root / 'workspace'
+        yield client, root, workspace
+
+
+@pytest.mark.parametrize('style', ['MEDIA', 'path', 'sandbox', 'file'])
+def test_delivery_reference_downloads_exact_bytes(files, style):
+    client, root, workspace = files
+    path = workspace / 'Отчёт (сентябрь).xlsx'
+    path.write_bytes(b'PK\x03\x04 test excel bytes')
+    ref = {'MEDIA': f'MEDIA:"{path}"', 'path': str(path),
+           'sandbox': 'sandbox:' + quote(str(path)), 'file': path.as_uri()}[style]
+    info = client.get('/api/files/attachment', params={'path': ref})
+    assert info.status_code == 200, info.text
+    assert info.json()['size'] == path.stat().st_size
+    response = client.get('/api/files/download', params={'path': ref, 'chat': 1})
+    assert response.content == path.read_bytes()
+    assert response.headers['content-disposition'].startswith('attachment;')
+
+
+def test_profile_private_paths_traversal_and_symlinks_are_denied(files):
+    client, root, workspace = files
+    private = root / 'profiles' / 'lawyer' / 'memo.xlsx'
+    private.parent.mkdir(parents=True)
+    private.write_bytes(b'private')
+    (workspace / 'link.xlsx').symlink_to(private)
+    (workspace / '.env').write_text('secret')
+    for path in [str(private), str(workspace / 'link.xlsx'), str(workspace / '.env'),
+                 str(workspace / '..' / 'profiles' / 'lawyer' / 'memo.xlsx'),
+                 'file://remote/etc/secret.xlsx', 'sandbox:/etc/passwd']:
+        for endpoint in ['/api/files/attachment', '/api/files/download']:
+            response = client.get(endpoint, params={'path': path, 'chat': 1})
+            assert response.status_code in (400, 403), (path, response.text)
+    client.headers.clear()
+    assert client.get('/api/files/attachment', params={'path': str(private)}).status_code == 401
+
+
+def test_upload_visible_downloadable_and_reusable_without_copy(files):
+    client, root, workspace = files
+    data = 'Проверка: сумма 2145'.encode()
+    uploaded = client.post('/api/chat/upload', files={'file': ('Данные.txt', data)})
+    assert uploaded.status_code == 200, uploaded.text
+    descriptor = uploaded.json()
+    target = Path(descriptor['path'])
+    assert target.is_relative_to(workspace)
+    listing = client.get('/api/files', params={'path': str(target.parent)}).json()
+    assert [entry['path'] for entry in listing['entries']] == [str(target)]
+    assert client.get('/api/files/download', params={'path': str(target)}).content == data
+    request = Request({'type': 'http', 'app': server.app, 'path': '/', 'headers': [], 'server': ('testserver', 80)})
+    body = {'messages': [{'role': 'user', 'content': 'Прочти'}], 'attachments': [descriptor, descriptor]}
+    server._apply_chat_attachments(body, request=request)
+    assert body['messages'][0]['content'].count(str(target)) == 1
+    assert len(list(workspace.rglob('*.txt'))) == 1
+    # A document made/uploaded in Files is admitted through the same path.
+    existing = workspace / 'existing.txt'
+    existing.write_bytes(data)
+    body = {'messages': [{'role': 'user', 'content': ''}], 'attachments': [{'path': str(existing)}]}
+    server._apply_chat_attachments(body, request=request)
+    assert str(existing) in body['messages'][0]['content']
+
+
+def test_empty_oversized_and_symlink_upload_leave_no_partial_files(files, monkeypatch):
+    client, root, workspace = files
+    monkeypatch.setattr(server, '_CHAT_MAX_UPLOAD_BYTES', 8)
+    for data, status in [(b'', 400), (b'123456789', 413)]:
+        assert client.post('/api/chat/upload', files={'file': ('x.txt', data)}).status_code == status
+    assert not list(workspace.rglob('*.upload'))
+    assert not list(workspace.rglob('*.txt'))
+    import shutil
+    shutil.rmtree(workspace / 'client')
+    (workspace / 'client').symlink_to(root, target_is_directory=True)
+    assert client.post('/api/chat/upload', files={'file': ('x.txt', b'ok')}).status_code == 403
+
+
+def test_fleet_profile_scope_uses_shared_workspace(files, monkeypatch):
+    client, root, workspace = files
+    profile = root / 'profiles' / 'lawyer'
+    profile.mkdir(parents=True)
+    monkeypatch.setattr(server, '_resolve_profile_dir', lambda name: profile)
+    result = client.post('/api/chat/upload?profile=lawyer', files={'file': ('case.txt', b'case')})
+    assert result.status_code == 200, result.text
+    assert Path(result.json()['path']).is_relative_to(workspace)
+    assert not list(profile.rglob('*.txt'))

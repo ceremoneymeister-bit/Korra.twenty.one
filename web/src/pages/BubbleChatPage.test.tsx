@@ -2,6 +2,7 @@
 
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const attachmentMocks = vi.hoisted(() => ({
@@ -114,7 +115,7 @@ async function render(ui: ReactNode) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(ui));
+  await act(async () => root.render(<MemoryRouter>{ui}</MemoryRouter>));
 }
 
 async function enterText(textarea: HTMLTextAreaElement, value: string) {
@@ -382,12 +383,12 @@ describe("BubbleChatComposer", () => {
     await act(async () => finishSend?.(true));
     await act(async () =>
       root.render(
-        <BubbleChatComposer
+        <MemoryRouter><BubbleChatComposer
           onSend={onSend}
           streaming
           disabled
           onAbort={vi.fn()}
-        />,
+        /></MemoryRouter>,
       ),
     );
     expect(container.querySelector('[role="status"]')?.textContent).toContain(
@@ -399,13 +400,13 @@ describe("BubbleChatComposer", () => {
 
     await act(async () =>
       root.render(
-        <BubbleChatComposer
+        <MemoryRouter><BubbleChatComposer
           onSend={onSend}
           streaming
           disabled
           responding
           onAbort={vi.fn()}
-        />,
+        /></MemoryRouter>,
       ),
     );
 
@@ -428,13 +429,13 @@ describe("BubbleChatComposer", () => {
     const onAbort = vi.fn();
     await act(async () =>
       root.render(
-        <BubbleChatComposer
+        <MemoryRouter><BubbleChatComposer
           onSend={onSend}
           streaming
           disabled
           responding
           onAbort={onAbort}
-        />,
+        /></MemoryRouter>,
       ),
     );
     await act(async () =>

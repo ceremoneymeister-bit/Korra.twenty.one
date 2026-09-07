@@ -22,10 +22,11 @@ import {
   Search,
   Trash2,
   Upload,
+  MessageSquare,
   X,
   XCircle,
 } from "lucide-react";
-import { useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { Button } from "@/components/ProductButton";
 import { Card, CardContent } from "@nous-research/ui/ui/components/card";
 import {
@@ -287,6 +288,7 @@ function FileTrash({
 }
 
 export default function FilesPage() {
+  const navigate = useNavigate();
   // Fleet is the full Korra workspace manager. The narrower client-mode
   // inbox/artifacts rules belong to white-label owner cabinets only.
   const clientMode = isClientUiMode();
@@ -984,6 +986,11 @@ export default function FilesPage() {
                     </Button>
                   ) : (
                     <>
+                      <Button ghost size="icon" type="button"
+                        onClick={() => navigate(`/chat?${new URLSearchParams({ attach: entry.path })}`)}
+                        aria-label={`Отправить в чат ${clientEntryLabel(entry.name)}`}>
+                        <MessageSquare />
+                      </Button>
                       <Button
                         ghost
                         size="icon"

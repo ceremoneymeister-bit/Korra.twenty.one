@@ -2661,21 +2661,18 @@ def _dashboard_local_update_managed_externally() -> bool:
 
 
 def _managed_files_policy(request: Request, *, create_root: bool = True) -> ManagedFilesPolicy:
+    # Fleet has one shared business workspace, including multiplexed agents.
+    # An inherited container FILES_ROOT=/opt/data must not expose profile data.
+    if korra_env("KORRA_UI_MODE", "").strip().lower() == "fleet":
+        from korra_constants import get_default_hermes_root
+
+        workspace = get_default_hermes_root() / "workspace"
+        root = _ensure_managed_root(workspace) if create_root else _canonical_path(workspace)
+        return ManagedFilesPolicy(default_path=root, locked_root=root, can_change_path=False)
+
     raw_forced_root = korra_env(_MANAGED_FILES_ROOT_ENV, "").strip()
     if raw_forced_root:
         root = _ensure_managed_root(raw_forced_root) if create_root else _canonical_path(Path(raw_forced_root))
-        return ManagedFilesPolicy(default_path=root, locked_root=root, can_change_path=False)
-
-    # The fleet dashboard is an owner-facing product surface, not a server
-    # filesystem explorer. HERMES_HOME contains credentials, state databases,
-    # logs, and internal caches; exposing that root makes a successful Files
-    # request more dangerous than the 404 it replaced. Give fleet users a
-    # dedicated, persistent workspace while preserving the upstream admin/local
-    # dashboard policy below. Operators can still override this with the
-    # explicit HERMES_DASHBOARD_FILES_ROOT setting above.
-    if korra_env("KORRA_UI_MODE", "").strip().lower() == "fleet":
-        workspace = Path(get_hermes_home()) / "workspace"
-        root = _ensure_managed_root(workspace) if create_root else _canonical_path(workspace)
         return ManagedFilesPolicy(default_path=root, locked_root=root, can_change_path=False)
 
     # Remote/OAuth access does not imply a hosted container. Users can expose a
@@ -3308,7 +3305,7 @@ async def chat_completions_proxy(
     # Browser uploads arrive as a separate, owner-friendly array. Convert it
     # to the durable text block understood by every agent/tool transport before
     # fingerprinting and forwarding the OpenAI-compatible request.
-    _apply_chat_attachments(body, profile_name or None)
+    _apply_chat_attachments(body, profile_name or None, request=request)
     do_stream = bool(body.get("stream", False))
     upstream_path = (
         f"/p/{urllib.parse.quote(profile_name, safe='')}/v1/chat/completions"
@@ -3544,6 +3541,10 @@ def _chat_safe_stem(raw_name: str) -> str:
 
 def _chat_client_root(home: str | Path | None = None) -> Path:
     """Keep uploaded chat files inside the same root as the Files screen."""
+    if korra_env("KORRA_UI_MODE", "").strip().lower() == "fleet":
+        from korra_constants import get_default_hermes_root
+
+        return get_default_hermes_root() / "workspace" / "client"
     forced = korra_env(_MANAGED_FILES_ROOT_ENV, "").strip()
     if forced:
         base = Path(forced)
@@ -3566,7 +3567,7 @@ def _chat_human_size(size: int) -> str:
 
 @app.post("/api/chat/upload")
 async def upload_chat_file(
-    file: UploadFile = File(...), profile: Optional[str] = None
+    request: Request, file: UploadFile = File(...), profile: Optional[str] = None
 ):
     """Store an owner attachment and return its agent-readable descriptor."""
     profile_name = (profile or "").strip()
@@ -3580,77 +3581,43 @@ async def upload_chat_file(
             status_code=400, detail=f"Файлы {extension} загружать нельзя"
         )
 
-    chunks: list[bytes] = []
-    total = 0
-    try:
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > _CHAT_MAX_UPLOAD_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail=(
-                        f"Файл больше {_CHAT_MAX_UPLOAD_BYTES // (1024 * 1024)} МБ"
-                    ),
-                )
-            chunks.append(chunk)
-    finally:
-        await file.close()
-
-    data = b"".join(chunks)
-    if not data:
-        raise HTTPException(status_code=400, detail="Пустой файл")
-
-    profile_scope = (
-        contextlib.nullcontext(None)
-        if korra_env(_MANAGED_FILES_ROOT_ENV, "").strip()
-        else _profile_scope(profile_name or None)
-    )
-    with profile_scope as scoped_home:
+    # Resolve the destination in the profile scope, but never hold a process
+    # environment scope across an await. Fleet always resolves to its shared
+    # workspace, independently of the selected agent's private data directory.
+    with _profile_scope(profile_name or None) as scoped_home:
         day = datetime.now().strftime("%Y-%m-%d")
         target_dir = _chat_client_root(scoped_home) / "inbox" / day
-        try:
-            target_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise HTTPException(
-                status_code=500, detail=f"Не удалось создать папку: {exc}"
-            ) from exc
-
-        target = target_dir / (
-            f"{secrets.token_hex(4)}-{_chat_safe_stem(original_name)}{extension}"
-        )
-        try:
-            target.write_bytes(data)
-            target.chmod(0o644)
-        except OSError as exc:
-            raise HTTPException(
-                status_code=500, detail=f"Не удалось записать файл: {exc}"
-            ) from exc
-
-        if not os.access(target, os.R_OK):
-            with contextlib.suppress(OSError):
-                target.unlink()
-            raise HTTPException(
-                status_code=500, detail="Файл записан, но недоступен агенту"
-            )
-
-        digest = hashlib.sha256(data).hexdigest()
-        reader = _CHAT_ATTACHMENT_READERS.get(extension, "unknown")
-        metadata = {
-            "original_name": original_name,
-            "stored_path": str(target),
-            "bytes": total,
-            "sha256": digest,
-            "mime_type": file.content_type or mimetypes.guess_type(original_name)[0],
-            "reader": reader,
-            "uploaded_at": datetime.now(timezone.utc).isoformat(),
-        }
-        with contextlib.suppress(OSError):
-            target.with_suffix(target.suffix + ".meta.json").write_text(
-                json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+    _, target_dir, _ = _resolve_managed_path(str(target_dir), request, for_write=True)
+    if _is_private_managed_path(target_dir):
+        raise HTTPException(403, "Служебная папка недоступна.")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / (
+        f"{secrets.token_hex(4)}-{_chat_safe_stem(original_name)}{extension}"
+    )
+    fd, temporary = tempfile.mkstemp(prefix=".chat-", suffix=".upload", dir=target_dir)
+    tmp_path = Path(temporary)
+    total = 0
+    digest = hashlib.sha256()
+    published = False
+    try:
+        with os.fdopen(fd, "wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > _CHAT_MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, "Файл больше 50 МБ")
+                digest.update(chunk)
+                output.write(chunk)
+        if total == 0:
+            raise HTTPException(400, "Пустой файл")
+        tmp_path.chmod(0o644)
+        _publish_managed_upload(tmp_path, target, overwrite=False)
+        published = True
+    finally:
+        if not published:
+            tmp_path.unlink(missing_ok=True)
+        await file.close()
+    digest = digest.hexdigest()
+    reader = _CHAT_ATTACHMENT_READERS.get(extension, "unknown")
 
     return {
         "ok": True,
@@ -3664,7 +3631,7 @@ async def upload_chat_file(
 
 
 def _apply_chat_attachments(
-    body: dict[str, Any], profile: Optional[str] = None
+    body: dict[str, Any], profile: Optional[str] = None, *, request: Request | None = None
 ) -> None:
     """Append verified attachment paths to the final user message."""
     raw = body.pop("attachments", None)
@@ -3704,6 +3671,7 @@ def _apply_chat_attachments(
         with _profile_scope(profile) as scoped_home:
             root = _chat_client_root(scoped_home).resolve()
     lines: list[str] = []
+    seen: set[str] = set()
     for index, item in enumerate(raw, start=1):
         if not isinstance(item, dict):
             raise HTTPException(status_code=400, detail="Некорректное вложение")
@@ -3713,7 +3681,10 @@ def _apply_chat_attachments(
             raise HTTPException(
                 status_code=400, detail="Некорректный путь вложения"
             ) from exc
-        if not _path_is_under(root, target):
+        if request is not None:
+            descriptor = _chat_file_descriptor(str(item.get("path", "")), request)
+            target = Path(descriptor["path"])
+        elif not _path_is_under(root, target):
             raise HTTPException(
                 status_code=400, detail="Вложение вне папки клиента"
             )
@@ -3722,6 +3693,9 @@ def _apply_chat_attachments(
                 status_code=409,
                 detail=f"Файл недоступен: {item.get('name') or target.name}",
             )
+        if str(target) in seen:
+            continue
+        seen.add(str(target))
 
         name = _CHAT_ATTACHMENT_NAME_UNSAFE.sub(
             " ", str(item.get("name") or target.name)
@@ -3735,7 +3709,7 @@ def _apply_chat_attachments(
         reader = _CHAT_ATTACHMENT_READERS.get(target.suffix.lower(), "unknown")
         size = _chat_human_size(target.stat().st_size)
         lines.append(
-            f"{index}. {name} · {kind} · {size} · читать: {reader}\n   {target}"
+            f"{len(lines) + 1}. {name} · {kind} · {size} · читать: {reader}\n   {target}"
         )
 
     block = "[вложения]\n" + "\n".join(lines)
@@ -4707,12 +4681,58 @@ def _managed_file_response(
     )
 
 
+def _chat_file_path(reference: str) -> str:
+    """Accept local delivery references, never URLs with remote authorities."""
+    value = _path_text(reference).strip("`")
+    if value.startswith("MEDIA:"):
+        value = value[6:].strip().strip('"\'')
+    if value.startswith("sandbox:"):
+        value = urllib.parse.unquote(value[8:])
+    elif value.startswith("file://"):
+        parsed = urllib.parse.urlsplit(value)
+        if parsed.netloc or parsed.query or parsed.fragment:
+            raise HTTPException(400, "Нужна ссылка на файл рабочей папки.")
+        value = urllib.parse.unquote(parsed.path)
+    if not value.startswith("/") or value.startswith("//") or "\x00" in value:
+        raise HTTPException(400, "Нужен полный путь к файлу рабочей папки.")
+    return value
+
+
+def _chat_file_descriptor(reference: str, request: Request) -> dict[str, Any]:
+    path = _chat_file_path(reference)
+    policy, target, _ = _resolve_managed_path(path, request)
+    if policy.locked_root is None:
+        # Local admin Files may browse the host. Model-produced links have a
+        # narrower contract: only the active data directory is deliverable.
+        root = Path(get_hermes_home()).resolve()
+        if not _path_is_under(root, target):
+            raise HTTPException(403, "Файл вне рабочей папки. Попросите агента сохранить его в workspace.")
+    if _is_private_managed_path(target):
+        raise HTTPException(403, "Служебный файл недоступен для передачи.")
+    if not target.is_file():
+        raise HTTPException(404, "Файл удалён или перемещён. Попросите агента создать его снова.")
+    size = target.stat().st_size
+    if size > _MANAGED_FILE_MAX_BYTES:
+        raise HTTPException(413, "Файл больше 100 МБ. Попросите агента разделить его на части.")
+    return {
+        "path": str(target), "name": target.name,
+        "kind": target.suffix.lstrip(".").lower() or "bin", "size": size,
+        "reader": _CHAT_ATTACHMENT_READERS.get(target.suffix.lower(), "unknown"),
+    }
+
+
+@app.get("/api/files/attachment")
+async def describe_chat_file(request: Request, path: str):
+    return _chat_file_descriptor(path, request)
+
+
 @app.get("/api/files/download")
 async def download_managed_file(
     request: Request,
     path: str,
     inline: bool = False,
     expected_sha256: Optional[str] = None,
+    chat: bool = False,
 ):
     """Stream a managed file as an attachment download.
 
@@ -4727,6 +4747,8 @@ async def download_managed_file(
     their player source, while preserving attachment semantics for ordinary
     link/document requests.
     """
+    if chat:
+        path = _chat_file_descriptor(path, request)["path"]
     fetch_destination = request.headers.get("sec-fetch-dest", "").lower()
     is_media_subresource = fetch_destination in {"audio", "video"}
     return _managed_file_response(

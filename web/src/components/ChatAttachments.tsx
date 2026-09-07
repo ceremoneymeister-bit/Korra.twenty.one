@@ -29,6 +29,7 @@ import {
   type PendingAttachment,
 } from "@/lib/chat-attachments";
 import type { AttachmentDisplay } from "@/lib/chat-types";
+import { FileAttachment } from "@/components/chat/FileAttachment";
 
 const KIND_ICON: Record<string, ComponentType<{ size?: number; className?: string }>> = {
   pdf: FileText,
@@ -197,7 +198,7 @@ export function AttachmentCardList({ items }: { items: AttachmentDisplay[] }) {
   return (
     <div className="mb-2 flex flex-wrap gap-1.5">
       {items.map((item) => (
-        <AttachmentCard key={item.key} item={item} />
+        <FileAttachment key={item.key} path={item.key} name={item.name} />
       ))}
     </div>
   );

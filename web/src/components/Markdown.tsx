@@ -3,6 +3,8 @@ import { isTableDelimiter, splitTableRow } from "@/lib/markdown-tables";
 import { cn } from "@/lib/utils";
 import { CopyTextButton } from "./chat/CopyTextButton";
 import { ScrollableTable } from "./chat/ScrollableTable";
+import { FileAttachment } from "./chat/FileAttachment";
+import { splitFileReferences } from "@/lib/chat-attachments";
 import "./markdown.css";
 
 /** Разметка ответа остаётся текстом до браузера. Здесь разбираем привычные
@@ -26,7 +28,9 @@ export function Markdown({
    */
   variant?: "message" | "document";
 }) {
-  const blocks = useMemo(() => parseBlocks(content), [content]);
+  const files = useMemo(() => variant === "message" && !streaming
+    ? splitFileReferences(content) : { text: content, paths: [] }, [content, streaming, variant]);
+  const blocks = useMemo(() => parseBlocks(files.text), [files.text]);
   const caret = streaming ? <StreamingCaret /> : null;
 
   return (
@@ -46,6 +50,7 @@ export function Markdown({
         />
       ))}
       {blocks.length === 0 && caret}
+      {files.paths.map(path => <FileAttachment key={path} path={path} />)}
     </div>
   );
 }

@@ -87,3 +87,26 @@ describe("chatUploadPath", () => {
     expect(chatUploadPath()).toBe("/api/chat/upload");
   });
 });
+
+describe("выдача файлов агента", () => {
+  it("сводит MEDIA и ссылки на один файл в одну карточку", async () => {
+    const { splitFileReferences } = await import("./chat-attachments");
+    const path = "/opt/data/workspace/Отчёт (итог).xlsx";
+    const result = splitFileReferences(`Готово\nMEDIA:"${path}"\n[Скачать](sandbox:${encodeURI(path)})\n[Файл](file://${encodeURI(path)})`);
+    expect(result.paths).toEqual([path]);
+    expect(result.text).toBe("Готово");
+  });
+  it("оставляет команды и внешние ссылки текстом, распознаёт отдельный путь", async () => {
+    const { splitFileReferences } = await import("./chat-attachments");
+    const result = splitFileReferences('```text\nMEDIA:/etc/example.txt\n```\n`/etc/example.txt`\n[Сайт](https://example.com/a.xlsx)\n/opt/data/workspace/a.xlsx');
+    expect(result.paths).toEqual(["/opt/data/workspace/a.xlsx"]);
+    expect(result.text).toContain("MEDIA:/etc/example.txt");
+    expect(result.text).toContain("https://example.com/a.xlsx");
+  });
+  it("не превращает опасные и сетевые схемы в загрузку", async () => {
+    const { splitFileReferences } = await import("./chat-attachments");
+    for (const href of ["javascript:alert(1)", "file://host/path.xlsx", "//host/path.xlsx", "/workspace/../secret.xlsx"]) {
+      expect(splitFileReferences(`[файл](${href})`).paths).toEqual([]);
+    }
+  });
+});

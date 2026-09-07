@@ -9,7 +9,7 @@
  * (history comes back from the server with the block intact).
  */
 
-import { withBasePath } from "@/lib/api";
+import { fetchJSON, withBasePath } from "@/lib/api";
 import type { AttachmentDisplay } from "@/lib/chat-types";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 
@@ -54,6 +54,48 @@ export function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} КБ`;
   return `${bytes} Б`;
+}
+
+/** Only recognise explicit local file references; the server owns access. */
+export function localFilePath(reference: string): string | null {
+  let value = reference.trim().replace(/^<|>$/g, "");
+  if (value.startsWith("sandbox:")) value = value.slice(8);
+  else if (value.startsWith("file://")) {
+    if (!value.startsWith("file:///")) return null;
+    value = value.slice(7);
+  }
+  try { value = decodeURIComponent(value); } catch { return null; }
+  if (!value.startsWith("/") || value.startsWith("//") || /[\x00-\x1f]/.test(value)) return null;
+  if (value.split("/").includes("..")) return null;
+  return value;
+}
+
+export function describeAttachment(path: string, signal?: AbortSignal): Promise<UploadedAttachment> {
+  return fetchJSON(`/api/files/attachment?${new URLSearchParams({ path })}`, { signal });
+}
+
+/** Parse at render time so original MEDIA references remain durable in history. */
+export function splitFileReferences(content: string): { text: string; paths: string[] } {
+  const protectedText: string[] = [];
+  let text = content.replace(/(^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\2[^\n]*(?:\n|$))|(`(?!MEDIA:)[^`\n]+`)/gm, (value) => {
+    protectedText.push(value);
+    return `\u0000${protectedText.length - 1}\u0000`;
+  });
+  const paths = new Set<string>();
+  const take = (full: string, reference: string): string => {
+    const path = localFilePath(reference);
+    if (!path) return full;
+    paths.add(path);
+    return "";
+  };
+  text = text.replace(/!?\[[^\]\n]*\]\((<[^>\n]+>|(?:[^()\n]|\([^()\n]*\))+)\)/g,
+    (full, reference: string) => take(full, reference));
+  text = text.replace(/`?MEDIA:\s*(?:"([^"\n]+)"|'([^'\n]+)'|([^\s`]+))`?/g,
+    (full, double: string, single: string, bare: string) => take(full, double || single || bare.replace(/[.,;:!?)]+$/, "")));
+  text = text.replace(/^\s*((?:sandbox:|file:\/\/)?\/[^\n]*\.[\p{L}\d]{1,12})\s*$/gmu,
+    (full, path: string) => take(full, path));
+  text = text.replace(/\u0000(\d+)\u0000/g, (_full, index: string) => protectedText[Number(index)]);
+  return { text: text.trim(), paths: [...paths] };
 }
 
 /** Middle-truncate so the extension stays visible — "Отчёт…КЕДР.pptx". */

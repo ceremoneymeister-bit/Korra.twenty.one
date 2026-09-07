@@ -53,3 +53,17 @@ class TestResolveMediaToDataUrls(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_dashboard_preserves_media_for_authenticated_files_delivery(tmp_path):
+    from gateway.platforms.api_server import _api_request_session_source
+    image = tmp_path / 'image.png'
+    image.write_bytes(_PNG_BYTES)
+    token = _api_request_session_source.set('dashboard')
+    try:
+        for text in [f'MEDIA:{image}', f'MEDIA:{tmp_path}/report.xlsx',
+                     f'[Excel](sandbox:{tmp_path}/report.xlsx)']:
+            assert _resolve_media_to_data_urls(text) == text
+    finally:
+        _api_request_session_source.reset(token)
+    assert 'data:image/png' in _resolve_media_to_data_urls(f'MEDIA:{image}')
