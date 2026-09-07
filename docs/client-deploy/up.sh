@@ -4,12 +4,11 @@
 # Образ берётся из файла IMAGE рядом со скриптом (дайджест, а не тег: тег
 # завтра указывает на другой образ). Прежний образ сохраняется в IMAGE.prev.
 #
-#   ./up.sh              пересоздать контейнер на образе из IMAGE
+#   ./up.sh              первый запуск на образе из IMAGE
 #   ./up.sh --dry-run    напечатать команду запуска и выйти, ничего не делая
 #   ./up.sh --no-wait    не ждать, пока поднимется панель
 #
-# Откат на прежний образ:
-#   cp IMAGE.prev IMAGE && ./up.sh
+# Обновление/откат работающей установки: ./update.sh --help
 #
 # Полномочия намеренно минимальные: без docker.sock, без монтирования корня
 # хоста, без монтирования кода движка. Единственный том — каталог данных.
@@ -27,6 +26,8 @@ TIMEZONE="${TIMEZONE:-Europe/Moscow}"       # часовой пояс конту
 ENGINE_UID="${ENGINE_UID:-10000}"           # владелец файлов данных
 ENGINE_GID="${ENGINE_GID:-10000}"
 WAIT_SECONDS="${WAIT_SECONDS:-120}"         # сколько ждать панель после старта
+CONTAINER_CPUS="${CONTAINER_CPUS:-}"
+CONTAINER_MEMORY="${CONTAINER_MEMORY:-}"
 
 # Право sudo без пароля у агента ВНУТРИ контейнера.
 #   0 — снято (дефолт для клиентского контура);
@@ -83,11 +84,15 @@ fi
 # в HTML только при бинде на петлю, а любой бинд на 0.0.0.0 (без которого мост
 # не пробросить) включает гейт авторизации и пропуск убирает. Подробности —
 # в README.md, раздел «Почему host-сеть, а не мост».
+RESOURCE_ARGS=()
+if [ -n "$CONTAINER_CPUS" ]; then RESOURCE_ARGS+=(--cpus "$CONTAINER_CPUS"); fi
+if [ -n "$CONTAINER_MEMORY" ]; then RESOURCE_ARGS+=(--memory "$CONTAINER_MEMORY"); fi
 RUN_ARGS=(
     docker run -d
     --name "$NAME"
     --network host
     --restart unless-stopped
+    "${RESOURCE_ARGS[@]}"
     # Журнал контейнера без ротации за полгода съедает диск клиента молча.
     --log-opt max-size=50m --log-opt max-file=3
     -e KORRA_UID="$ENGINE_UID" -e KORRA_GID="$ENGINE_GID"
@@ -115,8 +120,21 @@ if [ "$DRY_RUN" = 1 ]; then
     exit 0
 fi
 
+# Пересоздание существующего контура проходит host updater: drain, полный
+# snapshot, проверка и откат. Самостоятельный up.sh остаётся первым запуском.
+if docker inspect "$NAME" >/dev/null 2>&1 && [ -z "${KORRA_UPDATER_JOB:-}" ]; then
+    echo 'Контейнер уже существует. Используйте update.sh --update <образ|tar>.' >&2
+    exit 2
+fi
+
+# Прогрев происходит на закреплённом образе до запуска gateway. В данных
+# ставятся ровно версии из manifest, проверяются импорты и metadata.
+if [ "${KORRA_UPDATER_ROLLBACK:-0}" != 1 ]; then
+    python3 "$HERE/updater.py" --warm-deps
+fi
+
 # ─── Пересоздание ───────────────────────────────────────────────────────────
-# Прежний образ запоминаем до сноса контейнера — это и есть путь отката.
+# Прежний образ — диагностический указатель; откат данных выполняет updater.
 CUR=$(docker inspect "$NAME" --format '{{.Config.Image}}' 2>/dev/null || true)
 if [ -n "$CUR" ] && [ "$CUR" != "$IMAGE" ]; then
     echo "$CUR" > "$HERE/IMAGE.prev"

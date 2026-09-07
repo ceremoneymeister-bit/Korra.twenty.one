@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "packages": [
+    {"spec": "openpyxl==3.1.5", "module": "openpyxl"},
+    {"spec": "python-docx==1.2.0", "module": "docx"},
+    {"spec": "pypdf==6.0.0", "module": "pypdf"},
+    {"spec": "reportlab==4.4.3", "module": "reportlab"},
+    {"spec": "pdfplumber==0.11.7", "module": "pdfplumber"},
+    {"spec": "pypdfium2==4.30.0", "module": "pypdfium2"},
+    {"spec": "pandas==2.3.2", "module": "pandas"},
+    {"spec": "xlsxwriter==3.2.5", "module": "xlsxwriter"},
+    {"spec": "pymupdf==1.26.4", "module": "fitz"},
+    {"spec": "matplotlib==3.10.6", "module": "matplotlib"},
+    {"spec": "tabulate==0.10.0", "module": "tabulate"},
+    {"spec": "beautifulsoup4==4.13.5", "module": "bs4"},
+    {"spec": "ddgs==9.5.5", "module": "ddgs"}
+  ]
+}
