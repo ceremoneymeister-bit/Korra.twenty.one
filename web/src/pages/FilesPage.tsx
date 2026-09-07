@@ -52,7 +52,6 @@ import {
   productUiMode,
 } from "@/lib/dashboard-flags";
 import { productNavLabel } from "@/lib/product-nav";
-import { artifactUrl } from "@/lib/chat-artifacts";
 import { downloadWorkspaceFile } from "@/lib/chat-attachments";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import {
