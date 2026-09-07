@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns } from "@/lib/chat-runs";
+import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
+import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns } from "@/lib/chat-runs";
 import type { ToolEntry } from "@/components/ToolCall";
 import type {
   ApprovalChoiceValue,
@@ -521,6 +522,7 @@ function sessionMessagesToChat(
 }
 
 export interface UseChatStreamOptions {
+  active?: boolean;
   /** Профиль агента, которому адресован чат. Пусто/не задан — профиль самого
    *  процесса панели (прежнее поведение). Уезжает в `?profile=` на
    *  /api/chat/completions и в загрузку истории сессии. */
@@ -531,6 +533,8 @@ export function useChatStream(
   options?: UseChatStreamOptions,
 ): UseChatStreamReturn {
   const profile = options?.profile;
+  const active = options?.active !== false;
+  const selectionKey = `${chatViewKey(profile)}:selected`;
   const [state, dispatch] = useReducer(reducer, initialState);
   const abortControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -590,6 +594,7 @@ export function useChatStream(
   }, []);
 
   const loadSession = useCallback(async (sessionId: string): Promise<void> => {
+    writeChatView(selectionKey, sessionId);
     const generation = crypto.randomUUID();
     activeStreamIdRef.current = generation;
     abortControllerRef.current?.abort();
@@ -672,9 +677,10 @@ export function useChatStream(
         activeStreamIdRef.current = null;
       }
     }
-  }, [profile]);
+  }, [profile, selectionKey]);
 
   const reset = useCallback(() => {
+    writeChatView(selectionKey, "");
     // Same triple-guard as loadSession — abort any active stream so its
     // residual APPEND_DELTAs don't leak into the new chat.
     activeStreamIdRef.current = null;
@@ -682,7 +688,7 @@ export function useChatStream(
     streamingRef.current = false;
 
     dispatch({ type: "RESET" });
-  }, []);
+  }, [selectionKey]);
 
   const send = useCallback(
     async (
@@ -732,6 +738,7 @@ export function useChatStream(
       } else if (retryRecord && state.sessionId !== sessionId) {
         dispatch({ type: "SET_SESSION_ID", sessionId });
       }
+      writeChatView(selectionKey, sessionId);
       // Tag this stream as the one currently allowed to mutate state.
       // The read loop below re-checks this ref on every iteration so a
       // mid-stream loadSession()/reset() can invalidate us synchronously.
@@ -760,6 +767,7 @@ export function useChatStream(
         return false;
       }
 
+      writeChatView(chatViewKey(profile, state.sessionId), "");
       const userMsg: ChatMessage = {
         id: `user-${messageId}`,
         role: "user",
@@ -1055,8 +1063,40 @@ export function useChatStream(
       }
       return delivered;
     },
-    [state.messages, state.sessionId, profile]
+    [state.messages, state.sessionId, profile, selectionKey]
   );
+
+  // Page and profile switches detach only the reader. A fresh visit resolves
+  // the session again; a remembered browser flag never proves agent liveness.
+  const sessionRef = useRef(state.sessionId);
+  useEffect(() => { sessionRef.current = state.sessionId; }, [state.sessionId]);
+  useEffect(() => {
+    const id = readChatView(selectionKey) || loadChatOutbox(profile ?? "")?.sessionId;
+    if (id) void loadSession(id);
+  }, [loadSession, profile, selectionKey]);
+  useEffect(() => {
+    if (!active) return;
+    const resume = () => {
+      if (!document.hidden && sessionRef.current && !streamingRef.current) void loadSession(sessionRef.current);
+    };
+    resume();
+    window.addEventListener("online", resume);
+    window.addEventListener("focus", resume);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      window.removeEventListener("online", resume);
+      window.removeEventListener("focus", resume);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, [active, loadSession]);
+  useEffect(() => {
+    if (!active) return;
+    markChatViewed(profile ?? "", state.sessionId);
+    return () => {
+      const viewed = $viewedChat.get();
+      if (viewed?.profile === (profile ?? "") && viewed.sessionId === state.sessionId) $viewedChat.set(null);
+    };
+  }, [active, profile, state.sessionId]);
 
   const retryPending = useCallback(async (): Promise<boolean> => {
     const pending = loadChatOutbox(profile ?? "");
