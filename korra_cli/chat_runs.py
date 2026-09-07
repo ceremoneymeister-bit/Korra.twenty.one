@@ -23,7 +23,15 @@ async def chat_runs(profile: str | None = None, session_id: str | None = None):
     server = _server()
     ledger = server._chat_delivery_ledger()
     items = await server.run_in_threadpool(ledger.runs, profile, session_id)
-    return {"runs": [{**item, "status": _status(item, ledger)} for item in items]}
+    result = []
+    for item in items:
+        summary = {**item, "status": _status(item, ledger)}
+        if session_id is None:
+            # The shell polls summaries. Full prompts belong only to the
+            # explicitly opened conversation, not every two-second update.
+            summary["user_message"] = {"role": "user", "content": str(item["user_message"].get("content", ""))[:160]}
+        result.append(summary)
+    return {"runs": result}
 
 
 @router.get("/api/chat/runs/{message_id}/stream")
@@ -102,7 +110,7 @@ async def cancel_chat_run(message_id: str, session_id: str, profile: str = ""):
     run = server._CHAT_DELIVERY_STREAMS.get(f"{ledger.path}:{message_id}")
     if run is None or run.done:
         return {"stopped": False}
-    terminal = server._durable_stream_error_event("Ход остановлен пользователем.") + b"data: [DONE]\n\n"
+    terminal = server._durable_stream_error_event("Остановка запрошена пользователем.") + b"data: [DONE]\n\n"
     await run.publish(terminal)
     if run.task:
         # Explicit Stop closes the upstream SSE: its existing disconnect
