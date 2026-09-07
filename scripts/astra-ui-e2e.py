@@ -103,7 +103,7 @@ def main():
         expect(file_button).to_be_visible()
         with page.expect_download() as download:
             file_button.click()
-        assert Path(download.value.path()).read_text() == "Поставщик А: 100 рублей, 2 дня"
+        assert Path(download.value.path()).read_text(encoding="utf-8") == "Поставщик А: 100 рублей, 2 дня"
         page.get_by_role("button", name="Приостановить", exact=True).click()
         page.get_by_label("Причина паузы", exact=True).fill("Уточнить бюджет у руководителя")
         page.get_by_role("button", name="Приостановить", exact=True).click()

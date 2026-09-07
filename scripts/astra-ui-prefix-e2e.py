@@ -134,7 +134,7 @@ def main():
         expect(page.get_by_role("button", name="поставщик-А.txt", exact=True)).to_be_visible()
         with page.expect_download() as download:
             page.get_by_role("button", name="поставщик-А.txt", exact=True).click()
-        assert Path(download.value.path()).read_text() == "Цена 100, доставка 2 дня"
+        assert Path(download.value.path()).read_text(encoding="utf-8") == "Цена 100, доставка 2 дня"
         page.get_by_role("button", name="Закрыть окно", exact=True).click()
         card = page.locator(f'[data-task-id="{task_id}"]')
         card.drag_to(page.locator('[data-status="blocked"]'))
