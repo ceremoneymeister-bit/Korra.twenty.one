@@ -190,6 +190,10 @@ export default function AgentWorkbenchPage() {
     // пустой профиль панели.
     const agent =
       requested === "default" ? MAIN_AGENT_TAB.profile : requested;
+    if (hiddenTabs.some(tab => tab.profile === agent)) {
+      showTab(agent); // An explicit notification click also reveals its hidden tab.
+      return;
+    }
     if (!tabs.some((tab) => tab.profile === agent)) {
       // Диплинк на профиль, которого в составе ещё нет (только что создан):
       // перечитываем список и оставляем параметры до его появления.
@@ -212,7 +216,7 @@ export default function AgentWorkbenchPage() {
       },
       { replace: true },
     );
-  }, [onAgentsRoute, searchParams, setSearchParams, tabs, refresh]);
+  }, [onAgentsRoute, searchParams, setSearchParams, tabs, hiddenTabs, showTab, refresh]);
 
   const clearDraft = useCallback((profile: string) => {
     setDraftByProfile((previous) => {
