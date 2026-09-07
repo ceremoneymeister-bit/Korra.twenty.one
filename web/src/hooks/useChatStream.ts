@@ -62,7 +62,7 @@ interface StreamState {
 }
 
 type StreamAction =
-  | { type: "SEND_USER"; userMsg: ChatMessage; assistantMsg: ChatMessage }
+  | { type: "SEND_USER"; userMsg: ChatMessage; assistantMsg: ChatMessage; streaming?: boolean }
   | { type: "RETRY_USER"; userMsg: ChatMessage; assistantMsg: ChatMessage }
   | { type: "RESTORE_PENDING"; sessionId: string; userMsg: ChatMessage; error: string }
   | { type: "MARK_DELIVERY"; messageId: string; delivery: "sending" | "failed" | "delivered" }
@@ -123,7 +123,7 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       return {
         ...state,
         messages: [...state.messages, action.userMsg, action.assistantMsg],
-        isStreaming: true,
+        isStreaming: action.streaming ?? true,
         error: null,
       };
     }
@@ -606,7 +606,10 @@ export function useChatStream(
     try {
       // Read the run AFTER history: completion between these reads is replayed
       // from the same ledger, never from a stale history snapshot.
-      const resp = await api.getSessionMessages(sessionId, profile || "default");
+      const resp = await api.getSessionMessages(sessionId, profile || "default").catch(error => {
+        if (error instanceof Error && /^404(?:\s|:)/.test(error.message)) return { messages: [] };
+        throw error;
+      });
       if (!current()) return;
       const chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
       let run;
@@ -619,7 +622,8 @@ export function useChatStream(
         return;
       }
       if (!current()) return;
-      if (!run || (!isRunBusy(run) && run.status !== "completed")) {
+      const newerHistory = run?.status === "completed" && chatMessages.length > run.history_count + 2;
+      if (!run || newerHistory || (!isRunBusy(run) && run.status !== "completed")) {
         dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages });
         if (run?.status === "interrupted") dispatch({ type: "SET_ERROR", error: "Связь с ходом потеряна. Проверьте историю перед повторной отправкой." });
         return;
@@ -628,7 +632,7 @@ export function useChatStream(
       // copy before replay, including tool messages, so it appears exactly once.
       dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages.slice(0, run.history_count) });
       const pending = loadChatOutbox(profile ?? "", sessionId);
-      dispatch({ type: "SEND_USER", userMsg: {
+      dispatch({ type: "SEND_USER", streaming: isRunBusy(run), userMsg: {
         id: `user-${run.message_id}`, clientMessageId: run.message_id,
         role: "user", content: run.user_message.content,
         timestamp: run.updated_at * 1000, delivery: "delivered",
