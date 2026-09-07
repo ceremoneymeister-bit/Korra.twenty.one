@@ -8,6 +8,12 @@ import { api, type SessionMessage } from "@/lib/api";
 import { loadChatOutbox } from "@/lib/chat-outbox";
 import { useChatStream, type UseChatStreamReturn } from "./useChatStream";
 
+vi.mock("@/lib/chat-runs", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/chat-runs")>(),
+  getChatRuns: vi.fn(async () => []),
+  refreshChatRuns: vi.fn(async () => {}),
+}));
+
 let container: HTMLDivElement;
 let root: Root;
 let current: UseChatStreamReturn;
@@ -20,6 +26,7 @@ function Probe({ onValue }: { onValue: (value: UseChatStreamReturn) => void }) {
 
 beforeEach(async () => {
   localStorage.clear();
+  sessionStorage.clear();
   let sequence = 0;
   vi.stubGlobal("crypto", {
     randomUUID: () => `12345678-1234-4234-8234-${String(++sequence).padStart(12, "0")}`,

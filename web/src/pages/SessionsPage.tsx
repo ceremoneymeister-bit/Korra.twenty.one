@@ -1,3 +1,4 @@
+import { getManagementProfile } from "@/lib/api";
 import { KorraLoader } from "@/components/KorraLoader";
 import {
   useEffect,
@@ -554,7 +555,7 @@ function SessionRow({
           title={t.sessions.resumeInChat}
           onClick={(e) => {
             e.stopPropagation();
-            navigate(`/chat?resume=${encodeURIComponent(session.id)}`);
+            navigate(`/agents?agent=${encodeURIComponent(getManagementProfile() || "default")}&resume=${encodeURIComponent(session.id)}`);
           }}
         >
           <Play />
@@ -1144,6 +1145,7 @@ export default function SessionsPage() {
   // stale values. ``newestSeenRef`` starts null so the first poll sets a
   // baseline without triggering a redundant reload (mount already loads).
   const newestSeenRef = useRef<string | null>(null);
+  const overviewRevisionRef = useRef("");
   const pageRef = useRef(page);
 
   useEffect(() => {
@@ -1184,10 +1186,12 @@ export default function SessionsPage() {
           // silently refresh the paginated list so the new session shows
           // up in real time without a visible loading flicker.
           const newest = r.sessions[0]?.id ?? null;
-          if (shouldRefreshSessions(newestSeenRef.current, newest)) {
+          const revision = r.sessions.map(session => `${session.id}:${session.last_active}:${session.message_count}`).join("|");
+          if (shouldRefreshSessions(newestSeenRef.current, newest) || (overviewRevisionRef.current && overviewRevisionRef.current !== revision)) {
             loadSessions(pageRef.current, true);
           }
           newestSeenRef.current = newest;
+          overviewRevisionRef.current = revision;
         })
         .catch(() => {});
     };

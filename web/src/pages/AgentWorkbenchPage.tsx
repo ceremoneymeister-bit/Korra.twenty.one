@@ -1,3 +1,4 @@
+import { AgentRunBadge, SessionRunActivity } from "@/components/chat/SessionRunActivity";
 /**
  * AgentWorkbenchPage — рабочее место команды агентов.
  *
@@ -117,9 +118,7 @@ export default function AgentWorkbenchPage() {
   const activeId = tabs.some((tab) => tab.profile === selectedId)
     ? selectedId
     : MAIN_AGENT_TAB.profile;
-  const [streamingByProfile, setStreamingByProfile] = useState<
-    Record<string, boolean>
-  >({});
+  const [resumeByProfile, setResumeByProfile] = useState<Record<string, string>>({});
   // Адресный черновик предназначен ОДНОМУ агенту. Держим его здесь и раздаём
   // адресно: сам чат `?draft=` не читает — несколько
   // смонтированных экземпляра приняли бы его каждый на свой счёт.
@@ -196,6 +195,8 @@ export default function AgentWorkbenchPage() {
       return;
     }
     setActiveId(agent);
+    const resume = searchParams.get("resume");
+    if (resume) setResumeByProfile(previous => ({ ...previous, [agent]: resume }));
     if (draft) setDraftByProfile((previous) => ({ ...previous, [agent]: draft }));
     // Параметры снимаем сразу: иначе возврат на экран назад-вперёд подставил
     // бы тот же текст поверх уже набранного.
@@ -203,6 +204,7 @@ export default function AgentWorkbenchPage() {
       (previous) => {
         const next = new URLSearchParams(previous);
         next.delete("agent");
+        next.delete("resume");
         next.delete("draft");
         return next;
       },
@@ -218,20 +220,6 @@ export default function AgentWorkbenchPage() {
       return next;
     });
   }, []);
-
-  // Стабильная ссылка + выход без записи, когда значение не изменилось. Колбэк
-  // зовётся из эффекта дочернего чата, и новый объект состояния на каждый
-  // вызов означал бы бесконечный цикл рендеров.
-  const handleStreamingChange = useCallback(
-    (profile: string, streaming: boolean) => {
-      setStreamingByProfile((previous) =>
-        previous[profile] === streaming
-          ? previous
-          : { ...previous, [profile]: streaming },
-      );
-    },
-    [],
-  );
 
   const toggleTabMenu = useCallback(
     (event: MouseEvent<HTMLButtonElement>, profile: string) => {
@@ -428,7 +416,6 @@ export default function AgentWorkbenchPage() {
           >
             {tabs.map((tab) => {
               const active = tab.profile === activeId;
-              const streaming = streamingByProfile[tab.profile] === true;
               return (
                 <div
                   key={tab.profile}
@@ -443,9 +430,6 @@ export default function AgentWorkbenchPage() {
                     aria-controls={`agent-panel-${tab.profile}`}
                     tabIndex={active ? 0 : -1}
                     title={tab.description}
-                    aria-label={
-                      streaming ? `${tab.label} — агент отвечает` : undefined
-                    }
                     data-active={active ? "true" : undefined}
                     onClick={() => setActiveId(tab.profile)}
                     className={cn(
@@ -456,13 +440,7 @@ export default function AgentWorkbenchPage() {
                     )}
                   >
                     <span>{tab.label}</span>
-                    {streaming && (
-                      <span
-                        aria-hidden
-                        title="Агент отвечает"
-                        className="size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--neo-accent)]"
-                      />
-                    )}
+                    <AgentRunBadge profile={tab.profile} />
                   </button>
                   <button
                     type="button"
@@ -735,6 +713,7 @@ export default function AgentWorkbenchPage() {
         )}
 
       <Toast toast={toast} />
+      <SessionRunActivity tabs={mountedTabs} />
 
       <div className="flex min-h-0 flex-1 flex-col">
         {mountedTabs.map((tab) => (
@@ -750,8 +729,8 @@ export default function AgentWorkbenchPage() {
           >
             <BubbleChatPage
               agentProfile={tab.profile}
-              active={tab.profile === activeId}
-              onStreamingChange={handleStreamingChange}
+              active={onAgentsRoute && tab.profile === activeId}
+              resumeSession={resumeByProfile[tab.profile]}
               draft={draftByProfile[tab.profile] ?? null}
               onDraftConsumed={() => clearDraft(tab.profile)}
               newChatRequest={newChatByProfile[tab.profile] ?? 0}

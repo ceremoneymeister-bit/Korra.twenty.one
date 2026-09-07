@@ -1,3 +1,5 @@
+import { useStore } from "@nanostores/react";
+import { $chatRuns } from "@/lib/chat-runs";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { StatusResponse } from "@/lib/api";
@@ -20,6 +22,8 @@ export interface SidebarStatus {
  * он обязан погаснуть, а не светить последним удачным ответом.
  */
 export function useSidebarStatus(): SidebarStatus {
+  // One shared monitor lives with the shell, including non-chat routes.
+  useStore($chatRuns);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [reachable, setReachable] = useState<boolean | null>(null);
 

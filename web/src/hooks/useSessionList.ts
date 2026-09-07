@@ -58,7 +58,7 @@ export function useSessionList(
       const response = await api.getSessions(
         limit,
         DEFAULT_OFFSET,
-        profile || undefined,
+        profile === undefined ? undefined : profile || "default",
       );
       if (!mountedRef.current) return;
 
@@ -80,6 +80,7 @@ export function useSessionList(
 
   useEffect(() => {
     if (pollIntervalMs <= 0) return;
+    void refresh(); // The selected agent may have completed while hidden.
 
     const intervalId = window.setInterval(() => {
       // Скрытая вкладка браузера не опрашивает сервер.
