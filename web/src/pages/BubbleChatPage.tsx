@@ -1,3 +1,4 @@
+import { useChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
 import { useSessionRun } from "@/hooks/useSessionRun";
 import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
 /**
@@ -623,7 +624,7 @@ export function BubbleChatComposer({
 }: BubbleChatComposerProps) {
   const [value, setValue] = useState(() => draftKey ? readChatView(draftKey) : "");
   useEffect(() => { if (draftKey) writeChatView(draftKey, value); }, [draftKey, value]);
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [attachments, setAttachments] = useChatAttachmentDraft(draftKey);
   const [dragging, setDragging] = useState(false);
   // Одна строка отказа на весь композер: вложения и диктовка спорить за неё
   // не могут — обе операции запускает владелец, по одной за раз.
@@ -738,11 +739,12 @@ export function BubbleChatComposer({
   }, [attachments]);
   useEffect(
     () => () => {
+      if (draftKey) return; // Another session owns this upload until send/remove.
       attachmentsRef.current.forEach((item) => {
         if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
       });
     },
-    [],
+    [draftKey],
   );
 
   const resizeTextarea = useCallback((el: HTMLTextAreaElement) => {

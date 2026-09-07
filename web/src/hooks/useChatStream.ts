@@ -1,3 +1,4 @@
+import { clearChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
 import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns } from "@/lib/chat-runs";
@@ -800,6 +801,7 @@ export function useChatStream(
       }
 
       writeChatView(chatViewKey(profile, state.sessionId), "");
+      clearChatAttachmentDraft(chatViewKey(profile, state.sessionId));
       const userMsg: ChatMessage = {
         id: `user-${messageId}`,
         role: "user",
