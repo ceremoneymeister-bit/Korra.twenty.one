@@ -987,7 +987,7 @@ export default function FilesPage() {
                   ) : (
                     <>
                       <Button ghost size="icon" type="button"
-                        onClick={() => navigate(`/chat?${new URLSearchParams({ attach: entry.path })}`)}
+                        onClick={() => navigate(`${productUiMode() === "fleet" ? "/agents" : "/chat"}?${new URLSearchParams({ attach: entry.path })}`)}
                         aria-label={`Отправить в чат ${clientEntryLabel(entry.name)}`}>
                         <MessageSquare />
                       </Button>

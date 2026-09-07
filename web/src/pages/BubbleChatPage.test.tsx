@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, type ReactNode } from "react";
+import { act, StrictMode, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -166,6 +166,30 @@ afterEach(async () => {
 });
 
 describe("BubbleChatComposer", () => {
+  it("не дублирует загрузку одного файла при повторном выборе и StrictMode", async () => {
+    await render(<StrictMode><BubbleChatComposer onSend={vi.fn()} /></StrictMode>);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File(["данные"], "данные.txt", { lastModified: 1 });
+    Object.defineProperty(input, "files", { configurable: true, value: [file, file] });
+    await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(attachmentMocks.uploadAttachment).toHaveBeenCalledTimes(1);
+    expect(container.querySelectorAll('[role="listitem"]')).toHaveLength(1);
+  });
+
+  it("объясняет пустой и слишком большой файл до загрузки", async () => {
+    await render(<BubbleChatComposer onSend={vi.fn()} />);
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const empty = new File([], "пустой.txt");
+    const big = new File(["данные"], "большой.xlsx");
+    Object.defineProperty(big, "size", { value: 51 * 1024 * 1024 });
+    for (const file of [empty, big]) {
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(file.name);
+    }
+    expect(attachmentMocks.uploadAttachment).not.toHaveBeenCalled();
+  });
   it("keeps send inactive for an empty draft and activates it for text", async () => {
     const onSend = vi.fn();
     await render(<BubbleChatComposer onSend={onSend} />);
