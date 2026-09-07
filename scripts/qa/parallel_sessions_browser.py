@@ -111,6 +111,20 @@ async def main(base, artifacts):
         panel = await open_chat("lawyer", b)
         await expect(panel.locator("textarea")).to_have_value("Черновик для второго дела")
         results.append("independent unsent drafts per session")
+        panel = await open_chat("lawyer", a)
+        uploads = []
+        page.on("request", lambda request: uploads.append(request.url) if "/api/chat/upload" in request.url and request.method == "POST" else None)
+        await panel.locator('input[type="file"]').set_input_files({"name": "Черновик договора.txt", "mimeType": "text/plain", "buffer": "Условия договора".encode()})
+        chip = panel.locator('.korra-chat-attachment-chip[data-status="ready"]')
+        await expect(chip).to_have_count(1)
+        await open_chat("lawyer", b)
+        await expect(chip).to_have_count(0)
+        await open_chat("lawyer", a)
+        await expect(chip).to_have_count(1)
+        await page.reload()
+        await expect(chip).to_have_count(1)
+        assert len(uploads) == 1, "A restored draft uploaded the file again"
+        results.append("prepared file stays in its own draft across switches and reload, without reupload")
 
         r, mr = await send("lawyer", "RELOAD")
         await page.reload()

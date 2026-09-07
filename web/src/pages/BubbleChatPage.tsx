@@ -642,7 +642,7 @@ export function BubbleChatComposer({
     setAttachments((list) =>
       list.map((item) => (item.id === id ? { ...item, ...next } : item)),
     );
-  }, []);
+  }, [setAttachments]);
 
   const pickWorkspaceFile = useCallback((uploaded: UploadedAttachment) => {
     setAttachments(list => {
@@ -651,7 +651,7 @@ export function BubbleChatComposer({
       return [...list, { ...uploaded, id: crypto.randomUUID(), status: "ready",
         progress: 100, uploaded, file: new File([], uploaded.name) }];
     });
-  }, []);
+  }, [setAttachments]);
 
   const startUpload = useCallback(
     (item: PendingAttachment) => {
@@ -717,7 +717,7 @@ export function BubbleChatComposer({
       setAttachments(next);
       accepted.forEach(startUpload);
     },
-    [startUpload],
+    [startUpload, setAttachments],
   );
 
   const removeAttachment = useCallback((id: string) => {
@@ -728,7 +728,7 @@ export function BubbleChatComposer({
       if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
       return list.filter((item) => item.id !== id);
     });
-  }, []);
+  }, [setAttachments]);
 
   // Освобождение object URL при размонтировании. Через пустой список
   // зависимостей это не работает: замыкание держит ПЕРВЫЙ (пустой) массив
@@ -861,7 +861,7 @@ export function BubbleChatComposer({
       const el = taRef.current;
       if (el) resizeTextarea(el);
     });
-  }, [resizeTextarea]);
+  }, [resizeTextarea, setAttachments]);
 
   const submit = useCallback(() => {
     const text = value.trim();
