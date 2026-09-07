@@ -308,6 +308,15 @@ export default function FilesPage() {
   // Что реально показано на экране. Стартует пустым, поэтому первая загрузка
   // случается всегда, даже когда адрес уже содержит нужную папку.
   const currentPathRef = useRef<string | undefined>(undefined);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      // A late directory response must not navigate back from another section.
+      listRequestRef.current += 1;
+    };
+  }, []);
   const [pathInput, setPathInput] = useState("");
   const [listing, setListing] = useState<ManagedFilesResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -397,6 +406,7 @@ export default function FilesPage() {
 
   const load = useCallback(
     async (path?: string) => {
+      if (!mountedRef.current) return;
       const target = path === undefined ? currentPathRef.current : path;
       const requestId = ++listRequestRef.current;
       setLoading(true);
