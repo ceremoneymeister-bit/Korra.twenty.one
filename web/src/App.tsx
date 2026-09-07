@@ -107,6 +107,7 @@ const AgentWorkbenchPage = lazy(() => import("@/pages/AgentWorkbenchPage"));
 const UiKitPage = lazy(() => import("@/pages/UiKitPage"));
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { KorraBrand } from "@/components/KorraBrand";
+import { TechstkomBrand } from "@/components/TechstkomBrand";
 import { useI18n } from "@/i18n";
 import type { Translations } from "@/i18n/types";
 import { PluginPage, PluginSlot, usePlugins } from "@/plugins";
@@ -714,7 +715,9 @@ export default function App() {
           <Menu />
         </Button>
 
-        <KorraBrand themeName={theme.name} className="h-[18px]" />
+        {isCalcMode
+          ? <TechstkomBrand themeName={theme.name} />
+          : <KorraBrand themeName={theme.name} className="h-[18px]" />}
       </header>
 
       {mobileOpen && (
@@ -773,7 +776,9 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
-                <KorraBrand themeName={theme.name} />
+                {isCalcMode
+                  ? <TechstkomBrand themeName={theme.name} />
+                  : <KorraBrand themeName={theme.name} />}
               </div>
 
               <Button
@@ -979,7 +984,10 @@ export default function App() {
               )}
             >
               <AuthWidget />
-              <SidebarFooter status={sidebarStatus} />
+              <SidebarFooter
+                status={sidebarStatus}
+                poweredByTheme={isCalcMode ? theme.name : undefined}
+              />
             </div>
           </aside>
 
