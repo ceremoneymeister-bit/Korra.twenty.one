@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
+import { chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns } from "@/lib/chat-runs";
 import type { ToolEntry } from "@/components/ToolCall";
 import type {
   ApprovalChoiceValue,
@@ -589,40 +590,87 @@ export function useChatStream(
   }, []);
 
   const loadSession = useCallback(async (sessionId: string): Promise<void> => {
-    // Invalidate any in-flight stream before mutating state. Triple guard:
-    // (1) activeStreamIdRef flip — read loop checks this synchronously on
-    //     every iteration and bails out before dispatching APPEND_DELTA,
-    // (2) abort() — propagates AbortError so the catch block runs cleanup,
-    // (3) streamingRef=false — releases the concurrent-send lock so the
-    //     user can immediately send into the loaded thread.
-    // (Codex stop-gate review #10.)
-    activeStreamIdRef.current = null;
+    const generation = crypto.randomUUID();
+    activeStreamIdRef.current = generation;
     abortControllerRef.current?.abort();
-    streamingRef.current = false;
-
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    streamingRef.current = true; // Loading also excludes a concurrent send.
+    const current = () => mountedRef.current && activeStreamIdRef.current === generation;
+    dispatch({ type: "LOAD_SESSION", sessionId, messages: [] });
     try {
-      const resp = await api.getSessionMessages(sessionId, profile || undefined);
-      const chatMessages = sessionMessagesToChat(
-        sessionId,
-        resp.messages as HistoryMessage[],
-      );
-
-      dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages });
-
-      // Legacy/compressed sessions return an empty (or system-only) message
-      // list — without feedback the user sees a blank transcript and assumes
-      // the resume= link is broken. Surface a soft warning that lets them
-      // continue the thread from here. (Codex stop-gate review #13.)
-      if (chatMessages.length === 0) {
-        dispatch({
-          type: "SET_ERROR",
-          error:
-            "История этой сессии недоступна (сжата или legacy). Можешь продолжить отсюда — следующее сообщение запишется в эту нить.",
-        });
+      // Read the run AFTER history: completion between these reads is replayed
+      // from the same ledger, never from a stale history snapshot.
+      const resp = await api.getSessionMessages(sessionId, profile || "default");
+      if (!current()) return;
+      const chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
+      let run;
+      try {
+        run = (await getChatRuns(profile ?? "", sessionId))[0];
+      } catch {
+        if (!current()) return;
+        dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages });
+        dispatch({ type: "SET_ERROR", error: "История загружена. Не удалось проверить, работает ли агент; связь будет проверена при возврате." });
+        return;
       }
+      if (!current()) return;
+      if (!run || (!isRunBusy(run) && run.status !== "completed")) {
+        dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages });
+        if (run?.status === "interrupted") dispatch({ type: "SET_ERROR", error: "Связь с ходом потеряна. Проверьте историю перед повторной отправкой." });
+        return;
+      }
+      // The durable stream replays from byte zero. Remove this turn's saved
+      // copy before replay, including tool messages, so it appears exactly once.
+      dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages.slice(0, run.history_count) });
+      const pending = loadChatOutbox(profile ?? "", sessionId);
+      dispatch({ type: "SEND_USER", userMsg: {
+        id: `user-${run.message_id}`, clientMessageId: run.message_id,
+        role: "user", content: run.user_message.content,
+        timestamp: run.updated_at * 1000, delivery: "delivered",
+        ...(pending ? { attachments: toDisplay(pending.attachments) } : {}),
+      }, assistantMsg: { id: `asst-${run.message_id}`, role: "assistant", content: "", timestamp: Date.now() } });
+      const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/stream`, profile ?? "", sessionId), {
+        headers: chatRunHeaders(), signal: controller.signal, cache: "no-store",
+      });
+      if (!current()) return;
+      if (!response.ok || !response.body) throw new Error("Не удалось восстановить ответ. Вернитесь в чат для повторного подключения.");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let done = false;
+      while (!done) {
+        const part = await reader.read();
+        if (!current()) { void reader.cancel(); return; }
+        if (part.done) break;
+        const parsed = splitSSEBuffer(buffer + decoder.decode(part.value, { stream: true }));
+        buffer = parsed.remainder;
+        for (const event of parsed.events) {
+          if (event.type === "chunk") {
+            const choice = event.data.choices[0];
+            if (choice?.delta?.content) dispatch({ type: "APPEND_DELTA", content: choice.delta.content });
+            if (choice?.finish_reason === "error") {
+              void reader.cancel();
+              throw new Error(choice.delta?.content || event.data.error?.message || "Агент завершил ответ с ошибкой");
+            }
+          } else if (event.type === "tool_progress") dispatch({ type: "UPSERT_TOOL", toolData: event.data });
+          else if (event.type === "approval_request") {
+            const request = normalizeApprovalRequest(event.data);
+            if (request) dispatch({ type: "APPROVAL_REQUESTED", request });
+          } else if (event.type === "done") done = true;
+        }
+      }
+      void reader.cancel();
+      if (!done) throw new Error("Связь с ответом прервалась. Агент может продолжать работу; вернитесь в чат для подключения.");
+      clearChatOutbox(run.message_id, profile ?? "");
+      dispatch({ type: "FINALIZE" });
+      void refreshChatRuns();
     } catch (err) {
-      const msg = ownerFacingError(err, "Не удалось загрузить сессию.");
-      dispatch({ type: "SET_ERROR", error: msg });
+      if (current()) dispatch({ type: "SET_ERROR", error: ownerFacingError(err, "Не удалось загрузить сессию.") });
+    } finally {
+      if (current()) {
+        streamingRef.current = false;
+        activeStreamIdRef.current = null;
+      }
     }
   }, [profile]);
 
@@ -687,7 +735,7 @@ export function useChatStream(
       // Tag this stream as the one currently allowed to mutate state.
       // The read loop below re-checks this ref on every iteration so a
       // mid-stream loadSession()/reset() can invalidate us synchronously.
-      const localStreamId = sessionId;
+      const localStreamId = crypto.randomUUID();
       activeStreamIdRef.current = localStreamId;
 
       // Build user message
@@ -806,7 +854,9 @@ export function useChatStream(
             dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed" });
             dispatch({
               type: "SET_ERROR",
-              error: response.status === 409
+              error: response.status === 429
+                ? "Все места заняты. Сообщение сохранено — повторите, когда освободится место."
+                : response.status === 409
                 ? "Доставка требует проверки. Откройте историю или нажмите «Повторить» с тем же сообщением."
                 : "Сообщение не отправлено. Оно сохранено — можно повторить без дубликата.",
             });
@@ -814,6 +864,7 @@ export function useChatStream(
           return delivered;
         }
 
+        void refreshChatRuns();
         const reader = response.body!.getReader();
         const decoder = new TextDecoder("utf-8", { fatal: false });
         let buffer = "";
@@ -943,7 +994,8 @@ export function useChatStream(
           // карточке «отправлено агенту», и владелец считал решение
           // принятым (находка ревью 20.08.2026).
           delivered = !sawTerminalError && (sawDone || sawAgentOutput);
-          if (delivered) {
+          if (!sawDone && !sawTerminalError) dispatch({ type: "SET_ERROR", error: "Связь с ответом прервалась. Агент может продолжать работу; вернитесь в чат для подключения." });
+          if (delivered && sawDone) {
             clearChatOutbox(messageId, profile ?? "");
             dispatch({ type: "MARK_DELIVERY", messageId, delivery: "delivered" });
           } else {
@@ -992,6 +1044,7 @@ export function useChatStream(
           dispatch({ type: "RESET_STREAMING" });
         }
       } finally {
+        void refreshChatRuns();
         // Defensive cleanup — only unlock if this stream is still the
         // active one. If invalidated, the new stream owns the lock and
         // we must not touch it. (Codex review #11.)

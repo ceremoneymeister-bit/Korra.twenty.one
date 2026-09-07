@@ -507,3 +507,21 @@ describe("useChatStream — хозяин очереди вопросов ост�
     expect(current.approvals[0].request.request_id).toBe("req-live");
   });
 });
+
+describe("переключение сессий", () => {
+  it("запоздавшая история не заменяет выбранный чат", async () => {
+    let finishOld!: (value: { session_id: string; messages: SessionMessage[] }) => void;
+    vi.spyOn(api, "getSessionMessages").mockImplementation(id => id === "old"
+      ? new Promise(resolve => { finishOld = resolve; })
+      : Promise.resolve({ session_id: id, messages: [{ role: "user", content: "Новый чат" }] as SessionMessage[] }));
+    let old!: Promise<void>;
+    await act(async () => { old = current.loadSession("old"); });
+    await act(async () => { await current.loadSession("new"); });
+    await act(async () => {
+      finishOld({ session_id: "old", messages: [{ role: "user", content: "Старый чат" }] as SessionMessage[] });
+      await old;
+    });
+    expect(current.sessionId).toBe("new");
+    expect(current.messages[0].content).toBe("Новый чат");
+  });
+});
