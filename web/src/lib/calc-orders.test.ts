@@ -105,6 +105,11 @@ const WORKFLOW_READY: OrderCard = {
   warnings: [],
 };
 
+it("keeps an uploaded folder at document review without dispatching a calculation", () => {
+  const draft = order({ kind: "draft", folder_name: "Сделка 124", file_count: 1001 });
+  expect(nextAction(draft)).toEqual({ kind: "inspect", label: "Проверить комплект исходных документов", profile: null });
+});
+
 const WORKFLOW_BLOCKED: OrderCard = {
   ...WORKFLOW_READY,
   order_id: "34112-P12",

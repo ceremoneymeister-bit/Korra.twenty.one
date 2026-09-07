@@ -38,10 +38,12 @@ from fastapi import APIRouter, Body, HTTPException
 
 from korra_cli.web_deps import late
 from korra_cli.web_routers.calc_rates import _run_admin
+from korra_cli.web_routers import calc_files
 
 _log = logging.getLogger("korra_cli.web_server")
 
 router = APIRouter()
+router.include_router(calc_files.router)
 
 # Late-bound: тесты подменяют их на web_server, и прямой импорт разошёлся бы
 # с подменой.
@@ -1284,6 +1286,16 @@ def _stale_stages(state: dict[str, Any], active: Optional[dict[str, Any]]) -> li
 def _row_to_card(row: tuple, active_pack: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     order_id, revision, status, created_at, updated_at, raw = row
     state = _load_state(raw)
+    intake = state.get("folder_intake")
+    if isinstance(intake, dict) and status == "draft":
+        return {
+            "kind": "draft", "order_id": order_id, "revision": revision,
+            "status": "draft", "status_title": "Черновик", "created_at": created_at,
+            "updated_at": updated_at, "folder_name": intake.get("folder_name"),
+            "file_count": len(intake.get("files", [])), "total_bytes": intake.get("total_bytes", 0),
+            "customer": None, "stages": {}, "current_stage": None,
+            "provisional": False, "stale_stages": [], "price": None, "warnings": [],
+        }
     if isinstance(state.get("workflow"), dict):
         return _workflow_card(row, state, active_pack)
     summary = _stage_summary(state)
@@ -1839,7 +1851,12 @@ async def calc_order_detail(order_id: str):
 
     state = _load_state(row[5])
     card = _row_to_card(row, await _active_pack())
-    if card["kind"] == "workflow":
+    if card["kind"] == "draft":
+        card["detail"] = {
+            "stages": {}, "events": [], "provenance": state.get("provenance", {}),
+            "source_files": calc_files._file_urls(order_id, state["folder_intake"]["files"]),
+        }
+    elif card["kind"] == "workflow":
         card["detail"] = {
             "stages": {},
             "events": _workflow_events(state),

@@ -13,15 +13,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
 
 from .config import Settings
 from .errors import MetalCalcError
-from .packadmin import PackPublisher, upgrade_pack_v2_to_v3, validate_pack
-from .packs2 import PipelinePackStore
 from .securefs import SecureRoot
-from .service import MetalCalcService
-from .service3 import WorkflowService
 
 
 def _read_stdin_bytes(limit: int = 4 * 1024 * 1024) -> bytes:
@@ -49,6 +47,19 @@ def _emit(result: object) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="metal-calc-admin")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser("folder-upload-create")
+    subparsers.add_parser("folder-list")
+    for command in ("folder-upload-status", "folder-upload-complete", "folder-upload-file"):
+        folder = subparsers.add_parser(command)
+        folder.add_argument("--upload-id", required=True)
+        if command == "folder-upload-file":
+            folder.add_argument("--index", required=True, type=int)
+    for command in ("folder-detail", "folder-file-info", "folder-file-read"):
+        folder = subparsers.add_parser(command)
+        folder.add_argument("--order-id", required=True)
+        if command != "folder-detail":
+            folder.add_argument("--index", required=True, type=int)
 
     approve = subparsers.add_parser("approve-fact")
     approve.add_argument("--order", required=True)
@@ -132,6 +143,48 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.command.startswith("folder-"):
+        # Folder bytes are transported by the operator cabinet. No new model
+        # tool or role capability is exposed, and no geometry/rates imports are
+        # needed for each file in a large folder.
+        from .folder_intake import FolderIntake, MAX_MANIFEST_BYTES
+
+        service = None
+        try:
+            if os.environ.get("METAL_CALC_ROLE", "") != "front":
+                raise MetalCalcError("Папки заказов доступны в кабинете приёма заказов")
+            service = FolderIntake(Settings.from_env().orders_root)
+            if args.command == "folder-upload-create":
+                result = service.create(_read_stdin_json(MAX_MANIFEST_BYTES))
+            elif args.command == "folder-upload-status":
+                result = service.status(args.upload_id)
+            elif args.command == "folder-upload-file":
+                result = service.upload(args.upload_id, args.index, sys.stdin.buffer)
+            elif args.command == "folder-upload-complete":
+                result = service.complete(args.upload_id)
+            elif args.command == "folder-list":
+                result = service.list()
+            elif args.command == "folder-detail":
+                result = service.detail(args.order_id)
+            else:
+                fd, info = service.open_file(args.order_id, args.index)
+                with os.fdopen(fd, "rb") as handle:
+                    if args.command == "folder-file-read":
+                        shutil.copyfileobj(handle, sys.stdout.buffer, length=1024 * 1024)
+                        return
+                    result = info
+            _emit(result)
+        except MetalCalcError as exc:
+            _emit({"error": {"code": exc.code, "message": exc.public_message}})
+            raise SystemExit(2) from exc
+        except OSError as exc:
+            _emit({"error": {"code": "StorageUnavailable", "message": "Хранилище файлов недоступно"}})
+            raise SystemExit(2) from exc
+        finally:
+            if service is not None:
+                service.close()
+        return
+
     # Служба заказов нужна только операторским действиям; для паков поднимать
     # её незачем — она открывает реестр и схему заказа. Человеческие роли здесь
     # задаёт доверенный CLI, который панель вызывает после своей авторизации;
@@ -143,6 +196,10 @@ def main() -> None:
         "manual-review-complete",
         "route-return",
     }:
+        from .packs2 import PipelinePackStore
+        from .service import MetalCalcService
+        from .service3 import WorkflowService
+
         service = MetalCalcService(Settings.from_env())
         try:
             if args.command == "approve-fact":
@@ -252,6 +309,9 @@ def main() -> None:
         return
 
     settings = Settings.from_env()
+    from .packadmin import PackPublisher, upgrade_pack_v2_to_v3, validate_pack
+    from .packs2 import PipelinePackStore
+
     try:
         if args.command == "pack-validate":
             # Команде не нужен корень на запись: панель зовёт её на каждое

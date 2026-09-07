@@ -56,11 +56,23 @@ approved enterprise quotation.
 - Trusted order capabilities for autonomous stage requests; a shared gateway
   key must be present in each profile. The interactive front does not require
   an autonomous order capability.
-- Operator file writes are limited to inbox. Settings and runtime secrets are
-  outside that root; calculator config responses mask credentials.
+- General file writes are limited to inbox. Order folders use a dedicated,
+  authenticated intake backed by the canonical registry and secure orders root.
+  Settings and runtime secrets remain outside both surfaces.
 - Telegram and automatic handoff are disabled in the initial deployment.
-- Uploading files does not yet register a whole folder as an order. This is the
-  next intake slice, including the Excel brief and multiple drawings.
+- The Files page accepts one folder including its Excel brief, drawings and
+  subdirectories. Uploads stream three files at a time and can resume after an
+  interruption by reselecting the same folder in the same browser tab. A draft
+  appears in both Files and Orders only after every file has been stored.
+  The intake supports up to 10,000 files, 100 MiB per file and 20 GiB per folder.
+  Repeated completion returns the same order; a new upload with an existing
+  folder name is rejected without overwriting it.
+- Folder registration never invokes a model. Its full manifest lives in
+  `folder_intake`; calculation `source_files` remain empty until document
+  extraction and validation are implemented. Results are shown after that
+  separate workflow is connected; intake alone does not start calculation.
+- Incomplete uploads remain private and resumable. Automatic expiry/retention
+  is not implemented in this pilot; cleanup must preserve all completed orders.
 - Manual stage chats opened from an order do not yet carry its signed scope.
   Complete order-bound dispatch before testing the full production workflow.
 - Existing company data is a baseline. New standards, commercial rules and

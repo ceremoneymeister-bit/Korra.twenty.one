@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import {
   AlertTriangle,
   ArrowRight,
@@ -123,6 +123,7 @@ function StageStrip({
   order: OrderCard;
   compact?: boolean;
 }) {
+  if (order.kind === "draft") return <span className="text-sm text-text-secondary">Черновик · файлов: {order.file_count ?? 0}</span>;
   if (order.kind === "workflow") return <WorkflowStageStrip order={order} />;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -1187,6 +1188,11 @@ function WorkflowRoute({ order }: { order: OrderCard }) {
 
 function SourceFiles({ order }: { order: OrderCard }) {
   const files = order.detail?.source_files ?? [];
+  if (order.folder_name) return <section className="space-y-3 border-t border-border pt-4">
+    <h3 className="text-lg font-semibold">Исходные документы</h3>
+    <p className="text-sm text-text-secondary">Папка «{order.folder_name}» · файлов: {order.file_count ?? files.length}</p>
+    <Link to={`/files?order=${encodeURIComponent(order.order_id)}`} className="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm font-semibold hover:bg-muted/40">Открыть все файлы заказа</Link>
+  </section>;
   if (!files.length) return null;
   return (
     <section className="space-y-3 border-t border-border pt-4">
@@ -1221,8 +1227,10 @@ function SourceFiles({ order }: { order: OrderCard }) {
 
 export default function CalcOrdersPage() {
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const [orders, setOrders] = useState<OrderCard[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [fallbackId, setFallbackId] = useState<string | null>(null);
+  const selectedId = params.get("order") ?? fallbackId;
   const [detail, setDetail] = useState<OrderCard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1234,7 +1242,7 @@ export default function CalcOrdersPage() {
     try {
       const payload = await fetchJSON<OrdersResponse>("/api/calc/orders");
       setOrders(payload.orders ?? []);
-      setSelectedId((current) => current ?? payload.orders?.[0]?.order_id ?? null);
+      setFallbackId((current) => current ?? payload.orders?.[0]?.order_id ?? null);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Не удалось прочитать реестр заказов",
@@ -1258,7 +1266,7 @@ export default function CalcOrdersPage() {
         const card = await fetchJSON<OrderCard>(
           `/api/calc/orders/${encodeURIComponent(selectedId)}`,
         );
-        if (!cancelled) setDetail(card);
+        if (!cancelled) { setDetail(card); setDetailError(null); }
       } catch (cause) {
         if (!cancelled) {
           setDetailError(
@@ -1277,11 +1285,12 @@ export default function CalcOrdersPage() {
   const selectOrder = useCallback((orderId: string) => {
     setDetail(null);
     setDetailError(null);
-    setSelectedId(orderId);
+    setFallbackId(orderId);
+    setParams({ order: orderId }, { replace: true });
     // selectedId does not change on a repeated click, so use the explicit
     // reload generation as well; otherwise the card stays in loading forever.
     setDetailVersion((value) => value + 1);
-  }, []);
+  }, [setParams]);
 
   const refreshAfterQa = useCallback(() => {
     setDetail(null);
@@ -1290,7 +1299,7 @@ export default function CalcOrdersPage() {
     void load();
   }, [load]);
 
-  const selected = detail;
+  const selected = detail?.order_id === selectedId ? detail : null;
   const action = useMemo(() => (selected ? nextAction(selected) : null), [selected]);
   const actionProfile =
     action?.profile ?? (action?.stage ? STAGE_AGENTS[action.stage] : null);
@@ -1353,8 +1362,7 @@ export default function CalcOrdersPage() {
         </div>
         {orders.length === 0 && (
           <p className="text-sm leading-relaxed text-text-secondary">
-            Заказов пока нет. Заказ появляется здесь, как только расчётчик
-            заводит его инструментом.
+            Загрузите папку во вкладке «Файлы». Здесь появится черновик заказа.
           </p>
         )}
         {orders.map((order) => (
@@ -1378,7 +1386,7 @@ export default function CalcOrdersPage() {
             {/* Первой строкой — заказчик: человек ищет заказ по нему, а не по
                 коду реестра. Код остаётся, но как техническая деталь. */}
             <div className="text-base leading-snug font-medium">
-              {order.customer || `Заказ ${order.order_id}`}
+              {order.folder_name || order.customer || `Заказ ${order.order_id}`}
             </div>
             <div className="flex items-baseline justify-between gap-2 text-sm text-text-secondary">
               <span>{order.customer ? order.order_id : ""}</span>
@@ -1457,7 +1465,7 @@ export default function CalcOrdersPage() {
             <header className="space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="text-2xl font-semibold">
-                  {selected.customer || `Заказ ${selected.order_id}`}
+                  {selected.folder_name || selected.customer || `Заказ ${selected.order_id}`}
                 </h2>
                 {/* Не библиотечный Badge: он набирает статус капсом с
                     разрядкой в пятую эма, и «ч е р н о в и к» приходится

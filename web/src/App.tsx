@@ -85,6 +85,7 @@ const CalcOrdersPage = lazy(() => import("@/pages/CalcOrdersPage"));
 const CalcDataPage = lazy(() => import("@/pages/CalcDataPage"));
 const EnvPage = lazy(() => import("@/pages/EnvPage"));
 const FilesPage = lazy(() => import("@/pages/FilesPage"));
+const CalcFilesPage = lazy(() => import("@/pages/CalcFilesPage"));
 const SessionsPage = lazy(() => import("@/pages/SessionsPage"));
 const LogsPage = lazy(() => import("@/pages/LogsPage"));
 const AnalyticsPage = lazy(() => import("@/pages/AnalyticsPage"));
@@ -178,6 +179,10 @@ function HelpRoute() {
   return productUiMode() === "calc" ? <CalcHelpPage /> : <ClientHelpPage />;
 }
 
+function FilesRoute() {
+  return productUiMode() === "calc" ? <CalcFilesPage /> : <FilesPage />;
+}
+
 function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
   if (pluginsLoading) {
     // Render nothing during the plugin-load window — a spinner here would just flash.
@@ -214,7 +219,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
   "/agents": AgentsRouteSink,
   "/sessions": SessionsPage,
-  "/files": FilesPage,
+  "/files": FilesRoute,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
   "/logs": LogsPage,

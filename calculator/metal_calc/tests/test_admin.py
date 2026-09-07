@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from metal_calc import admin
+from metal_calc import admin, packs2, service as service_module, service3
 from metal_calc.errors import InvalidState
 
 
@@ -35,9 +35,9 @@ def test_qa_verdict_cli_uses_trusted_qa_role(monkeypatch, capsys) -> None:
             seen["kwargs"] = kwargs
             return {"status": "READY_FOR_LD"}
 
-    monkeypatch.setattr(admin, "MetalCalcService", lambda _settings: service)
-    monkeypatch.setattr(admin, "PipelinePackStore", lambda root: ("packs", root))
-    monkeypatch.setattr(admin, "WorkflowService", _Workflow)
+    monkeypatch.setattr(service_module, "MetalCalcService", lambda _settings: service)
+    monkeypatch.setattr(packs2, "PipelinePackStore", lambda root: ("packs", root))
+    monkeypatch.setattr(service3, "WorkflowService", _Workflow)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -84,9 +84,9 @@ def test_qa_verdict_cli_fails_closed_and_closes(monkeypatch, capsys) -> None:
         def qa_verdict(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
             raise InvalidState("wrong gate")
 
-    monkeypatch.setattr(admin, "MetalCalcService", lambda _settings: service)
-    monkeypatch.setattr(admin, "PipelinePackStore", lambda root: ("packs", root))
-    monkeypatch.setattr(admin, "WorkflowService", _Workflow)
+    monkeypatch.setattr(service_module, "MetalCalcService", lambda _settings: service)
+    monkeypatch.setattr(packs2, "PipelinePackStore", lambda root: ("packs", root))
+    monkeypatch.setattr(service3, "WorkflowService", _Workflow)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -129,9 +129,9 @@ def test_contractor_quote_cli_uses_trusted_panel_actor(monkeypatch, capsys) -> N
             seen["kwargs"] = kwargs
             return {"status": "COSTING_COMPLETE", "calculation_revision": 2}
 
-    monkeypatch.setattr(admin, "MetalCalcService", lambda _settings: service)
-    monkeypatch.setattr(admin, "PipelinePackStore", lambda root: ("packs", root))
-    monkeypatch.setattr(admin, "WorkflowService", _Workflow)
+    monkeypatch.setattr(service_module, "MetalCalcService", lambda _settings: service)
+    monkeypatch.setattr(packs2, "PipelinePackStore", lambda root: ("packs", root))
+    monkeypatch.setattr(service3, "WorkflowService", _Workflow)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -261,9 +261,9 @@ def test_human_review_admin_commands_use_trusted_qa_role(
             seen["kwargs"] = kwargs
             return {"status": "ROUTE_OPTIONS_READY"}
 
-    monkeypatch.setattr(admin, "MetalCalcService", lambda _settings: service)
-    monkeypatch.setattr(admin, "PipelinePackStore", lambda root: ("packs", root))
-    monkeypatch.setattr(admin, "WorkflowService", _Workflow)
+    monkeypatch.setattr(service_module, "MetalCalcService", lambda _settings: service)
+    monkeypatch.setattr(packs2, "PipelinePackStore", lambda root: ("packs", root))
+    monkeypatch.setattr(service3, "WorkflowService", _Workflow)
     monkeypatch.setattr(sys, "argv", ["metal-calc-admin", *command])
     monkeypatch.setattr(
         sys,

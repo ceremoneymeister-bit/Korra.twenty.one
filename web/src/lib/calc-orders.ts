@@ -219,7 +219,10 @@ export interface OrderNextAction {
 }
 
 export interface OrderCard {
-  kind?: "legacy" | "workflow";
+  kind?: "legacy" | "workflow" | "draft";
+  folder_name?: string;
+  file_count?: number;
+  total_bytes?: number;
   order_id: string;
   revision: number;
   status: string;
@@ -262,6 +265,8 @@ export interface OrderDetail {
 }
 
 export interface SourceFile {
+  relative_path?: string;
+  download_url?: string;
   source_file_id?: string;
   name?: string;
   sha256?: string;
@@ -353,6 +358,9 @@ export function nextAction(order: OrderCard): {
   profile?: string | null;
   label: string;
 } {
+  if (order.kind === "draft") {
+    return { kind: "inspect", label: "Проверить комплект исходных документов", profile: null };
+  }
   if (order.kind === "workflow") {
     return (
       order.next_action ?? {

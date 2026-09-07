@@ -142,7 +142,7 @@ function clientEntryLabel(name: string): string {
  * его или удалить окончательно было нельзя ничем, кроме доступа к серверу.
  * «Удалить» без видимой корзины — это обещание, которое продукт не выполнял.
  */
-function FileTrash({
+export function FileTrash({
   onRestored,
   refreshVersion,
 }: {
