@@ -1250,6 +1250,11 @@ def _resolve_media_to_data_urls(text: str) -> str:
     process could see was base64-exfiltrated to the API caller if its path
     merely appeared in the model's own final reply text.
     """
+    # The dashboard downloads through its authenticated Files API. Preserve
+    # the same reference in the live response and durable conversation; never
+    # embed bytes here and bypass that API's workspace policy.
+    if _api_request_session_source.get() == "dashboard":
+        return text
     if not text or "MEDIA:" not in text:
         return text
     import base64
