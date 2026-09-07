@@ -113,3 +113,33 @@ def test_second_message_in_busy_session_is_rejected_but_sibling_is_allowed(isola
         assert await handler(session_id="session-b", target_profile="lawyer", message_id_raw="message-other-1234567890") == "accepted"
         assert await handler(session_id="session-a", target_profile="accountant", message_id_raw="message-other-1234567890") == "accepted"
     asyncio.run(scenario())
+
+
+def test_failed_stream_is_not_a_ready_answer(isolated):
+    mid = remember(isolated)
+    isolated.complete(mid, response_body=web_server._durable_stream_error_event("Отказ провайдера") + b"data: [DONE]\n\n", status_code=200, content_type="text/event-stream")
+    assert asyncio.run(chat_runs("lawyer", "session-a"))["runs"][0]["status"] == "failed"
+
+
+def test_explicit_cancel_stops_queued_task_and_retains_terminal_replay(isolated):
+    from korra_cli.chat_runs import cancel_chat_run
+    async def scenario():
+        mid = remember(isolated)
+        run = web_server._DurableBrowserChatStream()
+        run.status = "queued"
+        exited = asyncio.Event()
+        async def waiting():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                exited.set()
+                await run.finish((503, b"", "application/json"))
+        run.task = asyncio.create_task(waiting())
+        await asyncio.sleep(0)
+        web_server._CHAT_DELIVERY_STREAMS[f"{isolated.path}:{mid}"] = run
+        assert await cancel_chat_run(mid, "session-a", "lawyer") == {"stopped": True}
+        assert exited.is_set()
+        record = isolated.response(mid, "lawyer", "session-a")
+        assert b"[DONE]" in record.response_body
+        assert (await chat_runs("lawyer", "session-a"))["runs"][0]["status"] == "failed"
+    asyncio.run(scenario())

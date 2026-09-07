@@ -37,6 +37,7 @@ export function isRunBusy(run: ChatRun): boolean {
   return run.status === "running" || run.status === "queued";
 }
 
+const monitoringStarted = Date.now();
 let refreshing: Promise<void> | null = null;
 export function refreshChatRuns(): Promise<void> {
   if (refreshing) return refreshing;
@@ -44,7 +45,8 @@ export function refreshChatRuns(): Promise<void> {
     const previous = $chatRuns.get();
     const viewed = $viewedChat.get();
     const newlyReady = runs.filter(run => run.status === "completed" &&
-      previous.some(old => old.message_id === run.message_id && isRunBusy(old)) &&
+      (previous.some(old => old.message_id === run.message_id && isRunBusy(old)) ||
+        (!previous.some(old => old.message_id === run.message_id) && run.updated_at * 1000 >= monitoringStarted)) &&
       !(viewed?.profile === run.profile && viewed.sessionId === run.session_id));
     if (newlyReady.length) {
       $unreadChatRuns.set([...newlyReady, ...$unreadChatRuns.get()].filter((run, i, all) => all.findIndex(r => r.message_id === run.message_id) === i));

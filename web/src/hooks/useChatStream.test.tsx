@@ -532,3 +532,56 @@ describe("переключение сессий", () => {
     expect(current.messages[0].content).toBe("Новый чат");
   });
 });
+
+describe("восстановление серверного хода", () => {
+  it("готовый ответ из журнала заменяет сохранённую копию без дублей", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValueOnce([{
+      message_id: "server-message-123456", session_id: "s-replay", profile: "",
+      status: "completed", updated_at: 123, history_count: 2,
+      user_message: { role: "user", content: "Повторный вопрос" },
+    }]);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "s-replay", messages: [
+      { role: "user", content: "Первый вопрос" }, { role: "assistant", content: "Первый ответ" },
+      { role: "user", content: "Повторный вопрос" }, { role: "assistant", content: "Второй ответ" },
+    ] as SessionMessage[] });
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      requests.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.includes("/stream")) return sseResponse('data: {"choices":[{"delta":{"content":"Второй ответ"}}]}\n\n', "data: [DONE]\n\n");
+      return new Response(JSON.stringify({ approvals: [] }), { headers: { "content-type": "application/json" } });
+    }));
+    await act(async () => { await current.loadSession("s-replay"); });
+    expect(current.messages.map(message => message.content)).toEqual(["Первый вопрос", "Первый ответ", "Повторный вопрос", "Второй ответ"]);
+    expect(current.isStreaming).toBe(false);
+    expect(requests.some(request => request.startsWith("POST"))).toBe(false);
+  });
+
+  it("возврат подключается к активному потоку, а уход не отменяет ход", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValueOnce([{
+      message_id: "server-live-123456789", session_id: "s-live-replay", profile: "",
+      status: "running", updated_at: 123, history_count: 0,
+      user_message: { role: "user", content: "Жду ответ" },
+    }]);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "s-live-replay", messages: [] });
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({ start(value) { controller = value; }, cancel() { cancelled = true; } });
+    const fetcher = vi.fn(async (url: string) => url.includes("/stream") ? new Response(stream) : new Response(JSON.stringify({ approvals: [] })));
+    vi.stubGlobal("fetch", fetcher);
+    let loading!: Promise<void>;
+    await act(async () => { loading = current.loadSession("s-live-replay"); });
+    expect(current.isStreaming).toBe(true);
+    await act(async () => { controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Начало"}}]}\n\n')); });
+    expect(current.messages.at(-1)?.content).toBe("Начало");
+    await act(async () => { current.reset(); });
+    await act(async () => {
+      controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Конец"}}]}\n\ndata: [DONE]\n\n'));
+      await loading;
+    });
+    expect(cancelled).toBe(true);
+    expect(current.messages).toEqual([]);
+    expect(fetcher.mock.calls.every(([url]) => !url.includes("/cancel"))).toBe(true);
+  });
+});
