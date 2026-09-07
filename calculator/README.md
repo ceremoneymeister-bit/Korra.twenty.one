@@ -61,12 +61,24 @@ approved enterprise quotation.
   Settings and runtime secrets remain outside both surfaces.
 - Telegram and automatic handoff are disabled in the initial deployment.
 - The Files page accepts one folder including its Excel brief, drawings and
-  subdirectories. Uploads stream three files at a time and can resume after an
-  interruption by reselecting the same folder in the same browser tab. A draft
-  appears in both Files and Orders only after every file has been stored.
-  The intake supports up to 10,000 files, 100 MiB per file and 20 GiB per folder.
+  subdirectories. Uploads stream three files at a time in a browser-tab-owned
+  job. Navigating to Agents, Orders or other cabinet pages leaves it running;
+  a shared panel provides progress, pause/resume and completion links. Finishing
+  an upload keeps the current route and refreshes the Orders/Files lists.
+  Closing or reloading the browser page still requires reselecting the same
+  folder to resume; the page warns while a transfer is active. A draft appears
+  in both Files and Orders only after the complete manifest is stored.
+  The intake supports up to 10,000 files and 10,000 subdirectories, 100 MiB per
+  file and 20 GiB per folder. Directory metadata preserves empty subdirectories
+  when dropped or selected through a supported native directory picker. The
+  legacy FileList picker preserves folders containing files and explains how
+  to include empty folders by dragging. Older orders infer their folder tree
+  from saved relative paths and require no re-upload.
   Repeated completion returns the same order; a new upload with an existing
   folder name is rejected without overwriting it.
+- Order documents offer folder navigation, breadcrumbs, global search and
+  bounded pages of 50 entries. Draft cards show upload status and a real link
+  to documents; document extraction and calculation remain a separate step.
 - Folder registration never invokes a model. Its full manifest lives in
   `folder_intake`; calculation `source_files` remain empty until document
   extraction and validation are implemented. Results are shown after that

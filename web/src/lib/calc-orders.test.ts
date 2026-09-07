@@ -105,9 +105,10 @@ const WORKFLOW_READY: OrderCard = {
   warnings: [],
 };
 
-it("keeps an uploaded folder at document review without dispatching a calculation", () => {
+it("opens uploaded documents without preparing a model request for an unparsed draft", () => {
   const draft = order({ kind: "draft", folder_name: "Сделка 124", file_count: 1001 });
-  expect(nextAction(draft)).toEqual({ kind: "inspect", label: "Проверить комплект исходных документов", profile: null });
+  expect(nextAction(draft)).toEqual({ kind: "documents", label: "Открыть документы", profile: null });
+  expect(actionDraft(draft)).toBe("");
 });
 
 const WORKFLOW_BLOCKED: OrderCard = {

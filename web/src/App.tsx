@@ -73,6 +73,7 @@ import { PageHeaderProvider } from "@/contexts/PageHeaderProvider";
 import { ProfileProvider } from "@/contexts/ProfileProvider";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { MemoryPressureBanner } from "@/components/MemoryPressureBanner";
+import { CalcFolderUploadPanel } from "@/components/CalcFolderUploadPanel";
 import { useSystemActions } from "@/contexts/useSystemActions";
 import type { SystemAction } from "@/contexts/system-actions-context";
 // Route pages are lazy-loaded so the initial dashboard shell does not pay for
@@ -996,6 +997,7 @@ export default function App() {
             >
               <PluginSlot name="pre-main" />
               <StaleBuildNotice build={sidebarStatus?.build} />
+              {isCalcMode && <CalcFolderUploadPanel />}
               <div
                 className={cn(
                   "w-full min-w-0",

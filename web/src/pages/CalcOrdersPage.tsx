@@ -13,7 +13,8 @@
  * действия по-прежнему открываются у профильного расчётчика.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useStore } from "@nanostores/react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import {
   AlertTriangle,
@@ -31,6 +32,7 @@ import {
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { ProductButton } from "@/components/ProductButton";
 import { fetchJSON } from "@/lib/api";
+import { $folderUpload } from "@/store/calc-folder-upload";
 import { cn } from "@/lib/utils";
 import {
   STAGE_AGENTS,
@@ -123,7 +125,7 @@ function StageStrip({
   order: OrderCard;
   compact?: boolean;
 }) {
-  if (order.kind === "draft") return <span className="text-sm text-text-secondary">Черновик · файлов: {order.file_count ?? 0}</span>;
+  if (order.kind === "draft") return null;
   if (order.kind === "workflow") return <WorkflowStageStrip order={order} />;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -1188,6 +1190,22 @@ function WorkflowRoute({ order }: { order: OrderCard }) {
 
 function SourceFiles({ order }: { order: OrderCard }) {
   const files = order.detail?.source_files ?? [];
+  if (order.kind === "draft") {
+    const formats = { PDF: 0, Excel: 0, другие: 0 };
+    for (const file of files) {
+      const extension = (file.relative_path || file.name || "").split(".").at(-1)?.toLowerCase();
+      if (extension === "pdf") formats.PDF++;
+      else if (["xls", "xlsx", "xlsm", "xlsb"].includes(extension ?? "")) formats.Excel++;
+      else formats.другие++;
+    }
+    return <section aria-label="Документы заказа" className="space-y-4">
+      <div className="space-y-2 text-sm text-text-secondary">
+        <p>Файлов: {order.file_count ?? files.length}{files.length > 0 && ` · ${Object.entries(formats).filter(([, count]) => count > 0).map(([format, count]) => `${format}: ${count}`).join(" · ")}`}</p>
+        <p>Автоматический разбор документов и расчёт для этого черновика пока недоступны.</p>
+      </div>
+      <Link to={`/files?order=${encodeURIComponent(order.order_id)}`} className="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm font-semibold hover:bg-muted/40 focus-visible:outline focus-visible:outline-primary">Открыть документы</Link>
+    </section>;
+  }
   if (order.folder_name) return <section className="space-y-3 border-t border-border pt-4">
     <h3 className="text-lg font-semibold">Исходные документы</h3>
     <p className="text-sm text-text-secondary">Папка «{order.folder_name}» · файлов: {order.file_count ?? files.length}</p>
@@ -1228,7 +1246,11 @@ function SourceFiles({ order }: { order: OrderCard }) {
 export default function CalcOrdersPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
+  const upload = useStore($folderUpload);
+  const completedOrderId = upload?.status === "complete" ? upload.orderId : undefined;
+  const seenCompletion = useRef(completedOrderId);
   const [orders, setOrders] = useState<OrderCard[]>([]);
+  const listVersion = useRef(0);
   const [fallbackId, setFallbackId] = useState<string | null>(null);
   const selectedId = params.get("order") ?? fallbackId;
   const [detail, setDetail] = useState<OrderCard | null>(null);
@@ -1238,23 +1260,31 @@ export default function CalcOrdersPage() {
   const [detailVersion, setDetailVersion] = useState(0);
 
   const load = useCallback(async () => {
+    const version = ++listVersion.current;
     setError(null);
     try {
       const payload = await fetchJSON<OrdersResponse>("/api/calc/orders");
+      if (version !== listVersion.current) return;
       setOrders(payload.orders ?? []);
       setFallbackId((current) => current ?? payload.orders?.[0]?.order_id ?? null);
     } catch (cause) {
-      setError(
+      if (version === listVersion.current) setError(
         cause instanceof Error ? cause.message : "Не удалось прочитать реестр заказов",
       );
     } finally {
-      setLoading(false);
+      if (version === listVersion.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (completedOrderId && completedOrderId !== seenCompletion.current) {
+      seenCompletion.current = completedOrderId;
+      void load();
+    }
+  }, [load, completedOrderId]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -1385,13 +1415,13 @@ export default function CalcOrdersPage() {
           >
             {/* Первой строкой — заказчик: человек ищет заказ по нему, а не по
                 коду реестра. Код остаётся, но как техническая деталь. */}
-            <div className="text-base leading-snug font-medium">
+            <div className={cn("text-base leading-snug font-medium", order.kind === "draft" && "[overflow-wrap:anywhere]")}>
               {order.folder_name || order.customer || `Заказ ${order.order_id}`}
             </div>
-            <div className="flex items-baseline justify-between gap-2 text-sm text-text-secondary">
+            {order.kind === "draft" ? <p className="text-sm text-text-secondary">Документы загружены · файлов: {order.file_count ?? 0}</p> : <div className="flex items-baseline justify-between gap-2 text-sm text-text-secondary">
               <span>{order.customer ? order.order_id : ""}</span>
               <span>ред. {order.revision}</span>
-            </div>
+            </div>}
             {order.kind === "workflow" && (
               <p className="text-sm font-medium leading-snug">
                 {order.status_title || order.status}
@@ -1464,14 +1494,14 @@ export default function CalcOrdersPage() {
           <div className="space-y-5 pb-8">
             <header className="space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-2xl font-semibold">
+                <h2 className={cn("text-2xl font-semibold", selected.kind === "draft" && "min-w-0 [overflow-wrap:anywhere]")}>
                   {selected.folder_name || selected.customer || `Заказ ${selected.order_id}`}
                 </h2>
                 {/* Не библиотечный Badge: он набирает статус капсом с
                     разрядкой в пятую эма, и «ч е р н о в и к» приходится
                     складывать по буквам. */}
                 <span className="rounded-lg border border-border px-2.5 py-1 text-sm text-text-secondary">
-                  {selected.status_title || orderStatusLabel(selected.status)}
+                  {selected.kind === "draft" ? "Документы загружены" : selected.status_title || orderStatusLabel(selected.status)}
                 </span>
               </div>
               {selected.customer && (
@@ -1505,7 +1535,7 @@ export default function CalcOrdersPage() {
             </header>
 
             {/* Что требуется от человека — первым экраном, а не после таблиц. */}
-            {action && action.kind !== "done" && (
+            {selected.kind !== "draft" && action && action.kind !== "done" && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-midground/60 p-4">
                 <span className="flex items-center gap-2 text-base">
                   {action.kind === "supply" && (

@@ -359,7 +359,7 @@ export function nextAction(order: OrderCard): {
   label: string;
 } {
   if (order.kind === "draft") {
-    return { kind: "inspect", label: "Проверить комплект исходных документов", profile: null };
+    return { kind: "documents", label: "Открыть документы", profile: null };
   }
   if (order.kind === "workflow") {
     return (
@@ -416,6 +416,7 @@ export function nextAction(order: OrderCard): {
  * через инструмент — один путь записи, одна история решений.
  */
 export function actionDraft(order: OrderCard): string {
+  if (order.kind === "draft") return "";
   const action = nextAction(order);
   if (order.kind === "workflow") {
     const status = order.workflow?.status ?? order.status;
