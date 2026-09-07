@@ -904,6 +904,11 @@ export function useChatStream(
           return delivered;
         }
 
+        // The durable proxy acknowledged the intent, including queue admission.
+        // Keep the outbox until DONE, but do not call accepted work "sending".
+        if (response.headers.get("X-Korra-Delivery-State")) {
+          dispatch({ type: "MARK_DELIVERY", messageId, delivery: "delivered" });
+        }
         void refreshChatRuns();
         const reader = response.body!.getReader();
         const decoder = new TextDecoder("utf-8", { fatal: false });
