@@ -17,7 +17,7 @@ on:
     - cron: "0 3 * * *" # ночью, после тестов
 permissions:
   contents: read
-  packages: write   # Korra: публикация образа в GHCR
+  packages: read
 
 # Concurrency: push/release runs are NEVER cancelled so every merge gets
 # its own image.  PR runs reuse a PR-scoped group with
@@ -59,12 +59,25 @@ jobs:
           # build), frontend and docker_meta. classify_changes.py owns the
           # formula so this gate and the nix lane cannot drift apart.
           DOCKER: ${{ steps.classify.outputs.docker }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if [ "$DOCKER" = "true" ]; then
+          if [ "$DOCKER" = "true" ] || [ "$EVENT_NAME" != "pull_request" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif changed=$(gh api --paginate "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}" --jq '.files[]?.filename'); then
+            # Only deployment_meta extends the shared classifier: docs/ also
+            # contains the executable updater and this acceptance runner.
+            deployment_meta=$(printf '%s\n' "$changed" | python3 docs/client-deploy/ci-acceptance.py deployment-needed)
+            echo "build=$deployment_meta" >> "$GITHUB_OUTPUT"
           else
-            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Deployment change lookup failed; running image acceptance"
+            echo "build=true" >> "$GITHUB_OUTPUT"
           fi
 
   # Build and test the image for each architecture. This job runs PR code,
@@ -75,6 +88,7 @@ jobs:
     if: github.repository == 'ceremoneymeister-bit/Korra.twenty.one' && needs.detect.outputs.build == 'true'
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - arch: amd64
@@ -103,41 +117,52 @@ jobs:
         id: buildx
         continue-on-error: true
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          # Shared production host: bound the build worker, never adjust live
+          # services here. Scheduled releases retain the existing night window.
+          driver-opts: |
+            cpu-period=100000
+            cpu-quota=400000
+            memory=4g
+            memory-swap=4g
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 4
 
       - name: Set up Docker Buildx (retry)
         if: steps.buildx.outcome == 'failure'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver-opts: |
+            cpu-period=100000
+            cpu-quota=400000
+            memory=4g
+            memory-swap=4g
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 4
 
-      # Build once, load into the local daemon for testing.  Cached
-      # per-arch; the push step below reuses every layer from this build.
+      # Build once. Revision labels belong here: adding them during publish
+      # would change the image config and invalidate acceptance's image ID.
       - name: Build image (${{ matrix.arch }})
+        id: image
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
           file: Dockerfile
           load: true
           platforms: ${{ matrix.platform }}
-          tags: ${{ env.IMAGE_NAME }}:test
+          tags: ${{ env.IMAGE_NAME }}:ci-build-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             HERMES_GIT_SHA=${{ github.sha }}
           cache-from: ${{ matrix.cache-from }}
           cache-to: ${{ (github.event_name != 'pull_request') && matrix.cache-to || '' }}
 
 
-      # Run the docker-integration test suite against the freshly-built
-      # image already loaded into the local daemon (`:test`).
-      #
-      # Piggybacking here avoids a second image build: the build step
-      # already loaded the image into the daemon under
-      # `${IMAGE_NAME}:test`, so we just point ``HERMES_TEST_IMAGE`` at
-      # that.  The fixture's ``HERMES_TEST_IMAGE`` branch (see
-      # tests/docker/conftest.py:62-63) short-circuits the rebuild.
-      #
-      # Why this job and not a standalone one: the image is 5GB+; passing
-      # it between jobs via ``docker save``/``upload-artifact`` is slower
-      # than the build itself.  Reusing the existing daemon state is the
-      # cheapest path to coverage on every PR that touches docker code.
-      # ---------------------------------------------------------------------
+      # Existing integration suite uses the exact build output, not a shared
+      # mutable tag. The acceptance job additionally tests clean first boot.
       - name: Install uv (for docker tests)
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # 8.2.0
         with:
@@ -163,7 +188,7 @@ jobs:
       - name: Run docker integration tests
         env:
           # Skip rebuild; use the image already loaded by the build step.
-          HERMES_TEST_IMAGE: ${{ env.IMAGE_NAME }}:test
+          HERMES_TEST_IMAGE: ${{ steps.image.outputs.imageid }}
           # Match the policy in tests.yml :: test job — no accidental
           # real-API calls from inside the harness.
           OPENROUTER_API_KEY: ""
@@ -174,11 +199,80 @@ jobs:
           # the limit and not the processor. This caps the workers. The
           # default from run_tests.sh is cpu_count*2, which starts 64
           # containers together on the 32-core amd64 runner.
-          HERMES_TEST_WORKERS=$(nproc) scripts/run_tests.sh tests/docker/ --file-timeout 600
+          HERMES_TEST_WORKERS=4 scripts/run_tests.sh tests/docker/ tests/deployment/ --file-timeout 600
+
+      - name: Export exact tested build artifact
+        env:
+          CANDIDATE_IMAGE: ${{ steps.image.outputs.imageid }}
+          ARTIFACT_DIR: ${{ runner.temp }}/release-build-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+          SOURCE_REVISION: ${{ github.sha }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          python3 docs/client-deploy/ci-acceptance.py pack --image "$CANDIDATE_IMAGE" \
+            --directory "$ARTIFACT_DIR" --revision "$SOURCE_REVISION" --arch "$ARCH"
+
+      - name: Upload tested build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-image-${{ matrix.arch }}
+          path: ${{ runner.temp }}/release-build-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}/*
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 1
+          overwrite: true
+
+      - name: Remove this job's exported archive
+        if: always()
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/release-build-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
+        run: rm -rf -- "$ARTIFACT_DIR"
+
+  acceptance:
+    name: Offline clean and smoke acceptance
+    needs: [build]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        arch: [amd64]
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 30
+    env:
+      SOURCE_REVISION: ${{ github.sha }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set isolated artifact paths on this runner
+        run: |
+          echo "ARTIFACT_DIR=$RUNNER_TEMP/release-accept-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ARCH" >> "$GITHUB_ENV"
+          echo "RECEIPT=$RUNNER_TEMP/release-receipt-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ARCH.json" >> "$GITHUB_ENV"
+      - name: Download exact build artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-image-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_DIR }}
+      - name: Accept exact image on fresh isolated data
+        # No owner data, credentials, Telegram, scheduled jobs, published ports
+        # or network access. Container limits: 4 CPU / 4 GiB / 256 PIDs.
+        run: |
+          timeout --signal=TERM --kill-after=30s 600s \
+            python3 docs/client-deploy/ci-acceptance.py accept --directory "$ARTIFACT_DIR" \
+            --revision "$SOURCE_REVISION" --arch "$ARCH" --receipt "$RECEIPT"
+      - name: Upload acceptance receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-acceptance-${{ matrix.arch }}
+          path: ${{ env.RECEIPT }}
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+      - name: Remove this job's local artifact files
+        if: always()
+        run: rm -rf -- "${ARTIFACT_DIR:-}" "${RECEIPT:-}"
 
   # ---------------------------------------------------------------------------
-  # Rebuild and push each architecture only after the unprivileged build/test
-  # matrix passes. This job is the sole Docker Hub credential boundary.
+  # Publish the accepted artifact, without rebuilding. Explicit job dependency
+  # AND a receipt bound to archive SHA256 + image ID make acceptance fail closed.
   #
   # Korra: публикация раньше шла только с push в main. Мы сняли push-триггер с
   # этого workflow (он занимал наш раннер на боевой машине), и сборка стала
@@ -188,7 +282,10 @@ jobs:
   # ---------------------------------------------------------------------------
   publish:
     if: github.repository == 'ceremoneymeister-bit/Korra.twenty.one' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main')
-    needs: [build]
+    needs: [build, acceptance]
+    permissions:
+      contents: read
+      packages: write
     environment: container-publish
     strategy:
       fail-fast: false
@@ -196,26 +293,46 @@ jobs:
         include:
           - arch: amd64
             runner: [self-hosted, linux, x64]
-            platform: linux/amd64
-            cache-from: type=gha,scope=docker-amd64
-            cache-to: type=gha,mode=max,scope=docker-amd64
           # Native arm64 for the same reason as the build matrix above.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    env:
+      SOURCE_REVISION: ${{ github.sha }}
+      ARCH: ${{ matrix.arch }}
     steps:
       - name: Checkout trusted source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      # Retry once on transient Docker Hub / buildkit pull failures.
-      # See build job for rationale; same pattern.
-      - name: Set up Docker Buildx
-        id: buildx
-        continue-on-error: true
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Set isolated artifact paths on this runner
+        run: |
+          echo "ARTIFACT_DIR=$RUNNER_TEMP/release-publish-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ARCH" >> "$GITHUB_ENV"
+          echo "RECEIPT_DIR=$RUNNER_TEMP/release-publish-receipt-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ARCH" >> "$GITHUB_ENV"
+          echo "DIGEST_DIR=$RUNNER_TEMP/release-digests-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$ARCH" >> "$GITHUB_ENV"
 
-      - name: Set up Docker Buildx (retry)
-        if: steps.buildx.outcome == 'failure'
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Download exact build artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-image-${{ matrix.arch }}
+          path: ${{ env.ARTIFACT_DIR }}
+
+      - name: Download successful acceptance receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-acceptance-${{ matrix.arch }}
+          path: ${{ env.RECEIPT_DIR }}
+
+      - name: Load and verify accepted image before registry login
+        id: accepted
+        run: |
+          set -euo pipefail
+          receipts=("$RECEIPT_DIR"/*.json)
+          if [ "${#receipts[@]}" != 1 ] || [ ! -f "${receipts[0]}" ]; then
+            echo "::error::Expected exactly one acceptance receipt"
+            exit 1
+          fi
+          image=$(python3 docs/client-deploy/ci-acceptance.py load --directory "$ARTIFACT_DIR" \
+            --revision "$SOURCE_REVISION" --arch "$ARCH" --receipt "${receipts[0]}")
+          echo "image=$image" >> "$GITHUB_OUTPUT"
 
       # Korra: GHCR под своим аккаунтом. Docker Hub апстрима нам недоступен,
       # а GITHUB_TOKEN уже даёт права на пакеты этого репозитория.
@@ -226,36 +343,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Push by digest only (no tag). The merge job assembles the tagged
-      # manifest list after both architecture publishers complete.
-      - name: Push ${{ matrix.arch }} by digest
-        id: push
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
-        with:
-          context: .
-          file: Dockerfile
-          platforms: ${{ matrix.platform }}
-          labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
-          build-args: |
-            HERMES_GIT_SHA=${{ github.sha }}
-          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: ${{ matrix.cache-from }}
-          cache-to: ${{ matrix.cache-to }}
-
-      - name: Export digest
+      # Docker pushes the loaded image by a run-specific tag; merge still uses
+      # its registry digest and owns main/latest/release tags. No build here.
+      - name: Push accepted ${{ matrix.arch }} artifact and export digest
+        env:
+          ACCEPTED_IMAGE: ${{ steps.accepted.outputs.image }}
         run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.push.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          set -euo pipefail
+          tag="${IMAGE_NAME}:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${ARCH}"
+          docker tag "$ACCEPTED_IMAGE" "$tag"
+          docker push "$tag" | tee "$ARTIFACT_DIR/push.log"
+          # Docker/containerd can retain several historical RepoDigests for
+          # one config ID. Select the digest returned by this push, then check
+          # membership, rather than assuming there is exactly one stored digest.
+          digest=$(python3 -c 'import re,sys; d=re.findall(r"digest: (sha256:[0-9a-f]{64})", open(sys.argv[1]).read()); assert len(d)==1, d; print(d[0])' "$ARTIFACT_DIR/push.log")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker image inspect "$tag" --format '{{json .RepoDigests}}' | \
+            python3 -c 'import json,sys; assert sys.argv[1] in json.load(sys.stdin)' "${IMAGE_NAME}@${digest}"
+          mkdir -p "$DIGEST_DIR"
+          touch "$DIGEST_DIR/${digest#sha256:}"
 
       - name: Upload digest artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: digest-${{ matrix.arch }}
-          path: /tmp/digests/*
+          path: ${{ env.DIGEST_DIR }}/*
           if-no-files-found: error
           retention-days: 1
+          overwrite: true
+
+      - name: Remove this job's local artifact files
+        if: always()
+        run: rm -rf -- "${ARTIFACT_DIR:-}" "${RECEIPT_DIR:-}" "${DIGEST_DIR:-}"
 
   # ---------------------------------------------------------------------------
   # Stitch both per-arch digests into a single tagged multi-arch manifest.
@@ -271,11 +390,16 @@ jobs:
     needs: [publish]
     timeout-minutes: 10
     environment: container-publish
+    permissions:
+      contents: read
+      packages: write
     steps:
+      - name: Set isolated artifact paths on this runner
+        run: echo "DIGEST_DIR=$RUNNER_TEMP/release-merge-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Download digests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          path: /tmp/digests
+          path: ${{ env.DIGEST_DIR }}
           pattern: digest-*
           merge-multiple: true
 
@@ -300,7 +424,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create manifest list and push
-        working-directory: /tmp/digests
+        working-directory: ${{ env.DIGEST_DIR }}
         env:
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
@@ -308,6 +432,10 @@ jobs:
           set -euo pipefail
           args=()
           for digest_file in *; do
+            if [[ ! "$digest_file" =~ ^[0-9a-f]{64}$ ]] || [ ! -f "$digest_file" ]; then
+              echo "::error::Missing or invalid published digest artifact"
+              exit 1
+            fi
             args+=("${IMAGE_NAME}@sha256:${digest_file}")
           done
           if [ "${{ github.event_name }}" = "release" ]; then
@@ -339,3 +467,7 @@ jobs:
           else
             docker buildx imagetools inspect "${IMAGE_NAME}:main"
           fi
+
+      - name: Remove this job's downloaded digests
+        if: always()
+        run: rm -rf -- "${DIGEST_DIR:-}"
