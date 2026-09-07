@@ -47,12 +47,12 @@ def fits(page):
 
 
 def main():
-    info = json.loads(subprocess.check_output(["docker", "inspect", "astra-ui"], text=True))[0]
+    info = json.loads(subprocess.check_output(["docker", "inspect", "astra-ui"], text=True, encoding="utf-8"))[0]
     assert info["Name"] == "/astra-ui" and info["State"]["Running"]
     data = Path(next(m["Source"] for m in info["Mounts"] if m["Destination"] == "/opt/data"))
     assert str(data).startswith("/tmp/astra-ui-data.")
-    assert "TELEGRAM_" not in (data / ".env").read_text()
-    config_text = (data / "config.yaml").read_text()
+    assert "TELEGRAM_" not in (data / ".env").read_text(encoding="utf-8")
+    config_text = (data / "config.yaml").read_text(encoding="utf-8")
     assert "telegram" not in config_text.lower()
     assert yaml.safe_load(config_text)["kanban"]["dispatch_in_gateway"] is False
     OUT.mkdir(parents=True, exist_ok=True)

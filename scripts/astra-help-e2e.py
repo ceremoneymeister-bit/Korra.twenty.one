@@ -83,8 +83,8 @@ def guard():
     assert info['Name'] == '/astra-help' and info['State']['Running']
     data = Path(next(m['Source'] for m in info['Mounts'] if m['Destination'] == '/opt/data'))
     assert str(data).startswith('/tmp/astra-help-data.')
-    assert 'TELEGRAM_' not in (data / '.env').read_text()
-    config = yaml.safe_load((data / 'config.yaml').read_text())
+    assert 'TELEGRAM_' not in (data / '.env').read_text(encoding="utf-8")
+    config = yaml.safe_load((data / 'config.yaml').read_text(encoding="utf-8"))
     assert 'telegram' not in config and config['kanban']['dispatch_in_gateway'] is False
 
 
