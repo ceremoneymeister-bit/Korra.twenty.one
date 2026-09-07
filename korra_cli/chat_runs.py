@@ -40,3 +40,52 @@ async def resume_chat_run(message_id: str, session_id: str, profile: str = ""):
     if record.status == "completed" and record.response_body is not None:
         return Response(record.response_body, media_type=record.content_type, headers=headers)
     raise HTTPException(409, "Связь с ходом потеряна. Проверьте историю перед повторной отправкой.")
+
+# Only admission (not the lifetime of the SSE reader) is serialised. Different
+# profiles/sessions remain independent; two browser tabs cannot fork one turn.
+from contextlib import asynccontextmanager
+import asyncio
+import functools
+
+_admissions: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def serialise_chat_admission(handler):
+    @functools.wraps(handler)
+    async def wrapped(*, session_id, target_profile="", **kwargs):
+        key = (target_profile, session_id)
+        lock = _admissions.setdefault(key, asyncio.Lock())
+        try:
+            async with lock:
+                server = _server()
+                ledger = server._chat_delivery_ledger()
+                for item in await server.run_in_threadpool(ledger.runs, target_profile, session_id):
+                    if item["message_id"] != kwargs["message_id_raw"] and _status(item, ledger) in {"running", "queued"}:
+                        raise HTTPException(409, "В этом чате агент ещё отвечает. Откройте его ход или начните другой чат.")
+                return await handler(session_id=session_id, target_profile=target_profile, **kwargs)
+        finally:
+            # A waiting admission may still reference this lock; retain it
+            # until the waiters have drained to avoid creating a second lock.
+            if not lock.locked() and not getattr(lock, "_waiters", None):
+                _admissions.pop(key, None)
+    return wrapped
+
+
+@asynccontextmanager
+async def queued_upstream_stream(client, run, url, body, headers):
+    """Queue only a confirmed gateway concurrency refusal, before any work."""
+    deadline = asyncio.get_running_loop().time() + 600
+    while True:
+        async with client.stream("POST", url, json={**body, "stream": True}, headers=headers) as response:
+            capacity_refusal = False
+            if response.status_code == 429:
+                raw = await response.aread()
+                capacity_refusal = b"Too many concurrent runs" in raw
+            if not capacity_refusal or asyncio.get_running_loop().time() >= deadline:
+                run.status = "running"
+                yield response
+                return
+            run.status = "queued"
+            run.mark_started(200, "text/event-stream")
+            await run.publish(b'event: korra.run.status\ndata: {"status":"queued"}\n\n')
+        await asyncio.sleep(1)

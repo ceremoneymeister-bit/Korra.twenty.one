@@ -3003,12 +3003,7 @@ async def _run_durable_browser_chat_stream(
         # upstream agent owns its turn deadline and the browser has Stop.
         timeout = _httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
         async with _httpx.AsyncClient(timeout=timeout) as client:
-            async with client.stream(
-                "POST",
-                upstream_url,
-                json={**body, "stream": True},
-                headers=upstream_headers,
-            ) as response:
+            async with queued_upstream_stream(client, run, upstream_url, body, upstream_headers) as response:
                 content_type = response.headers.get(
                     "content-type", "text/event-stream"
                 )
@@ -3022,6 +3017,9 @@ async def _run_durable_browser_chat_stream(
                     if response.status_code < 500:
                         ledger.fail(message_id)
                     result = (response.status_code, raw, content_type)
+                    await run.publish(_durable_stream_error_event(
+                        "Ожидание закончилось без запуска. Сообщение сохранено; попробуйте повторить позже."
+                    ))
                 else:
                     buffered: list[bytes] = []
                     total = 0
@@ -3072,6 +3070,10 @@ def _delivery_state_for_status(status_code: int) -> str:
     return "pending"
 
 
+from korra_cli.chat_runs import serialise_chat_admission, queued_upstream_stream
+
+
+@serialise_chat_admission
 async def _durable_browser_chat_response(
     *,
     message_id_raw: str,
