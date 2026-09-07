@@ -1,0 +1,4 @@
+# Runtime only; install into a dedicated virtualenv, never the costing kernel.
+pdf-inspector==1.17.0
+pypdfium2==5.13.0
+pillow==12.3.0
