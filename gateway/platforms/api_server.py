@@ -1539,6 +1539,67 @@ except Exception:  # pragma: no cover - scanner is optional hardening
     _scan_cron_prompt = None
 
 
+def _describe_provider_auth_failure(exc: BaseException) -> str:
+    """Korra: объяснить отказ провайдера словами владельца контура, а не текстом
+    движка для разработчика.
+
+    ``_resolve_runtime_agent_kwargs()`` заворачивает ``AuthError`` в
+    ``RuntimeError(format_auth_error(...))`` с сохранённой цепочкой ``from``, и
+    до панели доезжал английский текст с командами CLI («Run `hermes auth`…»),
+    которые в панели выполнить негде. Живой случай 07.09.2026: контур клиента с
+    выбранным ``openai-codex`` до входа в подписку показывал «No Codex credentials
+    stored. Run `hermes auth`…» вместо подсказки, где нажать.
+
+    Ищем исходный ``AuthError`` по цепочке причин и отвечаем по его коду; всё,
+    что не про авторизацию, возвращаем как было.
+    """
+    try:
+        from korra_cli.auth import AuthError, is_rate_limited_auth_error
+    except Exception:  # pragma: no cover - защитный путь
+        return str(exc)
+
+    auth: Optional[BaseException] = None
+    seen: set[int] = set()
+    cursor: Optional[BaseException] = exc
+    while cursor is not None and id(cursor) not in seen and len(seen) < 8:
+        seen.add(id(cursor))
+        if isinstance(cursor, AuthError):
+            auth = cursor
+            break
+        cursor = cursor.__cause__ or cursor.__context__
+    if auth is None:
+        return str(exc)
+
+    code = str(getattr(auth, "code", "") or "")
+    provider = str(getattr(auth, "provider", "") or "")
+    relogin = bool(getattr(auth, "relogin_required", False))
+
+    if code == "no_provider_configured":
+        # Уже русский текст движка Korra («Провайдер ответа не настроен…»).
+        return str(auth)
+    keys_hint = "Откройте раздел «Ключи»"
+    if provider == "openai-codex" and (code.startswith("codex_auth_missing") or relogin):
+        return (
+            "Подписка ChatGPT / Codex не подключена. "
+            f"{keys_hint} → «Вход через аккаунт» → «Подписка ChatGPT / Codex» → «Войти», "
+            "затем повторите сообщение."
+        )
+    try:
+        limited = bool(is_rate_limited_auth_error(auth))
+    except Exception:
+        limited = False
+    label = f"«{provider}»" if provider else "ответа"
+    if limited:
+        return (
+            f"Провайдер {label} временно недоступен или исчерпал лимит. "
+            "Подключение в порядке — повторите чуть позже."
+        )
+    if relogin:
+        return f"Провайдер {label} требует повторного входа. {keys_hint} и войдите заново."
+    reason = str(auth).strip()
+    return f"Провайдер {label} отклонил запрос: {reason} {keys_hint} и проверьте подключение."
+
+
 class _ProviderAuthResolutionError(RuntimeError):
     """Raised only when gateway.run._resolve_runtime_agent_kwargs() fails
     to resolve provider credentials.
@@ -7877,15 +7938,16 @@ class APIServerAdapter(BasePlatformAdapter):
                     # панели, а не разработчик в логе) и честные флаги отказа —
                     # без них стриминговый путь отдавал finish_reason "stop",
                     # то есть выдавал провал за успешный пустой ответ.
+                    reason = _describe_provider_auth_failure(exc)
                     return (
                         {
-                            "final_response": f"⚠️ Не удалось обратиться к провайдеру ответа. {exc}",
+                            "final_response": f"⚠️ Не удалось обратиться к провайдеру ответа. {reason}",
                             "messages": [],
                             "api_calls": 0,
                             "tools": [],
                             "completed": False,
                             "failed": True,
-                            "error": str(exc),
+                            "error": reason,
                         },
                         {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
                     )
