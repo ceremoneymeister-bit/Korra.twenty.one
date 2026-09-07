@@ -6,7 +6,7 @@ import { Markdown } from "../Markdown";
 
 const host = document.createElement("div");
 const root = createRoot(host);
-afterEach(async () => { await act(async () => root.render(null)); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.render(null)); delete window.__HERMES_SESSION_TOKEN__; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it("показывает имя, размер и защищённое скачивание, восстанавливается после перезагрузки", async () => {
   const path = "/opt/data/workspace/report.xlsx";
@@ -37,4 +37,24 @@ it("изображение получает превью через тот же 
   await act(async () => root.render(<Markdown content={`MEDIA:${path}`} />));
   expect(host.querySelector("img")?.src).toContain("chat=1");
   expect(host.querySelector('a[download]')).not.toBeNull();
+});
+
+it("прямой fleet скачивает с заголовком авторизации, не помещая токен в ссылку", async () => {
+  window.__HERMES_SESSION_TOKEN__ = "private-session";
+  window.__KORRA_UI_MODE__ = "fleet";
+  const path = "/opt/data/workspace/report.xlsx";
+  const fetcher = vi.fn().mockImplementation((url: string) => Promise.resolve(url.includes("/attachment?")
+    ? new Response(JSON.stringify({path, name: "report.xlsx", kind: "xlsx", size: 3, reader: "xlsx"}))
+    : new Response("abc")));
+  vi.stubGlobal("fetch", fetcher);
+  vi.stubGlobal("URL", class extends URL { static createObjectURL() { return "blob:download"; } static revokeObjectURL() {} });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  await act(async () => root.render(<Markdown content={`MEDIA:${path}`} />));
+  await act(async () => { host.querySelector('a[download]')!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  expect(click).toHaveBeenCalledOnce();
+  const [url, options] = fetcher.mock.calls.find(([url]) => url.includes("/download?"))!;
+  expect(url).not.toContain("private-session");
+  expect(options.headers.get("X-Hermes-Session-Token")).toBe("private-session");
+  expect(host.querySelector('a[download]')?.getAttribute("href")).not.toContain("token=");
+  delete window.__KORRA_UI_MODE__;
 });

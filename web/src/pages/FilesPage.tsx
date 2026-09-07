@@ -53,6 +53,7 @@ import {
 } from "@/lib/dashboard-flags";
 import { productNavLabel } from "@/lib/product-nav";
 import { artifactUrl } from "@/lib/chat-artifacts";
+import { downloadWorkspaceFile } from "@/lib/chat-attachments";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import {
   availableCopyName,
@@ -650,12 +651,8 @@ export default function FilesPage() {
 
   const downloadFile = (entry: ManagedFileEntry) => {
     if (entry.is_directory) return;
-    const link = document.createElement("a");
-    link.href = artifactUrl(entry.path, false);
-    link.download = entry.name || "download";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    void downloadWorkspaceFile(entry.path, entry.name || "download")
+      .catch(error => showToast(ownerFacingError(error, "Не удалось скачать файл."), "error"));
   };
 
   const previewEntry = (entry: ManagedFileEntry) => {

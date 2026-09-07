@@ -9,7 +9,7 @@
  * (history comes back from the server with the block intact).
  */
 
-import { fetchJSON, withBasePath } from "@/lib/api";
+import { authedFetch, fetchJSON, withBasePath } from "@/lib/api";
 import type { AttachmentDisplay } from "@/lib/chat-types";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 
@@ -72,6 +72,29 @@ export function localFilePath(reference: string): string | null {
 
 export function describeAttachment(path: string, signal?: AbortSignal): Promise<UploadedAttachment> {
   return fetchJSON(`/api/files/attachment?${new URLSearchParams({ path })}`, { signal });
+}
+
+/** Native downloads cannot set a header in a direct, token-authenticated panel.
+ * Keep its credential out of URLs; cookie/proxy deployments stream natively. */
+export async function downloadWorkspaceFile(path: string, name: string, chat = false): Promise<void> {
+  const query = new URLSearchParams({ path });
+  if (chat) query.set("chat", "1");
+  const endpoint = `/api/files/download?${query}`;
+  let url = withBasePath(endpoint);
+  let objectUrl = false;
+  if (window.__HERMES_SESSION_TOKEN__) {
+    const response = await authedFetch(endpoint);
+    if (!response.ok) throw new Error("Не удалось скачать файл. Он мог быть удалён или перемещён.");
+    url = URL.createObjectURL(await response.blob());
+    objectUrl = true;
+  }
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 /** Parse at render time so original MEDIA references remain durable in history. */
