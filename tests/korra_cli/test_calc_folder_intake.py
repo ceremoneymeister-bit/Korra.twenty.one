@@ -161,3 +161,71 @@ def test_empty_placeholder_survives_complete_and_download(intake):
     with io.open(fd, "rb") as handle:
         assert handle.read() == b""
     assert info["bytes"] == 0
+
+
+def test_nested_and_empty_directories_survive_restart(intake):
+    request = manifest(["Чертежи/Корпус/деталь.pdf"])
+    request["directories"] = ["Результаты/Архив", "Чертежи", "Результаты"]
+    intake.create(request)
+    intake.upload(request["upload_id"], 0, io.BytesIO(b"12345"))
+    order_id = intake.complete(request["upload_id"])["order_id"]
+    restarted = FolderIntake(intake.orders_root)
+    try:
+        detail = restarted.detail(order_id)
+        assert detail["directories"] == ["Результаты", "Результаты/Архив", "Чертежи", "Чертежи/Корпус"]
+        assert detail["file_count"] == 1
+        assert restarted.create({**request, "directories": list(reversed(request["directories"]))})["order_id"] == order_id
+        with pytest.raises(Conflict):
+            restarted.create({**request, "directories": [*request["directories"], "Добавлено"]})
+    finally:
+        restarted.close()
+
+
+def test_directory_only_order_has_one_durable_draft(intake):
+    request = {"upload_id": str(uuid4()), "folder_name": "Будущий заказ", "files": [],
+               "directories": ["Чертежи/Корпус", "Заявки"]}
+    assert intake.create(request)["received"] == []
+    result = intake.complete(request["upload_id"])
+    detail = intake.detail(result["order_id"])
+    assert detail["source_files"] == [] and detail["total_bytes"] == 0
+    assert detail["directories"] == ["Заявки", "Чертежи", "Чертежи/Корпус"]
+    assert intake.complete(request["upload_id"]) == result
+    assert len(intake.list()["orders"]) == 1
+
+
+def test_legacy_manifest_replay_and_completed_draft_infer_directories(intake):
+    request = manifest(["Чертежи/Корпус/деталь.pdf"])
+    intake.create(request)
+    path = intake.orders_root / "folders" / request["upload_id"] / "manifest.json"
+    old_manifest = json.loads(path.read_text())
+    del old_manifest["directories"]
+    path.write_text(json.dumps(old_manifest))
+    assert intake.create(request)["received"] == []
+    assert intake.create({**request, "directories": ["Чертежи", "Чертежи/Корпус"]})["received"] == []
+    intake.upload(request["upload_id"], 0, io.BytesIO(b"12345"))
+    order_id = intake.complete(request["upload_id"])["order_id"]
+    Registry(intake.orders_root / "registry.db").mutate(
+        order_id, lambda state: state["folder_intake"].pop("directories"))
+    assert intake.detail(order_id)["directories"] == ["Чертежи", "Чертежи/Корпус"]
+
+
+@pytest.mark.parametrize("directories", [["../secret"], ["/etc"], ["a//b"], ["x/../../y"], ["a\\b"]])
+def test_unsafe_directory_paths_rejected(intake, directories):
+    with pytest.raises(InvalidIdentifier):
+        intake.create({**manifest(), "directories": directories})
+
+
+def test_empty_root_directory_conflicts_and_directory_limits(intake, monkeypatch):
+    from metal_calc import folder_intake
+    with pytest.raises(InvalidState, match="полностью пуста"):
+        intake.create({"upload_id": str(uuid4()), "folder_name": "Пусто", "files": []})
+    with pytest.raises(InvalidState):
+        intake.create({**manifest(), "directories": None})
+    for directories in [["заявка.xlsx"], ["заявка.xlsx/Внутри"]]:
+        with pytest.raises(Conflict):
+            intake.create({**manifest(), "directories": directories})
+    monkeypatch.setattr(folder_intake, "MAX_DIRECTORIES", 2)
+    with pytest.raises(InvalidState):
+        intake.create({**manifest(), "directories": ["A", "B", "C"]})
+    with pytest.raises(InvalidState):
+        intake.create({**manifest(["A/B/C/file.pdf"]), "directories": []})

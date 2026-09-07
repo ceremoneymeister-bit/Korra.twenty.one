@@ -1,9 +1,14 @@
 import { fetchJSON } from "@/lib/api";
 
-export const FOLDER_LIMITS = { files: 10_000, fileBytes: 100 * 1024 ** 2, bytes: 20 * 1024 ** 3 };
+export const FOLDER_LIMITS = { files: 10_000, directories: 10_000, fileBytes: 100 * 1024 ** 2, bytes: 20 * 1024 ** 3 };
 
 export interface FolderFile { path: string; file: File }
-export interface FolderSelection { name: string; files: FolderFile[] }
+export interface FolderSelection {
+  name: string;
+  files: FolderFile[];
+  directories?: string[];
+  directoryCapture?: "complete" | "files-only";
+}
 export interface UploadReceipt { upload_id: string; received: number[]; order_id?: string }
 export interface UploadProgress { completed: number; total: number; bytes: number; totalBytes: number }
 
@@ -17,6 +22,7 @@ export async function readDroppedFolder(items: DataTransferItemList): Promise<Fo
   }
   const root = entries[0];
   const files: FolderFile[] = [];
+  const directories: string[] = [];
   async function visit(entry: FileSystemEntry, parent: string): Promise<void> {
     const path = parent ? `${parent}/${entry.name}` : entry.name;
     if (entry.isFile) {
@@ -25,6 +31,8 @@ export async function readDroppedFolder(items: DataTransferItemList): Promise<Fo
       files.push({ path, file });
       if (files.length > FOLDER_LIMITS.files) throw new Error("В папке может быть до 10 000 файлов.");
     } else if (entry.isDirectory) {
+      directories.push(path);
+      if (directories.length > FOLDER_LIMITS.directories) throw new Error("В заказе может быть до 10 000 вложенных папок.");
       const reader = (entry as FileSystemDirectoryEntry).createReader();
       for (;;) {
         const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
@@ -39,22 +47,56 @@ export async function readDroppedFolder(items: DataTransferItemList): Promise<Fo
     if (!batch.length) break;
     for (const entry of batch) await visit(entry, "");
   }
-  return validateSelection({ name: root.name, files });
+  return validateSelection({ name: root.name, files, directories, directoryCapture: "complete" });
+}
+
+/** Read-only traversal of the handle returned by showDirectoryPicker(). */
+export async function readDirectoryHandle(root: FileSystemDirectoryHandle): Promise<FolderSelection> {
+  const files: FolderFile[] = [];
+  const directories: string[] = [];
+  async function visit(directory: FileSystemDirectoryHandle, parent: string): Promise<void> {
+    for await (const entry of directory.values()) {
+      const path = parent ? `${parent}/${entry.name}` : entry.name;
+      if (entry.kind === "directory") {
+        directories.push(path);
+        if (directories.length > FOLDER_LIMITS.directories) throw new Error("В заказе может быть до 10 000 вложенных папок.");
+        await visit(entry, path);
+      } else {
+        files.push({ path, file: await entry.getFile() });
+        if (files.length > FOLDER_LIMITS.files) throw new Error("В папке может быть до 10 000 файлов.");
+      }
+    }
+  }
+  await visit(root, "");
+  return validateSelection({ name: root.name, files, directories, directoryCapture: "complete" });
 }
 
 export function selectedFolder(files: File[]): FolderSelection {
+  if (!files.length) throw new Error("В выбранной папке нет файлов. Перетащите папку, чтобы сохранить её вложенные папки.");
   const names = new Set(files.map((file) => (file.webkitRelativePath ?? "").split("/")[0]));
   if (names.size !== 1 || files.some((file) => !file.webkitRelativePath?.includes("/"))) {
     throw new Error("Выберите одну папку заказа целиком.");
   }
-  return validateSelection({ name: [...names][0], files: files.map((file) => ({
+  return validateSelection({ name: [...names][0], directoryCapture: "files-only", files: files.map((file) => ({
     file, path: file.webkitRelativePath.split("/").slice(1).join("/"),
   })) });
 }
 
+function collectDirectories(paths: string[], explicit: string[] = []): string[] {
+  if (explicit.length > FOLDER_LIMITS.directories) throw new Error("В заказе может быть до 10 000 вложенных папок.");
+  const directories = new Set(explicit);
+  for (const path of [...paths, ...explicit]) {
+    const parts = path.split("/");
+    for (let i = 1; i < parts.length; i++) directories.add(parts.slice(0, i).join("/"));
+  }
+  if (directories.size > FOLDER_LIMITS.directories) throw new Error("В заказе может быть до 10 000 вложенных папок.");
+  return [...directories].sort();
+}
+
 export function validateSelection(selection: FolderSelection): FolderSelection {
   const { files } = selection;
-  if (!files.length) throw new Error("В папке нет файлов. Выберите папку с документами заказа.");
+  const directories = collectDirectories(files.map(({ path }) => path), selection.directories);
+  if (!files.length && !directories.length) throw new Error("Папка полностью пуста. Добавьте документы или вложенные папки заказа.");
   if (files.length > FOLDER_LIMITS.files) throw new Error("В папке может быть до 10 000 файлов.");
   if (files.some(({ file }) => file.size > FOLDER_LIMITS.fileBytes)) {
     throw new Error("Один файл может занимать до 100 МБ.");
@@ -62,11 +104,18 @@ export function validateSelection(selection: FolderSelection): FolderSelection {
   if (files.reduce((sum, { file }) => sum + file.size, 0) > FOLDER_LIMITS.bytes) {
     throw new Error("Общий размер папки может быть до 20 ГБ.");
   }
-  return { ...selection, files: [...files].sort((a, b) => a.path.localeCompare(b.path, "ru", { numeric: true })) };
+  return { ...selection, directories, files: [...files].sort((a, b) => a.path.localeCompare(b.path, "ru", { numeric: true })) };
 }
 
 export function folderUploadKey(selection: FolderSelection): string {
-  const signature = JSON.stringify([selection.name, selection.files.map(({ path, file }) => [path, file.size, file.lastModified])]);
+  const paths = selection.files.map(({ path }) => path);
+  const inferred = collectDirectories(paths);
+  const directories = collectDirectories(paths, selection.directories);
+  const parts: unknown[] = [selection.name, selection.files.map(({ path, file }) => [path, file.size, file.lastModified])];
+  // Preserve keys issued before directory support for the same file tree.
+  // Explicit empty directories change the identity and require a fresh key.
+  if (JSON.stringify(directories) !== JSON.stringify(inferred)) parts.push(directories);
+  const signature = JSON.stringify(parts);
   try {
     const saved = JSON.parse(sessionStorage.getItem("calc.folder-upload") ?? "null");
     if (saved?.signature === signature && typeof saved.id === "string") return saved.id;
@@ -82,10 +131,23 @@ export async function uploadFolder(
   onProgress: (progress: UploadProgress) => void,
   signal: AbortSignal,
 ): Promise<string> {
-  const request = <T>(url: string, init?: RequestInit) => fetchJSON<T>(url, { ...init, signal });
+  const request = <T>(url: string, init?: RequestInit): Promise<T> => {
+    signal.throwIfAborted();
+    // Auth recovery can wait indefinitely after requesting a page reload. If
+    // the operator stays on the page, Pause must still settle this request.
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason); };
+      signal.addEventListener("abort", abort, { once: true });
+      fetchJSON<T>(url, { ...init, signal }).then(
+        (value) => { signal.removeEventListener("abort", abort); resolve(value); },
+        (cause) => { signal.removeEventListener("abort", abort); reject(cause); },
+      );
+    });
+  };
   const receipt = await request<UploadReceipt>("/api/calc/folder-uploads", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ upload_id: uploadId, folder_name: selection.name,
+      directories: collectDirectories(selection.files.map(({ path }) => path), selection.directories),
       files: selection.files.map(({ path, file }) => ({ path, size: file.size })) }),
   });
   if (receipt.order_id) return receipt.order_id;

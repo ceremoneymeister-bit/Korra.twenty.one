@@ -24,10 +24,11 @@ from .securefs import SecureRoot
 from .util import canonical_json, utcnow, validate_id
 
 MAX_FILES = 10_000
+MAX_DIRECTORIES = 10_000
 MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_FOLDER_BYTES = 20 * 1024 * 1024 * 1024
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
-LIMITS = {"max_files": MAX_FILES, "max_file_bytes": MAX_FILE_BYTES,
+LIMITS = {"max_files": MAX_FILES, "max_directories": MAX_DIRECTORIES, "max_file_bytes": MAX_FILE_BYTES,
           "max_folder_bytes": MAX_FOLDER_BYTES}
 
 
@@ -50,25 +51,49 @@ def _name(value: Any) -> str:
     return unicodedata.normalize("NFC", value)
 
 
+def _relative_path(path: Any) -> str:
+    if not isinstance(path, str) or not 1 <= len(path.encode("utf-8")) <= 2048:
+        raise InvalidIdentifier("Недопустимый путь файла или папки")
+    parts = path.split("/")
+    if len(parts) > 16:
+        raise InvalidIdentifier("Слишком много вложенных папок")
+    return "/".join(_name(part) for part in parts)
+
+
+def _directories(paths: list[str], explicit: Any = None) -> list[str]:
+    if explicit is None:
+        explicit = []
+    if not isinstance(explicit, list) or len(explicit) > MAX_DIRECTORIES:
+        raise InvalidState(f"В заказе может быть до {MAX_DIRECTORIES} вложенных папок")
+    directories = {_relative_path(path) for path in explicit}
+    for path in [*paths, *directories]:
+        parts = path.split("/")
+        directories.update("/".join(parts[:i]) for i in range(1, len(parts)))
+    if len(directories) > MAX_DIRECTORIES:
+        raise InvalidState(f"В заказе может быть до {MAX_DIRECTORIES} вложенных папок")
+    file_keys = {path.casefold() for path in paths}
+    if any(path.casefold() in file_keys for path in directories):
+        raise Conflict("Один путь используется и как файл, и как папка")
+    return sorted(directories)
+
+
 def _manifest(body: Any) -> dict[str, Any]:
-    if not isinstance(body, dict) or set(body) != {"upload_id", "folder_name", "files"}:
+    required = {"upload_id", "folder_name", "files"}
+    if not isinstance(body, dict) or not required <= set(body) or set(body) - required - {"directories"}:
         raise InvalidState("Ожидались upload_id, folder_name и список files")
     upload_id = validate_upload_id(body["upload_id"])
     folder_name = _name(body["folder_name"])
+    if "directories" in body and not isinstance(body["directories"], list):
+        raise InvalidState("directories должен содержать список относительных путей папок")
     files = body["files"]
-    if not isinstance(files, list) or not 1 <= len(files) <= MAX_FILES:
-        raise InvalidState(f"В папке должно быть от 1 до {MAX_FILES} файлов")
+    if not isinstance(files, list) or len(files) > MAX_FILES:
+        raise InvalidState(f"В папке может быть до {MAX_FILES} файлов")
     entries, seen, total = [], set(), 0
     for entry in files:
         if not isinstance(entry, dict) or set(entry) != {"path", "size"}:
             raise InvalidState("Для каждого файла нужны path и size")
         path, size = entry["path"], entry["size"]
-        if not isinstance(path, str) or not 1 <= len(path.encode("utf-8")) <= 2048:
-            raise InvalidIdentifier("Недопустимый путь файла")
-        parts = path.split("/")
-        if len(parts) > 16:
-            raise InvalidIdentifier("Слишком много вложенных папок")
-        normalized = "/".join(_name(part) for part in parts)
+        normalized = _relative_path(path)
         key = normalized.casefold()
         if key in seen:
             raise Conflict(f"Путь файла указан дважды: {normalized}")
@@ -81,13 +106,11 @@ def _manifest(body: Any) -> dict[str, Any]:
         entries.append({"path": normalized, "size": size})
     if total > MAX_FOLDER_BYTES:
         raise FileTooLarge("Размер папки превышает 20 ГиБ")
-    # A file cannot simultaneously be a parent directory of another file.
-    for key in seen:
-        parts = key.split("/")
-        if any("/".join(parts[:i]) in seen for i in range(1, len(parts))):
-            raise Conflict("Один путь используется и как файл, и как папка")
+    directories = _directories([entry["path"] for entry in entries], body.get("directories", []))
+    if not entries and not directories:
+        raise InvalidState("Папка полностью пуста. Добавьте документы или вложенные папки заказа")
     return {"upload_id": upload_id, "folder_name": folder_name, "files": entries,
-            "total_bytes": total, "version": 1}
+            "directories": directories, "total_bytes": total, "version": 1}
 
 
 class _BoundedInput:
@@ -192,7 +215,12 @@ class FolderIntake:
                 manifest["created_at"] = utcnow()
                 self.root.atomic_write(f"{directory}/manifest.json", canonical_json(manifest))
             else:
-                if {k: v for k, v in saved.items() if k != "created_at"} != manifest:
+                comparable = {k: v for k, v in saved.items() if k != "created_at"}
+                # Pre-directory sessions remain resumable: their non-empty
+                # parent directories were already implicit in the file paths.
+                comparable["directories"] = _directories(
+                    [entry["path"] for entry in saved["files"]], saved.get("directories", []))
+                if comparable != manifest:
                     raise Conflict("Эта загрузка уже имеет другой список файлов")
         return self.status(manifest["upload_id"])
 
@@ -260,6 +288,9 @@ class FolderIntake:
                      "timestamps": {}, "provenance": {"created_by": "panel_folder_intake"},
                      "folder_intake": {"version": 1, "upload_id": upload_id,
                                        "folder_name": manifest["folder_name"], "files": files,
+                                       "directories": _directories(
+                                           [entry["path"] for entry in manifest["files"]],
+                                           manifest.get("directories", [])),
                                        "total_bytes": manifest["total_bytes"]}}
             try:
                 _, saved = self._registry().create(self._order_id(manifest), state)
@@ -287,7 +318,10 @@ class FolderIntake:
         _, state = self._registry().get(order_id)
         if not isinstance(state.get("folder_intake"), dict):
             raise NotFound("Папка заказа не найдена")
-        return {**self.summary(state), "source_files": state["folder_intake"]["files"], "result_files": []}
+        intake = state["folder_intake"]
+        return {**self.summary(state), "source_files": intake["files"], "result_files": [],
+                "directories": _directories([item["relative_path"] for item in intake["files"]],
+                                            intake.get("directories", []))}
 
     def open_file(self, order_id: str, index: int) -> tuple[int, dict[str, Any]]:
         validate_id(order_id, field="order_id")

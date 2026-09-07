@@ -160,3 +160,21 @@ def test_stream_timeout_keeps_draft_unpublished(cabinet, monkeypatch):
     assert caught.value.status_code == 504
     assert not list(root.rglob(".tmp-*"))
     assert client.get("/api/calc/folders").json()["orders"] == []
+
+
+def test_directory_only_draft_preserves_empty_hierarchy_through_cli(cabinet):
+    client, config, root = cabinet
+    manifest = {"upload_id": str(uuid4()), "folder_name": "Папка с подразделами",
+                "files": [], "directories": ["Чертежи/Корпус", "Результаты"]}
+    created = client.post("/api/calc/folder-uploads", json=manifest)
+    assert created.status_code == 200, created.text
+    assert created.json()["received"] == []
+    completed = client.post(f"/api/calc/folder-uploads/{manifest['upload_id']}/complete")
+    assert completed.status_code == 200, completed.text
+    order_id = completed.json()["order_id"]
+    detail = client.get(f"/api/calc/folders/{order_id}").json()
+    assert detail["source_files"] == [] and detail["file_count"] == 0
+    assert detail["directories"] == ["Результаты", "Чертежи", "Чертежи/Корпус"]
+    assert client.get("/api/calc/orders").json()["orders"][0]["order_id"] == order_id
+    invalid = {**manifest, "upload_id": str(uuid4()), "directories": ["../escape"]}
+    assert client.post("/api/calc/folder-uploads", json=invalid).status_code == 422
