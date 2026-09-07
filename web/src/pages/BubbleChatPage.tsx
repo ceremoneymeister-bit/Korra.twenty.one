@@ -631,6 +631,7 @@ export function BubbleChatComposer({
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const abortsRef = useRef<Record<string, () => void>>({});
+  const attachmentsRef = useRef<PendingAttachment[]>([]);
   const textareaId = useId();
   const shortcutId = useId();
   const { themeName } = useTheme();
@@ -709,8 +710,9 @@ export function BubbleChatComposer({
       }
       // Reserve immediately, then upload outside React's replayable updater.
       // Repeated drops and StrictMode must never create duplicate disk files.
-      attachmentsRef.current = [...list, ...accepted];
-      setAttachments(attachmentsRef.current);
+      const next = [...list, ...accepted];
+      attachmentsRef.current = next;
+      setAttachments(next);
       accepted.forEach(startUpload);
     },
     [startUpload],
@@ -730,7 +732,6 @@ export function BubbleChatComposer({
   // зависимостей это не работает: замыкание держит ПЕРВЫЙ (пустой) массив
   // вложений, и все добавленные позже превью остаются в памяти вкладки.
   // Держим актуальный список в ref и чистим по нему. Находка ревью 20.08.
-  const attachmentsRef = useRef<PendingAttachment[]>([]);
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
