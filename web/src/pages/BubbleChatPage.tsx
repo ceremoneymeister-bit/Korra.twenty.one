@@ -1,3 +1,4 @@
+import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
 /**
  * BubbleChatPage — bubble-style chat UI (Phase 2.2 live SSE streaming).
  *
@@ -587,6 +588,7 @@ interface BubbleChatComposerProps {
    *  относительно дома того же агента. */
   profile?: string;
   allowAttachments?: boolean;
+  draftKey?: string;
 }
 
 const TEXTAREA_MIN_HEIGHT = 56;
@@ -611,8 +613,10 @@ export function BubbleChatComposer({
   profile,
   agentLabel,
   allowAttachments = true,
+  draftKey,
 }: BubbleChatComposerProps) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(() => draftKey ? readChatView(draftKey) : "");
+  useEffect(() => { if (draftKey) writeChatView(draftKey, value); }, [draftKey, value]);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
   // Одна строка отказа на весь композер: вложения и диктовка спорить за неё
@@ -1219,6 +1223,7 @@ export interface BubbleChatPageProps {
   /** Счётчик команд «Новый чат» из вкладки агента. Изменение значения
    *  сбрасывает только этот постоянно смонтированный экземпляр чата. */
   newChatRequest?: number;
+  resumeSession?: string;
 }
 
 export default function BubbleChatPage({
@@ -1227,6 +1232,7 @@ export default function BubbleChatPage({
   draft: draftFromOwner,
   onDraftConsumed,
   newChatRequest = 0,
+  resumeSession,
   active,
 }: BubbleChatPageProps = {}) {
   // Live SSE state from useChatStream. Sends POST to /api/chat/completions
@@ -1245,7 +1251,7 @@ export default function BubbleChatPage({
     abort,
     loadSession,
     reset,
-  } = useChatStream({ profile: agentProfile });
+  } = useChatStream({ profile: agentProfile, active });
   // Черновик недоставленного сообщения этого профиля из ДРУГОГО чата: пузырь
   // с «Повторить» есть только в своём чате, здесь напоминает баннер.
   // Имя агента вкладки (display_name профиля) для подсказок композера и
@@ -1363,7 +1369,7 @@ export default function BubbleChatPage({
   }, [draftFromOwner, onDraftConsumed]);
 
   useEffect(() => {
-    if (agentProfile) return;
+    if (agentProfile !== undefined) return;
     if (resumeHandledRef.current) return;
     const resume = searchParams.get("resume");
     if (!resume || sessionId === resume) return;
@@ -1388,6 +1394,8 @@ export default function BubbleChatPage({
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, sessionList]);
+
+  useEffect(() => { if (resumeSession) void loadSession(resumeSession); }, [resumeSession, loadSession]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -1471,6 +1479,8 @@ export default function BubbleChatPage({
           onApprovalDecision={handleApprovalDecision}
         />
         <BubbleChatComposer
+          key={sessionId ?? "new"}
+          draftKey={chatViewKey(agentProfile, sessionId)}
           agentLabel={agentLabel}
           onSend={send}
           prefill={prefill}
