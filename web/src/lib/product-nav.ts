@@ -20,6 +20,7 @@ export interface NavEntry {
 /** Что видит пользователь продукта. Порядок задаёт и порядок в сайдбаре. */
 const PRODUCT_NAV_PATHS: Record<ProductUiMode, string[]> = {
   fleet: ["/agents", "/files", "/sessions", "/cron"],
+  calc: ["/agents", "/orders", "/rates", "/files", "/sessions", "/help"],
 };
 
 /** Язык продукта, а не панели администратора. */
@@ -29,6 +30,14 @@ const PRODUCT_NAV_LABELS: Record<ProductUiMode, Record<string, string>> = {
     "/files": "Файлы",
     "/sessions": "История",
     "/cron": "Задачи",
+  },
+  calc: {
+    "/agents": "Расчётчики",
+    "/orders": "Заказы",
+    "/rates": "Данные",
+    "/files": "Файлы",
+    "/sessions": "История",
+    "/help": "Помощь",
   },
 };
 
@@ -92,6 +101,7 @@ export function productNavLabel(
 /** Куда уводить `/` и неизвестный маршрут. */
 const PRODUCT_HOME_PATHS: Record<ProductUiMode, string> = {
   fleet: "/agents",
+  calc: "/agents",
 };
 
 /** Домашний экран режима; для админской панели (`null`) — прежние /sessions. */
@@ -122,8 +132,12 @@ export function selectProductNav<T extends NavEntry>(
 }
 
 /** Пункты свёрнутой группы «НАСТРОЙКИ» — в порядке CLIENT_SETTINGS_PATHS. */
-export function selectProductSettingsNav<T extends NavEntry>(items: T[]): T[] {
-  return CLIENT_SETTINGS_PATHS.map((path) => {
+export function selectProductSettingsNav<T extends NavEntry>(
+  items: T[],
+  mode: ProductUiMode = "fleet",
+): T[] {
+  const paths = mode === "calc" ? ["/env", "/models"] : CLIENT_SETTINGS_PATHS;
+  return paths.map((path) => {
     const found = items.find((item) => item.path === path);
     return found
       ? {
@@ -136,7 +150,11 @@ export function selectProductSettingsNav<T extends NavEntry>(items: T[]): T[] {
 }
 
 /** Пункты второй свёрнутой группы «СЛУЖЕБНОЕ». */
-export function selectServiceNav<T extends NavEntry>(items: T[]): T[] {
+export function selectServiceNav<T extends NavEntry>(
+  items: T[],
+  mode: ProductUiMode = "fleet",
+): T[] {
+  if (mode === "calc") return [];
   return SERVICE_PATHS.map((path) => {
     const found = items.find((item) => item.path === path);
     return found

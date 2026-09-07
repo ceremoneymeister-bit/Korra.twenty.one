@@ -9,7 +9,7 @@ declare global {
     __HERMES_DASHBOARD_EMBEDDED_CHAT__?: boolean;
     /** Bubble-chat takeover for the browser dashboard. */
     __KORRA_DASHBOARD_CHAT__?: boolean;
-    /** The desktop fleet interface is enabled with KORRA_UI_MODE=fleet. */
+    /** Product workspace selected by the server: fleet or calc. */
     __KORRA_UI_MODE__?: string;
     /** IANA timezone configured for this isolated contour. */
     __KORRA_OWNER_TIMEZONE__?: string;
@@ -35,16 +35,16 @@ export function isDashboardBubbleChatEnabled(): boolean {
   if (typeof window === "undefined") return false;
   return (
     window.__KORRA_DASHBOARD_CHAT__ === true ||
-    (window.__KORRA_UI_MODE__ ?? "").toLowerCase() === "fleet"
+    productUiMode() !== null
   );
 }
 
-export type ProductUiMode = "fleet";
+export type ProductUiMode = "fleet" | "calc";
 
 export function productUiMode(): ProductUiMode | null {
   if (typeof window === "undefined") return null;
   const raw = (window.__KORRA_UI_MODE__ ?? "admin").toLowerCase();
-  return raw === "fleet" ? "fleet" : null;
+  return raw === "fleet" || raw === "calc" ? raw : null;
 }
 
 export function isProductUiMode(): boolean {

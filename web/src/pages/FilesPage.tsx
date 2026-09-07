@@ -99,8 +99,16 @@ function displayPath(path: string | null | undefined): string {
   return path?.trim() || filesRootLabel();
 }
 
-export function clientRelativeParts(path: string | null | undefined): string[] {
+export function clientRelativeParts(
+  path: string | null | undefined,
+  root?: string | null,
+): string[] {
   const normalized = (path ?? "").trim().replaceAll("\\", "/").replace(/\/$/, "");
+  const normalizedRoot = (root ?? "").trim().replaceAll("\\", "/").replace(/\/$/, "");
+  if (normalizedRoot && normalized === normalizedRoot) return [];
+  if (normalizedRoot && normalized.startsWith(`${normalizedRoot}/`)) {
+    return normalized.slice(normalizedRoot.length + 1).split("/").filter(Boolean);
+  }
   const marker = normalized.lastIndexOf("/home/client");
   if (marker >= 0) {
     return normalized.slice(marker + "/home/client".length).split("/").filter(Boolean);
@@ -112,8 +120,8 @@ export function clientRelativeParts(path: string | null | undefined): string[] {
   return parts.length ? [parts[parts.length - 1]] : [];
 }
 
-function clientDisplayPath(path: string | null | undefined): string {
-  const parts = clientRelativeParts(path).map(clientEntryLabel);
+function clientDisplayPath(path: string | null | undefined, root?: string | null): string {
+  const parts = clientRelativeParts(path, root).map(clientEntryLabel);
   return [filesRootLabel(), ...parts].join(" / ");
 }
 
@@ -287,9 +295,9 @@ function FileTrash({
 }
 
 export default function FilesPage() {
-  // Fleet is the full Korra workspace manager. The narrower client-mode
-  // inbox/artifacts rules belong to white-label owner cabinets only.
-  const clientMode = isClientUiMode();
+  // Calculator files use the same inbox/artifacts boundary as owner cabinets.
+  // Fleet keeps its full workspace manager.
+  const clientMode = isClientUiMode() || productUiMode() === "calc";
   const { toast, showToast } = useToast();
   const { setAfterTitle, setEnd } = usePageHeader();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -302,7 +310,7 @@ export default function FilesPage() {
   const searchParamsRef = useRef(searchParams);
   searchParamsRef.current = searchParams;
   const requestedPath =
-    searchParams.get("path")?.trim() || (clientMode ? "client" : undefined);
+    searchParams.get("path")?.trim() || (isClientUiMode() ? "client" : undefined);
   // Что реально показано на экране. Стартует пустым, поэтому первая загрузка
   // случается всегда, даже когда адрес уже содержит нужную папку.
   const currentPathRef = useRef<string | undefined>(undefined);
@@ -341,15 +349,19 @@ export default function FilesPage() {
   );
   const rawHeaderPath = displayPath(listing?.locked_root ?? listing?.path ?? requestedPath);
   const headerPath = clientMode
-    ? clientDisplayPath(activePath)
+    ? clientDisplayPath(activePath, managedRoot)
     : canChangePath
       ? rawHeaderPath
       : breadcrumbs.map((item) => item.label).join(" / ");
   const normalizedActivePath = activePath.replaceAll("\\", "/").replace(/\/$/, "");
+  const normalizedClientRoot = (managedRoot ?? "").replaceAll("\\", "/").replace(/\/$/, "");
   const isAtClientRoot =
-    clientMode && /(?:^|\/)home\/client$/.test(normalizedActivePath);
+    clientMode && Boolean(normalizedClientRoot) && normalizedActivePath === normalizedClientRoot;
   const isInClientInbox =
-    clientMode && /(?:^|\/)home\/client\/inbox(?:\/|$)/.test(normalizedActivePath);
+    clientMode && Boolean(normalizedClientRoot) && (
+      normalizedActivePath === `${normalizedClientRoot}/inbox` ||
+      normalizedActivePath.startsWith(`${normalizedClientRoot}/inbox/`)
+    );
   const currentCollision = uploadItems.find((item) => item.status === "choice") ?? null;
   const canUpload =
     Boolean(activePath) && !uploading && !currentCollision && (!clientMode || isInClientInbox);
@@ -1004,7 +1016,7 @@ export default function FilesPage() {
                       </Button>
                     </>
                   )}
-                  {entry.capabilities?.rename && entry.revision ? (
+                  {!isAtClientRoot && entry.capabilities?.rename && entry.revision ? (
                     <Button
                       ghost
                       size="icon"
@@ -1018,7 +1030,7 @@ export default function FilesPage() {
                       <Pencil />
                     </Button>
                   ) : null}
-                  {entry.capabilities?.trash && entry.revision ? (
+                  {!isAtClientRoot && entry.capabilities?.trash && entry.revision ? (
                     <Button
                       ghost
                       size="icon"

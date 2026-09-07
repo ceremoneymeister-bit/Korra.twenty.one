@@ -3085,3 +3085,111 @@ class TestCreateAgentModelRecovery:
         )
         adapter._create_agent(session_id="s2", gateway_session_key="ch")
         assert captured[1]["model"] == "anthropic/claude-opus-4.6"
+
+
+class TestTrustedToolScopeHeader:
+    """The capability reaches only the request-local agent context."""
+
+    @pytest.mark.asyncio
+    async def test_idempotency_cannot_replay_another_request_scope(self, auth_adapter):
+        observed = []
+
+        async def run_agent(**kwargs):
+            observed.append(kwargs["trusted_tool_scope"])
+            return {"final_response": str(len(observed)), "completed": True}, {}
+
+        headers = {"Authorization": "Bearer sk-secret", "Idempotency-Key": uuid.uuid4().hex}
+        body = {"model": "korra-agent", "messages": [{"role": "user", "content": "go"}]}
+        async with TestClient(TestServer(_create_app(auth_adapter))) as client:
+            with patch.object(auth_adapter, "_run_agent", side_effect=run_agent):
+                for capability in ("mcs1.first.signature", "mcs1.first.signature", "mcs1.second.signature", ""):
+                    response = await client.post(
+                        "/v1/chat/completions", json=body,
+                        headers={**headers, "X-Hermes-Tool-Scope": capability},
+                    )
+                    assert response.status == 200
+        assert observed == ["mcs1.first.signature", "mcs1.second.signature", ""]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_authenticated_scope_is_forwarded_without_echo(self, auth_adapter, stream):
+        from gateway.session_context import get_trusted_tool_scope
+
+        capability = "mcs1.payload.signature"
+        observed = []
+
+        def create_agent(**_kwargs):
+            agent = MagicMock()
+
+            def run_conversation(**_run_kwargs):
+                observed.append(get_trusted_tool_scope())
+                return {"final_response": "OK", "messages": [], "api_calls": 1}
+
+            agent.run_conversation.side_effect = run_conversation
+            agent.session_prompt_tokens = 0
+            agent.session_completion_tokens = 0
+            agent.session_total_tokens = 0
+            agent.session_id = "ordinary-session"
+            return agent
+
+        app = _create_app(auth_adapter)
+        async with TestClient(TestServer(app)) as cli:
+            with patch.object(auth_adapter, "_create_agent", side_effect=create_agent):
+                resp = await cli.post(
+                    "/v1/chat/completions",
+                    headers={
+                        "Authorization": "Bearer sk-secret",
+                        "X-Hermes-Session-Id": "ordinary-session",
+                        "X-Hermes-Tool-Scope": capability,
+                    },
+                    json={
+                        "model": "korra-agent",
+                        "stream": stream,
+                        "messages": [{"role": "user", "content": "go"}],
+                    },
+                )
+                body = await resp.text()
+
+        assert resp.status == 200
+        assert observed == [capability]
+        assert get_trusted_tool_scope() == ""
+        assert capability not in body
+        assert capability not in str(dict(resp.headers))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("capability", ["bad scope", "x" * 257])
+    async def test_invalid_scope_is_rejected_before_agent(
+        self, auth_adapter, capability
+    ):
+        app = _create_app(auth_adapter)
+        async with TestClient(TestServer(app)) as cli:
+            with patch.object(
+                auth_adapter, "_run_agent", new_callable=AsyncMock
+            ) as mock_run:
+                resp = await cli.post(
+                    "/v1/chat/completions",
+                    headers={
+                        "Authorization": "Bearer sk-secret",
+                        "X-Hermes-Tool-Scope": capability,
+                    },
+                    json={
+                        "model": "korra-agent",
+                        "messages": [{"role": "user", "content": "go"}],
+                    },
+                )
+        assert resp.status == 400
+        mock_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_key_mode_cannot_create_trusted_scope(self, adapter):
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                "/v1/chat/completions",
+                headers={"X-Hermes-Tool-Scope": "mcs1.payload.signature"},
+                json={
+                    "model": "korra-agent",
+                    "messages": [{"role": "user", "content": "go"}],
+                },
+            )
+        assert resp.status == 403

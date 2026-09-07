@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metal-calc-mcp"
+version = "0.1.0"
+description = "Typed deterministic drawing costing MCP server for Korra"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "Proprietary"}
+dependencies = [
+  "ezdxf==1.4.4",
+  "jsonschema==4.26.0",
+  "mcp==1.28.1",
+  "numpy==2.5.2",
+  "openpyxl==3.1.5",
+  "shapely==2.1.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.0.3"]
+
+[project.scripts]
+metal-calc-mcp = "metal_calc.mcp_server:main"
+metal-calc-admin = "metal_calc.admin:main"
+
+[tool.setuptools.packages.find]
+include = ["metal_calc*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]

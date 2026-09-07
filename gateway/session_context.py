@@ -103,6 +103,9 @@ _SESSION_UI_SESSION_ID: ContextVar = ContextVar("KORRA_UI_SESSION_ID", default=_
 _SESSION_MESSAGE_ID: ContextVar = ContextVar("KORRA_SESSION_MESSAGE_ID", default=_UNSET)
 
 _SESSION_PROFILE: ContextVar = ContextVar("KORRA_SESSION_PROFILE", default=_UNSET)
+# Authenticated request-only capability. No env bridge, prompt, persisted
+# session, or subprocess representation; fresh requests bind a fresh value.
+_TRUSTED_TOOL_SCOPE: ContextVar = ContextVar("KORRA_TRUSTED_TOOL_SCOPE", default=_UNSET)
 _BROWSER_CONTROL_PRINCIPAL: ContextVar = ContextVar(
     "KORRA_BROWSER_CONTROL_PRINCIPAL", default=_UNSET
 )
@@ -243,6 +246,7 @@ def set_session_vars(
     async_delivery: bool = True,
     ui_session_id: str = "",
     cron_session: Any = _UNSET,
+    trusted_tool_scope: str = "",
 ) -> list:
     """Set all session context variables and return reset tokens.
 
@@ -284,6 +288,7 @@ def set_session_vars(
         _SESSION_UI_SESSION_ID.set(ui_session_id),
         _SESSION_MESSAGE_ID.set(message_id),
         _SESSION_PROFILE.set(profile),
+        _TRUSTED_TOOL_SCOPE.set(trusted_tool_scope),
         _BROWSER_CONTROL_PRINCIPAL.set(browser_control_principal),
         _BROWSER_CONTROL_TRANSPORT_FAMILY.set(browser_control_transport_family),
         _CRON_SESSION.set(cron_session),
@@ -325,6 +330,7 @@ def clear_session_vars(tokens: list) -> None:
         _SESSION_UI_SESSION_ID,
         _SESSION_MESSAGE_ID,
         _SESSION_PROFILE,
+        _TRUSTED_TOOL_SCOPE,
         _BROWSER_CONTROL_PRINCIPAL,
         _BROWSER_CONTROL_TRANSPORT_FAMILY,
         _CRON_SESSION,
@@ -379,6 +385,7 @@ def reset_session_vars() -> None:
     """
     for var in _VAR_MAP.values():
         var.set(_UNSET)
+    _TRUSTED_TOOL_SCOPE.set(_UNSET)
     # Reset the async-delivery capability to "never bound here" (_UNSET) for the
     # same inheritance-leak reason as the mapped vars above — see clear_session_vars,
     # which resets this var on the handler-exit path for the symmetric concern.
@@ -417,6 +424,12 @@ def get_session_env(name: str, default: str = "") -> str:
             return value
     # Fall back to os.environ for CLI, cron, and test compatibility
     return korra_env(name, default)
+
+
+def get_trusted_tool_scope() -> str:
+    """Return the request-only capability, never an environment fallback."""
+    value = _TRUSTED_TOOL_SCOPE.get()
+    return value if isinstance(value, str) else ""
 
 
 # Surfaces that are not a human chat channel. The gateway binds a platform

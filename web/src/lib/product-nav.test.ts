@@ -11,6 +11,8 @@ import {
 const ADMIN_NAV: NavEntry[] = [
   { path: "/chat", labelKey: "chat", label: "Chat" },
   { path: "/agents", label: "Agents" },
+  { path: "/orders", label: "Orders" },
+  { path: "/rates", label: "Rates" },
   { path: "/sessions", labelKey: "sessions", label: "Sessions" },
   { path: "/files", label: "Files" },
   { path: "/models", labelKey: "models", label: "Models" },
@@ -31,6 +33,16 @@ const ADMIN_NAV: NavEntry[] = [
 ];
 
 describe("selectProductNav", () => {
+  it("связывает расчётчиков, заказы и данные в одном рабочем меню", () => {
+    const nav = selectProductNav(ADMIN_NAV, "calc");
+    expect(nav.map(({ path }) => path)).toEqual([
+      "/agents", "/orders", "/rates", "/files", "/sessions", "/help",
+    ]);
+    expect(nav.map(({ label }) => label)).toEqual([
+      "Расчётчики", "Заказы", "Данные", "Файлы", "История", "Помощь",
+    ]);
+    expect(nav.every(({ labelKey }) => labelKey === undefined)).toBe(true);
+  });
   it("убирает отдельный чат и оставляет четыре рабочих экрана", () => {
     expect(selectProductNav(ADMIN_NAV, "fleet")).toEqual([
       { path: "/agents", label: "Агенты", labelKey: undefined },
@@ -42,6 +54,12 @@ describe("selectProductNav", () => {
 });
 
 describe("secondary navigation", () => {
+  it("держит справку расчётчика в основном меню и скрывает служебные настройки", () => {
+    expect(selectProductSettingsNav(ADMIN_NAV, "calc").map(({ path }) => path)).toEqual([
+      "/env", "/models",
+    ]);
+    expect(selectServiceNav(ADMIN_NAV, "calc")).toEqual([]);
+  });
   it("формирует настройки отдельно от служебных экранов", () => {
     expect(selectProductSettingsNav(ADMIN_NAV).map((item) => item.path)).toEqual([
       "/env",
@@ -66,6 +84,7 @@ describe("secondary navigation", () => {
 describe("productHomePath", () => {
   it("делает вкладку агентов домашним экраном fleet", () => {
     expect(productHomePath("fleet")).toBe("/agents");
+    expect(productHomePath("calc")).toBe("/agents");
     expect(productHomePath(null)).toBe("/sessions");
   });
 });

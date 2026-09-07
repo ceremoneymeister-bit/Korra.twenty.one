@@ -53,6 +53,7 @@ import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import { agentSettingsHref, MAIN_AGENT_TAB } from "@/lib/agent-tabs";
 import { useAgentTabs } from "@/hooks/useAgentTabs";
+import { productUiMode } from "@/lib/dashboard-flags";
 
 /* ------------------------------------------------------------------ */
 /*  AgentWorkbenchPage (default export)                                */
@@ -84,6 +85,7 @@ function tabMenuLeft(trigger: DOMRect): number {
 }
 
 export default function AgentWorkbenchPage() {
+  const managedCalculator = productUiMode() === "calc";
   // Состав вкладок — реальные профили контура (см. lib/agent-tabs.ts):
   // главная «Корра» есть всегда, остальные приезжают из /api/profiles и
   // подхватываются без перезагрузки страницы.
@@ -482,7 +484,7 @@ export default function AgentWorkbenchPage() {
               );
             })}
           </div>
-          <button
+          {(!managedCalculator || hiddenTabs.length > 0) && <button
             type="button"
             aria-label="Добавить вкладку агента"
             aria-haspopup="menu"
@@ -498,7 +500,7 @@ export default function AgentWorkbenchPage() {
             )}
           >
             <Plus size={18} aria-hidden />
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -545,7 +547,7 @@ export default function AgentWorkbenchPage() {
               </form>
             ) : (
               <>
-                <button
+                {!managedCalculator && <button
                   type="button"
                   role="menuitem"
                   className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
@@ -556,12 +558,12 @@ export default function AgentWorkbenchPage() {
                 >
                   <Pencil size={15} aria-hidden />
                   Переименовать
-                </button>
+                </button>}
                 {/* Настройки *этого* агента, а не список всех: редактор роли
                     и модели в «Настройках агентов» открывается по адресу
                     `/profiles?agent=<профиль>&edit=role|model` (договорённость с
                     Астрой 05.09). Главная вкладка — профиль панели, `default`. */}
-                <button
+                {!managedCalculator && <button
                   type="button"
                   role="menuitem"
                   className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
@@ -572,14 +574,14 @@ export default function AgentWorkbenchPage() {
                 >
                   <FileText size={15} aria-hidden />
                   Роль и поведение
-                </button>
+                </button>}
                 <button
                   type="button"
                   role="menuitem"
                   className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
                   onClick={() => {
                     setOpenMenu(null);
-                    navigate(agentSettingsHref(menuTab.profile, "model"));
+                    navigate(managedCalculator ? "/models" : agentSettingsHref(menuTab.profile, "model"));
                   }}
                 >
                   <Cpu size={15} aria-hidden />
@@ -588,7 +590,7 @@ export default function AgentWorkbenchPage() {
                 {/* Обучение агента живёт в трёх разделах панели; из меню
                     вкладки они открываются сразу для этого агента (адрес
                     несёт `?profile=`), а не для запомненного в разделе. */}
-                <button
+                {!managedCalculator && <button
                   type="button"
                   role="menuitem"
                   className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
@@ -599,8 +601,8 @@ export default function AgentWorkbenchPage() {
                 >
                   <Package size={15} aria-hidden />
                   Навыки
-                </button>
-                <button
+                </button>}
+                {!managedCalculator && <button
                   type="button"
                   role="menuitem"
                   className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
@@ -611,7 +613,7 @@ export default function AgentWorkbenchPage() {
                 >
                   <Clock size={15} aria-hidden />
                   Расписание
-                </button>
+                </button>}
                 <button
                   type="button"
                   role="menuitem"
@@ -662,7 +664,7 @@ export default function AgentWorkbenchPage() {
                     Скрыть вкладку
                   </button>
                 )}
-                {menuTab.profile !== MAIN_AGENT_TAB.profile && (
+                {!managedCalculator && menuTab.profile !== MAIN_AGENT_TAB.profile && (
                   <button
                     type="button"
                     role="menuitem"
@@ -718,7 +720,7 @@ export default function AgentWorkbenchPage() {
                 <span className="min-w-0 truncate">{tab.label}</span>
               </button>
             ))}
-            <button
+            {!managedCalculator && <button
               type="button"
               role="menuitem"
               className="neo-select-option flex w-full items-center gap-2 px-3 py-2 text-left font-sans text-sm normal-case tracking-normal"
@@ -729,7 +731,7 @@ export default function AgentWorkbenchPage() {
             >
               <UserRoundPlus size={15} aria-hidden />
               Создать нового агента
-            </button>
+            </button>}
           </div>,
           document.body,
         )}

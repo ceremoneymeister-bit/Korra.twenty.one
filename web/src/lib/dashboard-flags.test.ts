@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { isProductUiMode, productUiMode } from "./dashboard-flags";
+import { isDashboardBubbleChatEnabled, isProductUiMode, productUiMode } from "./dashboard-flags";
 
 function setUiMode(mode: string | undefined) {
   (globalThis as { window?: unknown }).window = { __KORRA_UI_MODE__: mode };
@@ -15,6 +15,13 @@ describe("productUiMode", () => {
     setUiMode("fleet");
     expect(productUiMode()).toBe("fleet");
     expect(isProductUiMode()).toBe(true);
+  });
+
+  it("включает рабочее место расчётчика с обычным чатом", () => {
+    setUiMode("calc");
+    expect(productUiMode()).toBe("calc");
+    expect(isProductUiMode()).toBe(true);
+    expect(isDashboardBubbleChatEnabled()).toBe(true);
   });
 
   it("любое другое значение означает административную панель", () => {

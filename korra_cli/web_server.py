@@ -2661,6 +2661,18 @@ def _dashboard_local_update_managed_externally() -> bool:
 
 
 def _managed_files_policy(request: Request, *, create_root: bool = True) -> ManagedFilesPolicy:
+    from korra_cli.calc_policy import calculator_mode
+
+    if calculator_mode():
+        # Same shared client root as chat uploads, including named agents.
+        # Credentials, engine state and enterprise packs stay outside it.
+        raw_root = _chat_client_root()
+        root = _ensure_managed_root(raw_root) if create_root else _canonical_path(raw_root)
+        inbox = root / "inbox"
+        if create_root:
+            inbox.mkdir(parents=True, exist_ok=True)
+        return ManagedFilesPolicy(default_path=inbox, locked_root=root, can_change_path=False)
+
     raw_forced_root = korra_env(_MANAGED_FILES_ROOT_ENV, "").strip()
     if raw_forced_root:
         root = _ensure_managed_root(raw_forced_root) if create_root else _canonical_path(Path(raw_forced_root))
@@ -2743,6 +2755,13 @@ def _resolve_managed_path(
     if root is not None and not _path_is_under(root, resolved):
         raise HTTPException(status_code=403, detail="Path outside managed files root")
 
+    from korra_cli.calc_policy import calculator_mode
+
+    if calculator_mode() and (for_write or request.method not in {"GET", "HEAD", "OPTIONS"}):
+        inbox = root / "inbox"
+        if resolved == inbox or not _path_is_under(inbox, resolved):
+            raise HTTPException(status_code=403, detail="Изменять можно только файлы в папке inbox")
+
     return policy, resolved, str(resolved)
 
 
@@ -2798,6 +2817,10 @@ def _managed_file_entry(policy: ManagedFilesPolicy, target: Path) -> Dict[str, A
     }
     hidden = literal.name.startswith(".") or _is_private_managed_path(literal)
     mutation_root = policy.locked_root or policy.default_path
+    from korra_cli.calc_policy import calculator_mode
+
+    if calculator_mode():
+        mutation_root = mutation_root / "inbox"
     mutable = (
         not hidden
         and literal != mutation_root
@@ -9091,7 +9114,10 @@ async def get_config(profile: Optional[str] = None):
 
     config = await asyncio.to_thread(_run)
     # Strip internal keys that the frontend shouldn't see or send back
-    return {k: v for k, v in config.items() if not k.startswith("_")}
+    config = {k: v for k, v in config.items() if not k.startswith("_")}
+    from korra_cli.calc_policy import calculator_mode, redact_runtime_config
+
+    return redact_runtime_config(config) if calculator_mode() else config
 
 
 @app.get("/api/config/defaults")
@@ -10293,6 +10319,9 @@ def _get_env_vars_sync(profile: Optional[str] = None):
 
 @app.put("/api/env")
 async def set_env_var(body: EnvVarUpdate, profile: Optional[str] = None):
+    from korra_cli.calc_policy import require_calculator_credential_key
+
+    require_calculator_credential_key(body.key)
     def _run():
         with _profile_scope(body.profile or profile):
             # Unified credential lifecycle: writes .env AND reconciles any
@@ -10793,6 +10822,9 @@ async def validate_provider_credential(body: EnvVarUpdate, request: Request):
 
 @app.delete("/api/env")
 async def remove_env_var(body: EnvVarDelete, profile: Optional[str] = None):
+    from korra_cli.calc_policy import require_calculator_credential_key
+
+    require_calculator_credential_key(body.key)
     def _run():
         with _profile_scope(body.profile or profile):
             # Unified credential lifecycle: clears the .env entry AND every
@@ -10833,6 +10865,9 @@ async def reveal_env_var(
     - Rate limiting (max 5 reveals per 30s window)
     - Audit logging
     """
+    from korra_cli.calc_policy import require_calculator_credential_key
+
+    require_calculator_credential_key(body.key)
     # --- Token check ---
     _require_token(request)
 
@@ -15538,6 +15573,10 @@ def _normalize_mcp_server_create(
 
 def _redact_mcp_env(env: Dict[str, Any]) -> Dict[str, str]:
     """Mask secret-shaped MCP env values for read responses."""
+    from korra_cli.calc_policy import calculator_mode
+
+    if calculator_mode():
+        return {str(k): "***" if v else "" for k, v in (env or {}).items()}
     out: Dict[str, str] = {}
     for k, v in (env or {}).items():
         try:
@@ -15593,6 +15632,15 @@ from korra_cli.web_routers.mcp import (  # noqa: E402,F401 — legacy re-exports
 
 
 
+
+
+from korra_cli.web_routers import calc_orders as _calc_orders_routes  # noqa: E402
+from korra_cli.web_routers import calc_rates as _calc_rates_routes  # noqa: E402
+from korra_cli.calc_policy import CalculatorBoundaryMiddleware  # noqa: E402
+
+app.include_router(_calc_orders_routes.router)
+app.include_router(_calc_rates_routes.router)
+app.add_middleware(CalculatorBoundaryMiddleware)
 
 
 _MCP_DASHBOARD_OAUTH_TTL = 15 * 60

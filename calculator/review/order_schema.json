@@ -1,0 +1,1071 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ceremoneymeister.xyz/schemas/metal-calc-order-v1.json",
+  "title": "Заказ расчётчика металлообработки, v1",
+  "description": "Строгая схема реестра metal_calc. Денежные поля создаёт только детерминированный calculate_quote; модель не вычисляет cost, price или margin.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "order_id",
+    "customer",
+    "source_files",
+    "status",
+    "warnings",
+    "timestamps",
+    "provenance"
+  ],
+  "properties": {
+    "order_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "description": "Идентификатор заказа и допустимый сегмент каталога; разделители пути исключены."
+    },
+    "customer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "contact": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "external_ref": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Номер в CRM/ERP клиента, если он есть."
+        }
+      }
+    },
+    "source_files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_file_id",
+          "name",
+          "sha256",
+          "format",
+          "bytes",
+          "received_at"
+        ],
+        "properties": {
+          "source_file_id": {
+            "type": "string",
+            "pattern": "^src_[0-9a-f]{16,64}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "format": {
+            "enum": [
+              "dxf",
+              "dwg",
+              "pdf"
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20971520,
+            "description": "20 MiB: лимит входного файла v1 через публичный Telegram Bot API."
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "grade",
+        "thickness_mm",
+        "density_kg_m3"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "grade": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "thickness_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "density_kg_m3": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "supplier": {
+          "type": "string",
+          "maxLength": 128
+        }
+      }
+    },
+    "manual_facts": {
+      "type": "array",
+      "description": "Server-managed подтверждённые человеком величины. order_upsert не создаёт и не изменяет их.",
+      "items": {
+        "$ref": "#/$defs/manual_fact"
+      }
+    },
+    "stages": {
+      "type": "object",
+      "description": "Конвейер V2 (заготовка/маршрут/время/КП). Содержимое валидирует и пишет только service2; order_upsert его не трогает.",
+      "additionalProperties": false,
+      "properties": {
+        "blank": {
+          "type": "object"
+        },
+        "route": {
+          "type": "object"
+        },
+        "time": {
+          "type": "object"
+        },
+        "quote": {
+          "type": "object"
+        }
+      }
+    },
+    "pipeline_events": {
+      "type": "array",
+      "description": "Журнал событий конвейера V2 для handoff-раннера; пишет только service2.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage",
+          "event",
+          "at"
+        ],
+        "properties": {
+          "stage": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Детерминированный слой cadkit. Гибы не входят в контракт v1.",
+      "required": [
+        "revision",
+        "input_sha256",
+        "parts",
+        "confidence",
+        "analyzed_at"
+      ],
+      "properties": {
+        "revision": {
+          "type": "string",
+          "pattern": "^geo_[0-9a-f]{16,64}$"
+        },
+        "input_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "part_ref",
+              "area_mm2",
+              "outer_area_mm2",
+              "cut_length_mm",
+              "holes",
+              "pierces",
+              "bbox_mm",
+              "quantity"
+            ],
+            "properties": {
+              "part_ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "area_mm2": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "outer_area_mm2": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "cut_length_mm": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "holes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pierces": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "bbox_mm": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                ],
+                "items": false
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "confidence": {
+          "enum": [
+            "deterministic",
+            "text_only",
+            "unknown"
+          ],
+          "description": "Только deterministic разрешает автоматический costing. PDF до отдельного pipeline получает text_only или unknown."
+        },
+        "analyzed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "mass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "computed_kg"
+      ],
+      "properties": {
+        "computed_kg": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stamp_kg": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Масса по штампу чертежа, если указана."
+        },
+        "deviation_pct": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Расхождение computed и stamp; превышение клиентского порога создаёт stop-warning."
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/cost_line",
+        "description": "Операционная строка расчёта; material хранится только в cost.lines.",
+        "required": [
+          "code",
+          "category",
+          "quantity",
+          "unit",
+          "quantity_source",
+          "rate_rub",
+          "rate_source",
+          "subtotal_rub"
+        ],
+        "properties": {
+          "category": {
+            "enum": [
+              "cut",
+              "pierce",
+              "bend",
+              "weld",
+              "paint",
+              "galvanize",
+              "machining",
+              "assembly",
+              "logistics",
+              "other"
+            ]
+          }
+        }
+      }
+    },
+    "calculation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Воспроизводимый результат calculate_quote; модель не заполняет этот объект.",
+      "required": [
+        "engine",
+        "geometry_revision",
+        "rates_revision",
+        "rates_sha256",
+        "pricing_policy_revision",
+        "input_sha256",
+        "output_sha256",
+        "decimal_places",
+        "effective_quantities",
+        "effective_mass_kg",
+        "applied_manual_fact_ids",
+        "calculated_at",
+        "abstain"
+      ],
+      "properties": {
+        "engine": {
+          "const": "metal_calc_mcp"
+        },
+        "geometry_revision": {
+          "type": "string",
+          "pattern": "^geo_[0-9a-f]{16,64}$"
+        },
+        "rates_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "rates_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "pricing_policy_revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "input_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "output_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "decimal_places": {
+          "const": 2
+        },
+        "effective_quantities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "part_ref",
+              "quantity",
+              "fact_id"
+            ],
+            "properties": {
+              "part_ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "fact_id": {
+                "type": "string",
+                "pattern": "^fact_[0-9a-f]{16,64}$"
+              }
+            }
+          }
+        },
+        "effective_mass_kg": {
+          "type": "number",
+          "minimum": 0
+        },
+        "applied_manual_fact_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^fact_[0-9a-f]{16,64}$"
+          }
+        },
+        "offcut_model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "source"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "percent_of_area",
+                "nesting_measured"
+              ]
+            },
+            "percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "source": {
+              "$ref": "#/$defs/value_source"
+            }
+          }
+        },
+        "calculated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "abstain": {
+          "type": "boolean"
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Себестоимость, пересчитанная из line items calculate_quote.",
+      "required": [
+        "lines",
+        "material_rub",
+        "operations_rub",
+        "logistics_rub",
+        "total_rub",
+        "rounding"
+      ],
+      "properties": {
+        "lines": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/cost_line"
+          }
+        },
+        "material_rub": {
+          "$ref": "#/$defs/money"
+        },
+        "operations_rub": {
+          "$ref": "#/$defs/money"
+        },
+        "logistics_rub": {
+          "$ref": "#/$defs/money"
+        },
+        "total_rub": {
+          "$ref": "#/$defs/money"
+        },
+        "rounding": {
+          "enum": [
+            "none",
+            "up_10",
+            "up_100",
+            "bankers"
+          ]
+        }
+      }
+    },
+    "price": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "net_total_rub",
+        "vat_amount_rub",
+        "total_rub",
+        "currency",
+        "vat_included",
+        "valid_until"
+      ],
+      "properties": {
+        "net_total_rub": {
+          "$ref": "#/$defs/money",
+          "description": "Цена без НДС; база экономической маржи."
+        },
+        "vat_amount_rub": {
+          "$ref": "#/$defs/money",
+          "description": "Сумма НДС; ноль для цены без НДС."
+        },
+        "total_rub": {
+          "$ref": "#/$defs/money"
+        },
+        "currency": {
+          "const": "RUB"
+        },
+        "vat_included": {
+          "type": "boolean"
+        },
+        "vat_rate_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "valid_until": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    },
+    "margin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "absolute_rub",
+        "percent",
+        "basis"
+      ],
+      "properties": {
+        "absolute_rub": {
+          "$ref": "#/$defs/money"
+        },
+        "percent": {
+          "type": "number",
+          "minimum": 0
+        },
+        "basis": {
+          "enum": [
+            "on_cost",
+            "on_price"
+          ],
+          "description": "calculate_quote проверяет процент по указанному базису."
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_id",
+          "kind",
+          "order_path",
+          "sha256",
+          "bytes",
+          "created_at",
+          "delivery"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "pattern": "^art_[0-9a-f]{16,64}$"
+          },
+          "kind": {
+            "const": "quote_xlsx"
+          },
+          "order_path": {
+            "type": "string",
+            "pattern": "^out/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\\.xlsx$",
+            "description": "Внутренний относительный путь. В MEDIA не используется."
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "delivery": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "delivery_id",
+              "media_path",
+              "sha256",
+              "staged_at",
+              "expires_at"
+            ],
+            "properties": {
+              "delivery_id": {
+                "type": "string",
+                "pattern": "^delivery_[0-9a-f]{16,64}$"
+              },
+              "media_path": {
+                "type": "string",
+                "pattern": "^/opt/data/delivery/[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\\.xlsx$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "staged_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "received",
+        "analyzing",
+        "needs_human",
+        "calculated",
+        "quoted",
+        "won",
+        "lost",
+        "cancelled",
+        "draft",
+        "INPUT_FROZEN",
+        "BOM_VALIDATED",
+        "ROUTE_OPTIONS_READY",
+        "PRELIMINARY_READY",
+        "ROUTE_SELECTED",
+        "ROUTE_FROZEN",
+        "DETAILED_COSTING",
+        "COSTING_COMPLETE",
+        "BOOK_ASSEMBLED",
+        "QA_MECHANICAL_PASS",
+        "QA_TECHNOLOGICAL_PASS",
+        "READY_FOR_LD",
+        "BLOCK_FOR_TECH_REVIEW"
+      ],
+      "description": "needs_human останавливает автоматический выпуск КП."
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "enum": [
+              "core_mismatch",
+              "mass_deviation",
+              "open_contour",
+              "missing_rate",
+              "missing_quantity",
+              "missing_material",
+              "unit_ambiguous",
+              "unsupported_format",
+              "text_only_geometry",
+              "geometry_unverified",
+              "offcut_unknown",
+              "digest_mismatch",
+              "other"
+            ]
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warn",
+              "stop"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "part_ref": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      }
+    },
+    "timestamps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "quoted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "closed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Точные версии, нужные для воспроизводимости расчёта.",
+      "required": [
+        "image_digest",
+        "metal_calc_version",
+        "computed_by"
+      ],
+      "properties": {
+        "image_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "metal_calc_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "cadkit_version": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "ezdxf_version": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "shapely_version": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "rates_revision": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "analysis_rates_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "computed_by": {
+          "const": "metal_calc_mcp"
+        }
+      }
+    },
+    "workflow": {
+      "type": "object"
+    },
+    "bom": {
+      "type": "object"
+    },
+    "route_variants": {
+      "type": "object"
+    },
+    "costing": {
+      "type": "object"
+    },
+    "book": {
+      "type": "object"
+    },
+    "qa": {
+      "type": "object"
+    },
+    "workflow_events": {
+      "type": "array"
+    },
+    "workflow_history": {
+      "type": "array"
+    }
+  },
+  "$defs": {
+    "money": {
+      "type": "number",
+      "minimum": 0,
+      "multipleOf": 0.01
+    },
+    "value_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "client_canon",
+            "supplier_quote",
+            "manual_override",
+            "unknown"
+          ],
+          "description": "unknown создаёт stop-warning и запрещает calculated/quoted."
+        },
+        "ref": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "as_of": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    },
+    "cost_line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "category",
+        "quantity",
+        "unit",
+        "quantity_source",
+        "rate_rub",
+        "rate_source",
+        "subtotal_rub"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "category": {
+          "enum": [
+            "material",
+            "cut",
+            "pierce",
+            "bend",
+            "weld",
+            "paint",
+            "galvanize",
+            "machining",
+            "assembly",
+            "logistics",
+            "other"
+          ]
+        },
+        "quantity": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unit": {
+          "enum": [
+            "m",
+            "m2",
+            "kg",
+            "pcs",
+            "hour",
+            "bend",
+            "layer"
+          ]
+        },
+        "quantity_source": {
+          "$ref": "#/$defs/value_source"
+        },
+        "rate_rub": {
+          "type": "number",
+          "minimum": 0
+        },
+        "rate_source": {
+          "$ref": "#/$defs/value_source"
+        },
+        "subtotal_rub": {
+          "$ref": "#/$defs/money"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    },
+    "manual_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fact_id",
+        "code",
+        "value",
+        "unit",
+        "source_ref",
+        "source_sha256",
+        "approved_by",
+        "approved_at"
+      ],
+      "properties": {
+        "fact_id": {
+          "type": "string",
+          "pattern": "^fact_[0-9a-f]{16,64}$"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unit": {
+          "enum": [
+            "m",
+            "m2",
+            "kg",
+            "pcs",
+            "hour",
+            "bend",
+            "layer"
+          ]
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "approved_by": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "margin": {
+            "properties": {
+              "basis": {
+                "const": "on_price"
+              }
+            },
+            "required": [
+              "basis"
+            ]
+          }
+        },
+        "required": [
+          "margin"
+        ]
+      },
+      "then": {
+        "properties": {
+          "margin": {
+            "properties": {
+              "percent": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "calculated",
+              "quoted",
+              "won",
+              "lost"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "material",
+          "geometry",
+          "mass",
+          "operations",
+          "calculation",
+          "cost",
+          "price",
+          "margin"
+        ],
+        "properties": {
+          "calculation": {
+            "properties": {
+              "abstain": {
+                "const": false
+              }
+            },
+            "required": [
+              "abstain"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "quoted",
+              "won",
+              "lost"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "artifacts"
+        ],
+        "properties": {
+          "artifacts": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

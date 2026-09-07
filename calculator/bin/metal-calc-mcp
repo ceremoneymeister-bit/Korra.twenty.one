@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+export CADKIT_DWG2DXF="/opt/metal-calc/bin/dwg2dxf"
+exec /opt/metal-calc/.venv/bin/python -m metal_calc.mcp_server "$@"

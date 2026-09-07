@@ -29,7 +29,7 @@ def _cache_path() -> Path:
 
 
 def config_fingerprint(config: dict) -> str:
-    """Stable hash of the connection-defining parts of an MCP server config."""
+    """Stable hash of connection and model-visible schema configuration."""
     tools_filter = config.get("tools") or {}
     payload = {
         "command": config.get("command"),
@@ -38,6 +38,7 @@ def config_fingerprint(config: dict) -> str:
         "transport": config.get("transport"),
         "tools_include": sorted(tools_filter.get("include") or []),
         "tools_exclude": sorted(tools_filter.get("exclude") or []),
+        "context_arguments": config.get("context_arguments") or {},
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

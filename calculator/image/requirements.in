@@ -1,0 +1,5 @@
+# Runtime supplements supplied by the former engine environment.
+# Keep the legacy XLSX XML serializer explicitly in the isolated kernel venv.
+lxml==6.1.1
+# CAD font handling is an image requirement as well as an ezdxf dependency.
+fonttools==4.63.0

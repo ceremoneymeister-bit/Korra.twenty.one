@@ -1,0 +1,8 @@
+image/.context/
+image/*-receipt.json
+metal_calc/.venv/
+metal_calc/.pytest_cache/
+**/__pycache__/
+**/*.egg-info/
+**/build/
+**/dist/

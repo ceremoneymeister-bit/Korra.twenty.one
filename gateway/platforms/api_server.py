@@ -1190,7 +1190,9 @@ class ResponseStore:
 
 _CORS_HEADERS = {
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key",
+    "Access-Control-Allow-Headers": (
+        "Authorization, Content-Type, Idempotency-Key, X-Hermes-Tool-Scope"
+    ),
 }
 
 
@@ -2367,6 +2369,7 @@ class APIServerAdapter(BasePlatformAdapter):
     # (e.g. ``agent:main:webui:dm:user-42``) while staying small enough
     # that the sanitized form is safe to pass into Honcho / state.db.
     _MAX_SESSION_HEADER_LEN = 256
+    _MAX_TOOL_SCOPE_HEADER_LEN = 256
 
     def _parse_session_key_header(
         self, request: "web.Request"
@@ -2418,6 +2421,35 @@ class APIServerAdapter(BasePlatformAdapter):
                 status=400,
             )
 
+        return raw, None
+
+    def _parse_tool_scope_header(
+        self, request: "web.Request"
+    ) -> tuple[str, Optional["web.Response"]]:
+        """Validate an authenticated, request-only MCP capability header.
+
+        The value is never returned in a response or persisted with the
+        session. `_admit_api_agent_request` authenticates this endpoint before
+        the parser runs; requiring a configured key also prevents unsupported
+        no-key/manual wiring from gaining this trusted channel.
+        """
+        raw = request.headers.get("X-Hermes-Tool-Scope", "").strip()
+        if not raw:
+            return "", None
+        if not self._expected_api_key():
+            return "", web.json_response(
+                _openai_error(
+                    "X-Hermes-Tool-Scope requires API key authentication"
+                ),
+                status=403,
+            )
+        if (
+            len(raw) > self._MAX_TOOL_SCOPE_HEADER_LEN
+            or re.fullmatch(r"[A-Za-z0-9._-]+", raw) is None
+        ):
+            return "", web.json_response(
+                _openai_error("Invalid tool scope"), status=400
+            )
         return raw, None
 
     # ------------------------------------------------------------------
@@ -5310,6 +5342,10 @@ class APIServerAdapter(BasePlatformAdapter):
         if limited is not None:
             return limited
 
+        trusted_tool_scope, scope_err = self._parse_tool_scope_header(request)
+        if scope_err is not None:
+            return scope_err
+
         # Parse request body
         try:
             body = await request.json()
@@ -5627,6 +5663,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     tool_complete_callback=_on_tool_complete,
                     agent_ref=agent_ref,
                     gateway_session_key=gateway_session_key,
+                    trusted_tool_scope=trusted_tool_scope,
                     **agent_overrides,
                     route=route,
                 ))
@@ -5654,6 +5691,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 ephemeral_system_prompt=system_prompt,
                 session_id=session_id,
                 gateway_session_key=gateway_session_key,
+                trusted_tool_scope=trusted_tool_scope,
                 **agent_overrides,
                 route=route,
             )
@@ -5672,6 +5710,12 @@ class APIServerAdapter(BasePlatformAdapter):
                     "stream",
                 ],
             )
+            # Replays must stay inside the same request capability/profile.
+            # Store only the digest; the signed capability never enters logs,
+            # cached response bodies, persisted sessions or model messages.
+            fp = hashlib.sha256(
+                f"{fp}\0{_api_request_profile.get() or ''}\0{trusted_tool_scope}".encode()
+            ).hexdigest()
             try:
                 result, usage = await _idem_cache.get_or_set(
                     idempotency_key, fp, _compute_completion
@@ -7612,6 +7656,7 @@ class APIServerAdapter(BasePlatformAdapter):
         browser_control_principal: str = "",
         browser_control_transport_family: str = "",
         session_source: str = "",
+        trusted_tool_scope: str = "",
     ) -> list:
         """Bind session contextvars for an API-server agent run.
 
@@ -7639,6 +7684,7 @@ class APIServerAdapter(BasePlatformAdapter):
         return set_session_vars(
             platform="api_server",
             source=session_source,
+            trusted_tool_scope=trusted_tool_scope,
             chat_id=chat_id,
             session_key=session_key,
             session_id=session_id,
@@ -7669,6 +7715,7 @@ class APIServerAdapter(BasePlatformAdapter):
         requested_runtime: Optional[Dict[str, Any]] = None,
         route_source: str = "global",
         confirmed_runtime_lock: bool = False,
+        trusted_tool_scope: str = "",
     ) -> tuple:
         """
         Create an agent and run a conversation in a thread executor.
@@ -7725,6 +7772,7 @@ class APIServerAdapter(BasePlatformAdapter):
                         request_browser_control_transport_family
                     ),
                     session_source=request_session_source,
+                    trusted_tool_scope=trusted_tool_scope,
                 )
                 agent = None
                 try:

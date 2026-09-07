@@ -33,6 +33,9 @@ Example config::
         env:
           GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_..."
         supports_parallel_tool_calls: true  # tools from this server may run concurrently
+        context_arguments:
+          protected_tool:
+            hermes_session_context: request_scope  # hidden, request-only context
       remote_api:
         url: "https://my-mcp-server.example.com/mcp"
         headers:
@@ -6068,14 +6071,37 @@ def _ensure_healthy_or_recycle(server: Any, server_name: str) -> None:
         _signal_reconnect(server)
 
 
-def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
+def _make_tool_handler(
+    server_name: str,
+    tool_name: str,
+    tool_timeout: float,
+    context_arguments: Optional[Dict[str, str]] = None,
+):
     """Return a sync handler that calls an MCP tool via the background loop.
 
     The handler conforms to the registry's dispatch interface:
     ``handler(args_dict, **kwargs) -> str``
     """
 
+    trusted_context = dict(context_arguments or {})
+
     def _handler(args: dict, **kwargs) -> str:
+        call_args = dict(args or {})
+        for argument_name, context_name in trusted_context.items():
+            if context_name == "request_scope":
+                from gateway.session_context import get_trusted_tool_scope
+
+                value = get_trusted_tool_scope()
+            else:
+                value = kwargs.get(context_name)
+            if not isinstance(value, str) or not value:
+                return tool_error(
+                    f"MCP tool '{tool_name}' requires trusted request context "
+                    f"'{context_name}'"
+                )
+            # An unadvertised model-supplied field cannot override the scope.
+            call_args[argument_name] = value
+
         # Trust-tier gate (security boundary): write-capable tools on
         # servers configured ``trust: untrusted`` must be approved by the
         # user before ANY transport work happens — including the lazy
@@ -6183,7 +6209,7 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                             f"exited; failing the call fast instead of "
                             f"waiting {float(tool_timeout):.0f}s"
                         )
-                    _call_coro = server.session.call_tool(tool_name, arguments=args)
+                    _call_coro = server.session.call_tool(tool_name, arguments=call_args)
                     _watch_children = getattr(server, "_watch_stdio_children", None)
                     _watch_ok = (
                         _watch_children is not None
@@ -6894,6 +6920,71 @@ def _convert_mcp_schema(server_name: str, mcp_tool) -> dict:
     }
 
 
+_TRUSTED_MCP_CONTEXT_SOURCES = frozenset(
+    {"session_id", "task_id", "request_scope"}
+)
+
+
+def _context_arguments_for_tool(config: dict, tool_name: str) -> Dict[str, str]:
+    """Resolve hidden MCP arguments supplied by Hermes, never by the model.
+
+    ``context_arguments`` is keyed by raw MCP tool name. An optional ``*``
+    block applies defaults which an exact tool block may extend or override.
+    Invalid configuration raises so discovery fails closed instead of
+    publishing an unprotected schema.
+    """
+    raw = config.get("context_arguments")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("MCP context_arguments must be an object")
+    merged: Dict[str, str] = {}
+    for selector in ("*", tool_name):
+        selected = raw.get(selector)
+        if selected is None:
+            continue
+        if not isinstance(selected, dict):
+            raise ValueError(
+                f"MCP context_arguments.{selector} must be an object"
+            )
+        for argument_name, context_name in selected.items():
+            if not isinstance(argument_name, str) or not argument_name:
+                raise ValueError("MCP hidden argument names must be non-empty strings")
+            if context_name not in _TRUSTED_MCP_CONTEXT_SOURCES:
+                raise ValueError(
+                    f"Unsupported trusted MCP context source: {context_name!r}"
+                )
+            merged[argument_name] = context_name
+    return merged
+
+
+def _hide_mcp_context_arguments(
+    schema: dict, context_arguments: Dict[str, str]
+) -> dict:
+    """Remove trusted-only parameters from the model-visible tool schema."""
+    if not context_arguments:
+        return schema
+    updated = dict(schema)
+    parameters = dict(updated.get("parameters") or {})
+    properties = dict(parameters.get("properties") or {})
+    missing = sorted(set(context_arguments) - set(properties))
+    if missing:
+        raise ValueError(
+            "Configured MCP context argument(s) absent from server schema: "
+            + ", ".join(missing)
+        )
+    for argument_name in context_arguments:
+        properties.pop(argument_name, None)
+    parameters["properties"] = properties
+    required = parameters.get("required")
+    if isinstance(required, list):
+        parameters["required"] = [
+            name for name in required if name not in context_arguments
+        ]
+    updated["parameters"] = parameters
+    return updated
+
+
 def _build_utility_schemas(server_name: str) -> List[dict]:
     """Build schemas for the MCP utility tools (resources & prompts).
 
@@ -7223,14 +7314,20 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
             continue
 
         _scan_mcp_description(name, mcp_tool.name, mcp_tool.description or "")
-        schema = _convert_mcp_schema(name, mcp_tool)
+        context_arguments = _context_arguments_for_tool(config, mcp_tool.name)
+        schema = _hide_mcp_context_arguments(
+            _convert_mcp_schema(name, mcp_tool), context_arguments
+        )
         candidates.append(
             {
                 "registry_name": schema["name"],
                 "origin": f"tool {mcp_tool.name!r}",
                 "schema": schema,
                 "handler": _make_tool_handler(
-                    name, mcp_tool.name, server.tool_timeout
+                    name,
+                    mcp_tool.name,
+                    server.tool_timeout,
+                    context_arguments,
                 ),
                 "check_fn": check_fn,
             }
@@ -7502,7 +7599,10 @@ def _register_from_cache_sync(name: str, config: dict, entry: dict) -> List[str]
         # Defense-in-depth: the cache file is user-writable JSON, so run the
         # same injection scan the eager discovery path applies.
         _scan_mcp_description(name, mcp_tool.name, mcp_tool.description or "")
-        schema = _convert_mcp_schema(name, mcp_tool)
+        context_arguments = _context_arguments_for_tool(config, raw_name)
+        schema = _hide_mcp_context_arguments(
+            _convert_mcp_schema(name, mcp_tool), context_arguments
+        )
         registry_name = schema["name"]
         existing_toolset = registry.get_toolset_for_tool(registry_name)
         if existing_toolset and existing_toolset != toolset_name:
@@ -7516,7 +7616,9 @@ def _register_from_cache_sync(name: str, config: dict, entry: dict) -> List[str]
             name=registry_name,
             toolset=toolset_name,
             schema=schema,
-            handler=_make_tool_handler(name, raw_name, tool_timeout),
+            handler=_make_tool_handler(
+                name, raw_name, tool_timeout, context_arguments
+            ),
             check_fn=check_fn,
             is_async=False,
             description=schema["description"],

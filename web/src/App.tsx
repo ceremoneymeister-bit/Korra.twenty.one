@@ -80,6 +80,9 @@ import type { SystemAction } from "@/contexts/system-actions-context";
 const ConfigPage = lazy(() => import("@/pages/ConfigPage"));
 const DocsPage = lazy(() => import("@/pages/DocsPage"));
 const ClientHelpPage = lazy(() => import("@/pages/ClientHelpPage"));
+const CalcHelpPage = lazy(() => import("@/pages/CalcHelpPage"));
+const CalcOrdersPage = lazy(() => import("@/pages/CalcOrdersPage"));
+const CalcDataPage = lazy(() => import("@/pages/CalcDataPage"));
 const EnvPage = lazy(() => import("@/pages/EnvPage"));
 const FilesPage = lazy(() => import("@/pages/FilesPage"));
 const SessionsPage = lazy(() => import("@/pages/SessionsPage"));
@@ -171,6 +174,10 @@ function RootRedirect() {
   return <Navigate to={productHomePath(productUiMode())} replace />;
 }
 
+function HelpRoute() {
+  return productUiMode() === "calc" ? <CalcHelpPage /> : <ClientHelpPage />;
+}
+
 function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
   if (pluginsLoading) {
     // Render nothing during the plugin-load window — a spinner here would just flash.
@@ -224,8 +231,8 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/config": ConfigPage,
   "/env": EnvPage,
   "/docs": DocsPage,
-  "/help": ClientHelpPage,
-  "/help/:article": ClientHelpPage,
+  "/help": HelpRoute,
+  "/help/:article": HelpRoute,
   "/ui-kit": UiKitPage,
 };
 
@@ -464,6 +471,7 @@ export default function App() {
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const uiMode = productUiMode();
   const isFleetMode = uiMode === "fleet";
+  const isCalcMode = uiMode === "calc";
   const isChatRoute = normalizedPath === "/chat";
   const isAgentsRoute = normalizedPath === "/agents";
   const isFullHeightRoute =
@@ -526,22 +534,26 @@ export default function App() {
   const builtinRoutes = useMemo(
     () => ({
       ...BUILTIN_ROUTES_CORE,
+      ...(isCalcMode ? { "/orders": CalcOrdersPage, "/rates": CalcDataPage } : {}),
       ...(!isFleetMode && bubbleChat
         ? { "/chat": BubbleChatPage }
         : !isFleetMode && embeddedChat
           ? { "/chat": ChatRouteSink }
           : {}),
     }),
-    [bubbleChat, embeddedChat, isFleetMode],
+    [bubbleChat, embeddedChat, isFleetMode, isCalcMode],
   );
 
   const builtinNav = useMemo(() => {
     const base = embeddedChat
       ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
       : BUILTIN_NAV_REST;
+    const productBase: NavItem[] = uiMode === "calc"
+      ? [...base, { path: "/orders", label: "Заказы", icon: FileText }, { path: "/rates", label: "Данные", icon: Database }]
+      : base;
     const withAnalytics = showTokenAnalytics
-      ? base
-      : base.filter((n) => n.path !== "/analytics");
+      ? productBase
+      : productBase.filter((n) => n.path !== "/analytics");
     return uiMode ? selectProductNav(withAnalytics, uiMode) : withAnalytics;
   }, [embeddedChat, showTokenAnalytics, uiMode]);
 
@@ -549,7 +561,7 @@ export default function App() {
     () => {
       const partitioned = partitionSidebarNav(builtinNav, manifests);
       const workspacePlugins = ["/kanban", "/achievements"].flatMap(path => partitioned.pluginItems.filter(item => item.path === path));
-      if (!workspacePlugins.length || !isProductUiMode()) return partitioned;
+      if (!workspacePlugins.length || uiMode !== "fleet") return partitioned;
       const coreItems = [...partitioned.coreItems];
       const afterTasks = coreItems.findIndex((item) => item.path === "/cron");
       coreItems.splice(afterTasks < 0 ? coreItems.length : afterTasks + 1, 0, ...workspacePlugins);
@@ -558,17 +570,17 @@ export default function App() {
         pluginItems: partitioned.pluginItems.filter((item) => !["/kanban", "/achievements"].includes(item.path)),
       };
     },
-    [builtinNav, manifests],
+    [builtinNav, manifests, uiMode],
   );
   const productSettingsNav = useMemo<NavItem[]>(() => {
-    if (!isProductUiMode()) return [];
+    if (!uiMode) return [];
     const source = embeddedChat || bubbleChat
       ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
       : BUILTIN_NAV_REST;
-    return selectProductSettingsNav(source);
-  }, [bubbleChat, embeddedChat]);
+    return selectProductSettingsNav(source, uiMode);
+  }, [bubbleChat, embeddedChat, uiMode]);
   const productServiceNav = useMemo<NavItem[]>(() => {
-    if (!isProductUiMode()) return [];
+    if (!uiMode || uiMode === "calc") return [];
     const source = embeddedChat || bubbleChat
       ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
       : BUILTIN_NAV_REST;
@@ -576,8 +588,8 @@ export default function App() {
     const pluginItems = partitionSidebarNav(source, manifests).pluginItems.filter(
       (item) => !["/kanban", "/achievements"].includes(item.path),
     );
-    return [...selectServiceNav(source), ...pluginItems];
-  }, [bubbleChat, embeddedChat, manifests]);
+    return [...selectServiceNav(source, uiMode), ...pluginItems];
+  }, [bubbleChat, embeddedChat, manifests, uiMode]);
   // Группы сайдбара — аккордеон (решение владельца 03.09): открыта одна,
   // клик по другой переключает, клик вне сайдбара закрывает.
   const [openGroup, setOpenGroup] = useState<"settings" | "service" | null>(null);

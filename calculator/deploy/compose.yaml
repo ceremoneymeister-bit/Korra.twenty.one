@@ -1,0 +1,41 @@
+services:
+  calculator:
+    image: ${CALC_IMAGE:?Set the verified image ID}
+    container_name: korra-calc21-pilot
+    network_mode: host
+    restart: unless-stopped
+    command: [gateway, run]
+    cpus: 4
+    mem_limit: 6g
+    pids_limit: 512
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "3"
+    env_file: [/opt/korra-calc21-pilot/runtime.env]
+    environment:
+      KORRA_UID: "10000"
+      KORRA_GID: "10000"
+      KORRA_AGENT_SUDO: "0"
+      KORRA_DASHBOARD: "1"
+      KORRA_DASHBOARD_HOST: 127.0.0.1
+      KORRA_DASHBOARD_PORT: "9231"
+      KORRA_DASHBOARD_FILES_ROOT: /opt/data
+      KORRA_MANAGED_DIR: /etc/korra-calc-policy
+      KORRA_UI_MODE: calc
+      KORRA_TIMEZONE: Asia/Novosibirsk
+      API_SERVER_HOST: 127.0.0.1
+      API_SERVER_PORT: "8661"
+      # container_boot reads this env switch before config is loaded. Without
+      # it persisted named-profile intent starts competing listeners on :8661.
+      GATEWAY_MULTIPLEX_PROFILES: "1"
+      API_SERVER_PROXY_TARGET: http://127.0.0.1:8661
+      METAL_CALC_IMAGE_DIGEST: ${CALC_IMAGE}
+      METAL_CALC_GATEWAY_PORT: "8661"
+      METAL_CALC_AUTORUN: "0"
+      CADKIT_DWG2DXF: /opt/metal-calc/bin/dwg2dxf
+    volumes:
+      - /opt/korra-calc21-pilot/data:/opt/data
+      - /opt/korra-calc21-pilot/rates:/etc/metal-calc/rates
+      - /opt/korra-calc21-pilot/policy:/etc/korra-calc-policy:ro
