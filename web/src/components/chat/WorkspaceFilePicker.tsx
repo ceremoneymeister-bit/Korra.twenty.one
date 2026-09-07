@@ -60,7 +60,7 @@ export function WorkspaceFilePicker({ disabled, onPick }: {
                   .finally(() => setBusy(false));
               }}>
               {entry.is_directory && <FolderOpen size={16} aria-hidden />}<span className="min-w-0 flex-1 truncate">{entry.name}</span>
-              {!entry.is_directory && <span className="text-xs text-muted-foreground">{formatSize(entry.size)}</span>}
+              {!entry.is_directory && <span className="text-xs text-muted-foreground">{entry.size === null ? "" : formatSize(entry.size)}</span>}
             </button>)}
         </div>
       </div>
