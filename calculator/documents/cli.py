@@ -29,17 +29,27 @@ def worker(request: dict) -> int:
     seconds = math.ceil(request["timeout"])
     resource.setrlimit(resource.RLIMIT_CPU, (seconds, seconds + 1))
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (64 * 1024**2, 64 * 1024**2))
     limits = Limits(**request["limits"])
     artifact = base_artifact(request["command"], request["source"], request["sha256"], limits)
     path = Path(request["out"]) / f"{request['command']}.json"
     checkpoint = lambda value: write_json(path, value)
     checkpoint(artifact)
     try:
-        data = verified_source(request["source"], request["sha256"], limits)
+        document_type = request.get("document_type", "pdf")
+        data = verified_source(request["source"], request["sha256"], limits,
+                               document_type, request.get("expected_bytes"))
         artifact["source"].update(sha256=request["sha256"].lower(), sha256_verified=True,
                                   bytes=len(data))
         checkpoint(artifact)
-        if request["command"] == "inspect":
+        if document_type not in {"pdf", "xlsx"}:
+            raise DocumentError("unsupported_format", "Supported formats are PDF and XLSX")
+        if document_type == "xlsx":
+            if request["command"] != "inspect":
+                raise DocumentError("unsupported_command", "XLSX supports inspection only")
+            from xlsx_adapter import inspect_xlsx
+            inspect_xlsx(data, artifact, limits, checkpoint)
+        elif request["command"] == "inspect":
             inspect_document(data, artifact, limits, request.get("pages"), checkpoint)
         else:
             from adapter import render_document
@@ -47,6 +57,8 @@ def worker(request: dict) -> int:
                             request.get("crop"), Path(request["out"]))
     except DocumentError as exc:
         add_error(artifact, exc.code, str(exc))
+    except ImportError:
+        add_error(artifact, "reader_dependency_missing", "Install the pinned dedicated document requirements")
     except Exception as exc:
         add_error(artifact, "document_processing_error", f"{type(exc).__name__}: {exc}")
     checkpoint(artifact)
@@ -63,10 +75,17 @@ def main() -> int:
         command = subcommands.add_parser(name)
         command.add_argument("source", type=Path)
         command.add_argument("--sha256", required=True)
+        command.add_argument("--expected-bytes", type=int)
+        command.add_argument("--document-type", choices=("pdf", "xlsx", "unsupported"))
         command.add_argument("--out", type=Path, required=True, help="New or empty artifact directory")
         command.add_argument("--timeout", type=float, default=60, help="Worker wall-clock seconds, 1..180")
         command.add_argument("--max-pages", type=int, default=1000)
         command.add_argument("--max-bytes", type=int, default=100 * 1024 * 1024)
+        command.add_argument("--max-sheets", type=int, default=128)
+        command.add_argument("--max-cells", type=int, default=20000)
+        command.add_argument("--max-zip-members", type=int, default=5000)
+        command.add_argument("--max-expanded-bytes", type=int, default=128 * 1024 * 1024)
+        command.add_argument("--max-member-bytes", type=int, default=64 * 1024 * 1024)
         if name == "inspect":
             command.add_argument("--pages", help="Text pages, one-based: 1,3-5; default first eight; inventory is complete")
             command.add_argument("--max-text-chars", type=int, default=8000)
@@ -78,6 +97,9 @@ def main() -> int:
                                  help="Displayed page units after intrinsic rotation; top-left origin, y down")
             command.add_argument("--max-pixels", type=int, default=16_000_000)
     args = parser.parse_args()
+    args.document_type = args.document_type or {".pdf": "pdf", ".xlsx": "xlsx"}.get(args.source.suffix.lower(), "unsupported")
+    if args.expected_bytes is not None and args.expected_bytes < 0:
+        parser.error("expected-bytes must be nonnegative")
     if not math.isfinite(args.timeout) or not 1 <= args.timeout <= 180:
         parser.error("timeout must be 1..180 seconds")
     if not 1 <= args.max_pages <= 2000 or not 1 <= args.max_bytes <= 200 * 1024 * 1024:
@@ -85,7 +107,15 @@ def main() -> int:
     limits = Limits(max_bytes=args.max_bytes, max_pages=args.max_pages,
                     max_text_chars=getattr(args, "max_text_chars", 8000),
                     max_total_text_chars=getattr(args, "max_total_text_chars", 40000),
-                    max_pixels=getattr(args, "max_pixels", 16_000_000))
+                    max_pixels=getattr(args, "max_pixels", 16_000_000),
+                    max_sheets=args.max_sheets, max_cells=args.max_cells,
+                    max_zip_members=args.max_zip_members,
+                    max_expanded_bytes=args.max_expanded_bytes, max_member_bytes=args.max_member_bytes)
+    for field, ceiling in (("max_sheets", 256), ("max_cells", 100000),
+                           ("max_zip_members", 10000), ("max_expanded_bytes", 512 * 1024**2),
+                           ("max_member_bytes", 128 * 1024**2)):
+        if not 1 <= getattr(limits, field) <= ceiling:
+            parser.error(f"{field} must be 1..{ceiling}")
     if not 1 <= limits.max_text_chars <= 20000 or not 1 <= limits.max_total_text_chars <= 200000:
         parser.error("text limits exceed allowed range")
     if not 1 <= limits.max_pixels <= 40_000_000:

@@ -28,21 +28,29 @@ class Limits:
     max_text_chars: int = 8000
     max_total_text_chars: int = 40000
     max_pixels: int = 16_000_000
+    max_sheets: int = 128
+    max_cells: int = 20000
+    max_zip_members: int = 5000
+    max_expanded_bytes: int = 128 * 1024 * 1024
+    max_member_bytes: int = 64 * 1024 * 1024
 
 
-def verified_source(path: str, expected_sha256: str, limits: Limits) -> bytes:
+def verified_source(path: str, expected_sha256: str, limits: Limits,
+                    document_type: str = "pdf", expected_bytes: int | None = None) -> bytes:
     if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256):
         raise DocumentError("invalid_sha256", "Expected SHA256 must contain 64 hex characters")
     source = Path(path)
     if not source.is_file():
-        raise DocumentError("invalid_source", "Source must be a regular local PDF file")
+        raise DocumentError("invalid_source", "Source must be a regular local file")
     with source.open("rb") as stream:
         data = stream.read(limits.max_bytes + 1)
     if len(data) > limits.max_bytes:
         raise DocumentError("source_size_limit", "Source exceeds configured byte limit")
     if hashlib.sha256(data).hexdigest() != expected_sha256.lower():
         raise DocumentError("source_sha256_mismatch", "Source does not match expected revision")
-    if b"%PDF-" not in data[:1024]:
+    if expected_bytes is not None and len(data) != expected_bytes:
+        raise DocumentError("source_bytes_mismatch", "Source size does not match expected revision")
+    if document_type == "pdf" and b"%PDF-" not in data[:1024]:
         raise DocumentError("invalid_pdf", "PDF header missing")
     return data
 
