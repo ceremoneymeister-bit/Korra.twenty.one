@@ -23,7 +23,12 @@ export interface AgentTabConfig {
   description?: string;
 }
 
-/** Главный агент — всегда первая вкладка и всегда «Корра». */
+/** Главный агент — всегда первая вкладка. «Корра» — подпись по умолчанию,
+ *  пока владелец не дал главному агенту своё имя (`display_name` профиля
+ *  `default`, хранится в его `profile.yaml`). Живой случай 07.09.2026: у
+ *  клиентки главного агента зовут «Зара» — так его зовёт SOUL, так его отдаёт
+ *  `/api/profiles`, так он подписан в разделе ключей, — а вкладка упрямо
+ *  называлась «Корра». */
 export const MAIN_AGENT_TAB: AgentTabConfig = { profile: "", label: "Корра" };
 
 /** Предел вкладок, включая главную: дальше полоса перестаёт читаться. */
@@ -44,8 +49,9 @@ function cleanText(value: unknown): string {
 /**
  * Построить вкладки из ответа `/api/profiles`.
  *
- * Гарантии: никогда не бросает; первая вкладка — главный агент «Корра»;
- * профиль `default` — это и есть главная вкладка, второй раз не добавляется;
+ * Гарантии: никогда не бросает; первая вкладка — главный агент (его подпись —
+ * `display_name` профиля `default`, иначе «Корра»); профиль `default` — это и
+ * есть главная вкладка, второй раз не добавляется;
  * порядок именованных профилей — как отдал сервер (по имени); дубли и
  * имена вне грамматики отбрасываются; не больше `MAX_AGENT_TABS`.
  * Остановленный профиль, профиль без бота или без модели — всё равно
@@ -61,7 +67,13 @@ export function buildAgentTabs(profiles: unknown): AgentTabConfig[] {
     if (!item || typeof item !== "object") continue;
     const profile = item as ProfileLike;
     const name = cleanText(profile.name);
-    if (!name || name === "default" || profile.is_default === true) continue;
+    if (!name || name === "default" || profile.is_default === true) {
+      // Главная вкладка уже стоит первой; отсюда берём только имя, которое
+      // владелец дал главному агенту. Описание главного на вкладку не идёт.
+      const mainName = cleanText(profile.display_name);
+      if (mainName) tabs[0] = { ...tabs[0], label: mainName };
+      continue;
+    }
     if (!PROFILE_ID_RE.test(name) || seen.has(name)) continue;
     seen.add(name);
 

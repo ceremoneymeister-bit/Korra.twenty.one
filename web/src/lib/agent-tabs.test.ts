@@ -41,15 +41,28 @@ describe("buildAgentTabs", () => {
     }
   });
 
-  it("главный агент всегда первый и всегда «Корра», default второй раз не добавляется", () => {
+  it("главный агент всегда первый и носит имя из профиля default, второй раз не добавляется", () => {
     const tabs = buildAgentTabs([
       profile("zebra"),
       profile("default", { is_default: true, display_name: "Главный" }),
       profile("alpha"),
     ]);
-    expect(tabs[0]).toEqual(MAIN);
+    expect(tabs[0]).toEqual({ profile: "", label: "Главный" });
     expect(tabs.map((tab) => tab.profile)).toEqual(["", "zebra", "alpha"]);
-    expect(tabs.filter((tab) => tab.label === "Корра")).toHaveLength(1);
+    expect(tabs.filter((tab) => tab.profile === "")).toHaveLength(1);
+  });
+
+  it("главный агент без своего имени подписан «Корра», с именем — им", () => {
+    // Живой случай 07.09.2026: у клиентки главного агента зовут «Зара» — так
+    // его отдаёт /api/profiles, а вкладка называлась «Корра» жёстко в коде.
+    expect(buildAgentTabs([profile("alpha")])[0]).toEqual(MAIN);
+    expect(
+      buildAgentTabs([profile("default", { is_default: true, display_name: "  Зара " })])[0],
+    ).toEqual({ profile: "", label: "Зара" });
+    // Пустое имя не затирает подпись по умолчанию.
+    expect(
+      buildAgentTabs([profile("default", { is_default: true, display_name: "   " })])[0],
+    ).toEqual(MAIN);
   });
 
   it("подпись — имя, заданное владельцем, иначе имя профиля; описание уходит в подсказку", () => {
