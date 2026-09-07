@@ -1,3 +1,4 @@
+import { agentChatHref } from "@/lib/agent-tabs";
 import { getManagementProfile } from "@/lib/api";
 import { KorraLoader } from "@/components/KorraLoader";
 import {
@@ -555,7 +556,7 @@ function SessionRow({
           title={t.sessions.resumeInChat}
           onClick={(e) => {
             e.stopPropagation();
-            navigate(`/agents?agent=${encodeURIComponent(getManagementProfile() || "default")}&resume=${encodeURIComponent(session.id)}`);
+            navigate(agentChatHref(getManagementProfile(), session.id));
           }}
         >
           <Play />

@@ -128,3 +128,10 @@ export function agentSettingsHref(
   if (edit === "schedule") return `/cron?profile=${target}`;
   return `/profiles?agent=${target}&edit=${edit}`;
 }
+
+/** Адрес конкретной переписки сохраняет профиль и не перегружает панель. */
+export function agentChatHref(profile: string, sessionId?: string): string {
+  const query = new URLSearchParams({ agent: profile || "default" });
+  if (sessionId) query.set("resume", sessionId);
+  return `/agents?${query}`;
+}
