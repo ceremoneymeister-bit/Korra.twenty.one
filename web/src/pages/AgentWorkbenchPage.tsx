@@ -1,3 +1,4 @@
+import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
 import { AgentRunBadge, SessionRunActivity } from "@/components/chat/SessionRunActivity";
 /**
  * AgentWorkbenchPage — рабочее место команды агентов.
@@ -97,7 +98,8 @@ export default function AgentWorkbenchPage() {
     showTab,
     moveTab,
   } = useAgentTabs();
-  const [selectedId, setActiveId] = useState<string>(MAIN_AGENT_TAB.profile);
+  const [selectedId, setActiveId] = useState<string>(() => readChatView(`${chatViewKey()}:agent`) || MAIN_AGENT_TAB.profile);
+  useEffect(() => { writeChatView(`${chatViewKey()}:agent`, selectedId); }, [selectedId]);
   const [newChatByProfile, setNewChatByProfile] = useState<
     Record<string, number>
   >({});

@@ -1,3 +1,4 @@
+import { useSessionRun } from "@/hooks/useSessionRun";
 import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
 /**
  * BubbleChatPage — bubble-style chat UI (Phase 2.2 live SSE streaming).
@@ -1259,6 +1260,8 @@ export default function BubbleChatPage({
     loadSession,
     reset,
   } = useChatStream({ profile: agentProfile, active });
+  const serverRun = useSessionRun(agentProfile ?? "", sessionId);
+  const queued = isStreaming && serverRun?.status === "queued";
   // Черновик недоставленного сообщения этого профиля из ДРУГОГО чата: пузырь
   // с «Повторить» есть только в своём чате, здесь напоминает баннер.
   // Имя агента вкладки (display_name профиля) для подсказок композера и
@@ -1474,7 +1477,7 @@ export default function BubbleChatPage({
         <BubbleChatTranscript
           scrollKey={`${chatViewKey(agentProfile, sessionId)}:scroll`}
           messages={messages}
-          streaming={isStreaming}
+          streaming={isStreaming && !queued}
           error={error}
           onDecision={handleDecision}
           busy={isStreaming}
@@ -1486,6 +1489,7 @@ export default function BubbleChatPage({
           approvals={approvals}
           onApprovalDecision={handleApprovalDecision}
         />
+        {queued && <p role="status" className="px-5 py-3 text-sm text-muted-foreground">Все места заняты. Сообщение в очереди — агент начнёт автоматически, можно перейти в другой чат.</p>}
         <BubbleChatComposer
           active={active}
           key={sessionId ?? "new"}
