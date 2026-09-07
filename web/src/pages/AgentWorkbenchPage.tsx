@@ -46,7 +46,7 @@ import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
 
-import BubbleChatPage from "@/pages/BubbleChatPage";
+import BubbleChatPage, { type ChatResumeRequest } from "@/pages/BubbleChatPage";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { api } from "@/lib/api";
 import { soulNamedAs } from "@/lib/agent-wizard";
@@ -118,7 +118,7 @@ export default function AgentWorkbenchPage() {
   const activeId = tabs.some((tab) => tab.profile === selectedId)
     ? selectedId
     : MAIN_AGENT_TAB.profile;
-  const [resumeByProfile, setResumeByProfile] = useState<Record<string, string>>({});
+  const [resumeByProfile, setResumeByProfile] = useState<Record<string, ChatResumeRequest>>({});
   // Адресный черновик предназначен ОДНОМУ агенту. Держим его здесь и раздаём
   // адресно: сам чат `?draft=` не читает — несколько
   // смонтированных экземпляра приняли бы его каждый на свой счёт.
@@ -196,7 +196,7 @@ export default function AgentWorkbenchPage() {
     }
     setActiveId(agent);
     const resume = searchParams.get("resume");
-    if (resume) setResumeByProfile(previous => ({ ...previous, [agent]: resume }));
+    if (resume) setResumeByProfile(previous => ({ ...previous, [agent]: { sessionId: resume } }));
     if (draft) setDraftByProfile((previous) => ({ ...previous, [agent]: draft }));
     // Параметры снимаем сразу: иначе возврат на экран назад-вперёд подставил
     // бы тот же текст поверх уже набранного.

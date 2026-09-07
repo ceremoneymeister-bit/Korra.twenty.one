@@ -1227,8 +1227,10 @@ export interface BubbleChatPageProps {
   /** Счётчик команд «Новый чат» из вкладки агента. Изменение значения
    *  сбрасывает только этот постоянно смонтированный экземпляр чата. */
   newChatRequest?: number;
-  resumeSession?: string;
+  resumeSession?: ChatResumeRequest;
 }
+
+export interface ChatResumeRequest { sessionId: string }
 
 export default function BubbleChatPage({
   agentProfile,
@@ -1267,7 +1269,7 @@ export default function BubbleChatPage({
     : undefined;
   const pendingElsewhere = useMemo(() => {
     const pending = loadChatOutbox(agentProfile ?? "");
-    return pending && pending.sessionId !== sessionId ? pending : null;
+    return pending && pending.status === "failed" && pending.sessionId !== sessionId ? pending : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentProfile, sessionId, messages, error, isStreaming]);
 
@@ -1399,7 +1401,7 @@ export default function BubbleChatPage({
     prevStreamingRef.current = isStreaming;
   }, [isStreaming, sessionList]);
 
-  useEffect(() => { if (resumeSession) void loadSession(resumeSession); }, [resumeSession, loadSession]);
+  useEffect(() => { if (resumeSession) void loadSession(resumeSession.sessionId); }, [resumeSession, loadSession]);
 
   const handleSelect = useCallback(
     (id: string) => {
