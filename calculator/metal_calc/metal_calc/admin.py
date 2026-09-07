@@ -48,6 +48,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="metal-calc-admin")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    from . import document_admin
+    document_admin.register(subparsers)
+
     subparsers.add_parser("folder-upload-create")
     subparsers.add_parser("folder-list")
     for command in ("folder-upload-status", "folder-upload-complete", "folder-upload-file"):
@@ -142,6 +145,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    if args.command.startswith("document-"):
+        document_admin.run(args, _read_stdin_json, _emit)
+        return
 
     if args.command.startswith("folder-"):
         # Folder bytes are transported by the operator cabinet. No new model

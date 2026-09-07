@@ -25,6 +25,9 @@ RUN chmod 0755 /opt/metal-calc/bin/* && \
 ENV CADKIT_DWG2DXF=/opt/metal-calc/bin/dwg2dxf
 
 FROM kernel AS pilot
+COPY documents/ /opt/metal-calc/documents/
+RUN uv venv --python /opt/hermes/.venv/bin/python /opt/metal-calc/documents/.venv && \
+    uv pip install --python /opt/metal-calc/documents/.venv/bin/python -r /opt/metal-calc/documents/requirements.lock
 COPY runtime-overlay/ /opt/hermes/
 COPY web-dist/ /opt/hermes/korra_cli/web_dist/
 COPY handoff/runner.py /opt/metal-calc/lib/handoff_runner.py
@@ -40,6 +43,14 @@ RUN mkdir -p /etc/s6-overlay/s6-rc.d/calc-handoff/dependencies.d && \
     touch /etc/s6-overlay/s6-rc.d/user/contents.d/calc-handoff && \
     /opt/metal-calc/.venv/bin/python -m py_compile /opt/metal-calc/lib/handoff_runner.py && \
     chmod -R a-w /opt/metal-calc /etc/metal-calc
+RUN mkdir -p /etc/s6-overlay/s6-rc.d/calc-documents/dependencies.d && \
+    printf 'longrun\n' > /etc/s6-overlay/s6-rc.d/calc-documents/type && \
+    printf '%s\n' '#!/command/with-contenv sh' \
+      'exec s6-setuidgid hermes env -i PATH=/usr/bin:/bin HOME=/opt/data LANG=C.UTF-8 /opt/metal-calc/.venv/bin/python -m metal_calc.document_worker --orders-root /opt/data/orders --document-python /opt/metal-calc/documents/.venv/bin/python' \
+      > /etc/s6-overlay/s6-rc.d/calc-documents/run && \
+    chmod 0755 /etc/s6-overlay/s6-rc.d/calc-documents/run && \
+    touch /etc/s6-overlay/s6-rc.d/calc-documents/dependencies.d/base && \
+    touch /etc/s6-overlay/s6-rc.d/user/contents.d/calc-documents
 LABEL org.opencontainers.image.title="Korra 21 Calculator" \
       ru.korra.calculator.engine-revision="c9c42ecb375c56f853576f0d4a06519deeb96f78" \
       ru.korra.calculator.kernel="v9" \

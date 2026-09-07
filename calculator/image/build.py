@@ -35,7 +35,7 @@ def main():
     if context.exists():
         shutil.rmtree(context)
     context.mkdir()
-    for directory in ("metal_calc", "lib", "bin", "review", "handoff"):
+    for directory in ("metal_calc", "lib", "bin", "review", "handoff", "documents"):
         copy_tree(ROOT / "calculator" / directory, context / directory)
     for name in ("requirements.lock", "check_versions.py", "check_tool_surface.py"):
         shutil.copy2(IMAGE / name, context / name)

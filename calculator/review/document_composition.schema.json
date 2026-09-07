@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ceremoneymeister.xyz/schemas/document-composition-proposal-v1.json",
+  "title": "OrderComposition v1 — proposed document facts",
+  "description": "S0–S1 proposal contract, separate from the calculation BOM. Inventory and model proposals cannot accept customer scope, verify numeric facts, or authorize costing. Human acceptance requires a future authenticated operator writer with actor, source revision, decision and immutable receipt; model-authored receipts are forbidden. Semantic validation must additionally check unique IDs, reference existence, source ownership and snapshot revision before S2 proposals are enabled.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "positions", "facts", "evidence", "relations", "issues", "quantity", "human_receipt", "calculation_ready", "quote_ready"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {"enum": ["not_proposed", "proposed", "review_required"]},
+    "positions": {"type": "array", "items": {"$ref": "#/$defs/position"}},
+    "facts": {"type": "array", "items": {"$ref": "#/$defs/fact"}},
+    "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
+    "issues": {"type": "array", "items": {"$ref": "#/$defs/issue"}},
+    "quantity": {"$ref": "#/$defs/quantity"},
+    "human_receipt": {"const": null, "description": "Only a future authenticated employee decision may produce an acceptance receipt, outside this proposal schema."},
+    "calculation_ready": {"const": false, "description": "Composition acceptance alone never establishes position calculation readiness."},
+    "quote_ready": {"const": false, "description": "A quote needs separately accepted costing and responsible approval."}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "text": {"type": "string", "minLength": 1},
+    "nullableText": {"type": ["string", "null"], "minLength": 1},
+    "quantity": {
+      "description": "Manufacturing lot quantity is explicit evidence or an employee statement; document counts, holes and assembly counts never imply the lot. Unknown is null, with no default of one. Decimal strings retain exact values.",
+      "type": "object", "additionalProperties": false,
+      "required": ["value", "unit", "basis", "evidence_ids"],
+      "properties": {
+        "value": {"type": ["string", "null"], "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$"},
+        "unit": {"$ref": "#/$defs/nullableText"},
+        "basis": {"enum": [null, "explicit_source", "operator_statement"]},
+        "evidence_ids": {"$ref": "#/$defs/ids"}
+      },
+      "allOf": [{
+        "if": {"properties": {"value": {"type": "string"}}},
+        "then": {"properties": {"basis": {"enum": ["explicit_source", "operator_statement"]}, "evidence_ids": {"minItems": 1}}}
+      }]
+    },
+    "position": {
+      "type": "object", "additionalProperties": false,
+      "required": ["position_id", "product_id", "role", "role_evidence_ids", "quantity", "scope_state", "blocking_issue_ids"],
+      "properties": {
+        "position_id": {"$ref": "#/$defs/id"},
+        "product_id": {"$ref": "#/$defs/id"},
+        "designation_fact_id": {"$ref": "#/$defs/nullableText"},
+        "variant_fact_id": {"$ref": "#/$defs/nullableText"},
+        "role": {"enum": ["make", "buy", "customer_supplied", "excluded", "unknown"]},
+        "role_evidence_ids": {"$ref": "#/$defs/ids"},
+        "quantity": {"$ref": "#/$defs/quantity"},
+        "scope_state": {"enum": ["proposed", "needs_review", "unknown"]},
+        "blocking_issue_ids": {"$ref": "#/$defs/ids"},
+        "requirement_fact_ids": {"$ref": "#/$defs/ids"}
+      }
+    },
+    "fact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fact_id", "subject_id", "field_key", "raw_text", "normalized_value", "unit", "evidence_ids", "method", "version", "status", "unknown_reason"],
+      "properties": {
+        "fact_id": {"$ref": "#/$defs/id"},
+        "subject_id": {"$ref": "#/$defs/id"},
+        "field_key": {"$ref": "#/$defs/text"},
+        "raw_text": {"type": ["string", "null"]},
+        "normalized_value": {"type": ["string", "boolean", "null"], "description": "Numeric facts use exact decimal strings; physical unit remains separate."},
+        "unit": {"$ref": "#/$defs/nullableText"},
+        "evidence_ids": {"$ref": "#/$defs/ids"},
+        "method": {"enum": ["native_text", "ocr", "vision", "xlsx_cell", "cad_entity", "operator_statement", "unknown"]},
+        "version": {"$ref": "#/$defs/text"},
+        "status": {"enum": ["extracted", "needs_review", "conflicting"]},
+        "unknown_reason": {"$ref": "#/$defs/nullableText"},
+        "alternatives": {"type": "array", "items": {"type": ["string", "boolean", "null"]}},
+        "dependency_fact_ids": {"$ref": "#/$defs/ids"}
+      }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_id", "source_id", "source_sha256", "locator"],
+      "properties": {
+        "evidence_id": {"$ref": "#/$defs/id"},
+        "source_id": {"type": "string", "pattern": "^src_[0-9a-f]{40}$"},
+        "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "locator": {
+          "oneOf": [
+            {"type": "object", "additionalProperties": false, "required": ["kind", "page"], "properties": {"kind": {"const": "pdf"}, "page": {"type": "integer", "minimum": 1}, "bbox": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}}, "coordinate_space": {"enum": ["pdf_points", "render_pixels"]}, "render_transform": {"type": "array", "minItems": 6, "maxItems": 6, "items": {"type": "number"}}}, "dependentRequired": {"bbox": ["coordinate_space"], "render_transform": ["bbox", "coordinate_space"]}},
+            {"type": "object", "additionalProperties": false, "required": ["kind", "sheet", "cell"], "properties": {"kind": {"const": "xlsx"}, "sheet": {"$ref": "#/$defs/text"}, "cell": {"type": "string", "pattern": "^[A-Z]+[1-9][0-9]*(?::[A-Z]+[1-9][0-9]*)?$"}, "header_context": {"type": "string"}, "formula": {"type": ["string", "null"]}, "cached_value": {"type": ["string", "number", "boolean", "null"]}}},
+            {"type": "object", "additionalProperties": false, "required": ["kind", "space", "layout", "entity_handle"], "properties": {"kind": {"const": "cad"}, "space": {"enum": ["model", "paper"]}, "layout": {"$ref": "#/$defs/text"}, "entity_handle": {"$ref": "#/$defs/text"}, "block_transform": {"type": "array", "minItems": 16, "maxItems": 16, "items": {"type": "number"}}}}
+          ]
+        }
+      }
+    },
+    "entityReference": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "id"],
+      "properties": {
+        "kind": {"enum": ["document", "document_sheet", "part", "execution", "order_position", "assembly", "assembly_component"]},
+        "id": {"$ref": "#/$defs/id"}
+      }
+    },
+    "relation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["relation_id", "kind", "from", "to", "evidence_ids", "status"],
+      "properties": {
+        "relation_id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["describes", "sheet_of", "execution_of", "position_for", "component_of", "supersedes", "possible_duplicate"]},
+        "from": {"$ref": "#/$defs/entityReference"}, "to": {"$ref": "#/$defs/entityReference"},
+        "evidence_ids": {"$ref": "#/$defs/ids"},
+        "status": {"enum": ["proposed", "needs_review", "conflicting"]},
+        "quantity_per_parent": {"$ref": "#/$defs/quantity", "description": "Assembly multiplicity is separate from manufacturing lot quantity."},
+        "applicable_variant": {"$ref": "#/$defs/nullableText"}
+      }
+    },
+    "issue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "blocks", "question"],
+      "properties": {
+        "issue_id": {"$ref": "#/$defs/id"}, "code": {"$ref": "#/$defs/text"},
+        "blocks": {"enum": ["composition_acceptance", "calculation", "quote", "none"]},
+        "question": {"$ref": "#/$defs/text"},
+        "subject_ids": {"$ref": "#/$defs/ids"}, "evidence_ids": {"$ref": "#/$defs/ids"},
+        "status": {"enum": ["open", "needs_operator"]}
+      }
+    }
+  }
+}

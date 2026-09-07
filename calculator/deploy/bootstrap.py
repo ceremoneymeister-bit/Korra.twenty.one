@@ -72,8 +72,8 @@ def main():
     pilot_note = (
         "# Локальный пилот расчётчика Korra 21\n\n"
         "Текущий канал — кабинет оператора. Telegram в этом пилоте не подключён. "
-        "Загрузка папки как целого заказа и Excel-заявки ещё разрабатываются. "
-        "Сохранение файла в разделе Файлы само по себе не создаёт заказ. "
+        "Загрузка папки в Файлах заказов создаёт сохранённый черновик. "
+        "Серверное чтение S0–S1 хранит наблюдения; состав и входы расчёта подтверждает сотрудник. "
         "Используй только доступные инструменты и проверенные источники. "
         "Пока действуют прежние данные предприятия; окончательные цены требуют "
         "подтверждённых правил и проверки человеком.\n\n"
@@ -106,6 +106,8 @@ def main():
         if name != "default":
             write(home / ".env", f"API_SERVER_PORT=8661\nAPI_SERVER_KEY={api_key}\n", 0o600)
         source = args.prompts / "SOUL.md" if name == "default" else args.prompts / "profiles" / name / "SOUL.md"
+        if role == "front":
+            source = Path(__file__).with_name("front-soul.md")
         write(home / "SOUL.md", pilot_note + source.read_text())
     for rel in ("client/inbox", "client/artifacts", "cache/documents", "orders", "delivery", "handoff"):
         (data / rel).mkdir(parents=True, exist_ok=True)

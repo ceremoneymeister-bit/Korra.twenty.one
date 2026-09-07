@@ -4,6 +4,7 @@ services:
     container_name: korra-calc21-pilot
     network_mode: host
     restart: unless-stopped
+    stop_grace_period: 210s
     command: [gateway, run]
     cpus: 4
     mem_limit: 6g
