@@ -73,6 +73,7 @@ type StreamAction =
   | { type: "UPSERT_TOOL"; toolData: SSEToolProgressData }
   | { type: "FINALIZE" }
   | { type: "SET_ERROR"; error: string }
+  | { type: "STOP_FAILED"; error: string }
   | { type: "APPROVAL_REQUESTED"; request: SSEApprovalRequestData }
   | { type: "APPROVAL_RESTORED"; requests: SSEApprovalRequestData[] }
   | { type: "APPROVAL_SENDING"; requestId: string }
@@ -260,6 +261,8 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         approvals: expirePendingApprovals(state.approvals),
       };
     }
+
+    case "STOP_FAILED": return { ...state, error: action.error };
 
     case "SET_ERROR": {
       return {
@@ -590,8 +593,33 @@ export function useChatStream(
   }, [profile]);
 
   const abort = useCallback(() => {
-    abortControllerRef.current?.abort();
-  }, []);
+    const generation = activeStreamIdRef.current;
+    const sessionId = state.sessionId;
+    if (!sessionId) return;
+    void (async () => {
+      try {
+        const run = (await getChatRuns(profile ?? "", sessionId))[0];
+        if (!run) throw new Error("Ход пока отправляется. Попробуйте остановить ещё раз.");
+        const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/cancel`, profile ?? "", sessionId), {
+          method: "POST", headers: chatRunHeaders(),
+        });
+        if (!response.ok) throw new Error("Не удалось остановить ход. Проверьте связь и повторите.");
+        clearChatOutbox(run.message_id, profile ?? "");
+        if (mountedRef.current && activeStreamIdRef.current === generation) {
+          activeStreamIdRef.current = null;
+          abortControllerRef.current?.abort();
+          streamingRef.current = false;
+          dispatch({ type: "SET_ERROR", error: "Ход остановлен. Можно написать новое сообщение." });
+        }
+        void refreshChatRuns();
+      } catch (error) {
+        if (mountedRef.current && activeStreamIdRef.current === generation) {
+          // A failed Stop is not evidence that the agent stopped.
+          dispatch({ type: "STOP_FAILED", error: ownerFacingError(error, "Не удалось остановить ход.") });
+        }
+      }
+    })();
+  }, [profile, state.sessionId]);
 
   const loadSession = useCallback(async (sessionId: string): Promise<void> => {
     writeChatView(selectionKey, sessionId);
