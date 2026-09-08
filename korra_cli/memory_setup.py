@@ -76,7 +76,7 @@ def _curses_select(
 
 
 def _print_cancelled_setup() -> None:
-    print("\n  Cancelled. No changes saved.\n")
+    print("\n  Отменено. Изменения не сохранены.\n")
 
 
 def _clear_interactive_transition() -> None:
@@ -159,7 +159,7 @@ def _install_dependencies(provider_name: str, *, force: bool = False) -> None:
     if not missing:
         return
 
-    print(f"\n  Installing dependencies: {', '.join(missing)}")
+    print(f"\n  Устанавливаю зависимости: {', '.join(missing)}")
 
     # Environment-aware install: on immutable hosted images the agent venv
     # is sealed read-only and installs must go to the durable target on the
@@ -171,18 +171,18 @@ def _install_dependencies(provider_name: str, *, force: bool = False) -> None:
     try:
         outcome = install_specs(missing, timeout=120)
         if outcome.ok:
-            print(f"  ✓ Installed {', '.join(missing)}")
+            print(f"  ✓ Установлено: {', '.join(missing)}")
         elif outcome.blocked:
-            print(f"  ⚠ Cannot install {', '.join(missing)}: {outcome.reason}")
+            print(f"  ⚠ Нельзя установить {', '.join(missing)}: {outcome.reason}")
         else:
-            print(f"  ⚠ Failed to install {', '.join(missing)}")
+            print(f"  ⚠ Не удалось установить: {', '.join(missing)}")
             stderr = (outcome.stderr or "")[:200]
             if stderr:
                 print(f"    {stderr}")
-            print(f"  Run manually: {manual_cmd}")
+            print(f"  Выполните вручную: {manual_cmd}")
     except Exception as e:
-        print(f"  ⚠ Install failed: {e}")
-        print(f"  Run manually: {manual_cmd}")
+        print(f"  ⚠ Ошибка установки: {e}")
+        print(f"  Выполните вручную: {manual_cmd}")
 
     # Also show external dependencies (non-pip) if any
     ext_deps = meta.get("external_dependencies", [])
@@ -197,7 +197,7 @@ def _install_dependencies(provider_name: str, *, force: bool = False) -> None:
                 )
             except Exception:
                 if install_cmd:
-                    print(f"\n  ⚠ '{dep_name}' not found. Install with:")
+                    print(f"\n  ⚠ '{dep_name}' не найден. Установите командой:")
                     print(f"    {install_cmd}")
 
 
@@ -253,8 +253,8 @@ def cmd_setup_provider(provider_name: str) -> None:
             break
 
     if not match:
-        print(f"\n  Memory provider '{provider_name}' not found.")
-        print("  Run 'hermes memory setup' to see available providers.\n")
+        print(f"\n  Провайдер памяти '{provider_name}' не найден.")
+        print("  Список провайдеров: `korra memory setup`.\n")
         return
 
     name, _, provider = match
@@ -275,8 +275,8 @@ def cmd_setup_provider(provider_name: str) -> None:
     # Fallback: generic schema-based setup (same as cmd_setup)
     config["memory"]["provider"] = name
     save_config(config)
-    print(f"\n  Memory provider: {name}")
-    print("  Activation saved to config.yaml\n")
+    print(f"\n  Провайдер памяти: {name}")
+    print("  Выбор сохранён в config.yaml.\n")
 
 
 def cmd_setup(args) -> None:
@@ -286,18 +286,18 @@ def cmd_setup(args) -> None:
     providers = _get_available_providers()
 
     if not providers:
-        print("\n  No memory provider plugins detected.")
-        print("  Install a plugin to ~/.hermes/plugins/ and try again.\n")
+        print("\n  Плагины провайдеров памяти не найдены.")
+        print("  Установите плагин в ~/.hermes/plugins/ и повторите попытку.\n")
         return
 
     # Build picker items
     items = []
     for name, desc, _ in providers:
         items.append((name, f"— {desc}"))
-    items.append(("Built-in only", "— MEMORY.md / USER.md (default)"))
+    items.append(("Только встроенная память", "— MEMORY.md / USER.md, по умолчанию"))
 
     builtin_idx = len(items) - 1
-    selected = _curses_select("Memory provider setup", items, default=builtin_idx, cancel_returns=_CANCELLED)
+    selected = _curses_select("Настройка провайдера памяти", items, default=builtin_idx, cancel_returns=_CANCELLED)
     if selected == _CANCELLED:
         _print_cancelled_setup()
         return
@@ -310,8 +310,8 @@ def cmd_setup(args) -> None:
     if selected >= len(providers):
         config["memory"]["provider"] = ""
         save_config(config)
-        print("\n  ✓ Memory provider: built-in only")
-        print("  Saved to config.yaml\n")
+        print("\n  ✓ Провайдер памяти: только встроенная память")
+        print("  Сохранено в config.yaml.\n")
         return
 
     name, _, provider = providers[selected]
@@ -337,7 +337,7 @@ def cmd_setup(args) -> None:
     env_writes = {}
 
     if schema:
-        print(f"\n  Configuring {name}:\n")
+        print(f"\n  Настройка {name}:\n")
 
         for field in schema:
             key = field["key"]
@@ -378,10 +378,10 @@ def cmd_setup(args) -> None:
                 # Prompt for secret
                 existing = os.environ.get(env_var, "") if env_var else ""
                 if existing:
-                    masked = f"...{existing[-4:]}" if len(existing) > 4 else "set"
-                    val = _prompt(f"{desc} (current: {masked}, blank to keep)", secret=True)
+                    masked = f"...{existing[-4:]}" if len(existing) > 4 else "задано"
+                    val = _prompt(f"{desc} (сейчас: {masked}; пусто — сохранить)", secret=True)
                 else:
-                    hint = f"  Get yours at {url}" if url else ""
+                    hint = f"  Получить: {url}" if url else ""
                     if hint:
                         print(hint)
                     val = _prompt(desc, secret=True)
@@ -408,19 +408,19 @@ def cmd_setup(args) -> None:
         try:
             provider.save_config(provider_config, hermes_home)
         except Exception as e:
-            print(f"  Failed to write provider config: {e}")
+            print(f"  Не удалось записать настройки провайдера: {e}")
 
     # Write secrets to .env
     if env_writes:
         _write_env_vars(env_writes)
 
-    print(f"\n  Memory provider: {name}")
-    print("  Activation saved to config.yaml")
+    print(f"\n  Провайдер памяти: {name}")
+    print("  Выбор сохранён в config.yaml")
     if provider_config:
-        print("  Provider config saved")
+        print("  Настройки провайдера сохранены")
     if env_writes:
-        print("  API keys saved to .env")
-    print("\n  Start a new session to activate.\n")
+        print("  Ключи API сохранены в .env")
+    print("\n  Начните новую беседу, чтобы применить изменения.\n")
 
 
 def _write_env_vars(
@@ -486,8 +486,8 @@ def cmd_status(args) -> None:
     memory_enabled = mem_config.get("memory_enabled", True)
     user_profile_enabled = mem_config.get("user_profile_enabled", True)
 
-    mem_mark = "enabled ✓" if memory_enabled else "disabled ✗"
-    user_mark = "enabled ✓" if user_profile_enabled else "disabled ✗"
+    mem_mark = "включено ✓" if memory_enabled else "выключено ✗"
+    user_mark = "включено ✓" if user_profile_enabled else "выключено ✗"
 
     # Check if the memory tool is enabled for the CLI platform via the
     # canonical resolver and respects the check_fn gate when both stores are disabled.
@@ -495,14 +495,14 @@ def cmd_status(args) -> None:
     from tools.memory_tool import check_memory_requirements
     cli_tools = _get_platform_tools(config, "cli", include_default_mcp_servers=False)
     memory_tool_enabled = ("memory" in cli_tools) and check_memory_requirements()
-    tool_mark = "enabled ✓" if memory_tool_enabled else "disabled ✗"
+    tool_mark = "включено ✓" if memory_tool_enabled else "выключено ✗"
 
-    print("\nMemory status\n" + "─" * 40)
-    print("  Built-in (MEMORY.md / USER.md):")
-    print(f"    Memory injection:   {mem_mark}")
-    print(f"    User profile:       {user_mark}")
-    print(f"    Memory tool:        {tool_mark}")
-    print(f"  Provider:  {provider_name or '(none — built-in only)'}")
+    print("\nСостояние памяти\n" + "─" * 40)
+    print("  Встроенная память (MEMORY.md / USER.md):")
+    print(f"    Добавление воспоминаний: {mem_mark}")
+    print(f"    Профиль пользователя:    {user_mark}")
+    print(f"    Инструмент памяти:        {tool_mark}")
+    print(f"  Провайдер: {provider_name or '(нет; только встроенная память)'}")
 
     providers = _get_available_providers()
     provider = None
@@ -523,21 +523,21 @@ def cmd_status(args) -> None:
                     display_config["status_config_error"] = str(e)
 
         if display_config:
-            print(f"\n  {provider_name} config:")
+            print(f"\n  Настройки {provider_name}:")
             for key, val in display_config.items():
                 print(f"    {key}: {val}")
 
         if provider:
-            print("\n  Plugin:    installed ✓")
+            print("\n  Плагин: установлен ✓")
             if provider.is_available():
-                print("  Status:    available ✓")
+                print("  Состояние: доступен ✓")
             else:
-                print("  Status:    not available ✗")
+                print("  Состояние: недоступен ✗")
                 schema = provider.get_config_schema() if hasattr(provider, "get_config_schema") else []
                 # Check all fields that have env_var (both secret and non-secret)
                 required_fields = [f for f in schema if f.get("env_var")]
                 if required_fields:
-                    print("  Missing:")
+                    print("  Не указано:")
                     for f in required_fields:
                         env_var = f.get("env_var", "")
                         url = f.get("url", "")
@@ -548,19 +548,19 @@ def cmd_status(args) -> None:
                             line += f"  → {url}"
                         print(line)
                 print(
-                    "  Note: systemd/gateway services do not inherit ~/.hermes/.env —"
+                    "  Примечание: службы systemd и шлюза не наследуют ~/.hermes/.env;"
                 )
                 print(
-                    "        set any variables above in the service environment."
+                    "  задайте перечисленные переменные в окружении службы."
                 )
         else:
-            print("\n  Plugin:    NOT installed ✗")
-            print(f"  Install the '{provider_name}' memory plugin to ~/.hermes/plugins/")
+            print("\n  Плагин: не установлен ✗")
+            print(f"  Установите плагин памяти '{provider_name}' в ~/.hermes/plugins/")
 
     if providers:
-        print("\n  Installed plugins:")
+        print("\n  Установленные плагины:")
         for pname, desc, _ in providers:
-            active = " ← active" if pname == provider_name else ""
+            active = " ← активен" if pname == provider_name else ""
             print(f"    • {pname}  ({desc}){active}")
 
     print()

@@ -29,8 +29,8 @@ class TestMemorySetupProviderRouting:
         before any config load/save (the not-found guard precedes those imports)."""
         memory_setup.cmd_setup_provider("notaprovider")
         out = capsys.readouterr().out
-        assert "not found" in out
-        assert "hermes memory setup" in out
+        assert "не найден" in out
+        assert "korra memory setup" in out
 
 
 class TestInstallDependenciesRunner:

@@ -101,9 +101,9 @@ def test_cmd_status_memory_tool_gate_disabled(capsys, monkeypatch):
     memory_setup.cmd_status(SimpleNamespace())
 
     captured = capsys.readouterr().out
-    assert "Memory tool:        disabled ✗" in captured
-    assert "Memory injection:   disabled ✗" in captured
-    assert "User profile:       disabled ✗" in captured
+    assert "Инструмент памяти:        выключено ✗" in captured
+    assert "Добавление воспоминаний: выключено ✗" in captured
+    assert "Профиль пользователя:    выключено ✗" in captured
 
 
 def test_cmd_status_memory_tool_gate_enabled(capsys, monkeypatch):
@@ -118,6 +118,6 @@ def test_cmd_status_memory_tool_gate_enabled(capsys, monkeypatch):
     memory_setup.cmd_status(SimpleNamespace())
 
     captured = capsys.readouterr().out
-    assert "Memory tool:        enabled ✓" in captured
-    assert "Memory injection:   enabled ✓" in captured
-    assert "User profile:       disabled ✗" in captured
+    assert "Инструмент памяти:        включено ✓" in captured
+    assert "Добавление воспоминаний: включено ✓" in captured
+    assert "Профиль пользователя:    выключено ✗" in captured
