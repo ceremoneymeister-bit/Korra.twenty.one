@@ -30,6 +30,9 @@ from tests.docker.conftest import (
 )
 
 
+REDIRECT_BREADCRUMB = "под управлением s6"
+
+
 def _svstat(container: str, slot: str = "gateway-default") -> str:
     r = docker_exec_sh(container, f"/command/s6-svstat /run/service/{slot}")
     return r.stdout if r.returncode == 0 else ""
@@ -114,9 +117,9 @@ def test_gateway_run_redirects_to_supervised(
     # 30s to import the codebase, load config, and reach the redirect
     # logic. 60s matches the deadline other boot-readiness polls use.
     logs = wait_for_docker_logs(
-        container_name, "s6 supervision", deadline_s=60.0,
+        container_name, REDIRECT_BREADCRUMB, deadline_s=60.0,
     )
-    assert "s6 supervision" in logs, (
+    assert REDIRECT_BREADCRUMB in logs, (
         f"expected loud breadcrumb in docker logs; got:\n{logs}"
     )
     assert "--no-supervise" in logs, (
@@ -202,7 +205,7 @@ def test_supervised_gateway_does_not_recurse(
     # AND the supervised one (2 processes) and falsely conclude
     # recursion. Polling the breadcrumb is the definitive signal
     # that the redirect fired and the CMD process is now `sleep`.
-    wait_for_docker_logs(container_name, "s6 supervision")
+    wait_for_docker_logs(container_name, REDIRECT_BREADCRUMB)
 
     # Now that the redirect fired, count python processes running
     # `hermes gateway run`. If the recursion guard fails, s6 would
@@ -253,6 +256,7 @@ def test_dashboard_supervised_when_env_set(
     start_container(
         built_image, container_name,
         "HERMES_DASHBOARD=1",
+        "HERMES_DASHBOARD_HOST=127.0.0.1",
         cmd="gateway run",
     )
 
@@ -263,7 +267,7 @@ def test_dashboard_supervised_when_env_set(
     # cont-init finishes, but the redirect (which creates the
     # gateway-default s6 slot) happens later in the CMD process.
     wait_for_docker_logs(
-        container_name, "s6 supervision", deadline_s=60.0,
+        container_name, REDIRECT_BREADCRUMB, deadline_s=60.0,
     )
 
     # Poll for both slots to report want-up, using the same
@@ -292,5 +296,4 @@ def test_dashboard_supervised_when_env_set(
     assert ok_dash, (
         f"dashboard slot not want-up: {_svstat(container_name, 'dashboard')!r}"
     )
-
 
