@@ -88,48 +88,48 @@ def _inherited_flag(parser, *args, **kwargs):
 
 
 _EPILOGUE = """
-Examples:
-    korra                        Start interactive chat
-    korra chat -q "Hello"        Single query mode
-    korra --tui                  Launch the modern TUI (or set display.interface: tui)
-    korra --cli                  Force the classic REPL (overrides display.interface: tui)
-    korra -c                     Resume the most recent session
-    korra -c "my project"        Resume a session by name (latest in lineage)
-    korra --resume <session_id>  Resume a specific session by ID
-    korra --resume latest        Resume the most recent session (same as -c)
-    korra --tui --resume latest --in ./dir   Resume ./dir's latest session in the TUI
-    korra setup                  Run setup wizard
-    korra logout                 Clear stored authentication
-    korra auth add <provider>    Add a pooled credential
-    korra auth list              List pooled credentials
-    korra auth remove <p> <t>    Remove pooled credential by index, id, or label
-    korra auth reset <provider>  Clear exhaustion status for a provider
-    korra model                  Select default model
-    korra fallback [list]        Show fallback provider chain
-    korra fallback add           Add a fallback provider (same picker as `korra model`)
-    korra fallback remove        Remove a fallback provider from the chain
-    korra config                 View configuration
-    korra config edit            Edit config in $EDITOR
-    korra config set model gpt-4 Set a config value
-    korra gateway                Run messaging gateway
-    korra -s korra-agent,github
-    korra -w                     Start in isolated git worktree
-    korra gateway install        Install gateway background service
-    korra sessions list          List past sessions
-    korra sessions browse        Interactive session picker
-    korra sessions rename ID T   Rename/title a session
-    korra logs                   View agent.log (last 50 lines)
-    korra logs -f                Follow agent.log in real time
-    korra logs errors            View errors.log
-    korra logs --since 1h        Lines from the last hour
-    korra debug share             Upload debug report for support
-    korra console                Open the safe Korra command console
-    korra update                 Update to latest version
-    korra dashboard              Start web UI dashboard (port 9119)
-    korra dashboard --stop       Stop running dashboard processes
-    korra dashboard --status     List running dashboard processes
+Примеры:
+    korra                        Начать беседу
+    korra chat -q "Здравствуйте" Ответить на один запрос
+    korra --tui                  Открыть современный терминальный интерфейс
+    korra --cli                  Открыть классический терминальный интерфейс
+    korra -c                     Продолжить последнюю беседу
+    korra -c "мой проект"        Продолжить беседу по названию
+    korra --resume <session_id>  Продолжить беседу по ID
+    korra --resume latest        Продолжить последнюю беседу, как -c
+    korra --tui --resume latest --in ./dir   Открыть последнюю беседу проекта ./dir
+    korra setup                  Открыть мастер настройки
+    korra logout                 Выйти из учётной записи
+    korra auth add <provider>    Добавить ключ или учётную запись провайдера
+    korra auth list              Показать сохранённые ключи и учётные записи
+    korra auth remove <p> <t>    Удалить ключ по номеру, ID или метке
+    korra auth reset <provider>  Снять отметку об исчерпании лимита провайдера
+    korra model                  Выбрать основную модель
+    korra fallback [list]        Показать резервных провайдеров
+    korra fallback add           Добавить резервного провайдера
+    korra fallback remove        Удалить резервного провайдера
+    korra config                 Показать настройки
+    korra config edit            Открыть настройки в $EDITOR
+    korra config set model gpt-4 Изменить значение настройки
+    korra gateway                Запустить шлюз мессенджеров
+    korra -s korra-agent,github   Загрузить выбранные навыки
+    korra -w                     Запустить в отдельной рабочей копии Git
+    korra gateway install        Установить фоновую службу шлюза
+    korra sessions list          Показать прошлые беседы
+    korra sessions browse        Найти и выбрать беседу
+    korra sessions rename ID T   Переименовать беседу
+    korra logs                   Показать последние 50 строк agent.log
+    korra logs -f                Читать agent.log в реальном времени
+    korra logs errors            Показать errors.log
+    korra logs --since 1h        Показать записи за последний час
+    korra debug share            Загрузить отчёт для поддержки
+    korra console                Открыть безопасную консоль команд Корры
+    korra update                 Обновить до последней версии
+    korra dashboard              Открыть веб-панель на порту 9119
+    korra dashboard --stop       Остановить запущенные веб-панели
+    korra dashboard --status     Показать запущенные веб-панели
 
-For more help on a command:
+Справка по отдельной команде:
     korra <command> --help
 """
 
@@ -179,13 +179,13 @@ def build_top_level_parser():
     )
     parser = argparse.ArgumentParser(
         prog=prog,
-        description="Korra - AI assistant with tool-calling capabilities",
+        description='Korra — ваш ИИ-помощник с доступом к инструментам',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=epilogue,
     )
 
     parser.add_argument(
-        "--version", "-V", action="store_true", help="Show version and exit"
+        "--version", "-V", action="store_true", help='Показать версию и выйти'
     )
     parser.add_argument(
         "-z",
@@ -193,11 +193,7 @@ def build_top_level_parser():
         metavar="PROMPT",
         default=None,
         help=(
-            "One-shot mode: send a single prompt and print ONLY the final "
-            "response text to stdout. No banner, no spinner, no tool "
-            "previews, no session_id line. Tools, memory, rules, and "
-            "AGENTS.md in the CWD are loaded as normal; approvals are "
-            "auto-bypassed. Intended for scripts / pipes."
+            'Разовый запрос: вывести в stdout только итоговый ответ. Без заставки, анимации, промежуточного вывода инструментов и строки session_id. Инструменты, память, правила и AGENTS.md из текущей папки загружаются как обычно; подтверждения действий пропускаются. Для скриптов и конвейеров.'
         ),
     )
     parser.add_argument(
@@ -205,10 +201,7 @@ def build_top_level_parser():
         metavar="PATH",
         default=None,
         help=(
-            "One-shot mode only: after the run, write a JSON usage report "
-            "(estimated cost, token counts, model, api_calls) to PATH. "
-            "The report is written even when the run fails, so pipelines "
-            "can always account for spend. No effect outside -z/--oneshot."
+            'Только для -z/--oneshot: после выполнения записать в PATH отчёт JSON о примерной стоимости, токенах, модели и числе вызовов API (api_calls). Отчёт сохраняется и при ошибке.'
         ),
     )
     # --model / --provider are accepted at the top level so they can pair
@@ -221,8 +214,7 @@ def build_top_level_parser():
         "--model",
         default=None,
         help=(
-            "Model override for this invocation (e.g. anthropic/claude-sonnet-4.6). "
-            "Applies to -z/--oneshot and --tui. Also settable via HERMES_INFERENCE_MODEL env var."
+            'Модель для этого запуска, например anthropic/claude-sonnet-4.6. Работает с -z/--oneshot и --tui; также задаётся через HERMES_INFERENCE_MODEL.'
         ),
     )
     _inherited_flag(
@@ -230,9 +222,7 @@ def build_top_level_parser():
         "--provider",
         default=None,
         help=(
-            "Provider override for this invocation (e.g. openrouter, anthropic). "
-            "Applies to -z/--oneshot and --tui. The persistent provider lives in config.yaml "
-            "under model.provider — use `korra setup` or edit the file to change it."
+            'Провайдер для этого запуска, например openrouter или anthropic. Работает с -z/--oneshot и --tui. Постоянная настройка: model.provider в config.yaml или команда `korra setup`.'
         ),
     )
     _inherited_flag(
@@ -241,17 +231,14 @@ def build_top_level_parser():
         default=None,
         metavar="LEVEL",
         help=(
-            "Reasoning effort for this invocation: none, minimal, low, medium, "
-            "high, xhigh, max, or ultra. Overrides agent.reasoning_effort in "
-            "config.yaml for this run only; the persistent level lives there "
-            "(or per-model under agent.reasoning_overrides)."
+            'Глубина рассуждений для этого запуска: none, minimal, low, medium, high, xhigh, max или ultra. Заменяет agent.reasoning_effort из config.yaml только на время запуска; отдельные настройки моделей — agent.reasoning_overrides.'
         ),
     )
     parser.add_argument(
         "-t",
         "--toolsets",
         default=None,
-        help="Comma-separated toolsets to enable for this invocation. Applies to -z/--oneshot and --tui.",
+        help='Включить наборы инструментов через запятую. Работает с -z/--oneshot и --tui.',
     )
     parser.add_argument(
         "--resume",
@@ -259,15 +246,14 @@ def build_top_level_parser():
         metavar="SESSION",
         default=None,
         help=(
-            "Resume a previous session by ID or title, or pass 'latest' for "
-            "the most recent session (workspace-scoped, like -c with no name)"
+            'Продолжить беседу по ID или названию; latest — последняя беседа в текущем проекте, как -c без имени'
         ),
     )
     parser.add_argument(
         "--no-restore-cwd",
         action="store_true",
         default=False,
-        help="Don't cd into a resumed session's recorded working directory.",
+        help='Не переходить в рабочую папку, сохранённую в возобновляемой беседе.',
     )
     parser.add_argument(
         "--in",
@@ -275,10 +261,7 @@ def build_top_level_parser():
         metavar="DIR",
         default=None,
         help=(
-            "Change into DIR before starting or resuming. Combined with "
-            "'--resume latest' or -c, the most recent session for DIR's "
-            "workspace is picked, and the session stays in DIR (skips the "
-            "recorded-cwd restore)."
+            'Перейти в DIR перед запуском. С --resume latest или -c выбрать последнюю беседу этого проекта и остаться в DIR, не восстанавливая прежнюю рабочую папку.'
         ),
     )
     parser.add_argument(
@@ -289,14 +272,14 @@ def build_top_level_parser():
         const=True,
         default=None,
         metavar="SESSION_NAME",
-        help="Resume a session by name, or the most recent if no name given",
+        help='Продолжить беседу по названию; без названия — последнюю',
     )
     parser.add_argument(
         "--worktree",
         "-w",
         action="store_true",
         default=False,
-        help="Run in an isolated git worktree (for parallel agents)",
+        help='Запустить в отдельной рабочей копии Git для параллельной работы агентов',
     )
     _inherited_flag(
         parser,
@@ -304,10 +287,7 @@ def build_top_level_parser():
         action="store_true",
         default=False,
         help=(
-            "Auto-approve any unseen shell hooks declared in config.yaml "
-            "without a TTY prompt.  Equivalent to HERMES_ACCEPT_HOOKS=1 or "
-            "hooks_auto_accept: true in config.yaml.  Use on CI / headless "
-            "runs that can't prompt."
+            'Автоматически одобрять ещё не проверенные обработчики shell из config.yaml. Аналог hooks_auto_accept: true или HERMES_ACCEPT_HOOKS=1. Для CI и запусков без терминала.'
         ),
     )
     _inherited_flag(
@@ -316,56 +296,56 @@ def build_top_level_parser():
         "-s",
         action="append",
         default=None,
-        help="Preload one or more skills for the session (repeat flag or comma-separate)",
+        help='Заранее загрузить навыки: перечислите через запятую или повторите параметр',
     )
     _inherited_flag(
         parser,
         "--yolo",
         action="store_true",
         default=False,
-        help="Bypass all dangerous command approval prompts (use at your own risk)",
+        help='Пропускать все подтверждения опасных команд (на ваш риск)',
     )
     _inherited_flag(
         parser,
         "--pass-session-id",
         action="store_true",
         default=False,
-        help="Include the session ID in the agent's system prompt",
+        help='Включить ID беседы в системную инструкцию агента',
     )
     _inherited_flag(
         parser,
         "--ignore-user-config",
         action="store_true",
         default=False,
-        help="Ignore $HERMES_HOME/config.yaml and fall back to built-in defaults (credentials in .env are still loaded)",
+        help='Пропустить $HERMES_HOME/config.yaml и использовать исходные настройки; ключи из .env по-прежнему загружаются',
     )
     _inherited_flag(
         parser,
         "--ignore-rules",
         action="store_true",
         default=False,
-        help="Skip auto-injection of AGENTS.md, SOUL.md, .cursorrules, memory, and preloaded skills",
+        help='Не загружать AGENTS.md, SOUL.md, .cursorrules, память и заранее выбранные навыки',
     )
     _inherited_flag(
         parser,
         "--safe-mode",
         action="store_true",
         default=False,
-        help="Troubleshooting mode: disable ALL customizations — user config, AGENTS.md/memory injection, plugins, and MCP servers (implies --ignore-user-config and --ignore-rules)",
+        help='Режим диагностики: отключить настройки пользователя, AGENTS.md, память, плагины и серверы MCP. Включает --ignore-user-config и --ignore-rules.',
     )
     _inherited_flag(
         parser,
         "--tui",
         action="store_true",
         default=False,
-        help="Launch the modern TUI instead of the classic REPL",
+        help='Открыть современный терминальный интерфейс',
     )
     _inherited_flag(
         parser,
         "--cli",
         action="store_true",
         default=False,
-        help="Force the classic prompt_toolkit REPL (overrides display.interface=tui)",
+        help='Открыть классический терминальный интерфейс prompt_toolkit, независимо от display.interface=tui',
     )
     _inherited_flag(
         parser,
@@ -373,36 +353,31 @@ def build_top_level_parser():
         dest="tui_dev",
         action="store_true",
         default=False,
-        help="With --tui: run TypeScript sources via tsx (skip dist build)",
+        help='С --tui: запускать исходники TypeScript через tsx без сборки dist',
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    subparsers = parser.add_subparsers(dest="command", help='Команда для выполнения')
 
     # =========================================================================
     # chat command
     # =========================================================================
     chat_parser = subparsers.add_parser(
         "chat",
-        help="Interactive chat with the agent",
-        description="Start an interactive chat session with Korra",
+        help='Беседа с агентом',
+        description='Начать беседу с Коррой',
     )
     _query_group = chat_parser.add_mutually_exclusive_group()
     _query_group.add_argument(
         "-q", "--query",
         help=(
-            "Query to run. On a real TTY the prompt seeds an interactive "
-            "session (submitted literally as the first turn); combined with "
-            "--oneshot or -Q, or on a non-TTY, it answers and exits."
+            'Отправить запрос. В обычном терминале он становится первым сообщением беседы. С --oneshot, -Q или без интерактивного терминала — получить ответ и выйти.'
         ),
     )
     _query_group.add_argument(
         "--query-file",
         metavar="PATH",
         help=(
-            "Read the single query from a file instead of the command line "
-            "('-' reads stdin). Safe for arbitrary text: nothing is shell-"
-            "interpreted, so quotes, $(...), and backticks are preserved "
-            "verbatim. Mutually exclusive with -q."
+            "Прочитать запрос из файла; '-' — из stdin. Текст не обрабатывается оболочкой: кавычки, $(...) и обратные кавычки сохраняются. Нельзя использовать вместе с -q."
         ),
     )
     chat_parser.add_argument(
@@ -415,13 +390,11 @@ def build_top_level_parser():
         # prompt. `oneshot_exit` keeps the surfaces independent.
         default=False,
         help=(
-            "With -q/--query-file: answer the query and exit (legacy "
-            "single-query behavior) instead of seeding an interactive "
-            "session. Implied on non-TTY stdio and by -Q/--quiet."
+            'С -q/--query-file: ответить и выйти. Автоматически включается без интерактивного терминала и с -Q/--quiet.'
         ),
     )
     chat_parser.add_argument(
-        "--image", help="Optional local image path to attach to a single query"
+        "--image", help='Путь к изображению для вложения в разовый запрос'
     )
     # `default=argparse.SUPPRESS` on flags that are ALSO declared on the
     # top-level parser: when the user writes `hermes -m foo chat`, argparse
@@ -438,12 +411,12 @@ def build_top_level_parser():
         chat_parser,
         "-m", "--model",
         default=argparse.SUPPRESS,
-        help="Model to use (e.g., anthropic/claude-sonnet-4)",
+        help='Модель, например anthropic/claude-sonnet-4',
     )
     chat_parser.add_argument(
         "-t", "--toolsets",
         default=argparse.SUPPRESS,
-        help="Comma-separated toolsets to enable",
+        help='Наборы инструментов для включения, через запятую',
     )
     _inherited_flag(
         chat_parser,
@@ -451,9 +424,7 @@ def build_top_level_parser():
         default=argparse.SUPPRESS,
         metavar="LEVEL",
         help=(
-            "Reasoning effort for this session: none, minimal, low, medium, "
-            "high, xhigh, max, or ultra. Overrides agent.reasoning_effort for "
-            "this run only (same levels as the /reasoning slash command)."
+            'Глубина рассуждений для этой беседы: none, minimal, low, medium, high, xhigh, max или ultra. Временно заменяет agent.reasoning_effort; значения те же, что у /reasoning.'
         ),
     )
     _inherited_flag(
@@ -462,7 +433,7 @@ def build_top_level_parser():
         "--skills",
         action="append",
         default=argparse.SUPPRESS,
-        help="Preload one or more skills for the session (repeat flag or comma-separate)",
+        help='Заранее загрузить навыки: перечислите через запятую или повторите параметр',
     )
     _inherited_flag(
         chat_parser,
@@ -472,20 +443,20 @@ def build_top_level_parser():
         # handles validation/error reporting consistently with the top-level
         # `--provider` flag.
         default=argparse.SUPPRESS,
-        help="Inference provider (default: auto). Built-in or a user-defined name from `providers:` in config.yaml.",
+        help='Провайдер модели (по умолчанию auto): встроенный или добавленный в раздел providers: файла config.yaml.',
     )
     chat_parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Verbose output",
+        help='Подробный вывод',
     )
     chat_parser.add_argument(
         "-Q",
         "--quiet",
         action="store_true",
-        help="Quiet mode for programmatic use: suppress banner, spinner, and tool previews. Only output the final response and session info.",
+        help='Режим для скриптов: только итоговый ответ и сведения о беседе, без заставки, анимации и промежуточного вывода инструментов.',
     )
     chat_parser.add_argument(
         "--resume",
@@ -493,15 +464,14 @@ def build_top_level_parser():
         metavar="SESSION_ID",
         default=argparse.SUPPRESS,
         help=(
-            "Resume a previous session by ID (shown on exit), or 'latest' "
-            "for the most recent session"
+            'Продолжить беседу по ID, показанному при выходе; latest — последняя беседа'
         ),
     )
     chat_parser.add_argument(
         "--no-restore-cwd",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Don't cd into a resumed session's recorded working directory.",
+        help='Не переходить в рабочую папку, сохранённую в возобновляемой беседе.',
     )
     chat_parser.add_argument(
         "--in",
@@ -509,8 +479,7 @@ def build_top_level_parser():
         metavar="DIR",
         default=argparse.SUPPRESS,
         help=(
-            "Change into DIR before starting or resuming (scopes "
-            "'--resume latest' / -c lookups to DIR's workspace)."
+            'Перед запуском перейти в DIR; --resume latest и -c будут искать беседы проекта из этой папки.'
         ),
     )
     chat_parser.add_argument(
@@ -521,17 +490,14 @@ def build_top_level_parser():
         const=True,
         default=argparse.SUPPRESS,
         metavar="SESSION_NAME",
-        help="Resume a session by name, or the most recent if no name given",
+        help='Продолжить беседу по названию; без названия — последнюю',
     )
     chat_parser.add_argument(
         "--create-if-missing",
         action="store_true",
         default=argparse.SUPPRESS,
         help=(
-            "With -c/--continue <name>: if no session matches the name, "
-            "create a new session with that title and proceed (instead of "
-            "failing with a not-found error). Programmatic callers that "
-            "want 'send to this named thread, making it if needed'."
+            'С -c/--continue <name>: если беседы с таким названием нет, создать её и продолжить. Удобно для скриптов, которые отправляют сообщения в именованную беседу.'
         ),
     )
     chat_parser.add_argument(
@@ -539,7 +505,7 @@ def build_top_level_parser():
         "-w",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Run in an isolated git worktree (for parallel agents on the same repo)",
+        help='Запустить в отдельной рабочей копии Git для параллельной работы агентов в одном репозитории',
     )
     _inherited_flag(
         chat_parser,
@@ -547,23 +513,21 @@ def build_top_level_parser():
         action="store_true",
         default=argparse.SUPPRESS,
         help=(
-            "Auto-approve any unseen shell hooks declared in config.yaml "
-            "without a TTY prompt (see also HERMES_ACCEPT_HOOKS env var and "
-            "hooks_auto_accept: in config.yaml)."
+            'Автоматически одобрять ещё не проверенные обработчики shell из config.yaml без запроса в терминале. См. hooks_auto_accept в config.yaml и HERMES_ACCEPT_HOOKS.'
         ),
     )
     chat_parser.add_argument(
         "--checkpoints",
         action="store_true",
         default=False,
-        help="Enable filesystem checkpoints before destructive file operations (use /rollback to restore)",
+        help='Создавать точки восстановления перед удалением и изменением файлов; восстановление через /rollback',
     )
     chat_parser.add_argument(
         "--max-turns",
         type=int,
         default=None,
         metavar="N",
-        help="Maximum tool-calling iterations per conversation turn (default: 500, or agent.max_turns in config)",
+        help='Максимум обращений к инструментам за ход беседы (по умолчанию 500 или agent.max_turns из настроек)',
     )
     chat_parser.add_argument(
         "--run-budget",
@@ -572,12 +536,7 @@ def build_top_level_parser():
         metavar="SECONDS",
         dest="run_budget",
         help=(
-            "Optional wall-clock budget in seconds for each conversation run. "
-            "At 80%% elapsed the agent gets a one-time wrap-up notice, and "
-            "implicit provider stale timeouts are capped to the remaining "
-            "budget so one hung call can't consume the run. Unset = off. "
-            "Also configurable as agent.run_budget_seconds in config.yaml. "
-            "Intended for one-shot/eval invocations with a hard ceiling."
+            'Ограничить время каждого запуска в секундах. На 80%% времени агент получает указание завершать работу, а ожидание провайдера ограничивается остатком времени. По умолчанию выключено. Также задаётся через agent.run_budget_seconds в config.yaml. Для разовых запусков и проверок с жёстким сроком.'
         ),
     )
     _inherited_flag(
@@ -585,54 +544,54 @@ def build_top_level_parser():
         "--yolo",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Bypass all dangerous command approval prompts (use at your own risk)",
+        help='Пропускать все подтверждения опасных команд (на ваш риск)',
     )
     _inherited_flag(
         chat_parser,
         "--pass-session-id",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Include the session ID in the agent's system prompt",
+        help='Включить ID беседы в системную инструкцию агента',
     )
     _inherited_flag(
         chat_parser,
         "--ignore-user-config",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Ignore $HERMES_HOME/config.yaml and fall back to built-in defaults (credentials in .env are still loaded). Useful for isolated CI runs, reproduction, and third-party integrations.",
+        help='Пропустить $HERMES_HOME/config.yaml и использовать исходные настройки; ключи из .env по-прежнему загружаются. Для изолированных проверок, CI и интеграций.',
     )
     _inherited_flag(
         chat_parser,
         "--ignore-rules",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Skip auto-injection of AGENTS.md, SOUL.md, .cursorrules, memory, and preloaded skills. Combine with --ignore-user-config for a fully isolated run.",
+        help='Не загружать AGENTS.md, SOUL.md, .cursorrules, память и заранее выбранные навыки. Для полной изоляции добавьте --ignore-user-config.',
     )
     _inherited_flag(
         chat_parser,
         "--safe-mode",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Troubleshooting mode: disable ALL customizations — user config, AGENTS.md/memory injection, plugins, and MCP servers (implies --ignore-user-config and --ignore-rules). Use to isolate whether a problem comes from your setup or from Korra itself.",
+        help='Режим диагностики: отключить настройки пользователя, AGENTS.md, память, плагины и MCP. Включает --ignore-user-config и --ignore-rules. Помогает отличить ошибку настройки от ошибки Корры.',
     )
     chat_parser.add_argument(
         "--source",
         default=None,
-        help="Session source tag for filtering (default: cli). Use 'tool' for third-party integrations that should not appear in user session lists.",
+        help='Метка источника беседы для фильтрации (по умолчанию cli). Для интеграций, скрытых из списка бесед пользователя, укажите tool.',
     )
     _inherited_flag(
         chat_parser,
         "--tui",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Launch the modern TUI instead of the classic REPL",
+        help='Открыть современный терминальный интерфейс',
     )
     _inherited_flag(
         chat_parser,
         "--cli",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Force the classic prompt_toolkit REPL (overrides display.interface=tui)",
+        help='Открыть классический терминальный интерфейс prompt_toolkit, независимо от display.interface=tui',
     )
     _inherited_flag(
         chat_parser,
@@ -640,7 +599,7 @@ def build_top_level_parser():
         dest="tui_dev",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="With --tui: run TypeScript sources via tsx (skip dist build)",
+        help='С --tui: запускать исходники TypeScript через tsx без сборки dist',
     )
 
     return parser, subparsers, chat_parser
