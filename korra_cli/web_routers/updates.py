@@ -59,6 +59,15 @@ _MAX_ANNOUNCE_BYTES = 64 * 1024
 #: день, когда владелец про него забыл.
 REQUEST_TTL_SECONDS = 24 * 3600
 
+#: Сколько ждать вестей, прежде чем признать, что их нет. Ход обновления
+#: присылает кабинет, и присылает часто: раз в десять секунд, пока операция
+#: идёт. Молчать он может законно только пока панель перезапускается —
+#: около минуты, плюс подъём туннеля. Десять минут молчания законной причины
+#: не имеют: кабинет остановлен, потерял связь или упал. Показывать всё это
+#: время «Обновляем. Это займёт несколько минут.» — врать владельцу тем
+#: увереннее, чем дольше он смотрит.
+PROGRESS_STALE_AFTER_SECONDS = 10 * 60
+
 #: Шаги обновления так, как их видит владелец. Ключ — фаза хостового updater
 #: (`docs/client-deploy/updater.py`), значение — шаг на экране. Несколько фаз
 #: намеренно сходятся в один шаг: человеку не нужно знать разницу между
@@ -284,6 +293,8 @@ def _progress(installed: dict) -> Optional[dict[str, Any]]:
     phase = _clean_text(raw.get("phase"), 60)
     step = PHASE_STEP.get(phase.removeprefix("remote_"), "fetch")
     release_id = _clean_text(raw.get("release_id"), 80)
+    updated_at = raw.get("updated_at") if isinstance(raw.get("updated_at"), (int, float)) else None
+    final = status in _FINAL_STATUSES
     return {
         "status": status,
         "step": step,
@@ -292,8 +303,13 @@ def _progress(installed: dict) -> Optional[dict[str, Any]]:
         "message": _clean_text(raw.get("message"), 400) or STATUS_TEXT[status],
         "error": _clean_text(raw.get("error"), 400),
         "started_at": raw.get("started_at") if isinstance(raw.get("started_at"), (int, float)) else None,
-        "updated_at": raw.get("updated_at") if isinstance(raw.get("updated_at"), (int, float)) else None,
-        "final": status in _FINAL_STATUSES,
+        "updated_at": updated_at,
+        "final": final,
+        # Незавершённый ход, о котором давно нет вестей. Не «не удалось»: мы и
+        # правда не знаем, чем кончилось, — но и делать вид, что всё идёт по
+        # плану, больше нельзя.
+        "stale": bool(not final and updated_at
+                      and time.time() - updated_at > PROGRESS_STALE_AFTER_SECONDS),
         "installed_target": bool(release_id and release_id == installed.get("release_id")),
     }
 

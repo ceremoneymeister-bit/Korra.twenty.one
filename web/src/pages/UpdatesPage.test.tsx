@@ -195,6 +195,7 @@ describe('ход обновления', () => {
     started_at: 1,
     updated_at: 2,
     final: false,
+    stale: false,
     installed_target: false,
   };
 
@@ -217,6 +218,19 @@ describe('ход обновления', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(4100); });
     expect(container.textContent).toContain('Панель перезапускается');
     expect(container.textContent).not.toContain('Не удалось узнать состояние');
+  });
+
+  it('перестаёт обещать «несколько минут», когда вестей давно нет', async () => {
+    // Кабинет присылает ход раз в десять секунд; замолчать надолго он может,
+    // только если остановлен или потерял связь. Держать в этот момент бодрое
+    // «Обновляем» — врать владельцу тем увереннее, чем дольше он смотрит.
+    calls.getUpdatesState.mockResolvedValue(state({ progress: { ...running, stale: true } }));
+    await render();
+    expect(container.textContent).toContain('Об обновлении давно нет вестей');
+    expect(container.textContent).toContain('Ваши данные на месте');
+    expect(container.textContent).not.toContain('Это займёт несколько минут');
+    // И не притворяемся, что работа идёт прямо сейчас.
+    expect(container.querySelector('.upd-badge[data-tone="working"]')).toBeNull();
   });
 
   it('объясняет неудачу и успокаивает про данные', async () => {

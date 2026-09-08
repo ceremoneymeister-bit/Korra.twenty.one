@@ -205,3 +205,44 @@ def test_routes_are_closed_without_the_panel_session(home, client):
     assert client.get("/api/updates/state").status_code == 401
     assert client.post("/api/updates/request", json={}).status_code == 401
     assert client.post("/api/updates/announce", json={}).status_code == 401
+
+
+def test_progress_is_marked_stale_when_the_cabinet_goes_quiet(home, client, auth):
+    """Кабинет присылает ход раз в десять секунд; замолчать надолго он может,
+    только если остановлен или потерял связь. Незавершённый ход, о котором
+    давно нет вестей, экран обязан назвать своим именем, а не повторять
+    «Обновляем. Это займёт несколько минут.» до скончания века.
+    """
+    announce(client, auth, progress={"status": "running", "phase": "backup"})
+    assert state(client, auth)["progress"]["stale"] is False
+
+    stored = home / "update-center" / "progress.json"
+    body = json.loads(stored.read_text(encoding="utf-8"))
+    body["updated_at"] = time.time() - updates_routes.PROGRESS_STALE_AFTER_SECONDS - 1
+    stored.write_text(json.dumps(body), encoding="utf-8")
+    progress = state(client, auth)["progress"]
+    assert progress["stale"] is True
+    # Это не «не удалось»: чем кончилось, мы честно не знаем.
+    assert progress["final"] is False and progress["status"] == "running"
+
+
+def test_a_finished_operation_never_goes_stale(home, client, auth):
+    """У завершённой операции возраст ничего не значит: итог уже известен, и
+    объявлять его протухшим — пугать владельца на ровном месте."""
+    announce(client, auth, progress={"status": "succeeded", "phase": "complete"})
+    stored = home / "update-center" / "progress.json"
+    body = json.loads(stored.read_text(encoding="utf-8"))
+    body["updated_at"] = time.time() - 30 * 24 * 3600
+    stored.write_text(json.dumps(body), encoding="utf-8")
+    progress = state(client, auth)["progress"]
+    assert progress["final"] is True and progress["stale"] is False
+
+
+def test_progress_without_a_timestamp_is_not_called_stale(home, client, auth):
+    """Кабинет старого выпуска мог не прислать времени. Без времени судить не
+    о чем: молчать про молчание честнее, чем выдумать его."""
+    directory = home / "update-center"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "progress.json").write_text(
+        json.dumps({"status": "running", "phase": "backup"}), encoding="utf-8")
+    assert state(client, auth)["progress"]["stale"] is False

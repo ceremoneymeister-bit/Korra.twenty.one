@@ -2207,6 +2207,8 @@ export interface UpdateProgress {
   started_at: number | null;
   updated_at: number | null;
   final: boolean;
+  /** Операция не завершена, но вестей о ней давно нет: кабинет замолчал. */
+  stale: boolean;
   /** Установленный выпуск уже совпал с целью операции. */
   installed_target: boolean;
 }
