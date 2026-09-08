@@ -539,11 +539,12 @@ def test_refresh_429_classified_as_quota_not_auth_failure(monkeypatch):
     assert err.code == CODEX_RATE_LIMITED_CODE
     assert err.relogin_required is False
     assert is_rate_limited_auth_error(err) is True
-    assert "retry after 120s" in str(err)
+    assert "Повторите запрос через 120 с" in str(err)
     # User-facing copy must not tell the operator to re-authenticate.
     rendered = format_auth_error(err)
     assert "re-authenticate" not in rendered
-    assert "hermes auth" not in rendered
+    assert "korra auth" not in rendered
+    assert "войдите заново" not in rendered.lower()
 
 
 def test_refresh_429_without_retry_after_header(monkeypatch):
@@ -559,7 +560,7 @@ def test_refresh_429_without_retry_after_header(monkeypatch):
     err = exc_info.value
     assert err.code == CODEX_RATE_LIMITED_CODE
     assert err.relogin_required is False
-    assert "quota exhausted" in str(err).lower()
+    assert "достигнут лимит" in str(err).lower()
 
 
 def test_is_rate_limited_auth_error_distinguishes_credential_errors():

@@ -39,7 +39,7 @@ def test_loopback_ssh_hint_has_visual_header(monkeypatch):
     out = _cap(lambda: auth_mod._print_loopback_ssh_hint(
         "http://127.0.0.1:43827/callback"
     ))
-    assert "Remote session detected" in out
+    assert "Удалённое подключение" in out
     assert "---" in out  # divider is present
 
 

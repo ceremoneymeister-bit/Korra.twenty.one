@@ -809,8 +809,8 @@ ZAI_ENDPOINTS = [
     # (id, base_url, probe_models, label)
     ("global",        "https://api.z.ai/api/paas/v4",        ["glm-5"],   "Global"),
     ("cn",            "https://open.bigmodel.cn/api/paas/v4", ["glm-5"],   "China"),
-    ("coding-global", "https://api.z.ai/api/coding/paas/v4",  ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5v-turbo", "glm-4.7"], "Global (Coding Plan)"),
-    ("coding-cn",     "https://open.bigmodel.cn/api/coding/paas/v4", ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5v-turbo", "glm-4.7"], "China (Coding Plan)"),
+    ("coding-global", "https://api.z.ai/api/coding/paas/v4",  ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5v-turbo", "glm-4.7"], "Международный (Coding Plan)"),
+    ("coding-cn",     "https://open.bigmodel.cn/api/coding/paas/v4", ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5v-turbo", "glm-4.7"], "Китай (Coding Plan)"),
 ]
 
 
@@ -1050,24 +1050,24 @@ def format_auth_error(error: Exception) -> str:
         return str(error)
 
     if error.relogin_required:
-        return f"{error} Run `hermes model` to re-authenticate."
+        return f"{error} Войдите заново командой `korra model`."
 
     if error.code == "subscription_required":
         if error.provider == "nous":
             return _format_nous_entitlement_auth_error(error)
-        return "No active paid subscription found. Please purchase/activate a subscription, then retry."
+        return "Активная платная подписка не найдена. Оформите или активируйте подписку и повторите запрос."
 
     if error.code == "insufficient_credits":
         if error.provider == "nous":
             return _format_nous_entitlement_auth_error(error)
-        return "Subscription credits are exhausted. Top up/renew credits, then retry."
+        return "Лимит подписки исчерпан. Пополните баланс или продлите подписку и повторите запрос."
 
     if error.code in {"subscription_expired", "no_usable_credits", "account_missing", "member_spend_cap_exceeded"}:
         if error.provider == "nous":
             return _format_nous_entitlement_auth_error(error)
 
     if error.code == "temporarily_unavailable":
-        return f"{error} Please retry in a few seconds."
+        return f"{error} Повторите запрос через несколько секунд."
 
     return str(error)
 
@@ -1082,13 +1082,13 @@ def _format_nous_entitlement_auth_error(error: AuthError) -> str:
         account_info = get_nous_portal_account_info(force_fresh=True)
         message = format_nous_portal_entitlement_message(
             account_info,
-            capability="Nous model access",
+            capability="доступ к моделям Nous",
         )
         if message:
             return message
     except Exception:
         pass
-    return f"{error} Check credits or billing in Nous Portal, then retry."
+    return f"{error} Проверьте баланс и оплату в Nous Portal, затем повторите запрос."
 
 
 def _token_fingerprint(token: Any) -> Optional[str]:
@@ -1360,7 +1360,7 @@ def _auth_store_lock(
         lock_path,
         _auth_lock_holder_for(auth_path),
         timeout_seconds,
-        "Timed out waiting for auth store lock",
+        "Истекло время ожидания доступа к хранилищу авторизации",
     ):
         yield
 
@@ -2193,7 +2193,7 @@ def _get_config_hint_for_unknown_provider(provider_name: str) -> str:
         if not issues:
             return ""
 
-        lines = ["Config issue detected — run 'hermes doctor' for full diagnostics:"]
+        lines = ["Найдена ошибка настроек. Полная диагностика: 'korra doctor':"]
         for ci in issues:
             prefix = "ERROR" if ci.severity == "error" else "WARNING"
             lines.append(f"  [{prefix}] {ci.message}")
@@ -2289,11 +2289,11 @@ def resolve_provider(
     if normalized != "auto":
         # Check for common config.yaml issues that cause this error
         _config_hint = _get_config_hint_for_unknown_provider(normalized)
-        msg = f"Unknown provider '{normalized}'."
+        msg = f"Неизвестный провайдер '{normalized}'."
         if _config_hint:
             msg += f"\n\n{_config_hint}"
         else:
-            msg += " Check 'hermes model' for available providers, or run 'hermes doctor' to diagnose config issues."
+            msg += " Список провайдеров: 'korra model'. Диагностика настроек: 'korra doctor'."
         raise AuthError(msg, code="invalid_provider")
 
     # Explicit one-off CLI creds always mean openrouter/custom
@@ -2693,8 +2693,7 @@ def _assert_nous_inference_jwt_usable(
     if reason is None:
         return
     raise AuthError(
-        "Nous Portal access token is not a usable inference JWT "
-        f"({reason}). Re-authenticate with: hermes auth add nous",
+        f"Токен Nous Portal не подходит для запросов к модели ({reason}). Войдите заново: korra auth add nous",
         provider="nous",
         code=reason,
         relogin_required=True,
@@ -2811,7 +2810,7 @@ def _read_qwen_cli_tokens() -> Dict[str, Any]:
     auth_path = _qwen_cli_auth_path()
     if not auth_path.exists():
         raise AuthError(
-            "Qwen CLI credentials not found. Run 'qwen auth qwen-oauth' first.",
+            "Данные входа Qwen CLI не найдены. Выполните 'qwen auth qwen-oauth'.",
             provider="qwen-oauth",
             code="qwen_auth_missing",
         )
@@ -2819,13 +2818,13 @@ def _read_qwen_cli_tokens() -> Dict[str, Any]:
         data = json.loads(auth_path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise AuthError(
-            f"Failed to read Qwen CLI credentials from {auth_path}: {exc}",
+            f"Не удалось прочитать данные входа Qwen CLI из {auth_path}: {exc}",
             provider="qwen-oauth",
             code="qwen_auth_read_failed",
         ) from exc
     if not isinstance(data, dict):
         raise AuthError(
-            f"Invalid Qwen CLI credentials in {auth_path}.",
+            f"Некорректные данные входа Qwen CLI в {auth_path}.",
             provider="qwen-oauth",
             code="qwen_auth_invalid",
         )
@@ -2876,7 +2875,7 @@ def _refresh_qwen_cli_tokens(tokens: Dict[str, Any], timeout_seconds: float = 20
     refresh_token = str(tokens.get("refresh_token", "") or "").strip()
     if not refresh_token:
         raise AuthError(
-            "Qwen OAuth refresh token missing. Re-run 'qwen auth qwen-oauth'.",
+            "Нет токена обновления Qwen OAuth. Выполните 'qwen auth qwen-oauth' заново.",
             provider="qwen-oauth",
             code="qwen_refresh_token_missing",
         )
@@ -2897,7 +2896,7 @@ def _refresh_qwen_cli_tokens(tokens: Dict[str, Any], timeout_seconds: float = 20
         )
     except Exception as exc:
         raise AuthError(
-            f"Qwen OAuth refresh failed: {exc}",
+            f"Не удалось обновить доступ Qwen OAuth: {exc}",
             provider="qwen-oauth",
             code="qwen_refresh_failed",
         ) from exc
@@ -2905,8 +2904,8 @@ def _refresh_qwen_cli_tokens(tokens: Dict[str, Any], timeout_seconds: float = 20
     if response.status_code >= 400:
         body = response.text.strip()
         raise AuthError(
-            "Qwen OAuth refresh failed. Re-run 'qwen auth qwen-oauth'."
-            + (f" Response: {body}" if body else ""),
+            "Не удалось обновить доступ Qwen OAuth. Выполните 'qwen auth qwen-oauth' заново."
+            + (f" Ответ: {body}" if body else ""),
             provider="qwen-oauth",
             code="qwen_refresh_failed",
         )
@@ -2915,14 +2914,14 @@ def _refresh_qwen_cli_tokens(tokens: Dict[str, Any], timeout_seconds: float = 20
         payload = response.json()
     except Exception as exc:
         raise AuthError(
-            f"Qwen OAuth refresh returned invalid JSON: {exc}",
+            f"Qwen OAuth вернул некорректный JSON при обновлении доступа: {exc}",
             provider="qwen-oauth",
             code="qwen_refresh_invalid_json",
         ) from exc
 
     if not isinstance(payload, dict) or not str(payload.get("access_token", "") or "").strip():
         raise AuthError(
-            "Qwen OAuth refresh response missing access_token.",
+            "В ответе обновления Qwen OAuth нет access_token.",
             provider="qwen-oauth",
             code="qwen_refresh_invalid_response",
         )
@@ -2979,7 +2978,7 @@ def resolve_qwen_runtime_credentials(
         access_token = str(tokens.get("access_token", "") or "").strip()
     if not access_token:
         raise AuthError(
-            "Qwen OAuth access token missing. Re-run 'qwen auth qwen-oauth'.",
+            "Нет токена доступа Qwen OAuth. Выполните 'qwen auth qwen-oauth' заново.",
             provider="qwen-oauth",
             code="qwen_access_token_missing",
         )
@@ -3055,7 +3054,7 @@ def _spotify_client_id(
         if cleaned:
             return cleaned
     raise AuthError(
-        "Spotify client_id is required. Set HERMES_SPOTIFY_CLIENT_ID or pass --client-id.",
+        "Нужен идентификатор приложения Spotify (client_id). Задайте HERMES_SPOTIFY_CLIENT_ID или передайте --client-id.",
         provider="spotify",
         code="spotify_client_id_missing",
     )
@@ -3156,20 +3155,20 @@ def _spotify_validate_redirect_uri(redirect_uri: str) -> tuple[str, int, str]:
     parsed = urlparse(redirect_uri)
     if parsed.scheme != "http":
         raise AuthError(
-            "Spotify PKCE redirect_uri must use http://localhost or http://127.0.0.1.",
+            "Адрес возврата Spotify (redirect_uri) должен начинаться с http://localhost или http://127.0.0.1.",
             provider="spotify",
             code="spotify_redirect_invalid",
         )
     host = parsed.hostname or ""
     if host not in {"127.0.0.1", "localhost"}:
         raise AuthError(
-            "Spotify PKCE redirect_uri must point to localhost or 127.0.0.1.",
+            "Адрес возврата Spotify (redirect_uri) должен вести на localhost или 127.0.0.1.",
             provider="spotify",
             code="spotify_redirect_invalid",
         )
     if not parsed.port:
         raise AuthError(
-            "Spotify PKCE redirect_uri must include an explicit localhost port.",
+            "В адресе возврата Spotify (redirect_uri) нужно указать порт localhost.",
             provider="spotify",
             code="spotify_redirect_invalid",
         )
@@ -3203,9 +3202,9 @@ def _make_spotify_callback_handler(expected_path: str) -> tuple[type[BaseHTTPReq
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             if result["error"]:
-                body = "<html><body><h1>Spotify authorization failed.</h1>You can close this tab.</body></html>"
+                body = "<html><head><meta charset=\"utf-8\"></head><body><h1>Не удалось войти в Spotify.</h1>Эту вкладку можно закрыть.</body></html>"
             else:
-                body = "<html><body><h1>Spotify authorization received.</h1>You can close this tab.</body></html>"
+                body = "<html><head><meta charset=\"utf-8\"></head><body><h1>Вход в Spotify подтверждён.</h1>Эту вкладку можно закрыть.</body></html>"
             self.wfile.write(body.encode("utf-8"))
 
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
@@ -3229,7 +3228,7 @@ def _spotify_wait_for_callback(
         server = _ReuseHTTPServer((host, port), handler_cls)
     except OSError as exc:
         raise AuthError(
-            f"Could not bind Spotify callback server on {host}:{port}: {exc}",
+            f"Не удалось запустить обработчик входа Spotify на {host}:{port}: {exc}",
             provider="spotify",
             code="spotify_callback_bind_failed",
         ) from exc
@@ -3247,7 +3246,7 @@ def _spotify_wait_for_callback(
         server.server_close()
         thread.join(timeout=1.0)
     raise AuthError(
-        "Spotify authorization timed out waiting for the local callback.",
+        "Истекло время ожидания подтверждения входа Spotify.",
         provider="spotify",
         code="spotify_callback_timeout",
     )
@@ -3313,7 +3312,7 @@ def _spotify_exchange_code_for_tokens(
         )
     except Exception as exc:
         raise AuthError(
-            f"Spotify token exchange failed: {exc}",
+            f"Не удалось получить токен Spotify: {exc}",
             provider="spotify",
             code="spotify_token_exchange_failed",
         ) from exc
@@ -3321,15 +3320,15 @@ def _spotify_exchange_code_for_tokens(
     if response.status_code >= 400:
         detail = response.text.strip()
         raise AuthError(
-            "Spotify token exchange failed."
-            + (f" Response: {detail}" if detail else ""),
+            "Не удалось получить токен Spotify."
+            + (f" Ответ: {detail}" if detail else ""),
             provider="spotify",
             code="spotify_token_exchange_failed",
         )
     payload = response.json()
     if not isinstance(payload, dict) or not str(payload.get("access_token", "") or "").strip():
         raise AuthError(
-            "Spotify token response did not include an access_token.",
+            "В ответе Spotify нет токена доступа (access_token).",
             provider="spotify",
             code="spotify_token_exchange_invalid",
         )
@@ -3344,7 +3343,7 @@ def _refresh_spotify_oauth_state(
     refresh_token = str(state.get("refresh_token", "") or "").strip()
     if not refresh_token:
         raise AuthError(
-            "Spotify refresh token missing. Run `hermes auth spotify` again.",
+            "Нет токена обновления Spotify. Выполните `korra auth spotify` заново.",
             provider="spotify",
             code="spotify_refresh_token_missing",
             relogin_required=True,
@@ -3365,7 +3364,7 @@ def _refresh_spotify_oauth_state(
         )
     except Exception as exc:
         raise AuthError(
-            f"Spotify token refresh failed: {exc}",
+            f"Не удалось обновить токен Spotify: {exc}",
             provider="spotify",
             code="spotify_refresh_failed",
         ) from exc
@@ -3373,8 +3372,8 @@ def _refresh_spotify_oauth_state(
     if response.status_code >= 400:
         detail = response.text.strip()
         raise AuthError(
-            "Spotify token refresh failed. Run `hermes auth spotify` again."
-            + (f" Response: {detail}" if detail else ""),
+            "Не удалось обновить токен Spotify. Выполните `korra auth spotify` заново."
+            + (f" Ответ: {detail}" if detail else ""),
             provider="spotify",
             code="spotify_refresh_failed",
             relogin_required=True,
@@ -3383,7 +3382,7 @@ def _refresh_spotify_oauth_state(
     payload = response.json()
     if not isinstance(payload, dict) or not str(payload.get("access_token", "") or "").strip():
         raise AuthError(
-            "Spotify refresh response did not include an access_token.",
+            "В ответе обновления Spotify нет токена доступа (access_token).",
             provider="spotify",
             code="spotify_refresh_invalid",
             relogin_required=True,
@@ -3411,7 +3410,7 @@ def resolve_spotify_runtime_credentials(
         state = _load_provider_state(auth_store, "spotify")
         if not state:
             raise AuthError(
-                "Spotify is not authenticated. Run `hermes auth spotify` first.",
+                "Вход в Spotify не выполнен. Сначала выполните `korra auth spotify`.",
                 provider="spotify",
                 code="spotify_auth_missing",
                 relogin_required=True,
@@ -3450,7 +3449,7 @@ def resolve_spotify_runtime_credentials(
     access_token = str(state.get("access_token", "") or "").strip()
     if not access_token:
         raise AuthError(
-            "Spotify access token missing. Run `hermes auth spotify` again.",
+            "Нет токена доступа Spotify. Выполните `korra auth spotify` заново.",
             provider="spotify",
             code="spotify_access_token_missing",
             relogin_required=True,
@@ -3499,25 +3498,25 @@ def _spotify_interactive_setup(redirect_uri_hint: str) -> str:
 
     print()
     print("=" * 70)
-    print("Spotify first-time setup")
+    print("Первая настройка Spotify")
     print("=" * 70)
     print()
-    print("Spotify requires every user to register their own lightweight")
-    print("developer app. This takes about two minutes and only has to be")
-    print("done once per machine.")
+    print("Для подключения Spotify нужно создать своё приложение")
+    print("в кабинете разработчика. Это займёт около двух минут")
+    print("и потребуется только один раз на этом компьютере.")
     print()
-    print(f"Full guide: {SPOTIFY_DOCS_URL}")
+    print(f"Подробная инструкция: {SPOTIFY_DOCS_URL}")
     print()
-    print("Steps:")
-    print(f"  1. Opening {SPOTIFY_DASHBOARD_URL} in your browser...")
-    print("  2. Click 'Create app' and fill in:")
-    print("       App name:     anything (e.g. hermes-agent)")
-    print("       Description:  anything")
-    print(f"       Redirect URI: {redirect_uri_hint}")
-    print("       API/SDK:      Web API")
-    print("  3. Agree to the terms, click Save.")
-    print("  4. Open the app's Settings page and copy the Client ID.")
-    print("  5. Paste it below.")
+    print("Порядок действий:")
+    print(f"  1. Открываю в браузере {SPOTIFY_DASHBOARD_URL}...")
+    print("  2. Нажмите 'Create app' (создать приложение) и заполните поля:")
+    print("       App name (название):       любое, например korra-agent")
+    print("       Description (описание):    любое")
+    print(f"       Redirect URI (адрес возврата): {redirect_uri_hint}")
+    print("       API/SDK:                   выберите Web API")
+    print("  3. Примите условия и нажмите 'Save' (сохранить).")
+    print("  4. Откройте 'Settings' (настройки) приложения и скопируйте Client ID.")
+    print("  5. Вставьте идентификатор ниже.")
     print()
 
     if not _is_remote_session():
@@ -3529,15 +3528,15 @@ def _spotify_interactive_setup(redirect_uri_hint: str) -> str:
     from korra_cli.cli_output import line_input
 
     try:
-        raw = line_input("Spotify Client ID: ").strip()
+        raw = line_input("Идентификатор приложения Spotify (Client ID): ").strip()
     except (EOFError, KeyboardInterrupt):
         print()
-        raise SystemExit("Spotify setup cancelled.")
+        raise SystemExit("Настройка Spotify отменена.")
 
     if not raw:
         print()
-        print(f"No Client ID entered. See {SPOTIFY_DOCS_URL} for the full guide.")
-        raise SystemExit("Spotify setup cancelled: empty Client ID.")
+        print(f"Идентификатор приложения не введён. Инструкция: {SPOTIFY_DOCS_URL}")
+        raise SystemExit("Настройка Spotify отменена: идентификатор приложения не введён.")
 
     # Persist so subsequent `hermes auth spotify` runs skip the wizard.
     save_env_value("HERMES_SPOTIFY_CLIENT_ID", raw)
@@ -3547,7 +3546,7 @@ def _spotify_interactive_setup(redirect_uri_hint: str) -> str:
         save_env_value("HERMES_SPOTIFY_REDIRECT_URI", redirect_uri_hint)
 
     print()
-    print("Saved HERMES_SPOTIFY_CLIENT_ID to ~/.hermes/.env")
+    print("HERMES_SPOTIFY_CLIENT_ID сохранён в файле .env вашего профиля Korra")
     print()
     return raw
 
@@ -3586,15 +3585,15 @@ def login_spotify_command(args) -> None:
         accounts_base_url=accounts_base_url,
     )
 
-    print("Starting Spotify PKCE login...")
-    print(f"Client ID: {client_id}")
-    print(f"Redirect URI: {redirect_uri}")
-    print("Make sure this redirect URI is allow-listed in your Spotify app settings.")
+    print("Начинаю вход в Spotify...")
+    print(f"Идентификатор приложения: {client_id}")
+    print(f"Адрес возврата: {redirect_uri}")
+    print("Убедитесь, что этот адрес возврата разрешён в настройках вашего приложения Spotify.")
     print()
-    print("Open this URL to authorize Korra:")
+    print("Откройте ссылку, чтобы разрешить доступ Korra:")
     print(authorize_url)
     print()
-    print(f"Full setup guide: {SPOTIFY_DOCS_URL}")
+    print(f"Подробная инструкция по настройке: {SPOTIFY_DOCS_URL}")
     print()
 
     _print_loopback_ssh_hint(redirect_uri, docs_url=SPOTIFY_DOCS_URL)
@@ -3605,9 +3604,9 @@ def login_spotify_command(args) -> None:
         except Exception:
             opened = False
         if opened:
-            print("Browser opened for Spotify authorization.")
+            print("Браузер открыт для входа в Spotify.")
         else:
-            print("Could not open the browser automatically; use the URL above.")
+            print("Не удалось открыть браузер автоматически. Откройте ссылку выше.")
 
     callback = _spotify_wait_for_callback(
         redirect_uri,
@@ -3615,9 +3614,9 @@ def login_spotify_command(args) -> None:
     )
     if callback.get("error"):
         detail = callback.get("error_description") or callback["error"]
-        raise SystemExit(f"Spotify authorization failed: {detail}")
+        raise SystemExit(f"Не удалось войти в Spotify: {detail}")
     if callback.get("state") != state_nonce:
-        raise SystemExit("Spotify authorization failed: state mismatch.")
+        raise SystemExit("Не удалось войти в Spotify: проверочное значение state не совпало.")
 
     token_payload = _spotify_exchange_code_for_tokens(
         client_id=client_id,
@@ -3641,10 +3640,10 @@ def login_spotify_command(args) -> None:
         _store_provider_state(auth_store, "spotify", spotify_state, set_active=False)
         saved_to = _save_auth_store(auth_store)
 
-    print("Spotify login successful!")
-    print(f"  Auth state: {saved_to}")
-    print("  Provider state saved under providers.spotify")
-    print(f"  Docs: {SPOTIFY_DOCS_URL}")
+    print("Вход в Spotify выполнен!")
+    print(f"  Данные входа: {saved_to}")
+    print("  Данные провайдера сохранены в providers.spotify")
+    print(f"  Инструкция: {SPOTIFY_DOCS_URL}")
 
 # =============================================================================
 # SSH / remote session detection
@@ -3798,18 +3797,18 @@ def _print_loopback_ssh_hint(redirect_uri: str, *, docs_url: str | None = None) 
     divider = "-" * 60
     print()
     print(divider)
-    print("Remote session detected — SSH tunnel required")
+    print("Удалённое подключение — нужен SSH-туннель")
     print(divider)
-    print(f"Korra is waiting for the OAuth callback on {redirect_uri}")
-    print("but your browser is on a different machine. Run this command")
-    print("in a NEW terminal on your local machine BEFORE opening the URL:")
+    print(f"Korra ожидает подтверждение входа по адресу {redirect_uri}")
+    print("Браузер открыт на другом компьютере. Выполните команду ниже")
+    print("в новом терминале на своём компьютере, затем откройте ссылку:")
     print()
     print(f"  ssh -N -L {port}:127.0.0.1:{port} {_ssh_user_at_host()}")
     print()
-    print("Then open the authorize URL above in your local browser.")
+    print("Теперь откройте указанную выше ссылку входа в браузере на своём компьютере.")
     if docs_url:
-        print(f"Provider docs:      {docs_url}")
-    print(f"SSH/jump-box guide: {OAUTH_OVER_SSH_DOCS_URL}")
+        print(f"Инструкция провайдера: {docs_url}")
+    print(f"Настройка SSH-туннеля: {OAUTH_OVER_SSH_DOCS_URL}")
     print(divider)
     print()
 
@@ -3836,7 +3835,7 @@ def _read_codex_tokens(*, _lock: bool = True) -> Dict[str, Any]:
     state = _load_provider_state(auth_store, "openai-codex")
     if not state:
         raise AuthError(
-            "No Codex credentials stored. Run `hermes auth` to authenticate.",
+            "Данные входа Codex не сохранены. Войдите командой `korra auth`.",
             provider="openai-codex",
             code="codex_auth_missing",
             relogin_required=True,
@@ -3844,7 +3843,7 @@ def _read_codex_tokens(*, _lock: bool = True) -> Dict[str, Any]:
     tokens = state.get("tokens")
     if not isinstance(tokens, dict):
         raise AuthError(
-            "Codex auth state is missing tokens. Run `hermes auth` to re-authenticate.",
+            "В данных входа Codex нет токенов. Войдите заново командой `korra auth`.",
             provider="openai-codex",
             code="codex_auth_invalid_shape",
             relogin_required=True,
@@ -3853,14 +3852,14 @@ def _read_codex_tokens(*, _lock: bool = True) -> Dict[str, Any]:
     refresh_token = tokens.get("refresh_token")
     if not isinstance(access_token, str) or not access_token.strip():
         raise AuthError(
-            "Codex auth is missing access_token. Run `hermes auth` to re-authenticate.",
+            "В данных входа Codex нет access_token. Войдите заново командой `korra auth`.",
             provider="openai-codex",
             code="codex_auth_missing_access_token",
             relogin_required=True,
         )
     if not isinstance(refresh_token, str) or not refresh_token.strip():
         raise AuthError(
-            "Codex auth is missing refresh_token. Run `hermes auth` to re-authenticate.",
+            "В данных входа Codex нет refresh_token. Войдите заново командой `korra auth`.",
             provider="openai-codex",
             code="codex_auth_missing_refresh_token",
             relogin_required=True,
@@ -4026,7 +4025,7 @@ def refresh_codex_oauth_pure(
     del access_token  # Access token is only used by callers to decide whether to refresh.
     if not isinstance(refresh_token, str) or not refresh_token.strip():
         raise AuthError(
-            "Codex auth is missing refresh_token. Run `hermes auth` to re-authenticate.",
+            "В данных входа Codex нет refresh_token. Войдите заново командой `korra auth`.",
             provider="openai-codex",
             code="codex_auth_missing_refresh_token",
             relogin_required=True,
@@ -4059,13 +4058,11 @@ def refresh_codex_oauth_pure(
         retry_after = _parse_retry_after_seconds(getattr(response, "headers", None))
         if retry_after is not None:
             message = (
-                f"Codex provider quota exhausted (429); retry after {retry_after}s. "
-                "Credentials are still valid."
+                f"Достигнут лимит Codex (429). Повторите запрос через {retry_after} с. Данные входа менять не нужно."
             )
         else:
             message = (
-                "Codex provider quota exhausted (429). Credentials are still valid; "
-                "retry after the usage limit resets."
+                "Достигнут лимит Codex (429). Данные входа менять не нужно. Повторите запрос после сброса лимита."
             )
         raise AuthError(
             message,
@@ -4076,7 +4073,7 @@ def refresh_codex_oauth_pure(
 
     if response.status_code != 200:
         code = "codex_refresh_failed"
-        message = f"Codex token refresh failed with status {response.status_code}."
+        message = f"Не удалось обновить токен Codex: HTTP {response.status_code}."
         relogin_required = False
         try:
             err = response.json()
@@ -4089,23 +4086,20 @@ def refresh_codex_oauth_pure(
                         code = nested_code.strip()
                     nested_msg = err_obj.get("message")
                     if isinstance(nested_msg, str) and nested_msg.strip():
-                        message = f"Codex token refresh failed: {nested_msg.strip()}"
+                        message = f"Не удалось обновить токен Codex: {nested_msg.strip()}"
                 # OAuth spec shape: {"error": "code_str", "error_description": "..."}
                 elif isinstance(err_obj, str) and err_obj.strip():
                     code = err_obj.strip()
                     err_desc = err.get("error_description") or err.get("message")
                     if isinstance(err_desc, str) and err_desc.strip():
-                        message = f"Codex token refresh failed: {err_desc.strip()}"
+                        message = f"Не удалось обновить токен Codex: {err_desc.strip()}"
         except Exception:
             pass
         if code in {"invalid_grant", "invalid_token", "invalid_request"}:
             relogin_required = True
         if code == "refresh_token_reused":
             message = (
-                "Codex refresh token was already consumed by another client "
-                "(e.g. Codex CLI or VS Code extension). "
-                "Run `codex` in your terminal to generate fresh tokens, "
-                "then run `hermes auth` to re-authenticate."
+                "Токен обновления Codex уже использован другим приложением, например Codex CLI или расширением VS Code. Запустите `codex` в терминале для получения новых токенов, затем войдите заново через `korra auth`."
             )
             relogin_required = True
         # A 401/403 from the token endpoint always means the refresh token
@@ -4124,7 +4118,7 @@ def refresh_codex_oauth_pure(
         refresh_payload = response.json()
     except Exception as exc:
         raise AuthError(
-            "Codex token refresh returned invalid JSON.",
+            "Codex вернул некорректный JSON при обновлении токена.",
             provider="openai-codex",
             code="codex_refresh_invalid_json",
             relogin_required=True,
@@ -4133,7 +4127,7 @@ def refresh_codex_oauth_pure(
     refreshed_access = refresh_payload.get("access_token")
     if not isinstance(refreshed_access, str) or not refreshed_access.strip():
         raise AuthError(
-            "Codex token refresh response was missing access_token.",
+            "В ответе обновления Codex нет access_token.",
             provider="openai-codex",
             code="codex_refresh_missing_access_token",
             relogin_required=True,
@@ -4312,13 +4306,11 @@ def resolve_codex_runtime_credentials(
             if isinstance(reset_at, (int, float)) and reset_at > time.time():
                 remaining = int(reset_at - time.time())
                 message = (
-                    f"Codex provider quota exhausted (429); retry after {remaining}s. "
-                    "Credentials are still valid."
+                    f"Достигнут лимит Codex (429). Повторите запрос через {remaining} с. Данные входа менять не нужно."
                 )
             else:
                 message = (
-                    "Codex provider quota exhausted (429). Credentials are still valid; "
-                    "retry after the usage limit resets."
+                    "Достигнут лимит Codex (429). Данные входа менять не нужно. Повторите запрос после сброса лимита."
                 )
             raise AuthError(
                 message,
@@ -4329,7 +4321,7 @@ def resolve_codex_runtime_credentials(
         if read_error is not None:
             raise read_error
         raise AuthError(
-            "No Codex credentials stored. Run `hermes auth` to authenticate.",
+            "Данные входа Codex не сохранены. Войдите командой `korra auth`.",
             provider="openai-codex",
             code="codex_auth_missing",
             relogin_required=True,
@@ -4735,7 +4727,7 @@ def _read_xai_oauth_tokens(*, _lock: bool = True) -> Dict[str, Any]:
             state = global_state
     if not state:
         raise AuthError(
-            "No xAI OAuth credentials stored. Select xAI Grok OAuth (SuperGrok / Premium+) in `hermes model`.",
+            "Данные входа xAI OAuth не сохранены. Выберите xAI Grok OAuth (SuperGrok / Premium+) в `korra model`.",
             provider="xai-oauth",
             code="xai_auth_missing",
             relogin_required=True,
@@ -4743,7 +4735,7 @@ def _read_xai_oauth_tokens(*, _lock: bool = True) -> Dict[str, Any]:
     tokens = state.get("tokens")
     if not isinstance(tokens, dict):
         raise AuthError(
-            "xAI OAuth state is missing tokens. Re-authenticate with `hermes model`.",
+            "В данных входа xAI OAuth нет токенов. Войдите заново через `korra model`.",
             provider="xai-oauth",
             code="xai_auth_invalid_shape",
             relogin_required=True,
@@ -4752,14 +4744,14 @@ def _read_xai_oauth_tokens(*, _lock: bool = True) -> Dict[str, Any]:
     refresh_token = str(tokens.get("refresh_token", "") or "").strip()
     if not access_token:
         raise AuthError(
-            "xAI OAuth state is missing access_token. Re-authenticate with `hermes model`.",
+            "В данных входа xAI OAuth нет access_token. Войдите заново через `korra model`.",
             provider="xai-oauth",
             code="xai_auth_missing_access_token",
             relogin_required=True,
         )
     if not refresh_token:
         raise AuthError(
-            "xAI OAuth state is missing refresh_token. Re-authenticate with `hermes model`.",
+            "В данных входа xAI OAuth нет refresh_token. Войдите заново через `korra model`.",
             provider="xai-oauth",
             code="xai_auth_missing_refresh_token",
             relogin_required=True,
@@ -4959,23 +4951,20 @@ def _xai_validate_oauth_endpoint(url: str, *, field: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme != "https":
         raise AuthError(
-            f"xAI OIDC discovery returned a non-HTTPS {field}: {url!r}.",
+            f"Сервис входа xAI вернул адрес {field} без HTTPS: {url!r}.",
             provider="xai-oauth",
             code="xai_discovery_invalid",
         )
     host = (parsed.hostname or "").lower()
     if not host:
         raise AuthError(
-            f"xAI OIDC discovery {field} is missing a hostname: {url!r}.",
+            f"В адресе {field}, полученном от xAI, нет имени сервера: {url!r}.",
             provider="xai-oauth",
             code="xai_discovery_invalid",
         )
     if host != "x.ai" and not host.endswith(".x.ai"):
         raise AuthError(
-            f"xAI OIDC discovery {field} host {host!r} is not on the xAI origin "
-            f"(expected x.ai or a *.x.ai subdomain). Refusing to use a cached "
-            f"endpoint that may have been substituted by a MITM during initial "
-            f"discovery; re-authenticate with `hermes model` to re-fetch.",
+            f"Адрес {field} ({host!r}) не принадлежит xAI: ожидается x.ai или его поддомен. Подключение остановлено, поскольку сохранённый адрес мог быть подменён. Войдите заново через `korra model`, чтобы получить адрес повторно.",
             provider="xai-oauth",
             code="xai_discovery_invalid",
         )
@@ -5047,13 +5036,13 @@ def _xai_oauth_discovery(timeout_seconds: float = 15.0) -> Dict[str, str]:
         )
     except Exception as exc:
         raise AuthError(
-            f"xAI OIDC discovery failed: {exc}",
+            f"Не удалось получить настройки входа xAI: {exc}",
             provider="xai-oauth",
             code="xai_discovery_failed",
         ) from exc
     if response.status_code != 200:
         raise AuthError(
-            f"xAI OIDC discovery returned status {response.status_code}.",
+            f"Не удалось получить настройки входа xAI: HTTP {response.status_code}.",
             provider="xai-oauth",
             code="xai_discovery_failed",
         )
@@ -5061,13 +5050,13 @@ def _xai_oauth_discovery(timeout_seconds: float = 15.0) -> Dict[str, str]:
         payload = response.json()
     except Exception as exc:
         raise AuthError(
-            f"xAI OIDC discovery returned invalid JSON: {exc}",
+            f"Сервис настроек входа xAI вернул некорректный JSON: {exc}",
             provider="xai-oauth",
             code="xai_discovery_invalid_json",
         ) from exc
     if not isinstance(payload, dict):
         raise AuthError(
-            "xAI OIDC discovery response was not a JSON object.",
+            "Ответ сервиса настроек входа xAI должен быть объектом JSON.",
             provider="xai-oauth",
             code="xai_discovery_incomplete",
         )
@@ -5075,7 +5064,7 @@ def _xai_oauth_discovery(timeout_seconds: float = 15.0) -> Dict[str, str]:
     token_endpoint = str(payload.get("token_endpoint", "") or "").strip()
     if not authorization_endpoint or not token_endpoint:
         raise AuthError(
-            "xAI OIDC discovery response was missing required endpoints.",
+            "В настройках входа xAI нет обязательных адресов сервиса.",
             provider="xai-oauth",
             code="xai_discovery_incomplete",
         )
@@ -5097,7 +5086,7 @@ def refresh_xai_oauth_pure(
     del access_token
     if not isinstance(refresh_token, str) or not refresh_token.strip():
         raise AuthError(
-            "xAI OAuth is missing refresh_token. Re-authenticate with `hermes model`.",
+            "В данных входа xAI OAuth нет refresh_token. Войдите заново через `korra model`.",
             provider="xai-oauth",
             code="xai_auth_missing_refresh_token",
             relogin_required=True,
@@ -5131,22 +5120,16 @@ def refresh_xai_oauth_pure(
         # fallback.  See #26847.
         if response.status_code == 403:
             raise AuthError(
-                "xAI token refresh failed with HTTP 403."
-                + (f" Response: {detail}" if detail else "")
-                + " This OAuth account is not authorized for xAI API"
-                  " access — xAI may be restricting API/OAuth use to"
-                  " specific SuperGrok tiers despite the in-app"
-                  " subscription being active. Re-logging in won't"
-                  " change that; set ``XAI_API_KEY`` and switch to"
-                  " ``provider: xai`` (API-key path) if available, or"
-                  " upgrade your subscription at https://x.ai/grok.",
+                "Не удалось обновить токен xAI: HTTP 403."
+                + (f" Ответ: {detail}" if detail else "")
+                + " У этой учётной записи нет доступа к xAI API. Для доступа может требоваться другой тариф SuperGrok, даже если подписка в приложении активна. Повторный вход это не исправит. Если у вас есть API-ключ, задайте XAI_API_KEY и выберите provider: xai; иначе проверьте тариф на https://x.ai/grok.",
                 provider="xai-oauth",
                 code="xai_oauth_tier_denied",
                 relogin_required=False,
             )
         raise AuthError(
-            "xAI token refresh failed."
-            + (f" Response: {detail}" if detail else ""),
+            "Не удалось обновить токен xAI."
+            + (f" Ответ: {detail}" if detail else ""),
             provider="xai-oauth",
             code="xai_refresh_failed",
             relogin_required=(response.status_code in {400, 401}),
@@ -5155,13 +5138,13 @@ def refresh_xai_oauth_pure(
         payload = response.json()
     except Exception as exc:
         raise AuthError(
-            f"xAI token refresh returned invalid JSON: {exc}",
+            f"xAI вернул некорректный JSON при обновлении токена: {exc}",
             provider="xai-oauth",
             code="xai_refresh_invalid_json",
         ) from exc
     if not isinstance(payload, dict):
         raise AuthError(
-            "xAI token refresh response was not a JSON object.",
+            "Ответ обновления токена xAI должен быть объектом JSON.",
             provider="xai-oauth",
             code="xai_refresh_invalid_response",
             relogin_required=True,
@@ -5169,7 +5152,7 @@ def refresh_xai_oauth_pure(
     refreshed_access = str(payload.get("access_token", "") or "").strip()
     if not refreshed_access:
         raise AuthError(
-            "xAI token refresh response was missing access_token.",
+            "В ответе обновления токена xAI нет access_token.",
             provider="xai-oauth",
             code="xai_refresh_missing_access_token",
             relogin_required=True,
@@ -5407,7 +5390,7 @@ def _request_device_code(
     ]
     missing = [f for f in required_fields if f not in data]
     if missing:
-        raise ValueError(f"Device code response missing fields: {', '.join(missing)}")
+        raise ValueError(f"В ответе на запрос кода входа нет полей: {', '.join(missing)}")
     return data
 
 
@@ -5421,12 +5404,7 @@ def _nous_device_auth_timeout_message(portal_base_url: str) -> str:
     """
     portal = (portal_base_url or DEFAULT_NOUS_PORTAL_URL).rstrip("/")
     return (
-        "Timed out waiting for device authorization.\n"
-        "  Portal sign-in is required before the device code can be approved.\n"
-        "  If the browser showed a CAPTCHA / 'You did not pass CAPTCHA' error,\n"
-        "  finish signing in at the Portal in a normal browser tab, then retry:\n"
-        "    hermes portal\n"
-        f"  Portal login: {portal}/login"
+        f"Истекло время ожидания подтверждения входа.\n  Чтобы подтвердить код устройства, сначала войдите в кабинет провайдера.\n  Если браузер показал ошибку CAPTCHA, завершите вход в обычной вкладке браузера, затем повторите:\n    korra portal\n  Вход в кабинет: {portal}/login"
     )
 
 
@@ -5455,14 +5433,14 @@ def _poll_for_token(
         if response.status_code == 200:
             payload = response.json()
             if "access_token" not in payload:
-                raise ValueError("Token response did not include access_token")
+                raise ValueError("В ответе сервиса нет токена доступа (access_token)")
             return payload
 
         try:
             error_payload = response.json()
         except Exception:
             response.raise_for_status()
-            raise RuntimeError("Token endpoint returned a non-JSON error response")
+            raise RuntimeError("Сервис токенов вернул ошибку в формате, отличном от JSON")
 
         error_code = error_payload.get("error", "")
         if error_code == "authorization_pending":
@@ -5473,7 +5451,7 @@ def _poll_for_token(
             time.sleep(current_interval)
             continue
 
-        description = error_payload.get("error_description") or "Unknown authentication error"
+        description = error_payload.get("error_description") or "Неизвестная ошибка входа"
         raise RuntimeError(f"{error_code}: {description}")
 
     # Enriched at the SOURCE so every caller inherits the guidance:
@@ -5577,7 +5555,7 @@ def _nous_shared_store_lock(timeout_seconds: float = AUTH_LOCK_TIMEOUT_SECONDS):
         lock_path,
         _nous_shared_lock_holder,
         timeout_seconds,
-        "Timed out waiting for shared Nous auth lock",
+        "Истекло время ожидания доступа к общему хранилищу входа Nous",
     ):
         yield
 
@@ -5987,18 +5965,18 @@ def _refresh_access_token(
     if response.status_code == 200:
         payload = response.json()
         if "access_token" not in payload:
-            raise AuthError("Refresh response missing access_token",
+            raise AuthError("В ответе обновления нет токена доступа (access_token)",
                             provider="nous", code="invalid_token", relogin_required=True)
         return payload
 
     try:
         error_payload = response.json()
     except Exception as exc:
-        raise AuthError("Refresh token exchange failed",
+        raise AuthError("Не удалось обменять токен обновления",
                         provider="nous", relogin_required=True) from exc
 
     code = str(error_payload.get("error", "invalid_grant"))
-    description = str(error_payload.get("error_description") or "Refresh token exchange failed")
+    description = str(error_payload.get("error_description") or "Не удалось обменять токен обновления")
     relogin = code in {"invalid_grant", "invalid_token", "refresh_token_reused"}
 
     # Detect the OAuth 2.1 "refresh token reuse" signal from the Nous portal
@@ -6011,15 +5989,7 @@ def _refresh_access_token(
     lowered = description.lower()
     if code == "refresh_token_reused" or "reuse" in lowered or "reuse detected" in lowered:
         description = (
-            "Nous Portal detected refresh-token reuse and revoked this session.\n"
-            "This usually means an external process (monitoring script, "
-            "custom self-heal hook, or another Korra install sharing "
-            "~/.hermes/auth.json) called POST /api/oauth/token with Korra's "
-            "refresh token without persisting the rotated token back.\n"
-            "Nous refresh tokens are single-use — only Korra may call the "
-            "refresh endpoint. For health checks, use `hermes auth status` "
-            "instead.\n"
-            "Re-authenticate with: hermes auth add nous"
+            "Nous Portal обнаружил повторное использование одноразового токена и отозвал сеанс.\nОбычно это означает, что другая программа или другой экземпляр Korra использовал общий токен обновления и не сохранил новый.\nТокены Nous можно использовать только один раз. Для проверки соединения используйте `korra auth status`, не обновляйте токен вручную.\nВойдите заново: korra auth add nous"
         )
         relogin = True
 
@@ -6042,7 +6012,7 @@ def fetch_nous_models(
         )
 
     if response.status_code != 200:
-        description = f"/models request failed with status {response.status_code}"
+        description = f"Не удалось получить список моделей: HTTP {response.status_code}"
         try:
             err = response.json()
             description = str(err.get("error_description") or err.get("error") or description)
@@ -6133,7 +6103,7 @@ def resolve_nous_access_token(
 
         if not state:
             raise AuthError(
-                "Korra is not logged into Nous Portal.",
+                "Korra не подключена к Nous Portal.",
                 provider="nous",
                 relogin_required=True,
             )
@@ -6171,7 +6141,7 @@ def resolve_nous_access_token(
             refresh_token = state.get("refresh_token")
             if not isinstance(access_token, str) or not access_token:
                 raise AuthError(
-                    "No access token found for Nous Portal login.",
+                    "Не найден токен доступа для входа в Nous Portal.",
                     provider="nous",
                     relogin_required=True,
                 )
@@ -6192,7 +6162,7 @@ def resolve_nous_access_token(
 
             if not isinstance(refresh_token, str) or not refresh_token:
                 raise AuthError(
-                    "Session expired and no refresh token is available.",
+                    "Сеанс истёк, а токен для его обновления отсутствует.",
                     provider="nous",
                     relogin_required=True,
                 )
@@ -6308,15 +6278,13 @@ def refresh_nous_oauth_pure(
             if not isinstance(refresh_token_value, str) or not refresh_token_value:
                 if current_invoke_jwt_status is not None:
                     raise AuthError(
-                        "Nous Portal access token is not a usable inference JWT "
-                        f"({current_invoke_jwt_status}) and no refresh token is available. "
-                        "Re-authenticate with: hermes auth add nous",
+                        f"Токен Nous Portal не подходит для запросов к модели ({current_invoke_jwt_status}), а токен обновления отсутствует. Войдите заново: korra auth add nous",
                         provider="nous",
                         code=current_invoke_jwt_status,
                         relogin_required=True,
                     )
                 raise AuthError(
-                    "No refresh token is available for Nous Portal.",
+                    "Нет токена обновления для Nous Portal.",
                     provider="nous",
                     relogin_required=True,
                 )
@@ -6478,7 +6446,7 @@ def resolve_nous_runtime_credentials(
     ):
 
         if not state:
-            raise AuthError("Korra is not logged into Nous Portal.",
+            raise AuthError("Korra не подключена к Nous Portal.",
                             provider="nous", relogin_required=True)
 
         persisted_state = dict(state)
@@ -6618,7 +6586,7 @@ def resolve_nous_runtime_credentials(
                         _persist_state("runtime_shared_merge_missing_access_token")
 
             if not isinstance(access_token, str) or not access_token:
-                raise AuthError("No access token found for Nous Portal login.",
+                raise AuthError("Не найден токен доступа для входа в Nous Portal.",
                                 provider="nous", relogin_required=True)
 
             invoke_jwt_status = _nous_invoke_jwt_status(
@@ -6648,9 +6616,7 @@ def resolve_nous_runtime_credentials(
                         if not isinstance(refresh_token, str) or not refresh_token:
                             reason = invoke_jwt_status or "force_refresh"
                             raise AuthError(
-                                "Nous Portal access token is not a usable inference JWT "
-                                f"({reason}) and no refresh token is available. "
-                                "Re-authenticate with: hermes auth add nous",
+                                f"Токен Nous Portal не подходит для запросов к модели ({reason}), а токен обновления отсутствует. Войдите заново: korra auth add nous",
                                 provider="nous",
                                 code=reason,
                                 relogin_required=True,
@@ -6752,7 +6718,7 @@ def resolve_nous_runtime_credentials(
 
     api_key = state.get("agent_key")
     if not isinstance(api_key, str) or not api_key:
-        raise AuthError("Failed to resolve a Nous inference API key",
+        raise AuthError("Не удалось получить API-ключ Nous для запросов к модели",
                         provider="nous", code="server_error")
 
     expires_at = state.get("agent_key_expires_at")
@@ -7152,7 +7118,7 @@ def get_codex_auth_status() -> Dict[str, Any]:
                     "error_code": CODEX_RATE_LIMITED_CODE,
                     "error": (
                         rate_limit.get("message")
-                        or "Codex provider quota exhausted; retry after the usage limit resets."
+                        or "Достигнут лимит Codex. Повторите запрос после сброса лимита."
                     ),
                     "reset_at": rate_limit.get("reset_at"),
                 }
@@ -7343,7 +7309,7 @@ def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
             from agent.bedrock_adapter import has_aws_credentials
             return {"logged_in": has_aws_credentials(), "provider": target}
         except ImportError:
-            return {"logged_in": False, "provider": target, "error": "boto3 not installed"}
+            return {"logged_in": False, "provider": target, "error": "Пакет boto3 не установлен"}
     return {"logged_in": False}
 
 
@@ -7400,19 +7366,16 @@ def _get_azure_foundry_auth_status() -> Dict[str, Any]:
             info["logged_in"] = bool(installed)
             if not installed:
                 info["hint"] = (
-                    "azure-identity not installed. Install with: "
-                    "pip install azure-identity  (or rely on Korra's "
-                    "lazy-install at first use)."
+                    "Пакет azure-identity не установлен. Установите его командой pip install azure-identity или дождитесь автоматической установки при первом использовании Korra."
                 )
             else:
                 info["hint"] = (
-                    "azure-identity is installed; live credential validation "
-                    "is skipped here. Run `hermes doctor` to verify token acquisition."
+                    "Пакет azure-identity установлен. Чтобы проверить получение токена, выполните `korra doctor`."
                 )
             return info
         except Exception as exc:
             info["logged_in"] = False
-            info["error"] = f"azure-identity check failed: {exc}"
+            info["error"] = f"Не удалось проверить azure-identity: {exc}"
             return info
 
     # api_key mode (default)
@@ -7432,7 +7395,7 @@ def resolve_api_key_provider_credentials(provider_id: str) -> Dict[str, Any]:
     pconfig = PROVIDER_REGISTRY.get(provider_id)
     if not pconfig or pconfig.auth_type != "api_key":
         raise AuthError(
-            f"Provider '{provider_id}' is not an API-key provider.",
+            f"Провайдер '{provider_id}' не поддерживает вход по API-ключу.",
             provider=provider_id,
             code="invalid_provider",
         )
@@ -7510,7 +7473,7 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
     pconfig = PROVIDER_REGISTRY.get(provider_id)
     if not pconfig or pconfig.auth_type != "external_process":
         raise AuthError(
-            f"Provider '{provider_id}' is not an external-process provider.",
+            f"Провайдер '{provider_id}' не поддерживает запуск внешнего процесса.",
             provider=provider_id,
             code="invalid_provider",
         )
@@ -7529,8 +7492,7 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
     resolved_command = shutil.which(command) if command else None
     if not resolved_command and not base_url.startswith("acp+tcp://"):
         raise AuthError(
-            f"Could not find the Copilot CLI command '{command}'. "
-            "Install GitHub Copilot CLI or set HERMES_COPILOT_ACP_COMMAND/COPILOT_CLI_PATH.",
+            f"Команда Copilot CLI '{command}' не найдена. Установите GitHub Copilot CLI или укажите HERMES_COPILOT_ACP_COMMAND/COPILOT_CLI_PATH.",
             provider=provider_id,
             code="missing_copilot_cli",
         )
@@ -7717,7 +7679,7 @@ def _confirm_selection_guards(
     print(combined_message(warnings))
     print("=" * 72)
     try:
-        response = input("Switch anyway? [y/N]: ").strip().lower()
+        response = input("Всё равно переключить? [y — да / N — нет]: ").strip().lower()
     except (KeyboardInterrupt, EOFError):
         print()
         return False
@@ -7891,7 +7853,7 @@ def _prompt_model_selection(
     default_idx = 0
 
     # Build a pricing header hint for the menu title
-    menu_title = "Select default model:"
+    menu_title = "Выберите модель по умолчанию:"
     if has_pricing:
         # Align the header with the model column.
         # Each choice is "  {label}" (2 spaces) and we prepend
@@ -7911,13 +7873,13 @@ def _prompt_model_selection(
         from korra_cli.curses_ui import curses_radiolist
 
         choices = [_label_segments(mid) for mid in ordered]
-        choices.append("Enter custom model name")
-        choices.append("Skip (keep current)")
+        choices.append("Ввести название другой модели")
+        choices.append("Пропустить (оставить текущую)")
 
         _upgrade_url = (portal_url or DEFAULT_NOUS_PORTAL_URL).rstrip("/")
         unavailable_footer = unavailable_message.strip()
         if not unavailable_footer and _unavailable:
-            unavailable_footer = f"Upgrade at {_upgrade_url} for paid models"
+            unavailable_footer = f"Платные модели доступны после смены тарифа: {_upgrade_url}"
 
         # The pricing column header (and any unavailable-models block) is shown
         # as a multi-line description above the list so it survives the curses
@@ -7948,11 +7910,11 @@ def _prompt_model_selection(
             model_search_labels.append(
                 label if haystack == mid else f"{label} {haystack}"
             )
-        model_search_labels.append("Enter custom model name")
-        model_search_labels.append("Skip (keep current)")
+        model_search_labels.append("Ввести название другой модели")
+        model_search_labels.append("Пропустить (оставить текущую)")
 
         idx = curses_radiolist(
-            "Select default model:",
+            "Выберите модель по умолчанию:",
             choices,
             selected=default_idx,
             cancel_returns=-1,
@@ -7967,7 +7929,7 @@ def _prompt_model_selection(
             return _confirmed_selection(ordered[idx])
         elif idx == len(ordered):
             try:
-                custom = line_input("Enter model name: ").strip()
+                custom = line_input("Введите название модели: ").strip()
             except (EOFError, KeyboardInterrupt):
                 return None
             return _confirmed_selection(custom) if custom else None
@@ -7988,13 +7950,13 @@ def _prompt_model_selection(
     for i, mid in enumerate(ordered, 1):
         print(f"  {i:>{num_width}}. {format_radio_item_ansi(_label_segments(mid))}")
     n = len(ordered)
-    print(f"  {n + 1:>{num_width}}. Enter custom model name")
-    print(f"  {n + 2:>{num_width}}. Skip (keep current)")
+    print(f"  {n + 1:>{num_width}}. Ввести название другой модели")
+    print(f"  {n + 2:>{num_width}}. Пропустить (оставить текущую)")
 
     if _unavailable:
         _upgrade_url = (portal_url or DEFAULT_NOUS_PORTAL_URL).rstrip("/")
         unavailable_footer = unavailable_message.strip() or (
-            f"Unavailable models (requires paid tier — upgrade at {_upgrade_url})"
+            f"Недоступные модели (нужна платная подписка: {_upgrade_url})"
         )
         print()
         print(f"  {_DIM}── {unavailable_footer} ──{_RESET}")
@@ -8004,20 +7966,20 @@ def _prompt_model_selection(
 
     while True:
         try:
-            choice = input(f"Choice [1-{n + 2}] (default: skip): ").strip()
+            choice = input(f"Выбор [1–{n + 2}] (Enter — пропустить): ").strip()
             if not choice:
                 return None
             idx = int(choice)
             if 1 <= idx <= n:
                 return _confirmed_selection(ordered[idx - 1])
             elif idx == n + 1:
-                custom = line_input("Enter model name: ").strip()
+                custom = line_input("Введите название модели: ").strip()
                 return _confirmed_selection(custom) if custom else None
             elif idx == n + 2:
                 return None
-            print(f"Please enter 1-{n + 2}")
+            print(f"Введите число от 1 до {n + 2}")
         except ValueError:
-            print("Please enter a number")
+            print("Введите число")
         except (KeyboardInterrupt, EOFError):
             return None
 
@@ -8041,9 +8003,9 @@ def _save_model_choice(model_id: str) -> None:
 
 def login_command(args) -> None:
     """Deprecated: use 'hermes model' or 'hermes setup' instead."""
-    print("The 'hermes login' command has been removed.")
-    print("Use 'hermes auth' to manage credentials,")
-    print("'hermes model' to select a provider, or 'hermes setup' for full setup.")
+    print("Команда 'korra login' удалена.")
+    print("Для управления доступом используйте 'korra auth',")
+    print("для выбора провайдера — 'korra model', для полной настройки — 'korra setup'.")
     raise SystemExit(0)
 
 
@@ -8067,19 +8029,19 @@ def _login_openai_codex(
             # the user "Login successful!".
             _resolved_key = existing.get("api_key", "")
             if isinstance(_resolved_key, str) and _resolved_key and not _codex_access_token_is_expiring(_resolved_key, 60):
-                print("Existing Codex credentials found in Korra auth store.")
+                print("В хранилище Korra найдены данные входа Codex.")
                 try:
-                    reuse = input("Use existing credentials? [Y/n]: ").strip().lower()
+                    reuse = input("Использовать сохранённые данные входа? [Y — да / n — нет]: ").strip().lower()
                 except (EOFError, KeyboardInterrupt):
                     reuse = "y"
                 if reuse in {"", "y", "yes"}:
                     config_path = _update_config_for_provider("openai-codex", existing.get("base_url", DEFAULT_CODEX_BASE_URL))
                     print()
-                    print("Login successful!")
-                    print(f"  Config updated: {config_path} (model.provider=openai-codex)")
+                    print("Вход выполнен!")
+                    print(f"  Настройки обновлены: {config_path} (model.provider=openai-codex)")
                     return
             else:
-                print("Existing Codex credentials are expired. Starting fresh login...")
+                print("Данные входа Codex истекли. Начинаю новый вход...")
         except AuthError:
             pass
 
@@ -8087,10 +8049,10 @@ def _login_openai_codex(
     if not force_new_login:
         cli_tokens = _import_codex_cli_tokens()
         if cli_tokens:
-            print("Found existing Codex CLI credentials at ~/.codex/auth.json")
-            print("Korra will create its own session to avoid conflicts with Codex CLI / VS Code.")
+            print("В ~/.codex/auth.json найдены данные входа Codex CLI")
+            print("Korra создаст отдельный сеанс, чтобы избежать конфликтов с Codex CLI и VS Code.")
             try:
-                do_import = input("Import these credentials? (a separate login is recommended) [y/N]: ").strip().lower()
+                do_import = input("Импортировать эти данные входа? Рекомендуется отдельный вход. [y — да / N — нет]: ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 do_import = "n"
             if do_import in {"y", "yes"}:
@@ -8098,15 +8060,15 @@ def _login_openai_codex(
                 base_url = korra_env("KORRA_CODEX_BASE_URL", "").strip().rstrip("/") or DEFAULT_CODEX_BASE_URL
                 config_path = _update_config_for_provider("openai-codex", base_url)
                 print()
-                print("Credentials imported. Note: if Codex CLI refreshes its token,")
-                print("Korra will keep working independently with its own session.")
-                print(f"  Config updated: {config_path} (model.provider=openai-codex)")
+                print("Данные входа импортированы. Даже если Codex CLI обновит свой токен,")
+                print("Korra продолжит работать независимо в своём сеансе.")
+                print(f"  Настройки обновлены: {config_path} (model.provider=openai-codex)")
                 return
 
     # Run a fresh device code flow — Hermes gets its own OAuth session
     print()
-    print("Signing in to OpenAI Codex...")
-    print("(Korra creates its own session — won't affect Codex CLI or VS Code)")
+    print("Вход в OpenAI Codex...")
+    print("(Korra создаёт отдельный сеанс; работа Codex CLI и VS Code продолжится)")
     print()
 
     creds = _codex_device_code_login()
@@ -8115,10 +8077,10 @@ def _login_openai_codex(
     _save_codex_tokens(creds["tokens"], creds.get("last_refresh"))
     config_path = _update_config_for_provider("openai-codex", creds.get("base_url", DEFAULT_CODEX_BASE_URL))
     print()
-    print("Login successful!")
+    print("Вход выполнен!")
     from korra_constants import display_hermes_home as _dhh
-    print(f"  Auth state: {_dhh()}/auth.json")
-    print(f"  Config updated: {config_path} (model.provider=openai-codex)")
+    print(f"  Данные входа: {_dhh()}/auth.json")
+    print(f"  Настройки обновлены: {config_path} (model.provider=openai-codex)")
 
 
 def _login_xai_oauth(
@@ -8134,9 +8096,9 @@ def _login_xai_oauth(
             existing = resolve_xai_oauth_runtime_credentials()
             api_key = existing.get("api_key", "")
             if isinstance(api_key, str) and api_key and not _xai_access_token_is_expiring(api_key, 60):
-                print("Existing xAI OAuth credentials found in Korra auth store.")
+                print("В хранилище Korra найдены данные входа xAI OAuth.")
                 try:
-                    reuse = input("Use existing credentials? [Y/n]: ").strip().lower()
+                    reuse = input("Использовать сохранённые данные входа? [Y — да / n — нет]: ").strip().lower()
                 except (EOFError, KeyboardInterrupt):
                     reuse = "y"
                 if reuse in {"", "y", "yes"}:
@@ -8145,15 +8107,15 @@ def _login_xai_oauth(
                         existing.get("base_url", DEFAULT_XAI_OAUTH_BASE_URL),
                     )
                     print()
-                    print("Login successful!")
-                    print(f"  Config updated: {config_path} (model.provider=xai-oauth)")
+                    print("Вход выполнен!")
+                    print(f"  Настройки обновлены: {config_path} (model.provider=xai-oauth)")
                     return
         except AuthError:
             pass
 
     print()
-    print("Signing in to xAI Grok OAuth (SuperGrok / Premium+)...")
-    print("(Korra creates its own local OAuth session)")
+    print("Вход в xAI Grok OAuth (SuperGrok / Premium+)...")
+    print("(Korra создаёт свой локальный сеанс OAuth)")
     print()
 
     timeout_seconds = float(getattr(args, "timeout", None) or 20.0)
@@ -8183,10 +8145,10 @@ def _login_xai_oauth(
     unsuppress_credential_source("xai-oauth", "device_code")
     config_path = _update_config_for_provider("xai-oauth", creds.get("base_url", DEFAULT_XAI_OAUTH_BASE_URL))
     print()
-    print("Login successful!")
+    print("Вход выполнен!")
     from korra_constants import display_hermes_home as _dhh
-    print(f"  Auth state: {_dhh()}/auth.json")
-    print(f"  Config updated: {config_path} (model.provider=xai-oauth)")
+    print(f"  Данные входа: {_dhh()}/auth.json")
+    print(f"  Настройки обновлены: {config_path} (model.provider=xai-oauth)")
 
 
 def _xai_oauth_request_device_code(
@@ -8207,8 +8169,8 @@ def _xai_oauth_request_device_code(
     )
     if response.status_code != 200:
         raise AuthError(
-            f"xAI device-code request failed (HTTP {response.status_code})."
-            + (f" Response: {response.text.strip()}" if response.text else ""),
+            f"Не удалось запросить код входа xAI (HTTP {response.status_code})."
+            + (f" Ответ: {response.text.strip()}" if response.text else ""),
             provider="xai-oauth",
             code="device_code_request_failed",
         )
@@ -8224,7 +8186,7 @@ def _xai_oauth_request_device_code(
     missing = [key for key in required if key not in payload]
     if missing:
         raise AuthError(
-            f"xAI device-code response missing fields: {', '.join(missing)}",
+            f"В ответе xAI на запрос кода входа нет полей: {', '.join(missing)}",
             provider="xai-oauth",
             code="device_code_invalid",
         )
@@ -8258,13 +8220,13 @@ def _xai_oauth_poll_device_token(
             payload = response.json()
             if not payload.get("access_token"):
                 raise AuthError(
-                    "xAI device-code token response did not include an access_token.",
+                    "В ответе xAI на запрос токена нет access_token.",
                     provider="xai-oauth",
                     code="xai_device_token_invalid",
                 )
             if not payload.get("refresh_token"):
                 raise AuthError(
-                    "xAI device-code token response did not include a refresh_token.",
+                    "В ответе xAI на запрос токена нет refresh_token.",
                     provider="xai-oauth",
                     code="xai_device_token_invalid",
                 )
@@ -8275,7 +8237,7 @@ def _xai_oauth_poll_device_token(
         except Exception:
             response.raise_for_status()
             raise AuthError(
-                "xAI device-code token polling returned a non-JSON error response.",
+                "При проверке входа xAI получена ошибка в формате, отличном от JSON.",
                 provider="xai-oauth",
                 code="xai_device_token_failed",
             )
@@ -8293,12 +8255,12 @@ def _xai_oauth_poll_device_token(
             or response.text
         )
         raise AuthError(
-            f"xAI device-code token polling failed: {description}",
+            f"Не удалось проверить вход xAI: {description}",
             provider="xai-oauth",
             code="xai_device_token_failed",
         )
     raise AuthError(
-        "Timed out waiting for xAI device authorization.",
+        "Истекло время ожидания подтверждения входа xAI.",
         provider="xai-oauth",
         code="device_code_timeout",
     )
@@ -8323,19 +8285,19 @@ def _xai_oauth_device_code_login(
         interval = int(device_data["interval"])
 
         print()
-        print("To continue:")
-        print(f"  1. Open: {verification_url}")
-        print(f"  2. If prompted, enter code: {user_code}")
+        print("Для продолжения:")
+        print(f"  1. Откройте: {verification_url}")
+        print(f"  2. Если потребуется, введите код: {user_code}")
         if open_browser and not _is_remote_session() and _can_open_graphical_browser():
             try:
                 opened = webbrowser.open(verification_url)
             except Exception:
                 opened = False
             if opened:
-                print("  (Opened browser for verification)")
+                print("  (Браузер открыт для подтверждения входа)")
             else:
-                print("  Could not open browser automatically -- use the URL above.")
-        print(f"Waiting for approval (polling every {max(1, interval)}s)...")
+                print("  Не удалось открыть браузер автоматически. Откройте ссылку выше.")
+        print(f"Ожидаю подтверждение (проверка каждые {max(1, interval)} с)...")
 
         payload = _xai_oauth_poll_device_token(
             client,
@@ -8349,7 +8311,7 @@ def _xai_oauth_device_code_login(
     refresh_token = str(payload.get("refresh_token", "") or "").strip()
     if not access_token or not refresh_token:
         raise AuthError(
-            "xAI device-code token response was missing required tokens.",
+            "В ответе xAI нет обязательных токенов доступа.",
             provider="xai-oauth",
             code="xai_device_token_invalid",
         )
@@ -8397,7 +8359,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
                 )
         except Exception as exc:
             raise AuthError(
-                f"Failed to request device code: {exc}",
+                f"Не удалось запросить код входа: {exc}",
                 provider="openai-codex", code="device_code_request_failed",
             )
 
@@ -8413,29 +8375,26 @@ def _codex_device_code_login() -> Dict[str, Any]:
             delay = retry_after if retry_after is not None else 2 ** attempt
             delay = max(1, min(int(delay), 60))
             print(
-                "OpenAI is rate-limiting login requests "
-                f"(429); retrying in {delay}s..."
+                f"OpenAI временно ограничил запросы входа (429). Повтор через {delay} с..."
             )
             _time.sleep(delay)
 
     if resp is not None and resp.status_code == 429:
         retry_after = _parse_retry_after_seconds(getattr(resp, "headers", None))
         wait_hint = (
-            f" Try again in about {retry_after}s."
+            f" Повторите попытку примерно через {retry_after} с."
             if retry_after is not None
-            else " Wait a minute and run the login again."
+            else " Подождите минуту и повторите вход."
         )
         raise AuthError(
-            "OpenAI is rate-limiting Codex login requests (HTTP 429). "
-            "This is a temporary throttle on OpenAI's side, not a credential "
-            f"problem.{wait_hint}",
+            f"OpenAI временно ограничил вход в Codex (HTTP 429). Это ограничение на стороне OpenAI; данные входа менять не нужно.{wait_hint}",
             provider="openai-codex", code=CODEX_RATE_LIMITED_CODE,
         )
 
     if resp is None or resp.status_code != 200:
         status = resp.status_code if resp is not None else "unknown"
         raise AuthError(
-            f"Device code request returned status {status}.",
+            f"Запрос кода входа завершился с HTTP {status}.",
             provider="openai-codex", code="device_code_request_error",
         )
 
@@ -8446,17 +8405,17 @@ def _codex_device_code_login() -> Dict[str, Any]:
 
     if not user_code or not device_auth_id:
         raise AuthError(
-            "Device code response missing required fields.",
+            "В ответе на запрос кода входа нет обязательных полей.",
             provider="openai-codex", code="device_code_incomplete",
         )
 
     # Step 2: Show user the code
-    print("To continue, follow these steps:\n")
-    print("  1. Open this URL in your browser:")
+    print("Чтобы продолжить, выполните следующие действия:\n")
+    print("  1. Откройте в браузере эту ссылку:")
     print(f"     \033[94m{issuer}/codex/device\033[0m\n")
-    print("  2. Enter this code:")
+    print("  2. Введите код:")
     print(f"     \033[94m{user_code}\033[0m\n")
-    print("Waiting for sign-in... (press Ctrl+C to cancel)")
+    print("Ожидаю подтверждение входа... (Ctrl+C — отменить)")
 
     # Step 3: Poll for authorization code
     max_wait = 15 * 60  # 15 minutes
@@ -8480,16 +8439,16 @@ def _codex_device_code_login() -> Dict[str, Any]:
                     continue  # User hasn't completed login yet
                 else:
                     raise AuthError(
-                        f"Device auth polling returned status {poll_resp.status_code}.",
+                        f"Проверка входа завершилась с HTTP {poll_resp.status_code}.",
                         provider="openai-codex", code="device_code_poll_error",
                     )
     except KeyboardInterrupt:
-        print("\nLogin cancelled.")
+        print("\nВход отменён.")
         raise SystemExit(130)
 
     if code_resp is None:
         raise AuthError(
-            "Login timed out after 15 minutes.",
+            "Вход не подтверждён за 15 минут. Повторите попытку.",
             provider="openai-codex", code="device_code_timeout",
         )
 
@@ -8500,7 +8459,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
 
     if not authorization_code or not code_verifier:
         raise AuthError(
-            "Device auth response missing authorization_code or code_verifier.",
+            "В ответе сервиса входа нет authorization_code или code_verifier.",
             provider="openai-codex", code="device_code_incomplete_exchange",
         )
 
@@ -8519,7 +8478,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
             )
     except Exception as exc:
         raise AuthError(
-            f"Token exchange failed: {exc}",
+            f"Не удалось получить токен: {exc}",
             provider="openai-codex", code="token_exchange_failed",
         )
 
@@ -8528,20 +8487,18 @@ def _codex_device_code_login() -> Dict[str, Any]:
             getattr(token_resp, "headers", None)
         )
         wait_hint = (
-            f" Try again in about {retry_after}s."
+            f" Повторите попытку примерно через {retry_after} с."
             if retry_after is not None
-            else " Wait a minute and run the login again."
+            else " Подождите минуту и повторите вход."
         )
         raise AuthError(
-            "OpenAI is rate-limiting Codex login requests (HTTP 429) during "
-            "token exchange. This is a temporary throttle on OpenAI's side, "
-            f"not a credential problem.{wait_hint}",
+            f"OpenAI временно ограничил вход в Codex (HTTP 429) при получении токена. Это ограничение на стороне OpenAI; данные входа менять не нужно.{wait_hint}",
             provider="openai-codex", code=CODEX_RATE_LIMITED_CODE,
         )
 
     if token_resp.status_code != 200:
         raise AuthError(
-            f"Token exchange returned status {token_resp.status_code}.",
+            f"Получение токена завершилось с HTTP {token_resp.status_code}.",
             provider="openai-codex", code="token_exchange_error",
         )
 
@@ -8551,7 +8508,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
 
     if not access_token:
         raise AuthError(
-            "Token exchange did not return an access_token.",
+            "Сервис не вернул токен доступа (access_token).",
             provider="openai-codex", code="token_exchange_no_access_token",
         )
 
@@ -8672,19 +8629,19 @@ def _minimax_request_user_code(
     if response.status_code != 200:
         body = _minimax_response_error_text(response)
         raise AuthError(
-            f"MiniMax OAuth authorization failed: {body or response.reason_phrase}",
+            f"Не удалось войти в MiniMax OAuth: {body or response.reason_phrase}",
             provider="minimax-oauth", code="authorization_failed",
         )
     payload = response.json()
     for field in ("user_code", "verification_uri", "expired_in"):
         if field not in payload:
             raise AuthError(
-                f"MiniMax OAuth response missing field: {field}",
+                f"В ответе MiniMax OAuth нет поля: {field}",
                 provider="minimax-oauth", code="authorization_incomplete",
             )
     if payload.get("state") != state:
         raise AuthError(
-            "MiniMax OAuth state mismatch (possible CSRF).",
+            "Проверка безопасности входа MiniMax OAuth не пройдена: значение state не совпало (возможна CSRF-подмена).",
             provider="minimax-oauth", code="state_mismatch",
         )
     return payload
@@ -8743,7 +8700,7 @@ def _minimax_poll_token(
                 payload = {}
             msg = (payload.get("base_resp", {}) or {}).get("status_msg") or error_text
             raise AuthError(
-                f"MiniMax OAuth error: {msg or 'unknown'}",
+                f"Ошибка MiniMax OAuth: {msg or 'неизвестная причина'}",
                 provider="minimax-oauth", code="token_exchange_failed",
             )
         try:
@@ -8754,13 +8711,13 @@ def _minimax_poll_token(
         status = payload.get("status")
         if status == "error":
             raise AuthError(
-                "MiniMax OAuth reported an error. Please try again later.",
+                "Ошибка входа MiniMax OAuth. Повторите попытку позже.",
                 provider="minimax-oauth", code="authorization_denied",
             )
         if status == "success":
             if not all(payload.get(k) for k in ("access_token", "refresh_token", "expired_in")):
                 raise AuthError(
-                    "MiniMax OAuth success payload missing required token fields.",
+                    "В ответе MiniMax OAuth нет обязательных полей токена.",
                     provider="minimax-oauth", code="token_incomplete",
                 )
             return payload
@@ -8768,7 +8725,7 @@ def _minimax_poll_token(
         _time.sleep(interval)
 
     raise AuthError(
-        "MiniMax OAuth timed out before authorization completed.",
+        "Время ожидания входа MiniMax OAuth истекло.",
         provider="minimax-oauth", code="timeout",
     )
 
@@ -8799,8 +8756,8 @@ def _minimax_oauth_login(
     if _is_remote_session():
         open_browser = False
 
-    print(f"Starting Korra login via MiniMax ({region}) OAuth...")
-    print(f"Portal: {portal_base_url}")
+    print(f"Начинаю вход Korra через MiniMax ({region}) OAuth...")
+    print(f"Кабинет провайдера: {portal_base_url}")
 
     with httpx.Client(timeout=httpx.Timeout(timeout_seconds),
                       headers={"Accept": "application/json"},
@@ -8814,18 +8771,18 @@ def _minimax_oauth_login(
         user_code = str(code_data["user_code"])
 
         print()
-        print("To continue:")
-        print(f"  1. Open: {verification_url}")
-        print(f"  2. If prompted, enter code: {user_code}")
+        print("Для продолжения:")
+        print(f"  1. Откройте: {verification_url}")
+        print(f"  2. Если потребуется, введите код: {user_code}")
         if open_browser and _can_open_graphical_browser():
             if webbrowser.open(verification_url):
-                print("  (Opened browser for verification)")
+                print("  (Браузер открыт для подтверждения входа)")
             else:
-                print("  Could not open browser automatically -- use the URL above.")
+                print("  Не удалось открыть браузер автоматически. Откройте ссылку выше.")
 
         interval_raw = code_data.get("interval")
         interval_ms = int(interval_raw) if interval_raw is not None else None
-        print("Waiting for approval...")
+        print("Ожидаю подтверждение...")
 
         token_data = _minimax_poll_token(
             client, portal_base_url=portal_base_url,
@@ -8858,9 +8815,9 @@ def _minimax_oauth_login(
     }
 
     _minimax_save_auth_state(auth_state)
-    print("\u2713 MiniMax OAuth login successful.")
+    print("✓ Вход через MiniMax OAuth выполнен.")
     if msg := token_data.get("notification_message"):
-        print(f"Note from MiniMax: {msg}")
+        print(f"Сообщение MiniMax: {msg}")
     return auth_state
 
 
@@ -8871,7 +8828,7 @@ def _refresh_minimax_oauth_state(
     """Refresh MiniMax OAuth access token if close to expiry (or forced)."""
     if not state.get("refresh_token"):
         raise AuthError(
-            "MiniMax OAuth state has no refresh_token; please re-login.",
+            "В данных MiniMax OAuth нет refresh_token. Войдите заново.",
             provider="minimax-oauth", code="no_refresh_token", relogin_required=True,
         )
     try:
@@ -8908,14 +8865,14 @@ def _refresh_minimax_oauth_state(
             relogin = any(m in body_lower for m in
                           ("invalid_grant", "refresh_token_reused", "invalid_refresh_token"))
             raise AuthError(
-                f"MiniMax OAuth refresh failed: {body or response.reason_phrase}",
+                f"Не удалось обновить доступ MiniMax OAuth: {body or response.reason_phrase}",
                 provider="minimax-oauth", code="refresh_failed",
                 relogin_required=relogin,
             )
     payload = response.json()
     if payload.get("status") != "success":
         raise AuthError(
-            "MiniMax OAuth refresh did not return success.",
+            "MiniMax OAuth не подтвердил обновление доступа.",
             provider="minimax-oauth", code="refresh_failed",
             relogin_required=True,
         )
@@ -8988,8 +8945,7 @@ def build_minimax_oauth_token_provider() -> Callable[[], str]:
         state = get_provider_auth_state("minimax-oauth")
         if not state or not state.get("access_token"):
             raise AuthError(
-                "Not logged into MiniMax OAuth. Run `hermes model` and select "
-                "MiniMax (OAuth).",
+                "Вход через MiniMax OAuth не выполнен. Запустите `korra model` и выберите MiniMax (OAuth).",
                 provider="minimax-oauth", code="not_logged_in", relogin_required=True,
             )
         try:
@@ -9000,7 +8956,7 @@ def build_minimax_oauth_token_provider() -> Callable[[], str]:
         token = state.get("access_token")
         if not token:
             raise AuthError(
-                "MiniMax OAuth state has no access_token after refresh.",
+                "После обновления MiniMax OAuth нет access_token.",
                 provider="minimax-oauth", code="no_access_token", relogin_required=True,
             )
         return token
@@ -9028,8 +8984,7 @@ def resolve_minimax_oauth_runtime_credentials(
     state = get_provider_auth_state("minimax-oauth")
     if not state or not state.get("access_token"):
         raise AuthError(
-            "Not logged into MiniMax OAuth. Run `hermes model` and select "
-            "MiniMax (OAuth).",
+            "Вход через MiniMax OAuth не выполнен. Запустите `korra model` и выберите MiniMax (OAuth).",
             provider="minimax-oauth", code="not_logged_in", relogin_required=True,
         )
     try:
@@ -9114,12 +9069,12 @@ def _nous_device_code_login(
     if _is_remote_session():
         open_browser = False
 
-    print(f"Starting Korra login via {pconfig.name}...")
-    print(f"Portal: {portal_base_url}")
+    print(f"Начинаю вход Korra через {pconfig.name}...")
+    print(f"Кабинет провайдера: {portal_base_url}")
     if insecure:
-        print("TLS verification: disabled (--insecure)")
+        print("Проверка TLS: отключена (--insecure)")
     elif ca_bundle:
-        print(f"TLS verification: custom CA bundle ({ca_bundle})")
+        print(f"Проверка TLS: свой набор сертификатов ({ca_bundle})")
 
     with httpx.Client(timeout=timeout, headers={"Accept": "application/json"}, verify=verify) as client:
         device_data = _request_device_code(
@@ -9135,16 +9090,16 @@ def _nous_device_code_login(
         interval = int(device_data["interval"])
 
         print()
-        print("To continue:")
-        print(f"  1. Open: {verification_url}")
-        print(f"  2. If prompted, enter code: {user_code}")
+        print("Для продолжения:")
+        print(f"  1. Откройте: {verification_url}")
+        print(f"  2. Если потребуется, введите код: {user_code}")
 
         if open_browser:
             opened = webbrowser.open(verification_url)
             if opened:
-                print("  (Opened browser for verification)")
+                print("  (Браузер открыт для подтверждения входа)")
             else:
-                print("  Could not open browser automatically — use the URL above.")
+                print("  Не удалось открыть браузер автоматически. Откройте ссылку выше.")
 
         # Surface the verification URL/code to an out-of-band consumer (e.g. the
         # TUI gateway, whose stdout is a JSON-RPC pipe — a plain print() there is
@@ -9157,7 +9112,7 @@ def _nous_device_code_login(
                 pass
 
         effective_interval = max(1, min(interval, DEVICE_AUTH_POLL_INTERVAL_CAP_SECONDS))
-        print(f"Waiting for approval (polling every {effective_interval}s)...")
+        print(f"Ожидаю подтверждение (проверка каждые {effective_interval} с)...")
 
         token_data = _poll_for_token(
             client=client,
@@ -9176,7 +9131,7 @@ def _nous_device_code_login(
         or requested_inference_url
     )
     if resolved_inference_url != requested_inference_url:
-        print(f"Using portal-provided inference URL: {resolved_inference_url}")
+        print(f"Адрес сервиса модели, полученный от провайдера: {resolved_inference_url}")
 
     auth_state = {
         "portal_base_url": portal_base_url,
@@ -9214,9 +9169,9 @@ def _nous_device_code_login(
             message = format_auth_error(exc)
             print()
             print(message)
-            print(f"  Subscribe here: {portal_url}/billing")
+            print(f"  Оформить подписку: {portal_url}/billing")
             print()
-            print("After subscribing, run `hermes model` again to finish setup.")
+            print("После оформления подписки выполните `korra model` заново, чтобы завершить настройку.")
             raise SystemExit(1)
         raise
 
@@ -9330,20 +9285,20 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
                 shared_path = None
             print()
             if shared_path:
-                print(f"Found existing Nous OAuth credentials at {shared_path}")
+                print(f"Найдены данные входа Nous OAuth: {shared_path}")
             else:
-                print("Found existing shared Nous OAuth credentials")
+                print("Найдены общие данные входа Nous OAuth")
             try:
-                do_import = input("Import these credentials? [Y/n]: ").strip().lower()
+                do_import = input("Импортировать эти данные входа? [Y — да / n — нет]: ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 do_import = "y"
             if do_import in {"", "y", "yes"}:
-                print("Rehydrating Nous session from shared credentials...")
+                print("Восстанавливаю сеанс Nous из общих данных входа...")
                 auth_state = _try_import_shared_nous_state(
                     timeout_seconds=timeout_seconds,
                 )
                 if auth_state is None:
-                    print("Could not refresh shared credentials — falling back to device-code login.")
+                    print("Не удалось обновить общие данные входа. Перехожу ко входу по коду устройства.")
 
         if auth_state is None:
             auth_state = _nous_device_code_login(
@@ -9379,8 +9334,8 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
         _sync_nous_pool_from_auth_store()
 
         print()
-        print("Login successful!")
-        print(f"  Auth state: {saved_to}")
+        print("Вход выполнен!")
+        print(f"  Данные входа: {saved_to}")
 
         # Resolve model BEFORE writing provider to config.yaml so we never
         # leave the config in a half-updated state (provider=nous but model
@@ -9391,7 +9346,7 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
             runtime_key = auth_state.get("agent_key") or auth_state.get("access_token")
             if not isinstance(runtime_key, str) or not runtime_key:
                 raise AuthError(
-                    "No runtime API key available to fetch models",
+                    "Нет API-ключа для получения списка моделей",
                     provider="nous",
                     code="invalid_token",
                 )
@@ -9424,7 +9379,7 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
                         unavailable_message = (
                             format_nous_portal_entitlement_message(
                                 _account_info,
-                                capability="paid Nous models",
+                                capability="платные модели Nous",
                             )
                             or ""
                         )
@@ -9451,7 +9406,7 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
                     )
             _portal = auth_state.get("portal_base_url", "")
             if model_ids:
-                print(f"Showing {len(model_ids)} curated models — use \"Enter custom model name\" for others.")
+                print(f"Показаны рекомендуемые модели ({len(model_ids)}). Для других выберите «Ввести название другой модели».")
                 selected_model = _prompt_model_selection(
                     model_ids, pricing=pricing,
                     unavailable_models=unavailable_models,
@@ -9463,14 +9418,14 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
                 )
             elif unavailable_models:
                 _url = (_portal or DEFAULT_NOUS_PORTAL_URL).rstrip("/")
-                print("No free models currently available.")
-                print(unavailable_message or f"Upgrade at {_url} to access paid models.")
+                print("Бесплатные модели сейчас недоступны.")
+                print(unavailable_message or f"Платные модели доступны после смены тарифа: {_url}")
             else:
-                print("No curated models available for Nous Portal.")
+                print("Для Nous Portal нет рекомендуемых моделей.")
         except Exception as exc:
             message = format_auth_error(exc) if isinstance(exc, AuthError) else str(exc)
             print()
-            print(f"Login succeeded, but could not fetch available models. Reason: {message}")
+            print(f"Вход выполнен, но список моделей получить не удалось. Причина: {message}")
 
         # Write provider + model atomically so config is never mismatched.
         # If no model was selected (user picked "Skip (keep current)",
@@ -9490,8 +9445,8 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
                     auth_store.pop("active_provider", None)
                 _save_auth_store(auth_store)
             print()
-            print("No provider change. Nous credentials saved for future use.")
-            print("  Run `hermes model` again to switch to Nous Portal.")
+            print("Провайдер не изменён. Данные входа Nous сохранены для дальнейшего использования.")
+            print("  Чтобы перейти на Nous Portal, выполните `korra model` заново.")
             return
 
         config_path = _update_config_for_provider(
@@ -9499,14 +9454,14 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
         )
         if selected_model:
             _save_model_choice(selected_model)
-            print(f"Default model set to: {selected_model}")
-        print(f"  Config updated: {config_path} (model.provider=nous)")
+            print(f"Модель по умолчанию: {selected_model}")
+        print(f"  Настройки обновлены: {config_path} (model.provider=nous)")
 
     except KeyboardInterrupt:
-        print("\nLogin cancelled.")
+        print("\nВход отменён.")
         raise SystemExit(130)
     except Exception as exc:
-        print(f"Login failed: {exc}")
+        print(f"Не удалось войти: {exc}")
         raise SystemExit(1)
 
 
@@ -9515,14 +9470,14 @@ def logout_command(args) -> None:
     provider_id = getattr(args, "provider", None)
 
     if provider_id and not is_known_auth_provider(provider_id):
-        print(f"Unknown provider: {provider_id}")
+        print(f"Неизвестный провайдер: {provider_id}")
         raise SystemExit(1)
 
     active = get_active_provider()
     target = provider_id or active or _logout_default_provider_from_config()
 
     if not target:
-        print("No provider is currently logged in.")
+        print("Ни один провайдер не подключён.")
         return
 
     should_reset_config = _should_reset_config_provider_on_logout(target)
@@ -9531,12 +9486,12 @@ def logout_command(args) -> None:
     if clear_provider_auth(target) or should_reset_config:
         if should_reset_config:
             _reset_config_provider()
-        print(f"Logged out of {provider_name}.")
+        print(f"Вы вышли из {provider_name}.")
         if should_reset_config and os.getenv("OPENROUTER_API_KEY"):
-            print("Korra will use OpenRouter for inference.")
+            print("Korra будет использовать модели OpenRouter.")
         elif should_reset_config:
-            print("Run `hermes model` or configure an API key to use Korra.")
+            print("Чтобы пользоваться Korra, выполните `korra model` или добавьте API-ключ.")
         else:
-            print("Model provider configuration was unchanged.")
+            print("Настройки провайдера модели сохранены без изменений.")
     else:
-        print(f"No auth state found for {provider_name}.")
+        print(f"Данные входа {provider_name} не найдены.")

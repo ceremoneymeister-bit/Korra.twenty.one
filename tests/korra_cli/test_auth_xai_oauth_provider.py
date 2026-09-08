@@ -398,7 +398,7 @@ def test_refresh_xai_oauth_pure_403_marked_tier_denied_not_relogin(monkeypatch):
     message = str(exc.value).lower()
     assert "403" in message
     assert "xai_api_key" in message
-    assert "tier" in message
+    assert "тариф" in message
 
 
 def test_format_auth_error_tier_denied_does_not_suggest_relogin():
@@ -420,7 +420,8 @@ def test_format_auth_error_tier_denied_does_not_suggest_relogin():
     )
     rendered = format_auth_error(err)
     assert "re-authenticate" not in rendered.lower()
-    assert "hermes model" not in rendered.lower()
+    assert "korra model" not in rendered.lower()
+    assert "войдите заново" not in rendered.lower()
     assert "XAI_API_KEY" in rendered
 
 

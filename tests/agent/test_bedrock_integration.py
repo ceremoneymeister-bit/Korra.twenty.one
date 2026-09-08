@@ -159,7 +159,7 @@ class TestRuntimeProvider:
              patch.dict("sys.modules", {"botocore": MagicMock(), "botocore.session": MagicMock()}):
             import botocore.session as _bs
             _bs.get_session = MagicMock(return_value=mock_session)
-            with pytest.raises(AuthError, match="No AWS credentials"):
+            with pytest.raises(AuthError, match="Данные входа AWS.*не найдены"):
                 resolve_runtime_provider(requested="auto")
 
     def test_bedrock_runtime_explicit_skips_credential_check(self, monkeypatch):

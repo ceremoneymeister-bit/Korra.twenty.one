@@ -1599,8 +1599,7 @@ def _resolve_azure_foundry_runtime(
     base_url = explicit_base_url_clean or cfg_base_url or env_base_url
     if not base_url:
         raise AuthError(
-            "Azure Foundry requires a base URL. Set it via 'hermes model' or "
-            "the AZURE_FOUNDRY_BASE_URL environment variable."
+            "Для Azure Foundry нужен адрес сервиса. Укажите его через 'korra model' или в model.base_url файла config.yaml."
         )
 
     # Anthropic SDK appends /v1/messages itself, so strip any trailing /v1
@@ -1638,9 +1637,7 @@ def _resolve_azure_foundry_runtime(
                 )
             except Exception as exc:
                 raise AuthError(
-                    "Azure Foundry Entra ID auth requires the 'azure-identity' "
-                    "package. Install it with: pip install azure-identity "
-                    f"(import failed: {exc})"
+                    f"Для входа Azure Foundry через Entra ID нужен пакет azure-identity. Установите: pip install azure-identity (ошибка загрузки: {exc})"
                 ) from exc
 
             scope = (
@@ -1687,11 +1684,7 @@ def _resolve_azure_foundry_runtime(
         api_key = _getenv("AZURE_FOUNDRY_API_KEY", "").strip()
     if not api_key:
         raise AuthError(
-            "Azure Foundry requires an API key. Set AZURE_FOUNDRY_API_KEY in "
-            "~/.hermes/.env or run 'hermes model' to configure. To use "
-            "keyless Microsoft Entra ID auth instead, set "
-            "model.auth_mode: entra_id in config.yaml (or pick "
-            "'Microsoft Entra ID' in 'hermes model')."
+            "Для Azure Foundry нужен API-ключ. Добавьте AZURE_FOUNDRY_API_KEY в .env профиля Korra или выполните 'korra model'. Для входа без ключа выберите Microsoft Entra ID в 'korra model' либо задайте model.auth_mode: entra_id в config.yaml."
         )
 
     source = "explicit" if (explicit_api_key or explicit_base_url) else "config"
@@ -1735,8 +1728,7 @@ def _resolve_explicit_runtime(
             api_key = resolve_anthropic_token()
             if not api_key:
                 raise AuthError(
-                    "No Anthropic credentials found. Set ANTHROPIC_TOKEN or ANTHROPIC_API_KEY, "
-                    "run 'claude setup-token', or authenticate with 'claude /login'."
+                    "Данные входа Anthropic не найдены. Добавьте ANTHROPIC_TOKEN или ANTHROPIC_API_KEY, выполните 'claude setup-token' либо войдите через 'claude /login'."
                 )
         return {
             "provider": "anthropic",
@@ -1915,8 +1907,7 @@ def resolve_runtime_provider(
         _block = _provs_cfg.get(requested_provider)
         if isinstance(_block, dict) and not is_provider_enabled(_block):
             raise ValueError(
-                f"provider {requested_provider!r} is disabled in config "
-                f"(providers.{requested_provider}.enabled: false)"
+                f"Провайдер {requested_provider!r} отключён в настройках (providers.{requested_provider}.enabled: false)"
             )
 
     if requested_provider == "moa":
@@ -1980,13 +1971,7 @@ def resolve_runtime_provider(
         token, base_url = get_vertex_config()
         if not token or not base_url:
             raise AuthError(
-                "Vertex AI credentials could not be resolved. Vertex uses "
-                "OAuth2 (not a static API key): provide a service-account JSON "
-                "via GOOGLE_APPLICATION_CREDENTIALS (or VERTEX_CREDENTIALS_PATH) "
-                "in ~/.hermes/.env, or run 'gcloud auth application-default "
-                "login' for ADC. Set the GCP project/region under vertex: in "
-                "config.yaml if they aren't embedded in the credentials. "
-                "Run `hermes setup` to install Vertex support."
+                "Не удалось получить доступ к Vertex AI. Здесь используется OAuth2: укажите JSON-файл сервисной учётной записи через GOOGLE_APPLICATION_CREDENTIALS (или VERTEX_CREDENTIALS_PATH) в .env профиля Korra либо выполните 'gcloud auth application-default login'. Если проект и регион GCP не указаны в файле доступа, задайте их в разделе vertex файла config.yaml. Поддержку Vertex можно установить через `korra setup`."
             )
         return {
             "provider": "vertex",
@@ -2325,17 +2310,14 @@ def resolve_runtime_provider(
                 )
             if not token:
                 raise AuthError(
-                    "No Azure Anthropic API key found. Set AZURE_ANTHROPIC_KEY or "
-                    "ANTHROPIC_API_KEY, or point key_env/api_key_env in your "
-                    "config.yaml model section at a custom env var."
+                    "API-ключ Azure Anthropic не найден. Добавьте AZURE_ANTHROPIC_KEY или ANTHROPIC_API_KEY либо укажите имя переменной с ключом в model.key_env или model.api_key_env файла config.yaml."
                 )
         else:
             from agent.anthropic_adapter import resolve_anthropic_token
             token = resolve_anthropic_token()
             if not token:
                 raise AuthError(
-                    "No Anthropic credentials found. Set ANTHROPIC_TOKEN or ANTHROPIC_API_KEY, "
-                    "run 'claude setup-token', or authenticate with 'claude /login'."
+                    "Данные входа Anthropic не найдены. Добавьте ANTHROPIC_TOKEN или ANTHROPIC_API_KEY, выполните 'claude setup-token' либо войдите через 'claude /login'."
                 )
         return {
             "provider": "anthropic",
@@ -2364,11 +2346,7 @@ def resolve_runtime_provider(
         is_explicit = requested_provider in {"bedrock", "aws", "aws-bedrock", "amazon-bedrock", "amazon"}
         if not is_explicit and not has_aws_credentials():
             raise AuthError(
-                "No AWS credentials found for Bedrock. Configure one of:\n"
-                "  - AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY\n"
-                "  - AWS_PROFILE (for SSO / named profiles)\n"
-                "  - IAM instance role (EC2, ECS, Lambda)\n"
-                "Or run 'aws configure' to set up credentials.",
+                "Данные входа AWS для Bedrock не найдены. Настройте один из вариантов:\n  - AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY\n  - AWS_PROFILE (для SSO или именованных профилей)\n  - Роль IAM (EC2, ECS, Lambda)\nЛибо выполните 'aws configure'.",
                 code="no_aws_credentials",
             )
         # Read bedrock-specific config from config.yaml
@@ -2472,9 +2450,9 @@ def resolve_runtime_provider(
         # supplies a non-empty placeholder in the credential resolver above.
         if not has_usable_secret(creds.get("api_key")):
             env_names = ", ".join(pconfig.api_key_env_vars)
-            hint = f" Set {env_names}." if env_names else ""
+            hint = f" Добавьте {env_names} в .env профиля Korra." if env_names else ""
             raise AuthError(
-                f"No usable credentials found for provider '{provider}'.{hint}",
+                f"Действующие данные входа для провайдера '{provider}' не найдены.{hint}",
                 provider=provider,
                 code="missing_api_key",
             )

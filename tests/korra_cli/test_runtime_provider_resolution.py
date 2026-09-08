@@ -26,7 +26,7 @@ def test_configured_api_key_provider_without_key_fails_closed(monkeypatch):
         },
     )
 
-    with pytest.raises(rp.AuthError, match="No usable credentials.*deepseek"):
+    with pytest.raises(rp.AuthError, match="Действующие данные входа.*deepseek.*не найдены"):
         rp.resolve_runtime_provider()
 
 
@@ -1073,7 +1073,7 @@ class TestAzureFoundryResolution:
         monkeypatch.setattr(rp, "_get_model_config", lambda: {})
         monkeypatch.setattr(rp, "load_pool", lambda provider: None)
 
-        with pytest.raises(rp.AuthError, match="base URL"):
+        with pytest.raises(rp.AuthError, match="нужен адрес сервиса"):
             rp.resolve_runtime_provider(requested="azure-foundry")
 
 
