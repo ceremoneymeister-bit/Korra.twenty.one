@@ -680,20 +680,20 @@ def cmd_mcp_list(args=None):
 
     if not servers:
         print()
-        _info("No MCP servers configured.")
+        _info("Серверы MCP не настроены.")
         print()
-        _info("Add one with:")
-        _info('  hermes mcp add <name> --url <endpoint>')
-        _info('  hermes mcp add <name> --command <cmd> --args <args...>')
+        _info("Чтобы добавить сервер:")
+        _info('  korra mcp add <имя> --url <адрес>')
+        _info('  korra mcp add <имя> --command <команда> --args <аргументы...>')
         print()
         return
 
     print()
-    print(color("  MCP Servers:", Colors.CYAN + Colors.BOLD))
+    print(color("  Серверы MCP:", Colors.CYAN + Colors.BOLD))
     print()
 
     # Table header
-    print(f"  {'Name':<16} {'Transport':<30} {'Tools':<12} {'Status':<10}")
+    print(f"  {'Имя':<16} {'Транспорт':<30} {'Инструменты':<12} {'Состояние':<10}")
     print(f"  {'─' * 16} {'─' * 30} {'─' * 12} {'─' * 10}")
 
     for name, cfg in servers.items():
@@ -722,19 +722,19 @@ def cmd_mcp_list(args=None):
             include = tools_cfg.get("include")
             exclude = tools_cfg.get("exclude")
             if include and isinstance(include, list):
-                tools_str = f"{len(include)} selected"
+                tools_str = f"{len(include)} выбрано"
             elif exclude and isinstance(exclude, list):
-                tools_str = f"-{len(exclude)} excluded"
+                tools_str = f"-{len(exclude)} исключено"
             else:
-                tools_str = "all"
+                tools_str = "все"
         else:
-            tools_str = "all"
+            tools_str = "все"
 
         # Enabled status
         enabled = cfg.get("enabled", True)
         if isinstance(enabled, str):
             enabled = enabled.lower() in {"true", "1", "yes"}
-        status = color("✓ enabled", Colors.GREEN) if enabled else color("✗ disabled", Colors.DIM)
+        status = color("✓ включён", Colors.GREEN) if enabled else color("✗ выключен", Colors.DIM)
 
         print(f"  {name:<16} {transport:<30} {tools_str:<12} {status}")
 

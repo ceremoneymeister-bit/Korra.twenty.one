@@ -86,7 +86,9 @@ class TestMcpList:
 
         cmd_mcp_list()
         out = capsys.readouterr().out
-        assert "No MCP servers configured" in out
+        assert "Серверы MCP не настроены" in out
+        assert "korra mcp add" in out
+        assert "hermes" not in out.lower()
 
     def test_list_with_servers(self, tmp_path, capsys):
         _seed_config(tmp_path, {
@@ -107,8 +109,10 @@ class TestMcpList:
         out = capsys.readouterr().out
         assert "ink" in out
         assert "github" in out
-        assert "2 selected" in out  # ink has 2 in include
-        assert "disabled" in out  # github is disabled
+        assert "2 выбрано" in out  # у ink два инструмента в include
+        assert "выключен" in out  # github выключен
+        assert "Серверы MCP" in out
+        assert "hermes" not in out.lower()
 
     def test_list_enabled_default_true(self, tmp_path, capsys):
         """Server without explicit enabled key defaults to enabled."""
@@ -120,7 +124,7 @@ class TestMcpList:
         cmd_mcp_list()
         out = capsys.readouterr().out
         assert "myserver" in out
-        assert "enabled" in out
+        assert "включён" in out
 
 
 # ---------------------------------------------------------------------------
