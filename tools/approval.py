@@ -10,6 +10,8 @@ This module is the single source of truth for the dangerous command system:
 
 import contextlib
 import contextvars
+
+from tools.approval_display import approval_data_for_display, approval_description_for_display
 import fnmatch
 import functools
 import hashlib
@@ -3028,7 +3030,7 @@ def has_gateway_notify(session_key: str) -> bool:
 def list_gateway_approvals(session_key: str) -> list[dict]:
     """Return replay-safe snapshots of unresolved approvals for one session."""
     with _lock:
-        return [dict(entry.data) for entry in _gateway_queues.get(session_key, [])]
+        return [approval_data_for_display(entry.data) for entry in _gateway_queues.get(session_key, [])]
 
 
 def ack_gateway_approval(session_key: str, request_id: str) -> bool:
@@ -3060,7 +3062,7 @@ def get_pending_gateway_approval(session_key: str) -> dict | None:
         queue = _gateway_queues.get(session_key)
         if not queue:
             return None
-        return dict(queue[0].data)
+        return approval_data_for_display(queue[0].data)
 
 
 def submit_pending(session_key: str, approval: dict):
@@ -3392,7 +3394,7 @@ def _prompt_dangerous_approval_inner(command: str, description: str,
     # and log sanitization so tokens mask consistently across surfaces.
     from agent.redact import redact_sensitive_text
     display_command = redact_sensitive_text(command)
-    display_description = redact_sensitive_text(description)
+    display_description = approval_description_for_display(redact_sensitive_text(description))
 
     # Smart DENY and a session-less gate both reduce the menu to
     # once/deny; the rendered strings are the same either way.
@@ -4476,7 +4478,7 @@ def _present_with_selected_transport(
         timeout_seconds = _get_approval_timeout()
         request = ApprovalRequest.create(
             command=redact_sensitive_text(command, force=True),
-            description=redact_sensitive_text(description, force=True),
+            description=approval_description_for_display(redact_sensitive_text(description, force=True)),
             pattern_key=pattern_key,
             pattern_keys=tuple(pattern_keys),
             session_key=session_key,
@@ -4748,7 +4750,7 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict,
 
     # Notify the user (bridges sync agent thread → async gateway)
     try:
-        notify_cb(dict(entry.data))
+        notify_cb(approval_data_for_display(entry.data))
     except Exception as exc:
         logger.warning("Gateway approval notify failed: %s", exc)
         _drop_entry()
@@ -5747,7 +5749,7 @@ def check_execute_code_guard(code: str, env_type: str,
     from agent.redact import redact_sensitive_text
     display_command = redact_sensitive_text(command)
     display_code = redact_sensitive_text(code)
-    display_description = redact_sensitive_text(description)
+    display_description = approval_description_for_display(redact_sensitive_text(description))
 
     transport_attempt = _present_with_selected_transport(
         command=command,
