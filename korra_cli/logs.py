@@ -173,13 +173,13 @@ def tail_log(
     """
     filename = LOG_FILES.get(log_name)
     if filename is None:
-        print(f"Unknown log: {log_name!r}. Available: {', '.join(sorted(LOG_FILES))}")
+        print(f"Неизвестный журнал: {log_name!r}. Доступны: {', '.join(sorted(LOG_FILES))}")
         sys.exit(1)
 
     log_path = get_hermes_home() / "logs" / filename
     if not log_path.exists():
-        print(f"Log file not found: {log_path}")
-        print("(Logs are created when Korra runs — try 'hermes chat' first)")
+        print(f"Файл журнала не найден: {log_path}")
+        print("(Журналы создаются во время работы Korra; сначала запустите `korra chat`.)")
         sys.exit(1)
 
     # Parse --since into a datetime cutoff
@@ -187,12 +187,12 @@ def tail_log(
     if since:
         since_dt = _parse_since(since)
         if since_dt is None:
-            print(f"Invalid --since value: {since!r}. Use format like '1h', '30m', '2d'.")
+            print(f"Неверное значение --since: {since!r}. Примеры: '1h', '30m', '2d'.")
             sys.exit(1)
 
     min_level = level.upper() if level else None
     if min_level and min_level not in _LEVEL_ORDER:
-        print(f"Invalid --level: {level!r}. Use DEBUG, INFO, WARNING, ERROR, or CRITICAL.")
+        print(f"Неверное значение --level: {level!r}. Допустимы DEBUG, INFO, WARNING, ERROR, CRITICAL.")
         sys.exit(1)
 
     # Resolve component to logger name prefixes
@@ -202,7 +202,7 @@ def tail_log(
         component_lower = component.lower()
         if component_lower not in COMPONENT_PREFIXES:
             available = ", ".join(sorted(COMPONENT_PREFIXES))
-            print(f"Unknown component: {component!r}. Available: {available}")
+            print(f"Неизвестный компонент: {component!r}. Доступны: {available}")
             sys.exit(1)
         component_prefixes = COMPONENT_PREFIXES[component_lower]
 
@@ -219,7 +219,7 @@ def tail_log(
                            min_level=min_level, session_filter=session,
                            since=since_dt, component_prefixes=component_prefixes)
     except PermissionError:
-        print(f"Permission denied: {log_path}")
+        print(f"Нет доступа к файлу: {log_path}")
         sys.exit(1)
 
     # Print header
@@ -235,9 +235,9 @@ def tail_log(
     filter_desc = f" [{', '.join(filter_parts)}]" if filter_parts else ""
 
     if follow:
-        print(f"--- {display_hermes_home()}/logs/{filename}{filter_desc} (Ctrl+C to stop) ---")
+        print(f"--- {display_hermes_home()}/logs/{filename}{filter_desc} (Ctrl+C — остановить) ---")
     else:
-        print(f"--- {display_hermes_home()}/logs/{filename}{filter_desc} (last {num_lines}) ---")
+        print(f"--- {display_hermes_home()}/logs/{filename}{filter_desc} (последние строки: {num_lines}) ---")
 
     for line in lines:
         print(line, end="")
@@ -250,7 +250,7 @@ def tail_log(
         _follow_log(log_path, min_level=min_level, session_filter=session,
                      since=since_dt, component_prefixes=component_prefixes)
     except KeyboardInterrupt:
-        print("\n--- stopped ---")
+        print("\n--- остановлено ---")
 
 
 def _read_tail(
@@ -366,10 +366,10 @@ def list_logs() -> None:
     """Print available log files with sizes."""
     log_dir = get_hermes_home() / "logs"
     if not log_dir.exists():
-        print(f"No logs directory at {display_hermes_home()}/logs/")
+        print(f"Папка журналов не найдена: {display_hermes_home()}/logs/")
         return
 
-    print(f"Log files in {display_hermes_home()}/logs/:\n")
+    print(f"Файлы журналов в {display_hermes_home()}/logs/:\n")
     found = False
     for entry in sorted(log_dir.iterdir()):
         if entry.is_file() and entry.suffix == ".log":
@@ -383,15 +383,15 @@ def list_logs() -> None:
                 size_str = f"{size / (1024 * 1024):.1f}MB"
             age = datetime.now() - mtime
             if age.total_seconds() < 60:
-                age_str = "just now"
+                age_str = "только что"
             elif age.total_seconds() < 3600:
-                age_str = f"{int(age.total_seconds() / 60)}m ago"
+                age_str = f"{int(age.total_seconds() / 60)} мин назад"
             elif age.total_seconds() < 86400:
-                age_str = f"{int(age.total_seconds() / 3600)}h ago"
+                age_str = f"{int(age.total_seconds() / 3600)} ч назад"
             else:
                 age_str = mtime.strftime("%Y-%m-%d")
             print(f"  {entry.name:<25} {size_str:>8}   {age_str}")
             found = True
 
     if not found:
-        print("  (no log files yet — run 'hermes chat' to generate logs)")
+        print("  (журналов пока нет; запустите `korra chat`)")

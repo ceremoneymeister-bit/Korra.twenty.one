@@ -51,23 +51,23 @@ def _cmd_status(args) -> int:
     print(color("  ───────────", Colors.MAGENTA))
     if logged_in:
         portal = auth.get("portal_base_url") or DEFAULT_PORTAL_URL
-        print(f"  Auth:    {color('✓ logged in', Colors.GREEN)}")
+        print(f"  Вход:    {color('✓ выполнен', Colors.GREEN)}")
         print(f"  Portal:  {portal}")
         inference = auth.get("inference_base_url")
         if inference:
             print(f"  API:     {inference}")
     else:
-        print(f"  Auth:    {color('not logged in', Colors.YELLOW)}")
-        print(f"  Sign up: {SUBSCRIPTION_URL}")
-        print("  Login:   hermes portal")
+        print(f"  Вход:    {color('не выполнен', Colors.YELLOW)}")
+        print(f"  Регистрация: {SUBSCRIPTION_URL}")
+        print("  Войти:   korra portal")
 
     # Provider selection (independent of auth)
     model_cfg = config.get("model") if isinstance(config.get("model"), dict) else {}
     provider = str(model_cfg.get("provider") or "").strip().lower()
     if provider == "nous":
-        print(f"  Model:   {color('✓ using Nous as inference provider', Colors.GREEN)}")
+        print(f"  Модель:  {color('✓ используется провайдер Nous', Colors.GREEN)}")
     elif provider:
-        print(f"  Model:   currently {provider} (switch with `hermes model`)")
+        print(f"  Модель:  сейчас {provider}; сменить: `korra model`")
 
     # Tool Gateway routing
     print()
@@ -79,19 +79,19 @@ def _cmd_status(args) -> int:
         features = None
 
     if features is None:
-        print("  (could not resolve subscription state)")
+        print("  (не удалось определить состояние подписки)")
         return 0
 
     rows = []
     for feat in features.items():
         if feat.managed_by_nous:
-            state = color("via Nous Portal", Colors.GREEN)
+            state = color("через Nous Portal", Colors.GREEN)
         elif feat.active and feat.current_provider:
             state = feat.current_provider
         elif feat.active:
-            state = "active"
+            state = "активно"
         else:
-            state = color("not configured", Colors.DIM)
+            state = color("не настроено", Colors.DIM)
         rows.append((feat.label, state))
 
     width = max((len(r[0]) for r in rows), default=0)
@@ -107,14 +107,14 @@ def _cmd_status(args) -> int:
 def _cmd_open(args) -> int:
     """Open the Portal subscription page in the default browser."""
     target = SUBSCRIPTION_URL
-    print(f"Opening {target}")
+    print(f"Открываю {target}")
     try:
         opened = webbrowser.open(target)
     except Exception:
         opened = False
     if not opened:
         print()
-        print("Could not launch a browser. Visit the URL above manually.")
+        print("Не удалось открыть браузер. Перейдите по адресу выше вручную.")
         return 1
     return 0
 
@@ -127,44 +127,44 @@ def _cmd_tools(args) -> int:
     try:
         features = get_nous_subscription_features(config)
     except Exception:
-        print("Could not resolve Tool Gateway state.", file=sys.stderr)
+        print("Не удалось определить состояние шлюза инструментов.", file=sys.stderr)
         return 1
 
     # Static catalog — the partners Tool Gateway routes to today.
     catalog = [
-        ("web",       "Web search & extract",  "Firecrawl"),
-        ("image_gen", "Image generation",      "FAL"),
-        ("tts",       "Text-to-speech",        "OpenAI TTS"),
-        ("browser",   "Browser automation",    "Browser Use"),
-        ("modal",     "Cloud terminal",        "Modal"),
+        ("web",       "Поиск и извлечение из веба", "Firecrawl"),
+        ("image_gen", "Создание изображений",       "FAL"),
+        ("tts",       "Синтез речи",                 "OpenAI TTS"),
+        ("browser",   "Управление браузером",        "Browser Use"),
+        ("modal",     "Облачный терминал",           "Modal"),
     ]
 
     print()
-    print(color("  Tool Gateway catalog", Colors.MAGENTA))
+    print(color("  Каталог шлюза инструментов", Colors.MAGENTA))
     print(color("  ────────────────────", Colors.MAGENTA))
 
     if not features.nous_auth_present:
-        print(color("  Not logged into Nous Portal — sign in with `hermes portal`.", Colors.YELLOW))
+        print(color("  Вход в Nous Portal не выполнен. Выполните `korra portal`.", Colors.YELLOW))
         print()
 
     label_width = max(len(label) for _, label, _ in catalog)
     for key, label, partner in catalog:
         feat = features.features.get(key)
         if feat is None:
-            state = color("unknown", Colors.DIM)
+            state = color("неизвестно", Colors.DIM)
         elif feat.managed_by_nous:
-            state = color("✓ via Nous Portal", Colors.GREEN)
+            state = color("✓ через Nous Portal", Colors.GREEN)
         elif feat.active and feat.current_provider:
             state = feat.current_provider
         elif feat.active:
-            state = "active"
+            state = "активно"
         else:
-            state = color("not configured", Colors.DIM)
-        print(f"  {label:<{label_width}}  partner: {partner:<14} {state}")
+            state = color("не настроено", Colors.DIM)
+        print(f"  {label:<{label_width}}  партнёр: {partner:<14} {state}")
 
     print()
-    print(color(f"  Manage your subscription: {SUBSCRIPTION_URL}", Colors.DIM))
-    print(color(f"  Docs: {DOCS_URL}", Colors.DIM))
+    print(color(f"  Управление подпиской: {SUBSCRIPTION_URL}", Colors.DIM))
+    print(color(f"  Документация: {DOCS_URL}", Colors.DIM))
     return 0
 
 
@@ -184,7 +184,7 @@ def _cmd_login(args) -> int:
         _run_portal_one_shot(config)
     except (KeyboardInterrupt, EOFError):
         print()
-        print("Portal setup cancelled.")
+        print("Настройка Portal отменена.")
         return 1
     return 0
 
@@ -204,8 +204,8 @@ def portal_command(args) -> int:
         return _cmd_open(args)
     if sub == "tools":
         return _cmd_tools(args)
-    print(f"Unknown portal subcommand: {sub}", file=sys.stderr)
-    print("Run `hermes portal -h` for usage.", file=sys.stderr)
+    print(f"Неизвестная подкоманда portal: {sub}", file=sys.stderr)
+    print("Справка: `korra portal -h`.", file=sys.stderr)
     return 1
 
 

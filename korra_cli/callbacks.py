@@ -67,7 +67,7 @@ def clarify_callback(cli, question, choices, multi_select=False):
     cli._clarify_deadline = None
     if hasattr(cli, "_app") and cli._app:
         cli._app.invalidate()
-    cprint(f"\n{_DIM}(clarify timed out after {timeout}s — agent will decide){_RST}")
+    cprint(f"\n{_DIM}(уточнение не получено за {timeout} с; агент решит сам){_RST}")
     return (
         "The user did not provide a response within the time limit. "
         "Use your best judgement to make the choice and proceed."
@@ -86,28 +86,28 @@ def prompt_for_secret(cli, var_name: str, prompt: str, metadata=None) -> dict:
         if not hasattr(cli, "_secret_deadline"):
             cli._secret_deadline = 0
         try:
-            value = masked_secret_prompt(f"{prompt} (hidden, ESC or empty Enter to skip): ")
+            value = masked_secret_prompt(f"{prompt} (ввод скрыт; ESC или пустой Enter — пропустить): ")
         except (EOFError, KeyboardInterrupt):
             value = ""
 
         if not value:
-            cprint(f"\n{_DIM}  ⏭ Secret entry skipped{_RST}")
+            cprint(f"\n{_DIM}  ⏭ Ввод секрета пропущен{_RST}")
             return {
                 "success": True,
                 "reason": "cancelled",
                 "stored_as": var_name,
                 "validated": False,
                 "skipped": True,
-                "message": "Secret setup was skipped.",
+                "message": "Настройка секрета пропущена.",
             }
 
         stored = save_env_value_secure(var_name, value)
         _dhh = display_hermes_home()
-        cprint(f"\n{_DIM}  ✓ Stored secret in {_dhh}/.env as {var_name}{_RST}")
+        cprint(f"\n{_DIM}  ✓ Секрет сохранён в {_dhh}/.env как {var_name}{_RST}")
         return {
             **stored,
             "skipped": False,
-            "message": "Secret stored securely. The secret value was not exposed to the model.",
+            "message": "Секрет сохранён безопасно и не передан модели.",
         }
 
     timeout = 120
@@ -144,23 +144,23 @@ def prompt_for_secret(cli, var_name: str, prompt: str, metadata=None) -> dict:
                 cli._app.invalidate()
 
             if not value:
-                cprint(f"\n{_DIM}  ⏭ Secret entry skipped{_RST}")
+                cprint(f"\n{_DIM}  ⏭ Ввод секрета пропущен{_RST}")
                 return {
                     "success": True,
                     "reason": "cancelled",
                     "stored_as": var_name,
                     "validated": False,
                     "skipped": True,
-                    "message": "Secret setup was skipped.",
+                    "message": "Настройка секрета пропущена.",
                 }
 
             stored = save_env_value_secure(var_name, value)
             _dhh = display_hermes_home()
-            cprint(f"\n{_DIM}  ✓ Stored secret in {_dhh}/.env as {var_name}{_RST}")
+            cprint(f"\n{_DIM}  ✓ Секрет сохранён в {_dhh}/.env как {var_name}{_RST}")
             return {
                 **stored,
                 "skipped": False,
-                "message": "Secret stored securely. The secret value was not exposed to the model.",
+                "message": "Секрет сохранён безопасно и не передан модели.",
             }
         except queue.Empty:
             remaining = cli._secret_deadline - _time.monotonic()
@@ -183,14 +183,14 @@ def prompt_for_secret(cli, var_name: str, prompt: str, metadata=None) -> dict:
             pass
     if hasattr(cli, "_app") and cli._app:
         cli._app.invalidate()
-    cprint(f"\n{_DIM}  ⏱ Timeout — secret capture cancelled{_RST}")
+    cprint(f"\n{_DIM}  ⏱ Время истекло; ввод секрета отменён{_RST}")
     return {
         "success": True,
         "reason": "timeout",
         "stored_as": var_name,
         "validated": False,
         "skipped": True,
-        "message": "Secret setup timed out and was skipped.",
+        "message": "Время настройки секрета истекло; шаг пропущен.",
     }
 
 
@@ -249,5 +249,5 @@ def approval_callback(cli, command: str, description: str) -> str:
         cli._approval_deadline = 0
         if hasattr(cli, "_app") and cli._app:
             cli._app.invalidate()
-        cprint(f"\n{_DIM}  ⏱ Timeout — denying command{_RST}")
+        cprint(f"\n{_DIM}  ⏱ Время истекло; команда отклонена{_RST}")
         return "timeout"
