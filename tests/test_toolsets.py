@@ -295,8 +295,6 @@ class TestResolveToolsetMemo:
         generation makes repeat calls a dict lookup instead of a full
         includes-walk + registry snapshot.
         """
-        from tools.registry import registry
-
         toolsets_mod._resolve_toolset_memo.clear()
         get_toolset_calls = {"n": 0}
 
@@ -308,9 +306,6 @@ class TestResolveToolsetMemo:
 
         monkeypatch.setattr(toolsets_mod, "get_toolset", counting_get_toolset)
 
-        registry_id = id(registry)
-        generation = registry._generation
-
         first = resolve_toolset("hermes-cli")
         second = resolve_toolset("hermes-cli")
 
@@ -319,9 +314,6 @@ class TestResolveToolsetMemo:
             "second resolution must be a memo hit (no get_toolset re-walk), "
             f"got {get_toolset_calls['n']} calls"
         )
-        assert (
-            "hermes-cli", True, registry_id, generation
-        ) in toolsets_mod._resolve_toolset_memo
 
     def test_generation_bump_invalidates_memo(self, monkeypatch):
         """A registry mutation (generation bump) must force a fresh resolve."""
@@ -356,3 +348,34 @@ class TestResolveToolsetMemo:
         assert first == second
         assert first  # non-empty sanity
 
+    def test_memo_keeps_native_tool_definitions_profile_scoped(self, tmp_path, monkeypatch):
+        import model_tools
+        from korra_constants import set_hermes_home_override, reset_hermes_home_override
+
+        reg = ToolRegistry()
+        monkeypatch.setattr("tools.registry.registry", reg)
+        monkeypatch.setattr(model_tools, "registry", reg)
+        monkeypatch.setattr(toolsets_mod, "_resolve_toolset_memo", {})
+        monkeypatch.setattr(model_tools, "_tool_defs_cache", {})
+        expected = {}
+        for profile, prefix in (("root", "intake"), ("analysis", "analysis")):
+            scope = str(tmp_path / profile)
+            expected[profile] = sorted(f"mcp__metal_calc__{prefix}_{verb}"
+                                       for verb in ("context", "sources", "observation"))
+            for name in expected[profile]:
+                reg.register(name=name, toolset="mcp-metal_calc", schema=_make_schema(name),
+                             handler=_dummy_handler, check_fn=lambda: True, scope=scope)
+        reg.register_toolset_alias("metal_calc", "mcp-metal_calc")
+        generation = reg._generation
+        for profile in ("analysis", "root", "analysis", "root"):
+            token = set_hermes_home_override(str(tmp_path / profile))
+            try:
+                definitions = model_tools.get_tool_definitions(
+                    enabled_toolsets=["metal_calc"], quiet_mode=True,
+                    skip_tool_search_assembly=True,
+                )
+                assert sorted(d["function"]["name"] for d in definitions) == expected[profile]
+                assert resolve_toolset("metal_calc") == expected[profile]
+                assert reg._generation == generation
+            finally:
+                reset_hermes_home_override(token)
