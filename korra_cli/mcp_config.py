@@ -467,13 +467,13 @@ def cmd_mcp_add(args):
         return
 
     if url and explicit_env:
-        _error("--env is only supported for stdio MCP servers (--command or stdio presets)")
+        _error("--env поддерживается только для MCP-серверов stdio (--command или шаблоны stdio)")
         return
 
     # Validate transport
     if not url and not command:
-        _error("Must specify --url <endpoint>, --command <cmd>, or --preset <name>")
-        _info("Examples:")
+        _error("Укажите --url <адрес>, --command <команда> или --preset <имя>")
+        _info("Примеры:")
         _info('  korra mcp add ink --url "https://mcp.ml.ink/mcp"')
         _info('  korra mcp add github --command npx --args @modelcontextprotocol/server-github')
         _info('  korra mcp add myserver --preset mypreset')
@@ -482,8 +482,8 @@ def cmd_mcp_add(args):
     # Check if server already exists
     existing = _get_mcp_servers()
     if name in existing:
-        if not _confirm(f"Server '{name}' already exists. Overwrite?", default=False):
-            _info("Cancelled.")
+        if not _confirm(f"Сервер '{name}' уже существует. Перезаписать?", default=False):
+            _info("Отменено.")
             return
 
     # Build initial config
@@ -502,14 +502,14 @@ def cmd_mcp_add(args):
     if issues:
         for issue in issues:
             _warning(issue)
-        _warning(f"Server '{name}' was NOT saved due to suspicious configuration.")
+        _warning(f"Сервер '{name}' не сохранён: конфигурация выглядит подозрительно.")
         return
 
     # ── Authentication ────────────────────────────────────────────────
 
     if url and auth_type == "oauth":
         print()
-        _info(f"Starting OAuth flow for '{name}'...")
+        _info(f"Запускаю вход через OAuth для '{name}'...")
         oauth_ok = False
         try:
             from tools.mcp_oauth_manager import get_manager
@@ -518,40 +518,40 @@ def cmd_mcp_add(args):
             )
             if oauth_auth:
                 server_config["auth"] = "oauth"
-                _success("OAuth configured (tokens will be acquired on first connection)")
+                _success("OAuth настроен (токены будут получены при первом подключении)")
                 oauth_ok=True
             else:
-                _warning("OAuth setup failed — MCP SDK auth module not available")
+                _warning("Не удалось настроить OAuth — модуль авторизации MCP SDK недоступен")
         except Exception as exc:
-            _warning(f"OAuth error: {exc}")
+            _warning(f"Ошибка OAuth: {exc}")
 
         if not oauth_ok:
-            _info("This server may not support OAuth.")
-            if _confirm("Continue without authentication?", default=True):
+            _info("Возможно, этот сервер не поддерживает OAuth.")
+            if _confirm("Продолжить без аутентификации?", default=True):
                 # Don't store auth: oauth — server doesn't support it
                 pass
             else:
-                _info("Cancelled.")
+                _info("Отменено.")
                 return
 
     elif url:
         # Prompt for API key / Bearer token for HTTP servers
         print()
-        _info(f"Connecting to {url}")
-        needs_auth = _confirm("Does this server require authentication?", default=True)
+        _info(f"Подключаюсь к {url}")
+        needs_auth = _confirm("Этому серверу нужна аутентификация?", default=True)
         if needs_auth:
             if auth_type == "header" or not auth_type:
                 env_key = _env_key_for_server(name)
                 existing_key = get_env_value(env_key)
                 if existing_key:
-                    _success(f"{env_key}: already configured")
+                    _success(f"{env_key}: уже настроен")
                 else:
-                    api_key = _prompt("API key / Bearer token", password=True)
+                    api_key = _prompt("Ключ API / токен Bearer", password=True)
                     if api_key:
                         server_config["headers"] = _save_bearer_auth_token(
                             name, api_key
                         )
-                        _success(f"Saved to {display_hermes_home()}/.env as {env_key}")
+                        _success(f"Сохранено в {display_hermes_home()}/.env как {env_key}")
 
                 # Set header with env var interpolation
                 if existing_key:
@@ -560,30 +560,30 @@ def cmd_mcp_add(args):
     # ── Discovery: connect and list tools ─────────────────────────────
 
     print()
-    print(color(f"  Connecting to '{name}'...", Colors.CYAN))
+    print(color(f"  Подключаюсь к '{name}'...", Colors.CYAN))
 
     try:
         tools = _probe_single_server(name, server_config)
     except Exception as exc:
-        _error(f"Failed to connect: {exc}")
-        if _confirm("Save config anyway (you can test later)?", default=False):
+        _error(f"Не удалось подключиться: {exc}")
+        if _confirm("Всё равно сохранить конфигурацию и проверить подключение позже?", default=False):
             server_config["enabled"] = False
             if _save_mcp_server(name, server_config):
-                _success(f"Saved '{name}' to config (disabled)")
+                _success(f"Сервер '{name}' сохранён в конфигурации (выключен)")
                 _info("После исправления проверьте подключение: korra mcp test " + name)
         return
 
     if not tools:
-        _warning("Server connected but reported no tools.")
-        if _confirm("Save config anyway?", default=True):
+        _warning("Сервер подключён, но не сообщил ни об одном инструменте.")
+        if _confirm("Всё равно сохранить конфигурацию?", default=True):
             if _save_mcp_server(name, server_config):
-                _success(f"Saved '{name}' to config")
+                _success(f"Сервер '{name}' сохранён в конфигурации")
         return
 
     # ── Tool selection ────────────────────────────────────────────────
 
     print()
-    _success(f"Connected! Found {len(tools)} tool(s) from '{name}':")
+    _success(f"Подключено! У сервера '{name}' найдено инструментов: {len(tools)}")
     print()
     for tool_name, desc in tools:
         short = desc[:60] + "..." if len(desc) > 60 else desc
@@ -593,15 +593,15 @@ def cmd_mcp_add(args):
     # Ask: enable all, select, or cancel
     try:
         choice = input(
-            color(f"  Enable all {len(tools)} tools? [Y/n/select]: ", Colors.YELLOW)
+            color(f"  Включить все инструменты ({len(tools)})? [Enter — все / n — отмена / select — выбор]: ", Colors.YELLOW)
         ).strip().lower()
     except (KeyboardInterrupt, EOFError):
         print()
-        _info("Cancelled.")
+        _info("Отменено.")
         return
 
     if choice in {"n", "no"}:
-        _info("Cancelled — server not saved.")
+        _info("Отменено — сервер не сохранён.")
         return
 
     if choice in {"s", "select"}:
@@ -612,13 +612,13 @@ def cmd_mcp_add(args):
         pre_selected = set(range(len(tools)))
 
         chosen = curses_checklist(
-            f"Select tools for '{name}'",
+            f"Выберите инструменты для '{name}'",
             labels,
             pre_selected,
         )
 
         if not chosen:
-            _info("No tools selected — server not saved.")
+            _info("Инструменты не выбраны — сервер не сохранён.")
             return
 
         chosen_names = [tools[i][0] for i in sorted(chosen)]
@@ -636,8 +636,8 @@ def cmd_mcp_add(args):
     server_config["enabled"] = True
     if _save_mcp_server(name, server_config):
         print()
-        _success(f"Saved '{name}' to {display_hermes_home()}/config.yaml ({tool_count}/{total} tools enabled)")
-        _info("Start a new session to use these tools.")
+        _success(f"Сервер '{name}' сохранён в {display_hermes_home()}/config.yaml (включено инструментов: {tool_count}/{total})")
+        _info("Чтобы использовать эти инструменты, начните новый сеанс.")
 
 
 # ─── hermes mcp remove ───────────────────────────────────────────────────────
@@ -648,18 +648,18 @@ def cmd_mcp_remove(args):
     existing = _get_mcp_servers()
 
     if name not in existing:
-        _error(f"Server '{name}' not found in config.")
+        _error(f"Сервер '{name}' не найден в конфигурации.")
         servers = list(existing.keys())
         if servers:
-            _info(f"Available servers: {', '.join(servers)}")
+            _info(f"Доступные серверы: {', '.join(servers)}")
         return
 
-    if not _confirm(f"Remove server '{name}'?", default=True):
-        _info("Cancelled.")
+    if not _confirm(f"Удалить сервер '{name}'?", default=True):
+        _info("Отменено.")
         return
 
     _remove_mcp_server(name)
-    _success(f"Removed '{name}' from config")
+    _success(f"Сервер '{name}' удалён из конфигурации")
 
     # Clean up OAuth tokens if they exist — route through MCPOAuthManager so
     # any provider instance cached in the current process (e.g. from an
@@ -667,7 +667,7 @@ def cmd_mcp_remove(args):
     try:
         from tools.mcp_oauth_manager import get_manager
         get_manager().remove(name)
-        _success("Cleaned up OAuth tokens")
+        _success("Токены OAuth удалены")
     except Exception:
         pass
 
@@ -749,28 +749,28 @@ def cmd_mcp_test(args):
     servers = _get_mcp_servers()
 
     if name not in servers:
-        _error(f"Server '{name}' not found in config.")
+        _error(f"Сервер '{name}' не найден в конфигурации.")
         available = list(servers.keys())
         if available:
-            _info(f"Available: {', '.join(available)}")
+            _info(f"Доступны: {', '.join(available)}")
         return
 
     cfg = servers[name]
     print()
-    print(color(f"  Testing '{name}'...", Colors.CYAN))
+    print(color(f"  Проверяю '{name}'...", Colors.CYAN))
 
     # Show transport info
     if "url" in cfg:
-        _info(f"Transport: HTTP → {cfg['url']}")
+        _info(f"Транспорт: HTTP → {cfg['url']}")
     else:
         cmd = cfg.get("command", "?")
-        _info(f"Transport: stdio → {cmd}")
+        _info(f"Транспорт: stdio → {cmd}")
 
     # Show auth info (masked)
     auth_type = cfg.get("auth", "")
     headers = cfg.get("headers", {})
     if auth_type == "oauth":
-        _info("Auth: OAuth 2.1 PKCE")
+        _info("Аутентификация: OAuth 2.1 PKCE")
     elif headers:
         for k, v in headers.items():
             if isinstance(v, str) and ("key" in k.lower() or "auth" in k.lower()):
@@ -782,7 +782,7 @@ def cmd_mcp_test(args):
                     masked = "***"
                 print(f"    {k}: {masked}")
     else:
-        _info("Auth: none")
+        _info("Аутентификация: нет")
 
     # Attempt connection
     start = time.monotonic()
@@ -791,11 +791,11 @@ def cmd_mcp_test(args):
         elapsed_ms = (time.monotonic() - start) * 1000
     except Exception as exc:
         elapsed_ms = (time.monotonic() - start) * 1000
-        _error(f"Connection failed ({elapsed_ms:.0f}ms): {exc}")
+        _error(f"Не удалось подключиться ({elapsed_ms:.0f} мс): {exc}")
         return
 
-    _success(f"Connected ({elapsed_ms:.0f}ms)")
-    _success(f"Tools discovered: {len(tools)}")
+    _success(f"Подключено ({elapsed_ms:.0f} мс)")
+    _success(f"Найдено инструментов: {len(tools)}")
 
     if tools:
         print()
@@ -817,10 +817,10 @@ def _reauth_oauth_server(name: str, server_config: dict) -> bool:
     """
     url = server_config.get("url")
     if not url:
-        _error(f"Server '{name}' has no URL — not an OAuth-capable server")
+        _error(f"У сервера '{name}' нет URL — он не подходит для OAuth")
         return False
     if server_config.get("auth") != "oauth":
-        _error(f"Server '{name}' is not configured for OAuth (auth={server_config.get('auth')})")
+        _error(f"Для сервера '{name}' не настроен OAuth (auth={server_config.get('auth')})")
         _info("Чтобы изменить способ входа, выполните `korra mcp remove`, затем `korra mcp add`.")
         return False
 
@@ -830,10 +830,10 @@ def _reauth_oauth_server(name: str, server_config: dict) -> bool:
         from tools.mcp_oauth_manager import get_manager
         get_manager().remove(name)
     except Exception as exc:
-        _warning(f"Could not clear existing OAuth state: {exc}")
+        _warning(f"Не удалось удалить прежнее состояние OAuth: {exc}")
 
     print()
-    _info(f"Starting OAuth flow for '{name}'...")
+    _info(f"Запускаю вход через OAuth для '{name}'...")
 
     # Probe triggers the OAuth flow (browser redirect + callback capture).
     # Honor the server's configured connect_timeout so a human has enough
@@ -869,14 +869,14 @@ def _reauth_oauth_server(name: str, server_config: dict) -> bool:
         # Verify a token actually landed on disk before claiming success.
         if not _oauth_tokens_present(name):
             _warning(
-                "Server responded, but no OAuth token was obtained — "
-                "authentication did not complete."
+                "Сервер ответил, но токен OAuth не получен — "
+                "аутентификация не завершена."
             )
             print()
             _info(
-                "Some providers (e.g. Google Drive, Atlassian) do not support "
-                "automatic client registration. For those you must create an "
-                "OAuth client yourself and add its credentials to config.yaml:"
+                "Некоторые провайдеры (например, Google Drive и Atlassian) не поддерживают "
+                "автоматическую регистрацию клиента. Для них создайте клиент OAuth "
+                "самостоятельно и добавьте его учётные данные в config.yaml:"
             )
             print()
             print(color("    mcp_servers:", Colors.DIM))
@@ -890,9 +890,9 @@ def _reauth_oauth_server(name: str, server_config: dict) -> bool:
             _info("Затем снова выполните `korra mcp login " + name + "`.")
             return False
         if tools:
-            _success(f"Authenticated — {len(tools)} tool(s) available")
+            _success(f"Аутентификация выполнена — доступно инструментов: {len(tools)}")
         else:
-            _success("Authenticated (server reported no tools)")
+            _success("Аутентификация выполнена (сервер не сообщил ни об одном инструменте)")
         return True
     except Exception as exc:
         try:
@@ -903,7 +903,7 @@ def _reauth_oauth_server(name: str, server_config: dict) -> bool:
             )
         except Exception:
             humanized = None
-        _error(f"Authentication failed: {humanized or exc}")
+        _error(f"Не удалось выполнить аутентификацию: {humanized or exc}")
         return False
 
 
@@ -924,9 +924,9 @@ def cmd_mcp_login(args):
     servers = _get_mcp_servers()
 
     if name not in servers:
-        _error(f"Server '{name}' not found in config.")
+        _error(f"Сервер '{name}' не найден в конфигурации.")
         if servers:
-            _info(f"Available servers: {', '.join(servers)}")
+            _info(f"Доступные серверы: {', '.join(servers)}")
         return
 
     _reauth_oauth_server(name, servers[name])
@@ -955,10 +955,10 @@ def cmd_mcp_reauth(args):
             if c.get("auth") == "oauth" and c.get("url")
         ]
         if not oauth_servers:
-            _info("No OAuth-based MCP servers found in config.")
+            _info("В конфигурации нет MCP-серверов с OAuth.")
             return
         print()
-        _info(f"Re-authenticating {len(oauth_servers)} OAuth server(s) one at a time...")
+        _info(f"Повторно вхожу на MCP-серверы с OAuth по очереди; всего: {len(oauth_servers)}...")
         succeeded = 0
         for n, c in oauth_servers:
             print()
@@ -966,17 +966,17 @@ def cmd_mcp_reauth(args):
             if _reauth_oauth_server(n, c):
                 succeeded += 1
         print()
-        _success(f"Re-authenticated {succeeded}/{len(oauth_servers)} server(s)")
+        _success(f"Повторный вход выполнен для серверов: {succeeded}/{len(oauth_servers)}")
         return
 
     if not name:
-        _error("Specify a server name, or use --all to re-auth every OAuth server.")
+        _error("Укажите имя сервера или используйте --all для повторного входа на всех серверах с OAuth.")
         _info("Использование: korra mcp reauth <имя>   |   korra mcp reauth --all")
         return
     if name not in servers:
-        _error(f"Server '{name}' not found in config.")
+        _error(f"Сервер '{name}' не найден в конфигурации.")
         if servers:
-            _info(f"Available servers: {', '.join(servers)}")
+            _info(f"Доступные серверы: {', '.join(servers)}")
         return
 
     _reauth_oauth_server(name, servers[name])
@@ -994,26 +994,26 @@ def cmd_mcp_configure(args):
     servers = _get_mcp_servers()
 
     if name not in servers:
-        _error(f"Server '{name}' not found in config.")
+        _error(f"Сервер '{name}' не найден в конфигурации.")
         available = list(servers.keys())
         if available:
-            _info(f"Available: {', '.join(available)}")
+            _info(f"Доступны: {', '.join(available)}")
         return
 
     cfg = servers[name]
 
     # Discover all available tools
     print()
-    print(color(f"  Connecting to '{name}' to discover tools...", Colors.CYAN))
+    print(color(f"  Подключаюсь к '{name}', чтобы найти инструменты...", Colors.CYAN))
 
     try:
         all_tools = _probe_single_server(name, cfg)
     except Exception as exc:
-        _error(f"Failed to connect: {exc}")
+        _error(f"Не удалось подключиться: {exc}")
         return
 
     if not all_tools:
-        _warning("Server reports no tools.")
+        _warning("Сервер не сообщил ни об одном инструменте.")
         return
 
     # Determine which are currently enabled
@@ -1052,7 +1052,7 @@ def cmd_mcp_configure(args):
 
     currently = len(pre_selected)
     total = len(all_tools)
-    _info(f"Currently {currently}/{total} tools enabled for '{name}'.")
+    _info(f"Сейчас у сервера '{name}' включено инструментов: {currently}/{total}.")
     print()
 
     # Interactive checklist
@@ -1061,13 +1061,13 @@ def cmd_mcp_configure(args):
     labels = [f"{t[0]}  —  {t[1]}" for t in all_tools]
 
     chosen = curses_checklist(
-        f"Select tools for '{name}'",
+        f"Выберите инструменты для '{name}'",
         labels,
         pre_selected,
     )
 
     if chosen == pre_selected:
-        _info("No changes made.")
+        _info("Изменений нет.")
         return
 
     # Update config
@@ -1109,12 +1109,11 @@ def cmd_mcp_configure(args):
         )
         if glob_shadowed:
             _warning(
-                f"{len(glob_shadowed)} re-enabled tool(s) still match glob "
-                f"exclude pattern(s) {glob_entries} and stay excluded: "
+                f"Повторно включённые инструменты ({len(glob_shadowed)}) всё ещё соответствуют "
+                f"шаблонам исключения {glob_entries} и остаются выключенными: "
                 f"{', '.join(glob_shadowed[:5])}"
-                f"{' ...' if len(glob_shadowed) > 5 else ''}. Remove the "
-                f"pattern from mcp_servers.{name}.tools.exclude in "
-                "config.yaml to enable them."
+                f"{' ...' if len(glob_shadowed) > 5 else ''}. Чтобы включить их, удалите "
+                f"шаблон из mcp_servers.{name}.tools.exclude в config.yaml."
             )
 
         if not new_exclude:
@@ -1133,8 +1132,8 @@ def cmd_mcp_configure(args):
     save_config(config)
 
     new_count = len(chosen)
-    _success(f"Updated config: {new_count}/{total} tools enabled")
-    _info("Start a new session for changes to take effect.")
+    _success(f"Конфигурация обновлена: включено инструментов {new_count}/{total}")
+    _info("Чтобы изменения вступили в силу, начните новый сеанс.")
 
 
 # ─── Dispatcher ───────────────────────────────────────────────────────────────

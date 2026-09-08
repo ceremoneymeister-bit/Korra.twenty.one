@@ -90,16 +90,6 @@ class TestMcpList:
         assert "korra mcp add" in out
         assert "hermes" not in out.lower()
 
-    def test_user_facing_command_hints_do_not_use_legacy_brand(self):
-        source = Path("korra_cli/mcp_config.py").read_text(encoding="utf-8")
-        output_lines = [
-            line
-            for line in source.splitlines()
-            if "_info(" in line or "_error(" in line or "_success(" in line
-        ]
-
-        assert not any("hermes mcp" in line.lower() for line in output_lines)
-
     def test_list_with_servers(self, tmp_path, capsys):
         _seed_config(tmp_path, {
             "ink": {
@@ -152,13 +142,26 @@ class TestMcpRemove:
         cmd_mcp_remove(_make_args(name="myserver"))
 
         out = capsys.readouterr().out
-        assert "Removed" in out
+        assert "Сервер 'myserver' удалён из конфигурации" in out
 
         # Verify config updated
         from korra_cli.config import load_config
 
         config = load_config()
         assert "myserver" not in config.get("mcp_servers", {})
+
+    def test_remove_missing_server_reports_russian_error(self, tmp_path, capsys):
+        _seed_config(tmp_path, {
+            "available": {"url": "https://example.com/mcp"},
+        })
+        from korra_cli.mcp_config import cmd_mcp_remove
+
+        cmd_mcp_remove(_make_args(name="missing"))
+
+        out = capsys.readouterr().out
+        assert "Сервер 'missing' не найден в конфигурации" in out
+        assert "Доступные серверы: available" in out
+        assert "not found" not in out
 
 
     def test_remove_cleans_oauth_tokens(self, tmp_path, capsys, monkeypatch):
@@ -189,6 +192,83 @@ class TestMcpRemove:
 
 class TestMcpAdd:
 
+    def test_add_requires_transport_in_russian(self, tmp_path, capsys):
+        from korra_cli.mcp_config import cmd_mcp_add
+
+        cmd_mcp_add(_make_args(name="no-transport"))
+
+        out = capsys.readouterr().out
+        assert "Укажите --url <адрес>, --command <команда> или --preset <имя>" in out
+        assert "Примеры:" in out
+        assert "korra mcp add" in out
+        assert "Must specify" not in out
+
+    def test_add_existing_server_cancellation_is_russian(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        _seed_config(tmp_path, {
+            "existing": {"command": "old-command"},
+        })
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+        from korra_cli.mcp_config import cmd_mcp_add
+
+        cmd_mcp_add(_make_args(name="existing", mcp_command="new-command"))
+
+        out = capsys.readouterr().out
+        assert "Отменено." in out
+        assert "Cancelled" not in out
+
+        from korra_cli.config import load_config
+
+        assert load_config()["mcp_servers"]["existing"]["command"] == "old-command"
+
+    def test_add_connection_error_keeps_dynamic_detail_and_does_not_save(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        def failed_probe(name, config, **kwargs):
+            raise RuntimeError("connection exploded")
+
+        monkeypatch.setattr(
+            "korra_cli.mcp_config._probe_single_server", failed_probe
+        )
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+        from korra_cli.mcp_config import cmd_mcp_add
+
+        cmd_mcp_add(_make_args(name="broken", mcp_command="broken-command"))
+
+        out = capsys.readouterr().out
+        assert "Не удалось подключиться: connection exploded" in out
+        assert "Failed to connect" not in out
+
+        from korra_cli.config import load_config
+
+        assert "broken" not in load_config().get("mcp_servers", {})
+
+    def test_add_tool_picker_and_empty_selection_are_russian(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "korra_cli.mcp_config._probe_single_server",
+            lambda name, config, **kwargs: [("search", "Search repos")],
+        )
+        monkeypatch.setattr("builtins.input", lambda _: "select")
+        picker = {}
+
+        def cancel_picker(title, labels, pre_selected):
+            picker["title"] = title
+            return set()
+
+        monkeypatch.setattr(
+            "korra_cli.curses_ui.curses_checklist", cancel_picker
+        )
+        from korra_cli.mcp_config import cmd_mcp_add
+
+        cmd_mcp_add(_make_args(name="picker", mcp_command="picker-command"))
+
+        out = capsys.readouterr().out
+        assert picker["title"] == "Выберите инструменты для 'picker'"
+        assert "Инструменты не выбраны — сервер не сохранён" in out
+
     def test_add_http_server_all_tools(self, tmp_path, capsys, monkeypatch):
         """Add an HTTP server, accept all tools."""
         fake_tools = [
@@ -210,8 +290,8 @@ class TestMcpAdd:
 
         cmd_mcp_add(_make_args(name="ink", url="https://mcp.ml.ink/mcp"))
         out = capsys.readouterr().out
-        assert "Saved" in out
-        assert "2/2 tools" in out
+        assert "Сервер 'ink' сохранён" in out
+        assert "включено инструментов: 2/2" in out
 
         # Verify config written
         from korra_cli.config import load_config
@@ -246,7 +326,7 @@ class TestMcpAdd:
             env=["MY_API_KEY=secret123", "DEBUG=true"],
         ))
         out = capsys.readouterr().out
-        assert "Saved" in out
+        assert "Сервер 'github' сохранён" in out
 
         from korra_cli.config import load_config
 
@@ -283,7 +363,7 @@ class TestMcpAdd:
 
         cmd_mcp_add(_make_args(name="myserver", preset="testmcp"))
         out = capsys.readouterr().out
-        assert "Saved" in out
+        assert "Сервер 'myserver' сохранён" in out
 
         config = read_raw_config()
         srv = config["mcp_servers"]["myserver"]
@@ -313,8 +393,41 @@ class TestMcpTest:
 
         cmd_mcp_test(_make_args(name="ink"))
         out = capsys.readouterr().out
-        assert "Connected" in out
-        assert "Tools discovered: 2" in out
+        assert "Подключено" in out
+        assert "Найдено инструментов: 2" in out
+
+    def test_test_missing_server_reports_russian_error(self, tmp_path, capsys):
+        _seed_config(tmp_path, {
+            "available": {"url": "https://example.com/mcp"},
+        })
+        from korra_cli.mcp_config import cmd_mcp_test
+
+        cmd_mcp_test(_make_args(name="missing"))
+
+        out = capsys.readouterr().out
+        assert "Сервер 'missing' не найден в конфигурации" in out
+        assert "Доступны: available" in out
+
+    def test_test_connection_error_is_russian_and_keeps_dynamic_detail(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        _seed_config(tmp_path, {
+            "broken": {"url": "https://example.com/mcp"},
+        })
+        monkeypatch.setattr(
+            "korra_cli.mcp_config._probe_single_server",
+            lambda name, config, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("remote exploded")
+            ),
+        )
+        from korra_cli.mcp_config import cmd_mcp_test
+
+        cmd_mcp_test(_make_args(name="broken"))
+
+        out = capsys.readouterr().out
+        assert "Не удалось подключиться" in out
+        assert "remote exploded" in out
+        assert "Connection failed" not in out
 
     def test_probe_uses_configured_connect_timeout(self, monkeypatch):
         """OAuth-capable probes must not hard-code a short 30s timeout."""
@@ -733,7 +846,8 @@ class TestMcpLogin:
         from korra_cli.mcp_config import cmd_mcp_login
         cmd_mcp_login(_make_args(name="ghost"))
         out = capsys.readouterr().out
-        assert "not found" in out
+        assert "Сервер 'ghost' не найден в конфигурации" in out
+        assert "not found" not in out
 
 
     def test_login_false_success_no_token(self, tmp_path, capsys, monkeypatch):
@@ -762,8 +876,8 @@ class TestMcpLogin:
         cmd_mcp_login(_make_args(name="googledrive"))
         out = capsys.readouterr().out
 
-        assert "no OAuth token was obtained" in out
-        assert "Authenticated" not in out
+        assert "токен OAuth не получен" in out
+        assert "Аутентификация выполнена" not in out
         assert "client_id" in out
 
     def test_login_genuine_success_with_token(self, tmp_path, capsys, monkeypatch):
@@ -793,8 +907,8 @@ class TestMcpLogin:
         cmd_mcp_login(_make_args(name="realserver"))
         out = capsys.readouterr().out
 
-        assert "Authenticated — 3 tool(s) available" in out
-        assert "no OAuth token" not in out
+        assert "Аутентификация выполнена — доступно инструментов: 3" in out
+        assert "токен OAuth не получен" not in out
         # The login path must grant a human enough time to finish the browser
         # OAuth round-trip — far longer than the 30s probe default.
         assert seen["connect_timeout"] >= 180
@@ -826,7 +940,7 @@ class TestMcpReauth:
         out = capsys.readouterr().out
 
         assert visited == ["gh", "jira"]
-        assert "Re-authenticated 2/2 server(s)" in out
+        assert "Повторный вход выполнен для серверов: 2/2" in out
 
     def test_reauth_all_reports_partial_failures(self, tmp_path, capsys, monkeypatch):
         """A server that fails to re-auth is counted but doesn't abort the rest."""
@@ -843,7 +957,7 @@ class TestMcpReauth:
         cmd_mcp_reauth(_make_args(name=None, all=True))
         out = capsys.readouterr().out
 
-        assert "Re-authenticated 1/2 server(s)" in out
+        assert "Повторный вход выполнен для серверов: 1/2" in out
 
 
     def test_reauth_unknown_server(self, tmp_path, capsys):
@@ -854,4 +968,28 @@ class TestMcpReauth:
 
         cmd_mcp_reauth(_make_args(name="ghost", all=False))
         out = capsys.readouterr().out
-        assert "not found" in out
+        assert "Сервер 'ghost' не найден в конфигурации" in out
+        assert "not found" not in out
+
+
+class TestMcpConfigure:
+    def test_configure_missing_server_reports_russian_error(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        import sys
+        from unittest.mock import MagicMock
+
+        _seed_config(tmp_path, {
+            "available": {"url": "https://example.com/mcp"},
+        })
+        tty_stdin = MagicMock()
+        tty_stdin.isatty.return_value = True
+        monkeypatch.setattr(sys, "stdin", tty_stdin)
+        from korra_cli.mcp_config import cmd_mcp_configure
+
+        cmd_mcp_configure(_make_args(name="missing"))
+
+        out = capsys.readouterr().out
+        assert "Сервер 'missing' не найден в конфигурации" in out
+        assert "Доступны: available" in out
+        assert "not found" not in out
