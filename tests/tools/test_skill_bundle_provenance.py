@@ -353,7 +353,7 @@ def test_real_temp_repo_and_home_install_e2e(served_repo, monkeypatch, tmp_path)
     entry = json.loads((home / "skills" / ".hub" / "lock.json").read_text())["installed"]["demo-bundle"]
     assert entry["scan_provenance"]["source_url"] == url
     assert entry["scan_provenance"]["fresh"] is True
-    assert "Scan provenance: fresh" in sink.getvalue()
+    assert "Источник проверки: fresh" in sink.getvalue()
 
 
 def _make_skills_redirect(link: Path, target: Path) -> bool:
@@ -416,7 +416,7 @@ def test_install_with_junctioned_skills_dir(served_repo, monkeypatch, tmp_path):
     assert entry["content_hash"].startswith("sha256:")
     # The post-install "Installed:" line (relative_to on the display path)
     # renders instead of raising.
-    assert "Installed:" in sink.getvalue()
+    assert "Установлено:" in sink.getvalue()
 
 
 

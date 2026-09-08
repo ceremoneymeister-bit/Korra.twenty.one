@@ -290,4 +290,4 @@ class TestInstallPathHelper:
                         return_value=report):
             _print_tier1_advisory(tmp_path, console)
         printed = " ".join(str(c) for c in console.print.call_args_list)
-        assert "credentials" in printed.lower()
+        assert "ключи или пароли" in printed.lower()

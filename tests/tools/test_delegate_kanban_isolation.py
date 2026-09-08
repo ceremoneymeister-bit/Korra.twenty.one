@@ -204,7 +204,7 @@ def test_delegate_child_kanban_cli_cannot_delete_parent_board(
         env.cleanup()
 
     assert result["returncode"] == 1
-    assert "delegate_task child contexts cannot mutate Kanban tasks" in result["output"]
+    assert "помощники delegate_task не могут менять задачи доски через CLI" in result["output"]
     assert kb.board_exists("victim")
     assert kb.board_dir("victim").is_dir()
 

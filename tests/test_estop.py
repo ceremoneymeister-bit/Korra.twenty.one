@@ -235,7 +235,7 @@ def test_cli_pause_engages_with_reason(hermes_home, capsys):
     assert rc == 0
     assert estop.is_engaged() is True
     assert estop.get_state()["reason"] == "ops incident"
-    assert "paused" in capsys.readouterr().out.lower()
+    assert "приостановлена" in capsys.readouterr().out.lower()
 
 
 def test_cli_pause_idempotent(hermes_home, capsys):
@@ -253,7 +253,7 @@ def test_cli_resume_disengages(hermes_home, capsys):
     rc = cmd_resume(argparse.Namespace())
     assert rc == 0
     assert estop.is_engaged() is False
-    assert "resumed" in capsys.readouterr().out.lower()
+    assert "продолжила работу" in capsys.readouterr().out.lower()
 
 
 def test_cli_resume_when_not_paused(hermes_home, capsys):
@@ -261,7 +261,7 @@ def test_cli_resume_when_not_paused(hermes_home, capsys):
 
     rc = cmd_resume(argparse.Namespace())
     assert rc == 0
-    assert "not paused" in capsys.readouterr().out.lower()
+    assert "не приостановлена" in capsys.readouterr().out.lower()
 
 
 def test_builtin_subcommands_include_pause_resume():
@@ -281,7 +281,7 @@ def test_status_line_when_paused(hermes_home):
     estop.engage(reason="ops")
     line = _estop_status_line()
     assert line is not None
-    assert "paused" in line.lower()
+    assert "пауза" in line.lower()
     assert "ops" in line
     estop.disengage()
     assert _estop_status_line() is None
@@ -352,20 +352,20 @@ async def test_gateway_pause_command_engages_and_resumes(hermes_home):
     runner = object.__new__(GatewayRunner)
 
     reply = await runner._handle_pause_command(_FakePauseEvent("deploy window"))
-    assert "paused" in reply.lower()
+    assert "пауза включена" in reply.lower()
     assert estop.is_engaged() is True
     assert estop.get_state()["reason"] == "deploy window"
 
     # Re-issuing without args reports already-paused instead of clobbering.
     reply = await runner._handle_pause_command(_FakePauseEvent(""))
-    assert "already paused" in reply.lower()
+    assert "уже на паузе" in reply.lower()
 
     reply = await runner._handle_pause_command(_FakePauseEvent("off"))
-    assert "resumed" in reply.lower()
+    assert "работа возобновлена" in reply.lower()
     assert estop.is_engaged() is False
 
     reply = await runner._handle_pause_command(_FakePauseEvent("off"))
-    assert "wasn't paused" in reply.lower()
+    assert "не была на паузе" in reply.lower()
 
 
 def test_pause_command_registered_for_gateway():

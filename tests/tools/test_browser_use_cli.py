@@ -1296,15 +1296,15 @@ class TestLightpandaStatusLine:
 
     def test_status_reports_lightpanda_in_use(self, monkeypatch):
         out = self._status(monkeypatch, used=True, reason="Browser Use mode: Hermes spawns `lightpanda serve` per session")
-        assert "Engine: Lightpanda" in out
+        assert "Движок: Lightpanda" in out
         assert "spawns `lightpanda serve`" in out
-        assert "Binary: /opt/lightpanda" in out
+        assert "Программа: /opt/lightpanda" in out
 
     def test_status_reports_missing_binary(self, monkeypatch):
         out = self._status(monkeypatch, used=True, reason="x", binary=None)
-        assert "lightpanda binary not found" in out
+        assert "Программа lightpanda не найдена" in out
 
     def test_status_reports_shadowed_engine(self, monkeypatch):
         out = self._status(monkeypatch, used=False, reason="cloud provider Browserbase is selected")
-        assert "NOT in use" in out
+        assert "не используется" in out
         assert "Browserbase" in out

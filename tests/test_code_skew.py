@@ -66,7 +66,7 @@ class TestModelSwitchSkewGuard:
         assert msg is not None
         assert "abc1234567" in msg
         assert "def4567890" in msg
-        assert "hermes gateway restart" in msg
+        assert "korra gateway restart" in msg
 
 
 class TestDashboardCodeSkewGuard:

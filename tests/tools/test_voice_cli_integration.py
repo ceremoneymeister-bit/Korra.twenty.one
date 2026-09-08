@@ -106,7 +106,7 @@ class TestHandleVoiceCommandReal:
         cli._enable_voice_mode.assert_not_called()
         cli._disable_voice_mode.assert_not_called()
         # Should print usage via _cprint
-        assert any("Unknown" in str(c) or "unknown" in str(c)
+        assert any("Неизвестная" in str(c)
                     for c in mock_cp.call_args_list)
 
 
@@ -370,7 +370,7 @@ class TestVoiceStopAndTranscribeReal:
             cli._voice_stop_and_transcribe()
 
         messages = [call.args[0] for call in mock_print.call_args_list]
-        assert any("Transcribing..." in message for message in messages)
+        assert any("Распознаю речь..." in message for message in messages)
         assert all("Hugging Face" not in message for message in messages)
         mock_transcribe.assert_called_once_with("/tmp/test.wav", model="whisper-1")
 
