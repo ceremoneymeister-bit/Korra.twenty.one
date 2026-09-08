@@ -59,65 +59,63 @@ def _validate_phone_number_id(value: str) -> tuple[bool, Optional[str]]:
     not exist."
     """
     if not value:
-        return False, "Phone Number ID is required"
+        return False, "Укажите Phone Number ID"
     s = value.strip()
     if not s.isdigit():
-        return False, "Phone Number ID must be numeric (no '+', spaces, or dashes)"
+        return False, "Phone Number ID должен состоять из цифр без '+', пробелов и дефисов"
     # Real phone numbers are 10-11 digits (US/CA country code + area code
     # + 7 digits). Meta's internal IDs are 15-17 digits. If we see a
     # phone-number-sized value, the user almost certainly pasted the
     # phone number by mistake.
     if 10 <= len(s) <= 12:
         return False, (
-            "That looks like a phone number — but this field needs the "
-            "Phone Number ID (Meta's internal ID, 15-17 digits, e.g. "
-            "'7794189252778687'). Look just BELOW the 'From' dropdown in "
-            "API Setup → it's labelled 'Phone number ID'."
+            "Это похоже на номер телефона, но здесь нужен внутренний Phone Number ID Meta "
+            "из 15–17 цифр, например '7794189252778687'. Он указан под полем 'From' "
+            "на странице API Setup в строке 'Phone number ID'."
         )
     if len(s) < 13:
-        return False, "Phone Number ID looks too short (expected 13-18 digits)"
+        return False, "Phone Number ID слишком короткий: ожидается 13–18 цифр"
     if len(s) > 20:
-        return False, "Phone Number ID looks too long (expected 13-18 digits)"
+        return False, "Phone Number ID слишком длинный: ожидается 13–18 цифр"
     return True, None
 
 
 def _validate_waba_id(value: str) -> tuple[bool, Optional[str]]:
     """WABA ID is numeric, similar length range as Phone Number ID."""
     if not value:
-        return False, "WABA ID is required"
+        return False, "Укажите WABA ID"
     s = value.strip()
     if not s.isdigit():
-        return False, "WABA ID must be numeric"
+        return False, "WABA ID должен состоять из цифр"
     if len(s) < 10 or len(s) > 25:
-        return False, "WABA ID looks wrong (expected 10-25 digits)"
+        return False, "WABA ID имеет неверную длину: ожидается 10–25 цифр"
     return True, None
 
 
 def _validate_app_id(value: str) -> tuple[bool, Optional[str]]:
     """Meta App ID is numeric, typically 15-16 digits."""
     if not value:
-        return False, "App ID is required"
+        return False, "Укажите App ID"
     s = value.strip()
     if not s.isdigit():
-        return False, "App ID must be numeric"
+        return False, "App ID должен состоять из цифр"
     if len(s) < 13 or len(s) > 20:
-        return False, "App ID looks wrong (expected 15-16 digits)"
+        return False, "App ID имеет неверную длину: обычно это 15–16 цифр"
     return True, None
 
 
 def _validate_app_secret(value: str) -> tuple[bool, Optional[str]]:
     """App Secret is a 32-character lowercase hex string."""
     if not value:
-        return False, "App Secret is required"
+        return False, "Укажите App Secret"
     s = value.strip()
     if not re.fullmatch(r"[0-9a-f]+", s.lower()):
         return False, (
-            "App Secret should be a hex string (only digits 0-9 and "
-            "letters a-f). Make sure you copied the 'App secret' from "
-            "Settings → Basic, not some other token."
+            "App Secret должен быть шестнадцатеричной строкой из цифр 0–9 и букв a–f. "
+            "Скопируйте поле 'App secret' из Settings → Basic, а не другой токен."
         )
     if len(s) != 32:
-        return False, f"App Secret should be exactly 32 hex characters (got {len(s)})"
+        return False, f"App Secret должен содержать ровно 32 шестнадцатеричных символа; получено {len(s)}"
     return True, None
 
 
@@ -128,33 +126,32 @@ def _validate_access_token(value: str) -> tuple[bool, Optional[str]]:
     prefix. We don't try to distinguish them.
     """
     if not value:
-        return False, "Access token is required"
+        return False, "Укажите токен доступа"
     s = value.strip()
     if not s.startswith("EAA"):
         # Diagnose common paste mistakes
         if s.startswith("sk-"):
             return False, (
-                "That's an OpenAI key (starts with 'sk-'), not a Meta "
-                "WhatsApp access token. Meta tokens start with 'EAA'."
+                "Это ключ OpenAI с префиксом 'sk-', а нужен токен WhatsApp Meta. "
+                "Токены Meta начинаются с 'EAA'."
             )
         if s.startswith("xoxb-") or s.startswith("xoxp-"):
             return False, (
-                "That's a Slack token, not a Meta WhatsApp access token. "
-                "Meta tokens start with 'EAA'."
+                "Это токен Slack, а нужен токен WhatsApp Meta. "
+                "Токены Meta начинаются с 'EAA'."
             )
         if s.startswith("ghp_") or s.startswith("gho_"):
             return False, (
-                "That's a GitHub token, not a Meta WhatsApp access "
-                "token. Meta tokens start with 'EAA'."
+                "Это токен GitHub, а нужен токен WhatsApp Meta. "
+                "Токены Meta начинаются с 'EAA'."
             )
         return False, (
-            "Meta WhatsApp access tokens start with 'EAA'. Check that "
-            "you're copying from the right place (API Setup → 'Generate "
-            "access token', or Business Settings → System Users → "
-            "'Generate token' for a permanent one)."
+            "Токены WhatsApp Meta начинаются с 'EAA'. Скопируйте токен из API Setup → "
+            "'Generate access token' или постоянный токен из Business Settings → "
+            "System Users → 'Generate token'."
         )
     if len(s) < 100:
-        return False, f"Access token looks too short ({len(s)} chars, expected 100+)"
+        return False, f"Токен доступа слишком короткий: {len(s)} символов, ожидается не менее 100"
     return True, None
 
 
@@ -179,7 +176,7 @@ def _prompt(message: str, default: Optional[str] = None, secret: bool = False) -
         if secret and sys.stdin.isatty():
             import getpass
 
-            raw = getpass.getpass(f"{message}{suffix} (input hidden): ").strip()
+            raw = getpass.getpass(f"{message}{suffix} (ввод скрыт): ").strip()
         else:
             raw = line_input(f"{message}{suffix}: ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -217,7 +214,7 @@ def _prompt_validated(
         print(f"    ✗ {reason}")
         if attempts >= 3:
             try:
-                cont = input("    Try again, or press Enter to skip: ").strip()
+                cont = input("    Попробуйте ещё раз или нажмите Enter, чтобы пропустить: ").strip()
             except (EOFError, KeyboardInterrupt):
                 return None
             if not cont:
@@ -239,36 +236,36 @@ def run_whatsapp_cloud_setup() -> int:
     from korra_cli.config import get_env_value, save_env_value
 
     print()
-    print("⚕ WhatsApp Business Cloud API Setup")
+    print("⚕ Настройка WhatsApp Business Cloud API")
     print("=" * 50)
     print()
-    print("This wizard configures Korra to talk to WhatsApp via Meta's")
-    print("official Cloud API. It's the production-grade path:")
+    print("Этот мастер подключит Korra к официальному Cloud API Meta")
+    print("для надёжной работы с WhatsApp:")
     print()
-    print("  • No QR codes, no Node.js bridge subprocess")
-    print("  • Stable connection — no account-ban risk")
-    print("  • Business account required (not personal WhatsApp)")
-    print("  • Public webhook URL required (Cloudflare Tunnel, ngrok,")
-    print("    or your own reverse proxy with TLS)")
+    print("  • без QR-кодов и отдельного процесса Node.js")
+    print("  • стабильное подключение без риска блокировки аккаунта")
+    print("  • нужен бизнес-аккаунт, личный WhatsApp не подходит")
+    print("  • нужен публичный адрес вебхука: Cloudflare Tunnel, ngrok")
+    print("    или собственный обратный прокси с TLS")
     print()
-    print("If you don't have a Meta app set up yet, follow these steps")
-    print("FIRST, then come back and re-run this wizard:")
+    print("Если приложение Meta ещё не настроено, сначала выполните эти шаги,")
+    print("а затем снова запустите мастер:")
     print()
     print("  1. https://developers.facebook.com/apps → Create App")
     print("     → 'Connect with customers through WhatsApp'")
     print("  2. App Dashboard → WhatsApp → API Setup")
-    print("  3. Click 'Generate access token' (temp 24h token is fine to")
-    print("     start; switch to a System User permanent token later)")
+    print("  3. Нажмите 'Generate access token'. Для начала подойдёт временный")
+    print("     токен на 24 часа; позже замените его постоянным System User token.")
     print()
     try:
-        proceed = input("Press Enter to continue, or Ctrl+C to abort... ").strip()
+        proceed = input("Нажмите Enter для продолжения или Ctrl+C для отмены… ").strip()
     except (EOFError, KeyboardInterrupt):
-        print("\nSetup cancelled.")
+        print("\nНастройка отменена.")
         return 1
 
     print()
     print("─" * 50)
-    print("STEP 1 — Phone Number ID")
+    print("ШАГ 1 — Phone Number ID")
     print("─" * 50)
     current_phone_id = get_env_value("WHATSAPP_CLOUD_PHONE_NUMBER_ID") or None
     phone_id = _prompt_validated(
@@ -276,69 +273,65 @@ def run_whatsapp_cloud_setup() -> int:
         _validate_phone_number_id,
         current=current_phone_id,
         help_text=(
-            "Found in: App Dashboard → WhatsApp → API Setup, in the\n"
-            "'Send and receive messages' section.\n"
-            "Look BELOW the 'From' dropdown — there's a 'Phone number ID'\n"
-            "line with the value (15-17 digits, e.g. '7794189252778687').\n"
-            "It is NOT the phone number itself (+1 555-...). That's the\n"
-            "single most common setup mistake."
+            "Откройте App Dashboard → WhatsApp → API Setup →\n"
+            "'Send and receive messages'. Под списком 'From' найдите строку\n"
+            "'Phone number ID' со значением из 15–17 цифр, например\n"
+            "'7794189252778687'. Это не сам номер телефона (+1 555-…)."
         ),
     )
     if not phone_id:
         if current_phone_id:
             phone_id = current_phone_id
-            print(f"  ✓ Keeping existing: {phone_id}")
+            print(f"  ✓ Сохранено прежнее значение: {phone_id}")
         else:
-            print("\n✗ Phone Number ID is required. Aborting.")
+            print("\n✗ Phone Number ID обязателен. Настройка прервана.")
             return 1
     else:
         save_env_value("WHATSAPP_CLOUD_PHONE_NUMBER_ID", phone_id)
-        print(f"  ✓ Saved: {phone_id}")
+        print(f"  ✓ Сохранено: {phone_id}")
     print()
 
     print("─" * 50)
-    print("STEP 2 — Access Token")
+    print("ШАГ 2 — Токен доступа")
     print("─" * 50)
     current_token = get_env_value("WHATSAPP_CLOUD_ACCESS_TOKEN") or None
     current_display = (current_token[:15] + "...") if current_token else None
     token = _prompt_validated(
-        "Access Token",
+        "Токен доступа",
         _validate_access_token,
         current=current_display,
         secret=True,
         help_text=(
-            "Two options for getting one:\n\n"
-            "  (a) TEMP — App Dashboard → WhatsApp → API Setup →\n"
-            "      'Generate access token' button. Lasts 24 hours.\n"
-            "      Fine for testing today; you'll have to regenerate\n"
-            "      tomorrow.\n\n"
-            "  (b) PERMANENT (production) — System User token. One-time\n"
-            "      setup, never expires:\n"
+            "Получить токен можно двумя способами:\n\n"
+            "  (а) ВРЕМЕННЫЙ — App Dashboard → WhatsApp → API Setup →\n"
+            "      'Generate access token'. Действует 24 часа и подходит\n"
+            "      для первой проверки.\n\n"
+            "  (б) ПОСТОЯННЫЙ — токен System User:\n"
             "      • business.facebook.com → Settings → System users →\n"
             "        Add → Admin role\n"
-            "      • Assign Assets → your app (Manage app), your\n"
-            "        WhatsApp account (Manage WABAs)\n"
+            "      • Assign Assets → ваше приложение (Manage app) и\n"
+            "        аккаунт WhatsApp (Manage WABAs)\n"
             "      • Generate token → expiration: Never → permissions:\n"
             "        business_management, whatsapp_business_messaging,\n"
             "        whatsapp_business_management\n\n"
-            "Tokens start with 'EAA'."
+            "Токены начинаются с 'EAA'."
         ),
     )
     # If they had a current token and just hit Enter, keep it.
     if not token:
         if current_token:
             token = current_token
-            print("  ✓ Keeping existing token")
+            print("  ✓ Сохранён прежний токен")
         else:
-            print("\n✗ Access Token is required. Aborting.")
+            print("\n✗ Токен доступа обязателен. Настройка прервана.")
             return 1
     else:
         save_env_value("WHATSAPP_CLOUD_ACCESS_TOKEN", token)
-        print("  ✓ Saved (token hidden)")
+        print("  ✓ Сохранено; токен скрыт")
     print()
 
     print("─" * 50)
-    print("STEP 3 — App Secret (required for webhook signature verification)")
+    print("ШАГ 3 — App Secret для проверки подписи вебхука")
     print("─" * 50)
     current_secret = get_env_value("WHATSAPP_CLOUD_APP_SECRET") or None
     current_secret_display = (current_secret[:8] + "...") if current_secret else None
@@ -348,105 +341,101 @@ def run_whatsapp_cloud_setup() -> int:
         current=current_secret_display,
         secret=True,
         help_text=(
-            "Found in: App Dashboard → Settings → Basic →\n"
-            "'App secret' field (click 'Show', enter your Facebook password).\n\n"
-            "If 'Show' doesn't appear, you may need Admin role on the app.\n"
-            "It's a 32-character lowercase hex string.\n\n"
-            "Without the App Secret, inbound webhook POSTs are refused\n"
-            "with HTTP 503 (we can't verify they actually came from Meta)."
+            "Откройте App Dashboard → Settings → Basic → поле 'App secret'.\n"
+            "Нажмите 'Show' и введите пароль Facebook. Если кнопки нет,\n"
+            "проверьте, есть ли у вас роль Admin приложения. Значение состоит\n"
+            "из 32 шестнадцатеричных символов. Без App Secret входящие\n"
+            "POST-запросы вебхука будут отклоняться с HTTP 503."
         ),
     )
     if not app_secret:
         if current_secret:
             app_secret = current_secret
-            print("  ✓ Keeping existing App Secret")
+            print("  ✓ Сохранён прежний App Secret")
         else:
-            print("\n⚠ Skipping App Secret — inbound webhooks will be refused")
-            print("   until you set WHATSAPP_CLOUD_APP_SECRET manually.")
+            print("\n⚠ App Secret пропущен: входящие вебхуки будут отклоняться,")
+            print("   пока вы не зададите WHATSAPP_CLOUD_APP_SECRET вручную.")
     else:
         save_env_value("WHATSAPP_CLOUD_APP_SECRET", app_secret)
-        print("  ✓ Saved (secret hidden)")
+        print("  ✓ Сохранено; секрет скрыт")
     print()
 
     print("─" * 50)
-    print("STEP 4 — App ID & WABA ID (optional, for analytics)")
+    print("ШАГ 4 — App ID и WABA ID, необязательно, для аналитики")
     print("─" * 50)
     current_app_id = get_env_value("WHATSAPP_CLOUD_APP_ID") or None
     app_id = _prompt_validated(
-        "App ID (optional, press Enter to skip)",
+        "App ID (необязательно; Enter — пропустить)",
         lambda v: (True, None) if not v else _validate_app_id(v),
         current=current_app_id,
         help_text=(
-            "Found in: App Dashboard → Settings → Basic → 'App ID' at the\n"
-            "top of the page. Numeric, ~15-16 digits.\n"
-            "Not required for messaging — useful only for analytics later."
+            "App ID указан вверху страницы App Dashboard → Settings → Basic.\n"
+            "Обычно это 15–16 цифр. Для сообщений не нужен, но пригодится для аналитики."
         ),
     )
     if app_id:
         save_env_value("WHATSAPP_CLOUD_APP_ID", app_id)
-        print(f"  ✓ Saved: {app_id}")
+        print(f"  ✓ Сохранено: {app_id}")
     elif current_app_id:
-        print(f"  ✓ Keeping existing: {current_app_id}")
+        print(f"  ✓ Сохранено прежнее значение: {current_app_id}")
 
     current_waba_id = get_env_value("WHATSAPP_CLOUD_WABA_ID") or None
     waba_id = _prompt_validated(
-        "WABA ID (optional, press Enter to skip)",
+        "WABA ID (необязательно; Enter — пропустить)",
         lambda v: (True, None) if not v else _validate_waba_id(v),
         current=current_waba_id,
         help_text=(
-            "WhatsApp Business Account ID. Found in: App Dashboard →\n"
-            "WhatsApp → API Setup, near the top — 'WhatsApp Business\n"
-            "Account ID'. Numeric, ~15+ digits.\n"
-            "Not required for messaging — useful for analytics."
+            "WhatsApp Business Account ID указан вверху страницы App Dashboard →\n"
+            "WhatsApp → API Setup в поле 'WhatsApp Business Account ID'.\n"
+            "Это число примерно из 15 цифр. Для сообщений не нужен."
         ),
     )
     if waba_id:
         save_env_value("WHATSAPP_CLOUD_WABA_ID", waba_id)
-        print(f"  ✓ Saved: {waba_id}")
+        print(f"  ✓ Сохранено: {waba_id}")
     elif current_waba_id:
-        print(f"  ✓ Keeping existing: {current_waba_id}")
+        print(f"  ✓ Сохранено прежнее значение: {current_waba_id}")
     print()
 
     print("─" * 50)
-    print("STEP 5 — Verify Token (auto-generated)")
+    print("ШАГ 5 — Проверочный токен, создаётся автоматически")
     print("─" * 50)
     current_verify = get_env_value("WHATSAPP_CLOUD_VERIFY_TOKEN") or None
     if current_verify:
-        print(f"  An existing verify token is already set ({current_verify[:8]}...).")
+        print(f"  Уже задан проверочный токен ({current_verify[:8]}…).")
         try:
-            regen = input("  Generate a new one? [y/N]: ").strip().lower()
+            regen = input("  Создать новый? [д/Н]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             regen = "n"
-        if regen in {"y", "yes"}:
+        if regen in {"y", "yes", "д", "да"}:
             verify_token = secrets.token_urlsafe(32)
             save_env_value("WHATSAPP_CLOUD_VERIFY_TOKEN", verify_token)
-            print(f"  ✓ New verify token: {verify_token}")
+            print(f"  ✓ Новый проверочный токен: {verify_token}")
         else:
             verify_token = current_verify
-            print("  ✓ Keeping existing verify token")
+            print("  ✓ Сохранён прежний проверочный токен")
     else:
         verify_token = secrets.token_urlsafe(32)
         save_env_value("WHATSAPP_CLOUD_VERIFY_TOKEN", verify_token)
-        print(f"  ✓ Generated: {verify_token}")
+        print(f"  ✓ Создан: {verify_token}")
     print()
-    print("  → COPY THIS TOKEN NOW. You'll paste it into Meta's webhook")
-    print("    configuration dialog (next step).")
+    print("  → СКОПИРУЙТЕ ТОКЕН СЕЙЧАС. Он понадобится в настройках")
+    print("    вебхука Meta на следующем шаге.")
     print()
 
     print("─" * 50)
-    print("STEP 6 — Recipient Allowlist")
+    print("ШАГ 6 — Список разрешённых получателей")
     print("─" * 50)
     print()
-    print("  Who is allowed to message the bot? (Comma-separated phone")
-    print("  numbers with country code, no '+' / spaces / dashes. Use '*'")
-    print("  to allow anyone — only safe if you've also configured Meta's")
-    print("  recipient whitelist for app-development mode.)")
+    print("  Кто может писать боту? Укажите через запятую номера с кодом страны")
+    print("  без '+', пробелов и дефисов. '*' разрешает сообщения от всех;")
+    print("  используйте его только со списком получателей Meta в режиме разработки.")
     print()
     current_allow = get_env_value("WHATSAPP_CLOUD_ALLOWED_USERS") or None
     allow_default = current_allow if current_allow else None
     try:
         allowed = line_input(
-            f"  → Allowed users{' [' + allow_default + ']' if allow_default else ''}: "
+            f"  → Разрешённые пользователи{' [' + allow_default + ']' if allow_default else ''}: "
         ).strip() or (allow_default or "")
     except (EOFError, KeyboardInterrupt):
         allowed = ""
@@ -456,87 +445,83 @@ def run_whatsapp_cloud_setup() -> int:
             re.sub(r"[\s\-+]", "", part) for part in allowed.split(",") if part.strip()
         )
         save_env_value("WHATSAPP_CLOUD_ALLOWED_USERS", allowed)
-        print(f"  ✓ Saved: {allowed}")
+        print(f"  ✓ Сохранено: {allowed}")
     else:
-        print("  ⚠ No allowlist — every inbound message will be denied.")
-        print("    Re-run this wizard or set WHATSAPP_CLOUD_ALLOWED_USERS manually.")
+        print("  ⚠ Список пуст: все входящие сообщения будут отклоняться.")
+        print("    Запустите мастер снова или задайте WHATSAPP_CLOUD_ALLOWED_USERS вручную.")
     print()
 
     print("─" * 50)
-    print("SETUP COMPLETE — Next steps")
+    print("НАСТРОЙКА ЗАВЕРШЕНА — следующие шаги")
     print("─" * 50)
     print()
-    print("  Korra needs a public HTTPS URL to receive WhatsApp messages.")
-    print("  The recommended path is Cloudflare Tunnel (free, no port")
-    print("  forwarding, no DNS setup).")
+    print("  Для сообщений WhatsApp Korra нужен публичный HTTPS-адрес.")
+    print("  Рекомендуем Cloudflare Tunnel: бесплатно, без проброса портов")
+    print("  и отдельной настройки DNS.")
     print()
-    print("    1. Install cloudflared (one-time, if you don't have it):")
+    print("    1. Один раз установите cloudflared:")
     print("         Windows:  winget install Cloudflare.cloudflared")
     print("         macOS:    brew install cloudflared")
     print("         Linux:    https://github.com/cloudflare/cloudflared/releases")
     print()
-    print("       Alternatives: ngrok, or your own domain + reverse proxy")
-    print("       with TLS.")
+    print("       Альтернативы: ngrok или собственный домен с обратным прокси и TLS.")
     print()
-    print("    2. Start the tunnel in a separate terminal:")
+    print("    2. Запустите туннель в отдельном терминале:")
     print("         cloudflared tunnel --url http://localhost:8090")
-    print("       Note the printed https://<random>.trycloudflare.com URL.")
+    print("       Запишите выданный адрес https://<случайное-имя>.trycloudflare.com.")
     print()
-    print("    3. Start the Korra gateway in another terminal:")
-    print("         hermes gateway")
+    print("    3. В другом терминале запустите шлюз Korra:")
+    print("         korra gateway")
     print()
-    print("    4. Verify your local config is reachable. From a third")
-    print("       terminal, with the tunnel URL substituted:")
+    print("    4. В третьем терминале проверьте доступность, подставив адрес туннеля:")
     print()
     print("         curl 'https://YOUR-TUNNEL.trycloudflare.com/whatsapp/webhook?\\")
     print(f"               hub.mode=subscribe&hub.verify_token={verify_token}&\\")
     print("               hub.challenge=hello'")
     print()
-    print("       Expected: HTTP 200 with body 'hello'.")
-    print("       Also try: curl https://YOUR-TUNNEL.trycloudflare.com/health")
-    print("       (should return JSON with verify_token_configured: true).")
+    print("       Ожидается HTTP 200 с текстом 'hello'.")
+    print("       Также выполните: curl https://YOUR-TUNNEL.trycloudflare.com/health")
+    print("       В JSON должно быть verify_token_configured: true.")
     print()
-    print("    5. Configure Meta to point at your tunnel:")
+    print("    5. Укажите туннель в Meta:")
     print("         App Dashboard → WhatsApp → Configuration → Edit webhook")
     print("         Callback URL: <tunnel-url>/whatsapp/webhook")
     print(f"         Verify Token: {verify_token}")
-    print("         → Click 'Verify and save'")
-    print("         → Then 'Manage' webhook fields → subscribe to 'messages'")
+    print("         → нажмите 'Verify and save'")
+    print("         → затем 'Manage' → подпишитесь на поле 'messages'")
     print()
-    print("    6. Add your phone to Meta's recipient list:")
+    print("    6. Добавьте свой телефон в список получателей Meta:")
     print("         App Dashboard → WhatsApp → API Setup → 'To' →")
     print("         'Manage phone number list'")
     print()
-    print("    7. DM the bot's test number from your phone.")
+    print("    7. Отправьте личное сообщение на тестовый номер бота.")
     print()
     print("─" * 50)
-    print("Optional: polish your bot's WhatsApp profile")
+    print("Необязательно: оформите профиль бота WhatsApp")
     print("─" * 50)
     print()
-    print("  WhatsApp shows a display name and profile picture for your bot")
-    print("  in every chat header and contact list. These are set in Meta's")
-    print("  Business Manager, not via this wizard — but here's where to do")
-    print("  it once you're up and running:")
+    print("  Имя и фото бота видны в заголовках чатов и списке контактов.")
+    print("  Они настраиваются в Meta Business Manager, а не в этом мастере:")
     print()
     effective_waba = waba_id or current_waba_id
     if effective_waba:
-        print("    • Display name + profile picture:")
+        print("    • Имя и фото профиля:")
         print("        https://business.facebook.com/wa/manage/phone-numbers/"
               f"?waba_id={effective_waba}")
     else:
-        print("    • Display name + profile picture:")
+        print("    • Имя и фото профиля:")
         print("        https://business.facebook.com/wa/manage/phone-numbers/")
-        print("        (select your WhatsApp Business Account on that page)")
-    print("        Display-name changes go through a ~24-48h Meta review.")
+        print("        (выберите на странице свой WhatsApp Business Account)")
+    print("        Изменения имени проходят проверку Meta примерно 24–48 часов.")
     print()
-    print("    • About, description, website, hours, business category:")
-    print("        Same page → click your phone number → 'Edit profile'.")
+    print("    • Сведения, описание, сайт, часы работы и категория:")
+    print("        на этой же странице нажмите номер телефона → 'Edit profile'.")
     print()
-    print("    • Verified badge (the green check):")
-    print("        Requires Meta's business verification process —")
-    print("        Business Manager → Security Center → Start Verification.")
+    print("    • Зелёная отметка подтверждённого бизнеса:")
+    print("        пройдите проверку Meta в Business Manager → Security Center →")
+    print("        Start Verification.")
     print()
-    print("  Docs: https://hermes-agent.nousresearch.com/docs/user-guide/")
+    print("  Документация: https://hermes-agent.nousresearch.com/docs/user-guide/")
     print("        messaging/whatsapp-cloud")
     print()
     return 0

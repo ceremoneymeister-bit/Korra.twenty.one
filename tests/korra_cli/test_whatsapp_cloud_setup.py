@@ -45,7 +45,7 @@ class TestPhoneNumberIdValidator:
         """The #1 setup trap — pasting the phone number instead of the ID."""
         ok, reason = _validate_phone_number_id("15556422442")
         assert not ok
-        assert "phone number" in reason.lower()
+        assert "номер телефона" in reason.lower()
         assert "Phone number ID" in reason  # tells them where to look
 
 
@@ -54,7 +54,7 @@ class TestAccessTokenValidator:
     def test_rejects_empty(self):
         ok, reason = _validate_access_token("")
         assert not ok
-        assert "required" in reason.lower()
+        assert "укажите" in reason.lower()
 
 
     def test_rejects_github_token_with_helpful_message(self):
@@ -74,7 +74,7 @@ class TestAppSecretValidator:
     def test_rejects_non_hex(self):
         ok, reason = _validate_app_secret("zzzz56789abcdef0123456789abcdezz")
         assert not ok
-        assert "hex" in reason.lower()
+        assert "шестнадцатеричной" in reason.lower()
 
 
 
@@ -135,7 +135,7 @@ class TestWizardFlow:
             rc = run_whatsapp_cloud_setup()
         assert rc == 0
         out = buf.getvalue()
-        assert "SETUP COMPLETE" in out
+        assert "НАСТРОЙКА ЗАВЕРШЕНА" in out
         # Required fields written
         assert _env_value(isolated_home, "WHATSAPP_CLOUD_PHONE_NUMBER_ID") == "7794189252778687"
         assert _env_value(isolated_home, "WHATSAPP_CLOUD_ACCESS_TOKEN").startswith("EAA")
@@ -209,4 +209,4 @@ class TestProfilePolishGuidance:
         # Deep-linked URL with the user's WABA pre-selected
         assert f"waba_id={waba}" in out
         # Without WABA, we tell the user they'll need to pick their account
-        assert "select your WhatsApp Business Account" not in out
+        assert "выберите на странице свой WhatsApp Business Account" not in out
