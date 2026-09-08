@@ -4225,14 +4225,14 @@ class SlackAdapter(BasePlatformAdapter):
                     "type": "feedback_buttons",
                     "action_id": "hermes_feedback",
                     "positive_button": {
-                        "text": {"type": "plain_text", "text": "Good Response"},
+                        "text": {"type": "plain_text", "text": 'Хороший ответ'},
                         "accessibility_label": (
                             "Submit positive feedback on this response"
                         ),
                         "value": "positive",
                     },
                     "negative_button": {
-                        "text": {"type": "plain_text", "text": "Bad Response"},
+                        "text": {"type": "plain_text", "text": 'Плохой ответ'},
                         "accessibility_label": (
                             "Submit negative feedback on this response"
                         ),
@@ -7159,7 +7159,7 @@ class SlackAdapter(BasePlatformAdapter):
         chat_id: str,
         command: str,
         session_key: str,
-        description: str = "dangerous command",
+        description: str = 'опасная команда',
         metadata: Optional[Dict[str, Any]] = None,
         allow_permanent: bool = True,
         allow_session: bool = True,
@@ -7186,17 +7186,17 @@ class SlackAdapter(BasePlatformAdapter):
             # ``command``, so budget the preview against the fixed parts
             # instead of a flat truncation that overflows once the header +
             # reason are added.
-            header = ":warning: *Command Approval Required*\n"
+            header = ':warning: *Нужно разрешение на команду*\n'
             if smart_denied:
-                header += "*Smart DENY:* owner override applies to this one operation only.\n"
-            reason = f"Reason: {description[:500]}"
+                header += '*Автопроверка запретила:* ваше разрешение действует только на эту операцию.\n'
+            reason = f"""Причина: {description[:500]}"""
             budget = 3000 - len(header) - len(reason) - len("``````\n") - len("...")
             cmd_preview = command[:budget] + "..." if len(command) > budget else command
 
             actions = [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Allow Once"},
+                    "text": {"type": "plain_text", "text": 'Разрешить один раз'},
                     "style": "primary",
                     "action_id": "hermes_approve_once",
                     "value": session_key,
@@ -7205,20 +7205,20 @@ class SlackAdapter(BasePlatformAdapter):
             if not smart_denied and allow_session:
                 actions.append({
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Allow Session"},
+                    "text": {"type": "plain_text", "text": 'Разрешить на сеанс'},
                     "action_id": "hermes_approve_session",
                     "value": session_key,
                 })
                 if allow_permanent:
                     actions.append({
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "Always Allow"},
+                        "text": {"type": "plain_text", "text": 'Разрешать всегда'},
                         "action_id": "hermes_approve_always",
                         "value": session_key,
                     })
             actions.append({
                 "type": "button",
-                "text": {"type": "plain_text", "text": "Deny"},
+                "text": {"type": "plain_text", "text": 'Запретить'},
                 "style": "danger",
                 "action_id": "hermes_deny",
                 "value": session_key,
@@ -7236,7 +7236,7 @@ class SlackAdapter(BasePlatformAdapter):
 
             kwargs: Dict[str, Any] = {
                 "channel": chat_id,
-                "text": f"⚠️ Command approval required: {cmd_preview[:100]}",
+                "text": f"""⚠️ Нужно разрешение на команду: {cmd_preview[:100]}""",
                 "blocks": sanitize_blocks(blocks),
             }
             if thread_ts:
@@ -7281,7 +7281,7 @@ class SlackAdapter(BasePlatformAdapter):
             # Same 3000-char section-block cap as send_exec_approval: budget
             # the body against the rendered title so the wrapper never pushes
             # the block over the limit (overflow → invalid_blocks → no buttons).
-            _title = (title or "Confirm")[:150]
+            _title = (title or 'Подтвердить')[:150]
             budget = 3000 - len(f"*{_title}*\n\n") - len("...")
             body = message[:budget] + "..." if len(message) > budget else message
             # Encode session_key and confirm_id into the button value so the
@@ -7301,20 +7301,20 @@ class SlackAdapter(BasePlatformAdapter):
                     "elements": [
                         {
                             "type": "button",
-                            "text": {"type": "plain_text", "text": "Approve Once"},
+                            "text": {"type": "plain_text", "text": 'Подтвердить один раз'},
                             "style": "primary",
                             "action_id": "hermes_confirm_once",
                             "value": value,
                         },
                         {
                             "type": "button",
-                            "text": {"type": "plain_text", "text": "Always Approve"},
+                            "text": {"type": "plain_text", "text": 'Подтверждать всегда'},
                             "action_id": "hermes_confirm_always",
                             "value": value,
                         },
                         {
                             "type": "button",
-                            "text": {"type": "plain_text", "text": "Cancel"},
+                            "text": {"type": "plain_text", "text": 'Отмена'},
                             "style": "danger",
                             "action_id": "hermes_confirm_cancel",
                             "value": value,
@@ -7403,7 +7403,7 @@ class SlackAdapter(BasePlatformAdapter):
             # so a larger choice list degrades gracefully instead of 400ing.
             elements = []
             for idx, choice in enumerate(choices):
-                label = str(choice).strip() or f"Option {idx + 1}"
+                label = str(choice).strip() or f"""Вариант {idx + 1}"""
                 elements.append({
                     "type": "button",
                     "text": {"type": "plain_text", "text": label[:75], "emoji": True},
@@ -7412,7 +7412,7 @@ class SlackAdapter(BasePlatformAdapter):
                 })
             elements.append({
                 "type": "button",
-                "text": {"type": "plain_text", "text": "✏️ Other…", "emoji": True},
+                "text": {"type": "plain_text", "text": '✏️ Свой ответ…', "emoji": True},
                 "action_id": "hermes_clarify_other",
                 "value": f"{clarify_id}|other",
             })
@@ -7561,11 +7561,11 @@ class SlackAdapter(BasePlatformAdapter):
         choice = choice_map.get(action_id, "cancel")
 
         label_map = {
-            "once": f"✅ Approved once by {user_name}",
-            "always": f"🔒 Always approved by {user_name}",
-            "cancel": f"❌ Cancelled by {user_name}",
+            "once": f"""✅ Разрешено один раз. Пользователь: {user_name}""",
+            "always": f"""🔒 Разрешено постоянно. Пользователь: {user_name}""",
+            "cancel": f"""❌ Отменено. Пользователь: {user_name}""",
         }
-        decision_text = label_map.get(choice, f"Resolved by {user_name}")
+        decision_text = label_map.get(choice, f"""Решение принято. Пользователь: {user_name}""")
 
         # Pull original prompt body out of the section block so we can show
         # the decision inline without losing context.
@@ -7585,7 +7585,7 @@ class SlackAdapter(BasePlatformAdapter):
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": original_text or "Confirmation prompt",
+                    "text": original_text or 'Подтверждение',
                 },
             },
             {
@@ -7735,16 +7735,15 @@ class SlackAdapter(BasePlatformAdapter):
 
         # Update the message to show the decision and remove buttons
         label_map = {
-            "once": f"✅ Approved once by {user_name}",
-            "session": f"✅ Approved for session by {user_name}",
-            "always": f"✅ Approved permanently by {user_name}",
-            "deny": f"❌ Denied by {user_name}",
+            "once": f"""✅ Разрешено один раз. Пользователь: {user_name}""",
+            "session": f"""✅ Разрешено на сеанс. Пользователь: {user_name}""",
+            "always": f"""✅ Разрешено постоянно. Пользователь: {user_name}""",
+            "deny": f"""❌ Запрещено. Пользователь: {user_name}""",
         }
-        decision_text = label_map.get(choice, f"Resolved by {user_name}")
+        decision_text = label_map.get(choice, f"""Решение принято. Пользователь: {user_name}""")
         if not count:
             decision_text = (
-                "⌛ Approval expired — command was not run "
-                "(already timed out or resolved elsewhere)"
+                '⌛ Запрос уже закрыт — команда не выполнена (истекло время ожидания или решение принято в другом месте)'
             )
 
         # Get original text from the section block
@@ -7764,7 +7763,7 @@ class SlackAdapter(BasePlatformAdapter):
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": original_text or "Command approval request",
+                    "text": original_text or 'Разрешение на команду',
                 },
             },
             {
@@ -7868,12 +7867,12 @@ class SlackAdapter(BasePlatformAdapter):
                 # ask and tap — a typed answer would go nowhere.
                 await self._update_clarify_message(
                     channel_id, msg_ts, original_text,
-                    f"⏳ This prompt expired — please send a new request. (by {user_name})",
+                    f"""⏳ Время ожидания истекло. Отправьте новый запрос. (Пользователь: {user_name})""",
                 )
                 return
             await self._update_clarify_message(
                 channel_id, msg_ts, original_text,
-                f"✏️ Awaiting typed answer from {user_name}…",
+                f"""✏️ Ожидается ответ текстом. Пользователь: {user_name}…""",
             )
             return
 
@@ -7895,7 +7894,7 @@ class SlackAdapter(BasePlatformAdapter):
         except Exception:
             resolved_text = None
         if resolved_text is None:
-            resolved_text = f"choice {idx + 1}"
+            resolved_text = f"""вариант {idx + 1}"""
 
         if _clarify_mod.resolve_gateway_clarify(clarify_id, resolved_text):
             await self._update_clarify_message(
@@ -7918,7 +7917,7 @@ class SlackAdapter(BasePlatformAdapter):
             # misleading ✓ on a button the agent will never receive.
             await self._update_clarify_message(
                 channel_id, msg_ts, original_text,
-                f"⏳ This prompt expired — please send a new request. (by {user_name})",
+                f"""⏳ Время ожидания истекло. Отправьте новый запрос. (Пользователь: {user_name})""",
             )
             logger.warning(
                 "[Slack] clarify resolve returned False (id=%s) — expired/reset",
@@ -9708,7 +9707,7 @@ def interactive_setup() -> None:
 
             manifest = _build_full_manifest(
                 bot_name="Hermes",
-                bot_description="Your Hermes agent on Slack",
+                bot_description='Ваш агент Korra в Slack',
             )
             target = Path(get_hermes_home()) / "slack-manifest.json"
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -9716,23 +9715,20 @@ def interactive_setup() -> None:
                 _json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
-            print_success(f"Slack app manifest written to: {target}")
+            print_success(f"""Описание приложения Slack сохранено: {target}""")
             print_info(
-                "   Paste it into https://api.slack.com/apps → your app → Features "
-                "→ App Manifest → Edit, then Save.  Slack will prompt to "
-                "reinstall if scopes or slash commands changed."
+                '   Вставьте описание: https://api.slack.com/apps → ваше приложение → Features → App Manifest → Edit → Save. При изменении разрешений или команд Slack предложит переустановку.'
             )
             print_info(
-                "   Re-run `hermes slack manifest --write` anytime to refresh after "
-                "Hermes adds new commands."
+                '   После добавления команд обновите описание: `korra slack manifest --write`.'
             )
         except Exception as e:
-            print_warning(f"Could not write Slack manifest: {e}")
+            print_warning(f"""Не удалось сохранить описание приложения Slack: {e}""")
 
     print_header("Slack")
     existing = get_env_value("SLACK_BOT_TOKEN")
     if existing:
-        print_info("Slack: already configured")
+        print_info('Slack: уже настроен')
         if not prompt_yes_no("Reconfigure Slack?", False):
             # Even without reconfiguring, offer to refresh the manifest so
             # new commands (e.g. /btw, /stop, ...) get registered in Slack.
@@ -9744,15 +9740,15 @@ def interactive_setup() -> None:
                 _write_slack_manifest_and_instruct()
             return
 
-    print_info("Steps to create a Slack app:")
-    print_info("   1. Go to https://api.slack.com/apps → Create New App")
-    print_info("      Pick 'From an app manifest' — we'll generate one for you below.")
-    print_info("   2. Enable Socket Mode: Settings → Socket Mode → Enable")
-    print_info("      • Create an App-Level Token with 'connections:write' scope")
-    print_info("   3. Install to Workspace: Settings → Install App")
-    print_info("   4. After installing, invite the bot to channels: /invite @YourBot")
+    print_info('Как создать приложение Slack:')
+    print_info('   1. Откройте https://api.slack.com/apps → Create New App')
+    print_info('      Выберите From an app manifest — описание приложения будет создано ниже.')
+    print_info('   2. Включите Socket Mode: Settings → Socket Mode → Enable')
+    print_info('      • Создайте App-Level Token с разрешением connections:write')
+    print_info('   3. Установите в рабочее пространство: Settings → Install App')
+    print_info('   4. Пригласите бота в каналы: /invite @YourBot')
     print()
-    print_info("   Full guide: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/slack/")
+    print_info('   Полная инструкция: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/slack/')
     print()
 
     # Generate and write manifest up-front so the user can paste it into
@@ -9761,41 +9757,41 @@ def interactive_setup() -> None:
     _write_slack_manifest_and_instruct()
 
     print()
-    bot_token = prompt("Slack Bot Token (xoxb-...)", password=True)
+    bot_token = prompt('Токен бота Slack (xoxb-...)', password=True)
     if not bot_token:
         return
     save_env_value("SLACK_BOT_TOKEN", bot_token)
-    app_token = prompt("Slack App Token (xapp-...)", password=True)
+    app_token = prompt('Токен приложения Slack (xapp-...)', password=True)
     if app_token:
         save_env_value("SLACK_APP_TOKEN", app_token)
-    print_success("Slack tokens saved")
+    print_success('Токены Slack сохранены')
 
     print()
-    print_info("🔒 Security: Restrict who can use your bot")
-    print_info("   To find a Member ID: click a user's name → View full profile → ⋮ → Copy member ID")
+    print_info('🔒 Доступ: кто может пользоваться ботом')
+    print_info('   ID участника: нажмите на имя → View full profile → ⋮ → Copy member ID')
     print()
     allowed_users = prompt(
-        "Allowed user IDs (comma-separated, leave empty to deny everyone except paired users)"
+        'ID пользователей через запятую (пусто — доступ только у подтверждённых пользователей)'
     )
     if allowed_users:
         save_env_value("SLACK_ALLOWED_USERS", allowed_users.replace(" ", ""))
-        print_success("Slack allowlist configured")
+        print_success('Список доступа Slack настроен')
     else:
-        print_warning("⚠️  No Slack allowlist set - unpaired users will be denied by default.")
-        print_info("   Set SLACK_ALLOW_ALL_USERS=true or GATEWAY_ALLOW_ALL_USERS=true only if you intentionally want open workspace access.")
+        print_warning('⚠️  Список доступа Slack пуст — неподтверждённые пользователи не смогут писать боту.')
+        print_info('   SLACK_ALLOW_ALL_USERS=true или GATEWAY_ALLOW_ALL_USERS=true открывает доступ всем участникам. Включайте только при необходимости.')
 
     print()
-    print_info("📬 Home Channel: where Hermes delivers cron job results,")
-    print_info("   cross-platform messages, and notifications.")
-    print_info("   To get a channel ID: open the channel in Slack, then right-click")
-    print_info("   the channel name → Copy link — the ID starts with C (e.g. C01ABC2DE3F).")
-    print_info("   You can also set this later by typing /set-home in a Slack channel.")
-    home_channel = prompt("Home channel ID (leave empty to set later with /set-home)").strip()
+    print_info('📬 Основной канал: сюда Корра присылает результаты задач,')
+    print_info('   сообщения из других мессенджеров и уведомления.')
+    print_info('   ID канала: откройте канал Slack, нажмите правой кнопкой')
+    print_info('   по его имени → Copy link. ID начинается с C, например C01ABC2DE3F.')
+    print_info('   Можно настроить позже командой /set-home в канале Slack.')
+    home_channel = prompt('ID основного канала (можно пропустить и настроить позже через /set-home)').strip()
     if home_channel:
         save_env_value("SLACK_HOME_CHANNEL", home_channel)
     else:
         if remove_env_value("SLACK_HOME_CHANNEL"):
-            print_info("Home channel cleared.")
+            print_info('Основной канал сброшен.')
 
 
 def _apply_yaml_config(yaml_cfg: dict, slack_cfg: dict) -> dict | None:
@@ -9895,7 +9891,7 @@ def register(ctx) -> None:
         ensure_deps_fn=check_slack_requirements,
         is_connected=_is_connected,
         required_env=["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
-        install_hint="Run `hermes setup` to install Slack support.",
+        install_hint='Выполните `korra setup`, чтобы подключить Slack.',
         # Interactive setup wizard — replaces korra_cli/setup.py::_setup_slack
         # and the static _PLATFORMS["slack"] dict in korra_cli/gateway.py.
         setup_fn=interactive_setup,

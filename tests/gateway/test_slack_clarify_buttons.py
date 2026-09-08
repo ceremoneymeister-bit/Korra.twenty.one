@@ -227,7 +227,7 @@ class TestSlackClarifyOtherFlow:
         with cm._lock:
             entry = cm._entries.get("cidO")
         assert not entry.event.is_set()
-        assert "awaiting" in mock_client.chat_update.call_args[1]["text"].lower()
+        assert "ожидается ответ текстом" in mock_client.chat_update.call_args[1]["text"].lower()
 
         # Now the gateway text-intercept (platform-agnostic) resolves from the
         # user's next typed message. We exercise that leveraged path directly.

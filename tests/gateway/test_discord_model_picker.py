@@ -74,9 +74,9 @@ async def test_model_picker_clears_controls_before_running_switch_callback():
     await view._on_model_selected(interaction)
 
     assert events == [
-        ("initial-edit", "⚙ Switching Model", "Switching to `gpt-5.4`...", None),
+        ("initial-edit", "⚙ Смена модели", "Переключение на `gpt-5.4`...", None),
         ("switch", "456", "gpt-5.4", "copilot"),
-        ("final-edit", "⚙ Model Switched", "Model switched", None),
+        ("final-edit", "⚙ Модель изменена", "Model switched", None),
     ]
     interaction.response.edit_message.assert_awaited_once()
     interaction.response.defer.assert_not_called()

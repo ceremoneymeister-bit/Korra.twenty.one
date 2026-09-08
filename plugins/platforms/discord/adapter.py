@@ -308,7 +308,7 @@ def _format_privileged_intents_guidance(*, needs_members: bool) -> str:
             "Fix: https://discord.com/developers/applications → your application "
             "→ Bot → Privileged Gateway Intents → enable the intent(s) listed "
             "above → Save Changes, then restart the gateway.",
-            "Docs: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/discord",
+            'Инструкция: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/discord',
         ]
     )
     return "\n".join(lines)
@@ -1539,9 +1539,7 @@ class DiscordAdapter(BasePlatformAdapter):
         if _is("LoginFailure"):
             return (
                 "discord_auth_error",
-                f"Discord bot token rejected: {error}. The token is invalid or "
-                "was revoked — regenerate it in the Discord Developer Portal "
-                "and update DISCORD_BOT_TOKEN.",
+                f"""Discord отклонил токен бота: {error}. Токен неверен или отозван. Создайте новый в Discord Developer Portal и обновите DISCORD_BOT_TOKEN.""",
                 False,
             )
         if _is("PrivilegedIntentsRequired"):
@@ -1555,7 +1553,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 )
             )
             return ("discord_intents_required", guidance, False)
-        return ("discord_connect_error", f"Discord startup failed: {error}", True)
+        return ("discord_connect_error", f'Не удалось подключить Discord: {error}', True)
 
     def _discord_message_admission(
         self,
@@ -4806,7 +4804,7 @@ class DiscordAdapter(BasePlatformAdapter):
             ch = self._client.get_channel(text_ch_id)
             if ch:
                 try:
-                    await ch.send("Left voice channel (inactivity timeout).")
+                    await ch.send('Голосовой канал отключён: долго не было активности.')
                 except Exception:
                     pass
 
@@ -5312,7 +5310,7 @@ class DiscordAdapter(BasePlatformAdapter):
 
         try:
             await interaction.response.send_message(
-                "You're not authorized to use this command.",
+                'У вас нет прав на эту команду.',
                 ephemeral=True,
             )
         except Exception as e:
@@ -5360,11 +5358,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 if not home or not getattr(home, "chat_id", None):
                     continue
                 msg = (
-                    "⚠️ Unauthorized Discord slash attempt\n"
-                    f"User: {user_name} ({user_id})\n"
-                    f"Channel: {chan_id} (guild {guild_id})\n"
-                    f"Command: {command_text}\n"
-                    f"Reason: {reason}"
+                    f'⚠️ Попытка выполнить команду Discord без доступа\nПользователь: {user_name} ({user_id})\nКанал: {chan_id} (сервер {guild_id})\nКоманда: {command_text}\nПричина: {reason}'
                 )
                 result = await adapter.send(str(home.chat_id), msg)
                 # Only return on confirmed delivery. SendResult(success=False)
@@ -5849,21 +5843,21 @@ class DiscordAdapter(BasePlatformAdapter):
 
         tree = self._client.tree
 
-        @tree.command(name="new", description="Start a new conversation")
+        @tree.command(name="new", description='Начать новую беседу')
         async def slash_new(interaction: discord.Interaction):
-            await self._run_simple_slash(interaction, "/reset", "New conversation started~")
+            await self._run_simple_slash(interaction, "/reset", 'Новая беседа начата.')
 
-        @tree.command(name="reset", description="Reset your Hermes session")
+        @tree.command(name="reset", description='Сбросить беседу с Коррой')
         async def slash_reset(interaction: discord.Interaction):
-            await self._run_simple_slash(interaction, "/reset", "Session reset~")
+            await self._run_simple_slash(interaction, "/reset", 'Беседа сброшена.')
 
-        @tree.command(name="model", description="Show or change the model")
-        @discord.app_commands.describe(name="Model name (e.g. anthropic/claude-sonnet-4). Leave empty to see current.")
+        @tree.command(name="model", description='Показать или сменить модель')
+        @discord.app_commands.describe(name='Модель, например anthropic/claude-sonnet-4. Если пусто — показать текущую.')
         async def slash_model(interaction: discord.Interaction, name: str = ""):
             await self._run_simple_slash(interaction, f"/model {name}".strip())
 
-        @tree.command(name="reasoning", description="Show/change reasoning effort, or toggle showing it")
-        @discord.app_commands.describe(effort="Pick a level, reset the override, or show/hide reasoning. Leave empty to see current.")
+        @tree.command(name="reasoning", description='Настроить глубину и показ рассуждений')
+        @discord.app_commands.describe(effort='Выберите уровень, сбросьте настройку или показ рассуждений. Если пусто — показать текущую.')
         @discord.app_commands.choices(effort=[
             # Effort levels and the reset/show/hide subcommands all arrive on the
             # gateway's single `/reasoning <arg>` handler. Discord's native UI has
@@ -5871,132 +5865,132 @@ class DiscordAdapter(BasePlatformAdapter):
             # user into the `effort` box), so expose every accepted value as an
             # explicit choice. --global persistence stays reachable by typing the
             # command as plain text.
-            discord.app_commands.Choice(name="none — disable reasoning", value="none"),
+            discord.app_commands.Choice(name='none — отключить рассуждения', value="none"),
             discord.app_commands.Choice(name="minimal", value="minimal"),
             discord.app_commands.Choice(name="low", value="low"),
             discord.app_commands.Choice(name="medium", value="medium"),
             discord.app_commands.Choice(name="high", value="high"),
             discord.app_commands.Choice(name="xhigh", value="xhigh"),
             discord.app_commands.Choice(name="max", value="max"),
-            discord.app_commands.Choice(name="ultra — maximum reasoning", value="ultra"),
-            discord.app_commands.Choice(name="reset — clear this session's override", value="reset"),
-            discord.app_commands.Choice(name="show — reveal reasoning in replies", value="show"),
-            discord.app_commands.Choice(name="hide — hide reasoning from replies", value="hide"),
+            discord.app_commands.Choice(name='ultra — максимальная глубина', value="ultra"),
+            discord.app_commands.Choice(name='reset — сбросить настройку беседы', value="reset"),
+            discord.app_commands.Choice(name='show — показывать рассуждения в ответах', value="show"),
+            discord.app_commands.Choice(name='hide — скрывать рассуждения в ответах', value="hide"),
         ])
         async def slash_reasoning(interaction: discord.Interaction, effort: str = ""):
             await self._run_simple_slash(interaction, f"/reasoning {effort}".strip())
 
-        @tree.command(name="personality", description="Set a personality")
-        @discord.app_commands.describe(name="Personality name. Leave empty to list available.")
+        @tree.command(name="personality", description='Выбрать стиль общения')
+        @discord.app_commands.describe(name='Название стиля. Если пусто — показать доступные.')
         async def slash_personality(interaction: discord.Interaction, name: str = ""):
             await self._run_simple_slash(interaction, f"/personality {name}".strip())
 
-        @tree.command(name="retry", description="Retry your last message")
+        @tree.command(name="retry", description='Повторить последний запрос')
         async def slash_retry(interaction: discord.Interaction):
-            await self._run_simple_slash(interaction, "/retry", "Retrying~")
+            await self._run_simple_slash(interaction, "/retry", 'Повторяю запрос…')
 
-        @tree.command(name="undo", description="Remove the last exchange")
+        @tree.command(name="undo", description='Убрать последний вопрос и ответ')
         async def slash_undo(interaction: discord.Interaction):
             await self._run_simple_slash(interaction, "/undo")
 
-        @tree.command(name="status", description="Show Hermes session status")
+        @tree.command(name="status", description='Показать состояние беседы с Коррой')
         async def slash_status(interaction: discord.Interaction):
-            await self._run_simple_slash(interaction, "/status", "Status sent~")
+            await self._run_simple_slash(interaction, "/status", 'Статус отправлен.')
 
-        @tree.command(name="sethome", description="Set this chat as the home channel")
+        @tree.command(name="sethome", description='Сделать этот чат основным каналом')
         async def slash_sethome(interaction: discord.Interaction):
             await self._run_simple_slash(interaction, "/sethome")
 
-        @tree.command(name="stop", description="Stop the running Hermes agent")
+        @tree.command(name="stop", description='Остановить работающую Корру')
         async def slash_stop(interaction: discord.Interaction):
-            await self._run_simple_slash(interaction, "/stop", "Stop requested~")
+            await self._run_simple_slash(interaction, "/stop", 'Запрошена остановка.')
 
-        @tree.command(name="steer", description="Inject a message after the next tool call (no interrupt)")
-        @discord.app_commands.describe(prompt="Text to inject into the agent's next tool result")
+        @tree.command(name="steer", description='Передать уточнение после следующего действия агента')
+        @discord.app_commands.describe(prompt='Уточнение для следующего действия агента')
         async def slash_steer(interaction: discord.Interaction, prompt: str):
             await self._run_simple_slash(interaction, f"/steer {prompt}".strip())
 
-        @tree.command(name="plan", description="Write a markdown implementation plan (no execution)")
-        @discord.app_commands.describe(task="What to plan. Leave empty to infer from the conversation.")
+        @tree.command(name="plan", description='Составить план действий в Markdown')
+        @discord.app_commands.describe(task='Что спланировать. Если пусто — взять задачу из беседы.')
         async def slash_plan(interaction: discord.Interaction, task: str = ""):
             await self._run_simple_slash(interaction, f"/plan {task}".strip())
 
-        @tree.command(name="compress", description="Compress conversation context")
+        @tree.command(name="compress", description='Сжать контекст беседы')
         async def slash_compress(interaction: discord.Interaction):
             await self._run_simple_slash(interaction, "/compress")
 
-        @tree.command(name="title", description="Set or show the session title")
-        @discord.app_commands.describe(name="Session title. Leave empty to show current.")
+        @tree.command(name="title", description='Задать или показать название беседы')
+        @discord.app_commands.describe(name='Название беседы. Если пусто — показать текущее.')
         async def slash_title(interaction: discord.Interaction, name: str = ""):
             await self._run_simple_slash(interaction, f"/title {name}".strip())
 
-        @tree.command(name="resume", description="Resume a previously-named session")
-        @discord.app_commands.describe(name="Session name to resume. Leave empty to list sessions.")
+        @tree.command(name="resume", description='Продолжить беседу по её названию')
+        @discord.app_commands.describe(name='Название беседы. Если пусто — показать список.')
         async def slash_resume(interaction: discord.Interaction, name: str = ""):
             await self._run_simple_slash(interaction, f"/resume {name}".strip())
 
-        @tree.command(name="usage", description="Show token usage for this session")
+        @tree.command(name="usage", description='Показать расход токенов в этой беседе')
         async def slash_usage(interaction: discord.Interaction):
             await self._run_simple_slash(interaction, "/usage")
 
-        @tree.command(name="help", description="Show available commands")
+        @tree.command(name="help", description='Показать доступные команды')
         async def slash_help(interaction: discord.Interaction):
             await self._run_simple_slash(interaction, "/help")
 
-        @tree.command(name="insights", description="Show usage insights and analytics")
-        @discord.app_commands.describe(days="Number of days to analyze (default: 7)")
+        @tree.command(name="insights", description='Показать статистику использования')
+        @discord.app_commands.describe(days='Период в днях (по умолчанию: 7)')
         async def slash_insights(interaction: discord.Interaction, days: int = 7):
             await self._run_simple_slash(interaction, f"/insights {days}")
 
-        @tree.command(name="reload-mcp", description="Reload MCP servers from config")
+        @tree.command(name="reload-mcp", description='Переподключить MCP-серверы из настроек')
         async def slash_reload_mcp(interaction: discord.Interaction):
             await self._run_simple_slash(interaction, "/reload-mcp")
 
-        @tree.command(name="reload-skills", description="Re-scan ~/.hermes/skills/ for new or removed skills")
+        @tree.command(name="reload-skills", description='Обновить список установленных навыков')
         async def slash_reload_skills(interaction: discord.Interaction):
             await self._run_simple_slash(interaction, "/reload-skills")
 
-        @tree.command(name="voice", description="Toggle voice reply mode")
-        @discord.app_commands.describe(mode="Voice mode: join, channel, leave, on, tts, off, or status")
+        @tree.command(name="voice", description='Настроить голосовые ответы')
+        @discord.app_commands.describe(mode='Режим голоса: join, channel, leave, on, tts, off или status')
         @discord.app_commands.choices(mode=[
             # `join` and `channel` both route to _handle_voice_channel_join in
             # gateway/run.py — expose both in the slash UI so autocomplete
             # matches what the docs advertise and what the runner accepts when
             # the command is typed as plain text.
-            discord.app_commands.Choice(name="join — join your voice channel", value="join"),
-            discord.app_commands.Choice(name="channel — join your voice channel (alias)", value="channel"),
-            discord.app_commands.Choice(name="leave — leave voice channel", value="leave"),
-            discord.app_commands.Choice(name="on — voice reply to voice messages", value="on"),
-            discord.app_commands.Choice(name="tts — voice reply to all messages", value="tts"),
-            discord.app_commands.Choice(name="off — text only", value="off"),
-            discord.app_commands.Choice(name="status — show current mode", value="status"),
+            discord.app_commands.Choice(name='join — подключиться к вашему голосовому каналу', value="join"),
+            discord.app_commands.Choice(name='channel — подключиться к голосовому каналу (псевдоним)', value="channel"),
+            discord.app_commands.Choice(name='leave — отключиться от голосового канала', value="leave"),
+            discord.app_commands.Choice(name='on — отвечать голосом на голосовые сообщения', value="on"),
+            discord.app_commands.Choice(name='tts — отвечать голосом на все сообщения', value="tts"),
+            discord.app_commands.Choice(name='off — отвечать только текстом', value="off"),
+            discord.app_commands.Choice(name='status — показать текущий режим', value="status"),
         ])
         async def slash_voice(interaction: discord.Interaction, mode: str = ""):
             await self._run_simple_slash(interaction, f"/voice {mode}".strip())
 
-        @tree.command(name="update", description="Update Hermes Agent to the latest version")
+        @tree.command(name="update", description='Обновить Корру до последней версии')
         async def slash_update(interaction: discord.Interaction):
-            await self._run_simple_slash(interaction, "/update", "Update initiated~")
+            await self._run_simple_slash(interaction, "/update", 'Обновление запущено.')
 
-        @tree.command(name="restart", description="Gracefully restart the Hermes gateway")
+        @tree.command(name="restart", description='Перезапустить шлюз после завершения задач')
         async def slash_restart(interaction: discord.Interaction):
-            await self._run_simple_slash(interaction, "/restart", "Restart requested~")
+            await self._run_simple_slash(interaction, "/restart", 'Запрошен перезапуск.')
 
-        @tree.command(name="approve", description="Approve a pending dangerous command")
-        @discord.app_commands.describe(scope="Optional: 'all', 'session', 'always', 'all session', 'all always'")
+        @tree.command(name="approve", description='Разрешить ожидающую опасную команду')
+        @discord.app_commands.describe(scope='Необязательно: all, session, always, all session, all always')
         async def slash_approve(interaction: discord.Interaction, scope: str = ""):
             await self._run_simple_slash(interaction, f"/approve {scope}".strip())
 
-        @tree.command(name="deny", description="Deny a pending dangerous command")
-        @discord.app_commands.describe(scope="Optional: 'all' to deny all pending commands")
+        @tree.command(name="deny", description='Запретить ожидающую опасную команду')
+        @discord.app_commands.describe(scope='Необязательно: all — запретить все ожидающие команды')
         async def slash_deny(interaction: discord.Interaction, scope: str = ""):
             await self._run_simple_slash(interaction, f"/deny {scope}".strip())
 
-        @tree.command(name="thread", description="Create a new thread and start a Hermes session in it")
+        @tree.command(name="thread", description='Создать ветку и начать в ней беседу с Коррой')
         @discord.app_commands.describe(
-            name="Thread name",
-            message="Optional first message to send to Hermes in the thread",
-            auto_archive_duration="Auto-archive in minutes (60, 1440, 4320, 10080)",
+            name='Название ветки',
+            message='Первое сообщение Корре в ветке (необязательно)',
+            auto_archive_duration='Архивировать через указанное число минут (60, 1440, 4320, 10080)',
         )
         async def slash_thread(
             interaction: discord.Interaction,
@@ -6008,20 +6002,20 @@ class DiscordAdapter(BasePlatformAdapter):
             # so a rejected invoker can receive an ephemeral rejection.
             await self._handle_thread_create_slash(interaction, name, message, auto_archive_duration)
 
-        @tree.command(name="queue", description="Queue a prompt for the next turn (doesn't interrupt)")
-        @discord.app_commands.describe(prompt="The prompt to queue")
+        @tree.command(name="queue", description='Добавить запрос в очередь после текущей задачи')
+        @discord.app_commands.describe(prompt='Запрос для очереди')
         async def slash_queue(interaction: discord.Interaction, prompt: str):
-            await self._run_simple_slash(interaction, f"/queue {prompt}", "Queued for the next turn.")
+            await self._run_simple_slash(interaction, f"/queue {prompt}", 'Добавлено в очередь.')
 
-        @tree.command(name="bg", description="Run a prompt in a separate background session")
-        @discord.app_commands.describe(prompt="The prompt to run in the background")
+        @tree.command(name="bg", description='Запустить задачу в отдельной фоновой беседе')
+        @discord.app_commands.describe(prompt='Запрос для фоновой задачи')
         async def slash_background(interaction: discord.Interaction, prompt: str):
-            await self._run_simple_slash(interaction, f"/bg {prompt}", "Background task started~")
+            await self._run_simple_slash(interaction, f"/bg {prompt}", 'Фоновая задача запущена.')
 
-        @tree.command(name="btw", description="Ask a side question about the current conversation")
-        @discord.app_commands.describe(question="The side question to answer without interrupting")
+        @tree.command(name="btw", description='Задать дополнительный вопрос по этой беседе')
+        @discord.app_commands.describe(question='Дополнительный вопрос без остановки текущей задачи')
         async def slash_btw(interaction: discord.Interaction, question: str):
-            await self._run_simple_slash(interaction, f"/btw {question}", "Side question dispatched~")
+            await self._run_simple_slash(interaction, f"/btw {question}", 'Дополнительный вопрос отправлен.')
 
         # ── Auto-register any gateway-available commands not yet on the tree ──
         # This ensures new commands added to COMMAND_REGISTRY in
@@ -6030,12 +6024,12 @@ class DiscordAdapter(BasePlatformAdapter):
         def _build_auto_slash_command(_name: str, _description: str, _args_hint: str = ""):
             """Build a discord.app_commands.Command that proxies to _run_simple_slash."""
             discord_name = _name.lower()[:32]
-            desc = (_description or f"Run /{_name}")[:100]
+            desc = (_description or f"""Выполнить /{_name}""")[:100]
             has_args = bool(_args_hint)
 
             if has_args:
                 def _make_args_handler(__name: str, __hint: str):
-                    @discord.app_commands.describe(args=f"Arguments: {__hint}"[:100])
+                    @discord.app_commands.describe(args=f"""Аргументы: {__hint}"""[:100])
                     async def _handler(interaction: discord.Interaction, args: str = ""):
                         await self._run_simple_slash(
                             interaction, f"/{__name} {args}".strip()
@@ -6312,8 +6306,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 entry = self._skill_lookup.get(name)
                 if not entry:
                     await interaction.response.send_message(
-                        f"Unknown skill: `{name}`. Start typing for "
-                        f"autocomplete suggestions.",
+                        f"""Неизвестный навык: `{name}`. Начните вводить название, чтобы увидеть подсказки.""",
                         ephemeral=True,
                     )
                     return
@@ -6479,7 +6472,7 @@ class DiscordAdapter(BasePlatformAdapter):
         if not result.get("success"):
             error = result.get("error", "unknown error")
             if deferred_response:
-                await interaction.followup.send(f"Failed to create thread: {error}", ephemeral=True)
+                await interaction.followup.send(f"""Не удалось создать ветку: {error}""", ephemeral=True)
             return
 
         thread_id = result.get("thread_id")
@@ -6488,7 +6481,7 @@ class DiscordAdapter(BasePlatformAdapter):
         # Tell the user where the thread is
         link = f"<#{thread_id}>" if thread_id else f"**{thread_name}**"
         if deferred_response:
-            await interaction.followup.send(f"Created thread {link}", ephemeral=True)
+            await interaction.followup.send(f"""Создана ветка {link}""", ephemeral=True)
 
         # Track thread participation so follow-ups don't require @mention
         if thread_id:
@@ -7176,7 +7169,7 @@ class DiscordAdapter(BasePlatformAdapter):
         """
         name = (name or "").strip()
         if not name:
-            return {"error": "Thread name is required."}
+            return {"error": 'Название ветки is required.'}
 
         if auto_archive_duration not in VALID_THREAD_AUTO_ARCHIVE_MINUTES:
             allowed = ", ".join(str(v) for v in sorted(VALID_THREAD_AUTO_ARCHIVE_MINUTES))
@@ -7193,7 +7186,7 @@ class DiscordAdapter(BasePlatformAdapter):
             return {"error": "Could not determine a parent text channel for the new thread."}
 
         display_name = getattr(getattr(interaction, "user", None), "display_name", None) or "unknown user"
-        reason = f"Requested by {display_name} via /thread"
+        reason = f"""Requested by {display_name} via /thread"""
         starter_message = (message or "").strip()
 
         try:
@@ -7211,7 +7204,7 @@ class DiscordAdapter(BasePlatformAdapter):
             }
         except Exception as direct_error:
             try:
-                seed_content = starter_message or f"\U0001f9f5 Thread created by Hermes: **{name}**"
+                seed_content = starter_message or f"""🧵 Ветка создана Коррой: **{name}**"""
                 seed_msg = await parent_channel.send(seed_content)
                 thread = await seed_msg.create_thread(
                     name=name,
@@ -7266,7 +7259,7 @@ class DiscordAdapter(BasePlatformAdapter):
         """
         thread_name = self._derive_auto_thread_name(message.content or "")
         display_name = getattr(getattr(message, "author", None), "display_name", None) or "unknown user"
-        reason = f"Auto-threaded from mention by {display_name}"
+        reason = f"""Auto-threaded from mention — пользователь {display_name}"""
 
         last_direct_error: Exception | None = None
         last_fallback_error: Exception | None = None
@@ -7283,7 +7276,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 last_direct_error = direct_error
                 try:
                     seed_msg = await message.channel.send(
-                        f"\U0001f9f5 Thread created by Hermes: **{thread_name}**"
+                        f"""🧵 Ветка создана Коррой: **{thread_name}**"""
                     )
                     thread = await seed_msg.create_thread(
                         name=thread_name,
@@ -7437,7 +7430,7 @@ class DiscordAdapter(BasePlatformAdapter):
             send = getattr(parent, "send", None)
             if send is None:
                 return None
-            seed_msg = await send(f"\U0001f9f5 Hermes handoff: **{thread_name}**")
+            seed_msg = await send(f"""🧵 Передача беседы Коррой: **{thread_name}**""")
             thread = await seed_msg.create_thread(
                 name=thread_name,
                 auto_archive_duration=1440,
@@ -7490,7 +7483,7 @@ class DiscordAdapter(BasePlatformAdapter):
 
     async def send_exec_approval(
         self, chat_id: str, command: str, session_key: str,
-        description: str = "dangerous command",
+        description: str = 'опасная команда',
         metadata: Optional[dict] = None,
         allow_permanent: bool = True,
         allow_session: bool = True,
@@ -7521,21 +7514,19 @@ class DiscordAdapter(BasePlatformAdapter):
             # command and reason must be visible in the same content block as
             # the approval buttons.
             reason_budget = 300
-            reason_display = str(description or "dangerous command")
+            reason_display = str(description or 'опасная команда')
             if len(reason_display) > reason_budget:
                 reason_display = reason_display[: reason_budget - 15] + "... [truncated]"
 
             prompt_prefix = (
-                "⚠️ **Command Approval Required**\n\n"
-                "Do you want Hermes to run this command?\n\n"
-                "**Requested command:**\n```bash\n"
+                '⚠️ **Нужно разрешение на команду**\n\nРазрешить Корре выполнить эту команду?\n\n**Команда:**\n```bash\n'
             )
             if smart_denied:
-                prompt_prefix += "**Smart DENY:** owner override applies to this one operation only.\n\n"
+                prompt_prefix += '**Автопроверка запретила:** ваше разрешение действует только на эту операцию.\n\n'
             mention_content = self._approval_mention_content()
             if mention_content:
                 prompt_prefix = f"{mention_content}\n{prompt_prefix}"
-            prompt_tail = f"\n```\n**Reason:** {reason_display}"
+            prompt_tail = f"""\n```\n**Причина:** {reason_display}"""
             truncated_suffix = "\n... [truncated]"
             command_budget = max(0, self.MAX_MESSAGE_LENGTH - len(prompt_prefix) - len(prompt_tail))
             content_cmd_display = str(command or "")
@@ -7553,11 +7544,11 @@ class DiscordAdapter(BasePlatformAdapter):
             if len(embed_cmd_display) > max_embed_desc:
                 embed_cmd_display = embed_cmd_display[: max_embed_desc - 3] + "..."
             embed = discord.Embed(
-                title="⚠️ Command Approval Required",
+                title='⚠️ Нужно разрешение на команду',
                 description=f"```\n{embed_cmd_display}\n```",
                 color=discord.Color.orange(),
             )
-            embed.add_field(name="Reason", value=reason_display, inline=False)
+            embed.add_field(name='Причина', value=reason_display, inline=False)
 
             require_admin, admin_user_ids = _resolve_exec_approval_admin_gate(
                 getattr(self.config, "extra", None)
@@ -7611,7 +7602,7 @@ class DiscordAdapter(BasePlatformAdapter):
             max_desc = 4088
             body = message if len(message) <= max_desc else message[: max_desc - 3] + "..."
             embed = discord.Embed(
-                title=title or "Confirm",
+                title=title or 'Подтвердить',
                 description=body,
                 color=discord.Color.orange(),
             )
@@ -7681,7 +7672,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 body = body[: max_desc - 3] + "..."
 
             embed = discord.Embed(
-                title="❓ Hermes needs your input",
+                title='❓ Корре нужен ваш ответ',
                 description=body,
                 color=discord.Color.orange(),
             )
@@ -7724,8 +7715,8 @@ class DiscordAdapter(BasePlatformAdapter):
 
             if clean_choices:
                 embed.add_field(
-                    name="Choices",
-                    value="Pick one below, or click ✏️ Other to type a custom answer.",
+                    name='Варианты',
+                    value='Выберите вариант ниже или нажмите ✏️ Свой ответ.',
                     inline=False,
                 )
                 view = ClarifyChoiceView(
@@ -7736,8 +7727,8 @@ class DiscordAdapter(BasePlatformAdapter):
                 )
             else:
                 embed.add_field(
-                    name="Reply",
-                    value="Reply in this channel with your answer.",
+                    name='Ответ',
+                    value='Напишите ответ в этом канале.',
                     inline=False,
                 )
                 view = None
@@ -7745,12 +7736,12 @@ class DiscordAdapter(BasePlatformAdapter):
             # Mirror the question in plain content — embeds are invisible on
             # some clients (see send_exec_approval).
             clarify_tail = (
-                "\n\nPick one below, or click ✏️ Other to type a custom answer."
+                '\n\nВыберите вариант ниже или нажмите ✏️ Свой ответ.'
                 if clean_choices
-                else "\n\nReply in this channel with your answer."
+                else '\n\nНапишите ответ в этом канале.'
             )
             content = self._self_contained_prompt_content(
-                "❓ **Hermes needs your input**", str(question or "").strip(),
+                '❓ **Корре нужен ваш ответ**', str(question or "").strip(),
                 tail=clarify_tail,
             )
             msg = await channel.send(content=content, embed=embed, view=view) if view else await channel.send(content=content, embed=embed)
@@ -7779,9 +7770,9 @@ class DiscordAdapter(BasePlatformAdapter):
             if not channel:
                 channel = await self._client.fetch_channel(int(target_id))
 
-            default_hint = f" (default: {default})" if default else ""
+            default_hint = f""" (по умолчанию: {default})""" if default else ""
             embed = discord.Embed(
-                title="⚕ Update Needs Your Input",
+                title='⚕ Для обновления нужен ваш ответ',
                 description=f"{prompt}{default_hint}",
                 color=discord.Color.gold(),
             )
@@ -7793,7 +7784,7 @@ class DiscordAdapter(BasePlatformAdapter):
             # Mirror the prompt in plain content — embeds are invisible on
             # some clients (see send_exec_approval).
             content = self._self_contained_prompt_content(
-                "⚕ **Update Needs Your Input**", f"{prompt}{default_hint}"
+                '⚕ **Для обновления нужен ваш ответ**', f"{prompt}{default_hint}"
             )
             msg = await channel.send(content=content, embed=embed, view=view)
             view._message = msg  # store for on_timeout expiration editing
@@ -7838,11 +7829,9 @@ class DiscordAdapter(BasePlatformAdapter):
                 provider_label = current_provider
 
             embed = discord.Embed(
-                title="⚙ Model Configuration",
+                title='⚙ Выбор модели',
                 description=(
-                    f"Current model: `{current_model or 'unknown'}`\n"
-                    f"Provider: {provider_label}\n\n"
-                    f"Select a provider:"
+                    f"""Текущая модель: `{current_model or 'unknown'}`\nПровайдер: {provider_label}\n\nВыберите провайдера:"""
                 ),
                 color=discord.Color.blue(),
             )
@@ -7893,7 +7882,7 @@ class DiscordAdapter(BasePlatformAdapter):
                 channel = await self._client.fetch_channel(int(target_id))
 
             embed = discord.Embed(
-                title="⚙ " + (title.splitlines()[0] if title else "Choose an option"),
+                title="⚙ " + (title.splitlines()[0] if title else 'Выберите вариант'),
                 description="\n".join(title.splitlines()[1:]) or None,
                 color=discord.Color.blue(),
             )
@@ -8231,8 +8220,7 @@ class DiscordAdapter(BasePlatformAdapter):
                     # invocation for this message.
                     try:
                         await message.channel.send(
-                            "⚠️ Hermes could not create a Discord thread for "
-                            "this message, so the request was not processed. Please retry."
+                            '⚠️ Корре не удалось создать ветку Discord для этого сообщения. Запрос не обработан. Повторите попытку.'
                         )
                     except Exception as notify_error:
                         logger.warning(
@@ -8897,13 +8885,13 @@ def _define_discord_view_classes() -> None:
             """Resolve the approval via the gateway approval queue and update the embed."""
             if self.resolved:
                 await interaction.response.send_message(
-                    "This approval has already been resolved~", ephemeral=True
+                    'По этому запросу уже принято решение.', ephemeral=True
                 )
                 return
 
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized to approve commands~", ephemeral=True
+                    'У вас нет прав разрешать команды.', ephemeral=True
                 )
                 return
 
@@ -8925,13 +8913,13 @@ def _define_discord_view_classes() -> None:
 
             if not count:
                 color = discord.Color.dark_grey()
-                label = "⌛ Approval expired — command was not run (already timed out or resolved elsewhere)"
+                label = '⌛ Запрос уже закрыт — команда не выполнена (истекло время ожидания или решение принято в другом месте)'
 
             # Update the embed with the decision
             embed = interaction.message.embeds[0] if interaction.message.embeds else None
             if embed:
                 embed.color = color
-                footer = f"{label} by {interaction.user.display_name}" if count else label
+                footer = f"""{label} — пользователь {interaction.user.display_name}""" if count else label
                 embed.set_footer(text=footer)
 
             # Disable all buttons
@@ -8940,29 +8928,29 @@ def _define_discord_view_classes() -> None:
 
             await interaction.response.edit_message(embed=embed, view=self)
 
-        @discord.ui.button(label="Allow Once", style=discord.ButtonStyle.green)
+        @discord.ui.button(label='Разрешить один раз', style=discord.ButtonStyle.green)
         async def allow_once(
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):
-            await self._resolve(interaction, "once", discord.Color.green(), "Approved once")
+            await self._resolve(interaction, "once", discord.Color.green(), 'Разрешено один раз')
 
-        @discord.ui.button(label="Allow Session", style=discord.ButtonStyle.grey)
+        @discord.ui.button(label='Разрешить на сеанс', style=discord.ButtonStyle.grey)
         async def allow_session(
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):
-            await self._resolve(interaction, "session", discord.Color.blue(), "Approved for session")
+            await self._resolve(interaction, "session", discord.Color.blue(), 'Разрешено на сеанс')
 
-        @discord.ui.button(label="Always Allow", style=discord.ButtonStyle.blurple)
+        @discord.ui.button(label='Разрешать всегда', style=discord.ButtonStyle.blurple)
         async def allow_always(
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):
-            await self._resolve(interaction, "always", discord.Color.purple(), "Approved permanently")
+            await self._resolve(interaction, "always", discord.Color.purple(), 'Разрешено постоянно')
 
-        @discord.ui.button(label="Deny", style=discord.ButtonStyle.red)
+        @discord.ui.button(label='Запретить', style=discord.ButtonStyle.red)
         async def deny(
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):
-            await self._resolve(interaction, "deny", discord.Color.red(), "Denied")
+            await self._resolve(interaction, "deny", discord.Color.red(), 'Запрещено')
 
         async def on_timeout(self):
             """Handle view timeout -- disable buttons and mark as expired."""
@@ -8976,7 +8964,7 @@ def _define_discord_view_classes() -> None:
                     embed = msg.embeds[0] if msg.embeds else None
                     if embed:
                         embed.color = discord.Color.greyple()
-                        embed.set_footer(text="⏱ Prompt expired — no action taken")
+                        embed.set_footer(text='⏱ Время ожидания истекло — действие не выполнено')
                     await msg.edit(embed=embed, view=self)
                 except Exception:
                     pass  # message deleted or too old to edit
@@ -9024,12 +9012,12 @@ def _define_discord_view_classes() -> None:
         ):
             if self.resolved:
                 await interaction.response.send_message(
-                    "This prompt has already been resolved~", ephemeral=True,
+                    'По этому запросу уже принято решение.', ephemeral=True,
                 )
                 return
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized to answer this prompt~", ephemeral=True,
+                    'У вас нет прав отвечать на этот запрос.', ephemeral=True,
                 )
                 return
 
@@ -9038,7 +9026,7 @@ def _define_discord_view_classes() -> None:
             embed = interaction.message.embeds[0] if interaction.message.embeds else None
             if embed:
                 embed.color = color
-                embed.set_footer(text=f"{label} by {interaction.user.display_name}")
+                embed.set_footer(text=f"""{label} — пользователь {interaction.user.display_name}""")
 
             for child in self.children:
                 child.disabled = True
@@ -9062,23 +9050,23 @@ def _define_discord_view_classes() -> None:
             except Exception as exc:
                 logger.error("Discord slash-confirm resolve failed: %s", exc, exc_info=True)
 
-        @discord.ui.button(label="Approve Once", style=discord.ButtonStyle.green)
+        @discord.ui.button(label='Подтвердить один раз', style=discord.ButtonStyle.green)
         async def approve_once(
             self, interaction: discord.Interaction, button: discord.ui.Button,
         ):
-            await self._resolve(interaction, "once", discord.Color.green(), "Approved once")
+            await self._resolve(interaction, "once", discord.Color.green(), 'Разрешено один раз')
 
-        @discord.ui.button(label="Always Approve", style=discord.ButtonStyle.blurple)
+        @discord.ui.button(label='Подтверждать всегда', style=discord.ButtonStyle.blurple)
         async def approve_always(
             self, interaction: discord.Interaction, button: discord.ui.Button,
         ):
-            await self._resolve(interaction, "always", discord.Color.purple(), "Always approved")
+            await self._resolve(interaction, "always", discord.Color.purple(), 'Разрешено постоянно')
 
-        @discord.ui.button(label="Cancel", style=discord.ButtonStyle.red)
+        @discord.ui.button(label='Отмена', style=discord.ButtonStyle.red)
         async def cancel(
             self, interaction: discord.Interaction, button: discord.ui.Button,
         ):
-            await self._resolve(interaction, "cancel", discord.Color.greyple(), "Cancelled")
+            await self._resolve(interaction, "cancel", discord.Color.greyple(), 'Отменено')
 
         async def on_timeout(self):
             self.resolved = True
@@ -9091,7 +9079,7 @@ def _define_discord_view_classes() -> None:
                     embed = msg.embeds[0] if msg.embeds else None
                     if embed:
                         embed.color = discord.Color.greyple()
-                        embed.set_footer(text="⏱ Prompt expired — no action taken")
+                        embed.set_footer(text='⏱ Время ожидания истекло — действие не выполнено')
                     await msg.edit(embed=embed, view=self)
                 except Exception:
                     pass
@@ -9128,12 +9116,12 @@ def _define_discord_view_classes() -> None:
         ):
             if self.resolved:
                 await interaction.response.send_message(
-                    "Already answered~", ephemeral=True
+                    'Ответ уже получен.', ephemeral=True
                 )
                 return
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized~", ephemeral=True
+                    'У вас нет доступа.', ephemeral=True
                 )
                 return
 
@@ -9143,7 +9131,7 @@ def _define_discord_view_classes() -> None:
             embed = interaction.message.embeds[0] if interaction.message.embeds else None
             if embed:
                 embed.color = color
-                embed.set_footer(text=f"{label} by {interaction.user.display_name}")
+                embed.set_footer(text=f"""{label} — пользователь {interaction.user.display_name}""")
 
             for child in self.children:
                 child.disabled = True
@@ -9164,17 +9152,17 @@ def _define_discord_view_classes() -> None:
             except Exception as exc:
                 logger.error("Failed to write update response: %s", exc)
 
-        @discord.ui.button(label="Yes", style=discord.ButtonStyle.green, emoji="✓")
+        @discord.ui.button(label='Да', style=discord.ButtonStyle.green, emoji="✓")
         async def yes_btn(
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):
-            await self._respond(interaction, "y", discord.Color.green(), "Yes")
+            await self._respond(interaction, "y", discord.Color.green(), 'Да')
 
-        @discord.ui.button(label="No", style=discord.ButtonStyle.red, emoji="✗")
+        @discord.ui.button(label='Нет', style=discord.ButtonStyle.red, emoji="✗")
         async def no_btn(
             self, interaction: discord.Interaction, button: discord.ui.Button
         ):
-            await self._respond(interaction, "n", discord.Color.red(), "No")
+            await self._respond(interaction, "n", discord.Color.red(), 'Нет')
 
         async def on_timeout(self):
             self.resolved = True
@@ -9187,7 +9175,7 @@ def _define_discord_view_classes() -> None:
                     embed = msg.embeds[0] if msg.embeds else None
                     if embed:
                         embed.color = discord.Color.greyple()
-                        embed.set_footer(text="⏱ Prompt expired — no action taken")
+                        embed.set_footer(text='⏱ Время ожидания истекло — действие не выполнено')
                     await msg.edit(embed=embed, view=self)
                 except Exception:
                     pass
@@ -9235,7 +9223,7 @@ def _define_discord_view_classes() -> None:
             options = []
             for p in self.providers:
                 count = p.get("total_models", len(p.get("models", [])))
-                label = f"{p['name']} ({count} models)"
+                label = f"""{p['name']} ({count} моделей)"""
                 desc = "current" if p.get("is_current") else None
                 options.append(
                     discord.SelectOption(
@@ -9251,7 +9239,7 @@ def _define_discord_view_classes() -> None:
                 return
 
             select = discord.ui.Select(
-                placeholder="Choose a provider...",
+                placeholder='Выберите провайдера…',
                 options=options[:_DISCORD_SELECT_MAX_OPTIONS],
                 custom_id="model_provider_select",
             )
@@ -9259,7 +9247,7 @@ def _define_discord_view_classes() -> None:
             self.add_item(select)
 
             cancel_btn = discord.ui.Button(
-                label="Cancel", style=discord.ButtonStyle.red, custom_id="model_cancel"
+                label='Отмена', style=discord.ButtonStyle.red, custom_id="model_cancel"
             )
             cancel_btn.callback = self._on_cancel
             self.add_item(cancel_btn)
@@ -9298,7 +9286,7 @@ def _define_discord_view_classes() -> None:
                 : _DISCORD_SELECT_MAX_ROWS - 2
             ]  # keep 2 rows for Back/Cancel
 
-            placeholder_base = f"Choose a model from {provider.get('name', provider_slug)}"
+            placeholder_base = f"""Выберите модель у {provider.get('name', provider_slug)}"""
             for idx, chunk in enumerate(chunks):
                 options = []
                 for model_id in chunk:
@@ -9327,13 +9315,13 @@ def _define_discord_view_classes() -> None:
                 self.add_item(select)
 
             back_btn = discord.ui.Button(
-                label="◀ Back", style=discord.ButtonStyle.grey, custom_id="model_back"
+                label='◀ Назад', style=discord.ButtonStyle.grey, custom_id="model_back"
             )
             back_btn.callback = self._on_back
             self.add_item(back_btn)
 
             cancel_btn = discord.ui.Button(
-                label="Cancel", style=discord.ButtonStyle.red, custom_id="model_cancel2"
+                label='Отмена', style=discord.ButtonStyle.red, custom_id="model_cancel2"
             )
             cancel_btn.callback = self._on_cancel
             self.add_item(cancel_btn)
@@ -9344,7 +9332,7 @@ def _define_discord_view_classes() -> None:
             self._pending_expensive_model = model_id
 
             confirm_btn = discord.ui.Button(
-                label="Switch anyway",
+                label='Всё равно переключить',
                 style=discord.ButtonStyle.red,
                 custom_id="model_expensive_confirm",
             )
@@ -9352,7 +9340,7 @@ def _define_discord_view_classes() -> None:
             self.add_item(confirm_btn)
 
             cancel_btn = discord.ui.Button(
-                label="Cancel",
+                label='Отмена',
                 style=discord.ButtonStyle.grey,
                 custom_id="model_expensive_cancel",
             )
@@ -9376,7 +9364,7 @@ def _define_discord_view_classes() -> None:
         async def _on_provider_selected(self, interaction: discord.Interaction):
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized~", ephemeral=True
+                    'У вас нет доступа.', ephemeral=True
                 )
                 return
 
@@ -9398,12 +9386,12 @@ def _define_discord_view_classes() -> None:
                 if provider
                 else 0
             )
-            extra = f"\n*{total - shown} more available — type `/model <name>` directly*" if total > shown else ""
+            extra = f"""\n*{total - shown} ещё — введите `/model <название>`*""" if total > shown else ""
 
             await interaction.response.edit_message(
                 embed=discord.Embed(
-                    title="⚙ Model Configuration",
-                    description=f"Provider: **{pname}**\nSelect a model:{extra}",
+                    title='⚙ Выбор модели',
+                    description=f"""Провайдер: **{pname}**\nВыберите модель:{extra}""",
                     color=discord.Color.blue(),
                 ),
                 view=self,
@@ -9416,12 +9404,12 @@ def _define_discord_view_classes() -> None:
         ):
             if self.resolved:
                 await interaction.response.send_message(
-                    "Already resolved~", ephemeral=True
+                    'Решение уже принято.', ephemeral=True
                 )
                 return
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized~", ephemeral=True
+                    'У вас нет доступа.', ephemeral=True
                 )
                 return
 
@@ -9429,8 +9417,8 @@ def _define_discord_view_classes() -> None:
             self.clear_items()
             await interaction.response.edit_message(
                 embed=discord.Embed(
-                    title="⚙ Switching Model",
-                    description=f"Switching to `{model_id}`...",
+                    title='⚙ Смена модели',
+                    description=f"""Переключение на `{model_id}`...""",
                     color=discord.Color.blue(),
                 ),
                 view=None,
@@ -9443,11 +9431,11 @@ def _define_discord_view_classes() -> None:
                     self._selected_provider,
                 )
             except Exception as exc:
-                result_text = f"Error switching model: {exc}"
+                result_text = f"""Не удалось сменить модель: {exc}"""
 
             await interaction.edit_original_response(
                 embed=discord.Embed(
-                    title="⚙ Model Switched",
+                    title='⚙ Модель изменена',
                     description=result_text,
                     color=discord.Color.green(),
                 ),
@@ -9457,12 +9445,12 @@ def _define_discord_view_classes() -> None:
         async def _on_model_selected(self, interaction: discord.Interaction):
             if self.resolved:
                 await interaction.response.send_message(
-                    "Already resolved~", ephemeral=True
+                    'Решение уже принято.', ephemeral=True
                 )
                 return
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized~", ephemeral=True
+                    'У вас нет доступа.', ephemeral=True
                 )
                 return
 
@@ -9485,12 +9473,12 @@ def _define_discord_view_classes() -> None:
         async def _on_expensive_confirm(self, interaction: discord.Interaction):
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized~", ephemeral=True
+                    'У вас нет доступа.', ephemeral=True
                 )
                 return
             if not self._pending_expensive_model:
                 await interaction.response.send_message(
-                    "Model selection expired.", ephemeral=True
+                    'Время выбора модели истекло.', ephemeral=True
                 )
                 return
             await self._switch_selected_model(
@@ -9501,7 +9489,7 @@ def _define_discord_view_classes() -> None:
         async def _on_back(self, interaction: discord.Interaction):
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized~", ephemeral=True
+                    'У вас нет доступа.', ephemeral=True
                 )
                 return
 
@@ -9515,11 +9503,9 @@ def _define_discord_view_classes() -> None:
 
             await interaction.response.edit_message(
                 embed=discord.Embed(
-                    title="⚙ Model Configuration",
+                    title='⚙ Выбор модели',
                     description=(
-                        f"Current model: `{self.current_model or 'unknown'}`\n"
-                        f"Provider: {provider_label}\n\n"
-                        f"Select a provider:"
+                        f"""Текущая модель: `{self.current_model or 'unknown'}`\nПровайдер: {provider_label}\n\nВыберите провайдера:"""
                     ),
                     color=discord.Color.blue(),
                 ),
@@ -9531,8 +9517,8 @@ def _define_discord_view_classes() -> None:
             self.clear_items()
             await interaction.response.edit_message(
                 embed=discord.Embed(
-                    title="⚙ Model Configuration",
-                    description="Model selection cancelled.",
+                    title='⚙ Выбор модели',
+                    description='Выбор модели отменён.',
                     color=discord.Color.greyple(),
                 ),
                 view=self,
@@ -9546,8 +9532,8 @@ def _define_discord_view_classes() -> None:
             if msg:
                 try:
                     embed = discord.Embed(
-                        title="⚙ Model Configuration",
-                        description="⏱ Selection expired — no model change.",
+                        title='⚙ Выбор модели',
+                        description='⏱ Время ожидания истекло — модель прежняя.',
                         color=discord.Color.greyple(),
                     )
                     await msg.edit(embed=embed, view=self)
@@ -9591,7 +9577,7 @@ def _define_discord_view_classes() -> None:
                     )
                 )
             select = discord.ui.Select(
-                placeholder="Choose an option...",
+                placeholder='Выберите вариант…',
                 options=options,
             )
             select.callback = self._on_select
@@ -9605,7 +9591,7 @@ def _define_discord_view_classes() -> None:
         async def _on_select(self, interaction: discord.Interaction):
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "⛔ You are not authorized to change this setting.",
+                    '⛔ У вас нет прав менять эту настройку.',
                     ephemeral=True,
                 )
                 return
@@ -9621,7 +9607,7 @@ def _define_discord_view_classes() -> None:
                 )
             except Exception as exc:
                 logger.error("Choice picker selection failed: %s", exc)
-                result_text = f"Error applying selection: {exc}"
+                result_text = f"""Не удалось применить выбор: {exc}"""
 
             embed = discord.Embed(
                 description=result_text,
@@ -9638,7 +9624,7 @@ def _define_discord_view_classes() -> None:
             if msg is not None:
                 try:
                     embed = discord.Embed(
-                        description="⏱ Selection expired — no change made.",
+                        description='⏱ Время ожидания истекло — настройки прежние.',
                         color=discord.Color.greyple(),
                     )
                     self.clear_items()
@@ -9727,7 +9713,7 @@ def _define_discord_view_classes() -> None:
                 self.add_item(button)
 
             other_btn = discord.ui.Button(
-                label="✏️ Other (type answer)",
+                label='✏️ Свой ответ',
                 style=discord.ButtonStyle.secondary,
                 custom_id=f"clarify:{clarify_id}:other",
             )
@@ -9753,12 +9739,12 @@ def _define_discord_view_classes() -> None:
             """Resolve the clarify with a chosen option."""
             if self.resolved:
                 await interaction.response.send_message(
-                    "This prompt has already been answered~", ephemeral=True,
+                    'На этот запрос уже ответили.', ephemeral=True,
                 )
                 return
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized to answer this prompt~", ephemeral=True,
+                    'У вас нет прав отвечать на этот запрос.', ephemeral=True,
                 )
                 return
 
@@ -9773,7 +9759,7 @@ def _define_discord_view_classes() -> None:
                 user = getattr(interaction, "user", None)
                 display_name = getattr(user, "display_name", "user")
                 embed.color = discord.Color.green()
-                embed.set_footer(text=f"Answered by {display_name}: {choice}")
+                embed.set_footer(text=f"""Ответил пользователь {display_name}: {choice}""")
 
             try:
                 await interaction.response.edit_message(embed=embed, view=self)
@@ -9821,12 +9807,12 @@ def _define_discord_view_classes() -> None:
             """Flip the clarify entry into text-capture mode."""
             if self.resolved:
                 await interaction.response.send_message(
-                    "This prompt has already been answered~", ephemeral=True,
+                    'На этот запрос уже ответили.', ephemeral=True,
                 )
                 return
             if not self._check_auth(interaction):
                 await interaction.response.send_message(
-                    "You're not authorized to answer this prompt~", ephemeral=True,
+                    'У вас нет прав отвечать на этот запрос.', ephemeral=True,
                 )
                 return
 
@@ -9854,7 +9840,7 @@ def _define_discord_view_classes() -> None:
                 display_name = getattr(user, "display_name", "user")
                 embed.color = discord.Color.blue()
                 embed.set_footer(
-                    text=f"Awaiting typed response from {display_name}…",
+                    text=f"""Ожидается ответ текстом. Пользователь: {display_name}…""",
                 )
 
             try:
@@ -9876,7 +9862,7 @@ def _define_discord_view_classes() -> None:
                     embed = msg.embeds[0] if msg.embeds else None
                     if embed:
                         embed.color = discord.Color.greyple()
-                        embed.set_footer(text="⏱ Prompt expired — no action taken")
+                        embed.set_footer(text='⏱ Время ожидания истекло — действие не выполнено')
                     await msg.edit(embed=embed, view=self)
                 except Exception:
                     pass
@@ -10318,71 +10304,67 @@ def interactive_setup() -> None:
     print_header("Discord")
     existing = get_env_value("DISCORD_BOT_TOKEN")
     if existing:
-        print_info("Discord: already configured")
+        print_info('Discord: уже настроен')
         if not prompt_yes_no("Reconfigure Discord?", False):
             if not get_env_value("DISCORD_ALLOWED_USERS"):
                 print_info(
-                    "⚠️  Discord has no user allowlist. With the fail-closed default, "
-                    "messages are denied unless you configure allowed users, roles, "
-                    "or channels, or set DISCORD_ALLOW_ALL_USERS=true."
+                    '⚠️  Список доступа Discord пуст. Укажите пользователей, роли или каналы с доступом. DISCORD_ALLOW_ALL_USERS=true открывает доступ всем.'
                 )
-                if prompt_yes_no("Add allowed users now?", True):
-                    print_info("   To find Discord ID: Enable Developer Mode, right-click name → Copy ID")
-                    allowed_users = prompt("Allowed user IDs (comma-separated)")
+                if prompt_yes_no('Добавить пользователей с доступом сейчас?', True):
+                    print_info('   ID в Discord: включите режим разработчика, нажмите правой кнопкой по имени → «Копировать ID»')
+                    allowed_users = prompt('ID пользователей с доступом (через запятую)')
                     if allowed_users:
                         cleaned_ids = _clean_discord_user_ids(allowed_users)
                         save_env_value("DISCORD_ALLOWED_USERS", ",".join(cleaned_ids))
-                        print_success("Discord allowlist configured")
+                        print_success('Список доступа Discord настроен')
             return
 
-    print_info("Create a bot at https://discord.com/developers/applications")
-    print_info("On Bot → Privileged Gateway Intents, enable:")
-    print_info("  - Message Content Intent (required — without it Discord rejects the connection)")
-    print_info("  - Server Members Intent (required if you use usernames or role allowlists)")
-    print_info("Save Changes in the Developer Portal before starting the gateway.")
+    print_info('Создайте бота: https://discord.com/developers/applications')
+    print_info('В разделе Bot → Privileged Gateway Intents включите:')
+    print_info('  - Message Content Intent (обязательно — иначе Discord отклонит подключение)')
+    print_info('  - Server Members Intent (для доступа по именам пользователей или ролям)')
+    print_info('Сохраните изменения в Developer Portal перед запуском шлюза.')
     print_info(
-        "Docs: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/discord"
+        'Инструкция: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/discord'
     )
-    token = prompt("Discord bot token", password=True)
+    token = prompt('Токен бота Discord', password=True)
     if not token:
         return
     save_env_value("DISCORD_BOT_TOKEN", token)
-    print_success("Discord token saved")
+    print_success('Токен Discord сохранён')
 
     print()
-    print_info("🔒 Security: Restrict who can use your bot")
-    print_info("   To find your Discord user ID:")
-    print_info("   1. Enable Developer Mode in Discord settings")
-    print_info("   2. Right-click your name → Copy ID")
+    print_info('🔒 Доступ: кто может пользоваться ботом')
+    print_info('   Как узнать свой ID в Discord:')
+    print_info('   1. Включите режим разработчика в настройках Discord')
+    print_info('   2. Нажмите правой кнопкой по своему имени → «Копировать ID»')
     print()
-    print_info("   You can also use Discord usernames (resolved on gateway start).")
+    print_info('   Можно указать имена пользователей Discord: они определятся при запуске шлюза.')
     print()
     allowed_users = prompt(
-        "Allowed user IDs or usernames (comma-separated, leave empty for open access)"
+        'ID или имена пользователей через запятую (без списка доступ будет закрыт)'
     )
     if allowed_users:
         cleaned_ids = _clean_discord_user_ids(allowed_users)
         save_env_value("DISCORD_ALLOWED_USERS", ",".join(cleaned_ids))
-        print_success("Discord allowlist configured")
+        print_success('Список доступа Discord настроен')
     else:
         print_info(
-            "⚠️  No allowlist set. Discord will deny messages until you set "
-            "DISCORD_ALLOWED_USERS, DISCORD_ALLOWED_ROLES, DISCORD_ALLOWED_CHANNELS, "
-            "or DISCORD_ALLOW_ALL_USERS=true for open access."
+            '⚠️  Список доступа пуст. Укажите DISCORD_ALLOWED_USERS, DISCORD_ALLOWED_ROLES или DISCORD_ALLOWED_CHANNELS. DISCORD_ALLOW_ALL_USERS=true открывает доступ всем.'
         )
 
     print()
-    print_info("📬 Home Channel: where Hermes delivers cron job results,")
-    print_info("   cross-platform messages, and notifications.")
-    print_info("   To get a channel ID: right-click a channel → Copy Channel ID")
-    print_info("   (requires Developer Mode in Discord settings)")
-    print_info("   You can also set this later by typing /set-home in a Discord channel.")
-    home_channel = prompt("Home channel ID (leave empty to set later with /set-home)").strip()
+    print_info('📬 Основной канал: сюда Корра присылает результаты задач,')
+    print_info('   сообщения из других мессенджеров и уведомления.')
+    print_info('   ID канала: нажмите правой кнопкой по каналу → «Копировать ID канала»')
+    print_info('   (нужен режим разработчика в настройках Discord)')
+    print_info('   Можно настроить позже командой /set-home в канале Discord.')
+    home_channel = prompt('ID основного канала (можно пропустить и настроить позже через /set-home)').strip()
     if home_channel:
         save_env_value("DISCORD_HOME_CHANNEL", home_channel)
     else:
         if remove_env_value("DISCORD_HOME_CHANNEL"):
-            print_info("Home channel cleared.")
+            print_info('Основной канал сброшен.')
 
 
 def _apply_yaml_config(yaml_cfg: dict, discord_cfg: dict) -> dict | None:
@@ -10602,7 +10584,7 @@ def register(ctx) -> None:
         ensure_deps_fn=check_discord_requirements,
         is_connected=_is_connected,
         required_env=["DISCORD_BOT_TOKEN"],
-        install_hint="Run `hermes setup` to install Discord support.",
+        install_hint='Выполните `korra setup`, чтобы подключить Discord.',
         # Interactive setup wizard — replaces the central
         # korra_cli/setup.py::_setup_discord function.  Same shape as Teams.
         setup_fn=interactive_setup,

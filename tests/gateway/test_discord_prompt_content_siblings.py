@@ -62,8 +62,7 @@ async def test_clarify_with_choices_mirrors_question_into_content():
 
     assert result.success is True
     assert sent["view"] is not None
-    assert "Hermes needs your input" in sent["content"]
+    assert "Корре нужен ваш ответ" in sent["content"]
     assert "Which environment should I deploy to?" in sent["content"]
-    assert "Pick one below" in sent["content"]
-
+    assert "Выберите вариант ниже" in sent["content"]
 

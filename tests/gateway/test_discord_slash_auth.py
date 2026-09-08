@@ -293,7 +293,7 @@ async def test_unauthorized_attempt_notifies_telegram(adapter):
     telegram_adapter.send.assert_awaited_once()
     chat_id, msg = telegram_adapter.send.call_args.args
     assert chat_id == "987654321"
-    assert "Unauthorized" in msg
+    assert "без доступа" in msg
     assert "999999999" in msg
     assert "/bg hi" in msg
     assert "DISCORD_ALLOWED_USERS" in msg
@@ -514,7 +514,7 @@ async def test_skill_handler_rejects_before_dispatch_for_unauthorized(
     interaction.response.send_message.assert_awaited_once()
     args, kwargs = interaction.response.send_message.call_args
     assert kwargs.get("ephemeral") is True
-    assert "not authorized" in (
+    assert "нет прав" in (
         args[0] if args else kwargs.get("content", "")
     ).lower()
     # Critically: nothing was dispatched, and the auth message did NOT
@@ -548,5 +548,4 @@ async def test_skill_handler_known_and_unknown_produce_same_rejection(
     )
     assert known_args == unknown_args
     assert known_kwargs == unknown_kwargs
-
 

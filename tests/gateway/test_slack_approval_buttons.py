@@ -137,7 +137,7 @@ class TestSlackExecApproval:
         assert [element["action_id"] for element in elements] == [
             "hermes_approve_once", "hermes_deny",
         ]
-        assert "one operation" in kwargs["blocks"][0]["text"]["text"].lower()
+        assert "только на эту операцию" in kwargs["blocks"][0]["text"]["text"].lower()
 
 
 # ===========================================================================
@@ -840,4 +840,3 @@ class TestSlackReactionAuthorizationGate:
         assert "U_RANDO" in runner.auth_checked
         assert runner.handled == []
         adapter.handle_message.assert_not_called()
-

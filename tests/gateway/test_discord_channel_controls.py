@@ -212,8 +212,8 @@ async def test_auto_thread_failure_skips_agent_and_notifies_user(adapter, monkey
     # inline reply.
     channel.send.assert_awaited_once()
     sent_text = channel.send.await_args.args[0]
-    assert "could not create" in sent_text.lower()
-    assert "thread" in sent_text.lower()
+    assert "не удалось создать" in sent_text.lower()
+    assert "ветку" in sent_text.lower()
 
 
 # ── config.py bridging ───────────────────────────────────────────────
@@ -238,5 +238,4 @@ def test_config_bridges_ignored_channels(monkeypatch, tmp_path):
 
     import os
     assert os.getenv("DISCORD_IGNORED_CHANNELS") == "111,222"
-
 

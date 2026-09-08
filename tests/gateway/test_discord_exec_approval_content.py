@@ -40,11 +40,10 @@ async def test_exec_approval_prompt_uses_visible_content_with_command_and_reason
     assert sent["embed"] is not None
 
     prompt_text = sent["content"]
-    assert "Command Approval Required" in prompt_text
-    assert "Do you want Hermes to run this command?" in prompt_text
-    assert "Requested command" in prompt_text
+    assert "Нужно разрешение на команду" in prompt_text
+    assert "Разрешить Корре выполнить эту команду?" in prompt_text
+    assert "Команда:" in prompt_text
     assert command in prompt_text
-    assert "Reason" in prompt_text
+    assert "Причина" in prompt_text
     assert "script execution via -c flag" in prompt_text
-
 
