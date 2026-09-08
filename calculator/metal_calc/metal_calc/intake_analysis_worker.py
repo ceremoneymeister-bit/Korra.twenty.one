@@ -86,7 +86,7 @@ class NativeRunsClient:
             "Idempotency-Key": attempt["idempotency_key"],
             # Scope redaction must never erase the public session identity used
             # to bind status/recovery. Keep the opaque marker distinct.
-            "X-Hermes-Tool-Scope": "calc-analysis-scope:" + attempt["session_id"],
+            "X-Hermes-Tool-Scope": "calc-analysis-scope-" + attempt["session_id"],
             "X-Korra-Session-Source": "dashboard",
         })
 

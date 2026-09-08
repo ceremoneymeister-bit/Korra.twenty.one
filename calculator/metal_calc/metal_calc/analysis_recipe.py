@@ -88,7 +88,7 @@ def source_contents(source, observation):
 
 def recipe():
     reader = load_reader()
-    return {"version": "calc21-analysis-v2", "model": ANALYSIS_MODEL,
+    return {"version": "calc21-analysis-v3", "model": ANALYSIS_MODEL,
             "provider": ANALYSIS_PROVIDER, "limits": LIMITS, "render": RENDER_OPTIONS,
             "reader": reader.reader_fingerprint("inspect", reader.canonical_options("inspect")),
             "schema_sha256": hashlib.sha256(schema_path().read_bytes()).hexdigest(),

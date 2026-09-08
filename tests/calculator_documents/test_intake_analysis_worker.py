@@ -57,7 +57,7 @@ def test_native_dispatch_is_profile_bound_and_frozen(native_server):
     headers = {key.lower(): value for key, value in headers.items()}
     assert path == "/p/intake-analysis/v1/runs"
     assert headers["idempotency-key"] == attempt["idempotency_key"]
-    assert headers["x-hermes-tool-scope"] == "calc-analysis-scope:" + attempt["session_id"]
+    assert headers["x-hermes-tool-scope"] == "calc-analysis-scope-" + attempt["session_id"]
     assert body == attempt["request_body"]
     assert source["relative_path"] not in body["input"]
     assert "test-only-token" not in json.dumps(body)
@@ -65,12 +65,19 @@ def test_native_dispatch_is_profile_bound_and_frozen(native_server):
 
 def test_scope_redaction_preserves_native_session_identity(native_server):
     from gateway.platforms.api_server_runs import _RunScopeRedactor
+    from gateway.platforms.api_server import APIServerAdapter
+    from types import SimpleNamespace
 
     url, calls, _ = native_server
     attempt = {"session_id": "analysis_opaque-session", "idempotency_key": "request-key"}
     attempt["request_body"] = request_body({"source_id": "src_test"}, attempt)
     NativeRunsClient(url, "test-token").dispatch(attempt)
     headers = {key.lower(): value for key, value in calls[0][1].items()}
+    parser = SimpleNamespace(_expected_api_key=lambda: "test-token",
+                             _MAX_TOOL_SCOPE_HEADER_LEN=APIServerAdapter._MAX_TOOL_SCOPE_HEADER_LEN)
+    _, error = APIServerAdapter._parse_tool_scope_header(parser, SimpleNamespace(
+        headers={"X-Hermes-Tool-Scope": headers["x-hermes-tool-scope"]}))
+    assert error is None, "Scope marker must satisfy the actual native header grammar"
     redactor = _RunScopeRedactor(headers["x-hermes-tool-scope"])
     public = redactor({"session_id": attempt["session_id"], "status": "completed"})
     assert public["session_id"] == attempt["session_id"]
