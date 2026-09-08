@@ -194,7 +194,8 @@ def _managed_externally() -> bool:
 
 
 def _clean_text(value: Any, limit: int = 400) -> str:
-    return str(value).strip()[:limit] if isinstance(value, (str, int, float)) else ""
+    """Только строка и только по длине: карточка выпуска — это текст."""
+    return value.strip()[:limit] if isinstance(value, str) else ""
 
 
 def _clean_items(raw: Any, limit: int = 24) -> list[dict[str, str]]:

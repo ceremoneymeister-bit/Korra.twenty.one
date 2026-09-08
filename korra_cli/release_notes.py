@@ -298,11 +298,14 @@ def qa_reports_between(repo: Path, rev_range: str) -> list[tuple[str, str]]:
     проверив результат, и в нём есть человеческий заголовок.
     """
     try:
-        changed = _git(repo, "diff", "--name-only", "--diff-filter=AM", rev_range, "--", "docs/qa")
+        # `-z` вместо разбора строк: имена отчётов бывают русскими и с
+        # пробелами, а git по умолчанию экранирует их кавычками.
+        changed = _git(repo, "diff", "--name-only", "-z", "--diff-filter=AM",
+                       rev_range, "--", "docs/qa")
     except RuntimeError:
         return []
     reports: list[tuple[str, str]] = []
-    for name in sorted(set(changed.split())):
+    for name in sorted({item for item in changed.split("\0") if item}):
         if not name.endswith(".md"):
             continue
         path = repo / name

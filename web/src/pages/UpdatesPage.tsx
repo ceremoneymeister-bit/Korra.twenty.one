@@ -391,7 +391,24 @@ export default function UpdatesPage() {
         badge={!available && !active ? "Последняя версия" : undefined}
         badgeTone="ready"
       >
-        {!available && !active && !state.managed_externally && (
+        {finished && (
+          <div className="upd-note">
+            <Check size={18} aria-hidden />
+            <div>
+              <strong>
+                {progress?.status === "rolled_back"
+                  ? "Вернули прежнюю версию"
+                  : "Обновление прошло, всё на месте"}
+              </strong>
+              <p>
+                {progress?.status === "rolled_back"
+                  ? "Данные, память и доступы остались как были."
+                  : "Профили, доступы и ответ модели проверены после переключения."}
+              </p>
+            </div>
+          </div>
+        )}
+        {!available && !active && !finished && !state.managed_externally && (
           <div className="upd-note">
             <Info size={18} aria-hidden />
             <div>
@@ -403,7 +420,7 @@ export default function UpdatesPage() {
             </div>
           </div>
         )}
-        {!available && !active && state.managed_externally && (
+        {!available && !active && !finished && state.managed_externally && (
           <div className="upd-note">
             <Circle size={18} aria-hidden />
             <div>
