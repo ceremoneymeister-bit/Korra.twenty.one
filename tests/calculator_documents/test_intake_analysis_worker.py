@@ -57,10 +57,23 @@ def test_native_dispatch_is_profile_bound_and_frozen(native_server):
     headers = {key.lower(): value for key, value in headers.items()}
     assert path == "/p/intake-analysis/v1/runs"
     assert headers["idempotency-key"] == attempt["idempotency_key"]
-    assert headers["x-hermes-tool-scope"] == attempt["session_id"]
+    assert headers["x-hermes-tool-scope"] == "calc-analysis-scope:" + attempt["session_id"]
     assert body == attempt["request_body"]
     assert source["relative_path"] not in body["input"]
     assert "test-only-token" not in json.dumps(body)
+
+
+def test_scope_redaction_preserves_native_session_identity(native_server):
+    from gateway.platforms.api_server_runs import _RunScopeRedactor
+
+    url, calls, _ = native_server
+    attempt = {"session_id": "analysis_opaque-session", "idempotency_key": "request-key"}
+    attempt["request_body"] = request_body({"source_id": "src_test"}, attempt)
+    NativeRunsClient(url, "test-token").dispatch(attempt)
+    headers = {key.lower(): value for key, value in calls[0][1].items()}
+    redactor = _RunScopeRedactor(headers["x-hermes-tool-scope"])
+    public = redactor({"session_id": attempt["session_id"], "status": "completed"})
+    assert public["session_id"] == attempt["session_id"]
 
 
 @pytest.mark.parametrize("url", ["https://remote.test", "http://127.0.0.1/p/default",

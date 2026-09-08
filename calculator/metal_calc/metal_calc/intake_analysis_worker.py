@@ -84,7 +84,9 @@ class NativeRunsClient:
     def dispatch(self, attempt):
         return self.request("POST", "/v1/runs", body=attempt["request_body"], headers={
             "Idempotency-Key": attempt["idempotency_key"],
-            "X-Hermes-Tool-Scope": attempt["session_id"],
+            # Scope redaction must never erase the public session identity used
+            # to bind status/recovery. Keep the opaque marker distinct.
+            "X-Hermes-Tool-Scope": "calc-analysis-scope:" + attempt["session_id"],
             "X-Korra-Session-Source": "dashboard",
         })
 
