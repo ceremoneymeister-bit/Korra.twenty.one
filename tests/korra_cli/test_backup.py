@@ -406,8 +406,8 @@ class TestImport:
         run_import(Namespace(zipfile=str(zip_path), force=True))
 
         out = capsys.readouterr().out
-        assert "Done. Your Korra configuration has been restored." in out
-        assert "hermes gateway install" in out
+        assert "Готово. Настройки Korra восстановлены." in out
+        assert "korra gateway install" in out
 
 
 
@@ -1254,7 +1254,7 @@ class TestQuickSnapshot:
         monkeypatch.setattr(backup_mod, "_safe_copy_db", boom)
         snap_id = backup_mod.create_quick_snapshot(hermes_home=hermes_home)
         err = capsys.readouterr().out
-        assert "SQLite safe copy FAILED" in err or "CRITICAL" in err
+        assert "не удалось безопасно скопировать SQLite" in err or "КРИТИЧНО" in err
         assert "state.db" in err
         # Other small files may still snapshot
         if snap_id:
@@ -1674,8 +1674,8 @@ class TestRunPreUpdateBackup:
         snap_id = _run_pre_update_backup(Namespace(no_backup=False, backup=False))
         out = capsys.readouterr().out
         assert snap_id is not None
-        assert "Pre-update snapshot" in out
-        assert "Creating pre-update backup" in out
+        assert "Резервный снимок перед обновлением" in out
+        assert "Создаю резервную копию перед обновлением" in out
         assert len(self._zips(hermes_home)) == 1
 
 
@@ -1866,7 +1866,5 @@ class TestMemoryProviderExternalPaths:
         assert (restored.stat().st_mode & 0o777) == 0o600
         # External state did NOT leak into HERMES_HOME.
         assert not (hermes_home / "_external").exists()
-
-
 
 

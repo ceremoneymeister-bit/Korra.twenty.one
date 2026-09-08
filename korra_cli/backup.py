@@ -802,14 +802,14 @@ def run_backup(args) -> None:
     hermes_root = get_default_hermes_root()
 
     if not hermes_root.is_dir():
-        print(f"Error: Korra home directory not found at {hermes_root}")
+        print(f"Ошибка: папка данных Korra не найдена: {hermes_root}")
         sys.exit(1)
 
     try:
         with _backup_operation_lock(hermes_root):
             _run_backup_locked(args, hermes_root)
     except BackupInProgressError as exc:
-        print(f"Error: {exc}")
+        print(f"Ошибка: {exc}")
         raise SystemExit(2) from exc
 
 
@@ -839,13 +839,13 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
         # A bad/unwritable output path (permission denied, unreadable parent,
         # etc.) should give a clean one-line error, not a raw traceback
         # (round-3 QA SUB-01). is_dir() and mkdir() both hit the filesystem.
-        print(f"Error: cannot write backup to {args.output or out_path}: {exc}")
+        print(f"Ошибка: не удалось записать резервную копию в {args.output or out_path}: {exc}")
         raise SystemExit(1) from exc
 
     # Collect files
     scan_started = time.monotonic()
     logger.info("backup phase=scan status=started")
-    print(f"Scanning {display_hermes_home()} ...")
+    print(f"Проверяю файлы в {display_hermes_home()}…")
     files_to_add: list[tuple[Path, Path]] = []  # (absolute, relative)
     skipped_dirs = set()
 
@@ -903,7 +903,7 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
             "backup phase=scan status=empty duration_ms=%.1f",
             (time.monotonic() - scan_started) * 1000,
         )
-        print("No files to back up.")
+        print("Нет файлов для резервного копирования.")
         return
 
     # Create the zip
@@ -914,7 +914,7 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
         file_count,
     )
     logger.info("backup phase=archive status=started files=%d", file_count)
-    print(f"Backing up {file_count} files ...")
+    print(f"Создаю резервную копию; файлов: {file_count}…")
 
     total_bytes = 0
     errors = []
@@ -952,7 +952,7 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
 
             # Progress every 500 files
             if i % 500 == 0:
-                print(f"  {i}/{file_count} files ...")
+                print(f"  Файлов: {i}/{file_count}…")
                 logger.info(
                     "backup phase=archive status=progress completed=%d total=%d",
                     i,
@@ -983,42 +983,42 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
     # Summary
     print()
     if errors:
-        print(f"Backup incomplete: {out_path}")
+        print(f"Резервная копия создана не полностью: {out_path}")
     else:
-        print(f"Backup complete: {out_path}")
-    print(f"  Files:       {file_count}")
-    print(f"  Original:    {_format_size(total_bytes)}")
-    print(f"  Compressed:  {_format_size(zip_size)}")
-    print(f"  Time:        {elapsed:.1f}s")
+        print(f"Резервная копия готова: {out_path}")
+    print(f"  Файлов:      {file_count}")
+    print(f"  До сжатия:   {_format_size(total_bytes)}")
+    print(f"  После сжатия: {_format_size(zip_size)}")
+    print(f"  Время:       {elapsed:.1f} с")
 
     if external_to_add:
         print(
-            f"\n  Included {len(external_to_add)} memory-provider file(s) "
-            f"stored outside {display_hermes_home()}."
+            f"\n  Добавлено внешних файлов провайдера памяти: {len(external_to_add)}; "
+            f"они хранятся вне {display_hermes_home()}."
         )
 
     if skipped_external:
         print(
-            f"\n  Skipped {len(skipped_external)} memory-provider path(s) "
-            f"outside your home directory (not portable):"
+            f"\n  Пропущено внешних путей провайдера памяти: {len(skipped_external)}. "
+            "Они находятся вне домашней папки и не переносятся:"
         )
         for p in sorted(skipped_external)[:10]:
             print(f"    {p}")
 
     if skipped_dirs:
-        print("\n  Excluded directories:")
+        print("\n  Исключённые папки:")
         for d in sorted(skipped_dirs):
             print(f"    {d}/")
 
     if errors:
-        print(f"\n  Warnings ({len(errors)} files skipped):")
+        print(f"\n  Предупреждения; пропущено файлов: {len(errors)}:")
         for e in errors[:10]:
             print(e)
         if len(errors) > 10:
-            print(f"  ... and {len(errors) - 10} more")
+            print(f"  … и ещё {len(errors) - 10}")
 
     if not errors:
-        print(f"\nRestore with: hermes import {out_path.name}")
+        print(f"\nВосстановить: korra import {out_path.name}")
 
 
 # ---------------------------------------------------------------------------
@@ -1205,11 +1205,11 @@ def run_import(args) -> None:
     zip_path = Path(args.zipfile).expanduser().resolve()
 
     if not zip_path.is_file():
-        print(f"Error: File not found: {zip_path}")
+        print(f"Ошибка: файл не найден: {zip_path}")
         sys.exit(1)
 
     if not zipfile.is_zipfile(zip_path):
-        print(f"Error: Not a valid zip file: {zip_path}")
+        print(f"Ошибка: это не ZIP-архив: {zip_path}")
         sys.exit(1)
 
     hermes_root = get_default_hermes_root()
@@ -1218,18 +1218,18 @@ def run_import(args) -> None:
         # Validate
         ok, reason = _validate_backup_zip(zf)
         if not ok:
-            print(f"Error: {reason}")
+            print(f"Ошибка: {reason}")
             sys.exit(1)
 
         prefix = _detect_prefix(zf)
         members = [n for n in zf.namelist() if not n.endswith("/")]
         file_count = len(members)
 
-        print(f"Backup contains {file_count} files")
-        print(f"Target: {display_hermes_home()}")
+        print(f"В резервной копии файлов: {file_count}")
+        print(f"Папка восстановления: {display_hermes_home()}")
 
         if prefix:
-            print(f"Detected archive prefix: {prefix!r} (will be stripped)")
+            print(f"Обнаружен префикс архива {prefix!r}; при восстановлении он будет удалён.")
 
         # Check for existing installation
         has_config = (hermes_root / "config.yaml").exists()
@@ -1237,20 +1237,20 @@ def run_import(args) -> None:
 
         if (has_config or has_env) and not args.force:
             print()
-            print("Warning: Target directory already has Korra configuration.")
-            print("Importing will overwrite existing files with backup contents.")
+            print("Внимание: в целевой папке уже есть настройки Korra.")
+            print("Восстановление заменит существующие файлы содержимым копии.")
             print()
             try:
-                answer = input("Continue? [y/N] ").strip().lower()
+                answer = input("Продолжить? [д/Н] ").strip().lower()
             except (EOFError, KeyboardInterrupt):
-                print("\nAborted.")
+                print("\nОтменено.")
                 sys.exit(1)
-            if answer not in {"y", "yes"}:
-                print("Aborted.")
+            if answer not in {"y", "yes", "д", "да"}:
+                print("Отменено.")
                 return
 
         # Extract
-        print(f"\nImporting {file_count} files ...")
+        print(f"\nВосстанавливаю файлы: {file_count}…")
         hermes_root.mkdir(parents=True, exist_ok=True)
 
         errors = []
@@ -1292,7 +1292,7 @@ def run_import(args) -> None:
                 except (PermissionError, OSError) as exc:
                     errors.append(f"  {member}: {exc}")
                 if restored % 500 == 0:
-                    print(f"  {restored}/{file_count} files ...")
+                    print(f"  Файлов: {restored}/{file_count}…")
                 continue
 
             # Strip prefix if detected
@@ -1333,37 +1333,37 @@ def run_import(args) -> None:
                 errors.append(f"  {rel}: {exc}")
 
             if restored % 500 == 0:
-                print(f"  {restored}/{file_count} files ...")
+                print(f"  Файлов: {restored}/{file_count}…")
 
         elapsed = time.monotonic() - t0
 
         # Summary
         print()
-        print(f"Import complete: {restored} files restored in {elapsed:.1f}s")
-        print(f"  Target: {display_hermes_home()}")
+        print(f"Восстановление завершено: файлов {restored}, время {elapsed:.1f} с")
+        print(f"  Папка: {display_hermes_home()}")
 
         if restored_external:
             print(
-                f"\n  Restored {restored_external} memory-provider file(s) to "
-                f"their original location(s) outside {display_hermes_home()}."
+                f"\n  Восстановлено внешних файлов провайдера памяти: {restored_external}; "
+                f"они возвращены на исходные места вне {display_hermes_home()}."
             )
 
         if errors:
-            print(f"\n  Warnings ({len(errors)} files skipped):")
+            print(f"\n  Предупреждения; пропущено файлов: {len(errors)}:")
             for e in errors[:10]:
                 print(e)
             if len(errors) > 10:
-                print(f"  ... and {len(errors) - 10} more")
+                print(f"  … и ещё {len(errors) - 10}")
 
         if skipped_runtime:
             print(
-                f"\n  Preserved {len(skipped_runtime)} runtime state "
-                f"file(s) (kept this machine's, not the backup's):"
+                f"\n  Сохранено файлов рабочего состояния этой машины: {len(skipped_runtime)}; "
+                "версии из резервной копии не применялись:"
             )
             for rel in sorted(skipped_runtime)[:10]:
                 print(f"    {rel}")
             if len(skipped_runtime) > 10:
-                print(f"    ... and {len(skipped_runtime) - 10} more")
+                print(f"    … и ещё {len(skipped_runtime) - 10}")
 
         # Post-import: restore profile wrapper scripts
         profiles_dir = hermes_root / "profiles"
@@ -1383,7 +1383,7 @@ def run_import(args) -> None:
                         continue
                     collision = check_alias_collision(profile_name)
                     if collision:
-                        print(f"  Skipped alias '{profile_name}': {collision}")
+                        print(f"  Псевдоним '{profile_name}' пропущен: {collision}")
                         restored_profiles.append((profile_name, False))
                     else:
                         wrapper = create_wrapper_script(profile_name)
@@ -1393,30 +1393,30 @@ def run_import(args) -> None:
                     created = [n for n, ok in restored_profiles if ok]
                     skipped = [n for n, ok in restored_profiles if not ok]
                     if created:
-                        print(f"\n  Profile aliases restored: {', '.join(created)}")
+                        print(f"\n  Восстановлены псевдонимы профилей: {', '.join(created)}")
                     if skipped:
-                        print(f"  Profile aliases skipped:  {', '.join(skipped)}")
+                        print(f"  Пропущены псевдонимы профилей: {', '.join(skipped)}")
                     if not _is_wrapper_dir_in_path():
-                        print(f"\n  Note: {_get_wrapper_dir()} is not in your PATH.")
-                        print('  Add to your shell config (~/.bashrc or ~/.zshrc):')
+                        print(f"\n  Примечание: {_get_wrapper_dir()} отсутствует в PATH.")
+                        print('  Добавьте в настройки оболочки ~/.bashrc или ~/.zshrc:')
                         print('    export PATH="$HOME/.local/bin:$PATH"')
             except ImportError:
                 # korra_cli.profiles might not be available (fresh install)
                 if any(profiles_dir.iterdir()):
-                    print("\n  Profiles detected but aliases could not be created.")
-                    print("  Run: hermes profile list  (after installing hermes)")
+                    print("\n  Профили найдены, но создать псевдонимы не удалось.")
+                    print("  После установки Korra выполните: korra profile list")
 
         # Guidance
         print()
         if not (hermes_root / "hermes-agent").is_dir():
-            print("Note: The hermes-agent codebase was not included in the backup.")
-            print("  If this is a fresh install, run: hermes update")
+            print("Примечание: код Korra из папки hermes-agent не входил в резервную копию.")
+            print("  Для новой установки выполните: korra update")
 
         if restored_profiles:
             gw_profiles = [n for n, _ in restored_profiles]
-            print("\nTo re-enable gateway services for profiles:")
+            print("\nЧтобы снова включить службы шлюза профилей:")
             for pname in gw_profiles:
-                print(f"  hermes -p {pname} gateway install")
+                print(f"  korra -p {pname} gateway install")
 
         # Bring the restored install to life: the backup may contain bot
         # tokens and registered cron jobs, but they're inert without a
@@ -1431,10 +1431,10 @@ def run_import(args) -> None:
                 print()
                 ensure_gateway_service(context="import")
         except Exception:
-            print("\nStart the gateway to activate cron jobs and messaging:")
-            print("  hermes gateway install")
+            print("\nЗапустите шлюз для расписания и сообщений:")
+            print("  korra gateway install")
 
-        print("Done. Your Korra configuration has been restored.")
+        print("Готово. Настройки Korra восстановлены.")
 
 
 # ---------------------------------------------------------------------------
@@ -1609,13 +1609,13 @@ def _create_quick_snapshot_locked(
                         if not _safe_copy_db(sub, dst):
                             failed_dbs.append(sub_rel)
                             print(
-                                f"  ⚠ Snapshot: SQLite safe copy FAILED for {sub_rel} "
-                                f"— file may be locked or corrupted"
+                                f"  ⚠ Снимок: не удалось безопасно скопировать SQLite {sub_rel}; "
+                                "файл может быть занят или повреждён"
                             )
                             if is_zeroed_sqlite_file(sub):
                                 print(
-                                    f"  ⚠ Snapshot: {sub_rel} looks ZEROED "
-                                    f"(no SQLite header; {sub.stat().st_size} bytes of NULs?)"
+                                    f"  ⚠ Снимок: {sub_rel} выглядит обнулённым: "
+                                    f"нет заголовка SQLite, размер {sub.stat().st_size} байт"
                                 )
                             continue
                     else:
@@ -1641,13 +1641,13 @@ def _create_quick_snapshot_locked(
                 if not _safe_copy_db(src, dst):
                     failed_dbs.append(rel)
                     print(
-                        f"  ⚠ Snapshot: SQLite safe copy FAILED for {rel} "
-                        f"— file may be locked or corrupted"
+                        f"  ⚠ Снимок: не удалось безопасно скопировать SQLite {rel}; "
+                        "файл может быть занят или повреждён"
                     )
                     if is_zeroed_sqlite_file(src):
                         print(
-                            f"  ⚠ Snapshot: {rel} looks ZEROED "
-                            f"(no SQLite header; {src.stat().st_size} bytes)"
+                            f"  ⚠ Снимок: {rel} выглядит обнулённым: "
+                            f"нет заголовка SQLite, размер {src.stat().st_size} байт"
                         )
                     continue
             else:
@@ -1661,12 +1661,12 @@ def _create_quick_snapshot_locked(
         # missing state.db backup looked like a successful pre-update snapshot
         # (#68474). Surface this on stdout where operators actually look.
         print(
-            "  ⚠ CRITICAL: could not snapshot DB file(s): "
+            "  ⚠ КРИТИЧНО: не удалось сохранить в снимок базы данных: "
             + ", ".join(failed_dbs)
         )
         print(
-            "  ⚠ If sessions disappear after update, check "
-            f"{root} and run: hermes snapshot list"
+            "  ⚠ Если после обновления пропадут беседы, проверьте "
+            f"{root} и выполните: korra snapshot list"
         )
         logger.error(
             "Quick snapshot failed to capture DB file(s): %s",
@@ -1678,8 +1678,8 @@ def _create_quick_snapshot_locked(
         if failed_dbs:
             # Distinguish "nothing to snapshot" from "state.db present but unreadable"
             print(
-                "  ⚠ Snapshot aborted: no files captured "
-                f"(failed DBs: {', '.join(failed_dbs)})"
+                "  ⚠ Снимок отменён: файлы не сохранены; "
+                f"ошибки баз данных: {', '.join(failed_dbs)}"
             )
         return None
 
@@ -1711,7 +1711,7 @@ def _create_quick_snapshot_locked(
     else:
         if oversized_skipped:
             print(
-                "  ⚠ Skipping snapshot prune: DB file(s) skipped for size: "
+                "  ⚠ Старые снимки не удаляются: из-за размера пропущены базы данных: "
                 + ", ".join(oversized_skipped)
             )
             logger.warning(
@@ -2085,12 +2085,12 @@ def run_quick_backup(args) -> None:
     label = getattr(args, "label", None)
     snap_id = create_quick_snapshot(label=label)
     if snap_id:
-        print(f"State snapshot created: {snap_id}")
+        print(f"Снимок состояния создан: {snap_id}")
         snaps = list_quick_snapshots()
-        print(f"  {len(snaps)} snapshot(s) stored in {display_hermes_home()}/state-snapshots/")
-        print(f"  Restore with: /snapshot restore {snap_id}")
+        print(f"  Снимков в {display_hermes_home()}/state-snapshots/: {len(snaps)}")
+        print(f"  Восстановить: /snapshot restore {snap_id}")
     else:
-        print("No state files found to snapshot.")
+        print("Файлы состояния для снимка не найдены.")
 
 
 # ---------------------------------------------------------------------------
