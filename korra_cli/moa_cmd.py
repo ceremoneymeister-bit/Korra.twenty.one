@@ -52,20 +52,20 @@ def _model_options() -> list[dict[str, Any]]:
 def _pick_slot(current: dict[str, str] | None = None) -> dict[str, str]:
     providers = _model_options()
     if not providers:
-        raise RuntimeError("No configured model providers found. Run `hermes model` first.")
+        raise RuntimeError("Нет настроенных провайдеров моделей. Сначала выполните `korra model`.")
     current_provider = (current or {}).get("provider", "")
     provider_default = next(
         (idx for idx, p in enumerate(providers) if p.get("slug") == current_provider),
         0,
     )
     provider_rows = [f"{p.get('name') or p.get('slug')}  ({p.get('slug')})" for p in providers]
-    provider = providers[_prompt_choice("Select provider", provider_rows, provider_default)]
+    provider = providers[_prompt_choice("Выберите провайдера", provider_rows, provider_default)]
     models = list(provider.get("models") or [])
     if not models:
-        raise RuntimeError(f"Provider {provider.get('slug')} has no selectable models")
+        raise RuntimeError(f"У провайдера {provider.get('slug')} нет доступных моделей")
     current_model = (current or {}).get("model", "")
     model_default = models.index(current_model) if current_model in models else 0
-    model = models[_prompt_choice(f"Select model for {provider.get('slug')}", models, model_default)]
+    model = models[_prompt_choice(f"Выберите модель для {provider.get('slug')}", models, model_default)]
     return {"provider": str(provider.get("slug") or ""), "model": str(model)}
 
 
@@ -77,18 +77,18 @@ def _format_slot(slot: dict[str, Any]) -> str:
 
 def _print_config(config: dict[str, Any]) -> None:
     cfg = normalize_moa_config(config.get("moa") if isinstance(config, dict) else {})
-    print("Mixture of Agents presets")
-    print(f"Default: {cfg['default_preset']}")
-    active = cfg.get("active_preset") or "(off)"
-    print(f"Active in config: {active}")
+    print("Наборы Mixture of Agents")
+    print(f"По умолчанию: {cfg['default_preset']}")
+    active = cfg.get("active_preset") or "(выключено)"
+    print(f"Активный набор: {active}")
     for name, preset in cfg["presets"].items():
         marker = "*" if name == cfg["default_preset"] else " "
         print(f"\n{marker} {name}")
-        print("  Reference models:")
+        print("  Опорные модели:")
         for idx, slot in enumerate(preset["reference_models"], start=1):
             print(f"    {idx}. {_format_slot(slot)}")
         agg = preset["aggregator"]
-        print(f"  Aggregator: {_format_slot(agg)}")
+        print(f"  Модель-сборщик: {_format_slot(agg)}")
 
 
 def cmd_moa(args) -> None:
@@ -104,8 +104,8 @@ def cmd_moa(args) -> None:
         moa = normalize_moa_config(cfg.get("moa") if isinstance(cfg, dict) else {})
         preset_name = (getattr(args, "name", None) or moa.get("default_preset") or DEFAULT_MOA_PRESET_NAME).strip()
         current = moa["presets"].get(preset_name, moa["presets"][moa["default_preset"]])
-        print(f"Configure MoA preset: {preset_name}")
-        print("Pick at least one reference model; choose Done when finished.")
+        print(f"Настройка набора MoA: {preset_name}")
+        print("Выберите хотя бы одну опорную модель, затем нажмите «Готово».")
         refs: list[dict[str, str]] = []
         existing = list(current.get("reference_models") or [])
         idx = 0
@@ -115,10 +115,10 @@ def cmd_moa(args) -> None:
             picked["enabled"] = bool((base or {}).get("enabled", True))
             refs.append(picked)
             idx += 1
-            choice = _prompt_choice("Add another reference model?", ["Add another", "Done"], 1)
+            choice = _prompt_choice("Добавить ещё одну опорную модель?", ["Добавить", "Готово"], 1)
             if choice == 1:
                 break
-        print("Configure aggregator model.")
+        print("Настройте модель-сборщик.")
         current = dict(current)
         current["reference_models"] = refs
         current["aggregator"] = _pick_slot(current.get("aggregator"))
@@ -126,7 +126,7 @@ def cmd_moa(args) -> None:
         moa.setdefault("default_preset", preset_name)
         cfg["moa"] = normalize_moa_config(moa)
         save_config(cfg)
-        print(f"Saved MoA preset: {preset_name}")
+        print(f"Набор MoA сохранён: {preset_name}")
         _print_config(cfg)
         return
 
@@ -134,11 +134,11 @@ def cmd_moa(args) -> None:
         moa = normalize_moa_config(cfg.get("moa") if isinstance(cfg, dict) else {})
         preset_name = (getattr(args, "name", None) or "").strip()
         if not preset_name:
-            raise SystemExit("Usage: hermes moa delete <name>")
+            raise SystemExit("Использование: korra moa delete <имя>")
         if preset_name not in moa["presets"]:
-            raise SystemExit(f"Unknown MoA preset: {preset_name}")
+            raise SystemExit(f"Неизвестный набор MoA: {preset_name}")
         if len(moa["presets"]) <= 1:
-            raise SystemExit("Cannot delete the only MoA preset")
+            raise SystemExit("Нельзя удалить единственный набор MoA")
         del moa["presets"][preset_name]
         if moa["default_preset"] == preset_name:
             moa["default_preset"] = next(iter(moa["presets"]))
@@ -146,7 +146,7 @@ def cmd_moa(args) -> None:
             moa["active_preset"] = ""
         cfg["moa"] = normalize_moa_config(moa)
         save_config(cfg)
-        print(f"Deleted MoA preset: {preset_name}")
+        print(f"Набор MoA удалён: {preset_name}")
         return
 
-    raise SystemExit(f"Unknown moa subcommand: {sub}")
+    raise SystemExit(f"Неизвестная подкоманда moa: {sub}")

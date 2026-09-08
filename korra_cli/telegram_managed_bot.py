@@ -108,7 +108,7 @@ def print_qr_code(url: str, *, include_link: bool = True) -> None:
     if qr_text:
         print(qr_text)
     else:
-        print("  (Install 'qrcode' for a scannable QR code: pip install qrcode)")
+            print("  (Для отображения QR-кода установите qrcode: pip install qrcode)")
     if include_link:
         print(f"  Link: {url}")
 
@@ -286,26 +286,26 @@ def auto_setup_telegram_bot_result(
     _ = manager_bot, profile_name
     resolved_api_url = _api_url(api_url)
     print()
-    print(f"  Contacting Korra Telegram onboarding service: {resolved_api_url}")
+    print(f"  Подключаюсь к службе настройки Telegram Korra: {resolved_api_url}")
     sys.stdout.flush()
     pairing = create_pairing(resolved_api_url)
     if not pairing:
-        print("  ✗ Could not reach the Korra Telegram onboarding service.")
-        print("    Try the manual setup instead, or check your network.")
+        print("  ✗ Служба настройки Telegram Korra недоступна.")
+        print("    Проверьте сеть или настройте бота вручную.")
         return None
 
-    print("  ✓ Pairing created")
-    print("  Rendering QR code...")
+    print("  ✓ Подключение создано")
+    print("  Готовлю QR-код…")
     sys.stdout.flush()
     print()
-    print("  Scan this QR code with your phone, or open the link below:")
+    print("  Отсканируйте QR-код телефоном или откройте ссылку ниже:")
     print()
     print_qr_code(pairing.qr_payload, include_link=False)
     print()
-    print(f"  Link: {pairing.deep_link}")
+    print(f"  Ссылка: {pairing.deep_link}")
     print()
-    print("  When Telegram opens, tap 'Create Bot' to confirm.")
-    print("  (You can edit the bot display name before confirming)")
+    print("  В Telegram нажмите 'Create Bot' для подтверждения.")
+    print("  Перед подтверждением можно изменить отображаемое имя бота.")
     print()
 
     spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -318,7 +318,7 @@ def auto_setup_telegram_bot_result(
         elapsed = int(time.monotonic() - start)
         remaining = max(0, int(poll_timeout - elapsed))
         sys.stdout.write(
-            f"\r  {char} Waiting for bot creation... ({remaining}s remaining) "
+            f"\r  {char} Жду создания бота… осталось {remaining} с "
         )
         sys.stdout.flush()
         idx += 1
@@ -327,7 +327,7 @@ def auto_setup_telegram_bot_result(
             result = poll_pairing_result_once(resolved_api_url, pairing)
             if result:
                 sys.stdout.write(
-                    "\r  ✓ Bot created successfully!                              \n"
+                    "\r  ✓ Бот успешно создан!                                    \n"
                 )
                 sys.stdout.flush()
                 return result
@@ -335,10 +335,10 @@ def auto_setup_telegram_bot_result(
             pass
         time.sleep(POLL_INTERVAL)
 
-    sys.stdout.write("\r  ✗ Timed out waiting for bot creation.                    \n")
+    sys.stdout.write("\r  ✗ Время ожидания создания бота истекло.                  \n")
     sys.stdout.flush()
-    print("    The bot may still be created — check Telegram.")
-    print("    You can paste the token manually below, or re-run setup.")
+    print("    Бот мог всё же создаться — проверьте Telegram.")
+    print("    Вставьте токен вручную ниже или повторите настройку.")
     return None
 
 

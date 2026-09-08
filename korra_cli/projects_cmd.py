@@ -111,8 +111,8 @@ def projects_command(args: argparse.Namespace) -> int:
             parser.print_help()
         else:
             print(
-                "usage: hermes project <action> [options]\n"
-                "Run 'hermes project --help' for the full list.",
+                "Использование: korra project <действие> [параметры]\n"
+                "Полный список: korra project --help.",
                 file=sys.stderr,
             )
         return 0
@@ -133,7 +133,7 @@ def projects_command(args: argparse.Namespace) -> int:
     }
     handler = handlers.get(action)
     if handler is None:
-        print(f"Unknown project action: {action}", file=sys.stderr)
+        print(f"Неизвестное действие с проектом: {action}", file=sys.stderr)
         return 1
     return handler(args)
 
@@ -141,7 +141,7 @@ def projects_command(args: argparse.Namespace) -> int:
 def _resolve(conn, ident: str):
     proj = pdb.get_project(conn, ident)
     if proj is None:
-        print(f"project: no such project: {ident}", file=sys.stderr)
+        print(f"Проект не найден: {ident}", file=sys.stderr)
     return proj
 
 
@@ -168,17 +168,17 @@ def _with_project(fn):
 
 
 def _print_project(proj) -> None:
-    flags = " (archived)" if proj.archived else ""
+    flags = " (в архиве)" if proj.archived else ""
     print(f"{proj.slug}  [{proj.id}]{flags}")
-    print(f"  name:    {proj.name}")
+    print(f"  название: {proj.name}")
     if proj.description:
-        print(f"  about:   {proj.description}")
+        print(f"  описание: {proj.description}")
     if proj.board_slug:
-        print(f"  board:   {proj.board_slug}")
+        print(f"  доска:   {proj.board_slug}")
     if proj.primary_path:
-        print(f"  primary: {proj.primary_path}")
+        print(f"  основная папка: {proj.primary_path}")
     if proj.folders:
-        print("  folders:")
+        print("  папки:")
         for f in proj.folders:
             mark = " *" if f.is_primary else "  "
             label = f" ({f.label})" if f.label else ""
@@ -206,9 +206,9 @@ def _cmd_create(args: argparse.Namespace) -> int:
         print(f"project: {exc}", file=sys.stderr)
         return 2
     if proj is None:
-        print("project: vanished after create", file=sys.stderr)
+        print("Созданный проект не найден в базе.", file=sys.stderr)
         return 2
-    print(f"Created project {proj.slug} ({pid})")
+    print(f"Проект создан: {proj.slug} ({pid})")
     _print_project(proj)
     return 0
 
@@ -220,13 +220,13 @@ def _cmd_list(args: argparse.Namespace) -> int:
             conn, include_archived=getattr(args, "include_archived", False)
         )
     if not projs:
-        print("No projects yet. Create one with `hermes project create <name>`.")
+        print("Проектов пока нет. Создать: `korra project create <имя>`.")
         return 0
     for p in projs:
         marker = "*" if p.id == active else " "
-        flags = " (archived)" if p.archived else ""
+        flags = " (в архиве)" if p.archived else ""
         nfolders = len(p.folders)
-        print(f"{marker} {p.slug:<24} {p.name}{flags}  [{nfolders} folder(s)]")
+        print(f"{marker} {p.slug:<24} {p.name}{flags}  [папок: {nfolders}]")
     return 0
 
 
@@ -239,23 +239,23 @@ def _cmd_show(args, conn, proj) -> int:
 @_with_project
 def _cmd_add_folder(args, conn, proj) -> int:
     path = pdb.add_folder(conn, proj.id, args.path, label=args.label, is_primary=args.primary)
-    print(f"Added {path} to {proj.slug}")
+    print(f"Папка {path} добавлена в {proj.slug}")
     return 0
 
 
 @_with_project
 def _cmd_remove_folder(args, conn, proj) -> int:
     if not pdb.remove_folder(conn, proj.id, args.path):
-        print(f"project: folder not in project: {args.path}", file=sys.stderr)
+        print(f"В проекте нет папки: {args.path}", file=sys.stderr)
         return 1
-    print(f"Removed {args.path} from {proj.slug}")
+    print(f"Папка {args.path} удалена из {proj.slug}")
     return 0
 
 
 @_with_project
 def _cmd_rename(args, conn, proj) -> int:
     pdb.update_project(conn, proj.id, name=args.name)
-    print(f"Renamed {proj.slug} -> {args.name}")
+    print(f"Проект {proj.slug} переименован в {args.name}")
     return 0
 
 
@@ -263,12 +263,12 @@ def _cmd_rename(args, conn, proj) -> int:
 def _cmd_set_primary(args, conn, proj) -> int:
     if not pdb.set_primary(conn, proj.id, args.path):
         print(
-            f"project: '{args.path}' is not a folder of {proj.slug}; "
-            f"add it first with `hermes project add-folder`.",
+            f"'{args.path}' не входит в проект {proj.slug}; "
+            "сначала добавьте папку командой `korra project add-folder`.",
             file=sys.stderr,
         )
         return 1
-    print(f"Set primary of {proj.slug} -> {args.path}")
+    print(f"Основная папка проекта {proj.slug}: {args.path}")
     return 0
 
 
@@ -276,27 +276,27 @@ def _cmd_use(args: argparse.Namespace) -> int:
     with pdb.connect_closing() as conn:
         if not args.project:
             pdb.set_active(conn, None)
-            print("Cleared active project")
+            print("Активный проект сброшен")
             return 0
         proj = _resolve(conn, args.project)
         if proj is None:
             return 1
         pdb.set_active(conn, proj.id)
-    print(f"Active project: {proj.slug}")
+        print(f"Активный проект: {proj.slug}")
     return 0
 
 
 @_with_project
 def _cmd_archive(args, conn, proj) -> int:
     pdb.archive_project(conn, proj.id)
-    print(f"Archived {proj.slug}")
+    print(f"Проект помещён в архив: {proj.slug}")
     return 0
 
 
 @_with_project
 def _cmd_restore(args, conn, proj) -> int:
     pdb.restore_project(conn, proj.id)
-    print(f"Restored {proj.slug}")
+    print(f"Проект восстановлен: {proj.slug}")
     return 0
 
 
@@ -304,10 +304,10 @@ def _cmd_restore(args, conn, proj) -> int:
 def _cmd_bind_board(args, conn, proj) -> int:
     pdb.update_project(conn, proj.id, board_slug=args.board)
     if args.board.strip():
-        print(f"Bound {proj.slug} -> board {args.board}")
+        print(f"Проект {proj.slug} связан с доской {args.board}")
         _sync_board_default_workdir(proj, args.board)
     else:
-        print(f"Unbound board from {proj.slug}")
+        print(f"Связь проекта {proj.slug} с доской удалена")
     return 0
 
 

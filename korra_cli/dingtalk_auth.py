@@ -234,33 +234,33 @@ def dingtalk_qr_auth() -> Optional[Tuple[str, str]]:
     from korra_cli.setup import print_info, print_success, print_warning, print_error
 
     print()
-    print_info("  Initializing DingTalk device authorization...")
-    print_info("  Note: the scan page is branded 'OpenClaw' — DingTalk's")
-    print_info("        ecosystem onboarding bridge. Safe to use.")
+    print_info("  Запускаю авторизацию DingTalk на устройстве…")
+    print_info("  Страница сканирования помечена как 'OpenClaw': это безопасный")
+    print_info("  служебный мост подключения экосистемы DingTalk.")
 
     try:
         reg = begin_registration()
     except RegistrationError as exc:
-        print_error(f"  Authorization init failed: {exc}")
+        print_error(f"  Не удалось начать авторизацию: {exc}")
         return None
 
     url = reg["verification_uri_complete"]
 
     # Ensure qrcode library is available (auto-install if missing)
     if not _ensure_qrcode_installed():
-        print_warning("  qrcode library install failed, will show link only.")
+        print_warning("  Не удалось установить библиотеку qrcode; покажу только ссылку.")
 
     print()
-    print_info("  Please scan the QR code below with DingTalk to authorize:")
+    print_info("  Для авторизации отсканируйте QR-код в DingTalk:")
     print()
 
     if not render_qr_to_terminal(url):
-        print_warning("  QR code render failed, please open the link below to authorize:")
+        print_warning("  Не удалось показать QR-код. Откройте ссылку ниже:")
 
     print()
-    print_info(f"  Or open this link manually: {url}")
+    print_info(f"  Или откройте ссылку вручную: {url}")
     print()
-    print_info("  Waiting for QR scan authorization... (timeout: 2 hours)")
+    print_info("  Жду сканирования QR-кода; время ожидания — 2 часа…")
 
     dot_count = 0
 
@@ -280,11 +280,11 @@ def dingtalk_qr_auth() -> Optional[Tuple[str, str]]:
         )
     except RegistrationError as exc:
         print()
-        print_error(f"  Authorization failed: {exc}")
+        print_error(f"  Ошибка авторизации: {exc}")
         return None
 
     print()
-    print_success("  QR scan authorization successful!")
+    print_success("  Авторизация по QR-коду выполнена!")
     print_success(f"  Client ID:     {client_id}")
     print_success(f"  Client Secret: {client_secret[:8]}{'*' * (len(client_secret) - 8)}")
 
