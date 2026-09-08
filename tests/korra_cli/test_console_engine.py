@@ -258,8 +258,8 @@ def test_sessions_list_and_stats_use_isolated_session_store(_isolate_hermes_home
     assert listed.status == "ok"
     assert "chat-session" in listed.output
     assert "tool-session" not in listed.output
-    assert "Total sessions: 2" in stats.output
-    assert "Listable sessions: 1" in stats.output
+    assert "Всего сессий: 2" in stats.output
+    assert "Доступно в списке: 1" in stats.output
 
 
 def test_sessions_export_rejects_oversized_single_before_touching_output(
@@ -299,7 +299,7 @@ def test_sessions_export_rejects_oversized_single_before_touching_output(
 
     assert result.status == "error"
     assert "too-large" in result.output
-    assert "streaming Export" in result.output
+    assert "потоковый экспорт" in result.output
     assert "resume" not in result.output.lower()
     assert materialized == []
     assert output.read_text(encoding="utf-8") == "keep me\n"
@@ -393,8 +393,8 @@ def test_sessions_export_all_rejects_single_oversized_session(
 
     assert result.status == "error"
     assert "runaway" in result.output
-    assert "more than 3 active" in result.output
-    assert "streaming Export" in result.output
+    assert "больше 3 активных" in result.output
+    assert "потоковый экспорт" in result.output
     assert "max_export_messages" in result.output
     assert export_all_calls == []
     assert not output.exists()
@@ -455,7 +455,7 @@ def test_cron_pause_resume_and_run_require_confirmation(_isolate_hermes_home):
 
     triggered = engine.execute("cron run alpha", confirmed=True)
     assert triggered.status == "ok"
-    assert "Triggered job" in triggered.output
+    assert "Задача запущена" in triggered.output
 
 
 def test_repl_runs_non_interactive_lines_without_prompts(_isolate_hermes_home):
@@ -471,9 +471,41 @@ def test_repl_runs_non_interactive_lines_without_prompts(_isolate_hermes_home):
     )
 
     assert code == 0
-    assert "Korra Console" in stdout.getvalue()
+    assert "Консоль Korra" in stdout.getvalue()
     assert "hermes>" not in stdout.getvalue()
     assert stderr.getvalue() == ""
+
+
+def test_repl_interactive_prompt_is_russian_and_uses_korra_brand(
+    _isolate_hermes_home,
+):
+    stdin = io.StringIO("exit\n")
+    stdout = io.StringIO()
+
+    code = run_console_repl(
+        stdin=stdin,
+        stdout=stdout,
+        stderr=io.StringIO(),
+        interactive=True,
+    )
+
+    assert code == 0
+    assert "Консоль Korra" in stdout.getvalue()
+    assert "korra> " in stdout.getvalue()
+    assert "hermes" not in stdout.getvalue().lower()
+
+
+def test_console_argparse_and_rejection_use_korra_brand(_isolate_hermes_home):
+    engine = HermesConsoleEngine()
+
+    argparse_error = engine.execute("mcp list лишний")
+    rejected = engine.execute("gateway")
+
+    assert argparse_error.status == "error"
+    assert argparse_error.output.startswith("korra:")
+    assert "неизвестные аргументы" in argparse_error.output
+    assert rejected.output == "Команда `korra gateway` недоступна в консоли Korra."
+    assert "hermes" not in (argparse_error.output + rejected.output).lower()
 
 
 def test_capture_output_surfaces_string_exit_code_as_command_error():
@@ -494,7 +526,7 @@ def test_capture_output_preserves_integer_exit_code_message():
     with pytest.raises(ConsoleCommandError) as exc_info:
         _capture_output(lambda: sys.exit(3))
 
-    assert "status 3" in str(exc_info.value)
+    assert "кодом 3" in str(exc_info.value)
 
 
 def test_execute_handler_string_exit_returns_error_not_crash(_isolate_hermes_home):

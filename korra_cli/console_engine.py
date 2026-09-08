@@ -83,7 +83,7 @@ def _capture_output(fn: Callable[[], object]) -> str:
             code = 1
     text = stdout.getvalue() + stderr.getvalue()
     if code:
-        raise ConsoleCommandError(message.strip() or text.strip() or f"Command exited with status {code}")
+        raise ConsoleCommandError(message.strip() or text.strip() or f"Команда завершилась с кодом {code}")
     return text.rstrip()
 
 
@@ -134,7 +134,7 @@ def _split_line(line: str) -> list[str]:
 
         return split_command_line(line)
     except ValueError as exc:
-        raise ConsoleCommandError(f"Could not parse command: {exc}") from exc
+        raise ConsoleCommandError(f"Не удалось разобрать команду: {exc}") from exc
 
 
 def _contains_shell_syntax(line: str, tokens: Sequence[str]) -> bool:
@@ -148,8 +148,8 @@ def _contains_shell_syntax(line: str, tokens: Sequence[str]) -> bool:
 
 def _format_sessions(sessions: Sequence[dict]) -> str:
     if not sessions:
-        return "No sessions found."
-    lines = [f"{'ID':<32} {'Source':<12} {'Msgs':>5}  Title / Preview"]
+        return "Сессии не найдены."
+    lines = [f"{'ID':<32} {'Источник':<12} {'Сообщ.':>5}  Название / начало"]
     lines.append("-" * 82)
     for session in sessions:
         sid = str(session.get("id") or "")[:32]
@@ -165,13 +165,13 @@ def _format_job(job: dict, action: str) -> str:
     from cron.jobs import effective_job_state
 
     job_id = job.get("id") or job.get("job_id") or "?"
-    name = job.get("name") or "(unnamed)"
+    name = job.get("name") or "(без названия)"
     state = effective_job_state(job)
-    return f"{action} job: {name} ({job_id}) [{state}]"
+    return f"Задача {action}: {name} ({job_id}) [{state}]"
 
 
 def _parser_root() -> tuple[_ArgumentParser, argparse._SubParsersAction]:
-    parser = _ArgumentParser(prog="hermes", add_help=False)
+    parser = _ArgumentParser(prog="korra", add_help=False)
     subparsers = parser.add_subparsers(dest="_console_command")
     return parser, subparsers
 
@@ -295,7 +295,7 @@ def _adder_summaries(module_name: str, add_name: str) -> dict[tuple[str, ...], s
 def _invoke_namespace(args: argparse.Namespace) -> object:
     func = getattr(args, "func", None)
     if not callable(func):
-        raise ConsoleCommandError("No handler is available for that console command.")
+        raise ConsoleCommandError("Для этой команды консоли нет обработчика.")
     return func(args)
 
 
@@ -491,14 +491,14 @@ def _register_command_family(
         child_key = tuple(child_path)
         full_path = (root, *tuple(child_path))
         usage = " ".join(full_path)
-        command_summary = summary or (summaries or {}).get(full_path) or f"Run `hermes {usage}`."
+        command_summary = summary or (summaries or {}).get(full_path) or f"Выполнить `korra {usage}`."
         engine.register(
             full_path,
             usage,
             command_summary,
             handler_factory(tuple(child_path)),
             mutating=child_key in mutating_paths,
-            confirmation=confirmation or f"Run `hermes {usage}`?",
+            confirmation=confirmation or f"Выполнить `korra {usage}`?",
         )
 
 
@@ -525,8 +525,8 @@ class HermesConsoleEngine:
 
             if _contains_shell_syntax(raw_line, tokens):
                 raise ConsoleCommandError(
-                    "Korra Console does not run shell syntax. Use one supported "
-                    "Korra command at a time."
+                    "Консоль Korra не выполняет синтаксис командной оболочки. "
+                    "Запускайте по одной поддерживаемой команде Korra."
                 )
 
             builtin = self._execute_builtin(tokens)
@@ -541,7 +541,7 @@ class HermesConsoleEngine:
                     "confirm_required",
                     command=raw_line,
                     confirmation_message=command.confirmation
-                    or f"Run `{command.usage}`?",
+                    or f"Выполнить `{command.usage}`?",
                 )
 
             output = command.handler(self, args).rstrip()
@@ -558,9 +558,9 @@ class HermesConsoleEngine:
             return f"{command.usage}\n{command.summary}"
 
         lines = [
-            "Korra Console",
+            "Консоль Korra",
             "",
-            "Supported commands:",
+            "Доступные команды:",
         ]
         for command in sorted(self.commands.values(), key=lambda c: c.usage):
             marker = " *" if command.mutating else "  "
@@ -568,54 +568,54 @@ class HermesConsoleEngine:
         lines.extend(
             [
                 "",
-                "* requires confirmation",
-                "Built-ins: help, help <command>, history, clear, exit, quit",
+                "* требуется подтверждение",
+                "Встроенные команды: help, help <команда>, history, clear, exit, quit",
             ]
         )
         return "\n".join(lines)
 
     def _register_defaults(self) -> None:
-        self.register(("status",), "status", "Show Korra component status.", _status)
-        self.register(("version",), "version", "Show Korra version information.", _version)
-        self.register(("doctor",), "doctor", "Run diagnostics without auto-fix.", _doctor)
-        self.register(("logs",), "logs [name] [-n N]", "Show recent Korra logs.", _logs)
-        self.register(("sessions", "list"), "sessions list [--limit N]", "List recent sessions.", _sessions_list)
-        self.register(("sessions", "stats"), "sessions stats", "Show session store statistics.", _sessions_stats)
-        self.register(("config", "show"), "config show", "Show current configuration.", _config_show)
-        self.register(("config", "path"), "config path", "Print config.yaml path.", _config_path)
+        self.register(("status",), "status", "Показать состояние компонентов Korra.", _status)
+        self.register(("version",), "version", "Показать версию Korra.", _version)
+        self.register(("doctor",), "doctor", "Запустить диагностику без автоисправления.", _doctor)
+        self.register(("logs",), "logs [имя] [-n N]", "Показать последние журналы Korra.", _logs)
+        self.register(("sessions", "list"), "sessions list [--limit N]", "Показать последние сессии.", _sessions_list)
+        self.register(("sessions", "stats"), "sessions stats", "Показать статистику хранилища сессий.", _sessions_stats)
+        self.register(("config", "show"), "config show", "Показать текущие настройки.", _config_show)
+        self.register(("config", "path"), "config path", "Показать путь к config.yaml.", _config_path)
         self.register(
             ("config", "set"),
             "config set <key> <value>",
-            "Set a configuration value.",
+            "Изменить значение настройки.",
             _config_set,
             mutating=True,
-            confirmation="Update Korra configuration?",
+            confirmation="Изменить настройки Korra?",
         )
-        self.register(("cron", "list"), "cron list [--all]", "List scheduled jobs.", _cron_list)
-        self.register(("cron", "status"), "cron status", "Show cron scheduler status.", _cron_status)
+        self.register(("cron", "list"), "cron list [--all]", "Показать запланированные задачи.", _cron_list)
+        self.register(("cron", "status"), "cron status", "Показать состояние планировщика.", _cron_status)
         self.register(
             ("cron", "pause"),
             "cron pause <job>",
-            "Pause a scheduled job.",
+            "Приостановить запланированную задачу.",
             _cron_pause,
             mutating=True,
-            confirmation="Pause this cron job?",
+            confirmation="Приостановить эту задачу?",
         )
         self.register(
             ("cron", "resume"),
             "cron resume <job>",
-            "Resume a paused cron job.",
+            "Возобновить приостановленную задачу.",
             _cron_resume,
             mutating=True,
-            confirmation="Resume this cron job?",
+            confirmation="Возобновить эту задачу?",
         )
         self.register(
             ("cron", "run"),
             "cron run <job>",
-            "Run a job on the next scheduler tick.",
+            "Запустить задачу на следующем такте планировщика.",
             _cron_run,
             mutating=True,
-            confirmation="Trigger this cron job?",
+            confirmation="Запустить эту задачу?",
         )
         self._register_broad_cli_surface()
 
@@ -879,57 +879,57 @@ class HermesConsoleEngine:
         self.register(
             ("config", "migrate"),
             "config migrate",
-            "Update config with new options.",
+            "Добавить в настройки новые параметры.",
             _config_migrate,
             mutating=True,
-            confirmation="Update Korra configuration with missing defaults?",
+            confirmation="Добавить в настройки Korra недостающие значения?",
         )
         self.register(
             ("sessions", "export"),
             "sessions export <output> [--source SOURCE] [--session-id ID]",
-            "Export sessions to JSONL.",
+            "Экспортировать сессии в JSONL.",
             _sessions_export,
             mutating=True,
-            confirmation="Export session data?",
+            confirmation="Экспортировать данные сессий?",
         )
         self.register(
             ("sessions", "rename"),
             "sessions rename <session> <title>",
-            "Rename a session.",
+            "Переименовать сессию.",
             _sessions_rename,
             mutating=True,
-            confirmation="Rename this session?",
+            confirmation="Переименовать эту сессию?",
         )
         self.register(
             ("sessions", "optimize"),
             "sessions optimize",
-            "Optimize the session store.",
+            "Оптимизировать хранилище сессий.",
             _sessions_optimize,
             mutating=True,
-            confirmation="Optimize the session database?",
+            confirmation="Оптимизировать базу сессий?",
         )
         self.register(
             ("sessions", "repair"),
             "sessions repair [--check-only] [--no-backup]",
-            "Repair a malformed session database schema.",
+            "Исправить повреждённую структуру базы сессий.",
             _sessions_repair,
             mutating=True,
-            confirmation="Repair the session database?",
+            confirmation="Исправить базу сессий?",
         )
 
         self.register(
             ("profile",),
             "profile",
-            "Show active profile status.",
+            "Показать состояние активного профиля.",
             _profile_status,
         )
         self.register(
             ("send",),
             "send --to <target> <message>",
-            "Send a message to a configured platform.",
+            "Отправить сообщение в настроенный мессенджер.",
             _adder_handler("send", (), "korra_cli.send_cmd", "register_send_subparser"),
             mutating=True,
-            confirmation="Send this message?",
+            confirmation="Отправить это сообщение?",
         )
 
         portal_paths = [("info",), ("tools",)]
@@ -1155,7 +1155,7 @@ class HermesConsoleEngine:
                 return ConsoleResult("error", output=str(exc))
         if head == "history":
             output = "\n".join(f"{idx + 1}: {cmd}" for idx, cmd in enumerate(self.history))
-            return ConsoleResult("ok", output=output or "No history yet.")
+            return ConsoleResult("ok", output=output or "История пока пуста.")
         if head == "clear":
             return ConsoleResult("clear", output="\033[2J\033[H")
         if head in {"exit", "quit"}:
@@ -1176,13 +1176,13 @@ class HermesConsoleEngine:
         available = [" ".join(path) for path in self.commands]
         probe = " ".join(tokens[:2]) if len(tokens) > 1 else tokens[0]
         suggestions = difflib.get_close_matches(probe, available, n=3, cutoff=0.45)
-        suffix = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
-        raise ConsoleCommandError(f"Unsupported Korra Console command: {probe}.{suffix}")
+        suffix = f" Возможно, вы имели в виду: {', '.join(suggestions)}?" if suggestions else ""
+        raise ConsoleCommandError(f"Консоль Korra не поддерживает команду: {probe}.{suffix}")
 
     def _rejection_for(self, tokens: Sequence[str]) -> str:
         first = tokens[0]
         if first.startswith("-"):
-            return f"{first} is not available in Korra Console."
+            return f"Параметр {first} недоступен в консоли Korra."
         blocked_top = {
             "acp",
             "chat",
@@ -1208,30 +1208,30 @@ class HermesConsoleEngine:
             "whatsapp-cloud",
         }
         if first in blocked_top:
-            return f"`hermes {first}` is not available in Korra Console."
+            return f"Команда `korra {first}` недоступна в консоли Korra."
         blocked_pairs = {
-            ("config", "edit"): "`config edit` opens an editor and is not available in Korra Console.",
-            ("mcp", "serve"): "`mcp serve` starts a server and is not available in Korra Console.",
-            ("profile", "alias"): "`profile alias` creates shell wrappers and is not available in Korra Console.",
-            ("skills", "config"): "`skills config` is interactive and is not available in Korra Console.",
-            ("skills", "publish"): "`skills publish` is not available in Korra Console.",
-            ("portal", "login"): "`portal login` is interactive and is not available in Korra Console.",
-            ("portal", "open"): "`portal open` opens a browser and is not available in Korra Console.",
-            ("kanban", "tail"): "`kanban tail` streams output and is not available in Korra Console.",
-            ("kanban", "watch"): "`kanban watch` streams output and is not available in Korra Console.",
-            ("kanban", "daemon"): "`kanban daemon` starts a service and is not available in Korra Console.",
-            ("kanban", "dispatcher"): "`kanban dispatcher` starts a worker and is not available in Korra Console.",
-            ("kanban", "swarm"): "`kanban swarm` starts agent work and is not available in Korra Console.",
-            ("kanban", "decompose"): "`kanban decompose` starts agent work and is not available in Korra Console.",
-            ("kanban", "specify"): "`kanban specify` starts agent work and is not available in Korra Console.",
-            ("kanban", "gc"): "`kanban gc` is not available in Korra Console.",
+            ("config", "edit"): "`config edit` открывает редактор и недоступна в консоли Korra.",
+            ("mcp", "serve"): "`mcp serve` запускает сервер и недоступна в консоли Korra.",
+            ("profile", "alias"): "`profile alias` создаёт команды оболочки и недоступна в консоли Korra.",
+            ("skills", "config"): "`skills config` работает интерактивно и недоступна в консоли Korra.",
+            ("skills", "publish"): "`skills publish` недоступна в консоли Korra.",
+            ("portal", "login"): "`portal login` работает интерактивно и недоступна в консоли Korra.",
+            ("portal", "open"): "`portal open` открывает браузер и недоступна в консоли Korra.",
+            ("kanban", "tail"): "`kanban tail` непрерывно выводит данные и недоступна в консоли Korra.",
+            ("kanban", "watch"): "`kanban watch` непрерывно выводит данные и недоступна в консоли Korra.",
+            ("kanban", "daemon"): "`kanban daemon` запускает службу и недоступна в консоли Korra.",
+            ("kanban", "dispatcher"): "`kanban dispatcher` запускает обработчик и недоступна в консоли Korra.",
+            ("kanban", "swarm"): "`kanban swarm` запускает работу агентов и недоступна в консоли Korra.",
+            ("kanban", "decompose"): "`kanban decompose` запускает работу агентов и недоступна в консоли Korra.",
+            ("kanban", "specify"): "`kanban specify` запускает работу агентов и недоступна в консоли Korra.",
+            ("kanban", "gc"): "`kanban gc` недоступна в консоли Korra.",
         }
         if len(tokens) >= 2:
             pair = (tokens[0], tokens[1])
             if pair in blocked_pairs:
                 return blocked_pairs[pair]
         if tuple(tokens[:2]) in {("sessions", "delete"), ("sessions", "prune")}:
-            return "`sessions delete` and `sessions prune` are not available in Korra Console."
+            return "`sessions delete` и `sessions prune` недоступны в консоли Korra."
         return ""
 
     def _help_result(self) -> ConsoleResult:
@@ -1241,12 +1241,12 @@ class HermesConsoleEngine:
         if len(output) <= self.output_limit:
             return output
         omitted = len(output) - self.output_limit
-        return f"{output[:self.output_limit]}\n... output truncated ({omitted} bytes omitted)"
+        return f"{output[:self.output_limit]}\n... вывод сокращён (пропущено байт: {omitted})"
 
 
 def _expect_no_args(args: Sequence[str], usage: str) -> None:
     if args:
-        raise ConsoleCommandError(f"Usage: {usage}")
+        raise ConsoleCommandError(f"Использование: {usage}")
 
 
 def _apply_confirmed_defaults(args: argparse.Namespace) -> None:
@@ -1268,7 +1268,7 @@ def _apply_confirmed_defaults(args: argparse.Namespace) -> None:
     if getattr(args, "auth_action", None) == "add":
         auth_type = getattr(args, "auth_type", None)
         if auth_type in {"api-key", "api_key"} and not getattr(args, "api_key", None):
-            raise ConsoleCommandError("auth add --type api-key requires --api-key in Korra Console.")
+            raise ConsoleCommandError("Для `auth add --type api-key` в консоли Korra требуется --api-key.")
     if getattr(args, "import_name", None) is not None:
         # profile import has no prompt flag; leave it alone.
         return
@@ -1311,7 +1311,7 @@ def _doctor(_engine: HermesConsoleEngine, args: list[str]) -> str:
 
 def _logs(_engine: HermesConsoleEngine, args: list[str]) -> str:
     if "-f" in args or "--follow" in args:
-        raise ConsoleCommandError("`logs -f` is not available in Korra Console.")
+        raise ConsoleCommandError("`logs -f` недоступна в консоли Korra.")
     parser = _ArgumentParser(prog="logs", add_help=False)
     parser.add_argument("log_name", nargs="?", default="agent")
     parser.add_argument("-n", "--lines", type=int, default=50)
@@ -1321,7 +1321,7 @@ def _logs(_engine: HermesConsoleEngine, args: list[str]) -> str:
     parser.add_argument("--component")
     ns = parser.parse_args(args)
     if ns.lines < 1 or ns.lines > 500:
-        raise ConsoleCommandError("logs --lines must be between 1 and 500")
+        raise ConsoleCommandError("Значение logs --lines должно быть от 1 до 500")
 
     from korra_cli.logs import list_logs, tail_log
 
@@ -1345,7 +1345,7 @@ def _sessions_list(_engine: HermesConsoleEngine, args: list[str]) -> str:
     parser.add_argument("--limit", type=int, default=20)
     ns = parser.parse_args(args)
     if ns.limit < 1 or ns.limit > 200:
-        raise ConsoleCommandError("sessions list --limit must be between 1 and 200")
+        raise ConsoleCommandError("Значение sessions list --limit должно быть от 1 до 200")
 
     from korra_state import SessionDB
 
@@ -1371,9 +1371,9 @@ def _sessions_stats(_engine: HermesConsoleEngine, args: list[str]) -> str:
         listable = db.session_count(exclude_children=True, exclude_sources=["kanban", "tool"])
         messages = db.message_count()
         lines = [
-            f"Total sessions: {total}",
-            f"Listable sessions: {listable}",
-            f"Total messages: {messages}",
+            f"Всего сессий: {total}",
+            f"Доступно в списке: {listable}",
+            f"Всего сообщений: {messages}",
         ]
         for source in ["cli", "tui", "telegram", "discord", "slack", "cron"]:
             count = db.session_count(source=source)
@@ -1400,7 +1400,7 @@ def _config_path(_engine: HermesConsoleEngine, args: list[str]) -> str:
 
 def _config_set(_engine: HermesConsoleEngine, args: list[str]) -> str:
     if len(args) < 2:
-        raise ConsoleCommandError("Usage: config set <key> <value>")
+        raise ConsoleCommandError("Использование: config set <ключ> <значение>")
     key = args[0]
     value = " ".join(args[1:])
     from korra_cli.config import set_config_value
@@ -1416,12 +1416,12 @@ def _config_migrate(_engine: HermesConsoleEngine, args: list[str]) -> str:
 
         results = migrate_config(interactive=False, quiet=False)
         if results.get("env_added") or results.get("config_added"):
-            print("Configuration updated.")
+            print("Настройки обновлены.")
         else:
-            print("Configuration is up to date.")
+            print("Настройки уже актуальны.")
         warnings = results.get("warnings") or []
         for warning in warnings:
-            print(f"Warning: {warning}")
+            print(f"Предупреждение: {warning}")
 
     return _capture_output(_run)
 
@@ -1455,21 +1455,20 @@ def _sessions_export(_engine: HermesConsoleEngine, args: list[str]) -> str:
                         db.assert_export_safe(session_id, max_messages=limit)
                 except SessionExportTooLargeError as exc:
                     raise ConsoleCommandError(
-                        f"Session '{exc.session_id}' has more than {limit:,} active "
-                        "messages; in-memory export is capped per session. "
-                        "Use the Sessions page's streaming Export action, or set "
-                        "sessions.max_export_messages: 0 in config.yaml to disable "
-                        "the guard."
+                        f"В сессии «{exc.session_id}» больше {limit:,} активных "
+                        "сообщений; экспорт через память ограничен для каждой сессии. "
+                        "Используйте потоковый экспорт на странице «Сессии» или задайте "
+                        "sessions.max_export_messages: 0 в config.yaml, чтобы снять ограничение."
                     ) from exc
 
             if ns.session_id:
                 resolved_session_id = db.resolve_session_id(ns.session_id)
                 if not resolved_session_id:
-                    raise ConsoleCommandError(f"Session '{ns.session_id}' not found.")
+                    raise ConsoleCommandError(f"Сессия «{ns.session_id}» не найдена.")
                 _guard_exports([resolved_session_id])
                 data = db.export_session(resolved_session_id)
                 if not data:
-                    raise ConsoleCommandError(f"Session '{ns.session_id}' not found.")
+                    raise ConsoleCommandError(f"Сессия «{ns.session_id}» не найдена.")
                 rows = [data]
             else:
                 session_ids = [
@@ -1487,7 +1486,7 @@ def _sessions_export(_engine: HermesConsoleEngine, args: list[str]) -> str:
                 sys.stdout.write(text)
             else:
                 Path(ns.output).expanduser().write_text(text, encoding="utf-8")
-                print(f"Exported {len(rows)} session(s) to {ns.output}")
+                print(f"Экспортировано сессий: {len(rows)}. Файл: {ns.output}")
         finally:
             db.close()
 
@@ -1507,11 +1506,11 @@ def _sessions_rename(_engine: HermesConsoleEngine, args: list[str]) -> str:
         try:
             resolved_session_id = db.resolve_session_id(ns.session_id)
             if not resolved_session_id:
-                raise ConsoleCommandError(f"Session '{ns.session_id}' not found.")
+                raise ConsoleCommandError(f"Сессия «{ns.session_id}» не найдена.")
             title = " ".join(ns.title)
             if not db.set_session_title(resolved_session_id, title):
-                raise ConsoleCommandError(f"Session '{ns.session_id}' not found.")
-            print(f"Session '{resolved_session_id}' renamed to: {title}")
+                raise ConsoleCommandError(f"Сессия «{ns.session_id}» не найдена.")
+            print(f"Сессия «{resolved_session_id}» переименована: {title}")
         finally:
             db.close()
 
@@ -1527,7 +1526,7 @@ def _sessions_optimize(_engine: HermesConsoleEngine, args: list[str]) -> str:
         db = SessionDB()
         try:
             count = db.vacuum()
-            print(f"Optimized {count} FTS index(es).")
+            print(f"Оптимизировано индексов FTS: {count}.")
         finally:
             db.close()
 
@@ -1545,23 +1544,23 @@ def _sessions_repair(_engine: HermesConsoleEngine, args: list[str]) -> str:
 
         db_path = DEFAULT_DB_PATH
         if not db_path.exists():
-            print(f"No session database at {db_path} (nothing to repair).")
+            print(f"База сессий не найдена: {db_path}. Исправлять нечего.")
             return
         reason = _db_opens_cleanly(db_path)
         if reason is None:
-            print(f"{db_path} opens cleanly; no repair needed.")
+            print(f"База {db_path} открывается без ошибок; исправление не требуется.")
             return
-        print(f"{db_path} does not open cleanly: {reason}")
+        print(f"База {db_path} открывается с ошибкой: {reason}")
         if ns.check_only:
             return
         report = repair_state_db_schema(db_path, backup=not ns.no_backup)
         if report.get("repaired"):
             if report.get("backup_path"):
-                print(f"backup: {report['backup_path']}")
-            print(f"strategy: {report.get('strategy')}")
-            print("Repaired session database.")
+                print(f"Резервная копия: {report['backup_path']}")
+            print(f"Способ исправления: {report.get('strategy')}")
+            print("База сессий исправлена.")
             return
-        raise ConsoleCommandError(f"Repair failed: {report.get('error')}")
+        raise ConsoleCommandError(f"Не удалось исправить базу: {report.get('error')}")
 
     return _capture_output(_run)
 
@@ -1596,16 +1595,16 @@ def _cron_status(_engine: HermesConsoleEngine, args: list[str]) -> str:
 
 def _cron_pause(_engine: HermesConsoleEngine, args: list[str]) -> str:
     if len(args) != 1:
-        raise ConsoleCommandError("Usage: cron pause <job>")
+        raise ConsoleCommandError("Использование: cron pause <задача>")
     from cron.jobs import AmbiguousJobReference, pause_job
 
     try:
-        job = pause_job(args[0], reason="paused from hermes console")
+        job = pause_job(args[0], reason="приостановлена из консоли Korra")
     except AmbiguousJobReference as exc:
         raise ConsoleCommandError(str(exc)) from exc
     if not job:
-        raise ConsoleCommandError(f"Job not found: {args[0]}")
-    return _format_job(job, "Paused")
+        raise ConsoleCommandError(f"Задача не найдена: {args[0]}")
+    return _format_job(job, "приостановлена")
 
 
 def _cron_resume(_engine: HermesConsoleEngine, args: list[str]) -> str:
@@ -1615,7 +1614,7 @@ def _cron_resume(_engine: HermesConsoleEngine, args: list[str]) -> str:
     parser.add_argument("--run-now", action="store_true")
     ns = parser.parse_args(args)
     if ns.at and ns.run_now:
-        raise ConsoleCommandError("Use exactly one of --at or --run-now.")
+        raise ConsoleCommandError("Укажите только один параметр: --at или --run-now.")
     from cron.jobs import AmbiguousJobReference, _hermes_now, rearm_oneshot, resume_job
 
     try:
@@ -1628,13 +1627,13 @@ def _cron_resume(_engine: HermesConsoleEngine, args: list[str]) -> str:
     except ValueError as exc:
         raise ConsoleCommandError(str(exc)) from exc
     if not job:
-        raise ConsoleCommandError(f"Job not found: {ns.job}")
-    return _format_job(job, "Resumed")
+        raise ConsoleCommandError(f"Задача не найдена: {ns.job}")
+    return _format_job(job, "возобновлена")
 
 
 def _cron_run(_engine: HermesConsoleEngine, args: list[str]) -> str:
     if len(args) != 1:
-        raise ConsoleCommandError("Usage: cron run <job>")
+        raise ConsoleCommandError("Использование: cron run <задача>")
     from cron.jobs import AmbiguousJobReference, trigger_job
 
     try:
@@ -1642,8 +1641,8 @@ def _cron_run(_engine: HermesConsoleEngine, args: list[str]) -> str:
     except AmbiguousJobReference as exc:
         raise ConsoleCommandError(str(exc)) from exc
     if not job:
-        raise ConsoleCommandError(f"Job not found: {args[0]}")
-    return _format_job(job, "Triggered")
+        raise ConsoleCommandError(f"Задача не найдена: {args[0]}")
+    return _format_job(job, "запущена")
 
 
 def run_console_repl(
@@ -1663,11 +1662,11 @@ def run_console_repl(
 
     engine = HermesConsoleEngine()
     if interactive:
-        print("Korra Console. Type `help` for commands, `exit` to quit.", file=stdout)
+        print("Консоль Korra. Команды: `help`; выход: `exit`.", file=stdout)
 
     while True:
         if interactive:
-            print("hermes> ", end="", file=stdout, flush=True)
+            print("korra> ", end="", file=stdout, flush=True)
         line = stdin.readline()
         if line == "":
             if interactive:
@@ -1678,14 +1677,14 @@ def run_console_repl(
         if result.status == "confirm_required":
             if not interactive:
                 print(
-                    f"Confirmation required: {result.confirmation_message}",
+                    f"Требуется подтверждение: {result.confirmation_message}",
                     file=stderr,
                 )
                 return 1
-            print(f"{result.confirmation_message} [y/N] ", end="", file=stdout, flush=True)
+            print(f"{result.confirmation_message} [д/Н] ", end="", file=stdout, flush=True)
             answer = stdin.readline()
-            if answer.strip().lower() not in {"y", "yes"}:
-                print("Cancelled.", file=stdout)
+            if answer.strip().lower() not in {"y", "yes", "д", "да"}:
+                print("Отменено.", file=stdout)
                 continue
             result = engine.execute(result.command, confirmed=True)
 
