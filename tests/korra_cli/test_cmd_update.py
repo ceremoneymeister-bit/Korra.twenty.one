@@ -309,7 +309,7 @@ class TestCmdUpdateBranchFallback:
             input_fn=None,
         )
         captured = capsys.readouterr()
-        assert "Already up to date!" in captured.out
+        assert 'Установлена актуальная версия!' in captured.out
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
@@ -346,9 +346,9 @@ class TestCmdUpdateBranchFallback:
         add_remote.assert_not_called()
         mark_skip.assert_not_called()
         captured = capsys.readouterr()
-        assert "Skipping upstream setup (non-interactive run)." in captured.out
-        assert "official repo not checked" in captured.out
-        assert "Already up to date!" not in captured.out
+        assert 'Настройка исходного репозитория пропущена: запуск без участия пользователя.' in captured.out
+        assert 'Официальный репозиторий не проверялся' in captured.out
+        assert 'Установлена актуальная версия!' not in captured.out
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
@@ -418,7 +418,7 @@ class TestCmdUpdateBranchFallback:
         assert exit_info.value.code == 0
         post_update_step.assert_called_once_with()
         captured = capsys.readouterr()
-        assert "Already up to date!" not in captured.out
+        assert 'Установлена актуальная версия!' not in captured.out
 
     def test_update_non_interactive_runs_safe_config_migrations(self, mock_args, capsys):
         """Dashboard/web updates apply non-interactive migrations before restart."""
@@ -448,8 +448,8 @@ class TestCmdUpdateBranchFallback:
             mock_input.assert_not_called()
             migrate_config.assert_called_once_with(interactive=False, quiet=False)
             captured = capsys.readouterr()
-            assert "applying safe config migrations" in captured.out
-            assert "API keys require manual entry" in captured.out
+            assert 'Применяю безопасные изменения настроек' in captured.out
+            assert 'Ключи API нужно ввести вручную' in captured.out
 
 
 class TestCmdUpdateMigrationPrompt:
@@ -489,10 +489,10 @@ class TestCmdUpdateMigrationPrompt:
             mock_input.assert_not_called()
             mock_migrate.assert_called_once_with(interactive=False, quiet=True)
             out = capsys.readouterr().out
-            assert "Updating config format (v5 → v24)" in out
-            assert "no new settings to configure" in out
+            assert 'Обновляю формат настроек: v5 → v24' in out
+            assert 'Новых параметров нет' in out
             # The misleading question must NOT appear for a pure version bump.
-            assert "configure them now" not in out.lower()
+            assert 'Настроить эти параметры сейчас' not in out.lower()
 
     def test_version_bump_only_surfaces_migration_resets(
         self, mock_args, capsys
@@ -531,8 +531,8 @@ class TestCmdUpdateMigrationPrompt:
 
             mock_input.assert_not_called()
             out = capsys.readouterr().out
-            assert "Updating config format (v33 → v34)" in out
-            assert "no new settings to configure" in out
+            assert 'Обновляю формат настроек: v33 → v34' in out
+            assert 'Новых параметров нет' in out
             # The migration's mutation note and warning must NOT be swallowed.
             assert "display.personality=none (one-time reset)" in out
             assert "Disabled suspicious MCP server 'evil'" in out
@@ -765,7 +765,7 @@ class TestCmdUpdateBranchFlag:
         assert exc_info.value.code == 1
 
         out = capsys.readouterr().out
-        assert "does not exist locally or on origin" in out
+        assert 'не найдена ни локально, ни в origin' in out
         assert "nonexistent" in out
 
 
@@ -869,7 +869,7 @@ class TestCmdUpdateCheckBranchFlag:
         assert "CalledProcessError" not in out
         # Friendly message naming the branch.
         assert "ghost" in out
-        assert "not found" in out
+        assert 'не найдена' in out
 
         # rev-list must never have been called once verify failed.
         commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
@@ -915,9 +915,9 @@ class TestCmdUpdateZipBranchRefusal:
 
         out = capsys.readouterr().out
         assert "bb/gui" in out
-        assert "not supported" in out
+        assert 'не поддерживает' in out
         # No actual download attempted.
-        assert "Downloading latest version" not in out
+        assert 'Загружаю последнюю версию' not in out
 
 
 def test_is_termux_env_true_for_termux_prefix():
@@ -978,7 +978,7 @@ class TestNodeRuntimeNpmResolution:
             failed = hm._update_node_dependencies()
         assert failed == ["ui-tui, web workspaces"]
         out = capsys.readouterr().out
-        assert "mixed state" in out
+        assert 'Код уже может быть новым, а зависимости — старыми' in out
 
     def test_wsl_update_skips_windows_npm_build_paths(self, mock_args, monkeypatch):
         """A Windows-only npm on WSL must not reach web or desktop builds."""
@@ -1480,7 +1480,7 @@ class TestGitTrampolineSelfHeal:
             result = update_cmd._ensure_non_trampoline_git(git_cmd)
         assert result == [str(real), "-c", "windows.appendAtomically=false"]
         out = capsys.readouterr().out
-        assert "switching to real git" in out
+        assert 'Использую настоящий Git' in out
 
     def test_trampoline_no_real_git_keeps_command(self, capsys):
         from korra_cli import update_cmd
@@ -1497,7 +1497,7 @@ class TestGitTrampolineSelfHeal:
             result = update_cmd._ensure_non_trampoline_git(git_cmd)
         assert result == git_cmd
         out = capsys.readouterr().out
-        assert "ZIP path" in out
+        assert 'Обновление продолжится из ZIP' in out
 
     def test_off_windows_noop(self):
         from korra_cli import update_cmd
