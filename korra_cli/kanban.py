@@ -52,7 +52,7 @@ def _fmt_ts(ts: Optional[int]) -> str:
 
 def _fmt_task_line(t: kb.Task) -> str:
     icon = _STATUS_ICONS.get(t.status, "?")
-    assignee = t.assignee or "(unassigned)"
+    assignee = t.assignee or "(не назначен)"
     tenant = f" [{t.tenant}]" if t.tenant else ""
     return f"{icon} {t.id}  {t.status:8s}  {assignee:20s}{tenant}  {t.title}"
 
@@ -194,19 +194,11 @@ def _check_dispatcher_presence(
     if pid and not dispatch_on:
         return (
             False,
-            "Gateway is running but kanban.dispatch_in_gateway=false in "
-            "config.yaml — the task will sit in 'ready' until you flip it "
-            "back on and restart the gateway, OR run the legacy "
-            "standalone daemon (`hermes kanban daemon --force`)."
+            'Шлюз работает, но диспетчер выключен: kanban.dispatch_in_gateway=false. Включите его в config.yaml и перезапустите шлюз либо запустите отдельный диспетчер через `korra kanban daemon --force`.'
         )
     return (
         False,
-        "No gateway is running — the task will sit in 'ready' until you "
-        "start it. Run:\n"
-        "    hermes gateway start\n"
-        "The gateway hosts an embedded dispatcher (tick interval 60s by "
-        "default); your task will be picked up on the next tick after "
-        "the gateway comes up."
+        'Шлюз не запущен. Задача останется в ready, пока вы не выполните `korra gateway start`. После запуска диспетчер возьмёт её при следующей проверке очереди (по умолчанию каждые 60 секунд).'
     )
 
 
@@ -992,8 +984,7 @@ def kanban_command(args: argparse.Namespace) -> int:
             parser.print_help()
         else:
             print(
-                "usage: hermes kanban <action> [options]\n"
-                "Run 'hermes kanban --help' for the full list of actions.",
+                'Использование: korra kanban <действие> [параметры]. Полный список: korra kanban --help.',
                 file=sys.stderr,
             )
         return 0
@@ -1002,7 +993,7 @@ def kanban_command(args: argparse.Namespace) -> int:
     # korra_cli.kanban_db, because children can import DB mutators directly.
     if _is_delegated_child_cli_mutation(args):
         print(
-            "kanban: delegate_task child contexts cannot mutate Kanban tasks via the CLI",
+            'kanban: помощники delegate_task не могут менять задачи доски через CLI',
             file=sys.stderr,
         )
         return 1
@@ -1029,14 +1020,13 @@ def kanban_command(args: argparse.Namespace) -> int:
             print(f"kanban: {exc}", file=sys.stderr)
             return 2
         if not normed:
-            print("kanban: --board requires a slug", file=sys.stderr)
+            print('kanban: для --board нужно имя доски', file=sys.stderr)
             return 2
         # Boards other than 'default' must already exist — typoed slugs
         # would otherwise silently create an empty board.
         if normed != kb.DEFAULT_BOARD and not kb.board_exists(normed):
             print(
-                f"kanban: board {normed!r} does not exist. "
-                f"Create it with `hermes kanban boards create {normed}`.",
+                f'kanban: доска {normed!r} не существует. Создайте её: `korra kanban boards create {normed}`.',
                 file=sys.stderr,
             )
             return 1
@@ -1059,7 +1049,7 @@ def kanban_command(args: argparse.Namespace) -> int:
         try:
             kb.init_db()
         except Exception as exc:
-            print(f"kanban: could not initialize database: {exc}", file=sys.stderr)
+            print(f'kanban: не удалось создать базу данных: {exc}', file=sys.stderr)
             return 1
 
         handlers = {
@@ -1111,7 +1101,7 @@ def kanban_command(args: argparse.Namespace) -> int:
         }
         handler = handlers.get(action)
         if not handler:
-            print(f"kanban: unknown action {action!r}", file=sys.stderr)
+            print(f'kanban: неизвестное действие {action!r}', file=sys.stderr)
             return 2
         try:
             return int(handler(args) or 0)
@@ -1229,7 +1219,7 @@ def _dispatch_boards(args: argparse.Namespace) -> int:
         return _cmd_boards_export(args)
     if sub == "import":
         return _cmd_boards_import(args)
-    print(f"kanban boards: unknown action {sub!r}", file=sys.stderr)
+    print(f'kanban boards: неизвестное действие {sub!r}', file=sys.stderr)
     return 2
 
 
@@ -1262,24 +1252,24 @@ def _cmd_boards_list(args: argparse.Namespace) -> int:
         return 0
     # Human table: marker (•) for current, slug, display name, counts.
     if not boards:
-        print("(no boards — create one with `hermes kanban boards create <slug>`)")
+        print('(досок нет — создайте через `korra kanban boards create <имя>`)')
         return 0
-    print(f"{'':2s}  {'SLUG':24s}  {'NAME':28s}  COUNTS")
+    print(f"{'':2s}  {'ИМЯ':24s}  {'НАЗВАНИЕ':28s}  КОЛИЧЕСТВО")
     for b in boards:
         marker = "●" if b["is_current"] else " "
         counts = b["counts"] or {}
         counts_str = (
             ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
-            or "(empty)"
+            or "(пусто)"
         )
         name = b.get("name") or ""
         if b.get("archived"):
-            name += " [archived]"
+            name += " [архив]"
         print(f"{marker:2s}  {b['slug']:24s}  {name:28s}  {counts_str}")
     print()
-    print(f"Current board: {current}")
+    print(f'Текущая доска: {current}')
     if len(boards) > 1:
-        print("Switch boards with `hermes kanban boards switch <slug>`.")
+        print('Сменить доску: `korra kanban boards switch <имя>`.')
     return 0
 
 
@@ -1290,7 +1280,7 @@ def _cmd_boards_create(args: argparse.Namespace) -> int:
         print(f"kanban boards create: {exc}", file=sys.stderr)
         return 2
     if not normed:
-        print("kanban boards create: slug is required", file=sys.stderr)
+        print('kanban boards create: укажите имя доски', file=sys.stderr)
         return 2
     already = kb.board_exists(normed) and normed != kb.DEFAULT_BOARD
     meta = kb.create_board(
@@ -1302,14 +1292,14 @@ def _cmd_boards_create(args: argparse.Namespace) -> int:
         default_workdir=args.default_workdir,
     )
     verb = "already exists" if already else "created"
-    print(f"Board {meta['slug']!r} {verb}.")
-    print(f"  Display name: {meta.get('name', '')}")
-    print(f"  DB path:      {meta['db_path']}")
+    print(f"Доска {meta['slug']!r} {verb}.")
+    print(f"  Название:     {meta.get('name', '')}")
+    print(f"  Путь к базе:  {meta['db_path']}")
     if getattr(args, "switch", False):
         kb.set_current_board(meta["slug"])
-        print(f"  Switched to {meta['slug']!r}.")
+        print(f"  Выбрана доска {meta['slug']!r}.")
     else:
-        print(f"  Use `hermes kanban boards switch {meta['slug']}` to make it current.")
+        print(f"  Чтобы сделать её текущей, выполните `korra kanban boards switch {meta['slug']}`.")
     return 0
 
 
@@ -1325,11 +1315,10 @@ def _cmd_boards_rm(args: argparse.Namespace) -> int:
         print(f"kanban boards rm: {exc}", file=sys.stderr)
         return 1
     if res["action"] == "archived":
-        print(f"Board {res['slug']!r} archived → {res['new_path']}")
-        print("Recover by moving the directory back to "
-              "<root>/kanban/boards/<slug>/.")
+        print(f"Доска {res['slug']!r} перемещена в архив → {res['new_path']}")
+        print('Для восстановления верните папку в <root>/kanban/boards/<slug>/.')
     else:
-        print(f"Board {res['slug']!r} deleted.")
+        print(f"Доска {res['slug']!r} удалена.")
     return 0
 
 
@@ -1340,17 +1329,16 @@ def _cmd_boards_switch(args: argparse.Namespace) -> int:
         print(f"kanban boards switch: {exc}", file=sys.stderr)
         return 2
     if not normed:
-        print("kanban boards switch: slug is required", file=sys.stderr)
+        print('kanban boards switch: укажите имя доски', file=sys.stderr)
         return 2
     if not kb.board_exists(normed):
         print(
-            f"kanban boards switch: board {normed!r} does not exist. "
-            f"Create it with `hermes kanban boards create {normed}`.",
+            f'kanban boards switch: доска {normed!r} не существует. Создайте её: `korra kanban boards create {normed}`.',
             file=sys.stderr,
         )
         return 1
     kb.set_current_board(normed)
-    print(f"Active board is now {normed!r}.")
+    print(f'Теперь активна доска {normed!r}.')
     return 0
 
 
@@ -1359,12 +1347,12 @@ def _cmd_boards_show(args: argparse.Namespace) -> int:
     meta = kb.read_board_metadata(current)
     counts = _board_task_counts(current)
     total = sum(counts.values())
-    print(f"Current board: {current}")
-    print(f"  Display name: {meta.get('name', '')}")
+    print(f'Текущая доска: {current}')
+    print(f"  Название:     {meta.get('name', '')}")
     if meta.get("description"):
-        print(f"  Description:  {meta['description']}")
-    print(f"  DB path:      {meta['db_path']}")
-    print(f"  Tasks:        {total} total"
+        print(f"  Описание:     {meta['description']}")
+    print(f"  Путь к базе:  {meta['db_path']}")
+    print(f'  Задачи:       {total} всего'
           + (f" ({', '.join(f'{k}={v}' for k, v in sorted(counts.items()))})"
              if counts else ""))
     return 0
@@ -1377,11 +1365,11 @@ def _cmd_boards_rename(args: argparse.Namespace) -> int:
         print(f"kanban boards rename: {exc}", file=sys.stderr)
         return 2
     if not normed or not kb.board_exists(normed):
-        print(f"kanban boards rename: board {args.slug!r} does not exist",
+        print(f'kanban boards rename: доска {args.slug!r} не существует',
               file=sys.stderr)
         return 1
     meta = kb.write_board_metadata(normed, name=args.name)
-    print(f"Board {normed!r} renamed to {meta['name']!r}.")
+    print(f"Доска {normed!r} переименована в {meta['name']!r}.")
     return 0
 
 
@@ -1392,15 +1380,15 @@ def _cmd_boards_set_default_workdir(args: argparse.Namespace) -> int:
         print(f"kanban boards set-default-workdir: {exc}", file=sys.stderr)
         return 2
     if not normed or not kb.board_exists(normed):
-        print(f"kanban boards set-default-workdir: board {args.slug!r} does not exist",
+        print(f'kanban boards set-default-workdir: доска {args.slug!r} не существует',
               file=sys.stderr)
         return 1
     meta = kb.write_board_metadata(normed, default_workdir=args.path)
     new_val = meta.get("default_workdir")
     if new_val:
-        print(f"Board {normed!r} default workdir set to {new_val!r}.")
+        print(f'Доска {normed!r}: рабочая папка по умолчанию — {new_val!r}.')
     else:
-        print(f"Board {normed!r} default workdir cleared.")
+        print(f'Доска {normed!r}: рабочая папка по умолчанию сброшена.')
     return 0
 
 
@@ -1425,12 +1413,12 @@ def _cmd_boards_export(args: argparse.Namespace) -> int:
         print(json.dumps(res, indent=2, ensure_ascii=False))
         return 0
     counts = res["counts"]
-    print(f"Exported board {res['board']!r} → {res['archive']}")
-    print(f"  Size:        {format_bytes(res['size'])}")
-    print(f"  Tasks:       {counts['tasks']}")
-    print(f"  Comments:    {counts['task_comments']}")
-    print(f"  Attachments: {counts['attachment_files']}")
-    print("Import it with `hermes kanban boards import <archive>`.")
+    print(f"Экспортирована доска {res['board']!r} → {res['archive']}")
+    print(f"  Размер:      {format_bytes(res['size'])}")
+    print(f"  Задачи:      {counts['tasks']}")
+    print(f"  Комментарии: {counts['task_comments']}")
+    print(f"  Вложения:    {counts['attachment_files']}")
+    print('Импортируйте: `korra kanban boards import <архив>`.')
     return 0
 
 
@@ -1448,17 +1436,17 @@ def _cmd_boards_import(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         print(json.dumps(res, indent=2, ensure_ascii=False))
         return 0
-    print(f"Imported board {res['board']!r} ({res['name']}).")
+    print(f"Импортирована доска {res['board']!r} ({res['name']}).")
     if res["renamed"]:
-        print(f"  Renamed from {res['requested_board']!r} — that slug was taken.")
-    print(f"  Path:  {res['path']}")
-    print(f"  Tasks: {res['counts']['tasks']}")
+        print(f"  Прежнее имя: {res['requested_board']!r} — оно уже занято.")
+    print(f"  Путь:   {res['path']}")
+    print(f"  Задачи: {res['counts']['tasks']}")
     for warning in res["warnings"]:
-        print(f"  Note:  {warning}")
+        print(f'  Примечание: {warning}')
     if res["activated"]:
-        print(f"  Active board is now {res['board']!r}.")
+        print(f"  Теперь активна доска {res['board']!r}.")
     else:
-        print(f"  Switch to it with `hermes kanban boards switch {res['board']}`.")
+        print(f"  Переключиться: `korra kanban boards switch {res['board']}`.")
     return 0
 
 
@@ -1492,7 +1480,7 @@ def _parse_duration(val) -> Optional[int]:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     path = kb.init_db()
-    print(f"Kanban DB initialized at {path}")
+    print(f'База доски создана: {path}')
 
     print()
     # Enumerate profiles on disk so the user knows what assignees are
@@ -1505,21 +1493,18 @@ def _cmd_init(args: argparse.Namespace) -> int:
     except Exception:
         profiles = []
     if profiles:
-        print(f"Discovered {len(profiles)} profile(s) on disk; any of these can "
-              f"be an --assignee:")
+        print(f'Найдено профилей: {len(profiles)}. Любой из них можно указать в --assignee:')
         for name in profiles:
             print(f"  {name}")
     else:
-        print("No profiles found under ~/.hermes/profiles/.")
-        print("Create one with `hermes -p <name> setup` before assigning tasks.")
+        print('Профили не найдены в папке profiles.')
+        print('Перед назначением задач создайте профиль: `korra -p <имя> setup`.')
     print()
-    print("Next step: start the gateway so ready tasks actually get picked up.")
-    print("  hermes gateway start")
+    print('Теперь запустите шлюз, чтобы готовые задачи начали выполняться.')
+    print('  korra gateway start')
     print()
     print(
-        "The gateway hosts an embedded dispatcher that ticks every 60 seconds\n"
-        "by default (config: kanban.dispatch_interval_seconds). Without a\n"
-        "running gateway, tasks stay in 'ready' forever."
+        'В шлюзе работает диспетчер задач. По умолчанию он проверяет очередь каждые 60 секунд (kanban.dispatch_interval_seconds в config.yaml). Пока шлюз выключен, задачи остаются в состоянии ready.'
     )
     return 0
 
@@ -1533,9 +1518,9 @@ def _cmd_heartbeat(args: argparse.Namespace) -> int:
             expected_run_id=_worker_run_id_for(args.task_id),
         )
     if not ok:
-        print(f"cannot heartbeat {args.task_id} (not running?)", file=sys.stderr)
+        print(f'Не удалось зарегистрировать активность {args.task_id} (процесс не запущен?)', file=sys.stderr)
         return 1
-    print(f"Heartbeat recorded for {args.task_id}")
+    print(f'Активность зарегистрирована для {args.task_id}')
     return 0
 
 
@@ -1546,10 +1531,10 @@ def _cmd_assignees(args: argparse.Namespace) -> int:
         print(json.dumps(data, indent=2, ensure_ascii=False))
         return 0
     if not data:
-        print("(no assignees — create a profile with `hermes -p <name> setup`)")
+        print('(исполнителей нет — создайте профиль через `korra -p <имя> setup`)')
         return 0
     # Header
-    print(f"{'NAME':20s}  {'ON DISK':8s}  COUNTS")
+    print(f"{'ИМЯ':20s}  {'НА ДИСКЕ':8s}  КОЛИЧЕСТВО")
     for entry in data:
         on_disk = "yes" if entry["on_disk"] else "no"
         counts = entry["counts"] or {}
@@ -1566,7 +1551,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         print(f"kanban: {exc}", file=sys.stderr)
         return 2
     if branch_name and ws_kind != "worktree":
-        print("kanban: --branch is only valid with --workspace worktree", file=sys.stderr)
+        print('kanban: --branch можно использовать только вместе с --workspace worktree', file=sys.stderr)
         return 2
     try:
         max_runtime = _parse_duration(getattr(args, "max_runtime", None))
@@ -1576,8 +1561,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     max_retries = getattr(args, "max_retries", None)
     if max_retries is not None and max_retries < 1:
         print(
-            f"kanban: --max-retries must be >= 1 (got {max_retries}); "
-            "use 1 to trip on the first failure.",
+            f'kanban: --max-retries должен быть не меньше 1 (получено {max_retries}). Значение 1 останавливает повторы после первой ошибки.',
             file=sys.stderr,
         )
         return 2
@@ -1610,7 +1594,8 @@ def _cmd_create(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         print(json.dumps(_task_to_dict(task), indent=2, ensure_ascii=False))
     else:
-        print(f"Created {task_id}  ({task.status}, assignee={task.assignee or '-'})")
+        # Created is the protocol marker consumed by gateway/slash_commands.py.
+        print(f"Created {task_id}  ({task.status}, исполнитель={task.assignee or '-'})")
 
         # Warn when the task would sit in `ready` because no dispatcher is
         # present. Only warn on ready+assigned tasks — triage/todo are
@@ -1633,7 +1618,7 @@ def _cmd_swarm(args: argparse.Namespace) -> int:
         print(f"kanban swarm: {exc}", file=sys.stderr)
         return 2
     if not workers:
-        print("kanban swarm: at least one --worker is required", file=sys.stderr)
+        print('kanban swarm: укажите хотя бы одного --worker', file=sys.stderr)
         return 2
     with kb.connect_closing() as conn:
         created = ks.create_swarm(
@@ -1650,10 +1635,10 @@ def _cmd_swarm(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         print(json.dumps(created.as_dict(), indent=2, ensure_ascii=False))
     else:
-        print(f"Swarm root: {created.root_id}")
-        print("Workers: " + ", ".join(created.worker_ids))
-        print(f"Verifier: {created.verifier_id}")
-        print(f"Synthesizer: {created.synthesizer_id}")
+        print(f'Главная задача группы: {created.root_id}')
+        print('Исполнители: ' + ", ".join(created.worker_ids))
+        print(f'Проверяющий: {created.verifier_id}')
+        print(f'Подготовка общего итога: {created.synthesizer_id}')
     return 0
 
 
@@ -1690,12 +1675,10 @@ def _cmd_list(args: argparse.Namespace) -> int:
         current = kb.get_current_board()
         other_count = len(all_boards) - 1
         print(
-            f"Board: {current} "
-            f"({other_count} other board{'s' if other_count != 1 else ''} — "
-            f"`hermes kanban boards list`)\n"
+            f"Доска: {current}; других досок: {other_count} — `korra kanban boards list`\n"
         )
     if not tasks:
-        print("(no matching tasks)")
+        print('(подходящих задач нет)')
         return 0
     for t in tasks:
         print(_fmt_task_line(t))
@@ -1706,7 +1689,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     rsk = _run_state_kwargs(args)
     if rsk is None:
         print(
-            "kanban show: pass both --state-type and --state-name, or omit both",
+            'kanban show: укажите вместе --state-type и --state-name либо пропустите оба параметра',
             file=sys.stderr,
         )
         return 2
@@ -1714,7 +1697,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     with kb.connect_closing() as conn:
         task = kb.get_task(conn, args.task_id)
         if not task:
-            print(f"no such task: {args.task_id}", file=sys.stderr)
+            print(f'Задача не найдена: {args.task_id}', file=sys.stderr)
             return 1
         comments = kb.list_comments(conn, args.task_id)
         events = kb.list_events(conn, args.task_id)
@@ -1767,26 +1750,26 @@ def _cmd_show(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return 0
 
-    print(f"Task {task.id}: {task.title}")
-    print(f"  status:    {task.status}")
-    print(f"  assignee:  {task.assignee or '-'}")
+    print(f'Задача {task.id}: {task.title}')
+    print(f'  состояние:    {task.status}')
+    print(f"  исполнитель:  {task.assignee or '-'}")
     if task.tenant:
-        print(f"  tenant:    {task.tenant}")
-    print(f"  workspace: {task.workspace_kind}" +
+        print(f'  область:      {task.tenant}')
+    print(f'  рабочая папка: {task.workspace_kind}' +
           (f" @ {task.workspace_path}" if task.workspace_path else ""))
     if task.branch_name:
-        print(f"  branch:    {task.branch_name}")
+        print(f'  ветка:        {task.branch_name}')
     if task.skills:
-        print(f"  skills:    {', '.join(task.skills)}")
+        print(f"  навыки:       {', '.join(task.skills)}")
     if task.model_override:
         _prov = f" (provider: {task.provider_override})" if task.provider_override else ""
-        print(f"  model:     {task.model_override}{_prov}")
+        print(f'  модель:       {task.model_override}{_prov}')
     # Effective retry threshold. Show the per-task override if set,
     # otherwise the dispatcher's resolved value from config (or the
     # default if config doesn't set it either). Helps operators see
     # why a task auto-blocked earlier/later than they expected.
     if task.max_retries is not None:
-        print(f"  max-retries: {task.max_retries} (task)")
+        print(f'  макс. попыток: {task.max_retries} (задача)')
     else:
         try:
             from korra_cli.config import load_config
@@ -1795,10 +1778,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
         except Exception:
             cfg_val = None
         if cfg_val is not None and int(cfg_val) != kb.DEFAULT_FAILURE_LIMIT:
-            print(f"  max-retries: {int(cfg_val)} (config kanban.failure_limit)")
+            print(f'  макс. попыток: {int(cfg_val)} (настройка kanban.failure_limit)')
         else:
-            print(f"  max-retries: {kb.DEFAULT_FAILURE_LIMIT} (default)")
-    print(f"  created:   {_fmt_ts(task.created_at)} by {task.created_by or '-'}")
+            print(f'  макс. попыток: {kb.DEFAULT_FAILURE_LIMIT} (по умолчанию)')
+    print(f"  создана:      {_fmt_ts(task.created_at)}, автор: {task.created_by or '-'}")
 
     # Diagnostics section — surface active distress signals at the top
     # of show output so CLI users see them before scrolling through
@@ -1807,7 +1790,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     diags = kd.compute_task_diagnostics(task, events, runs, graph=graph)
     if diags:
         sev_marker = {"warning": "⚠", "error": "!!", "critical": "!!!"}
-        print(f"\n  Diagnostics ({len(diags)}):")
+        print(f'\n  Диагностика ({len(diags)}):')
         for d in diags:
             print(f"    {sev_marker.get(d.severity, '?')} [{d.severity}] {d.title}")
             if d.data:
@@ -1818,50 +1801,50 @@ def _cmd_show(args: argparse.Namespace) -> int:
                     else:
                         bits.append(f"{k}={v}")
                 if bits:
-                    print(f"       data: {' | '.join(bits)}")
+                    print(f"       данные: {' | '.join(bits)}")
             # Only show suggested actions in show output to keep it tight;
             # full list is available via `kanban diagnostics --task <id>`.
             for a in d.actions:
                 if a.suggested:
                     print(f"       → {a.label}")
     if task.started_at:
-        print(f"  started:   {_fmt_ts(task.started_at)}")
+        print(f'  начата:       {_fmt_ts(task.started_at)}')
     if task.completed_at:
-        print(f"  completed: {_fmt_ts(task.completed_at)}")
+        print(f'  завершена:    {_fmt_ts(task.completed_at)}')
     if parents:
-        print(f"  parents:   {', '.join(parents)}")
+        print(f"  родительские: {', '.join(parents)}")
     if children:
-        print(f"  children:  {', '.join(children)}")
+        print(f"  дочерние:     {', '.join(children)}")
     if task.body:
         print()
-        print("Body:")
+        print('Описание:')
         print(task.body)
     if task.result:
         print()
-        print("Result:")
+        print('Результат:')
         print(task.result)
     elif latest_summary:
         # Worker handoff lives on the latest run, not on tasks.result.
         # Surface it at top-level so a glance at ``hermes kanban show <id>``
         # tells you what the worker did even if tasks.result is empty.
         print()
-        print("Latest summary:")
+        print('Последний итог:')
         print(latest_summary)
     if comments:
         print()
-        print(f"Comments ({len(comments)}):")
+        print(f'Комментарии ({len(comments)}):')
         for c in comments:
             print(f"  [{_fmt_ts(c.created_at)}] {c.author}: {c.body}")
     if events:
         print()
-        print(f"Events ({len(events)}):")
+        print(f'События ({len(events)}):')
         for e in events[-20:]:
             pl = f" {e.payload}" if e.payload else ""
             run_tag = f" [run {e.run_id}]" if e.run_id else ""
             print(f"  [{_fmt_ts(e.created_at)}]{run_tag} {e.kind}{pl}")
     if runs:
         print()
-        print(f"Runs ({len(runs)}):")
+        print(f'Запуски ({len(runs)}):')
         for r in runs:
             # Clamp to 0 so NTP backward-jumps don't print negative seconds.
             elapsed = (max(0, r.ended_at - r.started_at)
@@ -1882,9 +1865,9 @@ def _cmd_assign(args: argparse.Namespace) -> int:
     with kb.connect_closing() as conn:
         ok = kb.assign_task(conn, args.task_id, profile)
     if not ok:
-        print(f"no such task: {args.task_id}", file=sys.stderr)
+        print(f'Задача не найдена: {args.task_id}', file=sys.stderr)
         return 1
-    print(f"Assigned {args.task_id} to {profile or '(unassigned)'}")
+    print(f"Назначена задача {args.task_id} → {profile or '(unassigned)'}")
     return 0
 
 
@@ -1900,15 +1883,13 @@ def _cmd_set_model(args: argparse.Namespace) -> int:
         print(f"kanban: {exc}", file=sys.stderr)
         return 2
     if not ok:
-        print(f"no such task: {args.task_id}", file=sys.stderr)
+        print(f'Задача не найдена: {args.task_id}', file=sys.stderr)
         return 1
     if model:
         label = f"{provider}:{model}" if provider else model
-        print(f"Set model override on {args.task_id}: {label} "
-              "(applies on next dispatch)")
+        print(f'Задана модель для задачи {args.task_id}: {label} (со следующего запуска)')
     else:
-        print(f"Cleared model override on {args.task_id} "
-              "(worker uses its profile default)")
+        print(f'Сброшен выбор модели для задачи {args.task_id} (исполнитель использует модель своего профиля)')
     return 0
 
 
@@ -1920,11 +1901,11 @@ def _cmd_reclaim(args: argparse.Namespace) -> int:
         )
     if not ok:
         print(
-            f"cannot reclaim {args.task_id} (not running or unknown id)",
+            f'Не удалось освободить задачу {args.task_id} (она не выполняется или ID неизвестен)',
             file=sys.stderr,
         )
         return 1
-    print(f"Reclaimed {args.task_id}")
+    print(f'Освобождена задача {args.task_id}')
     return 0
 
 
@@ -1938,15 +1919,13 @@ def _cmd_reassign(args: argparse.Namespace) -> int:
         )
     if not ok:
         print(
-            f"cannot reassign {args.task_id} "
-            f"(unknown id, or still running — pass --reclaim to release first)",
+            f'Не удалось переназначить задачу {args.task_id} (неизвестный ID или задача ещё выполняется; сначала освободите её через --reclaim)',
             file=sys.stderr,
         )
         return 1
     print(
-        f"Reassigned {args.task_id} to "
-        f"{profile or '(unassigned)'}"
-        + (" (claim reclaimed)" if getattr(args, "reclaim", False) else "")
+        f"Задача переназначена: {args.task_id} → {profile or '(unassigned)'}"
+        + (' (прежнее назначение освобождено)' if getattr(args, "reclaim", False) else "")
     )
     return 0
 
@@ -1965,7 +1944,7 @@ def _cmd_diagnostics(args: argparse.Namespace) -> int:
         if getattr(args, "task", None):
             task = kb.get_task(conn, args.task)
             if task is None:
-                print(f"no such task: {args.task}", file=sys.stderr)
+                print(f'Задача не найдена: {args.task}', file=sys.stderr)
                 return 1
             diags_by_task = {
                 args.task: kd.compute_task_diagnostics(
@@ -2048,7 +2027,7 @@ def _cmd_diagnostics(args: argparse.Namespace) -> int:
         return 0
 
     if not diags_by_task:
-        print("No active diagnostics on this board.")
+        print('На этой доске нет активных диагностических сообщений.')
         return 0
 
     # Human-readable summary: grouped by task, severity-marked, with
@@ -2056,14 +2035,13 @@ def _cmd_diagnostics(args: argparse.Namespace) -> int:
     sev_marker = {"warning": "⚠", "error": "!!", "critical": "!!!"}
     total = sum(len(dl) for dl in diags_by_task.values())
     print(
-        f"{total} active diagnostic(s) across "
-        f"{len(diags_by_task)} task(s):\n"
+        f'{total} активных диагностических сообщений, задач: {len(diags_by_task)}:\n'
     )
     for tid, dl in diags_by_task.items():
         m = meta.get(tid, {})
         title = m.get("title") or "(untitled)"
         status = m.get("status") or "?"
-        assignee = m.get("assignee") or "(unassigned)"
+        assignee = m.get("assignee") or "(не назначен)"
         print(f"  {tid}  {status:8s}  @{assignee:18s}  {title}")
         for d in dl:
             print(f"    {sev_marker.get(d.severity, '?')} [{d.severity}] {d.kind}: {d.title}")
@@ -2076,7 +2054,7 @@ def _cmd_diagnostics(args: argparse.Namespace) -> int:
                     else:
                         bits.append(f"{k}={v}")
                 if bits:
-                    print(f"       data: {' | '.join(bits)}")
+                    print(f"       данные: {' | '.join(bits)}")
             # Suggested actions first.
             for a in d.actions:
                 if a.suggested:
@@ -2088,7 +2066,7 @@ def _cmd_diagnostics(args: argparse.Namespace) -> int:
 def _cmd_link(args: argparse.Namespace) -> int:
     with kb.connect_closing() as conn:
         kb.link_tasks(conn, args.parent_id, args.child_id)
-    print(f"Linked {args.parent_id} -> {args.child_id}")
+    print(f'Создана связь {args.parent_id} -> {args.child_id}')
     return 0
 
 
@@ -2096,9 +2074,9 @@ def _cmd_unlink(args: argparse.Namespace) -> int:
     with kb.connect_closing() as conn:
         ok = kb.unlink_tasks(conn, args.parent_id, args.child_id)
     if not ok:
-        print(f"No such link: {args.parent_id} -> {args.child_id}", file=sys.stderr)
+        print(f'Связь не найдена: {args.parent_id} -> {args.child_id}', file=sys.stderr)
         return 1
-    print(f"Unlinked {args.parent_id} -> {args.child_id}")
+    print(f'Удалена связь {args.parent_id} -> {args.child_id}')
     return 0
 
 
@@ -2112,15 +2090,14 @@ def _cmd_claim(args: argparse.Namespace) -> int:
                 print(f"no such task: {args.task_id}", file=sys.stderr)
                 return 1
             print(
-                f"cannot claim {args.task_id}: status={existing.status} "
-                f"lock={existing.claim_lock or '(none)'}",
+                f"Не удалось взять в работу {args.task_id}: состояние={existing.status}, блокировка={existing.claim_lock or '(none)'}",
                 file=sys.stderr,
             )
             return 1
         workspace = kb.resolve_workspace(task)
         kb.set_workspace_path(conn, task.id, str(workspace))
-    print(f"Claimed {task.id}")
-    print(f"Workspace: {workspace}")
+    print(f'Задача взята в работу: {task.id}')
+    print(f'Рабочая область: {workspace}')
     return 0
 
 
@@ -2128,7 +2105,7 @@ def _cmd_comment(args: argparse.Namespace) -> int:
     body = " ".join(args.text).strip()
     if args.max_len is not None:
         if args.max_len < 1:
-            print("kanban: --max-len must be positive", file=sys.stderr)
+            print('kanban: --max-len должен быть положительным', file=sys.stderr)
             return 2
         if len(body) > args.max_len:
             suffix = f"\n\n[trimmed to {args.max_len} chars by --max-len]"
@@ -2136,7 +2113,7 @@ def _cmd_comment(args: argparse.Namespace) -> int:
     author = args.author or _profile_author()
     with kb.connect_closing() as conn:
         kb.add_comment(conn, args.task_id, author, body)
-    print(f"Comment added to {args.task_id}")
+    print(f'Добавлен комментарий к {args.task_id}')
     return 0
 
 
@@ -2152,7 +2129,7 @@ def _cmd_attach(args: argparse.Namespace) -> int:
 
     src = Path(args.path).expanduser()
     if not src.is_file():
-        print(f"kanban: no such file: {src}", file=sys.stderr)
+        print(f'kanban: файл не найден: {src}', file=sys.stderr)
         return 1
     data = src.read_bytes()
     name = args.name or src.name
@@ -2171,7 +2148,7 @@ def _cmd_attach(args: argparse.Namespace) -> int:
     except kb.AttachmentTooLarge as exc:
         print(f"kanban: {exc}", file=sys.stderr)
         return 1
-    print(f"Attached {name} to {args.task_id} (attachment {att_id}, {len(data)} bytes)")
+    print(f'Прикреплён файл {name} → {args.task_id} (вложение {att_id}, {len(data)} байт)')
     return 0
 
 
@@ -2179,7 +2156,7 @@ def _cmd_attachments(args: argparse.Namespace) -> int:
     """List a task's attachments."""
     with kb.connect_closing() as conn:
         if kb.get_task(conn, args.task_id) is None:
-            print(f"no such task: {args.task_id}", file=sys.stderr)
+            print(f'Задача не найдена: {args.task_id}', file=sys.stderr)
             return 1
         atts = kb.list_attachments(conn, args.task_id)
     if getattr(args, "json", False):
@@ -2197,12 +2174,12 @@ def _cmd_attachments(args: argparse.Namespace) -> int:
         ], indent=2))
         return 0
     if not atts:
-        print(f"No attachments on {args.task_id}")
+        print(f'Нет вложений у задачи {args.task_id}')
         return 0
-    print(f"Attachments on {args.task_id}:")
+    print(f'Вложения задачи {args.task_id}:')
     for a in atts:
         ct = a.content_type or "-"
-        print(f"  [{a.id}] {a.filename}  ({a.size} bytes, {ct}, by {a.uploaded_by or '-'})")
+        print(f"  [{a.id}] {a.filename}  ({a.size} байт, {ct}, автор: {a.uploaded_by or '-'})")
         print(f"        {a.stored_path}")
     return 0
 
@@ -2212,9 +2189,9 @@ def _cmd_attach_rm(args: argparse.Namespace) -> int:
     with kb.connect_closing() as conn:
         removed = kb.delete_attachment(conn, args.attachment_id)
     if removed is None:
-        print(f"no such attachment: {args.attachment_id}", file=sys.stderr)
+        print(f'Вложение не найдено: {args.attachment_id}', file=sys.stderr)
         return 1
-    print(f"Deleted attachment {args.attachment_id} ({removed.filename}) from {removed.task_id}")
+    print(f'Удалено вложение {args.attachment_id} ({removed.filename}) из {removed.task_id}')
     return 0
 
 
@@ -2267,7 +2244,7 @@ def _cmd_complete(args: argparse.Namespace) -> int:
     """Mark one or more tasks done. Supports a single id or a list."""
     ids = list(args.task_ids or [])
     if not ids:
-        print("at least one task_id is required", file=sys.stderr)
+        print('Укажите хотя бы один task_id', file=sys.stderr)
         return 1
     summary = getattr(args, "summary", None)
     raw_meta = getattr(args, "metadata", None)
@@ -2276,9 +2253,7 @@ def _cmd_complete(args: argparse.Namespace) -> int:
     # Refuse instead of silently doing the wrong thing.
     if len(ids) > 1 and (summary or raw_meta):
         print(
-            "kanban: --summary / --metadata are per-task and can't be used "
-            "with multiple ids (would apply the same handoff to every task). "
-            "Complete tasks one at a time, or drop the flags for the bulk close.",
+            'kanban: --summary и --metadata относятся к одной задаче. С несколькими ID они запишут всем один результат. Завершайте задачи по одной или уберите эти флаги для массового завершения.',
             file=sys.stderr,
         )
         return 2
@@ -2304,8 +2279,7 @@ def _cmd_complete(args: argparse.Namespace) -> int:
             )
             if rejection is not None:
                 print(
-                    f"kanban: goal completion of {tid} rejected by judge: {rejection}. "
-                    f"Provide evidence matching the task's acceptance criteria.",
+                    f'kanban: завершение цели {tid} отклонено проверяющим: {rejection}. Добавьте подтверждения по условиям приёмки задачи.',
                     file=sys.stderr,
                 )
                 failed.append(tid)
@@ -2319,9 +2293,9 @@ def _cmd_complete(args: argparse.Namespace) -> int:
                 expected_run_id=_worker_run_id_for(tid),
             ):
                 failed.append(tid)
-                print(f"cannot complete {tid} (unknown id or terminal state)", file=sys.stderr)
+                print(f'Не удалось завершить {tid} (неизвестный ID или задача уже в конечном состоянии)', file=sys.stderr)
             else:
-                print(f"Completed {tid}")
+                print(f'Завершена задача {tid}')
     return 0 if not failed else 1
 
 
@@ -2345,11 +2319,11 @@ def _cmd_edit(args: argparse.Namespace) -> int:
             metadata=metadata,
         ):
             print(
-                f"cannot edit {args.task_id} (unknown id or task is not done)",
+                f'Не удалось изменить {args.task_id} (неизвестный ID или задача ещё не завершена)',
                 file=sys.stderr,
             )
             return 1
-    print(f"Edited {args.task_id}")
+    print(f'Изменена задача {args.task_id}')
     return 0
 
 
@@ -2371,7 +2345,7 @@ def _cmd_block(args: argparse.Namespace) -> int:
                 expected_run_id=_worker_run_id_for(tid),
             ):
                 failed.append(tid)
-                print(f"cannot block {tid}", file=sys.stderr)
+                print(f'Не удалось заблокировать {tid}', file=sys.stderr)
             else:
                 # Report where the task actually landed — dependency blocks go
                 # to todo, and a tripped unblock-loop breaker routes to triage.
@@ -2379,14 +2353,13 @@ def _cmd_block(args: argparse.Namespace) -> int:
                 where = landed.status if landed else "blocked"
                 suffix = f": {reason}" if reason else ""
                 if where == "todo":
-                    print(f"{tid} → todo (dependency wait){suffix}")
+                    print(f'{tid} → todo (ожидание зависимости){suffix}')
                 elif where == "triage":
                     print(
-                        f"{tid} → triage (unblock loop detected — needs a "
-                        f"human decision){suffix}"
+                        f'{tid} → triage (повторная блокировка — нужно решение человека){suffix}'
                     )
                 else:
-                    print(f"Blocked {tid}{suffix}")
+                    print(f'Заблокировано: {tid}{suffix}')
     return 0 if not failed else 1
 
 
@@ -2406,16 +2379,16 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
                 expected_run_id=_worker_run_id_for(tid),
             ):
                 failed.append(tid)
-                print(f"cannot schedule {tid}", file=sys.stderr)
+                print(f'Не удалось запланировать {tid}', file=sys.stderr)
             else:
-                print(f"Scheduled {tid}" + (f": {reason}" if reason else ""))
+                print(f'Запланировано: {tid}' + (f": {reason}" if reason else ""))
     return 0 if not failed else 1
 
 
 def _cmd_unblock(args: argparse.Namespace) -> int:
     ids = list(args.task_ids or [])
     if not ids:
-        print("at least one task_id is required", file=sys.stderr)
+        print('Укажите хотя бы один task_id', file=sys.stderr)
         return 1
     reason = getattr(args, "reason", None)
     if reason is not None:
@@ -2428,9 +2401,9 @@ def _cmd_unblock(args: argparse.Namespace) -> int:
                 kb.add_comment(conn, tid, author, f"UNBLOCK: {reason}")
             if not kb.unblock_task(conn, tid):
                 failed.append(tid)
-                print(f"cannot unblock {tid} (not blocked/scheduled?)", file=sys.stderr)
+                print(f'Не удалось разблокировать {tid} (состояние не blocked или scheduled?)', file=sys.stderr)
             else:
-                print(f"Unblocked {tid}" + (f": {reason}" if reason else ""))
+                print(f'Разблокировано: {tid}' + (f": {reason}" if reason else ""))
     return 0 if not failed else 1
 
 
@@ -2457,8 +2430,7 @@ def _cmd_request_review(args: argparse.Namespace) -> int:
         )
         if rejection is not None:
             print(
-                f"kanban: goal review handoff of {tid} rejected by judge: "
-                f"{rejection}. Provide acceptance evidence matching the task.",
+                f'kanban: передача цели на проверку {tid} отклонено проверяющим: {rejection}. Добавьте подтверждения по условиям приёмки задачи.',
                 file=sys.stderr,
             )
             return 1
@@ -2475,14 +2447,14 @@ def _cmd_request_review(args: argparse.Namespace) -> int:
         if not ok:
             detail = reason or "not running/ready?"
             print(
-                f"cannot request review for {tid}: {detail}",
+                f'Не удалось запросить проверку для {tid}: {detail}',
                 file=sys.stderr,
             )
             return 1
         persisted_run = kb.latest_run(conn, tid)
         display_summary = persisted_run.summary if persisted_run else None
         print(
-            f"Requested review for {tid}"
+            f'Запрошена проверка для {tid}'
             + (f": {display_summary}" if display_summary else "")
         )
     return 0
@@ -2500,13 +2472,13 @@ def _cmd_request_changes(args: argparse.Namespace) -> int:
         )
         if not ok:
             print(
-                f"cannot request changes for {tid}: {detail or 'invalid review state'}",
+                f"Не удалось запросить изменения для {tid}: {detail or 'неверное состояние проверки'}",
                 file=sys.stderr,
             )
             return 1
         print(
-            f"Requested changes for {tid}"
-            + (f"; routed to {detail}" if detail else "")
+            f'Запрошены изменения для {tid}'
+            + (f'; направлено к {detail}' if detail else "")
         )
     return 0
 
@@ -2514,7 +2486,7 @@ def _cmd_request_changes(args: argparse.Namespace) -> int:
 def _cmd_reopen_review(args: argparse.Namespace) -> int:
     ids = list(args.task_ids or [])
     if not ids:
-        print("at least one task_id is required", file=sys.stderr)
+        print('Укажите хотя бы один task_id', file=sys.stderr)
         return 1
     reason = getattr(args, "reason", None)
     if reason is not None:
@@ -2525,7 +2497,7 @@ def _cmd_reopen_review(args: argparse.Namespace) -> int:
         for tid in ids:
             if not kb.reopen_review_task(conn, tid):
                 failed.append(tid)
-                print(f"cannot reopen {tid} (not in review?)", file=sys.stderr)
+                print(f'Не удалось вернуть в работу {tid} (задача не на проверке?)', file=sys.stderr)
             else:
                 if reason:
                     kb.add_comment(
@@ -2534,7 +2506,7 @@ def _cmd_reopen_review(args: argparse.Namespace) -> int:
                         author or "operator",
                         f"CHANGES REQUESTED: {reason}",
                     )
-                print(f"Reopened {tid}" + (f": {reason}" if reason else ""))
+                print(f'Возвращено в работу: {tid}' + (f": {reason}" if reason else ""))
     return 0 if not failed else 1
 
 
@@ -2585,7 +2557,7 @@ def _cmd_promote(args: argparse.Namespace) -> int:
             suffix = f": {reason}" if reason else ""
             print(f"{label} {r['task_id']} -> ready{tag}{suffix}")
         else:
-            print(f"cannot promote {r['task_id']}: {r['error']}", file=sys.stderr)
+            print(f"Не удалось продвинуть {r['task_id']}: {r['error']}", file=sys.stderr)
     return 0 if not failed else 1
 
 
@@ -2593,10 +2565,10 @@ def _cmd_archive(args: argparse.Namespace) -> int:
     ids = list(args.task_ids or [])
     purge_ids = list(getattr(args, "purge_ids", None) or [])
     if ids and purge_ids:
-        print("choose either task_ids to archive or --rm archived task_ids", file=sys.stderr)
+        print('Выберите ID задач для архивации либо --rm с ID уже архивных задач', file=sys.stderr)
         return 1
     if not ids and not purge_ids:
-        print("at least one task_id is required", file=sys.stderr)
+        print('Укажите хотя бы один task_id', file=sys.stderr)
         return 1
     failed: list[str] = []
     with kb.connect_closing() as conn:
@@ -2604,22 +2576,22 @@ def _cmd_archive(args: argparse.Namespace) -> int:
             for tid in purge_ids:
                 if not kb.delete_archived_task(conn, tid):
                     failed.append(tid)
-                    print(f"cannot delete {tid} (must already be archived)", file=sys.stderr)
+                    print(f'Не удалось удалить {tid} (задача ещё не в архиве)', file=sys.stderr)
                 else:
-                    print(f"Deleted {tid}")
+                    print(f'Удалено: {tid}')
             return 0 if not failed else 1
         for tid in ids:
             if not kb.archive_task(conn, tid):
                 failed.append(tid)
-                print(f"cannot archive {tid}", file=sys.stderr)
+                print(f'Не удалось отправить в архив {tid}', file=sys.stderr)
             else:
-                print(f"Archived {tid}")
+                print(f'Перемещено в архив: {tid}')
     return 0 if not failed else 1
 
 
 def _cmd_tail(args: argparse.Namespace) -> int:
     last_id = 0
-    print(f"Tailing events for {args.task_id}. Ctrl-C to stop.")
+    print(f'Наблюдение за событиями задачи {args.task_id}. Для остановки нажмите Ctrl-C.')
     try:
         while True:
             with kb.connect_closing() as conn:
@@ -2631,7 +2603,7 @@ def _cmd_tail(args: argparse.Namespace) -> int:
                     last_id = e.id
             time.sleep(max(0.1, args.interval))
     except KeyboardInterrupt:
-        print("\n(stopped)")
+        print('\n(остановлено)')
         return 0
 
 
@@ -2708,40 +2680,38 @@ def _cmd_dispatch(args: argparse.Namespace) -> int:
             "auto_assigned_default": res.auto_assigned_default,
         }, indent=2))
         return 0
-    print(f"Reclaimed:    {res.reclaimed}")
-    print(f"Crashed:      {len(res.crashed)}")
+    print(f'Освобождено:      {res.reclaimed}')
+    print(f'Сбоев:            {len(res.crashed)}')
     if res.crashed:
         print(f"  {', '.join(res.crashed)}")
-    print(f"Timed out:    {len(res.timed_out)}")
+    print(f'Таймаутов:        {len(res.timed_out)}')
     if res.timed_out:
         print(f"  {', '.join(res.timed_out)}")
-    print(f"Stale:        {len(res.stale)}")
+    print(f'Устаревших:       {len(res.stale)}')
     if res.stale:
         print(f"  {', '.join(res.stale)}")
-    print(f"Auto-blocked: {len(res.auto_blocked)}")
+    print(f'Автоблокировок:   {len(res.auto_blocked)}')
     if res.auto_blocked:
         print(f"  {', '.join(res.auto_blocked)}")
-    print(f"Promoted:     {res.promoted}")
-    print(f"Spawned:      {len(res.spawned)}")
+    print(f'Продвинуто:       {res.promoted}')
+    print(f'Запущено:         {len(res.spawned)}')
     for tid, who, ws in res.spawned:
         tag = " (dry)" if args.dry_run else ""
         print(f"  - {tid}  ->  {who}  @ {ws or '-'}{tag}")
     if res.auto_assigned_default:
         print(
-            f"Auto-assigned to kanban.default_assignee={default_assignee!r}: "
-            f"{', '.join(res.auto_assigned_default)}"
+            f"Автоматически назначено на kanban.default_assignee={default_assignee!r}: {', '.join(res.auto_assigned_default)}"
         )
     if res.skipped_unassigned:
-        print(f"Skipped (unassigned): {', '.join(res.skipped_unassigned)}")
+        print(f"Пропущено без исполнителя: {', '.join(res.skipped_unassigned)}")
     if res.skipped_per_profile_capped:
         for tid, who, current in res.skipped_per_profile_capped:
             print(
-                f"Deferred ({who} at per-profile cap, {current} running): {tid}"
+                f'Отложено ({who}: достигнут лимит профиля, выполняется {current}): {tid}'
             )
     if res.skipped_nonspawnable:
         print(
-            f"Skipped (non-spawnable assignee — terminal lane, OK): "
-            f"{', '.join(res.skipped_nonspawnable)}"
+            f"Пропущено: исполнитель работает через терминал, отдельный запуск не нужен: {', '.join(res.skipped_nonspawnable)}"
         )
     return 0
 
@@ -2763,22 +2733,7 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
     # casually — intentional.
     if not getattr(args, "force", False):
         print(
-            "hermes kanban daemon: DEPRECATED — the dispatcher now runs\n"
-            "inside the gateway. To use kanban:\n"
-            "\n"
-            "    hermes gateway start       # starts the gateway + embedded dispatcher\n"
-            "\n"
-            "Ready tasks will be picked up on the next dispatcher tick\n"
-            "(default: every 60 seconds). Configure via config.yaml:\n"
-            "\n"
-            "    kanban:\n"
-            "      dispatch_in_gateway: true      # default\n"
-            "      dispatch_interval_seconds: 60\n"
-            "      failure_limit: 2              # consecutive non-success attempts before auto-block\n"
-            "\n"
-            "Running both the gateway AND this standalone daemon will\n"
-            "race for claims. If you truly need the old standalone\n"
-            "daemon (no gateway available), rerun with --force.",
+            'Команда `korra kanban daemon` устарела: диспетчер теперь работает внутри шлюза. Запустите `korra gateway start`. Готовые задачи будут взяты в работу при следующей проверке очереди (по умолчанию каждые 60 секунд). Настройки в config.yaml: kanban.dispatch_in_gateway: true, kanban.dispatch_interval_seconds: 60, kanban.failure_limit: 2. Не запускайте одновременно шлюз и отдельный диспетчер: они будут конкурировать за задачи. Если шлюз недоступен и нужен отдельный диспетчер, повторите команду с --force.',
             file=sys.stderr,
         )
         return 2
@@ -2798,11 +2753,7 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
 
     verbose = bool(getattr(args, "verbose", False))
     print(
-        f"Kanban dispatcher running STANDALONE via --force "
-        f"(interval={args.interval}s, pid={os.getpid()}). "
-        f"Ctrl-C to stop. NOTE: if a gateway is also running with "
-        f"dispatch_in_gateway=true (default), you have two dispatchers "
-        f"racing for claims.",
+        f'Диспетчер доски запущен отдельно через --force (интервал={args.interval} с, pid={os.getpid()}). Для остановки — Ctrl-C. Если шлюз уже работает с dispatch_in_gateway=true, два диспетчера будут конкурировать за задачи.',
         file=sys.stderr,
     )
 
@@ -2883,7 +2834,7 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
                 Path(pidfile).unlink()
             except OSError:
                 pass
-    print("(dispatcher stopped)")
+    print('(диспетчер остановлен)')
     return 0
 
 
@@ -2894,7 +2845,7 @@ def _cmd_watch(args: argparse.Namespace) -> int:
         if args.kinds else None
     )
     cursor = 0
-    print("Watching kanban events. Ctrl-C to stop.", flush=True)
+    print('Наблюдение за событиями доски. Для остановки нажмите Ctrl-C.', flush=True)
     # Seed cursor at the latest id so we don't replay history.
     with kb.connect_closing() as conn:
         row = conn.execute(
@@ -2932,7 +2883,7 @@ def _cmd_watch(args: argparse.Namespace) -> int:
                 )
             time.sleep(max(0.1, args.interval))
     except KeyboardInterrupt:
-        print("\n(stopped)")
+        print('\n(остановлено)')
         return 0
 
 
@@ -2942,24 +2893,24 @@ def _cmd_stats(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         print(json.dumps(stats, indent=2, ensure_ascii=False))
         return 0
-    print("By status:")
+    print('По состоянию:')
     for k in ("triage", "todo", "scheduled", "ready", "running", "blocked", "done"):
         print(f"  {k:8s}  {stats['by_status'].get(k, 0)}")
     if stats["by_assignee"]:
-        print("\nBy assignee:")
+        print('\nПо исполнителю:')
         for who, counts in sorted(stats["by_assignee"].items()):
             parts = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
             print(f"  {who:20s}  {parts}")
     age = stats["oldest_ready_age_seconds"]
     if age is not None:
-        print(f"\nOldest ready task age: {int(age)}s")
+        print(f'\nВозраст самой старой готовой задачи: {int(age)}s')
     return 0
 
 
 def _cmd_notify_subscribe(args: argparse.Namespace) -> int:
     with kb.connect_closing() as conn:
         if kb.get_task(conn, args.task_id) is None:
-            print(f"no such task: {args.task_id}", file=sys.stderr)
+            print(f'Задача не найдена: {args.task_id}', file=sys.stderr)
             return 1
         kb.add_notify_sub(
             conn, task_id=args.task_id,
@@ -2970,9 +2921,9 @@ def _cmd_notify_subscribe(args: argparse.Namespace) -> int:
             notifier_profile=args.notifier_profile or _profile_author(),
             delivery_mode=getattr(args, "delivery_mode", None),
         )
-    print(f"Subscribed {args.platform}:{args.chat_id}"
+    print(f'Подписка оформлена: {args.platform}:{args.chat_id}'
           + (f":{args.thread_id}" if args.thread_id else "")
-          + f" to {args.task_id}")
+          + f' → {args.task_id}')
     return 0
 
 
@@ -2983,7 +2934,7 @@ def _cmd_notify_list(args: argparse.Namespace) -> int:
         print(json.dumps(subs, indent=2, ensure_ascii=False))
         return 0
     if not subs:
-        print("(no subscriptions)")
+        print('(подписок нет)')
         return 0
     for s in subs:
         thr = f":{s['thread_id']}" if s.get("thread_id") else ""
@@ -2993,8 +2944,7 @@ def _cmd_notify_list(args: argparse.Namespace) -> int:
         ctype = s.get("chat_type") or "dm"
         ct = "" if ctype == "dm" else f"  chat_type={ctype}"
         uid_alt = f"  user_id_alt={s['user_id_alt']}" if s.get("user_id_alt") else ""
-        print(f"  {s['task_id']:10s}  {s['platform']}:{s['chat_id']}{thr}"
-              f"  (since event {s['last_event_id']}){owner}{ct}{uid_alt}{mode}")
+        print(f"  {s['task_id']:10s}  {s['platform']}:{s['chat_id']}{thr}  (с события {s['last_event_id']}){owner}{ct}{uid_alt}{mode}")
     return 0
 
 
@@ -3006,16 +2956,16 @@ def _cmd_notify_unsubscribe(args: argparse.Namespace) -> int:
             thread_id=args.thread_id,
         )
     if not ok:
-        print("(no such subscription)", file=sys.stderr)
+        print('(подписка не найдена)', file=sys.stderr)
         return 1
-    print(f"Unsubscribed from {args.task_id}")
+    print(f'Отписка от {args.task_id}')
     return 0
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
     content = kb.read_worker_log(args.task_id, tail_bytes=args.tail)
     if content is None:
-        print(f"(no log for {args.task_id} — task may not have spawned yet)",
+        print(f'(журнал не найден для {args.task_id} — задача могла ещё не запускаться)',
               file=sys.stderr)
         return 1
     sys.stdout.write(content)
@@ -3029,7 +2979,7 @@ def _cmd_runs(args: argparse.Namespace) -> int:
     rsk = _run_state_kwargs(args)
     if rsk is None:
         print(
-            "kanban runs: pass both --state-type and --state-name, or omit both",
+            'kanban runs: укажите вместе --state-type и --state-name либо пропустите оба параметра',
             file=sys.stderr,
         )
         return 2
@@ -3047,9 +2997,9 @@ def _cmd_runs(args: argparse.Namespace) -> int:
         ], indent=2, ensure_ascii=False))
         return 0
     if not runs:
-        print(f"(no runs yet for {args.task_id})")
+        print(f'(запусков ещё нет для {args.task_id})')
         return 0
-    print(f"{'#':3s}  {'OUTCOME':12s}  {'PROFILE':16s}  {'ELAPSED':>8s}  STARTED")
+    print(f"{'#':3s}  {'OUTCOME':12s}  {'PROFILE':16s}  {'ELAPSED':>8s}  ЗАПУЩЕНО")
     for i, r in enumerate(runs, 1):
         end = r.ended_at or int(time.time())
         # Clamp to 0 so NTP backward-jumps don't print negative durations.
@@ -3090,7 +3040,7 @@ def _cmd_specify(args: argparse.Namespace) -> int:
 
     if args.task_id and all_flag:
         print(
-            "kanban: pass either a task id OR --all, not both",
+            'kanban: укажите ID задачи или --all, но не оба сразу',
             file=sys.stderr,
         )
         return 2
@@ -3112,7 +3062,7 @@ def _cmd_specify(args: argparse.Namespace) -> int:
         ids = [args.task_id]
     else:
         print(
-            "kanban: specify requires a task id or --all",
+            'kanban: для specify нужен ID задачи или --all',
             file=sys.stderr,
         )
         return 2
@@ -3138,7 +3088,7 @@ def _cmd_specify(args: argparse.Namespace) -> int:
                 if outcome.new_title
                 else ""
             )
-            print(f"Specified {outcome.task_id} → todo{title_suffix}")
+            print(f'Уточнена задача {outcome.task_id} → todo{title_suffix}')
         else:
             print(
                 f"kanban: specify {outcome.task_id}: {outcome.reason}",
@@ -3164,7 +3114,7 @@ def _cmd_decompose(args: argparse.Namespace) -> int:
 
     if args.task_id and all_flag:
         print(
-            "kanban: pass either a task id OR --all, not both",
+            'kanban: укажите ID задачи или --all, но не оба сразу',
             file=sys.stderr,
         )
         return 2
@@ -3186,7 +3136,7 @@ def _cmd_decompose(args: argparse.Namespace) -> int:
         ids = [args.task_id]
     else:
         print(
-            "kanban: decompose requires a task id or --all",
+            'kanban: для decompose нужен ID задачи или --all',
             file=sys.stderr,
         )
         return 2
@@ -3209,8 +3159,7 @@ def _cmd_decompose(args: argparse.Namespace) -> int:
             if outcome.fanout and outcome.child_ids:
                 child_summary = ", ".join(outcome.child_ids)
                 print(
-                    f"Decomposed {outcome.task_id} → {len(outcome.child_ids)} "
-                    f"children ({child_summary}); root promoted to todo"
+                    f'Задача разделена: {outcome.task_id} → {len(outcome.child_ids)} дочерних задач ({child_summary}); главная задача переведена в todo'
                 )
             else:
                 title_suffix = (
@@ -3219,8 +3168,7 @@ def _cmd_decompose(args: argparse.Namespace) -> int:
                     else ""
                 )
                 print(
-                    f"Specified {outcome.task_id} → todo "
-                    f"(no fanout){title_suffix}"
+                    f'Уточнена задача {outcome.task_id} → todo (без разделения){title_suffix}'
                 )
         else:
             print(
@@ -3279,8 +3227,7 @@ def _cmd_gc(args: argparse.Namespace) -> int:
     removed_logs = kb.gc_worker_logs(
         older_than_seconds=log_days * 24 * 3600,
     )
-    print(f"GC complete: {removed_ws} workspace(s), "
-          f"{removed_events} event row(s), {removed_logs} log file(s) removed")
+    print(f'Очистка завершена: удалено {removed_ws} рабочих областей, {removed_events} записей событий, {removed_logs} файлов журналов')
     return 0
 
 
@@ -3313,42 +3260,39 @@ def _cmd_repair(args: argparse.Namespace) -> int:
         return 0 if report.status in {"ok", "repaired", "missing"} else 1
 
     if report.status == "missing":
-        print(f"No kanban DB at {report.db_path} — nothing to repair.")
+        print(f'База доски не найдена: {report.db_path} — восстанавливать нечего.')
         return 0
     if report.status == "ok":
-        print(f"{report.db_path}: integrity_check ok — no repair needed.")
+        print(f'{report.db_path}: проверка integrity_check пройдена — восстановление не требуется.')
         return 0
     if report.status == "repaired":
-        print(f"{report.db_path}: repaired.")
-        print(f"  reindexed: {', '.join(report.reindexed)}")
+        print(f'{report.db_path}: восстановлена.')
+        print(f"  Переиндексировано: {', '.join(report.reindexed)}")
         if report.backup_path:
-            print(f"  pre-repair backup: {report.backup_path}")
-        print("  integrity_check now ok.")
+            print(f'  Резервная копия перед восстановлением: {report.backup_path}')
+        print('  Проверка integrity_check теперь проходит.')
         return 0
     # still corrupt
-    print(f"{report.db_path}: CORRUPT.", file=sys.stderr)
+    print(f'{report.db_path}: ПОВРЕЖДЕНА.', file=sys.stderr)
     for line in (report.messages or [])[:10]:
         print(f"  {line}", file=sys.stderr)
     if report.reindexed:
         print(
-            f"  REINDEX ({', '.join(report.reindexed)}) attempted but "
-            f"integrity_check is still failing:",
+            f"  REINDEX ({', '.join(report.reindexed)}) выполнен, но integrity_check всё ещё обнаруживает ошибки:",
             file=sys.stderr,
         )
         for line in (report.post_repair_messages or [])[:10]:
             print(f"    {line}", file=sys.stderr)
     else:
         print(
-            "  Not an index-only failure — automatic REINDEX repair does "
-            "not apply (fail-closed).",
+            '  Повреждены не только индексы. Автоматическое восстановление через REINDEX не подходит.',
             file=sys.stderr,
         )
     if report.backup_path:
-        print(f"  corrupt copy quarantined at: {report.backup_path}",
+        print(f'  Копия повреждённой базы сохранена: {report.backup_path}',
               file=sys.stderr)
     print(
-        "  Recover manually (e.g. `sqlite3 kanban.db \".recover\"` into a "
-        "fresh file) or move the file aside to start a new board.",
+        '  Восстановите данные вручную (например, через `sqlite3 kanban.db ".recover"` в новый файл) или перенесите повреждённый файл, чтобы создать новую доску.',
         file=sys.stderr,
     )
     return 1
@@ -3452,7 +3396,7 @@ def run_slash(rest: str) -> str:
         except SystemExit:
             pass
         except Exception as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            print(f'ошибка: {exc}', file=sys.stderr)
 
     out = buf_out.getvalue().rstrip()
     err = buf_err.getvalue().rstrip()

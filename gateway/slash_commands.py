@@ -555,6 +555,8 @@ class GatewaySlashCommandsMixin:
                         )
                 except Exception as exc:
                     logger.warning("kanban create auto-subscribe failed: %s", exc)
+                # The CLI prefix is a protocol marker; localize after consuming it.
+                output = output[:m.start()] + f"Создана задача {task_id}" + output[m.end():]
 
         # Gateway messages have practical length caps; truncate long
         # listings to keep the UX reasonable.

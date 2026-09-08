@@ -65,8 +65,8 @@ def test_kanban_show_text_renders_graph_with_open_connection(kanban_home):
 
     output = kc.run_slash(f"show {child_id}")
 
-    assert f"Task {child_id}: child task" in output
-    assert f"parents:   {parent_id}" in output
+    assert f"Задача {child_id}: child task" in output
+    assert f"родительские: {parent_id}" in output
     assert "Cannot operate on a closed database" not in output
 
 
@@ -161,7 +161,7 @@ def test_run_slash_reclaim_running_task(kanban_home):
         conn.close()
 
     out = kc.run_slash(f"reclaim {tid} --reason 'test'")
-    assert "Reclaimed" in out, out
+    assert "Освобождена задача" in out, out
     # Status back to ready.
     out2 = kc.run_slash(f"show {tid}")
     assert "ready" in out2.lower()
@@ -177,5 +177,4 @@ def test_run_slash_reclaim_running_task(kanban_home):
 # ---------------------------------------------------------------------------
 # /kanban help / no-args / unknown-action UX (issue #21794)
 # ---------------------------------------------------------------------------
-
 

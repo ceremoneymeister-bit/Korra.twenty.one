@@ -677,6 +677,8 @@ async def test_gateway_create_autosubscribes_on_explicit_board(kanban_home):
 
     out = await GatewayRunner._handle_kanban_command(runner, event)
 
+    # Эта пачка намеренно закрепляет английскую локаль: здесь проверяется
+    # маршрутизация подписки, а не русская локаль по умолчанию.
     assert "subscribed" in out.lower()
 
     conn = kb.connect(board="projx")

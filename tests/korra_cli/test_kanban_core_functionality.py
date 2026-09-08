@@ -1006,7 +1006,7 @@ def test_cli_daemon_help_marks_deprecated():
     if daemon_help:
         for act in daemon_help:
             if getattr(act, "dest", "") == "daemon":
-                if "DEPRECATED" in (act.help or ""):
+                if 'Устарело' in (act.help or ""):
                     found_deprecation = True
                     break
     assert found_deprecation, (
