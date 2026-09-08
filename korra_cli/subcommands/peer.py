@@ -116,9 +116,11 @@ def _request(
     try:
         parsed = json.loads(payload)
     except ValueError as exc:
-        raise RuntimeError(f"Peer returned non-JSON response: {payload[:200]}") from exc
+        raise RuntimeError(
+            f"Удалённый шлюз вернул ответ не в формате JSON: {payload[:200]}"
+        ) from exc
     if not isinstance(parsed, dict):
-        raise RuntimeError("Peer returned a non-object JSON response")
+        raise RuntimeError("Удалённый шлюз вернул JSON не в виде объекта")
     return parsed
 
 
@@ -167,17 +169,20 @@ def _ensure_bot_chat(base: str, key: str) -> str:
             # canonical Bot Chat exists but is hidden, so we couldn't see it
             # and the create collided with the UNIQUE(title) guard.
             raise RuntimeError(
-                f"Peer already has a '{BOT_CHAT_TITLE}' session but it is hidden and the "
-                f"peer's gateway is too old to expose hidden sessions to this lookup "
-                f"(HTTP 400: {detail}). Update the peer's hermes-agent, or unhide the "
-                f"session there: PATCH /api/sessions/<id> {{\"hidden\": false}}."
+                f"На удалённом шлюзе уже есть сеанс '{BOT_CHAT_TITLE}', но он скрыт, "
+                f"а версия шлюза слишком стара, чтобы показывать скрытые сеансы при "
+                f"таком поиске (HTTP 400: {detail}). Обновите korra-agent на удалённом "
+                f"шлюзе или сделайте сеанс видимым: PATCH /api/sessions/<id> "
+                f"{{\"hidden\": false}}."
             ) from exc
         raise
     # Real api_server wraps the row: {"object": "hermes.session", "session": {...}}.
     session = created.get("session") if isinstance(created.get("session"), dict) else created
     session_id = str(session.get("id") or session.get("session_id") or "")
     if not session_id:
-        raise RuntimeError("Peer did not return a session id for the new Bot Chat")
+        raise RuntimeError(
+            "Удалённый шлюз не вернул ID сеанса для нового чата Bot Chat"
+        )
     return session_id
 
 
@@ -188,9 +193,11 @@ def _parse_target(target: str) -> tuple[str, str | None]:
     peer = peer.strip()
     profile = profile.strip() or None
     if not peer:
-        raise ValueError("Peer name required (hermes peer dm <peer>[/<agent>] ...)")
+        raise ValueError(
+            "Укажите имя удалённого шлюза (korra peer dm <шлюз>[/<агент>] ...)"
+        )
     if profile and not _PROFILE_RE.match(profile):
-        raise ValueError(f"Invalid agent/profile name: {profile!r}")
+        raise ValueError(f"Недопустимое имя агента или профиля: {profile!r}")
     return peer, profile
 
 
@@ -209,12 +216,15 @@ def _resolve_peer_target(target: str) -> tuple[str, str | None, dict, str]:
     peer_name, profile = _parse_target(target)
     peer = _load_peers().get(peer_name)
     if not isinstance(peer, dict) or not peer.get("url"):
-        raise LookupError(f"No peer named '{peer_name}'. Run: hermes peer list")
+        raise LookupError(
+            f"Удалённый шлюз '{peer_name}' не найден. Выполните: korra peer list"
+        )
     key = _peer_secret(peer_name)
     if not key:
         raise PermissionError(
-            f"No API key for peer '{peer_name}'. Set it: hermes peer add {peer_name} "
-            f"--url <url> --key <key> (or add {_peer_key_env(peer_name)}=<key> to ~/.hermes/.env)"
+            f"Нет API-ключа для удалённого шлюза '{peer_name}'. Укажите его: "
+            f"korra peer add {peer_name} --url <адрес> --key <ключ> "
+            f"(или добавьте {_peer_key_env(peer_name)}=<ключ> в ~/.hermes/.env)"
         )
     return peer_name, profile, peer, key
 
@@ -247,11 +257,19 @@ def cmd_peer(args) -> int:
     if action in ("add", "set"):
         name = (args.name or "").strip().lower()
         if not _PEER_NAME_RE.match(name):
-            print(f"Invalid peer name: {name!r} (lowercase, digits, -, _; max 64)", file=sys.stderr)
+            print(
+                f"Недопустимое имя удалённого шлюза: {name!r} "
+                "(строчные латинские буквы, цифры, -, _; не более 64 знаков)",
+                file=sys.stderr,
+            )
             return 2
         url = (args.url or "").strip()
         if not url.lower().startswith(("http://", "https://")):
-            print("Peer --url must be an http(s) gateway base URL, e.g. http://spark.lan:8377", file=sys.stderr)
+            print(
+                "Параметр --url должен содержать основной HTTP(S)-адрес шлюза, "
+                "например http://spark.lan:8377",
+                file=sys.stderr,
+            )
             return 2
         peers = _load_peers()
         peers[name] = {"url": url.rstrip("/"), **({"note": args.note.strip()} if getattr(args, "note", "") else {})}
@@ -261,12 +279,16 @@ def cmd_peer(args) -> int:
             from korra_cli.config import save_env_value
 
             save_env_value(_peer_key_env(name), key)
-            print(f"Peer '{name}' saved ({url}) — key stored as {_peer_key_env(name)} in ~/.hermes/.env")
+            print(
+                f"Удалённый шлюз '{name}' сохранён ({url}) — ключ записан как "
+                f"{_peer_key_env(name)} в ~/.hermes/.env"
+            )
         else:
             print(
-                f"Peer '{name}' saved ({url}). No key given — set the peer's API_SERVER_KEY with:\n"
-                f"  hermes peer add {name} --url {url} --key <key>\n"
-                f"  (or add {_peer_key_env(name)}=<key> to ~/.hermes/.env)"
+                f"Удалённый шлюз '{name}' сохранён ({url}). Ключ не указан — "
+                f"задайте API_SERVER_KEY удалённого шлюза:\n"
+                f"  korra peer add {name} --url {url} --key <ключ>\n"
+                f"  (или добавьте {_peer_key_env(name)}=<ключ> в ~/.hermes/.env)"
             )
         return 0
 
@@ -274,21 +296,31 @@ def cmd_peer(args) -> int:
         name = (args.name or "").strip().lower()
         peers = _load_peers()
         if name not in peers:
-            print(f"No peer named '{name}'.", file=sys.stderr)
+            print(f"Удалённый шлюз '{name}' не найден.", file=sys.stderr)
             return 1
         peers.pop(name)
         _save_peers(peers)
-        print(f"Peer '{name}' removed (its {_peer_key_env(name)} entry in .env is kept; delete it manually if unused).")
+        print(
+            f"Удалённый шлюз '{name}' удалён (запись {_peer_key_env(name)} "
+            "сохранена в .env; удалите её вручную, если она больше не нужна)."
+        )
         return 0
 
     if action in ("list", "ls", None):
         peers = _load_peers()
         if not peers:
-            print("No peers registered. Add one: hermes peer add <name> --url http://host:port --key <API_SERVER_KEY>")
+            print(
+                "Нет подключённых удалённых шлюзов. Добавьте: "
+                "korra peer add <имя> --url http://host:port --key <API_SERVER_KEY>"
+            )
             return 0
         for name in sorted(peers):
             entry = peers[name] if isinstance(peers[name], dict) else {}
-            has_key = "key set" if _peer_secret(name) else f"NO KEY ({_peer_key_env(name)} unset)"
+            has_key = (
+                "ключ указан"
+                if _peer_secret(name)
+                else f"НЕТ КЛЮЧА ({_peer_key_env(name)} не задана)"
+            )
             note = f" — {entry.get('note')}" if entry.get("note") else ""
             print(f"{name}\t{entry.get('url', '?')}\t[{has_key}]{note}")
         return 0
@@ -308,7 +340,7 @@ def cmd_peer(args) -> int:
         if action in {"status", "stop"}:
             run_id = (getattr(args, "run_id", None) or "").strip()
             if not run_id:
-                print("Run ID required.", file=sys.stderr)
+                print("Укажите ID запуска.", file=sys.stderr)
                 return 2
             try:
                 result = _request(
@@ -320,12 +352,16 @@ def cmd_peer(args) -> int:
                 )
             except urllib.error.HTTPError as exc:
                 print(
-                    f"Peer '{peer_name}' rejected the request (HTTP {exc.code}): {_http_error_detail(exc)}",
+                    f"Удалённый шлюз '{peer_name}' отклонил запрос "
+                    f"(HTTP {exc.code}): {_http_error_detail(exc)}",
                     file=sys.stderr,
                 )
                 return 1
             except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as exc:
-                print(f"Could not reach peer '{peer_name}': {exc}", file=sys.stderr)
+                print(
+                    f"Не удалось подключиться к удалённому шлюзу '{peer_name}': {exc}",
+                    file=sys.stderr,
+                )
                 return 1
 
             payload = {"peer": peer_name, "profile": profile, **result}
@@ -341,7 +377,7 @@ def cmd_peer(args) -> int:
 
         message = _message_from_args(args)
         if not message:
-            print("Message required (argument or stdin).", file=sys.stderr)
+            print("Укажите сообщение аргументом или через stdin.", file=sys.stderr)
             return 2
 
         if action == "run":
@@ -354,7 +390,8 @@ def cmd_peer(args) -> int:
                 or re.search(r"[\r\n\x00]", idempotency_key)
             ):
                 print(
-                    "Idempotency key must be 1-255 characters without control newlines.",
+                    "Ключ идемпотентности должен содержать от 1 до 255 знаков "
+                    "без переводов строк.",
                     file=sys.stderr,
                 )
                 return 2
@@ -362,9 +399,9 @@ def cmd_peer(args) -> int:
                 durability = _peer_run_durability(base, key)
                 if durability is not True:
                     print(
-                        "Warning: this peer does not advertise restart-durable "
-                        "run replay; keep the run ID and avoid blind retries "
-                        "after a gateway restart.",
+                        "Предупреждение: удалённый шлюз не подтверждает сохранение "
+                        "повторов запуска после перезапуска; сохраните ID запуска и "
+                        "не повторяйте запрос вслепую после перезапуска шлюза.",
                         file=sys.stderr,
                     )
                 session_id = _ensure_bot_chat(base, key)
@@ -377,17 +414,24 @@ def cmd_peer(args) -> int:
                 )
             except urllib.error.HTTPError as exc:
                 print(
-                    f"Peer '{peer_name}' rejected the request (HTTP {exc.code}): {_http_error_detail(exc)}",
+                    f"Удалённый шлюз '{peer_name}' отклонил запрос "
+                    f"(HTTP {exc.code}): {_http_error_detail(exc)}",
                     file=sys.stderr,
                 )
                 return 1
             except (urllib.error.URLError, TimeoutError, OSError, RuntimeError) as exc:
-                print(f"Could not reach peer '{peer_name}': {exc}", file=sys.stderr)
+                print(
+                    f"Не удалось подключиться к удалённому шлюзу '{peer_name}': {exc}",
+                    file=sys.stderr,
+                )
                 return 1
 
             run_id = str(result.get("run_id") or "")
             if not run_id:
-                print(f"Peer '{peer_name}' did not return a run ID.", file=sys.stderr)
+                print(
+                    f"Удалённый шлюз '{peer_name}' не вернул ID запуска.",
+                    file=sys.stderr,
+                )
                 return 1
             payload = {
                 "peer": peer_name,
@@ -401,7 +445,7 @@ def cmd_peer(args) -> int:
             if getattr(args, "json", False):
                 print(json.dumps(payload))
             else:
-                replay = " (replayed)" if payload["replayed"] else ""
+                replay = " (повтор)" if payload["replayed"] else ""
                 print(f"{run_id}: {payload['status']}{replay}")
                 print(f"session_id: {session_id}")
                 print(f"idempotency_key: {idempotency_key}")
@@ -417,13 +461,20 @@ def cmd_peer(args) -> int:
                 timeout=DM_TIMEOUT_S,
             )
         except urllib.error.HTTPError as exc:
-            print(f"Peer '{peer_name}' rejected the request (HTTP {exc.code}): {_http_error_detail(exc)}", file=sys.stderr)
+            print(
+                f"Удалённый шлюз '{peer_name}' отклонил запрос "
+                f"(HTTP {exc.code}): {_http_error_detail(exc)}",
+                file=sys.stderr,
+            )
             return 1
         except RuntimeError as exc:
-            print(f"Peer '{peer_name}': {exc}", file=sys.stderr)
+            print(f"Удалённый шлюз '{peer_name}': {exc}", file=sys.stderr)
             return 1
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            print(f"Could not reach peer '{peer_name}': {exc}", file=sys.stderr)
+            print(
+                f"Не удалось подключиться к удалённому шлюзу '{peer_name}': {exc}",
+                file=sys.stderr,
+            )
             return 1
 
         reply = ""
@@ -433,10 +484,10 @@ def cmd_peer(args) -> int:
         if getattr(args, "json", False):
             print(json.dumps({"peer": peer_name, "profile": profile, "session_id": result.get("session_id") or session_id, "reply": reply}))
         else:
-            print(reply or "(no reply)")
+            print(reply or "(ответа нет)")
         return 0
 
-    print("Unknown peer action. See: hermes peer --help", file=sys.stderr)
+    print("Неизвестное действие peer. Справка: korra peer --help", file=sys.stderr)
     return 2
 
 

@@ -1,7 +1,9 @@
 """Tests for ``hermes peer`` — cross-machine bot-to-bot DMs."""
 
 import json
+import io
 import threading
+import urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 
@@ -43,7 +45,7 @@ def test_base_url_bare_and_profile():
 # ── registry round-trip (isolated config) ────────────────────────────────────
 
 
-def test_add_list_remove_roundtrip(monkeypatch, capsys):
+def test_add_list_remove_roundtrip_has_russian_output(monkeypatch, capsys):
     store = {}
 
     monkeypatch.setattr(peer_cmd, "_load_peers", lambda: dict(store))
@@ -60,30 +62,180 @@ def test_add_list_remove_roundtrip(monkeypatch, capsys):
     )
     assert rc == 0
     assert store["spark"]["url"] == "http://spark.lan:8377"
+    assert capsys.readouterr().out == (
+        "Удалённый шлюз 'spark' сохранён (http://spark.lan:8377). "
+        "Ключ не указан — задайте API_SERVER_KEY удалённого шлюза:\n"
+        "  korra peer add spark --url http://spark.lan:8377 --key <ключ>\n"
+        "  (или добавьте HERMES_PEER_SPARK_KEY=<ключ> в ~/.hermes/.env)\n"
+    )
 
     rc = peer_cmd.cmd_peer(SimpleNamespace(peer_action="list"))
     assert rc == 0
-    assert "spark" in capsys.readouterr().out
+    assert capsys.readouterr().out == (
+        "spark\thttp://spark.lan:8377\t[ключ указан]\n"
+    )
 
     rc = peer_cmd.cmd_peer(SimpleNamespace(peer_action="remove", name="spark"))
     assert rc == 0
     assert "spark" not in store
+    assert capsys.readouterr().out == (
+        "Удалённый шлюз 'spark' удалён (запись HERMES_PEER_SPARK_KEY "
+        "сохранена в .env; удалите её вручную, если она больше не нужна).\n"
+    )
 
 
-def test_add_rejects_bad_name_and_url(monkeypatch):
+def test_list_empty_and_missing_key_have_russian_output(monkeypatch, capsys):
+    monkeypatch.setattr(peer_cmd, "_load_peers", lambda: {})
+
+    assert peer_cmd.cmd_peer(SimpleNamespace(peer_action="list")) == 0
+    assert capsys.readouterr().out == (
+        "Нет подключённых удалённых шлюзов. Добавьте: korra peer add <имя> "
+        "--url http://host:port --key <API_SERVER_KEY>\n"
+    )
+
+    monkeypatch.setattr(
+        peer_cmd,
+        "_load_peers",
+        lambda: {"spark": {"url": "http://spark.lan:8377", "note": "лаборатория"}},
+    )
+    monkeypatch.setattr(peer_cmd, "_peer_secret", lambda name: "")
+
+    assert peer_cmd.cmd_peer(SimpleNamespace(peer_action="list")) == 0
+    assert capsys.readouterr().out == (
+        "spark\thttp://spark.lan:8377\t"
+        "[НЕТ КЛЮЧА (HERMES_PEER_SPARK_KEY не задана)] — лаборатория\n"
+    )
+
+
+def test_add_with_key_has_russian_output(monkeypatch, capsys):
+    from korra_cli import config
+
+    saved_env = {}
+    monkeypatch.setattr(peer_cmd, "_load_peers", lambda: {})
+    monkeypatch.setattr(peer_cmd, "_save_peers", lambda peers: None)
+    monkeypatch.setattr(config, "save_env_value", saved_env.__setitem__)
+
+    assert peer_cmd.cmd_peer(
+        SimpleNamespace(
+            peer_action="add",
+            name="spark",
+            url="http://spark.lan:8377",
+            key="secret",
+            note="",
+        )
+    ) == 0
+    assert saved_env == {"HERMES_PEER_SPARK_KEY": "secret"}
+    assert capsys.readouterr().out == (
+        "Удалённый шлюз 'spark' сохранён (http://spark.lan:8377) — ключ записан "
+        "как HERMES_PEER_SPARK_KEY в ~/.hermes/.env\n"
+    )
+
+
+def test_add_rejects_bad_name_and_url_with_russian_errors(monkeypatch, capsys):
     monkeypatch.setattr(peer_cmd, "_load_peers", lambda: {})
     monkeypatch.setattr(peer_cmd, "_save_peers", lambda peers: None)
 
     assert peer_cmd.cmd_peer(SimpleNamespace(peer_action="add", name="Bad Name!", url="http://x", key="", note="")) == 2
+    assert capsys.readouterr().err == (
+        "Недопустимое имя удалённого шлюза: 'bad name!' "
+        "(строчные латинские буквы, цифры, -, _; не более 64 знаков)\n"
+    )
     assert peer_cmd.cmd_peer(SimpleNamespace(peer_action="add", name="ok", url="ftp://x", key="", note="")) == 2
+    assert capsys.readouterr().err == (
+        "Параметр --url должен содержать основной HTTP(S)-адрес шлюза, "
+        "например http://spark.lan:8377\n"
+    )
 
 
-def test_dm_unknown_peer_and_missing_key(monkeypatch):
+def test_remove_unknown_peer_has_russian_error(monkeypatch, capsys):
+    monkeypatch.setattr(peer_cmd, "_load_peers", lambda: {})
+
+    assert peer_cmd.cmd_peer(
+        SimpleNamespace(peer_action="remove", name="spark")
+    ) == 1
+    assert capsys.readouterr().err == (
+        "Удалённый шлюз 'spark' не найден.\n"
+    )
+
+
+def test_dm_unknown_peer_and_missing_key_have_russian_errors(monkeypatch, capsys):
     monkeypatch.setattr(peer_cmd, "_load_peers", lambda: {"spark": {"url": "http://x"}})
     monkeypatch.setattr(peer_cmd, "_peer_secret", lambda name: "")
 
     assert peer_cmd.cmd_peer(SimpleNamespace(peer_action="dm", target="nope", message="hi", json=False)) == 1
+    assert capsys.readouterr().err == (
+        "Удалённый шлюз 'nope' не найден. Выполните: korra peer list\n"
+    )
     assert peer_cmd.cmd_peer(SimpleNamespace(peer_action="dm", target="spark", message="hi", json=False)) == 1
+    assert capsys.readouterr().err == (
+        "Нет API-ключа для удалённого шлюза 'spark'. Укажите его: "
+        "korra peer add spark --url <адрес> --key <ключ> "
+        "(или добавьте HERMES_PEER_SPARK_KEY=<ключ> в ~/.hermes/.env)\n"
+    )
+
+
+def test_run_id_and_message_required_have_russian_errors(monkeypatch, capsys):
+    monkeypatch.setattr(peer_cmd, "_load_peers", lambda: {"spark": {"url": "http://x"}})
+    monkeypatch.setattr(peer_cmd, "_peer_secret", lambda name: "secret")
+
+    assert peer_cmd.cmd_peer(
+        SimpleNamespace(peer_action="status", target="spark", run_id="", json=False)
+    ) == 2
+    assert capsys.readouterr().err == "Укажите ID запуска.\n"
+
+    monkeypatch.setattr(peer_cmd.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    assert peer_cmd.cmd_peer(
+        SimpleNamespace(peer_action="dm", target="spark", message="", json=False)
+    ) == 2
+    assert capsys.readouterr().err == "Укажите сообщение аргументом или через stdin.\n"
+
+
+def test_dm_http_and_remote_errors_have_russian_context(monkeypatch, capsys):
+    monkeypatch.setattr(peer_cmd, "_load_peers", lambda: {"spark": {"url": "http://x"}})
+    monkeypatch.setattr(peer_cmd, "_peer_secret", lambda name: "secret")
+    denied = urllib.error.HTTPError(
+        "http://x", 403, "Forbidden", {},
+        io.BytesIO(b'{"error":{"message":"remote denied"}}'),
+    )
+    monkeypatch.setattr(peer_cmd, "_ensure_bot_chat", lambda base, key: (_ for _ in ()).throw(denied))
+
+    assert peer_cmd.cmd_peer(
+        SimpleNamespace(peer_action="dm", target="spark", message="ping", json=False)
+    ) == 1
+    assert capsys.readouterr().err == (
+        "Удалённый шлюз 'spark' отклонил запрос (HTTP 403): remote denied\n"
+    )
+
+    monkeypatch.setattr(
+        peer_cmd,
+        "_ensure_bot_chat",
+        lambda base, key: (_ for _ in ()).throw(RuntimeError("remote failure")),
+    )
+    assert peer_cmd.cmd_peer(
+        SimpleNamespace(peer_action="dm", target="spark", message="ping", json=False)
+    ) == 1
+    assert capsys.readouterr().err == "Удалённый шлюз 'spark': remote failure\n"
+
+
+def test_run_missing_remote_id_has_russian_error(monkeypatch, capsys):
+    monkeypatch.setattr(peer_cmd, "_load_peers", lambda: {"spark": {"url": "http://x"}})
+    monkeypatch.setattr(peer_cmd, "_peer_secret", lambda name: "secret")
+    monkeypatch.setattr(peer_cmd, "_peer_run_durability", lambda base, key: True)
+    monkeypatch.setattr(peer_cmd, "_ensure_bot_chat", lambda base, key: "session_1")
+    monkeypatch.setattr(peer_cmd, "_request", lambda *args, **kwargs: {})
+
+    assert peer_cmd.cmd_peer(
+        SimpleNamespace(
+            peer_action="run",
+            target="spark",
+            message="ping",
+            idempotency_key="ticket-1",
+            json=False,
+        )
+    ) == 1
+    assert capsys.readouterr().err == (
+        "Удалённый шлюз 'spark' не вернул ID запуска.\n"
+    )
 
 
 # ── live HTTP dm flow (real loopback server, fake peer gateway) ──────────────
