@@ -886,11 +886,20 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(prog="metal-calc-mcp")
     parser.add_argument("--intake-only", action="store_true")
+    parser.add_argument("--analysis-only", action="store_true")
     parser.add_argument("--session-db", type=Path)
     args = parser.parse_args()
     settings = Settings.from_env()
     role = read_role_from_env()
     profile = read_profile_from_env(role)
+    if args.analysis_only:
+        if args.intake_only or args.session_db is not None or role != "front" or os.environ.get("METAL_CALC_PROFILE") != "intake-analysis":
+            raise RuntimeError("--analysis-only requires the internal analysis profile")
+        from .intake_analysis import AnalysisStore
+        from .intake_handoffs import IntakeHandoffs
+        from .analysis_mcp import build_mcp as build_analysis_mcp
+        build_analysis_mcp(AnalysisStore(IntakeHandoffs(settings.orders_root))).run(transport="stdio")
+        return
     if args.intake_only:
         if role != "front":
             raise RuntimeError("--intake-only requires the front role")

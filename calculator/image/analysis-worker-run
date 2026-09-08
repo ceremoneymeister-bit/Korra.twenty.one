@@ -1,0 +1,2 @@
+#!/command/with-contenv sh
+exec s6-setuidgid hermes /opt/metal-calc/.venv/bin/python -m metal_calc.intake_analysis_worker --orders-root /opt/data/orders --native-url http://127.0.0.1:8661

@@ -37,7 +37,7 @@ def main():
     context.mkdir()
     for directory in ("metal_calc", "lib", "bin", "review", "handoff", "documents"):
         copy_tree(ROOT / "calculator" / directory, context / directory)
-    for name in ("requirements.lock", "check_versions.py", "check_tool_surface.py"):
+    for name in ("requirements.lock", "check_versions.py", "check_tool_surface.py", "analysis-worker-run"):
         shutil.copy2(IMAGE / name, context / name)
     copy_tree(IMAGE / "fixtures", context / "fixtures")
     overlay = context / "runtime-overlay"

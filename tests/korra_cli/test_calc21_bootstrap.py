@@ -25,7 +25,9 @@ def test_bootstrap_role_config_and_native_multiplex_reconcile(tmp_path, monkeypa
     root_config = yaml.safe_load((data / "config.yaml").read_text())
     names = set(bootstrap.ROLES) - {"default"}
     assert root_config["gateway"]["multiplex_profiles"] is True
-    assert set(root_config["gateway"]["multiplex_profile_allowlist"]) == names
+    internal = "intake-analysis"
+    all_names = names | {internal}
+    assert set(root_config["gateway"]["multiplex_profile_allowlist"]) == all_names
     receiver = root_config["mcp_servers"]["metal_calc"]
     assert receiver["args"] == ["--intake-only", "--session-db", "/opt/data/state.db"]
     assert receiver["context_arguments"] == {
@@ -44,6 +46,14 @@ def test_bootstrap_role_config_and_native_multiplex_reconcile(tmp_path, monkeypa
         }
         # Simulate an older pilot's persisted named-profile run intent.
         (profile / "gateway_state.json").write_text('{"gateway_state":"running"}')
+    internal_config = yaml.safe_load((data / "profiles" / internal / "config.yaml").read_text())
+    server = internal_config["mcp_servers"]["metal_calc"]
+    assert server["args"] == ["--analysis-only"]
+    assert server["env"]["METAL_CALC_PROFILE"] == internal
+    assert server["context_arguments"] == {
+        tool: {"session_id": "session_id"} for tool in ("analysis_context", "analysis_page", "analysis_submit")
+    }
+    assert internal_config["platforms"]["telegram"]["enabled"] is False
 
     # This native pre-config switch is essential even if YAML enables mux.
     monkeypatch.setenv("GATEWAY_MULTIPLEX_PROFILES", "1")
@@ -52,5 +62,5 @@ def test_bootstrap_role_config_and_native_multiplex_reconcile(tmp_path, monkeypa
         container_argv=["gateway", "run"],
     )
     assert {action.profile: action.action for action in actions} == {
-        "default": "started", **{name: "registered" for name in names},
+        "default": "started", **{name: "registered" for name in all_names},
     }

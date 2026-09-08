@@ -17,7 +17,8 @@ def register(subparsers):
             parser.add_argument("--run-id", required=True)
         elif command == "error":
             parser.add_argument("--error-code", required=True)
-    for command in ("preparation", "answers-save"):
+    for command in ("preparation", "answers-save", "analysis", "analysis-plan", "analysis-start",
+                    "analysis-cancel", "analysis-retry"):
         parser = subparsers.add_parser("intake-" + command)
         parser.add_argument("--handoff-id", required=True)
 
@@ -27,6 +28,25 @@ def run(args, emit):
         if os.environ.get("METAL_CALC_ROLE") != "front":
             raise OrderScopeDenied("Передача доступна в кабинете приёма заказов")
         store = IntakeHandoffs(Settings.from_env().orders_root)
+        if args.command.startswith("intake-analysis"):
+            from .intake_analysis import AnalysisStore
+            from .admin import _read_stdin_json
+            from .errors import InvalidState
+            analysis = AnalysisStore(store)
+            action = args.command.removeprefix("intake-analysis").lstrip("-")
+            if action in {"start", "cancel", "retry"}:
+                body = _read_stdin_json(limit=4096)
+                required = {"plan_id", "request_id"} if action == "start" else {"job_id"}
+                if action == "retry":
+                    required.add("request_id")
+                if set(body) != required:
+                    raise InvalidState("Некорректный запрос управления разбором")
+                emit(getattr(analysis, action)(args.handoff_id, **body))
+            elif action == "plan":
+                emit(analysis.plan(args.handoff_id))
+            else:
+                emit(analysis.get(args.handoff_id))
+            return
         if args.command in {"intake-preparation", "intake-answers-save"}:
             from .intake_preparation import IntakePreparation
             from .admin import _read_stdin_json

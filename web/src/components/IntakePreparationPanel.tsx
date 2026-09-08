@@ -7,6 +7,7 @@ import {
   type SaveIntakeAnswersRequest,
 } from "@/lib/calc-intake-preparation";
 import { ownerFacingError } from "@/lib/owner-facing-error";
+import { IntakeAnalysisPanel } from "./IntakeAnalysisPanel";
 
 interface Props {
   handoffId: string;
@@ -196,7 +197,7 @@ function PreparationForm({ handoffId }: Props) {
             }}>Загрузить сохранённые ответы</button>
           </div>}
           {(saved || (!form.dirty && form.data.initial_answers.receipt)) && <p role="status" className="text-primary">Ответы сохранены для этого комплекта.</p>}
-          <p className="text-xs text-text-secondary">Следующий этап — план разбора и отдельный запуск обработки документов.</p>
+          <IntakeAnalysisPanel handoffId={handoffId} snapshotId={form.data.snapshot_id} answersRevision={form.revision} answersReady={form.data.editable && !form.dirty && !form.conflict && !saving && form.revision > 0} />
         </>}
         {error && <div role="alert"><p>{error}</p><button type="button" className="min-h-10 text-primary" onClick={() => void reload()}>Обновить сведения</button></div>}
       </div>

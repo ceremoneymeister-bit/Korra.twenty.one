@@ -104,7 +104,7 @@ def main():
             }
             cfg["gateway"] = {
                 "multiplex_profiles": True,
-                "multiplex_profile_allowlist": [profile for profile in ROLES if profile != "default"],
+                "multiplex_profile_allowlist": [profile for profile in ROLES if profile != "default"] + ["intake-analysis"],
             }
         write(home / "config.yaml", yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
         write(home / "profile.yaml", yaml.safe_dump({"display_name": label, "description": label}, allow_unicode=True))
@@ -118,6 +118,14 @@ def main():
         if role == "front":
             source = Path(__file__).with_name("front-soul.md")
         write(home / "SOUL.md", pilot_note + source.read_text())
+    # Internal bounded worker has its own stable tool schema and sessions.
+    # It is not a fifth operator workbench tab.
+    analysis_home = data / "profiles/intake-analysis"
+    write(analysis_home / "config.yaml", Path(__file__).with_name("analysis-profile.yaml").read_text())
+    write(analysis_home / "SOUL.md", Path(__file__).with_name("analysis-soul.md").read_text())
+    write(analysis_home / "profile.yaml", "display_name: Разбор документов\ndescription: Внутренний исполнитель приёмщика\n")
+    write(analysis_home / "gateway_state.json", json.dumps({"gateway_state": "stopped"}) + "\n")
+    write(analysis_home / ".env", f"API_SERVER_PORT=8661\nAPI_SERVER_KEY={api_key}\n", 0o600)
     for rel in ("client/inbox", "client/artifacts", "cache/documents", "orders", "delivery", "handoff"):
         (data / rel).mkdir(parents=True, exist_ok=True)
     for tree in (data, root / "rates", root / "policy"):

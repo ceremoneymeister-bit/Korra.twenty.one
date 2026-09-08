@@ -15,6 +15,7 @@ COPY --from=cad_source /opt/metal-calc/libredwg/ /opt/metal-calc/libredwg/
 COPY lib/ /opt/metal-calc/lib/
 COPY bin/ /opt/metal-calc/bin/
 COPY review/order_schema.json /etc/metal-calc/order_schema.json
+COPY review/document_composition.schema.json /etc/metal-calc/document_composition.schema.json
 COPY check_versions.py check_tool_surface.py /opt/metal-calc/acceptance/
 COPY fixtures/ /opt/metal-calc/acceptance/
 RUN chmod 0755 /opt/metal-calc/bin/* && \
@@ -55,3 +56,10 @@ LABEL org.opencontainers.image.title="Korra 21 Calculator" \
       ru.korra.calculator.engine-revision="c9c42ecb375c56f853576f0d4a06519deeb96f78" \
       ru.korra.calculator.kernel="v9" \
       ru.korra.calculator.stage="internal-pilot"
+
+COPY analysis-worker-run /etc/s6-overlay/s6-rc.d/calc-analysis/run
+RUN mkdir -p /etc/s6-overlay/s6-rc.d/calc-analysis/dependencies.d && \
+    cp /etc/s6-overlay/s6-rc.d/calc-documents/type /etc/s6-overlay/s6-rc.d/calc-analysis/type && \
+    chmod 0755 /etc/s6-overlay/s6-rc.d/calc-analysis/run && \
+    touch /etc/s6-overlay/s6-rc.d/calc-analysis/dependencies.d/base && \
+    touch /etc/s6-overlay/s6-rc.d/user/contents.d/calc-analysis

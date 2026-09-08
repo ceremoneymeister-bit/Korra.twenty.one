@@ -8,6 +8,9 @@ import type { IntakePreparation } from "@/lib/calc-intake-preparation";
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn() }));
 vi.mock("@/lib/calc-intake-preparation", () => ({ getIntakePreparation: mocks.get, saveIntakeAnswers: mocks.save }));
+vi.mock("./IntakeAnalysisPanel", () => ({
+  IntakeAnalysisPanel: ({ answersReady, answersRevision }: { answersReady: boolean; answersRevision: number }) => <div data-analysis-ready={answersReady} data-analysis-revision={answersRevision} />,
+}));
 
 function preparation(id = "handoff-a", revision = 0): IntakePreparation {
   return {
@@ -62,6 +65,16 @@ async function clickText(text: string) {
 }
 
 describe("intake preparation", () => {
+  it("allows analysis only for saved answers and locks it again while editing", async () => {
+    await mount();
+    expect(container.querySelector('[data-analysis-ready]')?.getAttribute("data-analysis-ready")).toBe("false");
+    mocks.save.mockResolvedValueOnce(preparation("handoff-a", 1));
+    await submit();
+    expect(container.querySelector('[data-analysis-ready]')?.getAttribute("data-analysis-ready")).toBe("true");
+    expect(container.querySelector('[data-analysis-revision]')?.getAttribute("data-analysis-revision")).toBe("1");
+    await select(1, "yes");
+    expect(container.querySelector('[data-analysis-ready]')?.getAttribute("data-analysis-ready")).toBe("false");
+  });
   it("restores saved scope and separates service files from documents without starting work", async () => {
     await mount();
     expect(container.textContent).toContain("Документы для разбора: 3");

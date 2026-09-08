@@ -223,6 +223,17 @@ class IntakeHandoffs:
                   for status in ("complete", "partial", "failed", "unsupported")}
         from .intake_preparation import IntakePreparation
         preparation = IntakePreparation(self).view(record["handoff_id"])
+        from .intake_analysis import AnalysisStore
+        analysis = AnalysisStore(self).get(record["handoff_id"])
+        job = analysis["job"]
+        analysis_summary = ({"status": job["status"], "stage": job["stage"], "summary": job["summary"],
+                             "issues": job["issues"][:20]} if job else None)
+        next_action = ("Уточните только неизвестные начальные ответы. Сотрудник сохраняет их в панели, "
+                       "затем подготавливает план и отдельно нажимает «Начать разбор».")
+        if job:
+            next_action = ("Статус разбора показан в analysis. Сохраняйте различие между серверным заданием, "
+                           "предварительными предложениями и принятым сотрудником составом. "
+                           "Предложения по исходнику доступны вместе с intake_observation.")
         return {"order_id": record["order_id"], "order_name": record["order_name"],
                 "snapshot_id": record["snapshot_id"], "document_set_revision": record["document_set_revision"],
                 "files_total": len(sources), "cached_observations": len(cached),
@@ -230,8 +241,8 @@ class IntakeHandoffs:
                 "cached_status_counts": counts,
                 "document_summary": preparation["summary"],
                 "initial_answers": preparation["initial_answers"],
-                "next_action": "Уточните только неизвестные начальные ответы; сотрудник сохраняет их в панели «Комплект и исходные ответы». Разбор ещё не запущен.",
-                "receipt": "context_delivered", "composition_status": "not_proposed",
+                "analysis": analysis_summary, "next_action": next_action,
+                "receipt": "context_delivered", "composition_status": "proposed" if job and job["summary"]["sources_complete"] else "not_proposed",
                 "human_approved": False, "use_for_calculation": False}
 
     @staticmethod
@@ -264,6 +275,13 @@ class IntakeHandoffs:
         if source_id not in cached:
             return {"source_id": source_id, "status": "not_cached", "use_for_calculation": False}
         result = self.jobs.result(cached[source_id]["job_id"], source_id)
+        from .intake_analysis import AnalysisStore
+        analysis = AnalysisStore(self).get(record["handoff_id"])["job"]
+        if analysis:
+            proposal = next((row.get("proposal") for row in analysis["rows"] if row["source_id"] == source_id), None)
+            if proposal:
+                result = {"reader_observation": result, "analysis_status": analysis["status"],
+                          "unverified_composition_proposal": proposal, "human_approved": False}
         # The result read uses another transaction; reject a source revision
         # that changed between binding resolution and cached artifact lookup.
         if self.get(record["handoff_id"])["status"] == "stale":

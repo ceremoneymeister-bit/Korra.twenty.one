@@ -9,7 +9,7 @@ import AgentWorkbenchPage from "./AgentWorkbenchPage";
 
 const agentTabs = vi.hoisted(() => ({
   tabs: [{ profile: "", label: "Корра" }, { profile: "calc-norm", label: "Расчётчик" }],
-  hiddenTabs: [],
+  hiddenTabs: [] as Array<{ profile: string; label: string }>,
   refresh: vi.fn(async () => {}),
   updateDisplayName: vi.fn(),
   hideTab: vi.fn(),
@@ -76,6 +76,8 @@ let root: Root;
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 beforeEach(() => {
+  agentTabs.tabs = [{ profile: "", label: "Корра" }, { profile: "calc-norm", label: "Расчётчик" }];
+  agentTabs.hiddenTabs = [];
   intakeMocks.get.mockReset();
   intakeMocks.get.mockRejectedValue(new Error("unexpected intake lookup"));
   container = document.createElement("div");
@@ -110,6 +112,21 @@ async function openCalculatorMenu() {
 }
 
 describe("calculator agent workbench", () => {
+  it("keeps the internal analysis worker out of calculator tabs and reopen menus", async () => {
+    agentTabs.tabs.push({ profile: "intake-analysis", label: "Внутренний разбор" });
+    agentTabs.hiddenTabs.push({ profile: "intake-analysis", label: "Внутренний разбор" });
+    await mount("calc", "/agents?agent=intake-analysis");
+    expect(container.querySelector('[data-profile="intake-analysis"]')).toBeNull();
+    expect(container.textContent).not.toContain("Внутренний разбор");
+    expect(container.querySelector('[aria-label="Добавить вкладку агента"]')).toBeNull();
+  });
+
+  it("preserves a same-named ordinary profile outside managed calculator mode", async () => {
+    agentTabs.tabs.push({ profile: "intake-analysis", label: "Мой разбор" });
+    await mount("fleet");
+    expect(container.querySelector('[data-profile="intake-analysis"]')).not.toBeNull();
+  });
+
   it("сохраняет рабочие действия и скрывает изменение управляемых ролей", async () => {
     await mount("calc");
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain("Приёмщик");

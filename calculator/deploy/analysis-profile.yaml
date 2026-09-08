@@ -1,0 +1,31 @@
+model:
+  provider: openai-codex
+  default: gpt-5.6-sol
+agent:
+  max_turns: 40
+  reasoning_effort: high
+  max_output_tokens: 16384
+streaming:
+  enabled: false
+api_server:
+  enabled: true
+platforms:
+  telegram:
+    enabled: false
+  api_server:
+    enabled: true
+platform_toolsets:
+  api_server: [metal_calc]
+mcp_servers:
+  metal_calc:
+    args: [--analysis-only]
+    env:
+      METAL_CALC_ROLE: front
+      METAL_CALC_PROFILE: intake-analysis
+    context_arguments:
+      analysis_context: {session_id: session_id}
+      analysis_page: {session_id: session_id}
+      analysis_submit: {session_id: session_id}
+    tools:
+      resources: false
+      prompts: false

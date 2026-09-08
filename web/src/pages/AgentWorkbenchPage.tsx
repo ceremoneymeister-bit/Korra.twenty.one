@@ -206,7 +206,7 @@ export default function AgentWorkbenchPage() {
   // Only its presentation label changes; chat/history keep the same profile id.
   const {
     tabs: profileTabs,
-    hiddenTabs,
+    hiddenTabs: profileHiddenTabs,
     refresh,
     updateDisplayName,
     hideTab,
@@ -215,11 +215,15 @@ export default function AgentWorkbenchPage() {
   } = useAgentTabs();
   const tabs = useMemo(
     () => managedCalculator
-      ? profileTabs.map((tab) => tab.profile === MAIN_AGENT_TAB.profile
+      ? profileTabs.filter((tab) => tab.profile !== "intake-analysis").map((tab) => tab.profile === MAIN_AGENT_TAB.profile
         ? { ...tab, label: "Приёмщик" }
         : tab)
       : profileTabs,
     [managedCalculator, profileTabs],
+  );
+  const hiddenTabs = useMemo(
+    () => managedCalculator ? profileHiddenTabs.filter((tab) => tab.profile !== "intake-analysis") : profileHiddenTabs,
+    [managedCalculator, profileHiddenTabs],
   );
   const [selectedId, setActiveId] = useState<string>(MAIN_AGENT_TAB.profile);
   const [newChatByProfile, setNewChatByProfile] = useState<
