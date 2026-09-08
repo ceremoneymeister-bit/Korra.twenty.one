@@ -4,15 +4,12 @@ No React, no JavaScript dependency. Listed providers come from the
 registry; clicking a provider sends a GET to
 ``/auth/login?provider=<name>``.
 
-Visual styling mirrors the Nous Research design system (the
-``@nous-research/ui`` package the React dashboard uses): the same
-``Collapse`` / ``Rules Compressed`` typeface, amber-on-dark colour
-tokens (``#170d02`` / ``#ffac02`` / ``#fff``), uppercase + wide-tracking
-brand chrome, and the inset-bevel button shadow. Fonts are served
-out of the SPA's ``/fonts/`` directory which the dashboard-auth gate
-already allowlists pre-auth (see ``_GATE_PUBLIC_PREFIXES`` in
-``middleware.py``), so the page renders without needing the React
-bundle loaded.
+Visual styling is the Korra21 "tactile threshold": the accepted graphite
+and lime palette, Onest typography, restrained neumorphic depth, and the
+large ``21`` edition mark. Fonts are served out of the SPA's ``/fonts/``
+directory which the dashboard-auth gate already allowlists pre-auth (see
+``_GATE_PUBLIC_PREFIXES`` in ``middleware.py``), so the page renders without
+needing the React bundle loaded.
 
 Test-stable class names: the existing test suite extracts the
 ``class="provider-btn"`` anchor href to walk the OAuth flow. That
@@ -24,6 +21,7 @@ from __future__ import annotations
 import html
 
 from korra_cli.dashboard_auth import list_session_providers
+from korra_cli.dashboard_auth.prefix import normalise_prefix
 
 # Inline minimal CSS. The dashboard's full skin lives in the React
 # bundle, which we deliberately do NOT load here — the login page must
@@ -34,50 +32,35 @@ from korra_cli.dashboard_auth import list_session_providers
 # are doubled (``{{`` / ``}}``).
 _LOGIN_HTML_TEMPLATE = """\
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="data:image/png;base64,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b0FxGvp+UR5+VmhMGE58bhm5rov2B7M4tCJqWDG7kQatLLPKWMkUmPJvA4LBo7qARNyXeMITLxnWbBfiaWHdU+J8sTQPgK+NpIL2OeFFDXkvx4Xkt8yaPKCUpACADRVVRQRsWbl5Tokm3bzcDWVyuLYP6xKI2DhUMi94Oc6mvmKosRsVy5Q/Qi7SjyBktwhNyyodUKCppaoI2ACsXbICDtS5XQilRHfiR0YjfVgJuNx0nPPJIxRkghXrhZff99h2QLAW1u80PP2qQTyptGjqRm0TyvzMQGaZ8ocdHRXGGwacMUNh826hpVNItwtb9xr2vWFILXdkjA/5MQhLS1RAgaZgGY22yamBR6a82vmh2gfUNZ10uxCUlOaV8Nw7huaVDlzEST/UrYSBzvWO+/aAYJj0h7ES0h/7jbGGfgS3QqphLZSLYHxhzXZDPC3z9RaYHlGuntK5//dNoNrhfk0fZtK/RabcgacRomEKT333XlQlu1nofExQy1yfEpl3/NmjynCvIjXTrNUJVbASUvDGGYxeZMvUPp4cf4VAikz7o1yJnaS04ib73jS0dQk2/MsyE7h1Rbl2xtIQFUoFXZoC1ToLwrg/QGCKRGyciMYBSJSXs26H6/1aqbcuVABoysD+9zxeeNeQaK29SanTih2TKf82E/4QraUuimaK88mjFJhk3WqDH3EvHwDjQVhWcv0QiUM8DUHZETJLLcFCLwSmyLX4KZJBG/EwQzzMkPcnuHpK2bpPSS13b7zb1+D3ry3dx5RIDBKtMJuH0etQLtbemNxDAUfjdqSXc8kjrC3swBJiDNw4qxw6GJJqE2yojPTB9KhrxwqM9FVmm/qb1CqBGaC0OLygogxFu8lFrhNIGRBUhZE+ZeSP6k4YjFfdJ9wz5vCq1ekDLtUrBUDJzGAlQFQqtRWM5646e7/F4jSQmyMgImPAR6o6Xo9E9XM/KdYKVe0FPgFCULyxqVEqh5Nu4DqwFkhX0rYP5FIsMA2cAN42njnpjmaXFx5ON4KqINIGbAZS/yTTO9N2vgQuichE9Vz4v4g/ASlFZPGB5P9IAAAAFHRFWHR4bXA6Q29sb3JTcGFjZQA2NTUzNTtUTfIAAABEdEVYdHhtcDpDcmVhdG9yVG9vbABDYW52YSBkb2M9REFISlJmYTREancgdXNlcj1VQUZzYnh3UjdyRSBicmFuZD1UIEhBU0RGcgbz3AAAABR0RVh0eG1wOkV4aWZWZXJzaW9uADAyMTCwWRvkAAAAGHRFWHR4bXA6Rmxhc2hQaXhWZXJzaW9uADAxMDCBx9h8AAAAGHRFWHR4bXA6UGl4ZWxYRGltZW5zaW9uADEyMDBXCdQ6AAAAGHRFWHR4bXA6UGl4ZWxZRGltZW5zaW9uADEyMDDu8g/SAAAAAElFTkSuQmCC">
-<title>Вход — Korra</title>
+<meta name="theme-color" content="#212121">
+<title>Вход — Korra21</title>
 <style>
-  /* Brand fonts shipped by @nous-research/ui — same files the SPA loads. */
+  /* The login page uses the same accepted type and colour tokens as Korra21. */
   @font-face {{
-    font-family: 'Collapse';
+    font-family: 'Onest';
     font-style: normal;
-    font-weight: 400;
+    font-weight: 100 900;
     font-display: swap;
-    src: url('/fonts/Collapse-Regular.woff2') format('woff2');
-  }}
-  @font-face {{
-    font-family: 'Collapse';
-    font-style: normal;
-    font-weight: 700;
-    font-display: swap;
-    src: url('/fonts/Collapse-Bold.woff2') format('woff2');
-  }}
-  @font-face {{
-    font-family: 'Rules Compressed';
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url('/fonts/RulesCompressed-Regular.woff2') format('woff2');
-  }}
-  @font-face {{
-    font-family: 'Rules Compressed';
-    font-style: normal;
-    font-weight: 600;
-    font-display: swap;
-    src: url('/fonts/RulesCompressed-Medium.woff2') format('woff2');
+    src: url('{base_path}/fonts/Onest-Variable.woff2') format('woff2');
   }}
 
   :root {{
-    --background-base: #170d02;
-    --background: #170d02;
-    --midground: #ffac02;
-    --foreground: #ffffff;
-    --hairline: color-mix(in srgb, #ffac02 18%, transparent);
-    --hairline-strong: color-mix(in srgb, #ffac02 35%, transparent);
+    color-scheme: dark;
+    --canvas: #212121;
+    --surface: #212121;
+    --surface-inset: #191919;
+    --text: #e8e8e8;
+    --text-muted: #9a9a9a;
+    --lime: #9ede01;
+    --lime-text: #1f1f1f;
+    --shadow: #191919;
+    --highlight: #2e2e2e;
+    --danger: #ff7979;
   }}
 
   *, *::before, *::after {{ box-sizing: border-box; }}
@@ -86,234 +69,404 @@ _LOGIN_HTML_TEMPLATE = """\
     margin: 0;
     padding: 0;
     min-height: 100%;
-    background: var(--background-base);
-    color: var(--foreground);
-    font-family: 'Collapse', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--canvas);
+    color: var(--text);
+    font-family: 'Onest', sans-serif;
+    font-optical-sizing: auto;
     font-size: 16px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }}
 
-  /* Subtle dot-grid backdrop — DS idiom (see `.dither` in globals.css). */
   body {{
-    background-image:
-      radial-gradient(
-        ellipse at top,
-        color-mix(in srgb, var(--midground) 6%, transparent) 0%,
-        transparent 55%
-      ),
-      repeating-conic-gradient(
-        color-mix(in srgb, var(--midground) 4%, transparent) 0% 25%,
-        transparent 0% 50%
-      );
-    background-size: auto, 3px 3px;
-    background-attachment: fixed;
-  }}
-
-  /* Layout: vertically center on tall screens, top-anchor on short. */
-  body {{
-    display: grid;
-    place-items: center;
-    padding: clamp(1.5rem, 6vh, 6rem) 1.25rem;
+    min-height: 100vh;
+    min-height: 100svh;
+    overflow-x: hidden;
+    background:
+      radial-gradient(circle at 12% 8%, rgba(158, 222, 1, 0.08), transparent 31rem),
+      var(--canvas);
   }}
 
   main {{
-    width: 100%;
-    max-width: 26rem;
-    position: relative;
-    animation: slide-up 0.6s ease-out both;
+    min-height: 100vh;
+    min-height: 100svh;
+    display: grid;
+    place-items: center;
+    padding: clamp(1.5rem, 5vw, 5rem);
   }}
 
-  @keyframes slide-up {{
-    from {{ opacity: 0; transform: translateY(6px); }}
+  .login-shell {{
+    width: 100%;
+    max-width: 70rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(21rem, 26rem);
+    align-items: center;
+    gap: clamp(3rem, 8vw, 8rem);
+    position: relative;
+    animation: arrive 0.55s cubic-bezier(.2,.8,.2,1) both;
+  }}
+
+  @keyframes arrive {{
+    from {{ opacity: 0; transform: translateY(14px); }}
     to   {{ opacity: 1; transform: translateY(0); }}
   }}
 
   @media (prefers-reduced-motion: reduce) {{
-    main {{ animation: none; }}
+    .login-shell {{ animation: none; }}
   }}
 
-  /* Brand wordmark above the card — same uppercase + wide-tracking
-     idiom DS Buttons use. */
-  .brand {{
-    text-align: center;
-    margin-bottom: 1.75rem;
-    font-family: 'Rules Compressed', 'Collapse', sans-serif;
-    font-weight: 600;
-    font-size: 1.05rem;
-    letter-spacing: 0.32em;
-    text-transform: uppercase;
-    color: var(--midground);
+  .identity {{
+    position: relative;
+    min-width: 0;
+    isolation: isolate;
   }}
-  .brand .dot {{
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    background: var(--midground);
-    margin: 0 0.55em 0.18em;
-    vertical-align: middle;
-    border-radius: 1px;
+
+  .edition-backdrop {{
+    position: absolute;
+    z-index: -1;
+    top: 50%;
+    left: -0.07em;
+    transform: translateY(-52%);
+    color: var(--lime);
+    font-size: clamp(14rem, 28vw, 27rem);
+    font-weight: 900;
+    line-height: 0.74;
+    letter-spacing: -0.13em;
+    opacity: 0.045;
+    user-select: none;
+    pointer-events: none;
+  }}
+
+  .brand-lockup {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.85rem;
+    margin-bottom: clamp(3.5rem, 10vh, 7rem);
+  }}
+
+  .brand-word {{
+    font-size: clamp(2.1rem, 4.4vw, 3.75rem);
+    font-weight: 850;
+    line-height: 0.9;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }}
+
+  .brand-number {{
+    display: grid;
+    place-items: center;
+    min-width: 2.9rem;
+    min-height: 2.25rem;
+    padding: 0.18rem 0.48rem 0.12rem;
+    border-radius: 0.7rem;
+    background: var(--lime);
+    color: var(--lime-text);
+    font-size: clamp(1.5rem, 3vw, 2.25rem);
+    font-weight: 900;
+    line-height: 1;
+    box-shadow: 3px 3px 6px var(--shadow), -3px -3px 6px var(--highlight);
+  }}
+
+  .eyebrow {{
+    margin: 0 0 1rem;
+    color: var(--lime);
+    font-size: 0.75rem;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }}
+
+  h1 {{
+    max-width: 9ch;
+    margin: 0;
+    font-size: clamp(2.8rem, 6vw, 5.4rem);
+    font-weight: 720;
+    line-height: 0.98;
+    letter-spacing: -0.055em;
+    text-wrap: balance;
+  }}
+
+  .identity-copy {{
+    max-width: 33rem;
+    margin: 1.65rem 0 0;
+    color: var(--text-muted);
+    font-size: clamp(1rem, 1.5vw, 1.15rem);
+    line-height: 1.65;
+    text-wrap: pretty;
+  }}
+
+  .feature-list {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin: 2rem 0 0;
+    padding: 0;
+    list-style: none;
+  }}
+
+  .feature-list li {{
+    padding: 0.58rem 0.8rem;
+    border-radius: 999px;
+    color: var(--text-muted);
+    background: var(--surface);
+    box-shadow: inset 1px 1px 3px var(--shadow), inset -1px -1px 3px var(--highlight);
+    font-size: 0.78rem;
+    font-weight: 560;
   }}
 
   .card {{
     position: relative;
-    padding: 2.25rem 2rem 2rem;
-    background: color-mix(in srgb, #ffffff 2%, var(--background-base));
-    border: 1px solid var(--hairline);
-    /* Hairline highlight + bevel shadow — matches DS Button SHADOW_DEFAULT
-       (`inset -1px -1px 0 #00000080, inset 1px 1px 0 #ffffff80`) at panel scale. */
-    box-shadow:
-      inset 1px 1px 0 0 color-mix(in srgb, #ffffff 5%, transparent),
-      inset -1px -1px 0 0 rgba(0, 0, 0, 0.4),
-      0 24px 60px -20px rgba(0, 0, 0, 0.6);
+    padding: clamp(1.6rem, 4vw, 2.5rem);
+    border-radius: 1.9rem;
+    background: var(--surface);
+    box-shadow: 5px 5px 10px var(--shadow), -5px -5px 10px var(--highlight);
   }}
 
-  h1 {{
-    margin: 0 0 0.4rem;
-    font-family: 'Rules Compressed', 'Collapse', sans-serif;
+  .card-kicker {{
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 2.4rem;
+    color: var(--text-muted);
+    font-size: 0.76rem;
     font-weight: 600;
-    font-size: 1.85rem;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--foreground);
+  }}
+
+  .status-dot {{
+    width: 0.55rem;
+    height: 0.55rem;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--lime);
+    box-shadow: 0 0 0 0.28rem rgba(158, 222, 1, 0.08);
+  }}
+
+  h2 {{
+    margin: 0;
+    font-size: clamp(1.8rem, 3vw, 2.35rem);
+    font-weight: 680;
+    line-height: 1.1;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
   }}
 
   .subtitle {{
-    margin: 0 0 1.75rem;
-    color: color-mix(in srgb, var(--foreground) 65%, transparent);
+    margin: 0.8rem 0 2rem;
+    color: var(--text-muted);
     font-size: 0.95rem;
+    line-height: 1.6;
   }}
 
   .provider-list {{
     display: grid;
-    gap: 0.75rem;
+    gap: 1rem;
   }}
 
-  /* Provider button — mirrors DS Button (default variant):
-     amber surface, dark text, uppercase + wide tracking, inset bevel. */
   .provider-btn {{
-    display: block;
+    min-height: 3.25rem;
+    display: grid;
+    place-items: center;
     width: 100%;
-    box-sizing: border-box;
-    padding: 0.95rem 1rem;
+    padding: 0.85rem 1.2rem;
     text-align: center;
-    background: var(--midground);
-    color: var(--background-base);
-    font-family: 'Collapse', sans-serif;
-    font-weight: 700;
-    font-size: 0.78rem;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
+    background: var(--lime);
+    color: var(--lime-text);
+    font: inherit;
+    font-size: 0.92rem;
+    font-weight: 720;
     text-decoration: none;
     border: 0;
-    border-radius: 0;  /* DS Button is squared — no rounded corners. */
+    border-radius: 0.9rem;
     cursor: pointer;
-    box-shadow:
-      inset 1px 1px 0 0 rgba(255, 255, 255, 0.5),
-      inset -1px -1px 0 0 rgba(0, 0, 0, 0.5);
-    transition: filter 0.12s ease-out;
-  }}
-  .provider-btn:hover {{
-    filter: brightness(1.08);
-  }}
-  .provider-btn:active {{
-    /* DS Button uses `active:invert` on the default surface. */
-    filter: invert(1);
-  }}
-  .provider-btn:focus-visible {{
-    outline: 2px solid var(--midground);
-    outline-offset: 3px;
+    box-shadow: 3px 3px 6px var(--shadow), -3px -3px 6px var(--highlight);
+    transition: transform 0.12s ease, filter 0.12s ease, box-shadow 0.12s ease;
   }}
 
-  /* Password provider form — same visual language as the OAuth buttons:
-     squared inputs, hairline borders, amber focus ring. */
+  .provider-btn:active {{
+    transform: translateY(1px);
+    box-shadow: inset 2px 2px 6px rgba(31, 31, 31, 0.34), inset -2px -2px 6px rgba(255, 255, 255, 0.2);
+  }}
+
+  .provider-btn:focus-visible {{
+    outline: none;
+    box-shadow: inset 0 0 0 3px var(--lime-text), inset 2px 2px 6px rgba(31, 31, 31, 0.34);
+  }}
+
+  .provider-btn:disabled {{
+    cursor: wait;
+    filter: saturate(0.7) brightness(0.82);
+  }}
+
   .provider-form {{
     display: grid;
-    gap: 0.75rem;
+    gap: 1rem;
     text-align: left;
   }}
+
   .form-title {{
-    font-family: 'Rules Compressed', 'Collapse', sans-serif;
     font-weight: 600;
-    font-size: 0.72rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: color-mix(in srgb, var(--foreground) 70%, transparent);
+    font-size: 0.82rem;
+    color: var(--text-muted);
   }}
+
   .field {{
     display: grid;
-    gap: 0.3rem;
+    gap: 0.55rem;
   }}
+
   .field-label {{
-    font-size: 0.72rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: color-mix(in srgb, var(--foreground) 55%, transparent);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 560;
   }}
+
   .field-input {{
+    min-height: 3.25rem;
     width: 100%;
-    box-sizing: border-box;
-    padding: 0.7rem 0.8rem;
-    background: color-mix(in srgb, #000000 25%, var(--background-base));
-    color: var(--foreground);
-    border: 1px solid var(--hairline-strong);
-    border-radius: 0;
-    font-family: 'Collapse', sans-serif;
-    font-size: 0.95rem;
+    padding: 0.82rem 1rem;
+    background: var(--surface-inset);
+    color: var(--text);
+    border: 0;
+    border-radius: 0.9rem;
+    font: inherit;
+    font-size: 1rem;
+    caret-color: var(--lime);
+    box-shadow: inset 3px 3px 6px #111111, inset -3px -3px 6px #242424;
   }}
+
   .field-input:focus-visible {{
     outline: none;
-    border-color: var(--midground);
-    box-shadow: 0 0 0 1px var(--midground);
+    background: #1b1b1b;
+    box-shadow: inset 0 0 0 2px var(--text-muted), inset 3px 3px 7px #101010;
   }}
+
   .form-error {{
-    color: #ff6b6b;
+    color: var(--danger);
     font-size: 0.82rem;
-    letter-spacing: 0.02em;
+    line-height: 1.45;
   }}
+
   .provider-form .provider-btn {{
-    margin-top: 0.25rem;
+    margin-top: 0.35rem;
   }}
 
-  footer {{
-    margin-top: 1.75rem;
-    text-align: center;
-    color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  .card-footer {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 2rem;
+    color: var(--text-muted);
     font-size: 0.75rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    line-height: 1.7;
-  }}
-  footer .sep {{
-    display: inline-block;
-    width: 1.5rem;
-    height: 1px;
-    background: var(--hairline-strong);
-    vertical-align: middle;
-    margin: 0 0.6em 0.2em;
   }}
 
-  /* Selection — DS uses midground bg + background text. */
+  .card-footer strong {{
+    color: var(--text);
+    font-weight: 620;
+  }}
+
   ::selection {{
-    background: var(--midground);
-    color: var(--background-base);
+    background: var(--lime);
+    color: var(--lime-text);
+  }}
+
+  @media (hover: hover) {{
+    .provider-btn:hover {{
+      transform: translateY(-1px);
+      filter: brightness(1.06);
+    }}
+  }}
+
+  @media (max-width: 820px) {{
+    main {{
+      padding: 2rem clamp(1.25rem, 7vw, 4rem);
+    }}
+
+    .login-shell {{
+      max-width: 34rem;
+      grid-template-columns: 1fr;
+      gap: 2.5rem;
+    }}
+
+    .brand-lockup {{
+      margin-bottom: 2.75rem;
+    }}
+
+    .edition-backdrop {{
+      left: auto;
+      right: -0.08em;
+      top: 45%;
+      font-size: clamp(12rem, 48vw, 20rem);
+    }}
+
+    h1 {{
+      max-width: 11ch;
+      font-size: clamp(2.6rem, 10vw, 4.4rem);
+    }}
+
+    .feature-list {{
+      margin-top: 1.5rem;
+    }}
+  }}
+
+  @media (max-width: 480px) {{
+    main {{ padding: 1.4rem 1rem 2rem; }}
+    .login-shell {{ gap: 2rem; }}
+    .brand-lockup {{ margin-bottom: 2.1rem; }}
+    .identity-copy {{ margin-top: 1.15rem; }}
+    .feature-list {{ display: none; }}
+    .card {{ padding: 1.55rem; border-radius: 1.5rem; }}
+    .card-kicker {{ margin-bottom: 1.8rem; }}
+    .card-footer {{ align-items: flex-start; flex-direction: column; gap: 0.2rem; }}
+  }}
+
+  @media (forced-colors: active) {{
+    .provider-btn:focus-visible,
+    .field-input:focus-visible {{
+      outline: 2px solid CanvasText;
+      outline-offset: 3px;
+    }}
+  }}
+
+  @media (prefers-reduced-motion: reduce) {{
+    .provider-btn {{ transition: none; }}
+    .provider-btn:hover,
+    .provider-btn:active {{ transform: none; }}
   }}
 </style>
 </head>
 <body>
 <main>
-  <div class="brand">KORRA</div>
-  <div class="card">
-    <h1>Вход</h1>
-    <p class="subtitle">Выберите способ входа в панель Korra</p>
-    <div class="provider-list">
+  <div class="login-shell">
+    <section class="identity" aria-labelledby="welcome-title">
+      <span class="edition-backdrop" aria-hidden="true">21</span>
+      <div class="brand-lockup">
+        <span class="brand-word">KORRA</span>
+        <span class="brand-number">21</span>
+      </div>
+      <p class="eyebrow">Персональный ИИ-агент</p>
+      <h1 id="welcome-title">Ваш рабочий контур</h1>
+      <p class="identity-copy">Агент, команда специалистов, проекты и материалы доступны в одном пространстве.</p>
+      <ul class="feature-list" aria-label="Возможности рабочего контура">
+        <li>Агент и специалисты</li>
+        <li>Проекты и материалы</li>
+        <li>История работы</li>
+      </ul>
+    </section>
+    <section class="card" aria-labelledby="login-title">
+      <div class="card-kicker"><span class="status-dot" aria-hidden="true"></span>Защищённый доступ</div>
+      <h2 id="login-title">Вход в систему</h2>
+      <p class="subtitle">Используйте данные доступа к вашему кабинету.</p>
+      <div class="provider-list">
 {provider_buttons}
+      </div>
+      <footer class="card-footer">
+        <strong>Korra21</strong>
+        <span>korra-agent.online</span>
+      </footer>
+    </section>
     </div>
-  </div>
-  <footer>
-    <span class="sep"></span>Public bind &middot; Auth required<span class="sep"></span>
-  </footer>
 </main>
 {password_script}
 </body>
@@ -322,84 +475,113 @@ _LOGIN_HTML_TEMPLATE = """\
 
 _EMPTY_HTML = """\
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="data:image/png;base64,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b0FxGvp+UR5+VmhMGE58bhm5rov2B7M4tCJqWDG7kQatLLPKWMkUmPJvA4LBo7qARNyXeMITLxnWbBfiaWHdU+J8sTQPgK+NpIL2OeFFDXkvx4Xkt8yaPKCUpACADRVVRQRsWbl5Tokm3bzcDWVyuLYP6xKI2DhUMi94Oc6mvmKosRsVy5Q/Qi7SjyBktwhNyyodUKCppaoI2ACsXbICDtS5XQilRHfiR0YjfVgJuNx0nPPJIxRkghXrhZff99h2QLAW1u80PP2qQTyptGjqRm0TyvzMQGaZ8ocdHRXGGwacMUNh826hpVNItwtb9xr2vWFILXdkjA/5MQhLS1RAgaZgGY22yamBR6a82vmh2gfUNZ10uxCUlOaV8Nw7huaVDlzEST/UrYSBzvWO+/aAYJj0h7ES0h/7jbGGfgS3QqphLZSLYHxhzXZDPC3z9RaYHlGuntK5//dNoNrhfk0fZtK/RabcgacRomEKT333XlQlu1nofExQy1yfEpl3/NmjynCvIjXTrNUJVbASUvDGGYxeZMvUPp4cf4VAikz7o1yJnaS04ib73jS0dQk2/MsyE7h1Rbl2xtIQFUoFXZoC1ToLwrg/QGCKRGyciMYBSJSXs26H6/1aqbcuVABoysD+9zxeeNeQaK29SanTih2TKf82E/4QraUuimaK88mjFJhk3WqDH3EvHwDjQVhWcv0QiUM8DUHZETJLLcFCLwSmyLX4KZJBG/EwQzzMkPcnuHpK2bpPSS13b7zb1+D3ry3dx5RIDBKtMJuH0etQLtbemNxDAUfjdqSXc8kjrC3swBJiDNw4qxw6GJJqE2yojPTB9KhrxwqM9FVmm/qb1CqBGaC0OLygogxFu8lFrhNIGRBUhZE+ZeSP6k4YjFfdJ9wz5vCq1ekDLtUrBUDJzGAlQFQqtRWM5646e7/F4jSQmyMgImPAR6o6Xo9E9XM/KdYKVe0FPgFCULyxqVEqh5Nu4DqwFkhX0rYP5FIsMA2cAN42njnpjmaXFx5ON4KqINIGbAZS/yTTO9N2vgQuichE9Vz4v4g/ASlFZPGB5P9IAAAAFHRFWHR4bXA6Q29sb3JTcGFjZQA2NTUzNTtUTfIAAABEdEVYdHhtcDpDcmVhdG9yVG9vbABDYW52YSBkb2M9REFISlJmYTREancgdXNlcj1VQUZzYnh3UjdyRSBicmFuZD1UIEhBU0RGcgbz3AAAABR0RVh0eG1wOkV4aWZWZXJzaW9uADAyMTCwWRvkAAAAGHRFWHR4bXA6Rmxhc2hQaXhWZXJzaW9uADAxMDCBx9h8AAAAGHRFWHR4bXA6UGl4ZWxYRGltZW5zaW9uADEyMDBXCdQ6AAAAGHRFWHR4bXA6UGl4ZWxZRGltZW5zaW9uADEyMDDu8g/SAAAAAElFTkSuQmCC">
-<title>Вход недоступен — Korra</title>
+<meta name="theme-color" content="#212121">
+<title>Настройка входа — Korra21</title>
 <style>
   @font-face {
-    font-family: 'Collapse';
+    font-family: 'Onest';
     font-style: normal;
-    font-weight: 400;
+    font-weight: 100 900;
     font-display: swap;
-    src: url('/fonts/Collapse-Regular.woff2') format('woff2');
-  }
-  @font-face {
-    font-family: 'Rules Compressed';
-    font-style: normal;
-    font-weight: 600;
-    font-display: swap;
-    src: url('/fonts/RulesCompressed-Medium.woff2') format('woff2');
+    src: url('/fonts/Onest-Variable.woff2') format('woff2');
   }
   :root {
-    --background-base: #170d02;
-    --midground: #ffac02;
-    --foreground: #ffffff;
-    --hairline: color-mix(in srgb, #ffac02 18%, transparent);
+    color-scheme: dark;
+    --canvas: #212121;
+    --text: #e8e8e8;
+    --muted: #9a9a9a;
+    --lime: #9ede01;
+    --shadow: #191919;
+    --highlight: #2e2e2e;
   }
   *, *::before, *::after { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; min-height: 100%;
-    background: var(--background-base);
-    color: var(--foreground);
-    font-family: 'Collapse', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--canvas);
+    color: var(--text);
+    font-family: 'Onest', sans-serif;
     font-size: 16px; line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
   body {
-    display: grid; place-items: center;
-    padding: clamp(1.5rem, 6vh, 6rem) 1.25rem;
+    min-height: 100vh;
+    min-height: 100svh;
+    display: grid;
+    place-items: center;
+    padding: clamp(1.25rem, 5vw, 4rem);
+    background:
+      radial-gradient(circle at 15% 12%, rgba(158, 222, 1, 0.08), transparent 30rem),
+      var(--canvas);
   }
   main {
-    width: 100%; max-width: 32rem;
-    padding: 2.25rem 2rem;
-    background: color-mix(in srgb, #ffffff 2%, var(--background-base));
-    border: 1px solid var(--hairline);
-    box-shadow:
-      inset 1px 1px 0 0 color-mix(in srgb, #ffffff 5%, transparent),
-      inset -1px -1px 0 0 rgba(0, 0, 0, 0.4),
-      0 24px 60px -20px rgba(0, 0, 0, 0.6);
+    width: 100%; max-width: 36rem;
+    padding: clamp(1.6rem, 5vw, 2.8rem);
+    border-radius: 1.9rem;
+    background: var(--canvas);
+    box-shadow: 5px 5px 10px var(--shadow), -5px -5px 10px var(--highlight);
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-bottom: 3rem;
+    font-size: 1.8rem;
+    font-weight: 850;
+    letter-spacing: 0.03em;
+  }
+  .brand span {
+    padding: 0.16rem 0.38rem 0.12rem;
+    border-radius: 0.55rem;
+    background: var(--lime);
+    color: #1f1f1f;
+    font-size: 1.2rem;
+    line-height: 1;
   }
   h1 {
     margin: 0 0 1rem;
-    font-family: 'Rules Compressed', 'Collapse', sans-serif;
-    font-weight: 600; font-size: 1.5rem;
-    letter-spacing: 0.05em; text-transform: uppercase;
-    color: var(--midground);
+    font-weight: 700;
+    font-size: clamp(2rem, 8vw, 3.2rem);
+    line-height: 1.05;
+    letter-spacing: -0.045em;
   }
-  p { margin: 0 0 1rem; }
+  p { margin: 0 0 1rem; color: var(--muted); }
+  .next-step { margin-top: 2rem; color: var(--text); }
   code {
-    background: var(--midground);
-    color: var(--background-base);
-    padding: 0.1em 0.35em;
-    font-family: 'Courier New', monospace;
-    font-size: 0.9em;
+    display: inline-block;
+    padding: 0.18em 0.45em;
+    border-radius: 0.45rem;
+    background: #191919;
+    color: var(--lime);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 0.88em;
   }
-  a { color: var(--midground); }
+  a {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    margin-top: 0.5rem;
+    color: var(--lime);
+    font-weight: 650;
+    text-underline-offset: 0.24em;
+  }
+  a:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 4px;
+  }
 </style>
 </head>
 <body>
 <main>
-<h1>Sign-in unavailable</h1>
-<p>This dashboard is bound to a non-loopback host but no authentication
-providers are available.</p>
-<p>Configure the bundled username/password provider or an OAuth provider.
-See the <a href="https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard#authentication-gated-mode">dashboard
-authentication documentation</a> for setup instructions.</p>
-<p>For auth-free local use, bind to <code>127.0.0.1</code> and connect through
-an SSH tunnel or Tailscale.</p>
+<div class="brand">KORRA <span>21</span></div>
+<h1>Настройте доступ</h1>
+<p>Панель готова принимать подключения. Добавьте провайдер логина и пароля или OAuth-провайдер в конфигурации Korra21.</p>
+<p class="next-step">Для локальной работы привяжите панель к <code>127.0.0.1</code> и откройте её через защищённый туннель: SSH-туннель или Tailscale.</p>
+<a href="https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard#authentication-gated-mode">Инструкция по настройке входа</a>
 </main>
 </body>
 </html>
@@ -422,15 +604,23 @@ _PASSWORD_FORM_SCRIPT = """\
       ev.preventDefault();
       var err = form.querySelector('.form-error');
       var btn = form.querySelector('button[type=submit]');
+      var fields = form.querySelectorAll('.field-input');
       if (err) { err.hidden = true; err.textContent = ''; }
-      if (btn) { btn.disabled = true; }
+      for (var i = 0; i < fields.length; i++) {
+        fields[i].removeAttribute('aria-invalid');
+      }
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Входим…';
+      }
+      form.setAttribute('aria-busy', 'true');
       var body = {
         provider: form.getAttribute('data-provider') || '',
         username: (form.querySelector('input[name=username]') || {}).value || '',
         password: (form.querySelector('input[name=password]') || {}).value || '',
         next: (form.querySelector('input[name=next]') || {}).value || ''
       };
-      fetch('/auth/password-login', {
+      fetch(form.action, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -442,14 +632,22 @@ _PASSWORD_FORM_SCRIPT = """\
           });
         }
         var msg = resp.status === 429
-          ? 'Too many attempts. Please wait and try again.'
-          : (resp.status === 401 ? 'Invalid username or password.'
-                                 : 'Sign-in failed. Please try again.');
+          ? 'Слишком много попыток. Подождите немного и повторите вход.'
+          : (resp.status === 401 ? 'Проверьте логин и пароль.'
+                                 : 'Не удалось войти. Повторите попытку.');
         if (err) { err.textContent = msg; err.hidden = false; }
-        if (btn) { btn.disabled = false; }
+        if (resp.status === 401) {
+          for (var i = 0; i < fields.length; i++) {
+            fields[i].setAttribute('aria-invalid', 'true');
+          }
+          if (fields.length) { fields[0].focus(); }
+        }
+        if (btn) { btn.disabled = false; btn.textContent = 'Войти'; }
+        form.removeAttribute('aria-busy');
       }).catch(function () {
-        if (err) { err.textContent = 'Network error. Please try again.'; err.hidden = false; }
-        if (btn) { btn.disabled = false; }
+        if (err) { err.textContent = 'Соединение прервалось. Проверьте интернет и повторите вход.'; err.hidden = false; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Войти'; }
+        form.removeAttribute('aria-busy');
       });
     });
   }
@@ -460,7 +658,7 @@ _PASSWORD_FORM_SCRIPT = """\
 """
 
 
-def render_login_html(*, next_path: str = "") -> str:
+def render_login_html(*, next_path: str = "", base_path: str = "") -> str:
     """Return the full HTML for ``GET /login``.
 
     ``next_path`` — when set, the post-login landing path the user
@@ -469,17 +667,28 @@ def render_login_html(*, next_path: str = "") -> str:
     end-to-end. The caller (``routes.login_page``) is responsible for
     validating ``next_path`` against the same-origin rules before we
     emit it; we still HTML-escape it as defence in depth.
+
+    ``base_path`` is the normalised reverse-proxy prefix. It is applied to
+    every pre-auth asset and auth action so the page works both at ``/login``
+    and under a cabinet/ingress mount such as ``/hermes/login``.
     """
+    from urllib.parse import quote
+
+    # A proxy prefix is still untrusted input. Keep slashes as path separators,
+    # but percent-encode characters that HTML/WHATWG URL parsing could reinterpret
+    # (for example ``&#92;`` becoming a backslash in a form action).
+    prefix = quote(normalise_prefix(base_path), safe="/")
     providers = list_session_providers()
     if not providers:
-        return _EMPTY_HTML
+        return _EMPTY_HTML.replace(
+            "url('/fonts/", f"url('{prefix}/fonts/"
+        )
 
     if next_path:
         # URL-encode then HTML-escape. The URL-encode step matches the
         # gate's ``_safe_next_target`` output shape (also URL-encoded),
         # so a value that round-tripped from /login?next=... back into
         # the button href is byte-identical.
-        from urllib.parse import quote
         next_qs = f"&next={html.escape(quote(next_path, safe=''), quote=True)}"
     else:
         next_qs = ""
@@ -489,21 +698,22 @@ def render_login_html(*, next_path: str = "") -> str:
     for p in providers:
         if getattr(p, "supports_password", False):
             needs_password_script = True
-            buttons.append(_render_password_form(p, next_path))
+            buttons.append(_render_password_form(p, next_path, prefix))
         else:
             buttons.append(
                 f'      <a class="provider-btn" '
-                f'href="/auth/login?provider={html.escape(p.name, quote=True)}{next_qs}">'
-                f'Sign in with {html.escape(p.display_name)}</a>'
+                f'href="{prefix}/auth/login?provider={html.escape(p.name, quote=True)}{next_qs}">'
+                f'Продолжить через {html.escape(p.display_name)}</a>'
             )
     script = _PASSWORD_FORM_SCRIPT if needs_password_script else ""
     return _LOGIN_HTML_TEMPLATE.format(
         provider_buttons="\n".join(buttons),
         password_script=script,
+        base_path=prefix,
     )
 
 
-def _render_password_form(provider, next_path: str) -> str:
+def _render_password_form(provider, next_path: str, base_path: str) -> str:
     """Render a username/password form for a ``supports_password`` provider.
 
     The form is wired by :data:`_PASSWORD_FORM_SCRIPT` (a single delegated
@@ -515,25 +725,27 @@ def _render_password_form(provider, next_path: str) -> str:
     form-field ordering.
     """
     pname = html.escape(provider.name, quote=True)
-    plabel = html.escape(provider.display_name)
+    error_id = f"login-error-{pname}"
     safe_next = html.escape(next_path, quote=True) if next_path else ""
     return (
         f'      <form class="provider-form" data-provider="{pname}" '
-        f'autocomplete="on">\n'
-        f'        <div class="form-title">Sign in with {plabel}</div>\n'
+        f'action="{base_path}/auth/password-login" autocomplete="on">\n'
+        f'        <div class="form-title">Вход по логину и паролю</div>\n'
         f'        <input type="hidden" name="next" value="{safe_next}">\n'
         f'        <label class="field">\n'
-        f'          <span class="field-label">Username</span>\n'
+        f'          <span class="field-label">Логин</span>\n'
         f'          <input class="field-input" type="text" name="username" '
+        f'aria-describedby="{error_id}" '
         f'autocomplete="username" autocapitalize="none" '
         f'autocorrect="off" spellcheck="false" required>\n'
         f'        </label>\n'
         f'        <label class="field">\n'
-        f'          <span class="field-label">Password</span>\n'
+        f'          <span class="field-label">Пароль</span>\n'
         f'          <input class="field-input" type="password" name="password" '
+        f'aria-describedby="{error_id}" '
         f'autocomplete="current-password" required>\n'
         f'        </label>\n'
-        f'        <div class="form-error" role="alert" hidden></div>\n'
-        f'        <button class="provider-btn" type="submit">Sign in</button>\n'
+        f'        <div class="form-error" id="{error_id}" role="alert" hidden></div>\n'
+        f'        <button class="provider-btn" type="submit">Войти</button>\n'
         f'      </form>'
     )

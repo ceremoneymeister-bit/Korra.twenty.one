@@ -251,6 +251,57 @@ class TestPasswordLoginRoute:
         assert SESSION_AT_COOKIE in set_cookie
         assert SESSION_RT_COOKIE in set_cookie
 
+    def test_valid_credentials_prefix_post_login_landing(self, gated_app):
+        resp = gated_app.post(
+            "/auth/password-login",
+            headers={"x-forwarded-prefix": "/hermes"},
+            json={
+                "provider": "testpw",
+                "username": "admin",
+                "password": "hunter2",
+                "next": "/sessions",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "next": "/hermes/sessions"}
+        assert "Path=/hermes" in resp.headers.get("set-cookie", "")
+
+    def test_prefixed_landing_with_query_is_not_double_prefixed(self, gated_app):
+        resp = gated_app.post(
+            "/auth/password-login",
+            headers={"x-forwarded-prefix": "/hermes"},
+            json={
+                "provider": "testpw",
+                "username": "admin",
+                "password": "hunter2",
+                "next": "/hermes?tab=1",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "next": "/hermes?tab=1"}
+
+    @pytest.mark.parametrize(
+        "unsafe_next",
+        [r"/\\evil.example", "%2F%5Cevil.example", "/%0A/evil.example"],
+    )
+    def test_valid_credentials_reject_open_redirect_landing(
+        self, gated_app, unsafe_next
+    ):
+        resp = gated_app.post(
+            "/auth/password-login",
+            json={
+                "provider": "testpw",
+                "username": "admin",
+                "password": "hunter2",
+                "next": unsafe_next,
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "next": "/"}
+
     def test_session_cookie_then_grants_authenticated_access(self, gated_app):
         # Log in, then hit an auth-required endpoint with the cookie jar
         # the TestClient retains — proving the minted session is accepted
@@ -349,9 +400,19 @@ class TestLoginPageRender:
         register_provider(PasswordProvider())
         try:
             html = render_login_html(next_path="/sessions")
+            assert '<html lang="ru">' in html
+            assert "Korra21" in html
+            assert "Вход в систему" in html
             assert '<form class="provider-form" data-provider="testpw"' in html
             assert 'name="username"' in html
             assert 'name="password"' in html
+            assert "Логин" in html
+            assert "Пароль" in html
+            assert ">Войти</button>" in html
+            assert "Вход по логину и паролю" in html
+            assert "Проверьте логин и пароль" in html
+            assert 'aria-describedby="login-error-testpw"' in html
+            assert 'id="login-error-testpw" role="alert"' in html
             assert 'value="/sessions"' in html
             assert "<script>" in html
             assert "/auth/password-login" in html
@@ -364,6 +425,7 @@ class TestLoginPageRender:
         try:
             html = render_login_html()
             assert "provider-btn" in html
+            assert "Продолжить через Stub" in html
             assert "<script>" not in html
             # No password FORM element rendered (the .provider-form CSS
             # rule lives in the template's <style> block unconditionally;
@@ -373,3 +435,33 @@ class TestLoginPageRender:
         finally:
             clear_providers()
 
+    def test_password_form_uses_proxy_prefix_for_submit_and_font(self):
+        clear_providers()
+        register_provider(PasswordProvider())
+        try:
+            html = render_login_html(base_path="/cabinet/client")
+            assert 'action="/cabinet/client/auth/password-login"' in html
+            assert "url('/cabinet/client/fonts/Onest-Variable.woff2')" in html
+            assert "fetch(form.action" in html
+        finally:
+            clear_providers()
+
+    @pytest.mark.parametrize("unsafe_prefix", [r"/\evil.example", "/&#92;evil.example"])
+    def test_password_form_prefix_cannot_escape_the_current_origin(
+        self, unsafe_prefix
+    ):
+        import re
+        from html import unescape
+        from urllib.parse import urljoin, urlsplit
+
+        clear_providers()
+        register_provider(PasswordProvider())
+        try:
+            page = render_login_html(base_path=unsafe_prefix)
+            action_match = re.search(r'action="([^"]+)"', page)
+            assert action_match is not None
+            action = unescape(action_match.group(1))
+            resolved = urlsplit(urljoin("https://korra.example/login", action))
+            assert resolved.netloc == "korra.example"
+        finally:
+            clear_providers()

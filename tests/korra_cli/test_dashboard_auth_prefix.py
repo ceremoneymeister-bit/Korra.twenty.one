@@ -107,6 +107,13 @@ def gated_app_direct():
 
 
 class TestForwardedPrefixNormalisation:
+    @pytest.mark.parametrize(
+        "unsafe",
+        [r"/\\evil.example", "/safe\n/evil", "/safe\r/evil", "/safe\t/evil"],
+    )
+    def test_canonicalization_characters_are_rejected(self, unsafe):
+        assert prefix_mod.normalise_prefix(unsafe) == ""
+
     def test_home_assistant_ingress_prefix_with_subpath_is_accepted(
         self, caplog
     ):
@@ -184,6 +191,19 @@ class TestGateRedirectsCarryPrefix:
         assert body["login_url"].startswith("/hermes/login"), (
             f"401 envelope login_url lost prefix: {body['login_url']!r}"
         )
+
+    def test_login_page_assets_and_provider_link_carry_prefix(
+        self, gated_app_proxied
+    ):
+        r = gated_app_proxied.get(
+            "/login",
+            headers={"x-forwarded-prefix": "/hermes"},
+            follow_redirects=False,
+        )
+
+        assert r.status_code == 200
+        assert "url('/hermes/fonts/Onest-Variable.woff2')" in r.text
+        assert 'href="/hermes/auth/login?provider=stub"' in r.text
 
 
     def test_malformed_prefix_header_is_ignored(self, gated_app_proxied):
@@ -490,7 +510,7 @@ class TestCookiePathRespectsPrefix:
         """
         # /auth/login sets the PKCE cookie. Capture it from Set-Cookie.
         r1 = gated_app_proxied.get(
-            "/auth/login?provider=stub",
+            "/auth/login?provider=stub&next=%2Fsessions",
             headers={"x-forwarded-prefix": "/hermes"},
             follow_redirects=False,
         )
@@ -514,6 +534,7 @@ class TestCookiePathRespectsPrefix:
             follow_redirects=False,
         )
         assert r2.status_code == 302, r2.text
+        assert r2.headers["location"] == "/hermes/sessions"
         cookies = r2.headers.get_list("set-cookie")
         at_cookies = [
             c for c in cookies

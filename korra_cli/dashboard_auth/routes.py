@@ -48,6 +48,7 @@ from korra_cli.dashboard_auth.cookies import (
     set_session_cookies,
 )
 from korra_cli.dashboard_auth.login_page import render_login_html
+from korra_cli.dashboard_auth.prefix import has_unsafe_path_characters
 
 _log = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ async def login_page(request: Request) -> HTMLResponse:
         request.query_params.get("next", "")
     )
     return HTMLResponse(
-        render_login_html(next_path=next_path),
+        render_login_html(next_path=next_path, base_path=_prefix(request)),
         headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
     )
 
@@ -589,7 +590,8 @@ async def auth_callback(
     # cookie is server-set so this is defence in depth, but a regression
     # that lets attacker-controlled bytes into the cookie would otherwise
     # produce an open redirect.
-    landing = _validate_post_login_target(next_from_cookie) or "/"
+    prefix = _prefix(request)
+    landing = _prefixed_post_login_target(next_from_cookie, prefix=prefix)
     resp = RedirectResponse(url=landing, status_code=302)
     set_session_cookies(
         resp,
@@ -597,13 +599,13 @@ async def auth_callback(
         refresh_token=session.refresh_token,
         access_token_expires_in=expires_in,
         use_https=detect_https(request),
-        prefix=_prefix(request),
+        prefix=prefix,
         provider=session.provider,
     )
-    clear_pkce_cookie(resp, use_https=detect_https(request), prefix=_prefix(request))
+    clear_pkce_cookie(resp, use_https=detect_https(request), prefix=prefix)
     # Clear the one-shot auto-SSO loop-guard marker now that login succeeded,
     # so it never lingers to suppress a future silent attempt after logout.
-    clear_sso_attempt_cookie(resp, prefix=_prefix(request))
+    clear_sso_attempt_cookie(resp, prefix=prefix)
     return resp
 
 
@@ -621,6 +623,8 @@ def _validate_post_login_target(raw: str) -> str:
         return ""
     from urllib.parse import unquote
     decoded = unquote(raw)
+    if has_unsafe_path_characters(decoded):
+        return ""
     if not decoded.startswith("/") or decoded.startswith("//"):
         return ""
     # Don't loop back to login pages or auth flow.
@@ -639,6 +643,21 @@ def _validate_post_login_target(raw: str) -> str:
     if decoded == "/api" or decoded.startswith("/api/"):
         return ""
     return decoded
+
+
+def _prefixed_post_login_target(raw: str, *, prefix: str) -> str:
+    """Return a safe browser landing path within the active proxy mount."""
+    from urllib.parse import urlsplit
+
+    landing = _validate_post_login_target(raw) or "/"
+    landing_path = urlsplit(landing).path
+    if (
+        prefix
+        and landing_path != prefix
+        and not landing_path.startswith(f"{prefix}/")
+    ):
+        return f"{prefix}{landing}"
+    return landing
 
 
 # ---------------------------------------------------------------------------
@@ -858,7 +877,8 @@ async def auth_password_login(request: Request, body: _PasswordLoginBody):
         return resp
 
     expires_in = max(60, session.expires_at - int(time.time()))
-    landing = _validate_post_login_target(body.next) or "/"
+    prefix = _prefix(request)
+    landing = _prefixed_post_login_target(body.next, prefix=prefix)
     resp = JSONResponse({"ok": True, "next": landing})
     set_session_cookies(
         resp,
@@ -866,7 +886,7 @@ async def auth_password_login(request: Request, body: _PasswordLoginBody):
         refresh_token=session.refresh_token,
         access_token_expires_in=expires_in,
         use_https=detect_https(request),
-        prefix=_prefix(request),
+        prefix=prefix,
         provider=session.provider,
     )
     return resp

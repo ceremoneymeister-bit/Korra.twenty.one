@@ -80,10 +80,10 @@ def test_empty_provider_login_page_shows_supported_auth_paths():
     html = render_login_html()
 
     assert "--insecure" not in html
-    assert "username/password provider" in html
-    assert "OAuth provider" in html
+    assert "провайдер логина и пароля" in html
+    assert "OAuth-провайдер" in html
     assert "127.0.0.1" in html
-    assert "SSH tunnel" in html
+    assert "защищённый туннель" in html
     assert "Tailscale" in html
     assert (
         'href="https://hermes-agent.nousresearch.com/docs/'

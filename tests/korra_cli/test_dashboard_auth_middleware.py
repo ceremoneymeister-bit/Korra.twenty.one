@@ -69,9 +69,9 @@ def test_empty_provider_login_page_is_safe_through_real_route(
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "no-store" in response.headers["cache-control"]
-    assert "Sign-in unavailable" in response.text
-    assert "username/password provider" in response.text
-    assert "OAuth provider" in response.text
+    assert "Настройте доступ" in response.text
+    assert "провайдер логина и пароля" in response.text
+    assert "OAuth-провайдер" in response.text
     assert "--insecure" not in response.text
     assert next_value not in response.text
 
@@ -382,5 +382,4 @@ def test_all_providers_unreachable_returns_503(_gated_state):
     r = client.get("/api/auth/me")
     assert r.status_code == 503
     assert "unreachable" in r.text.lower()
-
 
