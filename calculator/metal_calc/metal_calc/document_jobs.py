@@ -12,7 +12,8 @@ import struct
 import time
 from typing import Any
 
-from .document_contract import empty_composition, observation_summary, snapshot_sources, source_manifest, validate_observation
+from .document_contract import (RETRYABLE_FAILURES, empty_composition, observation_summary, snapshot_sources,
+                                source_manifest, validate_observation)
 from .errors import Conflict, InvalidState, NotFound, OrderScopeDenied
 from .registry import Registry
 from .securefs import SecureRoot
@@ -76,6 +77,17 @@ class DocumentJobs:
                     FOREIGN KEY(job_id,source_id) REFERENCES document_chunks(job_id,source_id)) STRICT""",
                 """CREATE TABLE IF NOT EXISTS document_control (
                     singleton INTEGER PRIMARY KEY CHECK(singleton=1), drained INTEGER NOT NULL) STRICT""",
+                # Additive per-source failure history. One row per recorded
+                # attempt (generation); rows are never updated except for the
+                # operator retry authorization mark. Old code ignores the table
+                # and simply sees such sources as pending.
+                """CREATE TABLE IF NOT EXISTS document_failures (
+                    job_id TEXT NOT NULL, source_id TEXT NOT NULL, generation INTEGER NOT NULL,
+                    attempt_id TEXT NOT NULL REFERENCES document_attempts(attempt_id),
+                    fence INTEGER NOT NULL, code TEXT NOT NULL, failure_sha256 TEXT NOT NULL,
+                    failure_json BLOB NOT NULL, recorded_at REAL NOT NULL, retry_authorized_at REAL,
+                    PRIMARY KEY(job_id,source_id,generation),
+                    FOREIGN KEY(job_id,source_id) REFERENCES document_chunks(job_id,source_id)) STRICT""",
             ):
                 con.execute(sql)
             con.execute("INSERT OR IGNORE INTO document_control VALUES(1,0)")
@@ -158,34 +170,57 @@ class DocumentJobs:
                 con.execute("UPDATE document_jobs SET status='stale',lease_until=NULL WHERE job_id=?", (job_id,))
             totals = con.execute("SELECT count(*),count(r.source_id),"
                                  "coalesce(sum(json_extract(r.summary_json,'$.coverage.pages_total')),0),"
-                                 "coalesce(sum(json_extract(r.summary_json,'$.coverage.pages_inventoried')),0) "
+                                 "coalesce(sum(json_extract(r.summary_json,'$.coverage.pages_inventoried')),0),"
+                                 "count(CASE WHEN r.source_id IS NULL AND f.generation IS NOT NULL "
+                                 "AND f.retry_authorized_at IS NULL THEN 1 END) "
                                  "FROM document_chunks c LEFT JOIN document_results r USING(job_id,source_id) "
-                                 "WHERE c.job_id=?", (job_id,)).fetchone()
-            rows = con.execute("SELECT c.source_json,r.summary_json,r.result_sha256 FROM document_chunks c "
-                               "LEFT JOIN document_results r USING(job_id,source_id) "
-                               "WHERE c.job_id=? ORDER BY c.ordinal LIMIT ? OFFSET ?",
+                                 + self._LATEST_FAILURE + " WHERE c.job_id=?", (job_id,)).fetchone()
+            rows = con.execute("SELECT c.source_json,r.summary_json,r.result_sha256,f.code,f.generation,"
+                               "f.recorded_at,f.retry_authorized_at,f.attempt_id AS failure_attempt "
+                               "FROM document_chunks c LEFT JOIN document_results r USING(job_id,source_id) "
+                               + self._LATEST_FAILURE + " WHERE c.job_id=? ORDER BY c.ordinal LIMIT ? OFFSET ?",
                                (job_id, source_limit, source_offset)).fetchall()
             sources = []
             for row in rows:
                 source = json.loads(row["source_json"])
                 result = json.loads(row["summary_json"]) if row["summary_json"] else None
                 coverage = result.get("coverage", {}) if result else {}
-                sources.append({**source, "status": result["status"] if result else "pending",
+                failure = None
+                if row["generation"] is not None:
+                    failure = {"code": row["code"], "generation": row["generation"],
+                               "attempt_id": row["failure_attempt"], "recorded_at": row["recorded_at"],
+                               "retryable": True, "retry_authorized": row["retry_authorized_at"] is not None}
+                if result:
+                    status = result["status"]
+                elif failure and not failure["retry_authorized"]:
+                    status = "failed"
+                else:
+                    status = "pending"
+                sources.append({**source, "status": status, "accepted": result is not None,
                                 "coverage": coverage, "errors": result.get("errors", []) if result else [],
-                                "result_sha256": row["result_sha256"]})
+                                "result_sha256": row["result_sha256"], "failure": failure})
             attempt = con.execute("SELECT outcome FROM document_attempts WHERE attempt_id=?", (job["attempt_id"],)).fetchone()
+            lease_until = job["lease_until"] if job["status"] == "running" else None
             return {key: job[key] for key in ("job_id", "order_id", "snapshot_id", "document_set_revision",
                     "manifest_digest", "pipeline_fingerprint", "status", "created_at", "updated_at")} | {
                 "recipe": json.loads(job["recipe_json"]), "sources": sources,
                 "source_offset": source_offset, "source_limit": source_limit,
                 "sources_has_more": source_offset + len(rows) < totals[0],
                 "execution_outcome": attempt[0] if attempt else None,
+                "lease_until": lease_until,
+                "lease_expired": bool(lease_until is not None and lease_until <= self.clock()),
                 "coverage": {"files_total": totals[0], "files_accounted": totals[1],
-                             "files_pending": totals[0] - totals[1], "pages_total_known": totals[2],
+                             "files_failed": totals[4],
+                             "files_pending": totals[0] - totals[1] - totals[4], "pages_total_known": totals[2],
                              "pages_inventoried": totals[3],
                              "file_accounting_complete": totals[0] == totals[1],
                              "customer_request_complete": None},
                 "composition": empty_composition(), "use_for_calculation": False}
+
+    # Latest failure generation per chunk; NULL columns when none was recorded.
+    _LATEST_FAILURE = (" LEFT JOIN document_failures f ON f.job_id=c.job_id AND f.source_id=c.source_id "
+                       "AND f.generation=(SELECT max(generation) FROM document_failures "
+                       "WHERE job_id=c.job_id AND source_id=c.source_id)")
 
     def list(self, order_id: str) -> dict:
         self.registry.get(order_id)
@@ -280,12 +315,126 @@ class DocumentJobs:
                         (self.clock() + lease_seconds, self.clock(), job["job_id"]))
 
     def pending(self, claim) -> list[dict]:
+        """Sources this pass may read: no accepted result and no failure awaiting operator retry."""
         with self._db() as con:
             job = self._authorize(con, claim)
             rows = con.execute("SELECT c.source_json FROM document_chunks c LEFT JOIN document_results r "
-                               "USING(job_id,source_id) WHERE c.job_id=? AND r.source_id IS NULL ORDER BY c.ordinal",
+                               "USING(job_id,source_id)" + self._LATEST_FAILURE +
+                               " WHERE c.job_id=? AND r.source_id IS NULL "
+                               "AND (f.generation IS NULL OR f.retry_authorized_at IS NOT NULL) ORDER BY c.ordinal",
                                (job["job_id"],)).fetchall()
         return [json.loads(row[0]) for row in rows]
+
+    def record_failure(self, claim, source_id, failure: dict) -> dict:
+        """Durably record a retryable per-source failure under the same fencing as publish.
+
+        The source keeps no accepted result; it is excluded from further passes
+        until an explicit operator retry. History is immutable per generation.
+        """
+        if (not isinstance(failure, dict) or failure.get("code") not in RETRYABLE_FAILURES
+                or not isinstance(failure.get("message", ""), str) or len(failure.get("message", "")) > 400):
+            raise InvalidState("Неверная запись сбоя чтения документа")
+        errors = failure.get("errors", [])
+        if (not isinstance(errors, list) or len(errors) > 20
+                or any(not isinstance(e, dict) or not isinstance(e.get("code"), str) or len(e["code"]) > 100
+                       or not isinstance(e.get("message"), str) or len(e["message"]) > 400 for e in errors)):
+            raise InvalidState("Неверный список ошибок документа")
+        reader = failure.get("reader")
+        reader = {k: v for k, v in reader.items() if k in {"fingerprint", "version"} and isinstance(v, str)
+                  and len(v) <= 200} if isinstance(reader, dict) else {}
+        checkpoint = failure.get("checkpoint")
+        if checkpoint is not None and not isinstance(checkpoint, dict):
+            raise InvalidState("Контрольная точка чтения должна быть объектом")
+        with self._db() as con:
+            job = self._authorize(con, claim)
+            source = self._source(con, job["job_id"], source_id)
+            if con.execute("SELECT 1 FROM document_results WHERE job_id=? AND source_id=?",
+                           (job["job_id"], source_id)).fetchone():
+                raise Conflict("Для источника уже принят результат")
+            latest = con.execute("SELECT generation,retry_authorized_at FROM document_failures WHERE job_id=? "
+                                 "AND source_id=? ORDER BY generation DESC LIMIT 1", (job["job_id"], source_id)).fetchone()
+            if latest and latest["retry_authorized_at"] is None:
+                raise Conflict("Сбой источника уже записан; нужен явный повтор")
+            generation = (latest["generation"] + 1) if latest else 1
+            now = self.clock()
+            binding = {"job_id": job["job_id"], "snapshot_id": job["snapshot_id"],
+                       "document_set_revision": job["document_set_revision"],
+                       "manifest_digest": job["manifest_digest"],
+                       "pipeline_fingerprint": job["pipeline_fingerprint"]}
+            record = {"schema_version": 1, "kind": "source_failure", "code": failure["code"],
+                      "message": failure.get("message", ""), "errors": errors, "reader": reader,
+                      "retryable": True, "generation": generation, "attempt_id": claim["attempt_id"],
+                      "fence": job["fence"], "recorded_at": now,
+                      "source": {k: source[k] for k in ("source_id", "sha256", "bytes", "relative_path")},
+                      "binding": binding, "checkpoint": None, "checkpoint_truncated": False,
+                      "checkpoint_dropped": [], "checkpoint_image_discarded": False,
+                      "checkpoint_rejected": failure.get("checkpoint_rejected") is True}
+            if checkpoint is not None:
+                record.update(self._bounded_checkpoint(checkpoint, source, json.loads(job["recipe_json"]), binding))
+            encoded = canonical_json(record)
+            if len(encoded) > self.CHECKPOINT_LIMIT + 256 * 1024:
+                raise InvalidState("Запись сбоя превышает допустимый размер")
+            digest = hashlib.sha256(encoded).hexdigest()
+            con.execute("INSERT INTO document_failures VALUES(?,?,?,?,?,?,?,?,?,NULL)",
+                        (job["job_id"], source_id, generation, claim["attempt_id"], job["fence"],
+                         failure["code"], digest, encoded, now))
+            con.execute("UPDATE document_jobs SET updated_at=? WHERE job_id=?", (now, job["job_id"]))
+        return {"failure_sha256": digest, "generation": generation}
+
+    # Partial reader output kept with a failure. Larger checkpoints are cut
+    # explicitly rather than rejected so a verbose parser cannot starve the pass.
+    CHECKPOINT_LIMIT = 512 * 1024
+    _CHECKPOINT_CORE = frozenset({"schema_version", "command", "status", "complete", "document_type",
+                                  "use_for_calculation", "source", "reader", "verification", "coverage",
+                                  "errors", "binding"})
+
+    @classmethod
+    def _bounded_checkpoint(cls, checkpoint: dict, source: dict, recipe: dict, binding: dict) -> dict:
+        """Validate an unverified partial reader result exactly like a publication, then bound it."""
+        validate_observation(checkpoint, source, recipe["command"])
+        if checkpoint["status"] == "complete" or checkpoint["complete"]:
+            raise InvalidState("Контрольная точка не может объявлять чтение полным")
+        if checkpoint["reader"].get("fingerprint") != recipe["reader_version"]:
+            raise InvalidState("Версия обработчика отличается от рецепта задания")
+        if checkpoint["reader"].get("options", {}) != recipe["options"]:
+            raise InvalidState("Параметры обработчика отличаются от рецепта задания")
+        if "binding" in checkpoint and checkpoint["binding"] != binding:
+            raise Conflict("Контрольная точка относится к другому снимку")
+        kept = {k: v for k, v in checkpoint.items() if k != "image"} | {"binding": binding}
+        # A partial render never carries a saved, SHA-checked asset; the
+        # reader's temporary image is discarded rather than referenced.
+        image_discarded = checkpoint.get("image") is not None
+        dropped = []
+        encoded = canonical_json(kept)
+        while len(encoded) > cls.CHECKPOINT_LIMIT:
+            extras = [k for k in kept if k not in cls._CHECKPOINT_CORE]
+            if not extras:
+                return {"checkpoint": None, "checkpoint_truncated": True, "checkpoint_dropped": dropped + ["*"],
+                        "checkpoint_image_discarded": image_discarded}
+            biggest = max(extras, key=lambda k: len(canonical_json(kept[k])))
+            dropped.append(biggest)
+            del kept[biggest]
+            encoded = canonical_json(kept)
+        return {"checkpoint": kept, "checkpoint_truncated": bool(dropped), "checkpoint_dropped": dropped,
+                "checkpoint_image_discarded": image_discarded}
+
+    def failures(self, job_id, source_id) -> list[dict]:
+        """Immutable failure history of one source, oldest first, integrity-checked.
+
+        Includes the bounded unverified checkpoint of each generation; this is
+        the only reader of the raw failure JSON — `get()` stays compact.
+        """
+        with self._db() as con:
+            self._job(con, job_id)
+            self._source(con, job_id, source_id)
+            rows = con.execute("SELECT failure_json,failure_sha256,retry_authorized_at FROM document_failures "
+                               "WHERE job_id=? AND source_id=? ORDER BY generation", (job_id, source_id)).fetchall()
+        history = []
+        for row in rows:
+            if hashlib.sha256(row[0]).hexdigest() != row[1]:
+                raise Conflict("SHA сохранённой записи сбоя не совпадает")
+            history.append(json.loads(row[0]) | {"failure_sha256": row[1], "retry_authorized_at": row[2]})
+        return history
 
     @staticmethod
     def _source(con, job_id, source_id):
@@ -409,10 +558,13 @@ class DocumentJobs:
     def finish(self, claim) -> dict:
         with self._db() as con:
             job = self._authorize(con, claim)
-            rows = con.execute("SELECT r.result_status FROM document_chunks c LEFT JOIN document_results r "
-                               "USING(job_id,source_id) WHERE c.job_id=?", (job["job_id"],)).fetchall()
-            if any(row[0] is None for row in rows):
+            rows = con.execute("SELECT r.result_status,f.generation,f.retry_authorized_at FROM document_chunks c "
+                               "LEFT JOIN document_results r USING(job_id,source_id)" + self._LATEST_FAILURE +
+                               " WHERE c.job_id=?", (job["job_id"],)).fetchall()
+            if any(row[0] is None and (row[1] is None or row[2] is not None) for row in rows):
                 raise Conflict("Отсутствуют типизированные результаты документов")
+            # Retryable failures never count as accounted: the job stays
+            # partial until an operator retry produces an accepted result.
             status = "completed" if all(r[0] == "complete" for r in rows) else "partial"
             con.execute("UPDATE document_jobs SET status=?,lease_until=NULL,updated_at=? WHERE job_id=?",
                         (status, self.clock(), job["job_id"]))
@@ -428,16 +580,62 @@ class DocumentJobs:
                             (self.clock(), job_id))
                 con.execute("UPDATE document_attempts SET outcome='cancelled',ended_at=? "
                             "WHERE attempt_id=? AND outcome='running'", (self.clock(), job["attempt_id"]))
+                # Cancel withdraws every retry permission that no pass has
+                # consumed yet; a later addressed retry re-grants exactly one.
+                # Failure JSON/history rows themselves are untouched.
+                con.execute("UPDATE document_failures SET retry_authorized_at=NULL WHERE job_id=? "
+                            "AND retry_authorized_at IS NOT NULL AND generation=(SELECT max(generation) "
+                            "FROM document_failures g WHERE g.job_id=document_failures.job_id "
+                            "AND g.source_id=document_failures.source_id) AND NOT EXISTS (SELECT 1 FROM "
+                            "document_results r WHERE r.job_id=document_failures.job_id "
+                            "AND r.source_id=document_failures.source_id)", (job_id,))
         return self.get(job_id)
 
-    def retry(self, job_id) -> dict:
+    def retry(self, job_id, *, source_id: str | None = None) -> dict:
+        """Explicit operator retry. Accepted results are never touched.
+
+        Without source_id: re-queue everything still unaccepted (pending and
+        every failed source). With source_id: authorize exactly that failed
+        source. A stale snapshot, a running job, an accepted or never-failed
+        source and a foreign source are rejected explicitly.
+        """
         with self._db() as con:
             job = self._job(con, job_id)
-            if not self._current(con, job):
+            if job["status"] == "stale" or not self._current(con, job):
                 raise Conflict("Комплект изменился; создайте задание нового снимка")
-            if job["status"] in {"cancelled", "blocked"}:
+            if job["status"] == "running" and job["lease_until"] and job["lease_until"] > self.clock():
+                raise Conflict("Задание выполняется; повтор возможен после завершения прохода")
+            now = self.clock()
+            if source_id is not None:
+                self._source(con, job_id, source_id)
+                if con.execute("SELECT 1 FROM document_results WHERE job_id=? AND source_id=?",
+                               (job_id, source_id)).fetchone():
+                    raise InvalidState("Для источника уже принят результат; повтор не требуется")
+                latest = con.execute("SELECT generation,retry_authorized_at FROM document_failures WHERE job_id=? "
+                                     "AND source_id=? ORDER BY generation DESC LIMIT 1", (job_id, source_id)).fetchone()
+                if latest is None:
+                    raise InvalidState("Источник не имеет записанного сбоя")
+                # An addressed retry must read exactly one source. A job that
+                # still holds never-read sources (cancelled/blocked mid-pass)
+                # would silently read them too, so it needs a job-level retry.
+                if con.execute("SELECT 1 FROM document_chunks c LEFT JOIN document_results r USING(job_id,source_id)"
+                               + self._LATEST_FAILURE + " WHERE c.job_id=? AND r.source_id IS NULL "
+                               "AND f.generation IS NULL", (job_id,)).fetchone():
+                    raise Conflict("В задании есть непрочитанные источники; используйте повтор всего задания")
+                con.execute("UPDATE document_failures SET retry_authorized_at=coalesce(retry_authorized_at,?) "
+                            "WHERE job_id=? AND source_id=? AND generation=?",
+                            (now, job_id, source_id, latest["generation"]))
+            else:
+                con.execute("UPDATE document_failures SET retry_authorized_at=? WHERE job_id=? "
+                            "AND retry_authorized_at IS NULL AND generation=(SELECT max(generation) "
+                            "FROM document_failures g WHERE g.job_id=document_failures.job_id "
+                            "AND g.source_id=document_failures.source_id)", (now, job_id))
+            unaccepted = con.execute("SELECT 1 FROM document_chunks c LEFT JOIN document_results r "
+                                     "USING(job_id,source_id) WHERE c.job_id=? AND r.source_id IS NULL",
+                                     (job_id,)).fetchone()
+            if job["status"] in {"cancelled", "blocked"} or (job["status"] == "partial" and unaccepted):
                 con.execute("UPDATE document_jobs SET status='queued',lease_until=NULL,updated_at=? WHERE job_id=?",
-                            (self.clock(), job_id))
+                            (now, job_id))
                 # An explicit operator retry grants another bounded recovery
                 # window while retaining the entire previous attempt history.
                 con.execute("UPDATE document_attempts SET outcome='retry_authorized' "

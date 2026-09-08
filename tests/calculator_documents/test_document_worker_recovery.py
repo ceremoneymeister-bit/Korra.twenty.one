@@ -84,10 +84,10 @@ def run(jobs, **kwargs):
     return document_worker.run_once(jobs, document_python="qa-document-python", **kwargs)
 
 
-@pytest.mark.parametrize("code", ["reader_unavailable", "reader_dependency_missing", "worker_timeout",
-                                  "worker_exit", "reader_version_mismatch", "invalid_reader_artifact",
+@pytest.mark.parametrize("code", ["reader_unavailable", "reader_dependency_missing", "reader_version_mismatch",
                                   "invalid_output_directory", "output_directory_not_empty"])
-def test_transient_second_source_blocks_and_retry_preserves_first_artifact(work, code):
+def test_systemic_reader_failure_blocks_job_and_retry_preserves_first_artifact(work, code):
+    """Environment-level failures stop the pass; nothing is parsed twice or lost."""
     jobs, job, reader = work
     a, b = job["sources"]
     reader.callback = lambda source: code if source["source_id"] == b["source_id"] else None
@@ -98,6 +98,7 @@ def test_transient_second_source_blocks_and_retry_preserves_first_artifact(work,
     assert snapshot["execution_outcome"] == "error:" + code
     assert snapshot["coverage"]["files_accounted"] == 1
     assert snapshot["coverage"]["files_pending"] == 1
+    assert snapshot["coverage"]["files_failed"] == 0
     before = jobs.result(job["job_id"], a["source_id"])
     with pytest.raises(NotFound):
         jobs.result(job["job_id"], b["source_id"])
@@ -112,9 +113,54 @@ def test_transient_second_source_blocks_and_retry_preserves_first_artifact(work,
     assert restarted.result(job["job_id"], a["source_id"]) == before
     with sqlite3.connect(jobs.orders_root / "registry.db") as con:
         assert con.execute("SELECT count(*) FROM document_results").fetchone()[0] == 2
+        assert con.execute("SELECT count(*) FROM document_failures").fetchone()[0] == 0
         attempts = con.execute("SELECT outcome, ended_at FROM document_attempts ORDER BY started_at").fetchall()
         assert [row[0] for row in attempts] == ["error:" + code, "completed"]
         assert all(row[1] is not None for row in attempts)
+
+
+@pytest.mark.parametrize("code", ["worker_timeout", "worker_exit", "invalid_reader_artifact"])
+def test_per_source_failure_is_recorded_and_pass_finishes_without_blocking(work, code):
+    """A document-level resource failure is a durable retryable failure, not a job block."""
+    jobs, job, reader = work
+    a, b = job["sources"]
+    reader.callback = lambda source: code if source["source_id"] == a["source_id"] else None
+    assert run(jobs) == {"job_id": job["job_id"], "status": "partial", "processed": 1, "failed": 1}
+    assert reader.seen == [a["source_id"], b["source_id"]]
+    snapshot = jobs.get(job["job_id"])
+    assert snapshot["status"] == "partial"
+    assert snapshot["execution_outcome"] == "partial"
+    assert snapshot["coverage"] | {"pages_total_known": 0, "pages_inventoried": 0} == {
+        "files_total": 2, "files_accounted": 1, "files_failed": 1, "files_pending": 0,
+        "pages_total_known": 0, "pages_inventoried": 0, "file_accounting_complete": False,
+        "customer_request_complete": None}
+    failed, accepted = snapshot["sources"]
+    assert failed["status"] == "failed" and failed["accepted"] is False and failed["result_sha256"] is None
+    assert failed["failure"]["code"] == code and failed["failure"]["retry_authorized"] is False
+    assert accepted["status"] == "complete" and accepted["accepted"] is True and accepted["failure"] is None
+    with pytest.raises(NotFound):
+        jobs.result(job["job_id"], a["source_id"])
+    history = jobs.failures(job["job_id"], a["source_id"])
+    assert [h["code"] for h in history] == [code]
+    assert history[0]["source"]["source_id"] == a["source_id"]
+    assert history[0]["binding"]["job_id"] == job["job_id"]
+    assert history[0]["retryable"] is True
+
+    # Restart never retries a poison document by itself.
+    restarted = DocumentJobs(jobs.orders_root)
+    assert run(restarted) == {"claimed": False}
+    assert len(reader.seen) == 2
+    before = restarted.result(job["job_id"], b["source_id"])
+    restarted.retry(job["job_id"], source_id=a["source_id"])
+    reader.callback = None
+    assert run(restarted) == {"job_id": job["job_id"], "status": "completed", "processed": 1}
+    assert reader.seen == [a["source_id"], b["source_id"], a["source_id"]]
+    assert restarted.result(job["job_id"], b["source_id"]) == before
+    assert restarted.result(job["job_id"], a["source_id"])["status"] == "complete"
+    # History survives the later success and is still marked as authorized.
+    history = restarted.failures(job["job_id"], a["source_id"])
+    assert len(history) == 1 and history[0]["retry_authorized_at"] is not None
+    assert restarted.get(job["job_id"])["sources"][0]["failure"]["retry_authorized"] is True
 
 
 def test_deterministic_format_error_is_accounted_and_not_reparsed_on_retry(work):

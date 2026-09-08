@@ -10,6 +10,12 @@ from .util import digest_json
 SCHEMA_VERSION = 1
 JOB_STATES = {"queued", "running", "completed", "partial", "cancelled", "stale", "blocked"}
 RESULT_STATES = {"complete", "partial", "failed", "unsupported"}
+# Reader outcomes that describe the execution environment, not the document.
+# Systemic ones block the whole job; per-source ones are recorded as a
+# retryable failure of that source while the pass continues.
+SYSTEMIC_FAILURES = frozenset({"reader_unavailable", "reader_dependency_missing", "reader_version_mismatch",
+                               "invalid_output_directory", "output_directory_not_empty"})
+RETRYABLE_FAILURES = frozenset({"worker_timeout", "worker_exit", "invalid_reader_artifact"})
 
 
 def source_manifest(state: dict) -> dict:
