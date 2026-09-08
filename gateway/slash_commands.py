@@ -91,9 +91,7 @@ def _model_switch_skew_guard() -> Optional[str]:
     return t(
         "gateway.model.error_prefix",
         error=(
-            f"This gateway is running code from {boot_rev} but the checkout on "
-            f"disk is now {disk_rev}. Switching models would risk a stale-module "
-            f"crash — restart the gateway to load the new code: hermes gateway restart"
+            f'''Шлюз работает с версией {boot_rev}, а файлы на диске уже обновлены до {disk_rev}. Перед сменой модели перезапустите шлюз: korra gateway restart.'''
         ),
     )
 
@@ -424,18 +422,12 @@ class GatewaySlashCommandsMixin:
 
         if not policy.enabled:
             return (
-                f"**You** — {platform} ({scope})\n"
-                f"User ID: `{user_id}`\n"
-                f"Tier: unrestricted (no admin list configured for this scope)\n"
-                f"Slash commands: all available"
+                f'''**Вы** — {platform} ({scope})\nID пользователя: `{user_id}`\nДоступ: без ограничений (список администраторов не задан)\nДоступны все команды'''
             )
 
         if policy.is_admin(user_id):
             return (
-                f"**You** — {platform} ({scope})\n"
-                f"User ID: `{user_id}`\n"
-                f"Tier: **admin**\n"
-                f"Slash commands: all available"
+                f'''**Вы** — {platform} ({scope})\nID пользователя: `{user_id}`\nДоступ: **администратор**\nДоступны все команды'''
             )
 
         # Non-admin user. Show what's actually reachable.
@@ -450,10 +442,7 @@ class GatewaySlashCommandsMixin:
                 runnable.append(c)
         runnable_str = ", ".join(f"/{c}" for c in runnable) if runnable else "(none)"
         return (
-            f"**You** — {platform} ({scope})\n"
-            f"User ID: `{user_id}`\n"
-            f"Tier: user\n"
-            f"Slash commands you can run: {runnable_str}"
+            f'''**Вы** — {platform} ({scope})\nID пользователя: `{user_id}`\nДоступ: пользователь\nДоступные команды: {runnable_str}'''
         )
 
     async def _handle_kanban_command(self, event: MessageEvent) -> str:
@@ -1398,10 +1387,9 @@ class GatewaySlashCommandsMixin:
                     if not isinstance(child, dict):
                         continue
                     tool = child.get("current_tool")
-                    doing = f"`{tool}`" if tool else "between turns"
+                    doing = f"`{tool}`" if tool else '''между запросами'''
                     part = (
-                        f"  - child {i + 1}: "
-                        f"{child.get('api_calls', '?')} api calls · {doing}"
+                        f'''  - помощник {i + 1}: запросов к API — {child.get('api_calls', '?')} · {doing}'''
                     )
                     idle = child.get("seconds_since_activity")
                     if idle is not None:
@@ -1533,7 +1521,7 @@ class GatewaySlashCommandsMixin:
             return None
 
         if action == "list":
-            lines = ["**Gateway platforms**"]
+            lines = ['''**Подключения мессенджеров**''']
             connected = sorted(p.value for p in self.adapters.keys())
             if connected:
                 lines.append("Connected: " + ", ".join(connected))
@@ -1545,8 +1533,7 @@ class GatewaySlashCommandsMixin:
                     if info.get("paused"):
                         reason = info.get("pause_reason") or "paused"
                         lines.append(
-                            f"  · {p.value} — PAUSED ({reason}). "
-                            f"Resume with `/platform resume {p.value}`."
+                            f'''  · {p.value} — ПАУЗА ({reason}). Возобновить: `/platform resume {p.value}`.'''
                         )
                     else:
                         attempts = info.get("attempts", 0)
@@ -1562,41 +1549,33 @@ class GatewaySlashCommandsMixin:
                 return f"Usage: /platform {action} <name>"
             platform = _resolve_platform(target)
             if platform is None:
-                return f"Unknown platform: {target}"
+                return f'''Неизвестная платформа: {target}'''
             failed = getattr(self, "_failed_platforms", {}) or {}
             if action == "pause":
                 if platform not in failed:
                     return (
-                        f"{platform.value} is not in the retry queue "
-                        f"(it's either connected or not enabled)."
+                        f'''{platform.value} не ожидает повторного подключения: платформа уже подключена или отключена в настройках.'''
                     )
                 if failed[platform].get("paused"):
-                    return f"{platform.value} is already paused."
+                    return f'''{platform.value} уже на паузе.'''
                 self._pause_failed_platform(platform, reason="paused via /platform pause")
                 return (
-                    f"✓ {platform.value} paused. "
-                    f"Resume with `/platform resume {platform.value}` or "
-                    f"`hermes gateway restart` to reset."
+                    f'''✓ {platform.value} приостановлена. Возобновить: `/platform resume {platform.value}`. Сбросить состояние: `korra gateway restart`.'''
                 )
             # action == "resume"
             if platform not in failed:
                 return (
-                    f"{platform.value} is not in the retry queue — "
-                    f"nothing to resume."
+                    f'''{platform.value} не ожидает повторного подключения. Возобновлять нечего.'''
                 )
             if not failed[platform].get("paused"):
                 return (
-                    f"{platform.value} is already retrying — "
-                    f"no resume needed."
+                    f'''{platform.value} уже пытается подключиться. Возобновление не требуется.'''
                 )
             self._resume_paused_platform(platform)
-            return f"✓ {platform.value} resumed — retrying on next watcher tick."
+            return f'''✓ {platform.value} возобновлена. Следующая проверка повторит подключение.'''
 
         return (
-            "Usage: /platform <list|pause|resume> [name]\n"
-            "  /platform list — show platform status\n"
-            "  /platform pause <name> — stop retrying a failing platform\n"
-            "  /platform resume <name> — re-queue a paused platform"
+            '''Использование: /platform <list|pause|resume> [название]\n  /platform list — состояние платформ\n  /platform pause <название> — приостановить попытки подключения\n  /platform resume <название> — возобновить подключение'''
         )
 
     async def _handle_restart_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
@@ -1970,8 +1949,7 @@ class GatewaySlashCommandsMixin:
                                 return t(
                                     "gateway.model.error_prefix",
                                     error=(
-                                        f"Model switch to {result.new_model} failed ({exc}); "
-                                        f"staying on {_cur_model}."
+                                        f'''Не удалось переключиться на {result.new_model} ({exc}). Текущая модель: {_cur_model}.'''
                                     ),
                                 )
 
@@ -2281,8 +2259,7 @@ class GatewaySlashCommandsMixin:
                     return t(
                         "gateway.model.error_prefix",
                         error=(
-                            f"Model switch to {result.new_model} failed ({exc}); "
-                            f"staying on {current_model}."
+                            f'''Не удалось переключиться на {result.new_model} ({exc}). Текущая модель: {current_model}.'''
                         ),
                     )
 
@@ -2481,7 +2458,7 @@ class GatewaySlashCommandsMixin:
             if persist_global:
                 lines.append(t("gateway.model.saved_global"))
             elif one_turn:
-                lines.append("    (next turn only — restores after one response)")
+                lines.append('''    (только следующий ответ; затем вернётся прежняя модель)''')
             else:
                 lines.append(t("gateway.model.session_only_hint"))
 
@@ -2512,8 +2489,7 @@ class GatewaySlashCommandsMixin:
             async def _on_cost_confirm(choice: str) -> str:
                 if choice == "cancel":
                     return (
-                        f"🟡 Model switch cancelled. Current model unchanged "
-                        f"({current_model or 'unknown'})."
+                        f'''🟡 Смена модели отменена. Текущая модель: {current_model or 'неизвестна'}.'''
                     )
                 # "once" and "always" both proceed — there is no persistent
                 # opt-out for selection guards (each guarded switch should be
@@ -2526,9 +2502,7 @@ class GatewaySlashCommandsMixin:
                 command="model",
                 title=_cost_warning.title,
                 message=(
-                    f"⚠️ **{_cost_warning.title}**\n\n{_cost_warning.message}\n\n"
-                    f"_Text fallback: reply `{_p}approve` to switch or `{_p}cancel` to keep "
-                    "the current model._"
+                    f'''⚠️ **{_cost_warning.title}**\n\n{_cost_warning.message}\n\n_Ответьте `{_p}approve`, чтобы сменить модель, или `{_p}cancel`, чтобы оставить текущую._'''
                 ),
                 handler=_on_cost_confirm,
             )
@@ -2558,7 +2532,7 @@ class GatewaySlashCommandsMixin:
         try:
             from korra_cli.config import load_config, save_config
         except Exception as exc:
-            return f"❌ Could not load config: {exc}"
+            return f'''❌ Не удалось загрузить настройки: {exc}'''
         cfg = load_config()
 
         result = crs.apply(
@@ -2681,7 +2655,7 @@ class GatewaySlashCommandsMixin:
             last_user_msg = retryable_user_text(live_view.get("content"))
             handoff, _ = split_user_originated_turn(history[last_user_idx])
         except ValueError as exc:
-            return f"Cannot retry that message safely: {exc}"
+            return f'''Нельзя безопасно повторить это сообщение: {exc}'''
 
         if handoff is not None:
             # A composite carrier is one physical row containing both the
@@ -2696,9 +2670,9 @@ class GatewaySlashCommandsMixin:
                     require_retryable_composite=True,
                 )
             except ValueError as exc:
-                return f"Cannot retry that message safely: {exc}"
+                return f'''Нельзя безопасно повторить это сообщение: {exc}'''
             if rewind_result is None:
-                return "Retry failed; transcript was not changed."
+                return '''Повторить запрос не удалось. История не изменилась.'''
             # The store reselects and validates the latest carrier on the same
             # snapshot used by the atomic rewind.  A concurrent newer turn can
             # therefore never be removed while this handler resends stale text.
@@ -2714,7 +2688,7 @@ class GatewaySlashCommandsMixin:
                 active_only=True,
                 reject_active_turn_lease=True,
             ):
-                return "Retry failed; transcript was not changed."
+                return '''Повторить запрос не удалось. История не изменилась.'''
         # Reset stored token count — transcript was truncated
         session_entry.last_prompt_tokens = 0
 
@@ -2811,25 +2785,25 @@ class GatewaySlashCommandsMixin:
         if lower == "wait" or lower.startswith("wait "):
             wait_arg = args[len("wait"):].strip()
             if not wait_arg:
-                return "Usage: /goal wait <pid> [reason]"
+                return '''Использование: /goal wait <pid> [причина]'''
             wtokens = wait_arg.split(None, 1)
             try:
                 pid = int(wtokens[0])
             except ValueError:
-                return "/goal wait: <pid> must be an integer process id."
+                return '''/goal wait: <pid> должен быть целым номером процесса.'''
             reason = wtokens[1].strip() if len(wtokens) > 1 else ""
             try:
                 mgr.wait_on(pid, reason=reason)
             except (RuntimeError, ValueError) as exc:
                 return f"/goal wait: {exc}"
             rtxt = f" ({reason})" if reason else ""
-            return f"⏳ Goal parked on pid {pid}{rtxt}. Loop pauses until it exits."
+            return f'''⏳ Цель ждёт завершения процесса {pid}{rtxt}. Цикл временно приостановлен.'''
 
         # /goal unwait — clear the wait barrier.
         if lower == "unwait":
             if mgr.stop_waiting():
-                return "▶ Wait barrier cleared — goal loop resumes."
-            return "No wait barrier set."
+                return '''▶ Ожидание снято. Работа над целью продолжается.'''
+            return '''Ожидание процесса не задано.'''
 
         # /goal gate ... — manage deterministic quality gates.
         if lower == "gate" or lower.startswith("gate "):
@@ -2844,9 +2818,7 @@ class GatewaySlashCommandsMixin:
                 except (RuntimeError, ValueError) as exc:
                     return f"/goal gate add: {exc}"
                 return (
-                    f"⚿ Gate added: $ {gate.command} "
-                    f"({gate.max_retries} retries, {gate.timeout_seconds}s timeout). "
-                    f"It must pass before the goal can complete."
+                    f'''⚿ Добавлена проверка: $ {gate.command}. Повторов: {gate.max_retries}, время ожидания: {gate.timeout_seconds} с. Она должна пройти до завершения цели.'''
                 )
             if gate_lower.startswith("remove ") or gate_lower.startswith("rm "):
                 idx_text = gate_arg.split(None, 1)[1].strip()
@@ -2854,14 +2826,14 @@ class GatewaySlashCommandsMixin:
                     removed = mgr.remove_gate(int(idx_text))
                 except (RuntimeError, ValueError, IndexError) as exc:
                     return f"/goal gate remove: {exc}"
-                return f"✓ Gate removed: $ {removed}"
+                return f'''✓ Проверка удалена: $ {removed}'''
             if gate_lower == "clear":
                 try:
                     prev = mgr.clear_gates()
                 except RuntimeError as exc:
                     return f"/goal gate clear: {exc}"
                 return f"✓ Cleared {prev} gate{'s' if prev != 1 else ''}."
-            return "Usage: /goal gate [list | add <command> | remove <N> | clear]"
+            return '''Использование: /goal gate [list | add <команда> | remove <номер> | clear]'''
 
         # /goal draft <objective> → draft a structured completion contract,
         # then set it. The aux LLM call is sync; run it off the event loop.
@@ -2869,7 +2841,7 @@ class GatewaySlashCommandsMixin:
         if lower.startswith("draft"):
             objective = args[len("draft"):].strip()
             if not objective:
-                return "Usage: /goal draft <objective in plain language>"
+                return '''Использование: /goal draft <цель простыми словами>'''
             try:
                 import asyncio
                 from korra_cli.goals import draft_contract
@@ -2917,10 +2889,10 @@ class GatewaySlashCommandsMixin:
 
         base = t("gateway.goal.set", budget=state.max_turns, goal=state.goal)
         if state.has_contract():
-            return f"{base}\nCompletion contract:\n{state.contract.render_block()}"
+            return f'''{base}\nУсловия завершения:\n{state.contract.render_block()}'''
         if lower.startswith("draft"):
             # Drafting was requested but the aux model couldn't produce one.
-            return f"{base}\n(Couldn't draft a contract — running as a free-form goal.)"
+            return f'''{base}\n(Не удалось составить условия завершения. Работа продолжается по свободно заданной цели.)'''
         return base
 
     async def _handle_heartbeat_command(self, event: "MessageEvent") -> str:
@@ -2937,7 +2909,7 @@ class GatewaySlashCommandsMixin:
 
         mgr, session_entry = await self._get_heartbeat_manager_for_event(event)
         if mgr is None:
-            return "Heartbeats unavailable (no session)."
+            return '''Регулярные проверки недоступны: нет диалога.'''
 
         quick_key = self._session_key_for_source(event.source) if event.source else None
 
@@ -2946,21 +2918,21 @@ class GatewaySlashCommandsMixin:
 
         if lower == "pause":
             state = mgr.pause()
-            return f"⏸ Heartbeat paused: {state.prompt}" if state else "No heartbeat set."
+            return f"⏸ Регулярная проверка приостановлена: {state.prompt}" if state else '''Регулярная проверка не задана.'''
 
         if lower == "resume":
             state = mgr.resume()
             if state is None:
-                return "No heartbeat to resume."
+                return '''Нет регулярной проверки для возобновления.'''
             if quick_key and event.source is not None:
                 self._register_heartbeat_watch(quick_key, event.source, mgr.session_id)
-            return f"▶ Heartbeat resumed (every {format_interval(state.interval_seconds)}): {state.prompt}"
+            return f'''▶ Регулярная проверка возобновлена (каждые {format_interval(state.interval_seconds)}): {state.prompt}'''
 
         if lower in {"clear", "stop", "off"}:
             had = mgr.clear()
             if quick_key:
                 self._unregister_heartbeat_watch(quick_key)
-            return "✓ Heartbeat cleared." if had else "No heartbeat set."
+            return '''✓ Регулярная проверка удалена.''' if had else '''Регулярная проверка не задана.'''
 
         # Set: `/heartbeat every 10m <prompt>` (also accepts `10m <prompt>`).
         tokens = args.split(None, 2)
@@ -2975,24 +2947,21 @@ class GatewaySlashCommandsMixin:
 
         if interval is None:
             return (
-                "Usage: /heartbeat every <interval> <prompt>  (e.g. /heartbeat every 10m Check CI)\n"
-                "Also: /heartbeat status | pause | resume | clear"
+                '''Использование: /heartbeat every <интервал> <задача>, например /heartbeat every 10m Проверьте состояние сборки\nТакже: /heartbeat status | pause | resume | clear'''
             )
         if interval < 0:
-            return f"Interval too small — minimum is {MIN_INTERVAL_SECONDS}s."
+            return f'''Интервал слишком короткий. Минимум: {MIN_INTERVAL_SECONDS} с.'''
         if not prompt.strip():
-            return "Usage: /heartbeat every <interval> <prompt> — the prompt is required."
+            return '''Использование: /heartbeat every <интервал> <задача>. Укажите задачу.'''
 
         try:
             state = mgr.set(prompt, interval)
         except ValueError as exc:
-            return f"Invalid heartbeat: {exc}"
+            return f'''Не удалось настроить регулярную проверку: {exc}'''
         if quick_key and event.source is not None:
             self._register_heartbeat_watch(quick_key, event.source, mgr.session_id)
         return (
-            f"♥ Heartbeat set (every {format_interval(state.interval_seconds)}): {state.prompt}\n"
-            "Fires as a normal turn whenever this session is idle and the interval has "
-            "elapsed. Lives while the gateway runs — use `hermes cron` for durable schedules."
+            f'''♥ Регулярная проверка задана (каждые {format_interval(state.interval_seconds)}): {state.prompt}\nЗапускается, когда диалог свободен и прошёл указанный интервал. Работает до остановки шлюза. Для постоянного расписания используйте `korra cron`.'''
         )
 
     async def _handle_refine_command(self, event: "MessageEvent") -> str:
@@ -3006,9 +2975,9 @@ class GatewaySlashCommandsMixin:
         args = (event.get_command_args() or "").strip()
         quick_key = self._session_key_for_source(event.source) if event.source else None
         if not quick_key:
-            return "Refine unavailable (no session)."
+            return '''Разбор недоступен: нет диалога.'''
         if quick_key in self._running_agents:
-            return "Agent is running — wait for the turn to finish, then /refine."
+            return '''Корра работает. Дождитесь ответа, затем отправьте /refine.'''
 
         agent = None
         cache_lock = getattr(self, "_agent_cache_lock", None)
@@ -3017,11 +2986,11 @@ class GatewaySlashCommandsMixin:
                 cached = self._agent_cache.get(quick_key)
                 agent = cached[0] if isinstance(cached, tuple) else cached if cached else None
         if agent is None:
-            return "Nothing to refine yet — send a message first."
+            return '''Пока нечего разбирать. Сначала отправьте сообщение.'''
 
         snapshot = list(getattr(agent, "_session_messages", None) or [])
         if not snapshot:
-            return "Nothing to refine yet — the conversation is empty."
+            return '''Пока нечего разбирать. Диалог пуст.'''
 
         review_skills = "skill_manage" in getattr(agent, "valid_tool_names", set())
         try:
@@ -3032,11 +3001,10 @@ class GatewaySlashCommandsMixin:
                 focus=args or None,
             )
         except Exception as exc:
-            return f"/refine failed to start: {exc}"
+            return f'''Не удалось запустить /refine: {exc}'''
         tail = f" (focus: {args})" if args else ""
         return (
-            f"⚗ Reviewing this conversation in the background{tail} — "
-            f"any memory/skill updates will be reported when done."
+            f'''⚗ Изучаю диалог в фоне{tail}. Сообщу об изменениях памяти и навыков после завершения.'''
         )
 
     async def _handle_review_command(self, event: "MessageEvent") -> str:
@@ -3055,9 +3023,9 @@ class GatewaySlashCommandsMixin:
         args = (event.get_command_args() or "").strip()
         quick_key = self._session_key_for_source(event.source) if event.source else None
         if not quick_key:
-            return "Review unavailable (no session)."
+            return '''Проверка недоступна: нет диалога.'''
         if quick_key in self._running_agents:
-            return "Agent is running — wait for the turn to finish, then /review."
+            return '''Корра работает. Дождитесь ответа, затем отправьте /review.'''
 
         agent = None
         cache_lock = getattr(self, "_agent_cache_lock", None)
@@ -3066,7 +3034,7 @@ class GatewaySlashCommandsMixin:
                 cached = self._agent_cache.get(quick_key)
                 agent = cached[0] if isinstance(cached, tuple) else cached if cached else None
         if agent is None:
-            return "Nothing to review yet — send a message first."
+            return '''Пока нечего проверять. Сначала отправьте сообщение.'''
 
         snapshot = list(getattr(agent, "_session_messages", None) or [])
 
@@ -3091,7 +3059,7 @@ class GatewaySlashCommandsMixin:
         except ValueError as exc:
             return str(exc)
         except Exception as exc:
-            return f"/review failed to start: {exc}"
+            return f'''Не удалось запустить /review: {exc}'''
 
         from agent.review_engine import format_dispatch_note
 
@@ -3109,7 +3077,7 @@ class GatewaySlashCommandsMixin:
         if mgr is None:
             return t("gateway.goal.unavailable")
         if not mgr.has_goal():
-            return "No active goal. Set one with /goal <text>."
+            return '''Активной цели нет. Задайте её командой /goal <текст>.'''
 
         # No args → list current subgoals.
         if not args:
@@ -3121,16 +3089,16 @@ class GatewaySlashCommandsMixin:
 
         if verb == "remove":
             if not rest:
-                return "Usage: /subgoal remove <n>"
+                return '''Использование: /subgoal remove <номер>'''
             try:
                 idx = int(rest.split()[0])
             except ValueError:
-                return "/subgoal remove: <n> must be an integer (1-based index)."
+                return '''/subgoal remove: укажите целый номер подцели, начиная с 1.'''
             try:
                 removed = mgr.remove_subgoal(idx)
             except (IndexError, RuntimeError) as exc:
                 return f"/subgoal remove: {exc}"
-            return f"✓ Removed subgoal {idx}: {removed}"
+            return f'''✓ Подцель {idx} удалена: {removed}'''
 
         if verb == "clear":
             try:
@@ -3139,14 +3107,14 @@ class GatewaySlashCommandsMixin:
                 return f"/subgoal clear: {exc}"
             if prev:
                 return f"✓ Cleared {prev} subgoal{'s' if prev != 1 else ''}."
-            return "No subgoals to clear."
+            return '''Нет подцелей для удаления.'''
 
         try:
             text = mgr.add_subgoal(args)
         except (ValueError, RuntimeError) as exc:
             return f"/subgoal: {exc}"
         idx = len(mgr.state.subgoals) if mgr.state else 0
-        return f"✓ Added subgoal {idx}: {text}"
+        return f'''✓ Подцель {idx} добавлена: {text}'''
 
     async def _get_loop_manager_for_event(self, event: "MessageEvent"):
         """Return a LoopManager bound to the session for this gateway event.
@@ -3185,11 +3153,11 @@ class GatewaySlashCommandsMixin:
             from korra_cli.loops import dispatch_loop_command, goal_blocks_loop_tick
         except Exception as exc:
             logger.debug("loops module unavailable: %s", exc)
-            return "Loops unavailable."
+            return '''Циклы недоступны.'''
 
         mgr, _session_entry = await self._get_loop_manager_for_event(event)
         if mgr is None:
-            return "Loops unavailable (no active session)."
+            return '''Циклы недоступны: нет активного диалога.'''
 
         route: dict = {}
         try:
@@ -3215,8 +3183,7 @@ class GatewaySlashCommandsMixin:
             try:
                 if goal_blocks_loop_tick(mgr.session_id):
                     output += (
-                        "\nNote: an active /goal is driving this session — loop "
-                        "wakeups defer until the goal finishes, pauses, or parks."
+                        '''\nСейчас диалогом управляет активная цель /goal. Цикл дождётся её завершения, паузы или ожидания.'''
                     )
             except Exception:
                 pass
@@ -3544,7 +3511,7 @@ class GatewaySlashCommandsMixin:
         result = await asyncio.to_thread(collect_working_diff, cwd, mode)
         if not result.get("success"):
             return t("gateway.diff.failed",
-                     error=result.get("error", "Could not generate diff"))
+                     error=result.get("error", '''Не удалось получить изменения'''))
 
         stat = result.get("stat", "")
         diff = result.get("diff", "")
@@ -3582,7 +3549,7 @@ class GatewaySlashCommandsMixin:
         result = await asyncio.to_thread(mgr.session_diff, cwd)
         if not result.get("success"):
             return t("gateway.diff.failed",
-                     error=result.get("error", "Could not generate diff"))
+                     error=result.get("error", '''Не удалось получить изменения'''))
 
         stat = result.get("stat", "")
         diff = result.get("diff", "")
@@ -3611,8 +3578,7 @@ class GatewaySlashCommandsMixin:
         note = ""
         if truncated:
             note = (
-                f"\n... (truncated — {len(diff_lines)} lines total; "
-                "use /diff --stat for a summary)"
+                f'''\n… (показана часть изменений, всего строк: {len(diff_lines)}; сводка: /diff --stat)'''
             )
         return f"```diff\n{diff}{note}\n```"
 
@@ -4024,8 +3990,7 @@ class GatewaySlashCommandsMixin:
             wa.MEMORY, args, memory_store=store, set_mode_fn=_set_approval,
         )
         if out is None:
-            out = ("Unknown /memory subcommand. Use: pending, approve <id>, "
-                   "reject <id>, approval <on|off>.")
+            out = ('''Неизвестная подкоманда /memory. Доступны: pending, approve <id>, reject <id>, approval <on|off>.''')
         return out
 
     async def _handle_skills_command(self, event: MessageEvent) -> str:
@@ -4056,9 +4021,7 @@ class GatewaySlashCommandsMixin:
         gate_on = wa.write_approval_enabled(wa.SKILLS)
         wants_toggle = bool(args) and args[0].lower() in {"approval", "mode"}
         if not gate_on and not wants_toggle and wa.pending_count(wa.SKILLS) == 0:
-            return ("Skill write approval is off (skills.write_approval). "
-                    "Enable it with /skills approval on, then review staged "
-                    "writes here with /skills pending.")
+            return ('''Подтверждение записи навыков отключено (skills.write_approval). Включите его командой /skills approval on. Затем проверяйте изменения через /skills pending.''')
 
         def _set_approval(enabled: bool):
             # Write-back round-trip: raw read is correct (merged defaults must
@@ -4074,9 +4037,7 @@ class GatewaySlashCommandsMixin:
             wa.SKILLS, args, set_mode_fn=_set_approval,
         )
         if out is None:
-            return ("Unknown /skills subcommand on this platform. Use: pending, "
-                    "approve <id>, reject <id>, diff <id>, approval <on|off>. "
-                    "(Search/install are CLI-only.)")
+            return ('''Эта подкоманда /skills недоступна на платформе. Доступны: pending, approve <id>, reject <id>, diff <id>, approval <on|off>. Поиск и установка доступны в терминале Korra.''')
 
         # Chat bubbles can't hold a full skill diff — truncate and point at
         # the real review surface. (Note: `hermes skills diff <name>` is a
@@ -4085,8 +4046,7 @@ class GatewaySlashCommandsMixin:
         if args and args[0].lower() == "diff" and len(out) > 3000:
             pending_id = args[1] if len(args) > 1 else "<id>"
             out = (out[:3000]
-                   + "\n… (truncated — full diff in "
-                     f"~/.hermes/pending/skills/{pending_id}.json)")
+                   + f'''\n… (показана часть изменений; полный файл: ~/.hermes/pending/skills/{pending_id}.json)''')
         return out
 
     async def _handle_fast_command(self, event: MessageEvent) -> Optional[str]:
@@ -4185,7 +4145,7 @@ class GatewaySlashCommandsMixin:
         # this side-effect boundary. Unconfigured policies remain unrestricted.
         policy = policy_for_source(self.config, event.source)
         if requested and not policy.is_admin(event.source.user_id):
-            return "Only gateway admins can change the persistent approval mode."
+            return '''Только администраторы шлюза могут менять постоянный режим разрешений.'''
         result = run_approval_mode_command(requested)
         # Approval checks load config dynamically; do not evict the cached agent
         # or alter its system prompt/tool schema (prompt-cache prefix is sacred).
@@ -4286,20 +4246,20 @@ class GatewaySlashCommandsMixin:
         if not arg or arg == "status":
             mode = self._effective_busy_input_mode(event.source)
             if mode == "queue":
-                behavior = "queues for next turn"
+                behavior = '''добавляются в очередь'''
             elif mode == "steer":
-                behavior = "steers into current run (after next tool call)"
+                behavior = '''уточняют текущую задачу после следующего действия'''
             else:
-                behavior = "interrupts current run"
+                behavior = '''прерывают текущую задачу'''
             return EphemeralReply(
-                f"**Busy input mode: `{mode}`" + "\n"
-                f"Messages while busy: _{behavior}_" + "\n"
-                f"Change with `/busy queue`, `/busy steer`, or `/busy interrupt`."
+                f"**Приём сообщений во время работы: `{mode}`" + "\n"
+                f"Сообщения во время работы: _{behavior}_" + "\n"
+                f"Изменить: `/busy queue`, `/busy steer` или `/busy interrupt`."
             )
 
         if arg not in {"queue", "interrupt", "steer"}:
             return EphemeralReply(
-                f"Unknown mode `{arg}`. Use `/busy queue`, `/busy steer`, or `/busy interrupt`."
+                f'''Неизвестный режим `{arg}`. Доступны `/busy queue`, `/busy steer` и `/busy interrupt`.'''
             )
 
         # Persist before mutate
@@ -4327,18 +4287,18 @@ class GatewaySlashCommandsMixin:
                 adapter._busy_text_mode = self._effective_busy_text_mode(event.source)
 
             if arg == "queue":
-                behavior = "Messages will be queued for the next turn while Korra is busy."
+                behavior = '''Пока Корра занята, сообщения будут добавляться в очередь.'''
             elif arg == "steer":
-                behavior = "Messages will be steered into the current run (after the next tool call)."
+                behavior = '''Сообщения будут уточнять текущую задачу после следующего действия.'''
             else:
-                behavior = "Messages will interrupt the current run while Korra is busy."
+                behavior = '''Пока Корра занята, сообщения будут прерывать текущую задачу.'''
             return EphemeralReply(
-                f"Busy input mode set to **`{arg}`** (saved)." + "\n"
+                f'''Режим входящих сообщений **`{arg}`** сохранён.''' + "\n"
                 f"_{behavior}_"
             )
         else:
             return EphemeralReply(
-                f"Busy input mode could not be saved to config. Mode unchanged."
+                f'''Не удалось сохранить режим входящих сообщений. Настройки не изменились.'''
             )
 
     async def _handle_footer_command(self, event: MessageEvent) -> str:
@@ -4481,10 +4441,7 @@ class GatewaySlashCommandsMixin:
             or getattr(agent, "_codex_session", None) is None
         ):
             return (
-                "🗜️ Nothing to compact: this session runs on the Codex "
-                "app-server runtime, whose context lives in a Codex-owned "
-                "thread that only exists while the agent is active. Send a "
-                "message first, then /compress — or /reset to start fresh."
+                '''🗜️ Пока нечего сжимать. Контекст этой сессии хранится в активном потоке Codex. Сначала отправьте сообщение, затем /compress. Для нового диалога: /reset.'''
             )
 
         compressor = getattr(agent, "context_compressor", None)
@@ -4500,14 +4457,10 @@ class GatewaySlashCommandsMixin:
         count_after = getattr(compressor, "compression_count", 0)
         if count_after > count_before:
             return (
-                "🗜️ Codex app-server thread compacted (thread/compact). "
-                "The transcript mirror is unchanged by design — the "
-                "app-server now carries the compacted context."
+                '''🗜️ Контекст Codex сжат. Сохранённая история диалога осталась прежней; модель продолжит со сжатым контекстом.'''
             )
         return (
-            "⚠️ Codex app-server compaction did not complete — the thread "
-            "is unchanged. Check the app-server logs, retry /compress, or "
-            "/reset for a clean session."
+            '''⚠️ Не удалось сжать контекст Codex. Он не изменился. Проверьте журнал Codex, повторите /compress или начните новый диалог через /reset.'''
         )
 
     async def _handle_compress_command_inner(self, event: MessageEvent) -> str:
@@ -5027,7 +4980,7 @@ class GatewaySlashCommandsMixin:
         session_id = session_entry.session_id
 
         if not self._session_db:
-            return "Session database not available."
+            return '''База диалогов недоступна.'''
         filename = parts[1] if len(parts) > 1 else default_save_filename(session_id, fmt)
         # The filename is echoed to the platform only — never trust path
         # separators from chat input.
@@ -5037,7 +4990,7 @@ class GatewaySlashCommandsMixin:
         # offloaded to a thread and must be awaited.
         export_data = await self._session_db.export_session(session_id)
         if not export_data:
-            return f"No stored messages found for this session ({session_id})."
+            return f'''В этом диалоге нет сохранённых сообщений ({session_id}).'''
 
         if redact:
             from korra_cli.session_export_md import redact_session_data
@@ -5065,14 +5018,14 @@ class GatewaySlashCommandsMixin:
                 await adapter.send_document(
                     chat_id=source.chat_id,
                     file_path=temp_path,
-                    caption=f"Session export: {filename}",
+                    caption=f'''Экспорт диалога: {filename}''',
                     file_name=filename,
                 )
-                return "Export complete."
-            return "Platform adapter not found to send the document."
+                return '''Экспорт завершён.'''
+            return '''Не найдено подключение платформы для отправки документа.'''
         except Exception as e:
             logger.warning("Session /save failed: %s", e)
-            return f"Error exporting session: {e}"
+            return f'''Ошибка экспорта диалога: {e}'''
         finally:
             try:
                 os.remove(temp_path)
@@ -5341,7 +5294,7 @@ class GatewaySlashCommandsMixin:
             return t("gateway.resume.parse_error", error=exc)
 
         if search_query == "":
-            return "Usage: `/sessions search <query>`"
+            return '''Использование: `/sessions search <запрос>`'''
 
         if target:
             resume_event = dataclasses.replace(event, text=f"/resume {target}")
@@ -5382,9 +5335,9 @@ class GatewaySlashCommandsMixin:
             ]
         rows = rows[:10]
         if search_query:
-            title = f"Sessions matching “{search_query}”"
+            title = f'''Диалоги по запросу «{search_query}»'''
         else:
-            title = "Sessions" if include_unnamed else "Named Sessions"
+            title = "Sessions" if include_unnamed else '''Диалоги с названием'''
         return format_gateway_session_listing(
             rows,
             include_source=cross_origin,
@@ -5561,7 +5514,7 @@ class GatewaySlashCommandsMixin:
         if view is None or not view.logged_in:
             return t("gateway.credits.not_logged_in")
 
-        lines: list[str] = ["💳 **Nous balance**"]
+        lines: list[str] = ['''💳 **Баланс Nous**''']
         for line in view.balance_lines:
             if line.lstrip().startswith("📈"):
                 continue  # drop the helper's header; we print our own
@@ -5571,8 +5524,8 @@ class GatewaySlashCommandsMixin:
             lines.append(view.identity_line)
         if view.topup_url:
             lines.append("")
-            lines.append(f"Manage billing on the portal: {view.topup_url}")
-            lines.append("Top up and manage billing in the browser — your balance updates here after.")
+            lines.append(f'''Управление оплатой в кабинете: {view.topup_url}''')
+            lines.append('''Пополните баланс в браузере. После оплаты баланс обновится здесь.''')
         return "\n".join(lines)
 
     def _context_breakdown_block(self, agent, source, expanded: bool) -> list[str]:
@@ -6067,13 +6020,10 @@ class GatewaySlashCommandsMixin:
         bundles = reply.data["bundles"]
         if not bundles:
             return (
-                "No skill bundles installed.\n"
-                "Create one on the host with:\n"
-                "  `hermes bundles create <name> --skill <s1> --skill <s2>`\n"
-                f"Directory: `{reply.data['dir']}`"
+                f'''Наборы навыков пока не установлены.\nСоздайте набор на сервере:\n  `korra bundles create <название> --skill <s1> --skill <s2>`\nПапка: `{reply.data['dir']}`'''
             )
 
-        lines = [f"**Skill Bundles** ({len(bundles)} installed):", ""]
+        lines = [f'''**Наборы навыков** (установлено: {len(bundles)}):''', ""]
         for info in bundles:
             skill_count = len(info.get("skills", []))
             desc = info.get("description") or f"Load {skill_count} skills"
@@ -6083,7 +6033,7 @@ class GatewaySlashCommandsMixin:
             for s in info.get("skills", []):
                 lines.append(f"    · {s}")
         lines.append("")
-        lines.append("Invoke a bundle with `/<slug>` to load all its skills.")
+        lines.append('''Чтобы загрузить все навыки набора, отправьте `/<slug>`.''')
         return "\n".join(lines)
 
     async def _handle_approve_command(self, event: MessageEvent) -> Optional[str]:

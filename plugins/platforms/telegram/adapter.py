@@ -6395,12 +6395,12 @@ class TelegramAdapter(BasePlatformAdapter):
         if not self._bot:
             return SendResult(success=False, error="Not connected")
         try:
-            default_hint = f" (default: {default})" if default else ""
-            text = self.format_message(f"⚕ *Update needs your input:*\n\n{prompt}{default_hint}")
+            default_hint = f''' (по умолчанию: {default})''' if default else ""
+            text = self.format_message(f'''⚕ *Для обновления нужен ваш ответ:*\n\n{prompt}{default_hint}''')
             keyboard = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✓ Yes", callback_data="update_prompt:y"),
-                    InlineKeyboardButton("✗ No", callback_data="update_prompt:n"),
+                    InlineKeyboardButton('''✓ Да''', callback_data="update_prompt:y"),
+                    InlineKeyboardButton('''✗ Нет''', callback_data="update_prompt:n"),
                 ]
             ])
             thread_id = self._metadata_thread_id(metadata)
@@ -6426,10 +6426,10 @@ class TelegramAdapter(BasePlatformAdapter):
             return SendResult(success=False, error=_redact_telegram_error_text(e))
 
     # Template attrs for the shared _format_exec_approval core (HTML mode).
-    _EA_HEADER = "⚠️ <b>Command Approval Required</b>\n\n"
+    _EA_HEADER = '''⚠️ <b>Нужно разрешение на команду</b>\n\n'''
     _EA_CODE_OPEN = "<pre>"
     _EA_CODE_CLOSE = "</pre>\n\n"
-    _EA_SMART_DENY_LINE = "\n\n<b>Smart DENY:</b> owner override applies to this one operation only."
+    _EA_SMART_DENY_LINE = '''\n\n<b>Проверка запретила команду:</b> владелец может разрешить только эту операцию.'''
     _EA_CMD_BUDGET = 3800
 
     def _ea_escape(self, text: str) -> str:
@@ -6437,7 +6437,7 @@ class TelegramAdapter(BasePlatformAdapter):
 
     async def send_exec_approval(
         self, chat_id: str, command: str, session_key: str,
-        description: str = "dangerous command",
+        description: str = '''опасная команда''',
         metadata: Optional[Dict[str, Any]] = None,
         allow_permanent: bool = True,
         allow_session: bool = True,
@@ -6466,17 +6466,17 @@ class TelegramAdapter(BasePlatformAdapter):
             approval_id = next(self._approval_counter)
 
             buttons = [
-                InlineKeyboardButton("✅ Allow Once", callback_data=f"ea:once:{approval_id}")
+                InlineKeyboardButton('''✅ Один раз''', callback_data=f"ea:once:{approval_id}")
             ]
             if not smart_denied and allow_session:
                 buttons.append(
-                    InlineKeyboardButton("✅ Session", callback_data=f"ea:session:{approval_id}")
+                    InlineKeyboardButton('''✅ До конца диалога''', callback_data=f"ea:session:{approval_id}")
                 )
                 if allow_permanent:
                     buttons.append(
-                        InlineKeyboardButton("✅ Always", callback_data=f"ea:always:{approval_id}")
+                        InlineKeyboardButton('''✅ Всегда''', callback_data=f"ea:always:{approval_id}")
                     )
-            buttons.append(InlineKeyboardButton("❌ Deny", callback_data=f"ea:deny:{approval_id}"))
+            buttons.append(InlineKeyboardButton('''❌ Запретить''', callback_data=f"ea:deny:{approval_id}"))
             # Pair into rows (2x2 for the full set) so labels stay readable on
             # mobile — a single 4-button row truncates to "Allo… / Ses… / …".
             rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
@@ -6524,11 +6524,11 @@ class TelegramAdapter(BasePlatformAdapter):
 
             keyboard = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✅ Approve Once", callback_data=f"sc:once:{confirm_id}"),
-                    InlineKeyboardButton("🔒 Always Approve", callback_data=f"sc:always:{confirm_id}"),
+                    InlineKeyboardButton('''✅ Разрешить один раз''', callback_data=f"sc:once:{confirm_id}"),
+                    InlineKeyboardButton('''🔒 Разрешать всегда''', callback_data=f"sc:always:{confirm_id}"),
                 ],
                 [
-                    InlineKeyboardButton("❌ Cancel", callback_data=f"sc:cancel:{confirm_id}"),
+                    InlineKeyboardButton('''❌ Отмена''', callback_data=f"sc:cancel:{confirm_id}"),
                 ],
             ])
 
@@ -6617,7 +6617,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     ])
                 rows.append([
                     InlineKeyboardButton(
-                        "✏️ Other (type answer)",
+                        '''✏️ Свой ответ''',
                         callback_data=f"cl:{clarify_id}:other",
                     )
                 ])
@@ -6672,10 +6672,7 @@ class TelegramAdapter(BasePlatformAdapter):
             provider_label = get_label(current_provider)
             text = self.format_message(
                 (
-                    f"⚙ *Model Configuration*\n\n"
-                    f"Current model: `{current_model or 'unknown'}`\n"
-                    f"Provider: {provider_label}\n\n"
-                    f"Select a provider:{provider_page_info}"
+                    f'''⚙ *Настройки модели*\n\nТекущая модель: `{current_model or 'неизвестна'}`\nПровайдер: {provider_label}\n\nВыберите провайдера:{provider_page_info}'''
                 )
             )
 
@@ -6784,7 +6781,7 @@ class TelegramAdapter(BasePlatformAdapter):
         """Handle choice picker button taps (cp:<index>)."""
         state = self._choice_picker_state.get(chat_id)
         if not state:
-            await query.answer(text="Picker expired — run the command again.")
+            await query.answer(text='''Срок выбора истёк. Выполните команду ещё раз.''')
             return
 
         # Same authorization gate as approval buttons: unauthorized users in a
@@ -6799,26 +6796,26 @@ class TelegramAdapter(BasePlatformAdapter):
             thread_id=str(getattr(query_message, "message_thread_id", None)) if getattr(query_message, "message_thread_id", None) is not None else None,
             user_name=getattr(query.from_user, "first_name", None),
         ):
-            await query.answer(text="⛔ You are not authorized to change this setting.")
+            await query.answer(text='''⛔ У вас нет прав менять эту настройку.''')
             return
 
         try:
             idx = int(data[3:])
             choice = state["choices"][idx]
         except (ValueError, IndexError):
-            await query.answer(text="Invalid selection.")
+            await query.answer(text='''Недопустимый выбор.''')
             return
 
         callback = state.get("on_choice_selected")
         if not callback:
-            await query.answer(text="Picker expired.")
+            await query.answer(text='''Срок выбора истёк.''')
             return
 
         try:
             result_text = await callback(chat_id, str(choice.get("value") or ""))
         except Exception as exc:
             logger.error("Choice picker selection failed: %s", exc)
-            result_text = f"Error applying selection: {exc}"
+            result_text = f'''Не удалось применить выбор: {exc}'''
 
         try:
             await query.edit_message_text(
@@ -6895,13 +6892,13 @@ class TelegramAdapter(BasePlatformAdapter):
         if total_pages > 1:
             nav: list = []
             if page > 0:
-                nav.append(InlineKeyboardButton("◀ Prev", callback_data=f"mpv:{page - 1}"))
+                nav.append(InlineKeyboardButton('''◀ Назад''', callback_data=f"mpv:{page - 1}"))
             nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="mx:noop"))
             if page < total_pages - 1:
-                nav.append(InlineKeyboardButton("Next ▶", callback_data=f"mpv:{page + 1}"))
+                nav.append(InlineKeyboardButton('''Вперёд ▶''', callback_data=f"mpv:{page + 1}"))
             rows.append(nav)
 
-        rows.append([InlineKeyboardButton("✗ Cancel", callback_data="mx")])
+        rows.append([InlineKeyboardButton('''✗ Отмена''', callback_data="mx")])
 
         return InlineKeyboardMarkup(rows), page_meta["page_info"]
 
@@ -6930,15 +6927,15 @@ class TelegramAdapter(BasePlatformAdapter):
         if total_pages > 1:
             nav: list = []
             if page > 0:
-                nav.append(InlineKeyboardButton("◀ Prev", callback_data=f"mg:{page - 1}"))
+                nav.append(InlineKeyboardButton('''◀ Назад''', callback_data=f"mg:{page - 1}"))
             nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="mx:noop"))
             if page < total_pages - 1:
-                nav.append(InlineKeyboardButton("Next ▶", callback_data=f"mg:{page + 1}"))
+                nav.append(InlineKeyboardButton('''Вперёд ▶''', callback_data=f"mg:{page + 1}"))
             rows.append(nav)
 
         rows.append([
-            InlineKeyboardButton("◀ Back", callback_data="mb"),
-            InlineKeyboardButton("✗ Cancel", callback_data="mx"),
+            InlineKeyboardButton('''◀ Назад''', callback_data="mb"),
+            InlineKeyboardButton('''✗ Отмена''', callback_data="mx"),
         ])
 
         return InlineKeyboardMarkup(rows), page_meta["page_info"]
@@ -6949,7 +6946,7 @@ class TelegramAdapter(BasePlatformAdapter):
         """Handle model picker inline keyboard callbacks (mp:/mm:/mc:/mb:/mx:/mg:)."""
         state = self._model_picker_state.get(chat_id)
         if not state:
-            await query.answer(text="Picker expired — use /model again.")
+            await query.answer(text='''Срок выбора истёк. Отправьте /model ещё раз.''')
             return
 
         try:
@@ -6966,7 +6963,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 None,
             )
             if not provider:
-                await query.answer(text="Provider not found.")
+                await query.answer(text='''Провайдер не найден.''')
                 return
 
             models = provider.get("models", [])
@@ -6980,14 +6977,12 @@ class TelegramAdapter(BasePlatformAdapter):
             pname = provider.get("name", provider_slug)
             total = provider.get("total_models", len(models))
             shown = len(models)
-            extra = f"\n_{total - shown} more available — type `/model <name>` directly_" if total > shown else ""
+            extra = f'''\n_Доступно ещё моделей: {total - shown}. Укажите название: `/model <название>`._''' if total > shown else ""
 
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Provider: *{pname}*{page_info}\n"
-                        f"Select a model:{extra}"
+                        f'''⚙ *Настройки модели*\n\nПровайдер: *{pname}*{page_info}\nВыберите модель:{extra}'''
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -7000,7 +6995,7 @@ class TelegramAdapter(BasePlatformAdapter):
             try:
                 page = int(data[3:])
             except ValueError:
-                await query.answer(text="Invalid page.")
+                await query.answer(text='''Недопустимая страница.''')
                 return
 
             models = state.get("model_list", [])
@@ -7016,14 +7011,12 @@ class TelegramAdapter(BasePlatformAdapter):
             )
             total = provider.get("total_models", len(models)) if provider else len(models)
             shown = len(models)
-            extra = f"\n_{total - shown} more available — type `/model <name>` directly_" if total > shown else ""
+            extra = f'''\n_Доступно ещё моделей: {total - shown}. Укажите название: `/model <название>`._''' if total > shown else ""
 
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Provider: *{pname}*{page_info}\n"
-                        f"Select a model:{extra}"
+                        f'''⚙ *Настройки модели*\n\nПровайдер: *{pname}*{page_info}\nВыберите модель:{extra}'''
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -7036,7 +7029,7 @@ class TelegramAdapter(BasePlatformAdapter):
             try:
                 page = int(data[4:])
             except ValueError:
-                await query.answer(text="Invalid page.")
+                await query.answer(text='''Недопустимая страница.''')
                 return
 
             state["provider_page"] = page
@@ -7052,10 +7045,7 @@ class TelegramAdapter(BasePlatformAdapter):
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Current model: `{state['current_model'] or 'unknown'}`\n"
-                        f"Provider: {provider_label}\n\n"
-                        f"Select a provider:{provider_page_info}"
+                        f'''⚙ *Настройки модели*\n\nТекущая модель: `{state['current_model'] or 'неизвестна'}`\nПровайдер: {provider_label}\n\nВыберите провайдера:{provider_page_info}'''
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -7068,12 +7058,12 @@ class TelegramAdapter(BasePlatformAdapter):
             try:
                 idx = int(data[3:])
             except ValueError:
-                await query.answer(text="Invalid selection.")
+                await query.answer(text='''Недопустимый выбор.''')
                 return
 
             model_list = state.get("model_list", [])
             if idx < 0 or idx >= len(model_list):
-                await query.answer(text="Invalid model index.")
+                await query.answer(text='''Недопустимый номер модели.''')
                 return
 
             model_id = model_list[idx]
@@ -7081,7 +7071,7 @@ class TelegramAdapter(BasePlatformAdapter):
             callback = state.get("on_model_selected")
 
             if not callback:
-                await query.answer(text="Picker expired.")
+                await query.answer(text='''Срок выбора истёк.''')
                 return
 
             switch_failed = False
@@ -7089,7 +7079,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 result_text = await callback(chat_id, model_id, provider_slug)
             except Exception as exc:
                 logger.error("Model picker switch failed: %s", exc)
-                result_text = f"Error switching model: {exc}"
+                result_text = f'''Не удалось сменить модель: {exc}'''
                 switch_failed = True
 
             try:
@@ -7108,7 +7098,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 except Exception:
                     pass
             await query.answer(
-                text="Switch failed." if switch_failed else "Model switched!"
+                text='''Не удалось сменить модель.''' if switch_failed else '''Модель изменена!'''
             )
             self._model_picker_state.pop(chat_id, None)
 
@@ -7117,12 +7107,12 @@ class TelegramAdapter(BasePlatformAdapter):
             try:
                 idx = int(data[3:])
             except ValueError:
-                await query.answer(text="Invalid selection.")
+                await query.answer(text='''Недопустимый выбор.''')
                 return
 
             model_list = state.get("model_list", [])
             if idx < 0 or idx >= len(model_list):
-                await query.answer(text="Invalid model index.")
+                await query.answer(text='''Недопустимый номер модели.''')
                 return
 
             model_id = model_list[idx]
@@ -7130,7 +7120,7 @@ class TelegramAdapter(BasePlatformAdapter):
             callback = state.get("on_model_selected")
 
             if not callback:
-                await query.answer(text="Picker expired.")
+                await query.answer(text='''Срок выбора истёк.''')
                 return
 
             try:
@@ -7147,10 +7137,10 @@ class TelegramAdapter(BasePlatformAdapter):
                 warning = None
             if warning is not None:
                 keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Switch anyway", callback_data=f"mc:{idx}")],
+                    [InlineKeyboardButton('''Всё равно переключить''', callback_data=f"mc:{idx}")],
                     [
-                        InlineKeyboardButton("◀ Back", callback_data="mb"),
-                        InlineKeyboardButton("✗ Cancel", callback_data="mx"),
+                        InlineKeyboardButton('''◀ Назад''', callback_data="mb"),
+                        InlineKeyboardButton('''✗ Отмена''', callback_data="mx"),
                     ],
                 ])
                 await query.edit_message_text(
@@ -7160,7 +7150,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     parse_mode=ParseMode.MARKDOWN_V2,
                     reply_markup=keyboard,
                 )
-                await query.answer(text="Confirm model selection")
+                await query.answer(text='''Подтвердите выбор модели''')
                 return
 
             switch_failed = False
@@ -7168,7 +7158,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 result_text = await callback(chat_id, model_id, provider_slug)
             except Exception as exc:
                 logger.error("Model picker switch failed: %s", exc)
-                result_text = f"Error switching model: {exc}"
+                result_text = f'''Не удалось сменить модель: {exc}'''
                 switch_failed = True
 
             # Edit message to show confirmation, remove buttons
@@ -7189,7 +7179,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 except Exception:
                     pass
             await query.answer(
-                text="Switch failed." if switch_failed else "Model switched!"
+                text='''Не удалось сменить модель.''' if switch_failed else '''Модель изменена!'''
             )
 
             # Clean up state
@@ -7207,7 +7197,7 @@ class TelegramAdapter(BasePlatformAdapter):
             by_slug = {p["slug"]: p for p in state["providers"]}
             members = [by_slug[m] for m in member_slugs if m in by_slug]
             if not members:
-                await query.answer(text="Group not found.")
+                await query.answer(text='''Группа не найдена.''')
                 return
 
             buttons = []
@@ -7221,17 +7211,15 @@ class TelegramAdapter(BasePlatformAdapter):
                 )
             rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
             rows.append([
-                InlineKeyboardButton("◀ Back", callback_data="mb"),
-                InlineKeyboardButton("✗ Cancel", callback_data="mx"),
+                InlineKeyboardButton('''◀ Назад''', callback_data="mb"),
+                InlineKeyboardButton('''✗ Отмена''', callback_data="mx"),
             ])
             keyboard = InlineKeyboardMarkup(rows)
 
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Provider family: *{_label or group_id}*\n\n"
-                        f"Select a provider:"
+                        f'''⚙ *Настройки модели*\n\nГруппа провайдеров: *{_label or group_id}*\n\nВыберите провайдера:'''
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -7254,10 +7242,7 @@ class TelegramAdapter(BasePlatformAdapter):
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Current model: `{state['current_model'] or 'unknown'}`\n"
-                        f"Provider: {provider_label}\n\n"
-                        f"Select a provider:{provider_page_info}"
+                        f'''⚙ *Настройки модели*\n\nТекущая модель: `{state['current_model'] or 'неизвестна'}`\nПровайдер: {provider_label}\n\nВыберите провайдера:{provider_page_info}'''
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -7269,7 +7254,7 @@ class TelegramAdapter(BasePlatformAdapter):
             # --- Cancel ---
             self._model_picker_state.pop(chat_id, None)
             await query.edit_message_text(
-                text="Model selection cancelled.",
+                text='''Выбор модели отменён.''',
                 reply_markup=None,
             )
             await query.answer()
@@ -7288,14 +7273,13 @@ class TelegramAdapter(BasePlatformAdapter):
         agent never receives.
         """
         try:
-            await query.answer(text="⚠️ This prompt expired — please /retry.")
+            await query.answer(text='''⚠️ Срок ответа истёк. Повторите запрос командой /retry.''')
         except Exception:
             pass
         try:
             await query.edit_message_text(
                 text=(
-                    f"❓ {_html.escape(query.message.text or '')}\n\n"
-                    "<i>⚠️ This question expired or the session reset — please /retry.</i>"
+                    f'''❓ {_html.escape(query.message.text or '')}\n\n<i>⚠️ Срок ответа истёк или диалог сброшен. Повторите запрос командой /retry.</i>'''
                 ),
                 parse_mode=ParseMode.HTML,
                 reply_markup=None,
@@ -7439,7 +7423,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 try:
                     approval_id = int(parts[2])
                 except (ValueError, IndexError):
-                    await query.answer(text="Invalid approval data.")
+                    await query.answer(text='''Некорректные данные подтверждения.''')
                     return
 
                 # Only authorized users may click approval buttons.
@@ -7451,15 +7435,15 @@ class TelegramAdapter(BasePlatformAdapter):
                     thread_id=str(query_thread_id) if query_thread_id is not None else None,
                     user_name=query_user_name,
                 ):
-                    await query.answer(text="⛔ You are not authorized to approve commands.")
+                    await query.answer(text='''⛔ У вас нет прав разрешать команды.''')
                     return
 
                 session_key = self._approval_state.pop(approval_id, None)
                 if not session_key:
-                    await query.answer(text="This approval has already been resolved.")
+                    await query.answer(text='''Этот запрос разрешения уже закрыт.''')
                     return
 
-                user_display = getattr(query.from_user, "first_name", "User")
+                user_display = getattr(query.from_user, "first_name", '''Пользователь''')
 
                 # Resolve the approval FIRST — unblocks the agent thread.
                 # Rendering happens after so the message reflects what
@@ -7481,18 +7465,17 @@ class TelegramAdapter(BasePlatformAdapter):
                 if count:
                     # Map choice to human-readable label
                     label_map = {
-                        "once": "✅ Approved once",
-                        "session": "✅ Approved for session",
-                        "always": "✅ Approved permanently",
-                        "deny": "❌ Denied",
+                        "once": '''✅ Разрешено один раз''',
+                        "session": '''✅ Разрешено до конца диалога''',
+                        "always": '''✅ Разрешено навсегда''',
+                        "deny": '''❌ Запрещено''',
                     }
-                    label = label_map.get(choice, "Resolved")
-                    edit_text = f"{label} by {user_display}"
+                    label = label_map.get(choice, '''Обработано''')
+                    edit_text = f'''{label}. Решение: {user_display}'''
                 else:
-                    label = "⌛ Approval expired"
+                    label = '''⌛ Срок разрешения истёк'''
                     edit_text = (
-                        f"{label} — no command was waiting. "
-                        f"It already timed out (and was denied) or was resolved elsewhere."
+                        f'''{label}. Ожидающей команды нет: она уже отклонена по времени ожидания или обработана в другом месте.'''
                     )
 
                 await query.answer(text=label)
@@ -7531,27 +7514,27 @@ class TelegramAdapter(BasePlatformAdapter):
                     thread_id=str(query_thread_id) if query_thread_id is not None else None,
                     user_name=query_user_name,
                 ):
-                    await query.answer(text="⛔ You are not authorized to answer this prompt.")
+                    await query.answer(text='''⛔ У вас нет прав отвечать на этот запрос.''')
                     return
 
                 session_key = self._slash_confirm_state.pop(confirm_id, None)
                 if not session_key:
-                    await query.answer(text="This prompt has already been resolved.")
+                    await query.answer(text='''Этот запрос уже закрыт.''')
                     return
 
                 label_map = {
-                    "once": "✅ Approved once",
-                    "always": "🔒 Always approve",
-                    "cancel": "❌ Cancelled",
+                    "once": '''✅ Разрешено один раз''',
+                    "always": '''🔒 Разрешать всегда''',
+                    "cancel": '''❌ Отменено''',
                 }
-                user_display = getattr(query.from_user, "first_name", "User")
-                label = label_map.get(choice, "Resolved")
+                user_display = getattr(query.from_user, "first_name", '''Пользователь''')
+                label = label_map.get(choice, '''Обработано''')
 
                 await query.answer(text=label)
 
                 try:
                     await query.edit_message_text(
-                        text=self.format_message(f"{label} by {user_display}"),
+                        text=self.format_message(f'''{label}. Решение: {user_display}'''),
                         parse_mode=ParseMode.MARKDOWN_V2,
                         reply_markup=None,
                     )
@@ -7631,15 +7614,15 @@ class TelegramAdapter(BasePlatformAdapter):
                     thread_id=str(query_thread_id) if query_thread_id is not None else None,
                     user_name=query_user_name,
                 ):
-                    await query.answer(text="⛔ You are not authorized to answer this prompt.")
+                    await query.answer(text='''⛔ У вас нет прав отвечать на этот запрос.''')
                     return
 
                 session_key = self._clarify_state.get(clarify_id)
                 if not session_key:
-                    await query.answer(text="This prompt has already been resolved.")
+                    await query.answer(text='''Этот запрос уже закрыт.''')
                     return
 
-                user_display = getattr(query.from_user, "first_name", "User")
+                user_display = getattr(query.from_user, "first_name", '''Пользователь''')
 
                 if choice_token == "other":
                     # Flip into text-capture mode and tell the user to type
@@ -7662,10 +7645,10 @@ class TelegramAdapter(BasePlatformAdapter):
                         await self._notify_clarify_expired(query, user_display)
                         return
 
-                    await query.answer(text="✏️ Type your answer in the chat.")
+                    await query.answer(text='''✏️ Напишите ответ в чате.''')
                     try:
                         await query.edit_message_text(
-                            text=f"❓ {query.message.text or ''}\n\n<i>Awaiting typed response from {_html.escape(user_display)}…</i>",
+                            text=f'''❓ {query.message.text or ''}\n\n<i>Жду ответ в чате от {_html.escape(user_display)}…</i>''',
                             parse_mode=ParseMode.HTML,
                             reply_markup=None,
                         )
@@ -7677,7 +7660,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 try:
                     idx = int(choice_token)
                 except (ValueError, TypeError):
-                    await query.answer(text="Invalid choice.")
+                    await query.answer(text='''Недопустимый вариант.''')
                     return
 
                 # Look up the choice text from the entry registered in the
@@ -7744,14 +7727,14 @@ class TelegramAdapter(BasePlatformAdapter):
             thread_id=str(query_thread_id) if query_thread_id is not None else None,
             user_name=query_user_name,
         ):
-            await query.answer(text="⛔ You are not authorized to answer update prompts.")
+            await query.answer(text='''⛔ У вас нет прав отвечать на запросы обновления.''')
             return
-        await query.answer(text=f"Sent '{answer}' to the update process.")
+        await query.answer(text=f'''Ответ '{answer}' передан процессу обновления.''')
         # Edit the message to show the choice and remove buttons
         label = "Yes" if answer == "y" else "No"
         try:
             await query.edit_message_text(
-                text=self.format_message(f"⚕ Update prompt answered: *{label}*"),
+                text=self.format_message(f'''⚕ Ответ на запрос обновления: *{label}*'''),
                 parse_mode=ParseMode.MARKDOWN_V2,
                 reply_markup=None,
             )
@@ -7778,16 +7761,16 @@ class TelegramAdapter(BasePlatformAdapter):
     # is_state=False is a per-email one-shot (send, archive, draft, spam) that
     # strips the keyboard on success.
     _GT_VERB_DISPATCH = {
-        "send":         ("send-draft.sh",      [],         "✓ sent draft",         False),
+        "send":         ("send-draft.sh",      [],         '''✓ черновик отправлен''',         False),
         "archive":      ("archive.sh",         [],         "✓ archived",           False),
-        "draft":        ("draft-blank.sh",     [],         "✓ drafted reply",      False),
-        "spam":         ("spam.sh",            [],         "✓ marked spam",        False),
+        "draft":        ("draft-blank.sh",     [],         '''✓ черновик ответа создан''',      False),
+        "spam":         ("spam.sh",            [],         '''✓ отмечено как спам''',        False),
         "mute":         ("mute-add.sh",        ["email"],  "✓ muted",              True),
-        "mute-domain":  ("mute-add.sh",        ["domain"], "✓ muted domain",       True),
+        "mute-domain":  ("mute-add.sh",        ["domain"], '''✓ домен заглушён''',       True),
         "trust":        ("trusted-ops-add.sh", ["email"],  "✓ trusted",            True),
-        "trust-domain": ("trusted-ops-add.sh", ["domain"], "✓ trusted domain",     True),
-        "vip":          ("vip-add.sh",         ["email"],  "✓ marked VIP",         True),
-        "vip-domain":   ("vip-add.sh",         ["domain"], "✓ marked VIP domain",  True),
+        "trust-domain": ("trusted-ops-add.sh", ["domain"], '''✓ домен добавлен в доверенные''',     True),
+        "vip":          ("vip-add.sh",         ["email"],  '''✓ отмечено как важное''',         True),
+        "vip-domain":   ("vip-add.sh",         ["domain"], '''✓ домен отмечен как важный''',  True),
     }
 
     async def _handle_gmail_triage_callback(
@@ -7803,7 +7786,7 @@ class TelegramAdapter(BasePlatformAdapter):
         """Dispatch a gmail-triage inline-button callback (gt:verb:arg)."""
         parts = data.split(":", 2)
         if len(parts) != 3:
-            await query.answer(text="Invalid gmail-triage data.")
+            await query.answer(text='''Некорректные данные действия с почтой.''')
             return
         verb, arg = parts[1], parts[2]
 
@@ -7815,18 +7798,18 @@ class TelegramAdapter(BasePlatformAdapter):
             thread_id=str(query_thread_id) if query_thread_id is not None else None,
             user_name=query_user_name,
         ):
-            await query.answer(text="⛔ You are not authorized to act on this email.")
+            await query.answer(text='''⛔ У вас нет прав обрабатывать это письмо.''')
             return
 
         entry = self._GT_VERB_DISPATCH.get(verb)
         if not entry:
-            await query.answer(text=f"Unknown verb: {verb}")
+            await query.answer(text=f'''Неизвестное действие: {verb}''')
             return
         script_name, extra_args, success_label, is_state_verb = entry
 
         script_path = _Path.home() / ".hermes" / "scripts" / "gmail-triage" / script_name
         if not script_path.exists():
-            await query.answer(text=f"❌ {script_name} missing")
+            await query.answer(text=f'''❌ Файл {script_name} не найден''')
             logger.error("[%s] gmail-triage script missing: %s", self.name, script_path)
             return
 
@@ -7857,7 +7840,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     self.name, verb, arg, proc.returncode, stderr_text,
                 )
         except asyncio.TimeoutError:
-            label = f"❌ {verb} timed out"
+            label = f'''❌ Истекло время выполнения действия {verb}'''
             logger.error("[%s] gmail-triage callback timed out: verb=%s arg=%s", self.name, verb, arg)
         except Exception as exc:
             label = f"❌ {verb} error: {exc}"
@@ -7870,7 +7853,7 @@ class TelegramAdapter(BasePlatformAdapter):
         if not success:
             return
 
-        user_display = getattr(query.from_user, "first_name", "User")
+        user_display = getattr(query.from_user, "first_name", '''Пользователь''')
         original_text = (query.message.text or "") if query.message else ""
         appended = f"{original_text}\n— {label} by {user_display}"
         try:
@@ -9707,10 +9690,16 @@ class TelegramAdapter(BasePlatformAdapter):
         structured-event refactor is out of scope per #23045).
         """
         named = f" ({display_name})" if display_name else ""
+        kind_label = {
+            "voice message": "голосовое сообщение",
+            "audio file": "аудиофайл",
+            "video file": "видеофайл",
+            "document": "документ",
+            "photo": "изображение",
+        }.get(kind, "вложение")
         try:
             await msg.reply_text(
-                f"\u26a0\ufe0f Couldn't download your {kind}{named} "
-                f"({exc.__class__.__name__}). Please try sending it again."
+                f'''⚠️ Не удалось скачать {kind_label}{named} ({exc.__class__.__name__}). Попробуйте отправить его ещё раз.'''
             )
         except Exception as reply_err:
             logger.warning(
@@ -11284,7 +11273,7 @@ def register(ctx) -> None:
         ensure_deps_fn=check_telegram_requirements,
         is_connected=_is_connected,
         required_env=["TELEGRAM_BOT_TOKEN"],
-        install_hint="Run `hermes setup` to install Telegram support.",
+        install_hint='''Запустите `korra setup`, чтобы установить поддержку Telegram.''',
         setup_fn=interactive_setup,
         apply_yaml_config_fn=_apply_yaml_config,
         allowed_users_env="TELEGRAM_ALLOWED_USERS",

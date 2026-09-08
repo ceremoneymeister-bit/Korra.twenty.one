@@ -303,19 +303,13 @@ def _hygiene_compression_timeout_message(
     """Describe the host timeout that actually ended hygiene compression."""
     if total_exhausted:
         progress = (
-            " after summary output was observed" if progress_observed else ""
+            ''' после появления текста сводки''' if progress_observed else ""
         )
         return (
-            "⚠️ Context compression reached its total ceiling after "
-            f"{elapsed:.1f}s{progress}. No messages were dropped — continuing "
-            "without compression. Run /compress to retry or /reset for a clean "
-            "session."
+            f'''⚠️ Сжатие истории достигло предельного времени: {elapsed:.1f} с{progress}. Все сообщения сохранены, продолжаем без сжатия. Повторите /compress или начните новый диалог через /reset.'''
         )
     return (
-        f"⚠️ Context compression timed out after {idle_timeout:.1f}s with no "
-        "output from the summary model. No messages were dropped — continuing "
-        "without compression. Run /compress to retry, /reset for a clean "
-        "session, or check your auxiliary.compression model configuration."
+        f'''⚠️ Модель сжатия не отвечала {idle_timeout:.1f} с. Все сообщения сохранены, продолжаем без сжатия. Повторите /compress, начните новый диалог через /reset или проверьте auxiliary.compression в настройках.'''
     )
 
 
@@ -902,45 +896,41 @@ def _format_exec_approval_fallback(
 ) -> str:
     """Render the text fallback from approval capabilities, not platform names."""
     cmd_preview = command[:200] + "..." if len(command) > 200 else command
-    heading = "⚠️ **Dangerous command requires approval:**"
+    heading = '''⚠️ **Для опасной команды нужно ваше разрешение:**'''
     if smart_denied:
-        heading = "⚠️ **Smart DENY — owner override for one operation:**"
+        heading = '''⚠️ **Проверка запретила команду — владелец может разрешить её один раз:**'''
 
-    choices = [f"Reply `{command_prefix}approve` to execute this one operation"]
+    choices = [f'''Ответьте `{command_prefix}approve`, чтобы выполнить эту операцию один раз''']
     if not smart_denied and allow_session:
         choices.append(
-            f"`{command_prefix}approve session` to approve this pattern for the session"
+            f'''`{command_prefix}approve session` — разрешить такие команды до конца диалога'''
         )
         if allow_permanent:
-            choices.append(f"`{command_prefix}approve always` to approve permanently")
-    choices.append(f"`{command_prefix}deny` to cancel")
+            choices.append(f'''`{command_prefix}approve always` — разрешить такие команды навсегда''')
+    choices.append(f'''`{command_prefix}deny` — отменить''')
     return (
-        f"{heading}\n```\n{cmd_preview}\n```\nReason: {description}\n\n"
-        + ", ".join(choices[:-1]) + f", or {choices[-1]}."
+        f"{heading}\n```\n{cmd_preview}\n```\nПричина: {description}\n\n"
+        + ", ".join(choices[:-1]) + f", или {choices[-1]}."
     )
 
 def _gateway_provider_error_reply(text: str) -> str:
     """Map raw provider/API errors to a short user-safe Telegram reply."""
     if _GATEWAY_AUTH_ERROR_RE.search(text):
         return (
-            "⚠️ Provider authentication failed. Check the configured credentials; "
-            "raw provider details are in the gateway logs."
+            '''⚠️ Не удалось войти в сервис модели. Проверьте подключение и ключ доступа. Подробности ошибки сохранены в журнале шлюза.'''
         )
     if _GATEWAY_PROVIDER_POLICY_RE.search(text):
         return (
-            "⚠️ The model provider rejected the request. I kept the raw provider "
-            "error out of chat; check gateway logs for details or try rephrasing."
+            '''⚠️ Сервис модели отклонил запрос. Попробуйте сформулировать его иначе. Подробности ошибки сохранены в журнале шлюза.'''
         )
     if _GATEWAY_RATE_LIMIT_RE.search(text):
-        return "⏱️ The model provider is rate-limiting requests. Please wait a moment and try again."
+        return '''⏱️ Сервис модели ограничил частоту запросов. Немного подождите и повторите попытку.'''
     if _GATEWAY_CONNECTION_ERROR_RE.search(text):
         return (
-            "⚠️ The model server is not responding — it looks like the configured "
-            "model endpoint is not running or is unreachable."
+            '''⚠️ Сервер модели не отвечает. Возможно, он выключен или недоступен по указанному адресу.'''
         )
     return (
-        "⚠️ The model provider failed after retries. I kept raw provider details "
-        "out of chat; check gateway logs for diagnostics."
+        '''⚠️ Сервис модели не ответил после нескольких попыток. Подробности ошибки сохранены в журнале шлюза.'''
     )
 
 
@@ -3988,8 +3978,7 @@ def _check_unavailable_skill(command_name: str) -> str | None:
                 # skills.disabled / skills.platform_disabled store).
                 if slug == normalized and declared_name in disabled:
                     return (
-                        f"The **{command_name}** skill is installed but disabled.\n"
-                        f"Enable it with: `hermes skills config`"
+                        f'''Навык **{command_name}** установлен, но отключён.\nВключите его командой `korra skills config`.'''
                     )
 
         # Check optional skills (shipped with repo but not installed)
@@ -4009,8 +3998,7 @@ def _check_unavailable_skill(command_name: str) -> str | None:
                     parts = list(rel.parts)
                     install_path = f"official/{'/'.join(parts)}"
                     return (
-                        f"The **{command_name}** skill is available but not installed.\n"
-                        f"Install it with: `hermes skills install {install_path}`"
+                        f'''Навык **{command_name}** доступен, но не установлен.\nУстановите его командой `korra skills install {install_path}`.'''
                     )
     except Exception:
         pass
@@ -4438,16 +4426,10 @@ def _normalize_empty_agent_response(
         ):
             if failure_reason.endswith(":disk") or "disk" in error_str:
                 return (
-                    "⚠️ Session storage was temporarily unavailable, so this "
-                    "turn was stopped to protect your conversation history. "
-                    "Please check available disk space, then send your "
-                    "message again."
+                    '''⚠️ Хранилище диалогов временно недоступно. Работа остановлена, чтобы сохранить историю. Проверьте свободное место на диске и отправьте сообщение ещё раз.'''
                 )
             return (
-                "⚠️ Session storage was temporarily unavailable, so this "
-                "turn was stopped to protect your conversation history. "
-                "Your message should already be saved — please send it "
-                "again in a moment."
+                '''⚠️ Хранилище диалогов временно недоступно. Работа остановлена, чтобы сохранить историю. Ваше сообщение должно быть сохранено — отправьте его ещё раз чуть позже.'''
             )
         is_context_failure = any(
             p in error_str
@@ -4455,13 +4437,10 @@ def _normalize_empty_agent_response(
         ) or ("400" in error_str and history_len > 50)
         if is_context_failure:
             return (
-                "⚠️ Session too large for the model's context window.\n"
-                "Use /compact to compress the conversation, or "
-                "/reset to start fresh."
+                '''⚠️ История диалога слишком большая для этой модели.\nСожмите её командой /compact или начните новый диалог через /reset.'''
             )
         return (
-            f"The request failed: {str(error_detail)[:300]}\n"
-            "Try again or use /reset to start a fresh session."
+            f'''Не удалось выполнить запрос: {str(error_detail)[:300]}\nПовторите попытку или начните новый диалог через /reset.'''
         )
 
     api_calls = int(agent_result.get("api_calls", 0) or 0)
@@ -4476,8 +4455,7 @@ def _normalize_empty_agent_response(
         # silence there swallows a real user message, so surface it.
         if api_calls == 0:
             return (
-                "⚠️ Your message was interrupted before processing started "
-                "(likely by a recent /stop). Please send it again."
+                '''⚠️ Сообщение было прервано до начала обработки — возможно, недавней командой /stop. Отправьте его ещё раз.'''
             )
         return response
     if api_calls > 0:
@@ -4485,10 +4463,9 @@ def _normalize_empty_agent_response(
             return ""
         if agent_result.get("partial"):
             err = agent_result.get("error", "processing incomplete")
-            return f"⚠️ Processing stopped: {str(err)[:200]}. Try again."
+            return f'''⚠️ Обработка остановлена: {str(err)[:200]}. Повторите попытку.'''
         return (
-            "⚠️ Processing completed but no response was generated. "
-            "This may be a transient error — try sending your message again."
+            '''⚠️ Обработка завершилась без ответа. Возможно, это временный сбой — отправьте сообщение ещё раз.'''
         )
 
     # api_calls == 0, not failed, not interrupted: the agent never ran for
@@ -4503,8 +4480,7 @@ def _normalize_empty_agent_response(
         and not agent_result.get("partial")
     ):
         return (
-            "⚠️ Your message wasn't processed (the previous turn was still "
-            "being cleaned up). Please send it again."
+            '''⚠️ Сообщение не обработано: предыдущий запрос ещё завершался. Отправьте его ещё раз.'''
         )
 
     return response
@@ -5048,7 +5024,7 @@ class TurnRunner:
                 f"- {task['title']} - {labels.get(task['status'], task['status'])}"
                 for task in _visible_tasks()
             ]
-            return "Korra is working\n" + "\n".join(lines)
+            return '''Корра работает\n''' + "\n".join(lines)
 
         def _apply_native_event(raw: Any) -> bool:
             nonlocal anonymous_seq
@@ -5125,7 +5101,7 @@ class TurnRunner:
                 result = await adapter.send_native_task_card_progress(
                     chat_id=ctx.source.chat_id,
                     tasks=_visible_tasks(),
-                    title="Korra is working",
+                    title='''Корра работает''',
                     reply_to=ctx._progress_reply_to,
                     metadata=ctx._progress_metadata,
                     fallback_text=_fallback_text(),
@@ -6676,7 +6652,7 @@ class TurnRunner:
             _close_native_stream_boundary("Approval")
 
             cmd = approval_data.get("command", "")
-            desc = approval_data.get("description", "dangerous command")
+            desc = approval_data.get("description", '''опасная команда''')
 
             # Redact credentials from the command before displaying it in
             # the approval prompt — Tirith's findings are already redacted,
@@ -8500,30 +8476,19 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     def _telegram_topic_root_lobby_message(self) -> str:
         return (
-            "This main chat is reserved for system commands.\n\n"
-            "To start a new Korra chat, open the All Messages topic at the top "
-            "of this bot interface and send any message there. Telegram will "
-            "create a new topic for that message; each topic works as an "
-            "independent Korra session."
+            '''Этот основной чат предназначен для системных команд.\n\nЧтобы начать новый диалог с Коррой, откройте «Все сообщения» вверху чата с ботом и отправьте сообщение. Telegram создаст отдельную тему со своей историей диалога.'''
         )
 
     def _telegram_topic_root_new_message(self) -> str:
         return (
-            "To start a new parallel Korra chat, open the All Messages topic "
-            "at the top of this bot interface and send any message there. "
-            "Telegram will create a new topic for it.\n\n"
-            "Each topic is an independent Korra session. Use /new inside an "
-            "existing topic only if you want to replace that topic's current session."
+            '''Чтобы вести несколько диалогов с Коррой одновременно, откройте «Все сообщения» вверху чата с ботом и отправьте сообщение. Telegram создаст новую тему.\n\nКаждая тема — отдельный диалог. Команда /new внутри темы заменяет только текущий диалог этой темы.'''
         )
 
     def _telegram_topic_new_header(self, source: SessionSource) -> Optional[str]:
         if not self._is_telegram_topic_lane(source):
             return None
         return (
-            "Started a new Korra session in this topic.\n\n"
-            "Tip: for parallel work, open All Messages and send a message there "
-            "to create a separate topic instead of using /new here. /new replaces "
-            "the session attached to the current topic."
+            '''В этой теме начат новый диалог с Коррой.\n\nДля параллельной работы откройте «Все сообщения» и отправьте сообщение, чтобы создать отдельную тему. Команда /new заменяет диалог текущей темы.'''
         )
 
     def _record_telegram_topic_binding(
@@ -9643,7 +9608,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         return "restart" if self._restart_requested else "shutdown"
 
     def _status_action_gerund(self) -> str:
-        return "restarting" if self._restart_requested else "shutting down"
+        return "перезапускается" if self._restart_requested else "выключается"
 
     def _queue_during_drain_enabled(
         self, busy_input_mode: Optional[str] = None
@@ -10910,9 +10875,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             thread_meta = self._thread_metadata_for_source(event.source, reply_anchor)
             if self._queue_during_drain_enabled(effective_mode):
                 self._queue_or_replace_pending_event(session_key, event)
-                message = f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."
+                message = f'''⏳ Шлюз {self._status_action_gerund()} — сообщение добавлено в очередь и будет обработано после запуска.'''
             else:
-                message = f"⏳ Gateway is {self._status_action_gerund()} and is not accepting another turn right now."
+                message = f'''⏳ Шлюз {self._status_action_gerund()} и пока не принимает новые сообщения.'''
 
             await adapter._send_with_retry(
                 chat_id=event.source.chat_id,
@@ -11235,7 +11200,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 if start_ts:
                     elapsed_min = int((now - start_ts) / 60)
                     if elapsed_min > 0:
-                        status_parts.append(f"{elapsed_min} min elapsed")
+                        status_parts.append(f'''прошло {elapsed_min} мин''')
                 if max_iter:
                     status_parts.append(f"iteration {iteration}/{max_iter}")
                 if current_tool:
@@ -11246,36 +11211,30 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         status_detail = f" ({', '.join(status_parts)})" if status_parts else ""
         if is_steer_mode:
             message = (
-                f"⏩ Steered into current run{status_detail}. "
-                f"Your message arrives after the next tool call."
+                f'''⏩ Уточнение добавлено к текущей задаче{status_detail}. Корра учтёт его после следующего действия.'''
             )
         elif is_redirect_mode:
             message = (
-                f"↪ Redirected current run{status_detail}. "
-                f"I'll adjust using your correction."
+                f'''↪ Направление текущей работы изменено{status_detail}. Корра учтёт ваше уточнение.'''
             )
         elif is_queue_mode and demoted_for_subagents:
             # #30170 — explain the demotion so the user knows their
             # follow-up didn't accidentally kill the subagent and
             # discovers `/stop` as the explicit escape hatch.
             message = (
-                f"⏳ Subagent working{status_detail} — your message is queued for "
-                f"when it finishes (use /stop to cancel everything)."
+                f'''⏳ Помощник выполняет задачу{status_detail}. Ваше сообщение добавлено в очередь и будет обработано после завершения. Команда /stop отменит всю работу.'''
             )
         elif is_queue_mode and demoted_for_compression:
             message = (
-                f"⏳ Compressing context{status_detail} — your message is queued for "
-                f"when it finishes (use /stop to cancel everything)."
+                f'''⏳ История сжимается{status_detail}. Ваше сообщение добавлено в очередь и будет обработано после завершения. Команда /stop отменит всю работу.'''
             )
         elif is_queue_mode:
             message = (
-                f"⏳ Queued for the next turn{status_detail}. "
-                f"I'll respond once the current task finishes."
+                f'''⏳ Сообщение добавлено в очередь{status_detail}. Корра ответит после завершения текущей задачи.'''
             )
         else:
             message = (
-                f"⚡ Interrupting current task{status_detail}. "
-                f"I'll respond to your message shortly."
+                f'''⚡ Прерываю текущую задачу{status_detail}. Корра скоро ответит на ваше сообщение.'''
             )
 
         # First-touch onboarding: the very first time a user sends a message
@@ -11446,7 +11405,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             logger.debug("Cron interrupt notification unavailable: %s", e)
             return 0
 
-        action = "restarting" if self._restart_requested else "shutting down"
+        action = "перезапускается" if self._restart_requested else "выключается"
         notified: set = set()
         for job_id in job_ids:
             try:
@@ -11464,9 +11423,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 continue
 
             msg = (
-                f"⚠️ Cron job '{job.get('name') or job_id}' was interrupted — "
-                f"the gateway is {action} and killed the run before it "
-                "finished. No result was produced for this run."
+                f'''⚠️ Задача по расписанию «{job.get('name') or job_id}» прервана: шлюз {action}. Задача не завершилась, результата нет.'''
             )
             for target in targets:
                 try:
@@ -11525,14 +11482,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         active = self._snapshot_running_agents()
         restart_source = self._restart_command_source if self._restart_requested else None
 
-        action = "restarting" if self._restart_requested else "shutting down"
+        action = "перезапускается" if self._restart_requested else "выключается"
         hint = (
-            "Your current task will be interrupted. "
-            "Send any message after restart and I'll try to resume where you left off."
+            '''Текущая задача будет прервана. Отправьте сообщение после перезапуска, и Корра попробует продолжить с того места, где остановилась.'''
             if self._restart_requested
-            else "Your current task will be interrupted."
+            else '''Текущая задача будет прервана.'''
         )
-        msg = f"⚠️ Gateway {action} — {hint}"
+        msg = f"⚠️ Шлюз {action} — {hint}"
 
         notified: set[tuple[str, str, Optional[str]]] = set()
         for session_key in active:
@@ -17752,10 +17708,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     # busy_handler naming an entry here). All other rejected commands get
     # the generic catch-all text in _dispatch_busy_slash_command.
     _BUSY_REJECT_TEXT: Dict[str, str] = {
-        "model": "Agent is running — wait or /stop first, then switch models.",
-        "codex-runtime": ("Agent is running — wait or /stop first, then "
-                          "change runtime."),
-        "moa": "Agent is running — wait or /stop first, then run /moa.",
+        "model": '''Корра работает. Дождитесь ответа или отправьте /stop, затем смените модель.''',
+        "codex-runtime": ('''Корра работает. Дождитесь ответа или отправьте /stop, затем смените среду выполнения.'''),
+        "moa": '''Корра работает. Дождитесь ответа или отправьте /stop, затем запустите /moa.''',
     }
 
     def _gateway_plain_command_handlers(self):
@@ -17836,8 +17791,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # running-agent guard. Reject gracefully rather than falling
         # through to interrupt + discard.
         return (
-            f"⏳ Agent is running — `/{name}` can't run "
-            f"mid-turn. Wait for the current response or `/stop` first."
+            f'''⏳ Корра работает — команду `/{name}` пока выполнить нельзя. Дождитесь ответа или сначала отправьте `/stop`.'''
         )
 
     async def _handle_pause_command(self, event: MessageEvent):
@@ -17853,21 +17807,19 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         args = (event.get_command_args() or "").strip()
         if args.lower() in {"off", "resume", "stop", "disengage"}:
             if estop.disengage():
-                return "▶️ Resumed — new work is accepted again."
-            return "Korra wasn't paused."
+                return '''▶️ Работа возобновлена. Корра снова принимает задачи.'''
+            return '''Корра не была на паузе.'''
         state = estop.get_state()
         if state is not None and not args:
             reason = state.get("reason")
             suffix = f" (reason: {reason})" if reason else ""
             return (
-                f"⏸️ Korra is already paused{suffix}. "
-                "Use `/pause off` to resume."
+                f'''⏸️ Корра уже на паузе{suffix}. Команда `/pause off` возобновит работу.'''
             )
         estop.engage(reason=args or None)
         suffix = f" (reason: {args})" if args else ""
         return (
-            f"⏸️ Paused{suffix}. New cron/kanban/gateway work is on hold; "
-            "in-flight work finishes normally. Use `/pause off` to resume."
+            f'''⏸️ Пауза включена{suffix}. Новые задачи расписания, доски и мессенджеров приостановлены; текущие задачи завершатся. Команда `/pause off` возобновит работу.'''
         )
 
     async def _busy_start_command(self, event: MessageEvent, quick_key: str, source):
@@ -17928,7 +17880,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # fields silently lost the attachment when the queued turn ran.
         has_media = bool(getattr(event, "media_urls", None))
         if not queued_text and not has_media:
-            return "Usage: /queue <prompt>"
+            return '''Использование: /queue <сообщение>'''
         adapter = self._adapter_for_source(source)
         if adapter:
             queued_event = MessageEvent(
@@ -17954,8 +17906,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             self._enqueue_fifo(quick_key, queued_event, adapter)
         depth = self._queue_depth(quick_key, adapter=self._adapter_for_source(source))
         if depth <= 1:
-            return "Queued for the next turn."
-        return f"Queued for the next turn. ({depth} queued)"
+            return '''Сообщение добавлено в очередь.'''
+        return f'''Сообщение добавлено в очередь. Всего в очереди: {depth}.'''
 
     async def _busy_steer_command(self, event: MessageEvent, quick_key: str, source):
         # /steer <prompt> — inject mid-run after the next tool call.
@@ -17965,7 +17917,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # no role-alternation violation.
         steer_text = event.get_command_args().strip()
         if not steer_text:
-            return "Usage: /steer <prompt>"
+            return '''Использование: /steer <уточнение>'''
         _steer_state = self._peek_session_state(quick_key)
         running_agent = _steer_state.turn.agent if _steer_state else None
         if running_agent is _AGENT_PENDING_SENTINEL:
@@ -17981,17 +17933,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     channel_context=event.channel_context,
                 )
                 self._enqueue_fifo(quick_key, queued_event, adapter)
-            return "Agent still starting — /steer queued for the next turn."
+            return '''Корра ещё запускается. Уточнение /steer добавлено в очередь.'''
         if running_agent and hasattr(running_agent, "steer"):
             try:
                 accepted = running_agent.steer(steer_text)
             except Exception as exc:
                 logger.warning("Steer failed for session %s: %s", quick_key, exc)
-                return f"⚠️ Steer failed: {exc}"
+                return f'''⚠️ Не удалось передать уточнение: {exc}'''
             if accepted:
                 preview = steer_text[:60] + ("..." if len(steer_text) > 60 else "")
-                return f"⏩ Steer queued — arrives after the next tool call: '{preview}'"
-            return "Steer rejected (empty payload)."
+                return f'''⏩ Уточнение будет учтено после следующего действия: «{preview}».'''
+            return '''Уточнение отклонено: сообщение пустое.'''
         # Running agent is missing or lacks steer() — fall back to queue.
         adapter = self._adapter_for_source(source)
         if adapter:
@@ -18004,7 +17956,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 channel_context=event.channel_context,
             )
             self._enqueue_fifo(quick_key, queued_event, adapter)
-        return "No active agent — /steer queued for the next turn."
+        return '''Активной задачи нет. Уточнение /steer добавлено в очередь.'''
 
     async def _busy_goal_command(self, event: MessageEvent, quick_key: str, source):
         # /goal is safe mid-run for status/pause/clear/wait (inspection
@@ -18025,7 +17977,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         )
         if _is_control:
             return await self._handle_goal_command(event)
-        return "Agent is running — use /goal status / pause / clear / wait mid-run, or /stop before setting a new goal."
+        return '''Корра работает. Доступны /goal status, /goal pause, /goal clear и /goal wait. Перед новой целью остановите работу командой /stop.'''
 
     async def _busy_loop_command(self, event: MessageEvent, quick_key: str, source):
         # /loop mirrors /goal: control verbs are safe mid-run (state
@@ -18034,7 +17986,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         _loop_arg = (event.get_command_args() or "").strip().lower()
         if not _loop_arg or _loop_arg in {"status", "pause", "resume", "stop", "clear", "cancel", "help", "--help", "-h"}:
             return await self._handle_loop_command(event)
-        return "Agent is running — use /loop status / pause / stop mid-run, or /stop before setting a new loop."
+        return '''Корра работает. Доступны /loop status, /loop pause и /loop stop. Перед новым циклом остановите работу командой /stop.'''
 
     async def _handle_message(self, event: MessageEvent) -> Optional[str]:
         """
@@ -18229,19 +18181,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         )
                         await adapter.send(
                             source.chat_id,
-                            f"Hi~ I don't recognize you yet!\n\n"
-                            f"Here's your pairing code: `{code}`\n\n"
-                            f"Ask the bot owner to run:\n"
-                            f"`hermes {profile_arg}pairing approve "
-                            f"{platform_name} {code}`"
+                            f'''Здравствуйте! У вас пока нет доступа к боту.\n\nВаш код подключения: `{code}`\n\nПопросите владельца бота выполнить:\n`korra {profile_arg}pairing approve {platform_name} {code}`'''
                         )
                 else:
                     adapter = self._adapter_for_source(source)
                     if adapter:
                         await adapter.send(
                             source.chat_id,
-                            "Too many pairing requests right now~ "
-                            "Please try again later!"
+                            '''Слишком много запросов на подключение. Попробуйте позже.'''
                         )
                     # Record rate limit so subsequent messages are silently ignored
                     pairing_store._record_rate_limit(platform_name, source.user_id)
@@ -18368,10 +18315,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     prompt_path.unlink(missing_ok=True)
                 except OSError as e:
                     logger.warning("Failed to write update response: %s", e)
-                    return f"✗ Failed to send response to update process: {e}"
+                    return f'''✗ Не удалось передать ответ процессу обновления: {e}'''
                 _up_state.persistent.update_prompt_pending = False
                 label = response_text if len(response_text) <= 20 else response_text[:20] + "…"
-                return f"✓ Sent `{label}` to the update process."
+                return f'''✓ Ответ `{label}` передан процессу обновления.'''
             # Recognized slash command during a pending update prompt:
             # unblock the detached update subprocess by writing a blank
             # response so ``_gateway_prompt`` returns the prompt's default
@@ -18736,7 +18683,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     # Force-clean the sentinel so the session is unlocked.
                     self._release_running_agent_state(_quick_key)
                     logger.info("HARD STOP (pending) for session %s — sentinel cleared", _quick_key)
-                    return EphemeralReply("⚡ Force-stopped. The agent was still starting — session unlocked.")
+                    return EphemeralReply('''⚡ Работа принудительно остановлена. Корра ещё запускалась — диалог разблокирован.''')
                 # Queue the message so it will be picked up after the
                 # agent starts.
                 adapter = self._adapter_for_source(source)
@@ -18755,9 +18702,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 if queue_during_drain:
                     self._queue_or_replace_pending_event(_quick_key, event)
                 return (
-                    f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."
+                    f'''⏳ Шлюз {self._status_action_gerund()} — сообщение добавлено в очередь и будет обработано после запуска.'''
                     if queue_during_drain
-                    else f"⏳ Gateway is {self._status_action_gerund()} and is not accepting another turn right now."
+                    else f'''⏳ Шлюз {self._status_action_gerund()} и пока не принимает новые сообщения.'''
                 )
             if effective_busy_input_mode == "queue":
                 logger.debug("PRIORITY queue follow-up for session %s", _quick_key)
@@ -18973,7 +18920,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     message = hook_result.get("message")
                     if isinstance(message, str) and message:
                         return message
-                    return f"Command `/{command}` was blocked by a hook."
+                    return f'''Команда `/{command}` заблокирована обработчиком расширения.'''
                 if decision == "handled":
                     message = hook_result.get("message")
                     return message if isinstance(message, str) and message else None
@@ -19004,8 +18951,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 command="new",
                 title="/new",
                 detail=(
-                    "This starts a fresh session and discards the current "
-                    "conversation history."
+                    '''Будет начат новый диалог. История текущего диалога будет очищена.'''
                 ),
                 execute=_do_reset,
             )
@@ -19051,9 +18997,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
             _learn_req = event.get_command_args().strip()
             _ack = (
-                "Learning a skill from what you described…"
+                '''Создаю навык по вашему описанию…'''
                 if _learn_req
-                else "Learning a skill from this conversation…"
+                else '''Создаю навык на основе этого диалога…'''
             )
             try:
                 adapter = self._adapter_for_source(source)
@@ -19066,7 +19012,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 event.text = build_learn_prompt(_learn_req)
                 # fall through to agent processing
             except Exception:
-                return "Could not start /learn — please try again."
+                return '''Не удалось запустить /learn. Попробуйте ещё раз.'''
 
         if canonical == "plan":
             # /plan: rewrite the turn to the plan-mode prompt and fall
@@ -19081,7 +19027,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             _ack = (
                 f"Planning: {_plan_task[:80]}{'…' if len(_plan_task) > 80 else ''}"
                 if _plan_task
-                else "Planning from this conversation's context…"
+                else '''Составляю план с учётом этого диалога…'''
             )
             try:
                 adapter = self._adapter_for_source(source)
@@ -19094,7 +19040,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 event.text = build_plan_prompt(_plan_task)
                 # fall through to agent processing
             except Exception:
-                return "Could not start /plan — please try again."
+                return '''Не удалось запустить /plan. Попробуйте ещё раз.'''
 
         if canonical == "init":
             # /init: rewrite the turn to a guidance-laden prompt and fall
@@ -19108,11 +19054,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             try:
                 _init_prompt = build_init_prompt_for_cwd(extra=_init_notes)
             except Exception:
-                return "Could not start /init — please try again."
+                return '''Не удалось запустить /init. Попробуйте ещё раз.'''
             _ack = (
-                "Updating AGENTS.md from a project scan…"
+                '''Изучаю проект и обновляю AGENTS.md…'''
                 if "UPDATE the existing AGENTS.md" in _init_prompt
-                else "Generating AGENTS.md from a project scan…"
+                else '''Изучаю проект и создаю AGENTS.md…'''
             )
             try:
                 adapter = self._adapter_for_source(source)
@@ -19187,9 +19133,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 except (ValueError, IndexError):
                     _undo_n = 1
             _undo_detail = (
-                "This removes the last user/assistant exchange from history."
+                '''Последние сообщение и ответ будут удалены из истории.'''
                 if _undo_n == 1
-                else f"This removes the last {_undo_n} user turns from history."
+                else f'''Из истории будут удалены последние запросы с ответами: {_undo_n}.'''
             )
             return await self._maybe_confirm_destructive_slash(
                 event=event,
@@ -19247,7 +19193,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if canonical == "queue":
             queue_payload = event.get_command_args().strip()
             if not queue_payload:
-                return "Usage: /queue <prompt>"
+                return '''Использование: /queue <сообщение>'''
             try:
                 event.text = queue_payload
             except Exception:
@@ -19259,7 +19205,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # message. If the payload is empty, surface the usage hint.
             steer_payload = event.get_command_args().strip()
             if not steer_payload:
-                return "Usage: /steer <prompt>  (no agent is running; sending as a normal message)"
+                return '''Использование: /steer <уточнение> (активной задачи нет; будет отправлено как обычное сообщение).'''
             try:
                 event.text = steer_payload
             except Exception:
@@ -19313,13 +19259,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 self._evict_cached_agent(_quick_key)
                 event._moa_disable_after_turn = True
             except Exception:
-                return "Failed to prepare MoA turn."
+                return '''Не удалось подготовить совместный ответ моделей.'''
 
         if canonical == "voice":
             return await self._handle_voice_command(event)
 
         if self._draining:
-            return f"⏳ Gateway is {self._status_action_gerund()} and is not accepting new work right now."
+            return f'''⏳ Шлюз {self._status_action_gerund()} и пока не принимает новые задачи.'''
 
         # User-defined quick commands (bypass agent loop, no LLM call)
         if command:
@@ -19362,13 +19308,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             if output:
                                 from agent.redact import redact_sensitive_text
                                 output = redact_sensitive_text(output)
-                            return output if output else "Command returned no output."
+                            return output if output else '''Команда завершилась без вывода.'''
                         except asyncio.TimeoutError:
-                            return "Quick command timed out (30s)."
+                            return '''Быстрая команда не завершилась за 30 секунд.'''
                         except Exception as e:
-                            return f"Quick command error: {e}"
+                            return f'''Ошибка быстрой команды: {e}'''
                     else:
-                        return f"Quick command '/{command}' has no command defined."
+                        return f'''Для быстрой команды '/{command}' не указано действие.'''
                 elif qcmd.get("type") == "alias":
                     target = (qcmd.get("target") or "").strip()
                     if target:
@@ -19379,9 +19325,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         command = target_command.split()[0] if target_command else target_command
                         # Fall through to normal command dispatch below
                     else:
-                        return f"Quick command '/{command}' has no target defined."
+                        return f'''Для быстрой команды '/{command}' не указана целевая команда.'''
                 else:
-                    return f"Quick command '/{command}' has unsupported type (supported: 'exec', 'alias')."
+                    return f'''Неподдерживаемый тип быстрой команды '/{command}'. Доступны 'exec' и 'alias'.'''
 
         # Plugin-registered slash commands
         if command:
@@ -19459,8 +19405,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         from agent.skill_utils import get_disabled_skill_names as _get_plat_disabled
                         if _skill_name in _get_plat_disabled(platform=_plat):
                             return (
-                                f"The **{_skill_name}** skill is disabled for {_plat}.\n"
-                                f"Enable it with: `hermes skills config`"
+                                f'''Навык **{_skill_name}** отключён для {_plat}.\nВключите его командой `korra skills config`.'''
                             )
                     user_instruction = event.get_command_args().strip()
                     # Stacked slash-skill invocations: `/skill-a /skill-b do
@@ -19494,9 +19439,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         ]
                         if _disabled_extra:
                             return (
-                                f"The **{', '.join(_disabled_extra)}** skill(s) in this "
-                                f"stacked invocation are disabled for {_plat}.\n"
-                                f"Enable them with: `hermes skills config`"
+                                f'''Навыки **{', '.join(_disabled_extra)}** в этом наборе отключены для {_plat}.\nВключите их командой `korra skills config`.'''
                             )
                     if extra_keys and _build_stacked is not None:
                         stacked_result = _build_stacked(
@@ -19509,7 +19452,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             event.text = msg
                             # Fall through to normal message processing
                         else:
-                            return f"Failed to load stacked skills for /{command}."
+                            return f'''Не удалось загрузить набор навыков для /{command}.'''
                     else:
                         msg = build_skill_invocation_message(
                             cmd_key, user_instruction, task_id=_quick_key
@@ -19539,10 +19482,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             source.platform.value if source.platform else "?",
                         )
                         return (
-                            f"Unknown command `/{command}`. "
-                            f"Type /commands to see what's available, "
-                            f"or resend without the leading slash to send "
-                            f"as a regular message."
+                            f'''Неизвестная команда `/{command}`. Список команд: /commands. Чтобы отправить обычное сообщение, уберите косую черту в начале.'''
                         )
             except Exception as e:
                 logger.debug("Skill command check failed (non-fatal): %s", e)
@@ -19576,9 +19516,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 _quick_key,
             )
             return (
-                "⏳ This agent is draining for a maintenance action and isn't "
-                "accepting new turns right now. It'll be back in a moment — "
-                "please resend shortly."
+                '''⏳ Корра завершает работу перед обслуживанием и пока не принимает сообщения. Отправьте сообщение ещё раз чуть позже.'''
             )
 
         # ── Claim this session before any await ───────────────────────
@@ -19623,9 +19561,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     exc.session_id,
                 )
                 return (
-                    "⏳ Another turn is still running on this session. To "
-                    "protect the transcript, this message was not processed. "
-                    "Wait for the active turn to finish, then resend it."
+                    '''⏳ В этом диалоге ещё выполняется предыдущий запрос. Чтобы сохранить историю, новое сообщение пока не обработано. Дождитесь ответа и отправьте его ещё раз.'''
                 )
             try:
                 await self._run_post_turn_hooks(
@@ -20104,7 +20040,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     if _adapter:
                         await _adapter.send(
                             source.chat_id,
-                            "\n".join(_ctx_result.warnings) or "Context injection refused.",
+                            "\n".join(_ctx_result.warnings) or '''Добавление контекста отклонено.''',
                         )
                     return None
                 if _ctx_result.expanded:
@@ -20691,21 +20627,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     adapter = self._adapter_for_source(source)
                     if adapter:
                         if reset_reason == "suspended":
-                            reason_text = "previous session was stopped or interrupted"
+                            reason_text = '''предыдущая работа была остановлена или прервана'''
                         elif reset_reason == "resume_pending_expired":
-                            reason_text = "gateway restart recovery timed out"
+                            reason_text = '''истекло время восстановления после перезапуска шлюза'''
                         elif reset_reason == "daily":
-                            reason_text = f"daily schedule at {policy.at_hour}:00"
+                            reason_text = f'''ежедневное расписание, {policy.at_hour}:00'''
                         else:
                             hours = policy.idle_minutes // 60
                             mins = policy.idle_minutes % 60
                             duration = f"{hours}h" if not mins else f"{hours}h {mins}m" if hours else f"{mins}m"
-                            reason_text = f"inactive for {duration}"
+                            reason_text = f'''не было активности {duration}'''
                         notice = (
-                            f"◐ Session automatically reset ({reason_text}). "
-                            f"Conversation history cleared.\n"
-                            f"Use /resume to browse and restore a previous session.\n"
-                            f"Adjust reset timing in config.yaml under session_reset."
+                            f'''◐ Диалог автоматически сброшен: {reason_text}. История очищена.\nКоманда /resume позволяет найти и восстановить предыдущий диалог.\nВремя сброса задаётся в config.yaml, раздел session_reset.'''
                         )
                         try:
                             session_info = await asyncio.to_thread(
@@ -21912,12 +21845,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                                             from agent.redact import redact_sensitive_text
                                             _err = redact_sensitive_text(_err, force=True)
                                             _warn_msg = (
-                                                "⚠️ Context compression aborted "
-                                                f"({_err}). No messages were dropped — "
-                                                "conversation is unchanged. Run /compress "
-                                                "to retry, /reset for a clean session, or "
-                                                "check your auxiliary.compression model "
-                                                "configuration."
+                                                f'''⚠️ Сжатие истории прервано ({_err}). Все сообщения сохранены, история не изменилась. Повторите /compress, начните новый диалог через /reset или проверьте auxiliary.compression в настройках.'''
                                             )
                                             try:
                                                 _adapter = self._adapter_for_source(source)
@@ -21938,10 +21866,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                                         _aux_model = getattr(_comp, "_last_aux_model_failure_model", "")
                                         _aux_err = getattr(_comp, "_last_aux_model_failure_error", None) or "unknown error"
                                         _aux_msg = (
-                                            f"ℹ️ Configured compression model `{_aux_model}` "
-                                            f"failed ({_aux_err}). Recovered using your main "
-                                            "model — context is intact — but you may want to "
-                                            "check `auxiliary.compression.model` in config.yaml."
+                                            f'''ℹ️ Модель сжатия `{_aux_model}` не справилась ({_aux_err}). История сохранена: использована основная модель. Проверьте `auxiliary.compression.model` в config.yaml.'''
                                         )
                                         try:
                                             _adapter = self._adapter_for_source(source)
@@ -22054,11 +21979,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     else "/sethome"
                 )
                 notice = (
-                    f"📬 No home channel is set for {platform_name.title()}. "
-                    f"A home channel is where Korra delivers cron job results "
-                    f"and cross-platform messages.\n\n"
-                    f"Type {sethome_cmd} to make this chat your home channel, "
-                    f"or ignore to skip."
+                    f'''📬 Для {platform_name.title()} не выбран основной чат. В него Корра отправляет результаты задач по расписанию и сообщения с других платформ.\n\nКоманда {sethome_cmd} сделает этот чат основным. Можно пропустить.'''
                 )
                 await self._deliver_platform_notice(source, notice)
         
@@ -22247,9 +22168,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # looks like a bug; a short explanation is more helpful.
             if response == "(empty)" and not _intentional_silence:
                 response = (
-                    "⚠️ The model returned no response after processing tool "
-                    "results. This can happen with some models — try again or "
-                    "rephrase your question."
+                    '''⚠️ Модель не вернула ответ после выполнения действий. Попробуйте ещё раз или переформулируйте вопрос.'''
                 )
             agent_messages = agent_result.get("messages", [])
             _response_time = time.time() - _msg_start_time
@@ -22354,7 +22273,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     lines = last_reasoning.strip().splitlines()
                     if len(lines) > 15:
                         display_reasoning = "\n".join(lines[:15])
-                        display_reasoning += f"\n_... ({len(lines) - 15} more lines)_"
+                        display_reasoning += f'''\n_… (ещё {len(lines) - 15} строк)_'''
                     else:
                         display_reasoning = last_reasoning.strip()
                     # Render style is per-platform: Discord defaults to "-# "
@@ -22557,9 +22476,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         source, session_entry, reason="compression-exhausted-reset",
                     )
                 response = (response or "") + (
-                    "\n\n🔄 Session auto-reset — the conversation exceeded the "
-                    "maximum context size and could not be compressed further. "
-                    "Your next message will start a fresh session."
+                    '''\n\n🔄 Диалог автоматически сброшен: история превысила предел модели и больше не сжимается. Следующее сообщение начнёт новый диалог.'''
                 )
 
             ts = time.time()  # Unix epoch float — consistent with DB storage
@@ -22880,9 +22797,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             status_code = getattr(e, "status_code", None)
             _hist_len = len(history) if 'history' in locals() else 0
             if status_code == 401:
-                status_hint = " Check your API key or run `claude /login` to refresh OAuth credentials."
+                status_hint = ''' Проверьте ключ API или обновите вход командой `claude /login`.'''
             elif status_code == 402:
-                status_hint = " Your API balance or quota is exhausted. Check your provider dashboard."
+                status_hint = ''' Баланс или квота API исчерпаны. Проверьте кабинет сервиса модели.'''
             elif status_code == 429:
                 # Check if this is a plan usage limit (resets on a schedule) vs a transient rate limit
                 _err_body = getattr(e, "response", None)
@@ -22899,28 +22816,25 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     if _resets_in and _resets_in > 0:
                         import math
                         _hours = math.ceil(_resets_in / 3600)
-                        status_hint = f" Your plan's usage limit has been reached. It resets in ~{_hours}h."
+                        status_hint = f''' Лимит вашего тарифа исчерпан. Он обновится примерно через {_hours} ч.'''
                     else:
-                        status_hint = " Your plan's usage limit has been reached. Please wait until it resets."
+                        status_hint = ''' Лимит вашего тарифа исчерпан. Дождитесь его обновления.'''
                 else:
-                    status_hint = " You are being rate-limited. Please wait a moment and try again."
+                    status_hint = ''' Слишком много запросов. Немного подождите и повторите попытку.'''
             elif status_code == 529:
-                status_hint = " The API is temporarily overloaded. Please try again shortly."
+                status_hint = ''' Сервис модели временно перегружен. Попробуйте чуть позже.'''
             elif status_code in {400, 500}:
                 # 400 with a large session is context overflow.
                 # 500 with a large session often means the payload is too large
                 # for the API to process — treat it the same way.
                 if _hist_len > 50:
                     return (
-                        "⚠️ Session too large for the model's context window.\n"
-                        "Use /compact to compress the conversation, or "
-                        "/reset to start fresh."
+                        '''⚠️ История диалога слишком большая для этой модели.\nСожмите её командой /compact или начните новый диалог через /reset.'''
                     )
                 elif status_code == 400:
-                    status_hint = " The request was rejected by the API."
+                    status_hint = ''' Сервис модели отклонил запрос.'''
             return (
-                f"Sorry, I encountered an unexpected error.{status_hint}\n"
-                "Try again or use /reset to start a fresh session."
+                f'''Произошла непредвиденная ошибка.{status_hint}\nПовторите попытку или начните новый диалог через /reset.'''
             )
         finally:
             # Restore session context variables to their pre-handler state
@@ -22963,7 +22877,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if resolved.context_source == "config":
             ctx_source = "config"
         elif resolved.context_source == "default":
-            ctx_source = "default — set model.context_length in config to override"
+            ctx_source = '''по умолчанию; можно изменить model.context_length в настройках'''
         else:
             ctx_source = "detected"
 
@@ -22977,7 +22891,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         lines = [
             f"◆ Model: `{model}`",
-            f"◆ Provider: {provider or 'openrouter'}",
+            f'''◆ Провайдер: {provider or 'openrouter'}''',
             f"◆ Context: {ctx_display} tokens ({ctx_source})",
         ]
 
@@ -23019,18 +22933,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         allowed_preview = sorted(policy.user_allowed_commands)
         if allowed_preview:
             suffix = (
-                "You can run: "
+                '''Вам доступны команды: '''
                 + ", ".join(f"/{c}" for c in allowed_preview[:12])
                 + ("…" if len(allowed_preview) > 12 else "")
-                + ". Use /whoami for the full list."
+                + '''. Полный список: /whoami.'''
             )
         else:
             suffix = (
-                "No slash commands are enabled for non-admins on this "
-                "platform. Ask an admin to add you to allow_admin_from "
-                "or to set user_allowed_commands."
+                '''На этой платформе команды доступны только администраторам. Попросите администратора предоставить доступ через allow_admin_from или user_allowed_commands.'''
             )
-        return f"⛔ /{canonical_cmd} is admin-only here. {suffix}"
+        return f'''⛔ Команда /{canonical_cmd} доступна только администраторам. {suffix}'''
 
 
 
@@ -23197,7 +23109,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return handle_suggestions_command(args, origin=origin, surface="gateway")
         except Exception as e:
             logger.debug("suggestions command failed: %s", e)
-            return f"Suggestions command failed: {e}"
+            return f'''Не удалось выполнить команду рекомендаций: {e}'''
 
     async def _handle_blueprint_command(self, event: MessageEvent):
         """Handle /blueprint in the gateway.
@@ -23232,7 +23144,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             logger.debug("blueprint command failed: %s", e)
             from korra_cli.blueprint_cmd import BlueprintCommandResult
 
-            return BlueprintCommandResult(f"Cron blueprint command failed: {e}")
+            return BlueprintCommandResult(f'''Не удалось выполнить команду шаблонов расписания: {e}''')
 
     # ────────────────────────────────────────────────────────────────
     # /goal — persistent cross-turn goals (Ralph-style loop)
@@ -23810,17 +23722,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """Join the user's current Discord voice channel."""
         adapter = self._adapter_for_source(event.source)
         if not hasattr(adapter, "join_voice_channel"):
-            return "Voice channels are not supported on this platform."
+            return '''Эта платформа не поддерживает голосовые каналы.'''
 
         guild_id = self._get_guild_id(event)
         if not guild_id:
-            return "This command only works in a Discord server."
+            return '''Эта команда работает только на сервере Discord.'''
 
         voice_channel = await adapter.get_user_voice_channel(
             guild_id, event.source.user_id
         )
         if not voice_channel:
-            return "You need to be in a voice channel first."
+            return '''Сначала подключитесь к голосовому каналу.'''
 
         # Wire callbacks BEFORE join so voice input arriving immediately
         # after connection is not lost.
@@ -23843,10 +23755,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             err_lower = str(e).lower()
             if "pynacl" in err_lower or "nacl" in err_lower or "davey" in err_lower:
                 return (
-                    "Voice dependencies are missing (PyNaCl / davey). "
-                    f"Install with: `{sys.executable} -m pip install PyNaCl`"
+                    f'''Не установлены компоненты голосовой связи (PyNaCl / davey). Установите их командой `{sys.executable} -m pip install PyNaCl`.'''
                 )
-            return f"Failed to join voice channel: {e}"
+            return f'''Не удалось подключиться к голосовому каналу: {e}'''
 
         if success:
             adapter._voice_text_channels[guild_id] = int(event.source.chat_id)
@@ -23856,12 +23767,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             self._save_voice_modes()
             self._set_adapter_auto_tts_enabled(adapter, event.source.chat_id, enabled=True)
             return (
-                f"Joined voice channel **{voice_channel.name}**.\n"
-                f"I'll speak my replies and listen to you. Use /voice leave to disconnect."
+                f'''Подключено к голосовому каналу **{voice_channel.name}**.\nКорра будет слушать вас и отвечать голосом. Для выхода: /voice leave.'''
             )
         # Join failed — clear callback
         adapter._voice_input_callback = None
-        return "Failed to join voice channel. Check bot permissions (Connect + Speak)."
+        return '''Не удалось подключиться к голосовому каналу. Проверьте права бота на подключение и передачу голоса (Connect + Speak).'''
 
     async def _handle_voice_channel_leave(self, event: MessageEvent) -> str:
         """Leave the Discord voice channel."""
@@ -23869,10 +23779,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         guild_id = self._get_guild_id(event)
 
         if not guild_id or not hasattr(adapter, "leave_voice_channel"):
-            return "Not in a voice channel."
+            return '''Корра не подключена к голосовому каналу.'''
 
         if not hasattr(adapter, "is_in_voice_channel") or not adapter.is_in_voice_channel(guild_id):
-            return "Not in a voice channel."
+            return '''Корра не подключена к голосовому каналу.'''
 
         try:
             await adapter.leave_voice_channel(guild_id)
@@ -23884,7 +23794,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         self._set_adapter_auto_tts_disabled(adapter, event.source.chat_id, disabled=True)
         if hasattr(adapter, "_voice_input_callback"):
             adapter._voice_input_callback = None
-        return "Left voice channel."
+        return '''Голосовой канал отключён.'''
 
     def _handle_voice_timeout_cleanup(self, chat_id: str) -> None:
         """Called by the adapter when a voice channel times out.
@@ -24472,7 +24382,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if not runtime_kwargs.get("api_key"):
                 await adapter.send(
                     source.chat_id,
-                    f"❌ Background task {task_id} failed: no provider credentials configured.",
+                    f'''❌ Фоновая задача {task_id} не выполнена: не настроен доступ к сервису модели.''',
                     metadata=_thread_metadata,
                 )
                 return
@@ -24576,7 +24486,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 images, text_content = adapter.extract_images(response)
 
                 preview = prompt[:60] + ("..." if len(prompt) > 60 else "")
-                header = f'✅ Background task complete\nPrompt: "{preview}"\n\n'
+                header = f'''✅ Фоновая задача завершена\nЗапрос: «{preview}»\n\n'''
 
                 if text_content:
                     await adapter.send(
@@ -24587,7 +24497,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 elif not images and not media_files:
                     await adapter.send(
                         chat_id=source.chat_id,
-                        content=header + "(No response generated)",
+                        content=header + '''(Ответ не получен)''',
                         metadata=_thread_metadata,
                     )
 
@@ -24645,7 +24555,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 preview = prompt[:60] + ("..." if len(prompt) > 60 else "")
                 await adapter.send(
                     chat_id=source.chat_id,
-                    content=f'✅ Background task complete\nPrompt: "{preview}"\n\n(No response generated)',
+                    content=f'''✅ Фоновая задача завершена\nЗапрос: «{preview}»\n\n(Ответ не получен)''',
                     metadata=_thread_metadata,
                 )
 
@@ -24654,7 +24564,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             try:
                 await adapter.send(
                     chat_id=source.chat_id,
-                    content=f"❌ Background task {task_id} failed: {e}",
+                    content=f'''❌ Фоновая задача {task_id} завершилась с ошибкой: {e}''',
                     metadata=_thread_metadata,
                 )
             except Exception:
@@ -24714,7 +24624,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         try:
             send_result = await adapter.send(
                 source.chat_id,
-                "System topic for Korra commands and status.",
+                '''Системная тема для команд Корры и просмотра состояния.''',
                 metadata={"thread_id": str(thread_id)},
             )
             message_id = getattr(send_result, "message_id", None)
@@ -24757,7 +24667,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """Return a Bot API-safe forum topic name from a generated session title."""
         cleaned = re.sub(r"\s+", " ", str(title or "")).strip()
         if not cleaned:
-            return "Korra Chat"
+            return '''Чат с Коррой'''
         # Telegram forum topic names are short (currently 1-128 chars). Keep
         # extra room for multi-byte titles and avoid trailing ellipsis churn.
         if len(cleaned) > 120:
@@ -24872,7 +24782,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
         cleaned = re.sub(r"\s+", " ", str(title or "")).strip()
         if not cleaned:
-            return "Korra Chat"
+            return '''Чат с Коррой'''
         if utf16_len(cleaned) > 80:
             cleaned = _prefix_within_utf16_limit(cleaned, 77).rstrip() + "..."
         return cleaned
@@ -25196,24 +25106,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     def _telegram_topic_help_text(self) -> str:
         return (
-            "/topic — enable multi-session DM mode (one bot, many parallel chats)\n"
-            "\n"
-            "Usage:\n"
-            "  /topic             Enable topic mode, or show status if already on\n"
-            "  /topic help        Show this message\n"
-            "  /topic off         Disable topic mode and clear topic bindings\n"
-            "  /topic <id>        Inside a topic: restore a previous session by ID\n"
-            "\n"
-            "How it works:\n"
-            "1. Run /topic once in this DM — Korra checks BotFather Threads\n"
-            "   Settings are enabled and flips on multi-session mode.\n"
-            "2. Tap All Messages at the top of the bot and send any message.\n"
-            "   Telegram creates a new topic for that message; each topic is\n"
-            "   an independent Korra session (fresh history, fresh context).\n"
-            "3. The root DM becomes a system lobby — send /topic, /status,\n"
-            "   /help, /usage there. Normal prompts go in a topic.\n"
-            "4. /new inside a topic resets just that topic's session.\n"
-            "5. /topic <id> inside a topic restores an old session into it."
+            '''/topic — несколько независимых диалогов с одним ботом\n\nКоманды:\n  /topic             Включить темы или показать их состояние\n  /topic help        Показать эту справку\n  /topic off         Отключить темы и привязки диалогов\n  /topic <id>        Восстановить диалог по ID внутри темы\n\nКак это работает:\n1. Отправьте /topic в личном чате. Корра проверит, включены ли темы в BotFather (Threads Settings).\n2. Нажмите «Все сообщения» вверху чата и отправьте сообщение. Telegram создаст новую тему с отдельной историей.\n3. Основной чат остаётся для команд /topic, /status, /help и /usage. Обычные сообщения отправляйте в темы.\n4. Команда /new внутри темы сбрасывает только её диалог.\n5. Команда /topic <id> внутри темы восстанавливает в ней предыдущий диалог.'''
         )
 
     async def _disable_telegram_topic_mode_for_chat(self, source: SessionSource) -> str:
@@ -25223,7 +25116,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return format_session_db_unavailable(prefix=t("gateway.shared.session_db_unavailable_prefix"))
         chat_id = str(source.chat_id or "")
         if not chat_id:
-            return "Could not determine chat ID."
+            return '''Не удалось определить ID чата.'''
         # No-op if never enabled.
         try:
             currently_enabled = await self._session_db.is_telegram_topic_mode_enabled(
@@ -25233,12 +25126,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             currently_enabled = False
         if not currently_enabled:
-            return "Multi-session topic mode is not currently enabled for this chat."
+            return '''В этом чате режим отдельных диалогов по темам не включён.'''
         try:
             await self._session_db.disable_telegram_topic_mode(chat_id=chat_id)
         except Exception as exc:
             logger.exception("Failed to disable Telegram topic mode")
-            return f"Failed to disable topic mode: {exc}"
+            return f'''Не удалось отключить режим тем: {exc}'''
         # Reset per-chat debounce state so the user doesn't see a stale
         # cooldown on the next activation.
         for attr in ("_telegram_lobby_reminder_ts", "_telegram_capability_hint_ts"):
@@ -25246,20 +25139,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if isinstance(store, dict):
                 store.pop(chat_id, None)
         return (
-            "Multi-session topic mode is now OFF for this chat.\n\n"
-            "Existing topics in Telegram aren't removed — they'll just stop "
-            "being gated as independent sessions. The root DM works as a "
-            "normal Korra chat again. Run /topic to re-enable later."
+            '''Режим отдельных диалогов по темам отключён.\n\nСуществующие темы Telegram сохранятся, но перестанут быть независимыми диалогами. Основной чат снова работает как обычный чат с Коррой. Включить темы повторно: /topic.'''
         )
 
 
     async def _telegram_topic_root_status_message(self, source: SessionSource) -> str:
         lines = [
-            "Telegram multi-session topics are enabled.",
+            '''Режим отдельных диалогов по темам Telegram включён.''',
             "",
-            "To create a new Korra chat, open All Messages at the top of this "
-            "bot interface and send any message there. Telegram will create a "
-            "new topic for it.",
+            '''Чтобы начать новый диалог с Коррой, откройте «Все сообщения» вверху чата с ботом и отправьте сообщение. Telegram создаст для него новую тему.''',
             "",
         ]
         try:
@@ -25273,10 +25161,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             sessions = []
 
         if sessions:
-            lines.append("Previous unlinked sessions:")
+            lines.append('''Предыдущие диалоги без привязки к теме:''')
             for session in sessions:
                 session_id = str(session.get("id") or "")
-                title = str(session.get("title") or "Untitled session")
+                title = str(session.get("title") or '''Диалог без названия''')
                 preview = str(session.get("preview") or "").strip()
                 line = f"- {title} — `{session_id}`"
                 if preview:
@@ -25284,18 +25172,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 lines.append(line)
             lines.extend([
                 "",
-                "To restore one:",
-                "1. Create or open a topic. To create a new one, open All Messages and send any message there.",
-                "2. Send /topic <session-id> inside that topic.",
-                f"Example: Send /topic {sessions[0].get('id')} inside a topic.",
+                '''Как восстановить диалог:''',
+                '''1. Создайте или откройте тему. Для новой темы откройте «Все сообщения» и отправьте сообщение.''',
+                '''2. Отправьте /topic <session-id> внутри темы.''',
+                f'''Например, отправьте /topic {sessions[0].get('id')} внутри темы.''',
             ])
         else:
             lines.extend([
-                "No previous unlinked Telegram sessions found.",
+                '''Предыдущие диалоги Telegram без привязки к теме не найдены.''',
                 "",
-                "To restore a previous session later:",
-                "1. Create or open a topic. To create a new one, open All Messages and send any message there.",
-                "2. Send /topic <session-id> inside that topic.",
+                '''Как восстановить предыдущий диалог позже:''',
+                '''1. Создайте или откройте тему. Для новой темы откройте «Все сообщения» и отправьте сообщение.''',
+                '''2. Отправьте /topic <session-id> внутри темы.''',
             ])
         return "\n".join(lines)
 
@@ -25304,15 +25192,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         source = event.source
         session_id = await self._session_db.resolve_session_id(raw_session_id.strip())
         if not session_id:
-            return f"Session not found: {raw_session_id.strip()}"
+            return f'''Диалог не найден: {raw_session_id.strip()}'''
 
         session = await self._session_db.get_session(session_id)
         if not session:
-            return f"Session not found: {raw_session_id.strip()}"
+            return f'''Диалог не найден: {raw_session_id.strip()}'''
         if str(session.get("source") or "") != "telegram":
-            return "That session is not a Telegram session and cannot be restored into this topic."
+            return '''Этот диалог создан вне Telegram. Его нельзя восстановить в этой теме.'''
         if str(session.get("user_id") or "") != str(source.user_id):
-            return "That session does not belong to this Telegram user."
+            return '''Этот диалог принадлежит другому пользователю Telegram.'''
 
         linked = await self._session_db.is_telegram_session_linked_to_topic(session_id=session_id)
         current_binding = await self._session_db.get_telegram_topic_binding(
@@ -25321,7 +25209,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         )
         if linked:
             if not current_binding or current_binding.get("session_id") != session_id:
-                return "That session is already linked to another Telegram topic."
+                return '''Этот диалог уже привязан к другой теме Telegram.'''
 
         session_key = self._session_key_for_source(source)
         try:
@@ -25335,7 +25223,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             )
         except ValueError as exc:
             if "already linked" in str(exc):
-                return "That session is already linked to another Telegram topic."
+                return '''Этот диалог уже привязан к другой теме Telegram.'''
             raise
 
         title = await self._session_db.get_session_title(session_id) or session_id
@@ -25351,9 +25239,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             last_assistant = None
 
-        response = f"Session restored: {title}"
+        response = f'''Диалог восстановлен: {title}'''
         if last_assistant:
-            response += f"\n\nLast Korra message:\n{last_assistant}"
+            response += f'''\n\nПоследнее сообщение Корры:\n{last_assistant}'''
         return response
 
 
@@ -25529,7 +25417,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         async def _on_confirm(choice: str):
             if choice == "cancel":
-                return f"🟡 /{command} cancelled. Conversation unchanged."
+                return f'''🟡 Команда /{command} отменена. История диалога не изменилась.'''
             persisted = False
             if choice == "always":
                 try:
@@ -25559,9 +25447,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if choice == "always":
                 if persisted:
                     note = (
-                        "\n\nℹ️ Future /clear, /new, /reset, and /undo will run "
-                        "without confirmation. Re-enable via "
-                        "`approvals.destructive_slash_confirm: true` in config.yaml."
+                        '''\n\nℹ️ Команды /clear, /new, /reset и /undo теперь выполняются без подтверждения. Чтобы вернуть подтверждения, установите `approvals.destructive_slash_confirm: true` в config.yaml.'''
                     )
                 else:
                     # The user did approve this run, so the action still goes
@@ -25569,10 +25455,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     # will be back next time. Say so rather than promising an
                     # opt-out that was never written.
                     note = (
-                        "\n\n⚠️ Could not save that preference (config.yaml is not "
-                        "writable), so /clear, /new, /reset, and /undo will ask "
-                        "again next time. To silence it permanently, set "
-                        "`approvals.destructive_slash_confirm: false` in config.yaml."
+                        '''\n\n⚠️ Не удалось сохранить настройку в config.yaml. Команды /clear, /new, /reset и /undo снова запросят подтверждение. Чтобы отключить его навсегда, установите `approvals.destructive_slash_confirm: false` в config.yaml.'''
                     )
                 if isinstance(result, str):
                     return result + note
@@ -25583,13 +25466,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         _p = self._typed_command_prefix_for(event.source.platform)
         prompt_message = (
-            f"⚠️ **Confirm /{command}**\n\n"
-            f"{detail}\n\n"
-            "Choose:\n"
-            "• **Approve Once** — proceed this time only\n"
-            "• **Always Approve** — proceed and silence this prompt permanently\n"
-            "• **Cancel** — keep current conversation\n\n"
-            f"_Text fallback: reply `{_p}approve`, `{_p}always`, or `{_p}cancel`._"
+            f'''⚠️ **Подтвердите /{command}**\n\n{detail}\n\nВыберите:\n• **Разрешить один раз** — выполнить сейчас\n• **Разрешать всегда** — выполнить и больше не спрашивать\n• **Отмена** — сохранить текущий диалог\n\n_Можно ответить командой `{_p}approve`, `{_p}always` или `{_p}cancel`._'''
         )
         return await self._request_slash_confirm(
             event=event,
@@ -25963,13 +25840,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     if exit_code == 0:
                         await adapter.send(
                             chat_id,
-                            "✅ Korra update finished.",
+                            '''✅ Обновление Korra завершено.''',
                             metadata=_non_conversational_metadata(metadata, platform=platform),
                         )
                     else:
                         await adapter.send(
                             chat_id,
-                            "❌ Korra update failed (exit code {}).".format(exit_code),
+                            '''❌ Не удалось обновить Korra (код завершения {}).'''.format(exit_code),
                             metadata=_non_conversational_metadata(metadata, platform=platform),
                         )
                     logger.info("Update finished (exit=%s), notified %s", exit_code, session_key)
@@ -26038,10 +25915,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             _p = getattr(adapter, "typed_command_prefix", "/")
                             await adapter.send(
                                 chat_id,
-                                f"⚕ **Update needs your input:**\n\n"
-                                f"{prompt_text}{default_hint}\n\n"
-                                f"Reply `{_p}approve` (yes) or `{_p}deny` (no), "
-                                f"or type your answer directly.",
+                                f'''⚕ **Для обновления нужен ваш ответ:**\n\n{prompt_text}{default_hint}\n\nОтветьте `{_p}approve` (да), `{_p}deny` (нет) или напишите свой ответ.''',
                                 metadata=_non_conversational_metadata(metadata, platform=platform),
                             )
                         # Keep the prompt marker on disk until the user
@@ -26067,7 +25941,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             try:
                 await adapter.send(
                     chat_id,
-                    "❌ Korra update timed out after 30 minutes.",
+                    '''❌ Обновление Korra не завершилось за 30 минут.''',
                     metadata=_non_conversational_metadata(metadata, platform=platform),
                 )
             except Exception:
@@ -26170,13 +26044,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     if len(output) > 3500:
                         output = "…" + output[-3500:]
                     if exit_code == 0:
-                        msg = f"✅ Korra update finished.\n\n```\n{output}\n```"
+                        msg = f'''✅ Обновление Korra завершено.\n\n```\n{output}\n```'''
                     else:
-                        msg = f"❌ Korra update failed.\n\n```\n{output}\n```"
+                        msg = f'''❌ Не удалось обновить Korra.\n\n```\n{output}\n```'''
                 elif exit_code == 0:
-                    msg = "✅ Korra update finished successfully."
+                    msg = '''✅ Korra успешно обновлена.'''
                 else:
-                    msg = "❌ Korra update failed. Check the gateway logs or run `hermes update` manually for details."
+                    msg = '''❌ Не удалось обновить Korra. Подробности — в журнале шлюза или при запуске `korra update` вручную.'''
                 await adapter.send(
                     chat_id,
                     msg,
@@ -26250,7 +26124,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             result = await transport.send(
                 platform,
                 str(chat_id),
-                "♻ Gateway restarted successfully. Your session continues.",
+                '''♻ Шлюз успешно перезапущен. Ваш диалог продолжается.''',
                 metadata=_non_conversational_metadata(metadata, platform=platform),
             )
             # adapter.send() catches provider errors (e.g. "Chat not found")
@@ -26291,7 +26165,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
         delivered: set[tuple[str, str, Optional[str]]] = set()
         skipped = skip_targets or set()
-        message = "♻️ Gateway online — Korra is back and ready."
+        message = '''♻️ Шлюз подключён. Корра готова к работе.'''
 
         for platform, platform_cfg in self.config.platforms.items():
             home = platform_cfg.home_channel
@@ -26380,19 +26254,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         hint = format_session_db_unavailable()
         if cause == "corrupt":
             message = (
-                "⚠️ Session database corruption detected. Messages may not be "
-                "persisted. Recovery options:\n"
-                "1. Run `hermes doctor --fix`\n"
-                "2. Salvage with: sqlite3 ~/.hermes/state.db \".recover\" "
-                "(then replace state.db)\n"
-                "3. Restore from a backup in ~/.hermes/backups/\n"
-                "Run `hermes doctor` for sanitized diagnostics."
+                '''⚠️ База диалогов повреждена. Сообщения могут не сохраняться. Запустите `korra doctor --fix` или восстановите базу из резервной копии. Команда `korra doctor` покажет диагностику без секретных данных.'''
             )
         else:
             message = (
-                f"⚠️ Session database unavailable — messages may not be persisted. "
-                f"{hint}\n"
-                f"Run `hermes doctor` for diagnostics."
+                f'''⚠️ База диалогов недоступна. Сообщения могут не сохраняться. {hint}\nДиагностика: `korra doctor`.'''
             )
 
         logger.warning(
@@ -29693,7 +29559,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             from aiohttp import ClientSession as _AioClientSession, ClientTimeout
         except ImportError:
             return {
-                "final_response": "⚠️ Proxy mode requires aiohttp. Install with: pip install aiohttp",
+                "final_response": '''⚠️ Для работы через прокси нужен aiohttp. Установите его командой pip install aiohttp.''',
                 "messages": [],
                 "api_calls": 0,
                 "tools": [],
@@ -29702,7 +29568,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         proxy_url = self._get_proxy_url()
         if not proxy_url:
             return {
-                "final_response": "⚠️ Proxy URL not configured (GATEWAY_PROXY_URL or gateway.proxy_url)",
+                "final_response": '''⚠️ Адрес прокси не настроен. Укажите gateway.proxy_url в config.yaml.''',
                 "messages": [],
                 "api_calls": 0,
                 "tools": [],
@@ -29839,7 +29705,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             resp.status, proxy_url, error_text[:500],
                         )
                         return {
-                            "final_response": f"⚠️ Proxy error ({resp.status}): {error_text[:300]}",
+                            "final_response": f'''⚠️ Ошибка прокси ({resp.status}): {error_text[:300]}''',
                             "messages": [],
                             "api_calls": 0,
                             "tools": [],
@@ -29899,7 +29765,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             logger.error("Proxy connection error to %s: %s", proxy_url, e)
             if not full_response:
                 return {
-                    "final_response": f"⚠️ Proxy connection error: {e}",
+                    "final_response": f'''⚠️ Ошибка подключения к прокси: {e}''',
                     "messages": [],
                     "api_calls": 0,
                     "tools": [],
@@ -29937,7 +29803,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         )
 
         return {
-            "final_response": full_response or "(No response from remote agent)",
+            "final_response": full_response or '''(Удалённый агент не ответил)''',
             "messages": [
                 {"role": "user", "content": message},
                 {"role": "assistant", "content": full_response},
@@ -30279,7 +30145,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 )
             except Exception as _phrase_err:
                 logger.debug("generic status phrase selection failed: %s", _phrase_err)
-                return "still on it" if kind in {"heartbeat", "waiting", "long_running", "status"} else "one sec"
+                return "Корра работает" if kind in {"heartbeat", "waiting", "long_running", "status"} else "Одну минуту"
         # Disable tool progress for webhooks - they don't support message editing,
         # so each progress line would be sent as a separate message.
         from gateway.config import Platform
@@ -31207,10 +31073,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             try:
                                 await _warn_adapter.send(
                                     source.chat_id,
-                                    f"⚠️ No activity for {_elapsed_warn} min. "
-                                    f"If the agent does not respond soon, it will "
-                                    f"be timed out in {_remaining_mins} min. "
-                                    f"You can continue waiting or use /reset.",
+                                    f'''⚠️ Нет активности {_elapsed_warn} мин. Если Корра не ответит в ближайшее время, работа будет остановлена через {_remaining_mins} мин. Можно подождать или отправить /reset.''',
                                     metadata=_interim_metadata(_status_thread_metadata),
                                 )
                             except Exception as _warn_err:
@@ -31300,25 +31163,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
                 # Construct a user-facing message with diagnostic context.
                 _diag_lines = [
-                    f"⏱️ Agent inactive for {_timeout_mins} min — no tool calls "
-                    f"or API responses."
+                    f'''⏱️ Нет активности {_timeout_mins} мин: ни действий, ни ответов сервиса модели.'''
                 ]
                 if _cur_tool:
                     _diag_lines.append(
-                        f"The agent appears stuck on tool `{_cur_tool}` "
-                        f"({_secs_ago:.0f}s since last activity, "
-                        f"iteration {_iter_n}/{_iter_max})."
+                        f'''Похоже, Корра зависла на инструменте `{_cur_tool}`: {_secs_ago:.0f} с без активности, шаг {_iter_n}/{_iter_max}.'''
                     )
                 else:
                     _diag_lines.append(
-                        f"Last activity: {_last_desc} ({_secs_ago:.0f}s ago, "
-                        f"iteration {_iter_n}/{_iter_max}). "
-                        "The agent may have been waiting on an API response."
+                        f'''Последнее действие: {_last_desc} ({_secs_ago:.0f} с назад, шаг {_iter_n}/{_iter_max}). Возможно, Корра ждала ответа сервиса модели.'''
                     )
                 _diag_lines.append(
-                    "To increase the limit, set agent.gateway_timeout in config.yaml "
-                    "(value in seconds, 0 = no limit) and restart the gateway.\n"
-                    "Try again, or use /reset to start fresh."
+                    '''Чтобы увеличить время ожидания, измените agent.gateway_timeout в config.yaml и перезапустите шлюз. Значение задаётся в секундах, 0 — без ограничения.\nПовторите попытку или начните новый диалог через /reset.'''
                 )
 
                 response = {
@@ -32800,10 +32656,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
                 existing_pid, hermes_home,
             )
             print(
-                f"\n❌ Gateway already running (PID {existing_pid}).\n"
-                f"   Use 'hermes gateway restart' to replace it,\n"
-                f"   or 'hermes gateway stop' to kill it first.\n"
-                f"   Or use 'hermes gateway run --replace' to auto-replace.\n"
+                f'''\n❌ Шлюз уже запущен (PID {existing_pid}).\n   Перезапустите: korra gateway restart.\n   Остановите: korra gateway stop.\n   Или замените автоматически: korra gateway run --replace.\n'''
             )
             return False
 
@@ -33433,9 +33286,9 @@ def main():
 
     import argparse
     
-    parser = argparse.ArgumentParser(description="Korra Gateway - Multi-platform messaging")
-    parser.add_argument("--config", "-c", help="Path to gateway config file")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser = argparse.ArgumentParser(description='''Шлюз Korra — подключение мессенджеров''')
+    parser.add_argument("--config", "-c", help='''Путь к файлу настроек шлюза''')
+    parser.add_argument("--verbose", "-v", action="store_true", help='''Подробный вывод''')
     
     args = parser.parse_args()
     

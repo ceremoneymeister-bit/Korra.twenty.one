@@ -703,8 +703,7 @@ def streaming_tts_should_skip_whole_file(
 
 
 GATEWAY_SECRET_CAPTURE_UNSUPPORTED_MESSAGE = (
-    "Secure secret entry is not supported over messaging. "
-    "Load this skill in the local CLI to be prompted, or add the key to ~/.hermes/.env manually."
+    '''Безопасный ввод секретов через мессенджер недоступен. Откройте этот навык в локальном терминале Korra или добавьте ключ в файл .env выбранного профиля.'''
 )
 
 
@@ -3745,16 +3744,15 @@ class BasePlatformAdapter(ABC):
         # tell WHICH profile owns the credential — name it when we can.
         owner_profile = scoped_lock_owner_label(existing)
         if owner_profile:
-            holder = f" by the '{owner_profile}' profile gateway"
+            holder = f''' шлюзом профиля «{owner_profile}»'''
             holder += f" (PID {owner_pid})" if owner_pid else ""
             remedy = (
-                f" Stop that gateway first "
-                f"(hermes --profile {owner_profile} gateway stop)."
+                f''' Сначала остановите его командой korra --profile {owner_profile} gateway stop.'''
             )
         else:
             holder = f" (PID {owner_pid})" if owner_pid else ""
-            remedy = " Stop the other gateway first."
-        message = f"{resource_desc} already in use{holder}.{remedy}"
+            remedy = ''' Сначала остановите другой шлюз.'''
+        message = f'''{resource_desc} уже используется{holder}.{remedy}'''
         logger.error('[%s] %s', self.name, message)
         self._set_fatal_error(f'{scope}_lock', message, retryable=True)
         return False
@@ -4354,12 +4352,12 @@ class BasePlatformAdapter(ABC):
     # keep their historical, platform-specific wording byte-identical while
     # sharing the assembly logic (header → fenced command preview → reason →
     # optional smart-deny note).
-    _EA_HEADER: str = "⚠️ Command Approval Required\n\n"
+    _EA_HEADER: str = '''⚠️ Нужно разрешение на выполнение команды\n\n'''
     _EA_CODE_OPEN: str = "```\n"
     _EA_CODE_CLOSE: str = "\n```\n"
-    _EA_REASON_LABEL: str = "Reason: "
+    _EA_REASON_LABEL: str = '''Причина: '''
     _EA_SMART_DENY_LINE: str = (
-        "\n\nSmart DENY: owner override applies to this one operation only."
+        '''\n\nПроверка запретила команду. Владелец может разрешить только эту операцию.'''
     )
     _EA_CMD_BUDGET: int = 3000
 
@@ -4383,7 +4381,7 @@ class BasePlatformAdapter(ABC):
     def _format_exec_approval(
         self,
         command: str,
-        description: str = "dangerous command",
+        description: str = '''опасная команда''',
         smart_denied: bool = False,
     ) -> str:
         """Shared formatting core for exec-approval prompt text.
@@ -4423,7 +4421,7 @@ class BasePlatformAdapter(ABC):
         page = max(0, min(page, total_pages - 1))
         start = page * per_page
         end = min(start + per_page, total)
-        page_info = f" ({start + 1}–{end} of {total})" if total_pages > 1 else ""
+        page_info = f" ({start + 1}–{end} из {total})" if total_pages > 1 else ""
         meta: Dict[str, Any] = {
             "page": page,
             "total_pages": total_pages,
@@ -4524,12 +4522,10 @@ class BasePlatformAdapter(ABC):
             lines.append("")
             if _is_multi:
                 lines.append(
-                    "Multiple selections allowed — reply with the numbers "
-                    "separated by commas or spaces (e.g. \"1, 3\"), the option "
-                    "text, or your own answer."
+                    '''Можно выбрать несколько вариантов: ответьте номерами через запятую или пробел (например, «1, 3»), текстом варианта или своим ответом.'''
                 )
             else:
-                lines.append("Reply with the number, the option text, or your own answer.")
+                lines.append('''Ответьте номером, текстом варианта или напишите свой ответ.''')
             text = "\n".join(lines)
             # Text fallback: enable text-capture so the gateway intercept
             # picks up the user's typed reply (e.g. "2" or choice text).
@@ -4775,7 +4771,7 @@ class BasePlatformAdapter(ABC):
             "[%s] send_voice fallback: native audio send unavailable for %s",
             self.name, audio_path,
         )
-        text = "⚠️ Couldn't deliver the audio attachment."
+        text = '''⚠️ Не удалось отправить аудиовложение.'''
         if caption:
             text = f"{caption}\n{text}"
         return await self.send(chat_id=chat_id, content=text, reply_to=reply_to, metadata=metadata)
@@ -4919,7 +4915,7 @@ class BasePlatformAdapter(ABC):
             "[%s] send_video fallback: native video send unavailable for %s",
             self.name, video_path,
         )
-        text = "⚠️ Couldn't deliver the video attachment."
+        text = '''⚠️ Не удалось отправить видео.'''
         if caption:
             text = f"{caption}\n{text}"
         return await self.send(chat_id=chat_id, content=text, reply_to=reply_to, metadata=metadata)
@@ -4951,9 +4947,9 @@ class BasePlatformAdapter(ABC):
         # filename (already non-sensitive — it is what the agent named the
         # output). Only show it when the caller passed one explicitly.
         if file_name:
-            text = f"⚠️ Couldn't deliver the file attachment ({file_name})."
+            text = f'''⚠️ Не удалось отправить файл ({file_name}).'''
         else:
-            text = "⚠️ Couldn't deliver the file attachment."
+            text = '''⚠️ Не удалось отправить файл.'''
         if caption:
             text = f"{caption}\n{text}"
         return await self.send(chat_id=chat_id, content=text, reply_to=reply_to, metadata=metadata)
@@ -4976,12 +4972,12 @@ class BasePlatformAdapter(ABC):
         ext = Path(media_path).suffix.lower()
         _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"}
         if is_voice or should_send_media_as_audio(self.platform, ext, is_voice=is_voice):
-            text = "⚠️ Couldn't deliver the audio attachment."
+            text = '''⚠️ Не удалось отправить аудиовложение.'''
         elif ext in _VIDEO_EXTS:
-            text = "⚠️ Couldn't deliver the video attachment."
+            text = '''⚠️ Не удалось отправить видео.'''
         else:
             file_name = os.path.basename(media_path)
-            text = f"⚠️ Couldn't deliver the file attachment ({file_name})."
+            text = f'''⚠️ Не удалось отправить файл ({file_name}).'''
         try:
             notice = await self.send(chat_id=chat_id, content=text, metadata=metadata)
             if not notice.success:
@@ -5020,7 +5016,7 @@ class BasePlatformAdapter(ABC):
             "[%s] send_image_file fallback: native image send unavailable for %s",
             self.name, image_path,
         )
-        text = "⚠️ Couldn't deliver the image attachment."
+        text = '''⚠️ Не удалось отправить изображение.'''
         if caption:
             text = f"{caption}\n{text}"
         return await self.send(chat_id=chat_id, content=text, reply_to=reply_to, metadata=metadata)
@@ -5804,8 +5800,7 @@ class BasePlatformAdapter(ABC):
                 # All retries exhausted (loop completed without break) — notify user
                 logger.error("[%s] Failed to deliver response after %d retries: %s", self.name, max_retries, error_str)
                 notice = (
-                    "\u26a0\ufe0f Message delivery failed after multiple attempts. "
-                    "Please try again \u2014 your request was processed but the response could not be sent."
+                    '''⚠️ Не удалось доставить ответ после нескольких попыток. Ваш запрос обработан — отправьте сообщение ещё раз.'''
                 )
                 try:
                     await self.send(chat_id=chat_id, content=notice, reply_to=reply_to, metadata=metadata)
@@ -5817,7 +5812,7 @@ class BasePlatformAdapter(ABC):
         logger.warning("[%s] Send failed: %s — trying plain-text fallback", self.name, error_str)
         fallback_result = await self.send(
             chat_id=chat_id,
-            content=f"(Response formatting failed, plain text:)\n\n{content[:3500]}",
+            content=f'''(Не удалось оформить ответ, отправляю обычным текстом:)\n\n{content[:3500]}''',
             reply_to=reply_to,
             metadata=metadata,
         )
@@ -7114,14 +7109,12 @@ class BasePlatformAdapter(ABC):
             # Send the error to the user so they aren't left with radio silence
             try:
                 error_type = type(e).__name__
-                error_detail = str(e)[:300] if str(e) else "no details available"
+                error_detail = str(e)[:300] if str(e) else '''подробности недоступны'''
                 _thread_metadata = _thread_metadata_for_source(event.source, _reply_anchor_for_event(event))
                 await self.send(
                     chat_id=event.source.chat_id,
                     content=(
-                        f"Sorry, I encountered an error ({error_type}).\n"
-                        f"{error_detail}\n"
-                        "Try again or use /reset to start a fresh session."
+                        f'''Произошла ошибка ({error_type}).\n{error_detail}\nПовторите попытку или начните новый диалог через /reset.'''
                     ),
                     metadata=_thread_metadata,
                 )
