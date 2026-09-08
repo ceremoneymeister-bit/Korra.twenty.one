@@ -46,12 +46,11 @@ def test_nous_401_guidance_strings_present():
 
     # Must tell the user it's an OAuth token problem, NOT an API key problem
     # (Nous Portal has no API key path — auth_type=oauth_device_code only).
-    assert "Nous Portal OAuth token was rejected" in source
+    assert "Токен Nous Portal отклонён" in source
 
     # Must give a concrete re-auth command, not a generic "hermes setup".
-    assert "hermes portal" in source
+    assert "korra portal" in source
 
     # Must point at the portal so users can check account/credit status.
     assert "portal.nousresearch.com" in source
-
 

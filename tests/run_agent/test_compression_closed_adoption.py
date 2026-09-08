@@ -231,12 +231,12 @@ def test_compression_closed_wording_never_mentions_disk() -> None:
         ),
     )
     assert text, "an abnormal persistence failure must produce an explanation"
-    assert "disk" not in text.lower(), "compression-race message must not blame disk"
-    assert "compression" in text.lower(), "message must name compression rotation"
+    assert "диск" not in text.lower(), "compression-race message must not blame disk"
+    assert "сжат" in text.lower(), "message must name compression rotation"
 
 
 def test_disk_cause_keeps_disk_guidance() -> None:
     text = AIAgent._format_turn_completion_explanation(
         "session_persistence_failed", persistence_cause="disk"
     )
-    assert "full disk" in text, "real disk failures must keep disk guidance"
+    assert "заполненный диск" in text, "real disk failures must keep disk guidance"

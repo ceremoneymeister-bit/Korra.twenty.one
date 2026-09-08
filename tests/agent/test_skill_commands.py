@@ -660,7 +660,7 @@ class TestBuildSkillInvocationMessage:
                 clear_session_vars(tokens)
 
         assert msg is not None
-        assert "local cli" in msg.lower()
+        assert "локальном терминале korra" in msg.lower()
 
 
     def test_supporting_file_hint_uses_file_path_argument(self, tmp_path):

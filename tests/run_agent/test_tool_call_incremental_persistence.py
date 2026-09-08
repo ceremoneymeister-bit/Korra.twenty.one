@@ -282,8 +282,8 @@ def test_locked_flush_exception_surfaces_locked_cause_in_result_contract():
     assert result["turn_exit_reason"] == "session_persistence_failed"
     assert result["failure_reason"] == "session_persistence_failed:locked"
     assert isinstance(result.get("error"), str) and result["error"].strip() != ""
-    assert "busy" in result["error"].lower()
-    assert "disk" not in result["error"].lower()
+    assert "занято" in result["error"].lower()
+    assert "диск" not in result["error"].lower()
 
 
 def test_persistence_cause_resets_between_turns():
@@ -898,4 +898,3 @@ def test_flush_concurrent_nonblank_winner_adopts_canonical_content(tmp_path):
     assert messages[-1]["content"] == "Canonical winner answer from sibling"
     assert messages[-1]["_db_persisted"] is True
     assert messages[-1]["_row_id"] == row_id
-

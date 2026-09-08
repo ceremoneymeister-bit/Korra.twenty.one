@@ -25,10 +25,10 @@ def test_format_turn_completion_corrupt_includes_recovery_options():
     explanation = AIAgent._format_turn_completion_explanation(
         "session_persistence_failed", "corrupt"
     )
-    assert "hermes doctor" in explanation
+    assert "korra doctor --fix" in explanation
     assert ".recover" in explanation
     assert "backups" in explanation
-    assert "Freeing disk space will not help" in explanation
+    assert "Освобождение места на диске это не исправит" in explanation
 
 
 def test_format_turn_completion_disk_still_advises_space():
@@ -38,7 +38,7 @@ def test_format_turn_completion_disk_still_advises_space():
     explanation = AIAgent._format_turn_completion_explanation(
         "session_persistence_failed", "disk"
     )
-    assert "free some space" in explanation
+    assert "Освободите место" in explanation
 
 
 def test_format_turn_completion_locked_still_advises_retry():
@@ -48,5 +48,5 @@ def test_format_turn_completion_locked_still_advises_retry():
     explanation = AIAgent._format_turn_completion_explanation(
         "session_persistence_failed", "locked"
     )
-    assert "busy" in explanation
-    assert "send it again" in explanation
+    assert "занято" in explanation
+    assert "отправьте его заново" in explanation

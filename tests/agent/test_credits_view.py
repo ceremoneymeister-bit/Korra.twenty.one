@@ -85,13 +85,13 @@ def test_view_built_with_org_pinned_url_and_identity(_logged_in_account):
 
     assert view.logged_in is True
     assert view.topup_url == "https://portal.example.test/orgs/acme/billing?topup=open"
-    assert view.identity_line == "Topping up as alice@example.test / org Acme Inc"
+    assert view.identity_line == "Пополнение от имени alice@example.test / организация Acme Inc"
     assert view.depleted is False
     # Balance lines carry the magnitudes but NOT the /usage affordance lines.
     blob = "\n".join(view.balance_lines)
-    assert "Top-up credits: $30.00" in blob
-    assert "Top up:" not in blob  # the trailing /usage affordance is stripped
-    assert "(or run" not in blob
+    assert "Пополнения: $30.00" in blob
+    assert "Пополнить:" not in blob  # the trailing /usage affordance is stripped
+    assert "(или выполните" not in blob
 
 
 

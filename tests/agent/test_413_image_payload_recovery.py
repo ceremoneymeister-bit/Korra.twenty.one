@@ -209,8 +209,8 @@ class TestConversationLoopWiring:
         # decision. Isolate the 413 handler region: from its status line to
         # its terminal error. (Token scoring survives in the
         # context-overflow branches, which ARE token-budget errors.)
-        start = src.index("Request payload too large (413) — compression attempt")
-        end = src.index("Payload too large and cannot compress further")
+        start = src.index("Запрос слишком большой (413) — попытка сжатия")
+        end = src.index("Запрос слишком большой, дальнейшее сжатие невозможно")
         branch = src[start:end]
         assert "new_tokens < original_tokens * 0.95" not in branch
         assert "original_bytes = serialized_messages_bytes" in branch

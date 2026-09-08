@@ -134,7 +134,7 @@ def test_status_output_includes_backend_warnings_section(tmp_path, monkeypatch):
         lsp_cli._cmd_status(emit_json=False)
 
     output = buf.getvalue()
-    assert "Backend warnings" in output
+    assert "Предупреждения среды" in output
     assert "shellcheck" in output
 
 

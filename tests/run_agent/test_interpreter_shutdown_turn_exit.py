@@ -94,7 +94,7 @@ def test_shutdown_error_exits_loop_without_retry(monkeypatch, capsys):
         f"signal (made {completions.calls} calls)"
     )
     assert result["failed"] is True
-    assert "shutting down" in result["final_response"]
+    assert "процесс завершился" in result["final_response"]
 
     # And no ❌ spam on the user's terminal.
     out = capsys.readouterr()

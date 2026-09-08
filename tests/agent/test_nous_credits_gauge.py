@@ -50,8 +50,8 @@ def test_gauge_present_with_monthly_credits():
     assert w is not None and w.label == "Subscription"
     assert abs(w.used_percent - (220 - 219.27341839) / 220 * 100) < 1e-9
     blob = "\n".join(render_account_usage_lines(snap))
-    assert "% used" in blob or "% remaining" in blob
-    assert "of $220.00 left" in blob
+    assert "использовано 0%" in blob or "осталось 100%" in blob
+    assert "Осталось $219.27 из $220.00" in blob
 
 
 
