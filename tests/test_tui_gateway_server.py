@@ -2893,7 +2893,7 @@ def test_tool_ctx_sends_an_arg_preview_not_a_phrased_label():
     # pre-phrased label made both stutter ("Ran Running sleep 70 + 2 commands")
     # and stood in for the real command in the desktop's `$` transcript.
     assert server._tool_ctx("terminal", {"command": 'sleep 70; echo "a"; echo "b"'}) == (
-        "sleep 70 + 2 commands"
+        "sleep 70 + ещё 2"
     )
     assert server._tool_ctx("read_file", {"path": "/tmp/demo/package.json"}) == "package.json"
     assert server._tool_ctx("web_search", {"query": "weather in NYC"}) == "weather in NYC"
@@ -9299,7 +9299,7 @@ def test_config_set_model_requires_confirmation_for_expensive_model(monkeypatch)
     )
 
     assert resp["result"]["confirm_required"] is True
-    assert "did you mean to select openai/gpt-5.5?" in resp["result"]["confirm_message"]
+    assert "Возможно, вы хотели выбрать openai/gpt-5.5?" in resp["result"]["confirm_message"]
     assert agent.switched is False
 
     confirmed = server.handle_request(
@@ -10652,7 +10652,7 @@ def test_slash_exec_r7_read_commands_use_metadata_mirror_flag_on(monkeypatch):
         "usage": "Total tokens:                 140",
         "history": "live question from state db",
         "prompt": "host system prompt",
-        "status": "Tokens: 140",
+        "status": "Токены: 140",
         "context": "Context usage: ~80 / 1,000 tokens",
         "tools": "terminal",
         "help": "/status",
@@ -11223,12 +11223,12 @@ def test_session_status_reads_live_gateway_agent(monkeypatch):
         server._sessions.pop("sid", None)
 
     out = resp["result"]["output"]
-    assert "Hermes TUI Status" in out
-    assert "Session ID: session-key" in out
-    assert "Title: Live TUI" in out
-    assert "Model: live-model (live-provider)" in out
-    assert "Tokens: 1,234" in out
-    assert "Agent Running: Yes" in out
+    assert "Состояние Корры в терминале" in out
+    assert "ID беседы: session-key" in out
+    assert "Название: Live TUI" in out
+    assert "Модель: live-model (live-provider)" in out
+    assert "Токены: 1,234" in out
+    assert "Агент работает: Да" in out
 
 
 def test_skills_reload_runs_in_gateway_process(monkeypatch):

@@ -117,7 +117,7 @@ class TestRestoreStashWithInputFn:
             )
 
         assert len(captured_args) == 1
-        assert "Restore" in captured_args[0][0]
+        assert "Восстановить" in captured_args[0][0]
         assert result is False  # user declined
 
 
@@ -396,5 +396,4 @@ class TestCmdUpdateGatewayMode:
             )
 
         assert len(calls) == 1
-        assert "Restore" in calls[0]
-
+        assert "Восстановить" in calls[0]

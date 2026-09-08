@@ -81,6 +81,5 @@ async def test_agents_command_marks_stalling_delegation(monkeypatch):
 
     assert res["delegation_id"] in out
     assert "stalling" in out
-    assert "no progress" in out
-
+    assert "нет прогресса" in out
 

@@ -234,4 +234,4 @@ class TestNewInHelp:
         lines = gateway_help_lines()
         new_line = next((line for line in lines if line.startswith("`/new ")), None)
         assert new_line is not None
-        assert "[name]" in new_line
+        assert "[название]" in new_line

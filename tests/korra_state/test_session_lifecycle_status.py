@@ -167,10 +167,10 @@ def test_annotate_session_statuses(db):
     assert _session_status_tag(bare[0].get("_status")) == "-"
 
     # Tag mapping
-    assert _session_status_tag(SESSION_STATUS_COMPLETE) == "done"
-    assert _session_status_tag(SESSION_STATUS_INTERRUPTED) == "intr"
-    assert _session_status_tag(SESSION_STATUS_ERROR) == "err"
-    assert _session_status_tag(SESSION_STATUS_EMPTY) == "empty"
+    assert _session_status_tag(SESSION_STATUS_COMPLETE) == "готов"
+    assert _session_status_tag(SESSION_STATUS_INTERRUPTED) == "прерв"
+    assert _session_status_tag(SESSION_STATUS_ERROR) == "ошиб"
+    assert _session_status_tag(SESSION_STATUS_EMPTY) == "пусто"
 
 
 def test_delete_session_removes_session_and_messages(db, tmp_path):

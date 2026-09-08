@@ -73,7 +73,7 @@ class TestSecretsDispatchE2E:
             f"stdout: {result.stdout}\n"
             f"stderr: {result.stderr}"
         )
-        assert "usage" in result.stdout.lower()
+        assert "использование" in result.stdout.lower()
 
     def test_bitwarden_status(self) -> None:
         """`hermes secrets bitwarden status` must exit 0 (runs lazy backend)."""

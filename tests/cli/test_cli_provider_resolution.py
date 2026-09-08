@@ -474,8 +474,8 @@ def test_model_flow_custom_saves_verified_v1_base_url(monkeypatch, capsys):
     hermes_main._model_flow_custom({})
     output = capsys.readouterr().out
 
-    assert "Saving the working base URL instead" in output
-    assert "Detected model: llm" in output
+    assert "Сохраняем рабочий основной адрес" in output
+    assert "Найдена модель: llm" in output
     # OPENAI_BASE_URL is no longer saved to .env — config.yaml is authoritative
     assert "OPENAI_BASE_URL" not in saved_env
     assert saved_env["MODEL"] == "llm"
@@ -678,5 +678,4 @@ def test_custom_endpoint_key_env_is_a_valid_posix_name_for_ip_endpoints():
 
     for identity in ("127.0.0.1_8080", "0.0.0.0", "10.0.0.7:11434", "", "-–-"):
         assert _ENV_VAR_NAME_RE.match(custom_endpoint_key_env(identity)), identity
-
 

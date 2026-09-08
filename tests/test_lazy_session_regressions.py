@@ -322,7 +322,7 @@ class TestGatewaySurfacesNullResponse:
 
         assert result, "Silent-drop turn must surface a user-facing hint"
         lowered = result.lower()
-        assert "send it again" in lowered or "try again" in lowered
+        assert "отправьте его ещё раз" in lowered
 
 
 # ===========================================================================
@@ -364,7 +364,6 @@ class TestFinalizeOrphanedCompressionSessions:
         session = db.get_session("ghost-cont")
         assert session["ended_at"] is not None
         assert session["end_reason"] == "orphaned_compression"
-
 
 
 
