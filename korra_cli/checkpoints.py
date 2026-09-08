@@ -236,46 +236,45 @@ def register_cli(parser: argparse.ArgumentParser) -> None:
 
     p_status = subs.add_parser(
         "status",
-        help="Show total size, project count, and per-project breakdown",
+        help='Показать общий размер, число проектов и размеры по проектам',
     )
     p_status.add_argument("--limit", type=int, default=20,
-                          help="Max projects to list (default 20)")
+                          help='Максимум проектов в списке (по умолчанию 20)')
     p_status.set_defaults(func=cmd_status)
 
     p_list = subs.add_parser(
         "list",
-        help="Alias for 'status'",
+        help='Другое имя команды status',
     )
     p_list.add_argument("--limit", type=int, default=20)
     p_list.set_defaults(func=cmd_list)
 
     p_prune = subs.add_parser(
         "prune",
-        help="Delete orphan/stale checkpoints and GC the store",
+        help='Удалить потерявшие связь и устаревшие точки восстановления, очистить хранилище',
     )
     p_prune.add_argument("--retention-days", type=int, default=7,
-                         help="Drop projects whose last_touch is older than N days (default 7)")
+                         help='Удалить проекты, не использовавшиеся более N дней (по умолчанию 7)')
     p_prune.add_argument("--max-size-mb", type=int, default=500,
-                         help="After orphan/stale prune, drop oldest commits "
-                              "per project until total size <= this (default 500)")
+                         help='После очистки старого удалять самые ранние коммиты проектов, пока общий размер не станет ниже этого лимита (по умолчанию 500)')
     p_prune.add_argument("--keep-orphans", action="store_true",
-                         help="Skip deleting projects whose workdir no longer exists")
+                         help='Не удалять проекты, рабочая папка которых больше не существует')
     p_prune.add_argument("-f", "--force", action="store_true",
-                         help="Skip the orphan-deletion confirmation prompt")
+                         help='Пропустить подтверждение удаления проектов без рабочих папок')
     p_prune.set_defaults(func=cmd_prune)
 
     p_clear = subs.add_parser(
         "clear",
-        help="Delete the entire checkpoint base (all /rollback history)",
+        help='Удалить всё хранилище точек восстановления и историю /rollback',
     )
     p_clear.add_argument("-f", "--force", action="store_true",
-                         help="Skip confirmation prompt")
+                         help='Пропустить запрос подтверждения')
     p_clear.set_defaults(func=cmd_clear)
 
     p_legacy = subs.add_parser(
         "clear-legacy",
-        help="Delete only the legacy-<ts>/ archives from v1 migration",
+        help='Удалить только архивы legacy-<ts>/ от переноса версии v1',
     )
     p_legacy.add_argument("-f", "--force", action="store_true",
-                          help="Skip confirmation prompt")
+                          help='Пропустить запрос подтверждения')
     p_legacy.set_defaults(func=cmd_clear_legacy)

@@ -173,46 +173,45 @@ def register_cli(subparser) -> None:
     """
     subs = subparser.add_subparsers(dest="bundles_action")
 
-    p_list = subs.add_parser("list", help="List installed skill bundles")
+    p_list = subs.add_parser("list", help='Показать установленные комплекты навыков')
     p_list.set_defaults(_bundles_handler=_cmd_list)
 
-    p_show = subs.add_parser("show", help="Show one bundle's contents")
-    p_show.add_argument("name", help="Bundle name")
+    p_show = subs.add_parser("show", help='Показать содержимое комплекта')
+    p_show.add_argument("name", help='Имя комплекта')
     p_show.set_defaults(_bundles_handler=_cmd_show)
 
     p_create = subs.add_parser(
         "create",
-        help="Create a new skill bundle",
+        help='Создать комплект навыков',
         description=(
-            "Create a new bundle. Skills can be passed via --skill (repeat for "
-            "multiple) or entered interactively when omitted."
+            'Создать комплект. Передайте навыки через повторяемый --skill или выберите их в меню.'
         ),
     )
-    p_create.add_argument("name", help="Bundle name (becomes the /slash command)")
+    p_create.add_argument("name", help='Имя комплекта; станет командой /<имя>')
     p_create.add_argument(
         "--skill", "-s", action="append", default=[],
-        help="Skill name to include (repeat for multiple)",
+        help='Имя включаемого навыка; повторите для нескольких',
     )
     p_create.add_argument(
         "--description", "-d", default="",
-        help="Human-readable description shown in /help and `hermes bundles list`",
+        help='Описание для /help и korra bundles list',
     )
     p_create.add_argument(
         "--instruction", "-i", default="",
-        help="Extra guidance prepended to the loaded skill content",
+        help='Дополнительные инструкции перед содержимым навыков',
     )
     p_create.add_argument(
         "--force", "-f", action="store_true",
-        help="Overwrite an existing bundle with the same name",
+        help='Заменить существующий комплект с таким же именем',
     )
     p_create.set_defaults(_bundles_handler=_cmd_create)
 
-    p_delete = subs.add_parser("delete", help="Delete a skill bundle")
-    p_delete.add_argument("name", help="Bundle name")
+    p_delete = subs.add_parser("delete", help='Удалить комплект навыков')
+    p_delete.add_argument("name", help='Имя комплекта')
     p_delete.set_defaults(_bundles_handler=_cmd_delete)
 
     p_reload = subs.add_parser(
-        "reload", help="Re-scan the bundles directory and report changes"
+        "reload", help='Обновить список комплектов и показать изменения'
     )
     p_reload.set_defaults(_bundles_handler=_cmd_reload)
 

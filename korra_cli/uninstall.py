@@ -1056,7 +1056,7 @@ def main(argv=None) -> int:
         "--mode",
         choices=["gui", "lite", "full"],
         required=True,
-        help="gui = Chat GUI only; lite = GUI + agent, keep data; full = everything",
+        help='gui — только приложение; lite — приложение и агент, данные сохраняются; full — удалить всё',
     )
     ns = parser.parse_args(argv)
     args = _UninstallArgs(mode=ns.mode)

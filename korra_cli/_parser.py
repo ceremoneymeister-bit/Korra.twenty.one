@@ -15,6 +15,43 @@ import re
 from functools import lru_cache
 
 
+class _RussianUsageMixin:
+    """Localize argparse's generated usage label without changing arguments."""
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        return super()._format_usage(
+            usage, actions, groups, "Использование: " if prefix is None else prefix
+        )
+
+
+class _RussianHelpFormatter(_RussianUsageMixin, argparse.HelpFormatter):
+    pass
+
+
+class _RussianRawDescriptionHelpFormatter(
+    _RussianUsageMixin, argparse.RawDescriptionHelpFormatter
+):
+    pass
+
+
+class KorraArgumentParser(argparse.ArgumentParser):
+    """Russian presentation for this parser and its inherited subparsers."""
+
+    def __init__(self, *args, **kwargs):
+        formatters = {
+            argparse.HelpFormatter: _RussianHelpFormatter,
+            argparse.RawDescriptionHelpFormatter: _RussianRawDescriptionHelpFormatter,
+        }
+        formatter = kwargs.get("formatter_class", argparse.HelpFormatter)
+        kwargs["formatter_class"] = formatters.get(formatter, formatter)
+        super().__init__(*args, **kwargs)
+        self._positionals.title = "Аргументы"
+        self._optionals.title = "Параметры"
+        for action in self._actions:
+            if isinstance(action, argparse._HelpAction):
+                action.help = "Показать эту справку и выйти"
+
+
 # `--profile` / `-p` is consumed by ``main._apply_profile_override`` before
 # argparse runs (it sets ``HERMES_HOME`` and strips itself from ``sys.argv``),
 # so it isn't on the parser. Listed here so all "carry over on relaunch"
@@ -177,7 +214,7 @@ def build_top_level_parser():
         _EPILOGUE if prog == CANONICAL_PROG
         else re.sub(rf"\b{CANONICAL_PROG}(?![-\w])", prog, _EPILOGUE)
     )
-    parser = argparse.ArgumentParser(
+    parser = KorraArgumentParser(
         prog=prog,
         description='Korra — ваш ИИ-помощник с доступом к инструментам',
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -121,7 +121,7 @@ def _prepare_child_command(
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run a command and timestamp each stderr line into a log file."
+        description='Выполнить команду и записывать каждую строку stderr в журнал с отметкой времени'
     )
     parser.add_argument("--error-log", required=True, type=Path)
     parser.add_argument("command", nargs=argparse.REMAINDER)

@@ -53,13 +53,13 @@ def register_cli(parent_parser: argparse.ArgumentParser) -> None:
     )
     install.add_argument(
         "--force", action="store_true",
-        help="Re-download even if a managed copy already exists",
+        help='Загрузить заново, даже если управляемая копия уже существует',
     )
     install.set_defaults(func=cmd_install)
 
     setup = sub.add_parser(
         "setup",
-        help="Interactive wizard: install + CA + mint tokens + write config",
+        help='Мастер: установка, сертификат CA, создание токенов и сохранение настроек',
     )
     setup.add_argument(
         "--tunnel-port", type=int, default=None,
@@ -67,65 +67,55 @@ def register_cli(parent_parser: argparse.ArgumentParser) -> None:
     )
     setup.add_argument(
         "--from-bitwarden", action="store_true",
-        help="Treat secrets as managed by Bitwarden — discover provider keys "
-             "from secrets.bitwarden config instead of the current env.  Fails "
-             "loudly if BW is unreachable rather than silently falling back.",
+        help='Получать ключи провайдеров из secrets.bitwarden вместо текущей среды. При недоступности Bitwarden сообщить ошибку без подмены источника.',
     )
     setup.add_argument(
         "--no-bitwarden", action="store_true",
-        help="Explicitly switch credential_source back to env on re-setup "
-             "(only meaningful when the previous setup used --from-bitwarden).",
+        help='При повторной настройке вернуть credential_source в env; действует после --from-bitwarden',
     )
     setup.add_argument(
         "--rotate-tokens", action="store_true",
-        help="Mint fresh proxy tokens for every provider (default is to "
-             "preserve tokens for providers that already had one — avoids "
-             "401-ing already-running sandboxes on re-setup).",
+        help='Создать новые токены прокси для всех провайдеров. По умолчанию существующие сохраняются, чтобы работающие изолированные среды не получали ошибки 401.',
     )
     setup.add_argument(
         "--restart", dest="restart", action="store_true", default=None,
-        help="If a daemon is already running, restart it automatically after "
-             "writing the new config/tokens (non-interactive default on a tty "
-             "is to ask).",
+        help='Автоматически перезапустить работающую службу после сохранения настроек и токенов; обычно в терминале запрашивается подтверждение',
     )
     setup.add_argument(
         "--no-restart", dest="restart", action="store_false",
-        help="Do not restart a running daemon after setup; you'll need to run "
-             "`hermes egress restart` yourself for changes to take effect.",
+        help='Не перезапускать службу после настройки. Для применения изменений выполните korra egress restart.',
     )
     setup.set_defaults(func=cmd_setup)
 
-    start = sub.add_parser("start", help="Start the managed iron-proxy")
+    start = sub.add_parser("start", help='Запустить управляемый iron-proxy')
     start.set_defaults(func=cmd_start)
 
-    stop = sub.add_parser("stop", help="Stop the managed iron-proxy")
+    stop = sub.add_parser("stop", help='Остановить управляемый iron-proxy')
     stop.set_defaults(func=cmd_stop)
 
     restart = sub.add_parser(
         "restart",
-        help="Restart the managed iron-proxy (stop if running, then start)",
+        help='Перезапустить управляемый iron-proxy',
     )
     restart.set_defaults(func=cmd_restart)
 
     reload_p = sub.add_parser(
         "reload",
-        help="Hot-reload the running daemon's ruleset from proxy.yaml "
-             "(management API — no restart, no dropped connections)",
+        help='Перезагрузить правила из proxy.yaml через API управления без перезапуска и разрыва подключений',
     )
     reload_p.set_defaults(func=cmd_reload)
 
-    status = sub.add_parser("status", help="Show proxy state and mappings")
+    status = sub.add_parser("status", help='Показать состояние прокси и связи ключей')
     status.add_argument(
         "--show-tokens", action="store_true",
-        help="Print the proxy tokens (default: redacted prefix only). "
-             "Beware: tokens may persist in your shell history.",
+        help='Показать токены прокси; по умолчанию только скрытые префиксы. Токены могут сохраниться в истории терминала.',
     )
     status.set_defaults(func=cmd_status)
 
-    disable = sub.add_parser("disable", help="Turn off the proxy integration")
+    disable = sub.add_parser("disable", help='Отключить подключение прокси')
     disable.set_defaults(func=cmd_disable)
 
-    cfg = sub.add_parser("config", help="Print the generated proxy.yaml path")
+    cfg = sub.add_parser("config", help='Показать путь к созданному proxy.yaml')
     cfg.set_defaults(func=cmd_config)
 
 

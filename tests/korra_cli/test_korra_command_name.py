@@ -64,7 +64,7 @@ class TestProgName:
         monkeypatch.setattr(sys, "argv", ["korra", "--help"])
         parser, _, _ = _parser.build_top_level_parser()
 
-        assert parser.format_usage().startswith("usage: korra")
+        assert parser.format_usage().startswith("Использование: korra")
 
     def test_usage_line_honours_the_legacy_alias(self, monkeypatch):
         import sys
@@ -74,7 +74,7 @@ class TestProgName:
         monkeypatch.setattr(sys, "argv", ["/opt/hermes/.venv/bin/hermes", "--help"])
         parser, _, _ = _parser.build_top_level_parser()
 
-        assert parser.format_usage().startswith("usage: hermes")
+        assert parser.format_usage().startswith("Использование: hermes")
 
     def test_examples_block_teaches_korra(self):
         from korra_cli._parser import _EPILOGUE

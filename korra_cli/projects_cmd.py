@@ -25,80 +25,77 @@ def build_parser(
     """Attach the ``project`` subcommand tree. Returns the top parser."""
     parser = parent_subparsers.add_parser(
         "project",
-        help="Manage projects (named, multi-folder workspaces)",
+        help='Управление проектами: именованные рабочие области из нескольких папок',
         description=(
-            "Projects are human-named workspaces that can span multiple "
-            "folders / repos. They anchor desktop session grouping and, when "
-            "bound to a kanban board, give tasks a deterministic worktree + "
-            "branch convention. State is per-profile."
+            'Проект объединяет папки и репозитории под понятным именем. Группирует беседы приложения, а при связи с доской задаёт рабочие копии Git и ветки задач. Настройки отдельны для каждого профиля.'
         ),
     )
     sub = parser.add_subparsers(dest="project_action")
 
-    p_create = sub.add_parser("create", help="Create a new project")
-    p_create.add_argument("name", help="Human name, e.g. 'Hermes Agent'")
+    p_create = sub.add_parser("create", help='Создать проект')
+    p_create.add_argument("name", help='Понятное имя, например «Мой бизнес»')
     p_create.add_argument(
-        "folders", nargs="*", help="Folder paths to include (first = primary)"
+        "folders", nargs="*", help='Включаемые папки; первая — основная'
     )
-    p_create.add_argument("--slug", default=None, help="Explicit slug override")
+    p_create.add_argument("--slug", default=None, help='Задать код проекта вручную')
     p_create.add_argument(
-        "--primary", default=None, metavar="PATH", help="Primary repo path"
+        "--primary", default=None, metavar="PATH", help='Путь к основному репозиторию'
     )
     p_create.add_argument("--description", default=None)
     p_create.add_argument("--icon", default=None)
     p_create.add_argument("--color", default=None)
     p_create.add_argument(
-        "--board", default=None, metavar="SLUG", help="Bind a kanban board"
+        "--board", default=None, metavar="SLUG", help='Связать с доской задач'
     )
     p_create.add_argument(
-        "--use", action="store_true", help="Set as the active project"
+        "--use", action="store_true", help='Сделать текущим проектом'
     )
 
-    p_list = sub.add_parser("list", aliases=["ls"], help="List projects")
+    p_list = sub.add_parser("list", aliases=["ls"], help='Показать проекты')
     p_list.add_argument(
         "--all", action="store_true", dest="include_archived",
-        help="Include archived projects",
+        help='Включить архивные проекты',
     )
 
-    p_show = sub.add_parser("show", help="Show a project's details")
-    p_show.add_argument("project", help="Project id or slug")
+    p_show = sub.add_parser("show", help='Показать сведения о проекте')
+    p_show.add_argument("project", help='ID или код проекта')
 
-    p_add = sub.add_parser("add-folder", help="Add a folder to a project")
-    p_add.add_argument("project", help="Project id or slug")
-    p_add.add_argument("path", help="Folder path")
+    p_add = sub.add_parser("add-folder", help='Добавить папку в проект')
+    p_add.add_argument("project", help='ID или код проекта')
+    p_add.add_argument("path", help='Путь к папке')
     p_add.add_argument("--label", default=None)
     p_add.add_argument(
-        "--primary", action="store_true", help="Mark as primary repo"
+        "--primary", action="store_true", help='Назначить основным репозиторием'
     )
 
-    p_rm = sub.add_parser("remove-folder", help="Remove a folder from a project")
-    p_rm.add_argument("project", help="Project id or slug")
-    p_rm.add_argument("path", help="Folder path")
+    p_rm = sub.add_parser("remove-folder", help='Удалить папку из проекта')
+    p_rm.add_argument("project", help='ID или код проекта')
+    p_rm.add_argument("path", help='Путь к папке')
 
-    p_rename = sub.add_parser("rename", help="Rename a project")
-    p_rename.add_argument("project", help="Project id or slug")
-    p_rename.add_argument("name", help="New name")
+    p_rename = sub.add_parser("rename", help='Переименовать проект')
+    p_rename.add_argument("project", help='ID или код проекта')
+    p_rename.add_argument("name", help='Новое имя')
 
-    p_primary = sub.add_parser("set-primary", help="Set the primary folder")
-    p_primary.add_argument("project", help="Project id or slug")
-    p_primary.add_argument("path", help="Folder path (must already be in project)")
+    p_primary = sub.add_parser("set-primary", help='Выбрать основную папку')
+    p_primary.add_argument("project", help='ID или код проекта')
+    p_primary.add_argument("path", help='Путь к папке, уже добавленной в проект')
 
-    p_use = sub.add_parser("use", help="Set the active project")
+    p_use = sub.add_parser("use", help='Выбрать текущий проект')
     p_use.add_argument(
         "project", nargs="?", default=None,
-        help="Project id or slug (omit to clear)",
+        help='ID или код проекта; без значения — снять выбор',
     )
 
-    p_archive = sub.add_parser("archive", help="Archive a project")
-    p_archive.add_argument("project", help="Project id or slug")
+    p_archive = sub.add_parser("archive", help='Архивировать проект')
+    p_archive.add_argument("project", help='ID или код проекта')
 
-    p_restore = sub.add_parser("restore", help="Restore an archived project")
-    p_restore.add_argument("project", help="Project id or slug")
+    p_restore = sub.add_parser("restore", help='Восстановить проект из архива')
+    p_restore.add_argument("project", help='ID или код проекта')
 
-    p_bind = sub.add_parser("bind-board", help="Bind a kanban board to a project")
-    p_bind.add_argument("project", help="Project id or slug")
+    p_bind = sub.add_parser("bind-board", help='Связать доску задач с проектом')
+    p_bind.add_argument("project", help='ID или код проекта')
     p_bind.add_argument(
-        "board", nargs="?", default="", help="Board slug (omit to unbind)"
+        "board", nargs="?", default="", help='Код доски; без значения — удалить связь'
     )
 
     parser.set_defaults(_project_parser=parser)

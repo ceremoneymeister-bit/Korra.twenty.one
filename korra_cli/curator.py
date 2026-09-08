@@ -872,189 +872,180 @@ def register_cli(parent: argparse.ArgumentParser) -> None:
     parent.set_defaults(func=lambda a: (parent.print_help(), 0)[1])
     subs = parent.add_subparsers(dest="curator_command")
 
-    p_status = subs.add_parser("status", help="Show curator status and skill stats")
+    p_status = subs.add_parser("status", help='Показать состояние обслуживания и статистику навыков')
     p_status.set_defaults(func=_cmd_status)
 
     p_usage = subs.add_parser(
         "usage",
-        help="Show usage telemetry for ALL skills (built-in, hub, agent) with provenance",
+        help='Показать статистику использования всех навыков и их источники: встроенные, из каталога, созданные агентом',
     )
     p_usage.add_argument(
         "--sort", choices=("activity", "recent", "name"), default="activity",
-        help="Sort order: activity (most-used first, default), recent "
-             "(most-recently-active first), or name (alphabetical)",
+        help='Сортировка: activity — часто используемые (по умолчанию), recent — недавние, name — по имени',
     )
     p_usage.add_argument(
         "--provenance", choices=("agent", "bundled", "hub"), default=None,
-        help="Only show skills of this origin",
+        help='Показать навыки только этого происхождения',
     )
     p_usage.add_argument(
         "--json", action="store_true",
-        help="Emit the full report as JSON instead of a table",
+        help='Вывести полный отчёт JSON вместо таблицы',
     )
     p_usage.set_defaults(func=_cmd_usage)
 
-    p_run = subs.add_parser("run", help="Trigger a curator review now")
+    p_run = subs.add_parser("run", help='Запустить проверку навыков сейчас')
     p_run.add_argument(
         "--sync", "--synchronous", dest="synchronous", action="store_true",
-        help="Wait for the LLM review pass to finish (default for manual runs)",
+        help='Дождаться проверки моделью; по умолчанию для ручного запуска',
     )
     p_run.add_argument(
         "--background", dest="background", action="store_true",
-        help="Start the LLM review pass in a background thread and return immediately",
+        help='Начать проверку моделью в фоне и сразу вернуть управление',
     )
     p_run.add_argument(
         "--dry-run", dest="dry_run", action="store_true",
-        help="Report only — no state changes, no archives, no consolidation "
-             "(use this to preview what curator would do)",
+        help='Только отчёт: без изменения состояния, архивирования и объединения навыков',
     )
     p_run.add_argument(
         "--consolidate", dest="consolidate", action="store_true",
-        help="Force the LLM umbrella-building consolidation pass on for this "
-             "run, overriding the config default (off). Without this flag the "
-             "run is prune-only unless `curator.consolidate: true` is set.",
+        help='Включить объединение навыков моделью для этого запуска. Без параметра выполняется только очистка, если не задано curator.consolidate: true.',
     )
     p_run.set_defaults(func=_cmd_run)
 
-    p_pause = subs.add_parser("pause", help="Pause the curator until resumed")
+    p_pause = subs.add_parser("pause", help='Приостановить обслуживание навыков до возобновления')
     p_pause.set_defaults(func=_cmd_pause)
 
-    p_resume = subs.add_parser("resume", help="Resume a paused curator")
+    p_resume = subs.add_parser("resume", help='Возобновить обслуживание навыков')
     p_resume.set_defaults(func=_cmd_resume)
 
-    p_pin = subs.add_parser("pin", help="Pin a skill so the curator never auto-transitions it")
-    p_pin.add_argument("skill", help="Skill name")
+    p_pin = subs.add_parser("pin", help='Закрепить навык и защитить от автоматического изменения статуса')
+    p_pin.add_argument("skill", help='Имя навыка')
     p_pin.set_defaults(func=_cmd_pin)
 
-    p_unpin = subs.add_parser("unpin", help="Unpin a skill")
-    p_unpin.add_argument("skill", help="Skill name")
+    p_unpin = subs.add_parser("unpin", help='Открепить навык')
+    p_unpin.add_argument("skill", help='Имя навыка')
     p_unpin.set_defaults(func=_cmd_unpin)
 
     subs.add_parser(
         "list-unmanaged",
-        help="List curation-eligible skills with no provenance marker",
+        help='Показать подходящие для обслуживания навыки без отметки об источнике',
     ).set_defaults(func=_cmd_list_unmanaged)
 
     p_adopt = subs.add_parser(
         "adopt",
-        help="Hand unmanaged skills to the curator (provenance is a user declaration)",
+        help='Передать неуправляемые навыки на обслуживание; источник декларирует пользователь',
     )
     p_adopt.add_argument(
         "skill", nargs="*",
-        help="Skill name(s) to adopt. Omit when using --all-unmanaged.",
+        help='Имена передаваемых навыков; не указываются с --all-unmanaged',
     )
     p_adopt.add_argument(
         "--all-unmanaged", action="store_true",
-        help="Adopt every curation-eligible skill that has no provenance marker",
+        help='Передать все подходящие навыки без отметки об источнике',
     )
     p_adopt.add_argument(
         "--dry-run", action="store_true",
-        help="List what would be adopted without writing anything",
+        help='Показать план передачи без записи',
     )
     p_adopt.add_argument(
         "--yes", action="store_true",
-        help="Skip the confirmation prompt for --all-unmanaged",
+        help='Пропустить подтверждение при --all-unmanaged',
     )
     p_adopt.set_defaults(func=_cmd_adopt)
 
-    p_restore = subs.add_parser("restore", help="Restore an archived skill")
-    p_restore.add_argument("skill", help="Skill name")
+    p_restore = subs.add_parser("restore", help='Восстановить навык из архива')
+    p_restore.add_argument("skill", help='Имя навыка')
     p_restore.set_defaults(func=_cmd_restore)
 
-    subs.add_parser("list-archived", help="List archived skills") \
+    subs.add_parser("list-archived", help='Показать архивные навыки') \
         .set_defaults(func=_cmd_list_archived)
 
     p_archive = subs.add_parser(
         "archive",
-        help="Manually archive a skill (move to .archive/, excluded from prompt)",
+        help='Архивировать навык вручную: переместить в .archive/ и убрать из контекста',
     )
-    p_archive.add_argument("skill", help="Skill name")
+    p_archive.add_argument("skill", help='Имя навыка')
     p_archive.set_defaults(func=_cmd_archive)
 
     p_prune = subs.add_parser(
         "prune",
-        help="Bulk-archive curator-managed skills idle for >= N days (default 90)",
+        help='Архивировать обслуживаемые навыки, не использовавшиеся N дней или дольше (по умолчанию 90)',
     )
     p_prune.add_argument(
         "--days", type=int, default=90,
-        help="Archive skills idle for at least N days (default: 90)",
+        help='Архивировать навыки, не использовавшиеся минимум N дней (по умолчанию 90)',
     )
     p_prune.add_argument(
         "-y", "--yes", action="store_true",
-        help="Skip the confirmation prompt",
+        help='Пропустить запрос подтверждения',
     )
     p_prune.add_argument(
         "--dry-run", dest="dry_run", action="store_true",
-        help="Show what would be archived without doing it",
+        help='Показать план архивирования без изменений',
     )
     p_prune.set_defaults(func=_cmd_prune)
 
     p_backup = subs.add_parser(
         "backup",
-        help="Take a manual tar.gz snapshot of ~/.hermes/skills/ "
-             "(curator also does this automatically before every real run)",
+        help='Создать снимок папки навыков в tar.gz; также создаётся автоматически перед каждым запуском обслуживания с изменениями',
     )
     p_backup.add_argument(
         "--reason", default=None,
-        help="Free-text label stored in manifest.json (default: 'manual')",
+        help='Произвольная метка в manifest.json (по умолчанию manual)',
     )
     p_backup.set_defaults(func=_cmd_backup)
 
     p_rollback = subs.add_parser(
         "rollback",
-        help="Restore ~/.hermes/skills/ from a curator snapshot, or a single "
-             "mutation by ledger entry id (see `hermes curator ledger`)",
+        help='Восстановить навыки из снимка или отменить одно изменение по ID журнала; см. korra curator ledger',
     )
     p_rollback.add_argument(
         "entry_id", nargs="?", default=None,
-        help="Ledger entry id for single-mutation rollback (from "
-             "`hermes curator ledger`). Omit for whole-tree snapshot rollback.",
+        help='ID записи журнала для отмены одного изменения; без параметра восстанавливается снимок всей папки',
     )
     p_rollback.add_argument(
         "--list", action="store_true",
-        help="List available snapshots and exit without restoring",
+        help='Показать снимки и выйти без восстановления',
     )
     p_rollback.add_argument(
         "--id", dest="backup_id", default=None,
-        help="Snapshot id to restore (see `--list`); default: newest",
+        help='ID восстанавливаемого снимка из --list; по умолчанию последний',
     )
     p_rollback.add_argument(
         "-y", "--yes", action="store_true",
-        help="Skip confirmation prompt",
+        help='Пропустить запрос подтверждения',
     )
     p_rollback.set_defaults(func=_cmd_rollback)
 
     p_ledger = subs.add_parser(
         "ledger",
-        help="List the per-mutation skill audit ledger (all actors: "
-             "curator/agent/user)",
+        help='Показать журнал изменений навыков, сделанных обслуживанием, агентом и пользователем',
     )
     p_ledger.add_argument(
         "--skill", default=None,
-        help="Only show entries for this skill",
+        help='Показать записи только этого навыка',
     )
     p_ledger.add_argument(
         "--limit", type=int, default=20,
-        help="Max entries to show (default: 20)",
+        help='Максимум записей (по умолчанию 20)',
     )
     p_ledger.set_defaults(func=_cmd_ledger)
 
     p_purge = subs.add_parser(
         "purge",
-        help="Delete archived skills older than curator.archive_ttl_days "
-             "(explicit only — never automatic; recorded in the ledger)",
+        help='Удалить архивные навыки старше curator.archive_ttl_days. Только вручную, с записью в журнал.',
     )
     p_purge.add_argument(
         "--days", type=int, default=None,
-        help="Override curator.archive_ttl_days for this invocation",
+        help='Заменить curator.archive_ttl_days для этого запуска',
     )
     p_purge.add_argument(
         "--dry-run", dest="dry_run", action="store_true",
-        help="Show what would be purged without deleting",
+        help='Показать план очистки без удаления',
     )
     p_purge.add_argument(
         "-y", "--yes", action="store_true",
-        help="Skip the confirmation prompt",
+        help='Пропустить запрос подтверждения',
     )
     p_purge.set_defaults(func=_cmd_purge)
 

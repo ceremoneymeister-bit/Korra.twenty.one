@@ -221,13 +221,9 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     """
     kanban_parser = parent_subparsers.add_parser(
         "kanban",
-        help="Multi-profile collaboration board (tasks, links, comments)",
+        help='Доска совместной работы профилей: задачи, связи и комментарии',
         description=(
-            "Durable SQLite-backed task board shared across Korra profiles. "
-            "Tasks are claimed atomically, can depend on other tasks, and "
-            "are executed by a named profile in an isolated workspace. "
-            "See https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban "
-            "or docs/hermes-kanban-v1-spec.pdf for the full design."
+            'Общая доска задач Корры в SQLite. Задачи имеют зависимости, закрепляются за одним исполнителем и выполняются именованным профилем в отдельной рабочей папке. Документация: https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban'
         ),
     )
     # --- global --board flag ---
@@ -240,166 +236,141 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         default=None,
         metavar="<slug>",
         help=(
-            "Board slug to operate on. Defaults to the current board "
-            "(set via `hermes kanban boards switch <slug>` or the "
-            "HERMES_KANBAN_BOARD env var). Use `hermes kanban boards list` "
-            "to see all boards."
+            'Код доски; по умолчанию текущая. Выбор: korra kanban boards switch <slug> или HERMES_KANBAN_BOARD. Список: korra kanban boards list.'
         ),
     )
     sub = kanban_parser.add_subparsers(dest="kanban_action")
 
     # --- init ---
-    sub.add_parser("init", help="Create kanban.db if missing (idempotent)")
+    sub.add_parser("init", help='Создать kanban.db, если её нет; повторный запуск безопасен')
 
     # --- boards (new in v2: multi-project support) ---
     p_boards = sub.add_parser(
         "boards",
-        help="Manage kanban boards (one board per project / workstream)",
+        help='Управление досками: отдельная доска для каждого проекта или направления',
         description=(
-            "Boards let you separate unrelated streams of work "
-            "(projects, repos, domains) into isolated queues. Each "
-            "board has its own DB, workspaces directory, and dispatcher "
-            "loop — tasks on one board cannot collide with tasks on "
-            "another. The first board is 'default' and always exists."
+            'Доски разделяют независимые направления работы. У каждой своя база, папки и диспетчер, поэтому задачи разных досок не пересекаются. Первая доска default существует всегда.'
         ),
     )
     boards_sub = p_boards.add_subparsers(dest="boards_action")
 
     b_list = boards_sub.add_parser(
         "list", aliases=["ls"],
-        help="List all boards with task counts",
+        help='Показать доски и число задач',
     )
     b_list.add_argument("--json", action="store_true")
     b_list.add_argument("--all", action="store_true",
-                        help="Include archived boards too")
+                        help='Включить архивные доски')
 
     b_create = boards_sub.add_parser(
         "create", aliases=["new"],
-        help="Create a new board",
+        help='Создать доску',
     )
     b_create.add_argument("slug",
-                          help="Board slug (kebab-case, e.g. atm10-server)")
+                          help='Код доски в формате kebab-case, например atm10-server')
     b_create.add_argument("--name", default=None,
-                          help="Human-readable display name (defaults to Title Case of slug)")
+                          help='Понятное название; по умолчанию создаётся из кода доски')
     b_create.add_argument("--description", default=None,
-                          help="Optional description")
+                          help='Необязательное описание')
     b_create.add_argument("--icon", default=None,
-                          help="Optional emoji or single-character icon for the dashboard")
+                          help='Необязательный значок для панели: эмодзи или один символ')
     b_create.add_argument("--color", default=None,
-                          help="Optional hex color (e.g. '#8b5cf6') for the dashboard")
+                          help='Необязательный цвет для панели в формате #8b5cf6')
     b_create.add_argument("--switch", action="store_true",
-                          help="Switch to the new board after creating it")
+                          help='Переключиться на новую доску после создания')
     b_create.add_argument("--default-workdir", default=None,
-                          help="Default workspace path for tasks created on this board")
+                          help='Рабочая папка по умолчанию для задач этой доски')
 
     b_rm = boards_sub.add_parser(
         "rm", aliases=["remove", "delete"],
-        help="Archive (default) or delete a board",
+        help='Архивировать доску (по умолчанию) или удалить её',
     )
     b_rm.add_argument("slug")
     b_rm.add_argument("--delete", action="store_true",
-                      help="Hard-delete the board directory instead of archiving it. "
-                           "Default is to move it to boards/_archived/ so it's recoverable.")
+                      help='Удалить папку доски безвозвратно. По умолчанию она переносится в boards/_archived/ с возможностью восстановления.')
 
     b_switch = boards_sub.add_parser(
         "switch", aliases=["use"],
-        help="Set the active board for subsequent CLI calls",
+        help='Выбрать активную доску для следующих команд CLI',
     )
     b_switch.add_argument("slug")
 
     boards_sub.add_parser(
         "show", aliases=["current"],
-        help="Print the currently-active board slug",
+        help='Показать код текущей доски',
     )
 
     b_rename = boards_sub.add_parser(
         "rename",
-        help="Change a board's human-readable display name (slug is immutable)",
+        help='Изменить отображаемое название доски; её код остаётся прежним',
     )
     b_rename.add_argument("slug")
-    b_rename.add_argument("name", help="New display name")
+    b_rename.add_argument("name", help='Новое название')
 
     b_set_wd = boards_sub.add_parser(
         "set-default-workdir",
-        help="Set the default workspace path for tasks on a board",
+        help='Задать рабочую папку по умолчанию для задач доски',
     )
     b_set_wd.add_argument("slug")
     b_set_wd.add_argument("path", nargs="?", default=None,
-                          help="Absolute path to use as default workdir. Omit to clear.")
+                          help='Абсолютный путь рабочей папки; без значения — очистить')
 
     b_export = boards_sub.add_parser(
         "export",
-        help="Export a board to a portable .tar.gz archive",
+        help='Сохранить доску в переносимый архив .tar.gz',
         description=(
-            "Package a board's tasks, comments, links, history, and file "
-            "attachments into one archive that can be imported on another "
-            "machine. Claims, worker PIDs, chat subscriptions, and paths "
-            "belonging to this machine are stripped. Workspaces are never "
-            "included — they are rebuilt on demand."
+            'Упаковать задачи, комментарии, связи, историю и вложения в архив для переноса. Блокировки, PID исполнителей, подписки чатов и локальные пути удаляются. Рабочие папки не включаются и создаются заново по запросу.'
         ),
     )
     b_export.add_argument("slug", nargs="?", default=None,
-                          help="Board to export (default: the current board)")
+                          help='Доска для экспорта; по умолчанию текущая')
     b_export.add_argument("-o", "--output", default=None,
-                          help="Archive path (default: ./<slug>.tar.gz)")
+                          help='Путь к архиву (по умолчанию ./<slug>.tar.gz)')
     b_export.add_argument("--no-attachments", action="store_true",
-                          help="Skip attachment files, keeping the archive small")
+                          help='Не включать вложения, чтобы уменьшить архив')
     b_export.add_argument("--include-logs", action="store_true",
-                          help="Include per-task worker logs")
+                          help='Включить журналы исполнителей задач')
     b_export.add_argument("--json", action="store_true")
 
     b_import = boards_sub.add_parser(
         "import",
-        help="Import a board archive as a new board",
+        help='Создать новую доску из архива',
         description=(
-            "Import a .tar.gz produced by `hermes kanban boards export`. "
-            "The board always lands as a NEW board — the slug gains a "
-            "numeric suffix if it is already taken — so an import can "
-            "never overwrite or merge into a board you already have."
+            'Загрузить архив korra kanban boards export как новую доску. Если код занят, добавится числовой суффикс. Существующие доски не заменяются и не объединяются.'
         ),
     )
-    b_import.add_argument("archive", help="Path to the .tar.gz archive")
+    b_import.add_argument("archive", help='Путь к архиву .tar.gz')
     b_import.add_argument("--as", dest="as_slug", default=None,
-                          help="Slug for the imported board (default: from the archive)")
+                          help='Код импортируемой доски; по умолчанию из архива')
     b_import.add_argument("--switch", action="store_true",
-                          help="Switch to the imported board afterwards")
+                          help='Переключиться на импортированную доску')
     b_import.add_argument("--json", action="store_true")
 
     # --- create ---
-    p_create = sub.add_parser("create", help="Create a new task")
-    p_create.add_argument("title", help="Task title")
-    p_create.add_argument("--body", default=None, help="Optional opening post")
-    p_create.add_argument("--assignee", default=None, help="Profile name to assign")
+    p_create = sub.add_parser("create", help='Создать задачу')
+    p_create.add_argument("title", help='Название задачи')
+    p_create.add_argument("--body", default=None, help='Необязательное начальное описание')
+    p_create.add_argument("--assignee", default=None, help='Имя профиля-исполнителя')
     p_create.add_argument("--parent", action="append", default=[],
-                          help="Parent task id (repeatable)")
+                          help='ID родительской задачи; параметр можно повторять')
     p_create.add_argument("--workspace", default="scratch",
-                          help="scratch | worktree | worktree:<path> | dir:<path> "
-                               "(default: scratch)")
+                          help='Рабочая среда: scratch, worktree, worktree:<path> или dir:<path>; по умолчанию scratch')
     p_create.add_argument("--branch", default=None,
-                          help="Branch name for worktree tasks, e.g. wt/t6-wire")
+                          help='Ветка для задачи в рабочей копии Git, например wt/t6-wire')
     p_create.add_argument("--project", default=None,
-                          help="Link to a project (id or slug). Anchors the task's "
-                               "worktree under the project's primary repo with a "
-                               "deterministic branch. See `hermes project list`.")
-    p_create.add_argument("--tenant", default=None, help="Tenant namespace")
-    p_create.add_argument("--priority", type=int, default=0, help="Priority tiebreaker")
+                          help='Связать с проектом по ID или коду. Рабочая копия задачи создаётся в основном репозитории проекта с предсказуемым именем ветки. См. korra project list.')
+    p_create.add_argument("--tenant", default=None, help='Пространство клиента')
+    p_create.add_argument("--priority", type=int, default=0, help='Приоритет при прочих равных')
     p_create.add_argument("--triage", action="store_true",
-                          help="Park in triage — a specifier will flesh out the spec and promote to todo")
+                          help='Поместить в разбор: агент уточнит описание и переведёт в todo')
     p_create.add_argument("--idempotency-key", default=None,
-                          help="Dedup key. If a non-archived task with this key exists, "
-                               "its id is returned instead of creating a duplicate.")
+                          help='Ключ защиты от дублей. Если неархивная задача с таким ключом есть, возвращается её ID без создания новой.')
     p_create.add_argument("--max-runtime", default=None,
-                          help="Per-task runtime cap. Accepts seconds (300) or "
-                               "durations (90s, 30m, 2h, 1d). When exceeded, "
-                               "the dispatcher SIGTERMs (then SIGKILLs) the worker "
-                               "and re-queues the task.")
+                          help='Лимит времени задачи: секунды (300) или период (90s, 30m, 2h, 1d). При превышении диспетчер завершает исполнителя через SIGTERM, затем SIGKILL, и возвращает задачу в очередь.')
     p_create.add_argument("--created-by", default="user",
-                          help="Author name recorded on the task (default: user)")
+                          help='Имя автора задачи (по умолчанию user)')
     p_create.add_argument("--skill", action="append", default=[], dest="skills",
-                          help="Skill to force-load into the worker "
-                               "(repeatable). The kanban lifecycle is already "
-                               "injected automatically. Example: "
-                               "--skill translation --skill github-code-review")
+                          help='Навык для обязательной загрузки исполнителем; параметр можно повторять. Правила работы с доской уже загружаются автоматически. Пример: --skill translation --skill github-code-review.')
     p_create.add_argument("--max-retries", type=int, default=None,
                           metavar="N",
                           help="Per-task override for the consecutive-failure "
@@ -410,392 +381,366 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
                                "kanban.failure_limit config "
                                f"(default {kb.DEFAULT_FAILURE_LIMIT}).")
     p_create.add_argument("--model", default=None, dest="model_override",
-                          help="Pin the worker to this model (passed as "
-                               "-m <model>) without changing the profile's "
-                               "configured model. Combine with --provider "
-                               "when the model belongs to a different "
-                               "backend than the profile's default.")
+                          help='Использовать эту модель для исполнителя через -m, не меняя настройки профиля. Для другого провайдера добавьте --provider.')
     p_create.add_argument("--provider", default=None, dest="provider_override",
-                          help="Provider the --model belongs to (passed as "
-                               "--provider <name> to the worker). Requires "
-                               "--model.")
+                          help='Провайдер для --model; передаётся исполнителю через --provider. Требует --model.')
     p_create.add_argument("--goal", action="store_true", dest="goal_mode",
-                          help="Run the worker in a goal loop: after each "
-                               "turn a judge checks the response against the "
-                               "card title/body and, if not done, the worker "
-                               "keeps going in the same session until the "
-                               "judge agrees it's complete (or the turn "
-                               "budget runs out, which blocks the card for "
-                               "review). Best for open-ended cards one shot "
-                               "rarely finishes.")
+                          help='Работать до достижения цели: после каждого хода независимая оценка сравнивает результат с карточкой. Исполнитель продолжает ту же беседу до успеха или лимита ходов; при лимите карточка блокируется для проверки.')
     p_create.add_argument("--goal-max-turns", type=int, default=None,
                           metavar="N", dest="goal_max_turns",
-                          help="Turn budget for --goal workers (default 20). "
-                               "Ignored without --goal.")
+                          help='Лимит ходов для --goal (по умолчанию 20); без --goal не действует')
     p_create.add_argument("--initial-status",
                           choices=sorted(kb.VALID_INITIAL_STATUSES),
                           default="running",
-                          help="Initial card status. Use 'blocked' for cards "
-                               "that require immediate human ops (R3 gate) "
-                               "to skip the brief running-to-blocked transition.")
-    p_create.add_argument("--json", action="store_true", help="Emit JSON output")
+                          help='Начальное состояние карточки. blocked — для задач, сразу требующих вмешательства человека (R3), без промежуточного запуска.')
+    p_create.add_argument("--json", action="store_true", help='Вывести JSON')
 
     # --- swarm ---
     p_swarm = sub.add_parser(
         "swarm",
-        help="Create a Kanban Swarm v1 graph (parallel workers → verifier → synthesizer)",
+        help='Создать группу Kanban Swarm v1: параллельные исполнители, проверяющий и автор итогового результата',
     )
-    p_swarm.add_argument("goal", help="Swarm goal / final outcome")
+    p_swarm.add_argument("goal", help='Общая цель и итоговый результат группы')
     p_swarm.add_argument(
         "--worker",
         action="append",
         default=[],
         metavar="PROFILE:TITLE[:SKILL,SKILL]",
-        help="Parallel worker card (repeatable)",
+        help='Карточка параллельного исполнителя; параметр можно повторять',
     )
-    p_swarm.add_argument("--verifier", required=True, help="Verifier profile")
-    p_swarm.add_argument("--synthesizer", required=True, help="Synthesizer/writer profile")
-    p_swarm.add_argument("--tenant", default=None, help="Tenant namespace")
-    p_swarm.add_argument("--priority", type=int, default=0, help="Priority tiebreaker")
-    p_swarm.add_argument("--created-by", default=None, help="Creator/anchor profile")
-    p_swarm.add_argument("--idempotency-key", default=None, help="Dedup key for the root card")
-    p_swarm.add_argument("--json", action="store_true", help="Emit JSON output")
+    p_swarm.add_argument("--verifier", required=True, help='Профиль проверяющего')
+    p_swarm.add_argument("--synthesizer", required=True, help='Профиль автора итогового результата')
+    p_swarm.add_argument("--tenant", default=None, help='Пространство клиента')
+    p_swarm.add_argument("--priority", type=int, default=0, help='Приоритет при прочих равных')
+    p_swarm.add_argument("--created-by", default=None, help='Профиль создателя и координатора')
+    p_swarm.add_argument("--idempotency-key", default=None, help='Ключ защиты от дублей для основной карточки')
+    p_swarm.add_argument("--json", action="store_true", help='Вывести JSON')
 
     # --- list ---
-    p_list = sub.add_parser("list", aliases=["ls"], help="List tasks")
+    p_list = sub.add_parser("list", aliases=["ls"], help='Показать задачи')
     p_list.add_argument("--mine", action="store_true",
-                        help="Filter by $HERMES_PROFILE as assignee")
+                        help='Только задачи, назначенные профилю из $HERMES_PROFILE')
     p_list.add_argument("--assignee", default=None)
     p_list.add_argument("--status", default=None,
                         choices=sorted(kb.VALID_STATUSES))
     p_list.add_argument("--tenant", default=None)
     p_list.add_argument("--session", default=None,
-                        help="Filter by originating chat/agent session id "
-                             "(set on tasks created from inside an ACP loop)")
+                        help='Фильтр по ID исходной беседы или агента; задаётся при создании задачи из ACP')
     p_list.add_argument("--archived", action="store_true",
-                        help="Include archived tasks")
+                        help='Включить архивные задачи')
     p_list.add_argument("--json", action="store_true")
     p_list.add_argument(
         "--sort",
         default=None,
         choices=sorted(kb.VALID_SORT_ORDERS.keys()),
-        help="Sort order for listed tasks (default: priority)",
+        help='Порядок задач; по умолчанию по приоритету',
     )
     p_list.add_argument(
         "--workflow-template-id",
         default=None,
         metavar="ID",
-        help="Restrict to tasks with this workflow_template_id",
+        help='Только задачи с этим workflow_template_id',
     )
     p_list.add_argument(
         "--step-key",
         default=None,
         dest="current_step_key",
         metavar="KEY",
-        help="Restrict to tasks with this current_step_key",
+        help='Только задачи с этим current_step_key',
     )
 
     # --- show ---
-    p_show = sub.add_parser("show", help="Show a task with comments + events")
+    p_show = sub.add_parser("show", help='Показать задачу с комментариями и событиями')
     p_show.add_argument("task_id")
     p_show.add_argument("--json", action="store_true")
     p_show.add_argument(
         "--state-type",
         choices=("status", "outcome"),
         default=None,
-        help="With --state-name: filter listed runs by task_runs column",
+        help='С --state-name: фильтровать запуски по столбцу task_runs',
     )
     p_show.add_argument(
         "--state-name",
         default=None,
         metavar="VALUE",
-        help="With --state-type: keep runs whose column equals this value",
+        help='С --state-type: оставить запуски с этим значением столбца',
     )
 
     # --- assign ---
-    p_assign = sub.add_parser("assign", help="Assign or reassign a task")
+    p_assign = sub.add_parser("assign", help='Назначить или сменить исполнителя задачи')
     p_assign.add_argument("task_id")
-    p_assign.add_argument("profile", help="Profile name (or 'none' to unassign)")
+    p_assign.add_argument("profile", help='Имя профиля; none — снять назначение')
 
     # --- set-model (per-task model/provider override) ---
     p_set_model = sub.add_parser(
         "set-model",
-        help="Set or clear a task's model/provider override "
-             "(takes effect on the next dispatch)",
+        help='Задать или удалить особую модель и провайдера задачи; применяется при следующем запуске',
     )
     p_set_model.add_argument("task_id")
     p_set_model.add_argument(
         "model", nargs="?", default=None,
-        help="Model to pin the worker to (or 'none' to clear the override)",
+        help='Модель исполнителя; none — удалить особую настройку',
     )
     p_set_model.add_argument(
         "--provider", default=None,
-        help="Provider the model belongs to (worker is spawned with "
-             "--provider <name>). Cleared together with the model.",
+        help='Провайдер модели для параметра --provider исполнителя; очищается вместе с моделью',
     )
 
     # --- reclaim / reassign (recovery) ---
     p_reclaim = sub.add_parser(
         "reclaim",
-        help="Release an active worker claim on a running task",
+        help='Снять действующее закрепление задачи за исполнителем',
     )
     p_reclaim.add_argument("task_id")
     p_reclaim.add_argument(
         "--reason", default=None,
-        help="Human-readable reason (recorded on the reclaimed event)",
+        help='Понятная причина; сохраняется в событии снятия закрепления',
     )
 
     p_reassign = sub.add_parser(
         "reassign",
-        help="Reassign a task to a different profile, optionally reclaiming first",
+        help='Сменить профиль-исполнителя, при необходимости сначала сняв действующее закрепление',
     )
     p_reassign.add_argument("task_id")
     p_reassign.add_argument(
         "profile",
-        help="New profile name (or 'none' to unassign)",
+        help='Новое имя профиля; none — снять назначение',
     )
     p_reassign.add_argument(
         "--reclaim", action="store_true",
-        help="Release any active claim before reassigning (required if task is running)",
+        help='Сначала снять действующее закрепление; обязательно для выполняемой задачи',
     )
     p_reassign.add_argument(
         "--reason", default=None,
-        help="Human-readable reason (recorded on the reclaimed event)",
+        help='Понятная причина; сохраняется в событии снятия закрепления',
     )
 
     # --- diagnostics (board-wide health) ---
     p_diag = sub.add_parser(
         "diagnostics",
         aliases=["diag"],
-        help="List active diagnostics on the current board",
+        help='Показать действующие диагностические предупреждения текущей доски',
     )
     p_diag.add_argument(
         "--severity",
         choices=["warning", "error", "critical"],
         default=None,
-        help="Only show diagnostics at or above this severity",
+        help='Минимальная тяжесть диагностических предупреждений',
     )
     p_diag.add_argument(
         "--task",
         default=None,
-        help="Only show diagnostics for one task id",
+        help='Показать диагностику только одной задачи по ID',
     )
     p_diag.add_argument(
         "--json", action="store_true",
-        help="Emit JSON (structured) instead of the default human table",
+        help='Вывести структурированный JSON вместо таблицы',
     )
 
     # --- link / unlink ---
-    p_link = sub.add_parser("link", help="Add a parent->child dependency")
+    p_link = sub.add_parser("link", help='Добавить зависимость родительской задачи от дочерней связи parent→child')
     p_link.add_argument("parent_id")
     p_link.add_argument("child_id")
-    p_unlink = sub.add_parser("unlink", help="Remove a parent->child dependency")
+    p_unlink = sub.add_parser("unlink", help='Удалить зависимость parent→child')
     p_unlink.add_argument("parent_id")
     p_unlink.add_argument("child_id")
 
     # --- claim ---
     p_claim = sub.add_parser(
         "claim",
-        help="Atomically claim a ready task (prints resolved workspace path)",
+        help='Атомарно взять готовую задачу и показать её рабочую папку',
     )
     p_claim.add_argument("task_id")
     p_claim.add_argument("--ttl", type=int, default=kb.DEFAULT_CLAIM_TTL_SECONDS,
-                         help="Claim TTL in seconds (default: 900)")
+                         help='Срок закрепления задачи в секундах (по умолчанию 900)')
 
     # --- comment / complete / block / unblock / archive ---
-    p_comment = sub.add_parser("comment", help="Append a comment")
+    p_comment = sub.add_parser("comment", help='Добавить комментарий')
     p_comment.add_argument("task_id")
-    p_comment.add_argument("text", nargs="+", help="Comment body")
+    p_comment.add_argument("text", nargs="+", help='Текст комментария')
     p_comment.add_argument("--author", default=None,
-                           help="Author name (default: $HERMES_PROFILE or 'user')")
+                           help='Имя автора; по умолчанию $HERMES_PROFILE или user')
     p_comment.add_argument("--max-len", type=int, default=None,
-                           help="Trim the stored comment body to this many characters")
+                           help='Ограничить сохраняемый комментарий этим числом символов')
 
     # --- attach / attachments / attach-rm ---
-    p_attach = sub.add_parser("attach", help="Attach a local file to a task")
+    p_attach = sub.add_parser("attach", help='Прикрепить локальный файл к задаче')
     p_attach.add_argument("task_id")
-    p_attach.add_argument("path", help="Path to the local file to attach")
+    p_attach.add_argument("path", help='Путь к прикрепляемому файлу')
     p_attach.add_argument("--content-type", default=None,
-                          help="MIME type (default: guessed from the file extension)")
+                          help='Тип MIME; по умолчанию определяется по расширению')
     p_attach.add_argument("--name", default=None,
-                          help="Stored filename (default: the source file's basename)")
+                          help='Имя файла при сохранении; по умолчанию исходное')
     p_attach.add_argument("--author", default=None,
-                          help="uploaded_by label (default: $HERMES_PROFILE or 'user')")
+                          help='Метка uploaded_by; по умолчанию $HERMES_PROFILE или user')
 
-    p_attachments = sub.add_parser("attachments", help="List a task's attachments")
+    p_attachments = sub.add_parser("attachments", help='Показать вложения задачи')
     p_attachments.add_argument("task_id")
     p_attachments.add_argument("--json", action="store_true")
 
-    p_attach_rm = sub.add_parser("attach-rm", help="Delete an attachment by id")
+    p_attach_rm = sub.add_parser("attach-rm", help='Удалить вложение по ID')
     p_attach_rm.add_argument("attachment_id", type=int)
 
-    p_complete = sub.add_parser("complete", help="Mark one or more tasks done")
+    p_complete = sub.add_parser("complete", help='Отметить одну или несколько задач выполненными')
     p_complete.add_argument("task_ids", nargs="+",
-                            help="One or more task ids (only --result applies to all of them)")
-    p_complete.add_argument("--result", default=None, help="Result summary")
+                            help='Один или несколько ID задач; ко всем применяется только --result')
+    p_complete.add_argument("--result", default=None, help='Краткий итог')
     p_complete.add_argument("--summary", default=None,
-                            help="Structured handoff summary for downstream tasks. "
-                                 "Falls back to --result if omitted.")
+                            help='Структурированное описание результата для следующих задач; без параметра используется --result')
     p_complete.add_argument("--metadata", default=None,
-                            help='JSON dict of structured facts (e.g. \'{"changed_files": [...], '
-                                 '"tests_run": 12}\'). Stored on the closing run.')
+                            help='Словарь JSON с фактами, например changed_files и tests_run. Сохраняется в завершающем запуске.')
 
     p_edit = sub.add_parser(
         "edit",
-        help="Edit recovery fields on an already-completed task",
+        help='Исправить поля результата уже выполненной задачи',
     )
     p_edit.add_argument("task_id")
     p_edit.add_argument(
         "--result",
         required=True,
-        help="Backfilled task result text for a done task",
+        help='Дополнить текст результата выполненной задачи',
     )
     p_edit.add_argument(
         "--summary",
         default=None,
-        help="Structured handoff summary. Falls back to --result if omitted.",
+        help='Структурированное описание результата; без параметра используется --result',
     )
     p_edit.add_argument(
         "--metadata",
         default=None,
-        help="JSON dict of structured facts to store on the latest completed run.",
+        help='Словарь JSON с фактами для последнего завершённого запуска',
     )
 
-    p_block = sub.add_parser("block", help="Mark one or more tasks blocked")
+    p_block = sub.add_parser("block", help='Отметить одну или несколько задач заблокированными')
     p_block.add_argument("task_id")
-    p_block.add_argument("reason", nargs="*", help="Reason (also appended as a comment)")
+    p_block.add_argument("reason", nargs="*", help='Причина; также добавляется комментарием')
     p_block.add_argument("--ids", nargs="+", default=None,
-                         help="Additional task ids to block with the same reason (bulk mode)")
+                         help='Дополнительные ID задач для блокировки с той же причиной')
     p_block.add_argument(
         "--kind", default=None, choices=sorted(kb.VALID_BLOCK_KINDS),
         help=(
-            "Typed block reason. 'dependency' waits in todo (auto-promoted "
-            "when parents finish, no human); 'needs_input'/'capability' go to "
-            "blocked for a human; 'transient' marks a maybe-flaky failure. "
-            "Repeated same-kind re-blocks after unblock route the task to "
-            "triage to break unblock loops. Omit for a generic block."
+            'Тип причины: dependency — ожидать в todo до завершения родителей; needs_input/capability — ждать человека в blocked; transient — возможный временный сбой. Повторная блокировка того же типа переводит в разбор. Без параметра — общая блокировка.'
         ),
     )
 
-    p_schedule = sub.add_parser("schedule", help="Park one or more tasks in Scheduled (waiting on time, not human input)")
+    p_schedule = sub.add_parser("schedule", help='Перевести задачи в ожидание запланированного времени')
     p_schedule.add_argument("task_id")
-    p_schedule.add_argument("reason", nargs="*", help="Reason/timing note (also appended as a comment)")
+    p_schedule.add_argument("reason", nargs="*", help='Причина или пояснение времени; также добавляется комментарием')
     p_schedule.add_argument("--ids", nargs="+", default=None,
-                            help="Additional task ids to schedule with the same reason (bulk mode)")
+                            help='Дополнительные ID задач для ожидания времени с той же причиной')
 
     p_unblock = sub.add_parser(
         "unblock",
-        help="Return blocked/scheduled tasks to ready, or todo while parents remain open",
+        help='Вернуть заблокированные или отложенные задачи в готовые; при незавершённых родителях — в todo',
     )
     p_unblock.add_argument(
         "--reason",
         default=None,
-        help="Optional reason/note — recorded as a comment before unblocking. Quote multi-word reasons.",
+        help='Необязательная причина перед разблокировкой; сохраняется комментарием. Текст из нескольких слов заключите в кавычки.',
     )
     p_unblock.add_argument("task_ids", nargs="+")
 
     p_request_review = sub.add_parser(
         "request-review",
-        help="Move a task to 'review' (implementation done, awaiting review) — NOT a block",
+        help='Отправить задачу на проверку (review): реализация готова, ожидается рецензия',
     )
     p_request_review.add_argument("task_id")
     p_request_review.add_argument(
         "--summary", default=None,
-        help="What was implemented and how it was verified — shown to the reviewer.",
+        help='Что сделано и как проверено; показывается проверяющему',
     )
     p_request_review.add_argument(
         "--reviewer", default=None,
-        help="Optional reviewer profile; reassigns the task before review dispatch.",
+        help='Необязательный профиль проверяющего; переназначает задачу перед проверкой',
     )
     p_request_review.add_argument(
         "--metadata", default=None,
-        help="JSON object with structured reviewer handoff facts.",
+        help='Объект JSON с фактами для передачи проверяющему',
     )
     p_request_review.add_argument(
         "--force", action="store_true",
         help=(
-            "Override the live-claim guard: move a running, claimed task to "
-            "review even without owning its run (clears the worker's claim)."
+            'Перевести выполняемую задачу на проверку, даже не владея её запуском; действующее закрепление исполнителя снимается'
         ),
     )
 
     p_request_changes = sub.add_parser(
         "request-changes",
-        help="Reviewer verdict: return the active review run to its implementer",
+        help='Решение проверяющего: вернуть задачу исполнителю',
     )
     p_request_changes.add_argument("task_id")
     p_request_changes.add_argument(
-        "reason", nargs="+", help="Concrete changes required before re-review",
+        "reason", nargs="+", help='Конкретные доработки перед повторной проверкой',
     )
 
     p_reopen_review = sub.add_parser(
         "reopen-review",
-        help="Send one or more review tasks back for changes (review -> ready/todo)",
+        help='Вернуть проверяемые задачи на доработку: review → ready/todo',
     )
     p_reopen_review.add_argument("task_ids", nargs="+")
     p_reopen_review.add_argument(
         "--reason", default=None,
-        help="Optional reason/note — recorded as a comment before reopening. Quote multi-word reasons.",
+        help='Необязательная причина перед повторным открытием; сохраняется комментарием. Текст из нескольких слов заключите в кавычки.',
     )
 
     p_promote = sub.add_parser(
         "promote",
-        help="Manually move one or more todo/blocked tasks to ready (recovery path)",
+        help='Вручную перевести задачи todo/blocked в готовые для восстановления работы',
     )
     p_promote.add_argument("task_id")
     p_promote.add_argument(
         "reason",
         nargs="*",
-        help="Audit-trail reason (recorded on the task_events row)",
+        help='Причина для журнала событий task_events',
     )
     p_promote.add_argument(
         "--ids",
         nargs="+",
         default=None,
-        help="Additional task ids to promote with the same reason (bulk mode)",
+        help='Дополнительные ID задач для перевода с той же причиной',
     )
     p_promote.add_argument(
         "--force",
         action="store_true",
-        help="Promote even if parent dependencies are not yet done/archived",
+        help='Перевести в готовые, даже если родительские задачи ещё не выполнены и не архивированы',
     )
     p_promote.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate the promotion without mutating state",
+        help='Проверить возможность перевода без изменения состояния',
     )
     p_promote.add_argument(
         "--json",
         dest="json",
         action="store_true",
-        help="Emit machine-readable JSON result",
+        help='Вывести машиночитаемый результат JSON',
     )
 
-    p_archive = sub.add_parser("archive", help="Archive one or more tasks")
+    p_archive = sub.add_parser("archive", help='Архивировать одну или несколько задач')
     p_archive.add_argument("task_ids", nargs="*",
-                           help="Task ids to archive (default mode)")
+                           help='ID архивируемых задач; действие по умолчанию')
     p_archive.add_argument(
         "--rm",
         dest="purge_ids",
         nargs="+",
         default=None,
-        help="Permanently delete already-archived task ids from the board",
+        help='Безвозвратно удалить с доски указанные уже архивные задачи',
     )
 
     # --- tail ---
-    p_tail = sub.add_parser("tail", help="Follow a task's event stream")
+    p_tail = sub.add_parser("tail", help='Следить за событиями задачи')
     p_tail.add_argument("task_id")
     p_tail.add_argument("--interval", type=float, default=1.0)
 
     # --- dispatch ---
     p_disp = sub.add_parser(
         "dispatch",
-        help="One dispatcher pass: reclaim stale, promote ready, spawn workers",
+        help='Один проход диспетчера: снять устаревшие закрепления, подготовить задачи и запустить исполнителей',
     )
     p_disp.add_argument("--dry-run", action="store_true",
-                        help="Don't actually spawn processes; just print what would happen")
+                        help='Только показать план без запуска процессов')
     p_disp.add_argument("--max", type=int, default=None,
-                        help="Cap number of spawns this pass")
+                        help='Максимум новых исполнителей за этот проход')
     p_disp.add_argument("--failure-limit", type=int,
                         default=kb.DEFAULT_SPAWN_FAILURE_LIMIT,
                         help=f"Auto-block a task after this many consecutive non-success attempts "
@@ -805,18 +750,18 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     # --- daemon (deprecated) ---
     p_daemon = sub.add_parser(
         "daemon",
-        help="DEPRECATED — dispatcher now runs in the gateway. Use `hermes gateway start`.",
+        help='Устарело: диспетчер теперь работает внутри шлюза. Используйте korra gateway start.',
     )
     p_daemon.add_argument("--interval", type=float, default=60.0,
-                          help="Seconds between dispatch ticks (default: 60)")
+                          help='Интервал проверок диспетчера в секундах (по умолчанию 60)')
     p_daemon.add_argument("--max", type=int, default=None,
-                          help="Cap number of spawns per tick")
+                          help='Максимум новых исполнителей за одну проверку')
     p_daemon.add_argument("--failure-limit", type=int,
                           default=kb.DEFAULT_SPAWN_FAILURE_LIMIT)
     p_daemon.add_argument("--pidfile", default=None,
-                          help="Write the daemon's PID to this file on start")
+                          help='Записать PID службы в этот файл при запуске')
     p_daemon.add_argument("--verbose", "-v", action="store_true",
-                          help="Log each tick's outcome to stdout")
+                          help='Выводить итог каждой проверки в stdout')
     # Undocumented escape hatch for users who truly cannot run the gateway.
     # Intentionally excluded from --help so nobody discovers it casually and
     # keeps the old double-dispatcher pattern alive.
@@ -826,29 +771,27 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     # --- watch ---
     p_watch = sub.add_parser(
         "watch",
-        help="Live-stream task_events to the terminal (Ctrl+C to exit)",
+        help='Показывать task_events в терминале в реальном времени; Ctrl+C — выход',
     )
     p_watch.add_argument("--assignee", default=None,
-                         help="Only show events for tasks assigned to this profile")
+                         help='Только события задач указанного профиля')
     p_watch.add_argument("--tenant", default=None,
-                         help="Only show events from tasks in this tenant")
+                         help='Только события задач этого клиента')
     p_watch.add_argument("--kinds", default=None,
-                         help="Comma-separated event kinds to include "
-                              "(e.g. 'completed,blocked,gave_up,crashed,timed_out')")
+                         help='Виды событий через запятую, например completed,blocked,gave_up,crashed,timed_out')
     p_watch.add_argument("--interval", type=float, default=0.5,
-                         help="Poll interval in seconds (default: 0.5)")
+                         help='Интервал проверки в секундах (по умолчанию 0.5)')
 
     # --- stats ---
     p_stats = sub.add_parser(
-        "stats", help="Per-status + per-assignee counts + oldest-ready age",
+        "stats", help='Число задач по состояниям и исполнителям, возраст самой старой готовой задачи',
     )
     p_stats.add_argument("--json", action="store_true")
 
     # --- notify subscribe / list / remove ---
     p_nsub = sub.add_parser(
         "notify-subscribe",
-        help="Subscribe a gateway source to a task's terminal events "
-             "(used by /kanban subscribe in the gateway adapter)",
+        help='Подписать чат шлюза на завершающие события задачи; используется /kanban subscribe',
     )
     p_nsub.add_argument("task_id")
     p_nsub.add_argument("--platform", required=True)
@@ -860,37 +803,30 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--chat-type",
         choices=("dm", "group", "channel", "thread"),
         default=None,
-        help="Originating source chat_type, recorded so the active-wake "
-             "delivery modes resolve the operator's real session. Omit to "
-             "leave an existing sub unchanged (new subs default to 'dm').",
+        help='Тип исходного чата (chat_type) для правильного пробуждения беседы оператора. Без параметра сохраняется текущий; у новой подписки — dm.',
     )
     p_nsub.add_argument(
         "--notifier-profile", default=None,
-        help="Profile gateway that owns/delivers this subscription (default: active profile)",
+        help='Профиль шлюза, обслуживающий подписку; по умолчанию текущий',
     )
     p_nsub.add_argument(
         "--delivery-mode",
         # Single source of truth shared with the DB/watcher enum.
         choices=kb._NOTIFY_DELIVERY_MODES,
         default=None,
-        help="How the kanban-notifier reacts to terminal events for this "
-             "subscription: 'notify' (passive message only; default), "
-             "'notify+wake' (message AND wake the destination gateway agent so "
-             "it reads the full board context and replies in its own voice), or "
-             "'wake' (wake the agent only, no passive message). Omit to leave an "
-             "existing subscription's mode unchanged (new subs default to 'notify').",
+        help='Реакция на завершающие события: notify — уведомление (по умолчанию); notify+wake — уведомление и пробуждение агента для ответа по контексту доски; wake — только пробуждение. Без параметра режим существующей подписки сохраняется.',
     )
 
     p_nlist = sub.add_parser(
         "notify-list",
-        help="List notification subscriptions (optionally for a single task)",
+        help='Показать подписки на уведомления; можно ограничить одной задачей',
     )
     p_nlist.add_argument("task_id", nargs="?", default=None)
     p_nlist.add_argument("--json", action="store_true")
 
     p_nrm = sub.add_parser(
         "notify-unsubscribe",
-        help="Remove a gateway subscription from a task",
+        help='Удалить подписку шлюза на задачу',
     )
     p_nrm.add_argument("task_id")
     p_nrm.add_argument("--platform", required=True)
@@ -900,17 +836,16 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     # --- log ---
     p_log = sub.add_parser(
         "log",
-        help="Print the worker log for a task (from <kanban-root>/kanban/logs/)",
+        help='Показать журнал исполнителя задачи из папки kanban/logs',
     )
     p_log.add_argument("task_id")
     p_log.add_argument("--tail", type=int, default=None,
-                       help="Only print the last N bytes")
+                       help='Показать только последние N байт')
 
     # --- runs (per-attempt history for a task) ---
     p_runs = sub.add_parser(
         "runs",
-        help="Show attempt history for a task (one row per run: profile, "
-             "outcome, elapsed, summary)",
+        help='Показать попытки выполнения задачи: профиль, результат, время и итог',
     )
     p_runs.add_argument("task_id")
     p_runs.add_argument("--json", action="store_true")
@@ -918,140 +853,123 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--state-type",
         choices=("status", "outcome"),
         default=None,
-        help="With --state-name: filter runs by task_runs column",
+        help='С --state-name: фильтровать запуски по столбцу task_runs',
     )
     p_runs.add_argument(
         "--state-name",
         default=None,
         metavar="VALUE",
-        help="With --state-type: keep runs whose column equals this value",
+        help='С --state-type: оставить запуски с этим значением столбца',
     )
 
     # --- heartbeat (worker liveness signal) ---
     p_hb = sub.add_parser(
         "heartbeat",
-        help="Emit a heartbeat event for a running task (worker liveness signal)",
+        help='Отправить сигнал активности исполнителя для выполняемой задачи',
     )
     p_hb.add_argument("task_id")
     p_hb.add_argument("--note", default=None,
-                      help="Optional short note attached to the heartbeat event")
+                      help='Необязательное короткое сообщение к сигналу активности')
 
     # --- assignees ---
     p_asg = sub.add_parser(
         "assignees",
-        help="List known profiles + per-profile task counts "
-             "(union of ~/.hermes/profiles/ and current assignees on the board)",
+        help='Показать профили и число их задач: профили из папки данных и текущие исполнители доски',
     )
     p_asg.add_argument("--json", action="store_true")
 
     # --- context --- (for spawned workers)
     p_ctx = sub.add_parser(
         "context",
-        help="Print the full context a worker sees for a task "
-             "(title + body + parent results + comments).",
+        help='Показать весь контекст исполнителя: название, описание, результаты родителей и комментарии',
     )
     p_ctx.add_argument("task_id")
 
     # --- specify --- (triage → todo via auxiliary LLM)
     p_specify = sub.add_parser(
         "specify",
-        help="Flesh out a triage-column task into a concrete spec "
-             "(title + body) and promote it to todo. Uses the auxiliary "
-             "LLM configured under auxiliary.triage_specifier.",
+        help='Уточнить задачу из разбора до конкретного задания и перевести в todo. Использует вспомогательную модель auxiliary.triage_specifier.',
     )
     p_specify.add_argument(
         "task_id",
         nargs="?",
         default=None,
-        help="Task id to specify (required unless --all is given)",
+        help='ID уточняемой задачи; обязателен без --all',
     )
     p_specify.add_argument(
         "--all",
         dest="all_triage",
         action="store_true",
-        help="Specify every task currently in the triage column",
+        help='Уточнить все задачи в колонке разбора',
     )
     p_specify.add_argument(
         "--tenant",
         default=None,
-        help="When used with --all, restrict the sweep to this tenant",
+        help='С --all: обработать только этого клиента',
     )
     p_specify.add_argument(
         "--author",
         default=None,
-        help="Author name recorded on the audit comment "
-             "(default: $HERMES_PROFILE or 'specifier')",
+        help='Автор комментария проверки; по умолчанию $HERMES_PROFILE или specifier',
     )
     p_specify.add_argument(
         "--json",
         action="store_true",
-        help="Emit one JSON object per task on stdout",
+        help='Вывести по объекту JSON на каждую задачу в stdout',
     )
 
     # --- decompose --- (triage → fan-out via auxiliary LLM + orchestrator)
     p_decompose = sub.add_parser(
         "decompose",
-        help="Decompose a triage-column task into a graph of child tasks "
-             "routed to specialist profiles by description. Falls back to "
-             "specify-style single-task promotion when the task doesn't "
-             "benefit from fan-out. Uses auxiliary.kanban_decomposer.",
+        help='Разбить задачу из разбора на связанные подзадачи и назначить профилям по их специализации. Если разделение не нужно, уточнить одну задачу. Использует auxiliary.kanban_decomposer.',
     )
     p_decompose.add_argument(
         "task_id",
         nargs="?",
         default=None,
-        help="Task id to decompose (required unless --all is given)",
+        help='ID разделяемой задачи; обязателен без --all',
     )
     p_decompose.add_argument(
         "--all",
         dest="all_triage",
         action="store_true",
-        help="Decompose every task currently in the triage column",
+        help='Разобрать на подзадачи все задачи в колонке разбора',
     )
     p_decompose.add_argument(
         "--tenant",
         default=None,
-        help="When used with --all, restrict the sweep to this tenant",
+        help='С --all: обработать только этого клиента',
     )
     p_decompose.add_argument(
         "--author",
         default=None,
-        help="Author name recorded on the audit comment "
-             "(default: $HERMES_PROFILE or 'decomposer')",
+        help='Автор комментария проверки; по умолчанию $HERMES_PROFILE или decomposer',
     )
     p_decompose.add_argument(
         "--json",
         action="store_true",
-        help="Emit one JSON object per task on stdout",
+        help='Вывести по объекту JSON на каждую задачу в stdout',
     )
 
     # --- gc ---
     p_gc = sub.add_parser(
-        "gc", help="Garbage-collect archived-task workspaces, old events, and old logs",
+        "gc", help='Очистить рабочие папки архивных задач, старые события и журналы',
     )
     p_gc.add_argument("--event-retention-days", type=int, default=30,
-                      help="Delete task_events older than N days for terminal tasks (default: 30)")
+                      help='Удалить task_events завершённых задач старше N дней (по умолчанию 30)')
     p_gc.add_argument("--log-retention-days", type=int, default=30,
-                      help="Delete worker log files older than N days (default: 30)")
+                      help='Удалить журналы исполнителей старше N дней (по умолчанию 30)')
 
     # --- repair ---
     p_repair = sub.add_parser(
         "repair",
-        help="Check kanban.db integrity and auto-repair index-only corruption",
+        help='Проверить целостность kanban.db и автоматически исправить повреждённые индексы',
         description=(
-            "Runs PRAGMA integrity_check on the board's DB and reports the "
-            "result. When the failure consists only of index-scoped errors "
-            "('wrong # of entries in index <name>' / 'row N missing from "
-            "index <name>'), the corrupt file is quarantined to a "
-            ".corrupt.<hash>.bak sibling first and the damaged indexes are "
-            "rebuilt with REINDEX — the same narrow auto-repair the "
-            "connect-time guard applies. Any other corruption class is "
-            "reported and left untouched (fail-closed). Exits 0 when the DB "
-            "is healthy or was repaired, non-zero when it is still corrupt."
+            'Выполнить PRAGMA integrity_check. Если повреждены только индексы, сохранить исходник в .corrupt.<hash>.bak и восстановить через REINDEX. Другие повреждения только сообщаются, база не меняется. Код 0 — исправна или восстановлена; ненулевой — повреждение осталось.'
         ),
     )
     p_repair.add_argument("--json", action="store_true",
-                          help="Emit the repair report as JSON")
+                          help='Вывести отчёт восстановления в JSON')
 
     kanban_parser.set_defaults(_kanban_parser=kanban_parser)
     return kanban_parser

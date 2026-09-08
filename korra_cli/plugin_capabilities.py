@@ -82,50 +82,45 @@ CAPABILITY_REGISTRY: Dict[str, CapabilitySpec] = {
             id="tools.override",
             legacy_path=("allow_tool_override",),
             description=(
-                "Replace built-in tools (e.g. shell_exec, write_file) — an "
-                "override can intercept everything routed through that tool"
+                'Заменять встроенные инструменты, например shell_exec и write_file, с доступом ко всем передаваемым им данным'
             ),
         ),
         CapabilitySpec(
             id="llm.provider_override",
             legacy_path=("llm", "allow_provider_override"),
             description=(
-                "Run host-owned LLM calls against a provider other than your "
-                "active one (uses your credentials)"
+                'Вызывать модели другого провайдера через Корру с вашими ключами доступа'
             ),
         ),
         CapabilitySpec(
             id="llm.model_override",
             legacy_path=("llm", "allow_model_override"),
             description=(
-                "Choose which model host-owned LLM calls use (spend follows "
-                "the chosen model)"
+                'Выбирать модель для вызовов через Корру; стоимость зависит от выбранной модели'
             ),
         ),
         CapabilitySpec(
             id="llm.agent_id_override",
             legacy_path=("llm", "allow_agent_id_override"),
-            description="Attribute its LLM calls to a different agent id",
+            description='Указывать другой ID агента для своих вызовов модели',
         ),
         CapabilitySpec(
             id="llm.profile_override",
             legacy_path=("llm", "allow_profile_override"),
-            description="Run LLM calls under a different auth profile",
+            description='Вызывать модели с другим профилем авторизации',
         ),
         CapabilitySpec(
             id="llm.task_override",
             legacy_path=("llm", "allow_task_override"),
             description=(
-                "Route its LLM calls through the host's built-in auxiliary "
-                "task lanes"
+                'Направлять вызовы моделей через встроенные вспомогательные задачи Корры'
             ),
         ),
         CapabilitySpec(
             id="gateway.platform_actions",
             legacy_path=("allow_platform_actions",),
             description=(
-                "Act on connected chat platforms as the gateway bot "
-                "(add reactions, rename threads) via ctx.platform_actions"
+                'Действовать от имени бота в подключённых чатах: ставить реакции и переименовывать темы через ctx.platform_actions'
             ),
         ),
     )

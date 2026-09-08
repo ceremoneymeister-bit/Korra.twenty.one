@@ -374,32 +374,32 @@ def register_cli(parent: argparse.ArgumentParser) -> None:
         type=float,
         default=1.0,
         metavar="0..1",
-        help="Render the timeline built up to this point (0=oldest, 1=now).",
+        help='Показать историю до этой точки: 0 — начало, 1 — настоящее время',
     )
-    parent.add_argument("--play", action="store_true", help="Animate the build-up over time (Ctrl-C to stop).")
-    parent.add_argument("--fps", type=int, default=12, help="Animation frames per second for --play (default 12).")
-    parent.add_argument("--width", type=int, default=None, help="Override render width in columns.")
-    parent.add_argument("--height", type=int, default=None, help="Override render height in rows.")
-    parent.add_argument("--no-color", action="store_true", help="Disable color output.")
+    parent.add_argument("--play", action="store_true", help='Проиграть историю по времени; Ctrl+C — остановить')
+    parent.add_argument("--fps", type=int, default=12, help='Кадров в секунду для --play (по умолчанию 12)')
+    parent.add_argument("--width", type=int, default=None, help='Ширина вывода в колонках')
+    parent.add_argument("--height", type=int, default=None, help='Высота вывода в строках')
+    parent.add_argument("--no-color", action="store_true", help='Отключить цвета')
     # Force ANSI even when stdout is captured — the interactive CLI re-renders it.
     parent.add_argument("--force-color", action="store_true", help=argparse.SUPPRESS)
-    parent.add_argument("--json", action="store_true", help="Print the raw graph payload as JSON and exit.")
+    parent.add_argument("--json", action="store_true", help='Вывести исходные данные графа JSON и выйти')
     parent.set_defaults(func=_cmd_show)
 
     sub = parent.add_subparsers(dest="journey_action")
 
-    p_list = sub.add_parser("list", help="List node ids (for delete/edit).")
+    p_list = sub.add_parser("list", help='Показать ID узлов для удаления и редактирования')
     p_list.add_argument("--no-color", action="store_true")
     p_list.add_argument("--force-color", action="store_true", help=argparse.SUPPRESS)
     p_list.set_defaults(func=_cmd_list)
 
-    p_del = sub.add_parser("delete", help="Delete a learned skill (archived) or memory by node id.")
-    p_del.add_argument("node", help="Node id (skill name or memory:<source>:<index>; see `journey list`).")
-    p_del.add_argument("-y", "--yes", action="store_true", help="Skip the confirmation prompt.")
+    p_del = sub.add_parser("delete", help='Удалить запись памяти или архивировать навык по ID узла')
+    p_del.add_argument("node", help='ID узла: имя навыка или memory:<source>:<index>; см. journey list')
+    p_del.add_argument("-y", "--yes", action="store_true", help='Пропустить запрос подтверждения')
     p_del.set_defaults(func=_cmd_delete)
 
-    p_edit = sub.add_parser("edit", help="Edit a learned skill or memory by node id in $EDITOR.")
-    p_edit.add_argument("node", help="Node id (skill name or memory:<source>:<index>; see `journey list`).")
+    p_edit = sub.add_parser("edit", help='Открыть навык или запись памяти по ID узла в $EDITOR')
+    p_edit.add_argument("node", help='ID узла: имя навыка или memory:<source>:<index>; см. journey list')
     p_edit.set_defaults(func=_cmd_edit)
 
 

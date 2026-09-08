@@ -83,57 +83,54 @@ def register_cli(parent_parser: argparse.ArgumentParser) -> None:
 
     setup = sub.add_parser(
         "setup",
-        help="Interactive wizard: install bws, store access token, pick project",
+        help='Мастер: установить bws, сохранить токен доступа и выбрать проект',
     )
     setup.add_argument(
         "--project-id",
-        help="Pre-select a project UUID instead of prompting",
+        help='Выбрать проект по UUID без запроса',
     )
     setup.add_argument(
         "--access-token",
-        help="Provide the access token non-interactively (will be stored in .env)",
+        help='Передать токен доступа без интерактивного ввода; сохранится в .env',
     )
     setup.add_argument(
         "--server-url",
         help=(
-            "Bitwarden region / self-hosted endpoint. Examples: "
-            "https://vault.bitwarden.com (US, default), "
-            "https://vault.bitwarden.eu (EU), or your self-hosted URL. "
-            "Skips the interactive region prompt."
+            'Регион Bitwarden или свой сервер: https://vault.bitwarden.com — США (по умолчанию), https://vault.bitwarden.eu — ЕС, либо ваш адрес. Пропускает выбор региона в меню.'
         ),
     )
     setup.set_defaults(func=cmd_setup)
 
     status = sub.add_parser(
         "status",
-        help="Show config + binary + token validation status",
+        help='Показать настройки, программу и результат проверки токена',
     )
     status.set_defaults(func=cmd_status)
 
     token = sub.add_parser(
         "token",
-        help="Rotate the access token: validate a new one and store it in .env",
+        help='Заменить токен доступа: проверить новый и сохранить в .env',
     )
     token.add_argument(
         "--access-token",
-        help="Provide the new token non-interactively (default: masked prompt)",
+        help='Передать новый токен без интерактивного ввода; по умолчанию скрытый запрос',
     )
     token.add_argument(
         "--no-verify",
         action="store_true",
-        help="Store without probing Bitwarden first (not recommended)",
+        help='Сохранить без предварительной проверки Bitwarden; не рекомендуется',
     )
     token.set_defaults(func=cmd_token)
 
-    sync = sub.add_parser("sync", help="Fetch secrets now and report what changed")
+    sync = sub.add_parser("sync", help='Получить секреты сейчас и показать изменения')
     sync.add_argument(
         "--apply",
         action="store_true",
-        help="Actually export the secrets into the current shell's env (default: dry-run)",
+        help='Экспортировать секреты в переменные текущей оболочки; по умолчанию только просмотр',
     )
     sync.set_defaults(func=cmd_sync)
 
-    disable = sub.add_parser("disable", help="Turn off the Bitwarden integration")
+    disable = sub.add_parser("disable", help='Отключить подключение Bitwarden')
     disable.set_defaults(func=cmd_disable)
 
     install = sub.add_parser(
@@ -143,7 +140,7 @@ def register_cli(parent_parser: argparse.ArgumentParser) -> None:
     install.add_argument(
         "--force",
         action="store_true",
-        help="Re-download even if a managed copy already exists",
+        help='Загрузить заново, даже если управляемая копия уже существует',
     )
     install.set_defaults(func=cmd_install)
 

@@ -213,34 +213,30 @@ def add_parser(subparsers) -> None:
     """Register `hermes portal` on the given argparse subparsers object."""
     portal_parser = subparsers.add_parser(
         "portal",
-        help="Set up Nous Portal (login, model pick, Tool Gateway); see also `portal info`",
+        help='Настроить Nous: вход, модель и шлюз инструментов; также portal info',
         description=(
-            "Run `hermes portal` with no subcommand to log in to Nous Portal "
-            "and set it up — pick a model, set Nous as your provider, and offer "
-            "the Tool Gateway (the human-readable alias for `hermes auth add "
-            "nous --type oauth`, identical to `hermes setup --portal`). "
-            "Subcommands: login (default), info, open, tools."
+            'korra portal без подкоманды открывает вход Nous, выбор модели, назначение провайдера и подключение шлюза инструментов. Аналог korra auth add nous --type oauth и korra setup --portal. Подкоманды: login (по умолчанию), info, open, tools.'
         ),
     )
     portal_sub = portal_parser.add_subparsers(dest="portal_command")
 
     portal_sub.add_parser(
         "login",
-        help="Log in to Nous Portal + set it up (default; one-shot onboarding)",
+        help='Войти в Nous и выполнить быструю настройку; действие по умолчанию',
     )
     portal_sub.add_parser(
         "info",
-        help="Show Portal auth + Tool Gateway routing summary",
+        help='Показать состояние входа Nous и маршрутизацию шлюза инструментов',
     )
     # `status` retained as a hidden back-compat alias for `info`.
     portal_sub.add_parser("status")
     portal_sub.add_parser(
         "open",
-        help="Open the Portal subscription page in your default browser",
+        help='Открыть страницу подписки портала в браузере',
     )
     portal_sub.add_parser(
         "tools",
-        help="List Tool Gateway tools and which are routed via Nous",
+        help='Показать инструменты шлюза и маршруты через Nous',
     )
 
     portal_parser.set_defaults(func=portal_command)

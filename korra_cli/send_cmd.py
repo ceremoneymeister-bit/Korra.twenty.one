@@ -404,25 +404,12 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
     """
     parser = subparsers.add_parser(
         "send",
-        help="Send a message to a configured platform (scripts, cron jobs, CI).",
+        help='Отправить сообщение в настроенный мессенджер из скрипта, расписания или CI',
         description=(
-            "Pipe text from any shell script to any messaging platform Korra "
-            "is already configured for. Reuses the gateway's platform "
-            "credentials (~/.hermes/.env + ~/.hermes/config.yaml) — no LLM, "
-            "no agent loop, no running gateway required for bot-token "
-            "platforms like Telegram/Discord/Slack/Signal."
+            'Передать текст из скрипта в подключённый мессенджер. Используются настройки и ключи шлюза из профиля. Модель и агент не запускаются; для платформ с токеном бота, включая Telegram, Discord, Slack и Signal, работающий шлюз не требуется.'
         ),
         epilog=(
-            "Examples:\n"
-            "  hermes send --to telegram \"deploy finished\"\n"
-            "  echo \"RAM 92%\" | hermes send --to telegram:-1001234567890\n"
-            "  hermes send --to discord:#ops --file /tmp/report.md\n"
-            "  hermes send --to slack:#eng --subject \"[CI]\" --file build.log\n"
-            "  hermes send --to telegram \"MEDIA:/tmp/chart.png\"   # send a media attachment\n"
-            "  hermes send --list                  # all platforms\n"
-            "  hermes send --list telegram         # filter by platform\n"
-            "\n"
-            "Exit codes: 0 ok, 1 delivery/backend error, 2 usage error."
+            'Примеры: korra send --to telegram "Развёртывание завершено"; echo "Память 92%" | korra send --to telegram:-1001234567890; korra send --to discord:#ops --file /tmp/report.md; korra send --to slack:#eng --subject "[CI]" --file build.log; korra send --to telegram "MEDIA:/tmp/chart.png" — вложение; korra send --list — все платформы; korra send --list telegram — только Telegram. Коды: 0 — успех, 1 — ошибка доставки, 2 — неверные аргументы.'
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -433,11 +420,7 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
         metavar="TARGET",
         default=None,
         help=(
-            "Delivery target. Format: 'platform' (home channel), "
-            "'platform:chat_id', 'platform:chat_id:thread_id', or "
-            "'platform:#channel-name'. Examples: telegram, "
-            "telegram:-1001234567890:17585, discord:#ops, slack:C0123ABCD, "
-            "signal:+15551234567."
+            'Адрес доставки: platform — основной канал, platform:chat_id, platform:chat_id:thread_id или platform:#channel-name. Например telegram, telegram:-1001234567890:17585, discord:#ops, slack:C0123ABCD, signal:+15551234567.'
         ),
     )
 
@@ -445,7 +428,7 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
         "message",
         nargs="?",
         default=None,
-        help="Message text. If omitted, read from --file or stdin.",
+        help='Текст сообщения; без аргумента читается из --file или stdin',
     )
 
     # Legacy / convenience positional removed — use --to for clarity.
@@ -456,9 +439,7 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
         metavar="PATH",
         default=None,
         help=(
-            "Read message body from PATH (text only). Use '-' to force stdin. "
-            "To send an image/document as an attachment, use MEDIA:<path> in "
-            "the message text instead."
+            'Прочитать текст из PATH; - — stdin. Для изображения или документа используйте MEDIA:<path> в тексте сообщения.'
         ),
     )
 
@@ -467,7 +448,7 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
         "--subject",
         metavar="LINE",
         default=None,
-        help="Prepend a subject/header line before the message body.",
+        help='Добавить строку темы или заголовка перед сообщением',
     )
 
     parser.add_argument(
@@ -476,7 +457,7 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
         dest="list_targets",
         action="store_true",
         default=False,
-        help="List available targets. Optional positional filter: `hermes send --list telegram`.",
+        help='Показать доступные адреса доставки; фильтр: korra send --list telegram',
     )
 
     parser.add_argument(
@@ -484,14 +465,14 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
         "--quiet",
         action="store_true",
         default=False,
-        help="Suppress stdout on success (exit code only).",
+        help='При успехе не выводить текст в stdout, только код выхода',
     )
 
     parser.add_argument(
         "--json",
         action="store_true",
         default=False,
-        help="Emit raw JSON result instead of human-readable output.",
+        help='Вывести исходный результат JSON',
     )
 
     parser.set_defaults(func=cmd_send)

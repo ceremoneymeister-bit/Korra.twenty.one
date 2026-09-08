@@ -50,11 +50,11 @@ def register_cli(parent_parser: argparse.ArgumentParser) -> None:
 
     setup = sub.add_parser(
         "setup",
-        help="Verify the op CLI, set account / token env var, and enable",
+        help='Проверить программу op, задать учётную запись и токен, включить подключение',
     )
     setup.add_argument(
         "--account",
-        help="1Password account shorthand or sign-in address (op --account)",
+        help='Краткое имя учётной записи 1Password или адрес входа для op --account',
     )
     setup.add_argument(
         "--token-env",
@@ -62,50 +62,50 @@ def register_cli(parent_parser: argparse.ArgumentParser) -> None:
     )
     setup.add_argument(
         "--token",
-        help="Service-account token to store in .env non-interactively",
+        help='Токен служебной учётной записи для сохранения в .env без интерактивного ввода',
     )
     setup.add_argument(
         "--binary-path",
-        help="Absolute path to the op binary (skips PATH lookup)",
+        help='Абсолютный путь к op без поиска в PATH',
     )
     setup.set_defaults(func=cmd_setup)
 
-    status = sub.add_parser("status", help="Show config + op binary + references")
+    status = sub.add_parser("status", help='Показать настройки, программу op и ссылки')
     status.set_defaults(func=cmd_status)
 
     token = sub.add_parser(
         "token",
-        help="Rotate the service-account token: validate and store it in .env",
+        help='Заменить токен служебной учётной записи: проверить и сохранить в .env',
     )
     token.add_argument(
         "--token",
-        help="Provide the new token non-interactively (default: masked prompt)",
+        help='Передать новый токен без интерактивного ввода; по умолчанию скрытый запрос',
     )
     token.add_argument(
         "--no-verify",
         action="store_true",
-        help="Store without probing 1Password first (not recommended)",
+        help='Сохранить без предварительной проверки 1Password; не рекомендуется',
     )
     token.set_defaults(func=cmd_token)
 
-    set_p = sub.add_parser("set", help="Map an env var to an op:// reference")
-    set_p.add_argument("env_var", help="Environment variable name, e.g. OPENAI_API_KEY")
-    set_p.add_argument("reference", help="1Password reference, e.g. op://Private/OpenAI/api key")
+    set_p = sub.add_parser("set", help='Связать переменную среды со ссылкой op://')
+    set_p.add_argument("env_var", help='Имя переменной среды, например OPENAI_API_KEY')
+    set_p.add_argument("reference", help='Ссылка 1Password, например op://Private/OpenAI/api key')
     set_p.set_defaults(func=cmd_set)
 
-    remove = sub.add_parser("remove", help="Remove an env-var → reference mapping")
-    remove.add_argument("env_var", help="Environment variable name to unmap")
+    remove = sub.add_parser("remove", help='Удалить связь переменной среды со ссылкой')
+    remove.add_argument("env_var", help='Имя переменной для удаления связи')
     remove.set_defaults(func=cmd_remove)
 
-    sync = sub.add_parser("sync", help="Resolve references now and report what changed")
+    sync = sub.add_parser("sync", help='Получить значения по ссылкам сейчас и показать изменения')
     sync.add_argument(
         "--apply",
         action="store_true",
-        help="Actually export resolved values into the current shell (default: dry-run)",
+        help='Экспортировать полученные значения в текущую оболочку; по умолчанию только просмотр',
     )
     sync.set_defaults(func=cmd_sync)
 
-    disable = sub.add_parser("disable", help="Turn off the 1Password integration")
+    disable = sub.add_parser("disable", help='Отключить подключение 1Password')
     disable.set_defaults(func=cmd_disable)
 
 
