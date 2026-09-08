@@ -1247,10 +1247,10 @@ def _confirm_startup_expensive_model_override(args) -> None:
 def _session_status_tag(status: Optional[str]) -> str:
     """Short fixed-width tag for a session lifecycle status."""
     return {
-        "complete": "done",
-        "interrupted": "intr",
-        "error": "err",
-        "empty": "empty",
+        "complete": 'готов',
+        "interrupted": 'прерв',
+        "error": 'ошиб',
+        "empty": 'пусто',
     }.get(status or "", "-")
 
 
@@ -1411,7 +1411,7 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
                 name_width = max(20, max_x - _FIXED_COLS)
                 col_header = (
                     f"   {'Название / начало':<{name_width}}  {'Стат.':<5}  "
-                    f"{'Сообщ':>5}  {'Активность':<10}  {'Источник':<5} {'ID'}"
+                    f"{'Сообщ':>5}  {'Активность':<10}  {'Канал':<5} {'ID'}"
                 )
                 try:
                     dim_attr = (

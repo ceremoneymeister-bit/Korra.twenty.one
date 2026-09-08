@@ -38,8 +38,8 @@ def test_warns_when_models_dev_input_price_exceeds_threshold():
 
     assert warning is not None
     assert warning.input_cost_per_million == Decimal("20.01")
-    assert "EXPENSIVE MODEL WARNING" in warning.message
-    assert "$20/M input" in warning.message
+    assert 'ВЫБРАНА ДОРОГАЯ МОДЕЛЬ' in warning.message
+    assert '20 долларов за миллион входящих' in warning.message
 
 
 @pytest.mark.parametrize("provider", ["custom", "custom:routerai", "routerai"])
@@ -101,7 +101,7 @@ def test_known_confusing_model_still_warns_on_custom_provider():
     )
 
     assert warning is not None
-    assert "did you mean to select openai/gpt-5.5?" in warning.message
+    assert 'Возможно, вы хотели выбрать openai/gpt-5.5?' in warning.message
 
 
 def test_warns_when_pricing_entry_output_price_exceeds_threshold(monkeypatch):
@@ -119,7 +119,7 @@ def test_warns_when_pricing_entry_output_price_exceeds_threshold(monkeypatch):
 
     assert warning is not None
     assert warning.output_cost_per_million == Decimal("100.01")
-    assert "$100.01/M" in warning.message
+    assert '$100.01/млн' in warning.message
 
 
 def test_openai_gpt55_pro_adds_suggestion(monkeypatch):
@@ -136,7 +136,7 @@ def test_openai_gpt55_pro_adds_suggestion(monkeypatch):
     warning = expensive_model_warning("openai/gpt-5.5-pro", provider="openrouter")
 
     assert warning is not None
-    assert "did you mean to select openai/gpt-5.5?" in warning.message
+    assert 'Возможно, вы хотели выбрать openai/gpt-5.5?' in warning.message
 
 
 def test_openai_gpt55_pro_warns_even_without_pricing(monkeypatch):
@@ -148,7 +148,7 @@ def test_openai_gpt55_pro_warns_even_without_pricing(monkeypatch):
     assert warning is not None
     assert warning.input_cost_per_million is None
     assert warning.output_cost_per_million is None
-    assert "did you mean to select openai/gpt-5.5?" in warning.message
+    assert 'Возможно, вы хотели выбрать openai/gpt-5.5?' in warning.message
 
 
 def test_openai_gpt55_pro_warns_for_nous_portal_pricing(monkeypatch):
@@ -170,4 +170,4 @@ def test_openai_gpt55_pro_warns_for_nous_portal_pricing(monkeypatch):
     assert warning is not None
     assert warning.input_cost_per_million == Decimal("25.000000")
     assert warning.output_cost_per_million == Decimal("125.000000")
-    assert "did you mean to select openai/gpt-5.5?" in warning.message
+    assert 'Возможно, вы хотели выбрать openai/gpt-5.5?' in warning.message

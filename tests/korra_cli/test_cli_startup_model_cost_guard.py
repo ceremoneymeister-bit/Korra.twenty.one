@@ -105,8 +105,8 @@ def test_cmd_chat_rejects_noninteractive_gpt55_pro_startup_override(
     assert excinfo.value.code == 1
     assert not fake_cli
     err = capsys.readouterr().err
-    assert "EXPENSIVE MODEL WARNING" in err
-    assert "did you mean to select openai/gpt-5.5?" in err
+    assert 'ВЫБРАНА ДОРОГАЯ МОДЕЛЬ' in err
+    assert 'Возможно, вы хотели выбрать openai/gpt-5.5?' in err
     assert 'Без подтверждения запуск отменён' in err
 
 
@@ -120,7 +120,7 @@ def test_cmd_chat_rejects_noninteractive_gpt55_pro_even_with_yolo(
 
     assert excinfo.value.code == 1
     assert not fake_cli
-    assert "EXPENSIVE MODEL WARNING" in capsys.readouterr().err
+    assert 'ВЫБРАНА ДОРОГАЯ МОДЕЛЬ' in capsys.readouterr().err
 
 
 def test_cmd_chat_allows_acknowledged_data_training_tier_noninteractively(
@@ -135,7 +135,7 @@ def test_cmd_chat_allows_acknowledged_data_training_tier_noninteractively(
 
     assert fake_cli["model"] == "muse-spark-1.2-contributor"
     err = capsys.readouterr().err
-    assert "TRAINS ON YOUR DATA" in err
+    assert 'ВАШИ ДАННЫЕ ДЛЯ ОБУЧЕНИЯ' in err
     assert "security.allow_data_training_tiers_noninteractive" in err
 
 
@@ -153,7 +153,7 @@ def test_cmd_chat_rejects_unacknowledged_data_training_tier_with_opt_in_hint(
     assert excinfo.value.code == 1
     assert not fake_cli
     err = capsys.readouterr().err
-    assert "TRAINS ON YOUR DATA" in err
+    assert 'ВАШИ ДАННЫЕ ДЛЯ ОБУЧЕНИЯ' in err
     assert "security.allow_data_training_tiers_noninteractive" in err
 
 
@@ -174,7 +174,7 @@ def test_data_training_acknowledgement_does_not_bypass_cost_guard(
 
     assert excinfo.value.code == 1
     assert not fake_cli
-    assert "EXPENSIVE MODEL WARNING" in capsys.readouterr().err
+    assert 'ВЫБРАНА ДОРОГАЯ МОДЕЛЬ' in capsys.readouterr().err
 
 
 def test_data_training_acknowledgement_requires_literal_true(
@@ -266,7 +266,7 @@ def test_cmd_chat_rejects_noninteractive_provider_only_override_when_default_is_
 
     assert excinfo.value.code == 1
     assert not fake_cli
-    assert "EXPENSIVE MODEL WARNING" in capsys.readouterr().err
+    assert 'ВЫБРАНА ДОРОГАЯ МОДЕЛЬ' in capsys.readouterr().err
 
 
 def test_cmd_chat_allows_noninteractive_safe_codex_startup_override(
@@ -305,5 +305,5 @@ def test_top_level_oneshot_rejects_noninteractive_gpt55_pro_startup_override(
     assert excinfo.value.code == 1
     assert called is False
     err = capsys.readouterr().err
-    assert "EXPENSIVE MODEL WARNING" in err
+    assert 'ВЫБРАНА ДОРОГАЯ МОДЕЛЬ' in err
     assert 'Без подтверждения запуск отменён' in err

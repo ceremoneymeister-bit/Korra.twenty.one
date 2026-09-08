@@ -50,23 +50,21 @@ def _is_meta_contributor(model_lower: str, provider_lower: str) -> bool:
 
 
 _META_CONTRIBUTOR_MESSAGE = (
-    "!!! CONTRIBUTOR TIER — TRAINS ON YOUR DATA !!!\n"
-    "\n"
-    "muse-spark-1.2-contributor is Meta's contributor tier: heavily discounted\n"
-    "token pricing in exchange for permission to use your prompts and completions\n"
-    "to train future Meta models.\n"
-    "\n"
-    "  Price per 1M tokens:  input $0.10  |  output $0.20  |  cached input $0.002\n"
-    "  (vs. standard muse-spark-1.2:  input $1.25  |  output $4.25  |  cached $0.15)\n"
-    "\n"
-    "It lowers the barrier to entry for prototyping, testing integrations, and\n"
-    "scaling experiments where training on your data is acceptable. Do NOT use it\n"
-    "for confidential, proprietary, personal, or otherwise sensitive data. For the\n"
-    "same model at standard pricing with no training on your data, select the\n"
-    "standard variant, muse-spark-1.2.\n"
-    "\n"
-    "Source: https://dev.meta.ai/docs/pricing-rate-limits/\n"
-    "Confirm only if training on your prompts and completions is acceptable."
+    """⚠️ ТАРИФ ИСПОЛЬЗУЕТ ВАШИ ДАННЫЕ ДЛЯ ОБУЧЕНИЯ
+
+muse-spark-1.2-contributor — тариф Meta со сниженной ценой в обмен на
+разрешение обучать будущие модели на ваших запросах и ответах.
+
+За миллион токенов: вход $0.10, выход $0.20, кешированный вход $0.002.
+Обычная muse-spark-1.2: вход $1.25, выход $4.25, кеш $0.15.
+
+Подходит для экспериментов, если обучение на ваших данных допустимо.
+Не используйте для конфиденциальных, личных или коммерческих данных.
+Для той же модели без обучения на ваших данных выберите muse-spark-1.2
+по обычной цене.
+
+Источник: https://dev.meta.ai/docs/pricing-rate-limits/
+Подтвердите, только если согласны на обучение по вашим запросам и ответам."""
 )
 
 

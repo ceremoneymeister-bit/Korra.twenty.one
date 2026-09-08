@@ -59,7 +59,7 @@ def _cost_guard(
     # carrying only ``.message``.
     return SelectionWarning(
         kind="cost",
-        title="Expensive Model Warning",
+        title='Дорогая модель',
         model=getattr(warning, "model", model_name),
         provider=getattr(warning, "provider", provider or ""),
         message=warning.message,
@@ -84,7 +84,7 @@ def _data_policy_guard(
         return None
     return SelectionWarning(
         kind="data_policy",
-        title="Data-Training Tier Warning",
+        title='Тариф с обучением на ваших данных',
         model=getattr(warning, "model", model_name),
         provider=getattr(warning, "provider", provider or ""),
         message=warning.message,
@@ -174,7 +174,7 @@ def combined_selection_warning(
         return warnings[0]
     return SelectionWarning(
         kind="multiple",
-        title="Model Selection Warning",
+        title='Подтвердите выбор модели',
         model=warnings[0].model,
         provider=warnings[0].provider,
         message=combined_message(warnings),

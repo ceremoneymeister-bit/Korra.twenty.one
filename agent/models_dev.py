@@ -123,30 +123,30 @@ class ModelInfo:
     def format_cost(self) -> str:
         """Human-readable cost string, e.g. '$3.00/M in, $15.00/M out'."""
         if not self.has_cost_data():
-            return "unknown"
-        parts = [f"${self.cost_input:.2f}/M in", f"${self.cost_output:.2f}/M out"]
+            return 'неизвестно'
+        parts = [f'вход ${self.cost_input:.2f}/млн', f'выход ${self.cost_output:.2f}/млн']
         if self.cost_cache_read is not None:
-            parts.append(f"cache read ${self.cost_cache_read:.2f}/M")
+            parts.append(f'чтение кеша ${self.cost_cache_read:.2f}/млн')
         return ", ".join(parts)
 
     def format_capabilities(self) -> str:
         """Human-readable capabilities, e.g. 'reasoning, tools, vision, PDF'."""
         caps = []
         if self.reasoning:
-            caps.append("reasoning")
+            caps.append('рассуждения')
         if self.tool_call:
-            caps.append("tools")
+            caps.append('инструменты')
         if self.supports_vision():
-            caps.append("vision")
+            caps.append('изображения')
         if self.supports_pdf():
             caps.append("PDF")
         if self.supports_audio_input():
-            caps.append("audio")
+            caps.append('аудио')
         if self.structured_output:
-            caps.append("structured output")
+            caps.append('структурированный ответ')
         if self.open_weights:
-            caps.append("open weights")
-        return ", ".join(caps) if caps else "basic"
+            caps.append('открытые веса')
+        return ", ".join(caps) if caps else 'базовые'
 
 
 @dataclass

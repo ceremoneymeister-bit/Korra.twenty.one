@@ -21,8 +21,8 @@ def test_data_policy_guard_fires_through_registry():
     kinds = [w.kind for w in warnings]
     assert "data_policy" in kinds
     w = next(w for w in warnings if w.kind == "data_policy")
-    assert "train" in w.message.lower()
-    assert w.title == "Data-Training Tier Warning"
+    assert 'обуч' in w.message.lower()
+    assert w.title == 'Тариф с обучением на ваших данных'
 
 
 def test_include_kinds_filters_guards():

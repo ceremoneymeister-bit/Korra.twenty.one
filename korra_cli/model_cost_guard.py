@@ -12,7 +12,7 @@ from agent.models_dev import ModelInfo, PROVIDER_TO_MODELS_DEV
 INPUT_COST_WARNING_THRESHOLD = Decimal("20")
 OUTPUT_COST_WARNING_THRESHOLD = Decimal("100")
 GPT55_PRO_OPENROUTER_ID = "openai/gpt-5.5-pro"
-GPT55_SUGGESTION = "did you mean to select openai/gpt-5.5?"
+GPT55_SUGGESTION = 'Возможно, вы хотели выбрать openai/gpt-5.5?'
 
 
 @dataclass(frozen=True)
@@ -38,8 +38,8 @@ def _to_decimal(value: object) -> Optional[Decimal]:
 
 def _format_money(value: Optional[Decimal]) -> str:
     if value is None:
-        return "unknown"
-    return f"${value:.2f}/M"
+        return 'неизвестно'
+    return f'${value:.2f}/млн'
 
 
 def _pricing_from_model_info(
@@ -159,21 +159,20 @@ def expensive_model_warning(
         return None
 
     lines = [
-        "!!! EXPENSIVE MODEL WARNING !!!",
+        '⚠️ ВЫБРАНА ДОРОГАЯ МОДЕЛЬ',
         "",
-        f"{model} has known pricing above Korra's safety threshold.",
-        f"Input tokens: {_format_money(input_cost)}",
-        f"Output tokens: {_format_money(output_cost)}",
+        f'Стоимость {model} выше порога предупреждения Корры.',
+        f'Входящие токены: {_format_money(input_cost)}',
+        f'Исходящие токены: {_format_money(output_cost)}',
         (
-            "Threshold: more than $20/M input tokens or more than "
-            "$100/M output tokens."
+            'Предупреждаем о цене выше 20 долларов за миллион входящих или 100 долларов за миллион исходящих токенов.'
         ),
     ]
     if source:
-        lines.append(f"Pricing source: {source}.")
+        lines.append(f'Источник цен: {source}.')
     if is_known_gpt55_pro_confusion:
         lines.append(GPT55_SUGGESTION)
-    lines.append("Confirm only if you intend to use this model.")
+    lines.append('Подтвердите, только если хотите использовать эту модель по указанной цене.')
 
     return ExpensiveModelWarning(
         model=model,

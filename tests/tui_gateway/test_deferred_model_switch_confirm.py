@@ -98,8 +98,8 @@ class TestGuardedPickAsksBeforeStashing:
     def test_confirm_message_names_the_guard(self, running_session):
         message = _config_set_model(GUARDED_MODEL)["result"]["confirm_message"]
 
-        assert "CONTRIBUTOR TIER" in message
-        assert "train" in message.lower()
+        assert 'ТАРИФ ИСПОЛЬЗУЕТ ВАШИ ДАННЫЕ' in message
+        assert 'обуч' in message.lower()
 
     def test_reconfirming_queues_the_pick(self, running_session):
         resp = _config_set_model(GUARDED_MODEL, confirm_expensive_model=True)
@@ -174,7 +174,7 @@ class TestHelperContract:
         message = server._pending_switch_selection_warning(GUARDED_MODEL, "")
 
         assert message is not None
-        assert "CONTRIBUTOR TIER" in message
+        assert 'ТАРИФ ИСПОЛЬЗУЕТ ВАШИ ДАННЫЕ' in message
 
     def test_an_explicit_provider_reaches_the_guards(self, monkeypatch):
         """Provider-keyed guards are useless if the provider is dropped here.
