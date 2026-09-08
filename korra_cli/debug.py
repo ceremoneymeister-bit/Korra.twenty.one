@@ -196,27 +196,26 @@ def _best_effort_sweep_expired_pastes() -> None:
 # ---------------------------------------------------------------------------
 
 _PRIVACY_NOTICE = """\
-⚠️  This will upload system info + logs to a PUBLIC paste service.
+⚠️ Системные сведения и журналы будут отправлены в ПУБЛИЧНЫЙ сервис вставок.
 
-Cryptographic secrets (API keys, tokens, passwords) are redacted before
-upload, but the following personal data is NOT redacted and will be public:
-  • Your display name and persistent platform user ID
-  • Verbatim content of your recent messages (prompts, responses, tool output)
-  • Local filesystem paths
-  • Any other PII present in the logs
+Ключи API, токены и пароли скрываются перед отправкой, но следующие личные
+данные не скрываются и станут публичными:
+  • ваше отображаемое имя и постоянный ID пользователя платформы;
+  • точный текст недавних сообщений, ответов и результатов инструментов;
+  • локальные пути файлов;
+  • другие личные данные из журналов.
 
-The resulting URL is public to anyone who has the link. Pastes auto-delete
-after 6 hours, but may be archived by third parties in the meantime.
+Ссылку сможет открыть любой, кто её получит. Вставка удалится автоматически
+через 6 часов, но за это время её могут сохранить сторонние службы.
 
-Use --local to view the report without uploading.
+Чтобы посмотреть отчёт без отправки, используйте --local.
 """
 
 _GATEWAY_PRIVACY_NOTICE = (
-    "⚠️ **Privacy notice:** This uploads system info + recent log tails "
-    "(may contain conversation fragments) to a public paste service. "
-    "Full logs are NOT included from the gateway — use `hermes debug share` "
-    "from the CLI for full log uploads.\n"
-    "Pastes auto-delete after 6 hours."
+    "⚠️ **Конфиденциальность:** системные сведения и последние строки журналов "
+    "будут отправлены в публичный сервис; они могут содержать фрагменты бесед. "
+    "Шлюз не отправляет полные журналы. Для этого используйте `korra debug share` "
+    "в терминале.\nВставки удаляются автоматически через 6 часов."
 )
 
 
@@ -827,18 +826,18 @@ def _confirm_upload(args) -> bool:
         return True
     if not sys.stdin.isatty():
         print(
-            "ERROR: Non-interactive mode requires --yes to confirm upload.\n"
-            "       This prevents accidental exposure of personal data.\n"
-            "       Use --local to view the report without uploading.",
+            "ОШИБКА: для отправки без интерактивного терминала укажите --yes.\n"
+            "Это защищает от случайной публикации личных данных.\n"
+            "Используйте --local, чтобы посмотреть отчёт без отправки.",
             file=sys.stderr,
         )
         sys.exit(1)
     try:
-        answer = input("Upload debug report? [y/N] ").strip().lower()
+        answer = input("Отправить диагностический отчёт? [д/Н] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         answer = ""
-    if answer not in ("y", "yes"):
-        print("Aborted.")
+    if answer not in ("y", "yes", "д", "да"):
+        print("Отменено.")
         return False
     return True
 
@@ -856,7 +855,7 @@ def run_debug_share(args):
         # before any network I/O. Reuses the shared collector so the rendered
         # output matches exactly what would be uploaded.
         _best_effort_sweep_expired_pastes()
-        print("Collecting debug report...")
+        print("Собираю диагностический отчёт…")
         bundle = collect_share_bundle(log_lines=log_lines, redact=redact)
         print(bundle["report"])
         for title, label in (
@@ -880,8 +879,8 @@ def run_debug_share(args):
     print(_PRIVACY_NOTICE)
     if not _confirm_upload(args):
         return
-    print("Collecting debug report...")
-    print("Uploading...")
+    print("Собираю диагностический отчёт…")
+    print("Отправляю…")
 
     try:
         result = build_debug_share(
@@ -890,40 +889,38 @@ def run_debug_share(args):
             redact=redact,
         )
     except RuntimeError as exc:
-        print(f"\nUpload failed: {exc}", file=sys.stderr)
-        print("\nRun `hermes debug share --local` to print the report instead.\n")
+        print(f"\nНе удалось отправить отчёт: {exc}", file=sys.stderr)
+        print("\nЧтобы вывести отчёт локально, выполните `korra debug share --local`.\n")
         sys.exit(1)
 
     # Print results
     label_width = max(len(k) for k in result.urls)
-    print("\nDebug report uploaded:")
+    print("\nДиагностический отчёт отправлен:")
     for label, url in result.urls.items():
         print(f"  {label:<{label_width}}  {url}")
 
     if result.failures:
-        print(f"\n  (failed to upload: {', '.join(result.failures)})")
+        print(f"\n  (не удалось отправить: {', '.join(result.failures)})")
 
     hours = result.auto_delete_seconds // 3600
-    print(f"\n⏱  Pastes will auto-delete in {hours} hours.")
+    print(f"\n⏱ Вставки удалятся автоматически через {hours} ч.")
 
     # Manual delete fallback
-    print("To delete now:  hermes debug delete <url>")
+    print("Удалить сейчас: korra debug delete <адрес>")
 
-    print("\nShare these links with the Korra team for support.")
+    print("\nПередайте эти ссылки команде Korra для поддержки.")
 
 
 _NOUS_PRIVACY_NOTICE = """\
-⚠️  --nous: This uploads your debug bundle to Nous-INTERNAL storage (AWS S3),
-    NOT a public paste service. The following is included:
-  • System info (OS, Python/Hermes version, provider, which API keys are
-    configured — NOT the actual keys)
-  • Full agent.log, gateway.log, and desktop.log (up to 512 KB each — likely
-    contains conversation content, tool outputs, and file paths)
+⚠️ --nous отправит диагностику во ВНУТРЕННЕЕ хранилище Nous (AWS S3),
+   а не в публичный сервис. В пакет входят:
+  • сведения о системе, версиях Python/Korra, провайдере и наличии ключей API,
+    но не сами ключи;
+  • полные agent.log, gateway.log и desktop.log до 512 КБ каждый. В них могут
+    быть тексты бесед, результаты инструментов и пути файлов.
 
-  • The bundle is viewable only by Nous staff (and allowlisted Discord mods)
-    via a Google-login-gated viewer.
-  • It is NOT a public paste — there is no public URL to the contents.
-  • It auto-deletes after 14 days.
+Пакет доступен только сотрудникам Nous и разрешённым модераторам Discord после
+входа через Google. Публичной ссылки на содержимое нет. Пакет удалится через 14 дней.
 """
 
 
@@ -942,10 +939,9 @@ def _run_debug_share_nous(args, *, log_lines: int, redact: bool) -> None:
         return
     if not redact:
         print(
-            "⚠️  --no-redact is set: secrets in your logs will NOT be redacted "
-            "before upload.\n"
+            "⚠️ Указан --no-redact: секреты в журналах НЕ будут скрыты перед отправкой.\n"
         )
-    print("Collecting debug report...")
+    print("Собираю диагностический отчёт…")
     _best_effort_sweep_expired_pastes()
 
     bundle = collect_share_bundle(log_lines=log_lines, redact=redact)
@@ -955,41 +951,40 @@ def _run_debug_share_nous(args, *, log_lines: int, redact: bool) -> None:
         )
     blob = build_nous_bundle(bundle, redact=redact)
 
-    print("Uploading to Nous diagnostics storage...")
+    print("Отправляю в хранилище диагностики Nous…")
     try:
         res = share_to_nous(blob)
     except Exception as exc:
         print(
-            f"\nNous upload failed: {exc}\n"
-            "\nThe Nous diagnostics service may be unavailable or not yet "
-            "provisioned.\n"
-            "Run `hermes debug share --local` to print the report instead, "
-            "or `hermes debug share` to upload to a public paste service.\n",
+            f"\nНе удалось отправить данные в Nous: {exc}\n"
+            "Служба диагностики Nous может быть временно недоступна.\n"
+            "Выполните `korra debug share --local` для локального вывода или "
+            "`korra debug share` для отправки в публичный сервис.\n",
             file=sys.stderr,
         )
         sys.exit(1)
 
     view_url = res.get("viewUrl") or res.get("view_url")
-    print("\nDebug bundle uploaded to Nous (private):")
+    print("\nДиагностический пакет отправлен в Nous; доступ закрытый:")
     if view_url:
-        print(f"  View URL  {view_url}")
+        print(f"  Ссылка для просмотра: {view_url}")
     else:
-        print(f"  (no view URL returned; upload id: {res.get('id', '?')})")
+        print(f"  (ссылка не возвращена; ID загрузки: {res.get('id', '?')})")
 
     expires_at = res.get("expiresAt") or res.get("expires_at")
     if expires_at:
-        print(f"\n⏱  Auto-deletes at {expires_at} (14-day retention).")
+        print(f"\n⏱ Автоматическое удаление: {expires_at}; срок хранения 14 дней.")
     else:
-        print("\n⏱  Auto-deletes after 14 days.")
+        print("\n⏱ Автоматическое удаление через 14 дней.")
 
     print(
-        "\nShare this private link with the Nous team — only Nous staff "
-        "(via Google login) can open it."
+        "\nПередайте закрытую ссылку команде Nous. Открыть её могут только "
+        "сотрудники Nous после входа через Google."
     )
     print(
-        "\nPick up the discussion in:\n"
-        "  GitHub Issues        https://github.com/NousResearch/hermes-agent/issues\n"
-        "  Nous Portal Support  https://portal.nousresearch.com/help\n"
+        "\nПродолжить обсуждение:\n"
+        "  Задачи GitHub         https://github.com/NousResearch/hermes-agent/issues\n"
+        "  Поддержка Nous Portal https://portal.nousresearch.com/help\n"
         "  Discord              https://discord.gg/NousResearch"
     )
 
@@ -998,21 +993,21 @@ def run_debug_delete(args):
     """Delete one or more paste URLs uploaded by /debug."""
     urls = getattr(args, "urls", [])
     if not urls:
-        print("Usage: hermes debug delete <url> [<url> ...]")
-        print("  Deletes paste.rs pastes uploaded by 'hermes debug share'.")
+        print("Использование: korra debug delete <адрес> [<адрес> ...]")
+        print("  Удаляет вставки paste.rs, отправленные через `korra debug share`.")
         return
 
     for url in urls:
         try:
             ok = delete_paste(url)
             if ok:
-                print(f"  ✓ Deleted: {url}")
+                print(f"  ✓ Удалено: {url}")
             else:
-                print(f"  ✗ Failed to delete: {url} (unexpected response)")
+                print(f"  ✗ Не удалось удалить: {url}; неожиданный ответ")
         except ValueError as exc:
             print(f"  ✗ {exc}")
         except Exception as exc:
-            print(f"  ✗ Could not delete {url}: {exc}")
+            print(f"  ✗ Не удалось удалить {url}: {exc}")
 
 
 def run_debug(args):
@@ -1034,19 +1029,19 @@ def run_debug(args):
         run_debug_delete(args)
     else:
         # Default: show help
-        print("Usage: hermes debug <command>")
+        print("Использование: korra debug <команда>")
         print()
-        print("Commands:")
-        print("  share    Upload debug report to a paste service and print URL")
-        print("  delete   Delete a previously uploaded paste")
+        print("Команды:")
+        print("  share    Отправить диагностический отчёт и показать ссылку")
+        print("  delete   Удалить ранее отправленную вставку")
         print()
-        print("Options (share):")
-        print("  --lines N    Number of log lines to include (default: 200)")
-        print("  --expire N   Paste expiry in days (default: 7)")
-        print("  --local      Print report locally instead of uploading")
-        print("  --nous       Upload to Nous-internal storage (private, staff-only,")
-        print("               auto-deletes in 14 days) instead of a public paste")
-        print("  --no-redact  Disable upload-time secret redaction (default: redact)")
+        print("Параметры share:")
+        print("  --lines N    Число строк журнала; по умолчанию 200")
+        print("  --expire N   Срок хранения вставки в днях; по умолчанию 7")
+        print("  --local      Показать отчёт без отправки")
+        print("  --nous       Отправить во внутреннее закрытое хранилище Nous")
+        print("               с автоматическим удалением через 14 дней")
+        print("  --no-redact  Не скрывать секреты перед отправкой")
         print()
-        print("Options (delete):")
-        print("  <url> ...    One or more paste URLs to delete")
+        print("Параметры delete:")
+        print("  <адрес> ...  Одна или несколько ссылок для удаления")

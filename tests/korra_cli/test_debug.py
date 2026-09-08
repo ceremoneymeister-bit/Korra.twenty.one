@@ -384,7 +384,7 @@ class TestRunDebugShare:
             run_debug_share(args)
 
         mock_sweep.assert_called_once()
-        assert "Debug report uploaded" in capsys.readouterr().out
+        assert "Диагностический отчёт отправлен" in capsys.readouterr().out
 
 
 
@@ -577,7 +577,7 @@ class TestRunDebug:
         run_debug(args)
 
         out = capsys.readouterr().out
-        assert "hermes debug" in out
+        assert "korra debug" in out
         assert "share" in out
         assert "delete" in out
 
@@ -788,7 +788,7 @@ class TestRunDebugDelete:
             run_debug_delete(args)
 
         out = capsys.readouterr().out
-        assert "Could not delete" in out
+        assert "Не удалось удалить" in out
 
 
 class TestShareIncludesAutoDelete:
@@ -811,8 +811,8 @@ class TestShareIncludesAutoDelete:
             run_debug_share(args)
 
         out = capsys.readouterr().out
-        assert "PUBLIC paste service" in out
-        assert "NOT redacted" in out
+        assert "ПУБЛИЧНЫЙ сервис" in out
+        assert "не скрываются" in out
 
 
 # ---------------------------------------------------------------------------
@@ -967,7 +967,7 @@ class TestRunDebugShareNous:
             run_debug_share(self._args())
 
         out = capsys.readouterr().out
-        assert "Nous-INTERNAL" in out
+        assert "ВНУТРЕННЕЕ хранилище Nous" in out
         assert "https://support.example.com/diagnostics/id-1" in out
         assert "2026-06-20T00:00:00Z" in out
         # The blob passed to share_to_nous must be gzip bytes.
@@ -985,7 +985,7 @@ class TestRunDebugShareNous:
                 run_debug_share(self._args())
         assert exc.value.code == 1
         err = capsys.readouterr().err
-        assert "Nous upload failed" in err
+        assert "Не удалось отправить данные в Nous" in err
         assert "--local" in err
 
     def test_nous_does_not_touch_pastebin(self, hermes_home):
@@ -1079,8 +1079,8 @@ class TestShareConsentGate:
         assert exc.value.code == 1
         mock_upload.assert_not_called()
         err = capsys.readouterr().err
-        assert "Non-interactive mode requires --yes" in err
-        assert "personal data" in err
+        assert "без интерактивного терминала укажите --yes" in err
+        assert "личных данных" in err
 
 
     def test_local_never_prompts(self, hermes_home, capsys, monkeypatch):
