@@ -468,10 +468,43 @@ def resolve_command(name: str) -> CommandDef | None:
     return _COMMAND_LOOKUP.get(name.lower().lstrip("/"))
 
 
+def display_args_hint(hint: str) -> str:
+    """Translate human placeholders; keep registry hints intact for inference."""
+    labels = {
+        "<what to learn from>": "<материал для изучения>",
+        "[review instructions]": "[что проверить]",
+        "[focus instructions]": "[на что обратить внимание]",
+        "[initial text]": "[начальный текст]",
+        "[description]": "[описание]",
+        "[subcommand]": "[подкоманда]",
+        "[filename]": "[имя файла]",
+        "[profile]": "[профиль]",
+        "[number]": "[номер]",
+        "[reason]": "[причина]",
+        "[notes]": "[заметки]",
+        "[name]": "[название]",
+        "[page]": "[страница]",
+        "[days]": "[дни]",
+        "[task]": "[задача]",
+        "[args]": "[аргументы]",
+        "<question>": "<вопрос>",
+        "<platform>": "<платформа>",
+        "<condition>": "<условие>",
+        "<prompt>": "<запрос>",
+        "<filter>": "<поиск>",
+        "<name>": "<название>",
+        "<path>": "<путь>",
+        "<text>": "<текст>",
+    }
+    for source, label in labels.items():
+        hint = hint.replace(source, label)
+    return hint
+
+
 def _build_description(cmd: CommandDef) -> str:
     """Build a CLI-facing description string including usage hint."""
     if cmd.args_hint:
-        return f"{cmd.description} (usage: /{cmd.name} {cmd.args_hint})"
+        return f'{cmd.description} (пример: /{cmd.name} {display_args_hint(cmd.args_hint)})'
     return cmd.description
 
 
@@ -481,7 +514,7 @@ for _cmd in COMMAND_REGISTRY:
     if not _cmd.gateway_only:
         COMMANDS[f"/{_cmd.name}"] = _build_description(_cmd)
         for _alias in _cmd.aliases:
-            COMMANDS[f"/{_alias}"] = f"{_cmd.description} (alias for /{_cmd.name})"
+            COMMANDS[f"/{_alias}"] = f'{_cmd.description} (другое имя /{_cmd.name})'
 
 # Backwards-compatible categorized dict
 COMMANDS_BY_CATEGORY: dict[str, dict[str, str]] = {}
@@ -672,14 +705,14 @@ def gateway_help_lines() -> list[str]:
     for cmd in COMMAND_REGISTRY:
         if not _is_gateway_available(cmd, overrides):
             continue
-        args = f" {cmd.args_hint}" if cmd.args_hint else ""
+        args = f" {display_args_hint(cmd.args_hint)}" if cmd.args_hint else ""
         alias_parts: list[str] = []
         for a in cmd.aliases:
             # Skip internal aliases like reload_mcp (underscore variant)
             if a.replace("-", "_") == cmd.name.replace("-", "_") and a != cmd.name:
                 continue
             alias_parts.append(f"`/{a}`")
-        alias_note = f" (alias: {', '.join(alias_parts)})" if alias_parts else ""
+        alias_note = f" (также: {', '.join(alias_parts)})" if alias_parts else ""
         lines.append(f"`/{cmd.name}{args}` -- {cmd.description}{alias_note}")
     return lines
 
@@ -710,7 +743,7 @@ def _iter_plugin_command_entries() -> list[tuple[str, str, str]]:
     for name, meta in commands.items():
         if not isinstance(name, str) or not isinstance(meta, dict):
             continue
-        description = str(meta.get("description") or f"Run /{name}")
+        description = str(meta.get("description") or f'Выполнить /{name}')
         args_hint = str(meta.get("args_hint") or "").strip()
         entries.append((name, description, args_hint))
     return entries
@@ -1519,7 +1552,7 @@ def slack_native_slashes() -> list[tuple[str, str, str]]:
     seen: set[str] = set()
 
     # Reserve /hermes as the catch-all top-level command.
-    entries.append(("hermes", "Talk to Korra or run a subcommand", "[subcommand] [args]"))
+    entries.append(("hermes", 'Написать Корре или выполнить подкоманду', display_args_hint("[subcommand] [args]")))
     seen.add("hermes")
 
     def _add(name: str, desc: str, hint: str) -> None:
@@ -1534,7 +1567,7 @@ def slack_native_slashes() -> list[tuple[str, str, str]]:
         if len(entries) >= _SLACK_MAX_SLASH_COMMANDS:
             return
         # Slack description cap is 2000 chars; keep it short.
-        entries.append((slack_name, desc[:140], hint[:100]))
+        entries.append((slack_name, desc[:140], display_args_hint(hint)[:100]))
         seen.add(slack_name)
 
     # Priority pass: pin high-value aliases (e.g. /btw, /bg, /reset) ahead of
@@ -1550,7 +1583,7 @@ def slack_native_slashes() -> list[tuple[str, str, str]]:
     for alias in _SLACK_PRIORITY_ALIASES:
         cmd = _alias_to_cmd.get(alias)
         if cmd is not None:
-            _add(alias, f"Alias for /{cmd.name} — {cmd.description}", cmd.args_hint or "")
+            _add(alias, f'Другое имя /{cmd.name} — {cmd.description}', cmd.args_hint or "")
 
     # First pass: canonical names (so they win slots if we hit the cap).
     for cmd in COMMAND_REGISTRY:
@@ -1565,7 +1598,7 @@ def slack_native_slashes() -> list[tuple[str, str, str]]:
         for alias in cmd.aliases:
             # Skip aliases that only differ from canonical by case/punctuation
             # normalization (already covered by _add dedup).
-            _add(alias, f"Alias for /{cmd.name} — {cmd.description}", cmd.args_hint or "")
+            _add(alias, f'Другое имя /{cmd.name} — {cmd.description}', cmd.args_hint or "")
 
     # Third pass: plugin commands.
     for name, description, args_hint in _iter_plugin_command_entries():
@@ -1591,7 +1624,7 @@ def slack_app_manifest(request_url: str = "https://hermes-agent.local/slack/comm
     for name, desc, usage in slack_native_slashes():
         entry = {
             "command": f"/{name}",
-            "description": desc or f"Run /{name}",
+            "description": desc or f'Выполнить /{name}',
             "should_escape": False,
             "url": request_url,
         }
@@ -1728,7 +1761,7 @@ class SlashCommandCompleter(Completer):
         for cmd, info in self._iter_skill_commands().items():
             if cmd in seen or not cmd.startswith(word_key):
                 continue
-            description = str(info.get("description", "Skill command"))
+            description = str(info.get("description", 'Команда навыка'))
             short_desc = description[:50] + ("..." if len(description) > 50 else "")
             # Exact match: append a trailing space so the dropdown stays
             # visible and the next stacked token can be typed immediately
@@ -2347,7 +2380,7 @@ class SlashCommandCompleter(Completer):
         for cmd, info in self._iter_skill_bundles().items():
             cmd_name = cmd[1:]
             if cmd_name.startswith(word):
-                description = str(info.get("description", "Skill bundle"))
+                description = str(info.get("description", 'Комплект навыков'))
                 short_desc = description[:50] + ("..." if len(description) > 50 else "")
                 skill_count = len(info.get("skills", []))
                 yield Completion(
@@ -2360,7 +2393,7 @@ class SlashCommandCompleter(Completer):
         for cmd, info in self._iter_skill_commands().items():
             cmd_name = cmd[1:]
             if cmd_name.startswith(word):
-                description = str(info.get("description", "Skill command"))
+                description = str(info.get("description", 'Команда навыка'))
                 short_desc = description[:50] + ("..." if len(description) > 50 else "")
                 yield Completion(
                     self._completion_text(cmd_name, word),

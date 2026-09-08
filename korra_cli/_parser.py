@@ -15,6 +15,64 @@ import re
 from functools import lru_cache
 
 
+# argparse already routes its generated prose through gettext callbacks.
+# Translate exact templates before interpolation: option names, choices,
+# supplied values and error semantics are never rewritten.
+_ARGPARSE_RU = {
+    "usage: ": "Использование: ",
+    "positional arguments": "Аргументы",
+    "options": "Параметры",
+    "show this help message and exit": "Показать эту справку и выйти",
+    "show program's version number and exit": "Показать версию и выйти",
+    " (default: %(default)s)": " (по умолчанию: %(default)s)",
+    "%(prog)s: error: %(message)s\n": "%(prog)s: ошибка: %(message)s\n",
+    "argument %(argument_name)s: %(message)s": "параметр %(argument_name)s: %(message)s",
+    "unrecognized arguments: %s": "неизвестные аргументы: %s",
+    "the following arguments are required: %s": "обязательные аргументы: %s",
+    "one of the arguments %s is required": "нужен один из аргументов: %s",
+    "not allowed with argument %s": "нельзя использовать вместе с %s",
+    "expected one argument": "нужно одно значение",
+    "expected at least one argument": "нужно хотя бы одно значение",
+    "expected at most one argument": "допускается не более одного значения",
+    "expected %s argument": "нужно значений: %s",
+    "expected %s arguments": "нужно значений: %s",
+    "invalid %(type)s value: %(value)r": "неверное значение типа %(type)s: %(value)r",
+    "invalid choice: %(value)r (choose from %(choices)s)": "неверный выбор: %(value)r (доступны: %(choices)s)",
+    "ignored explicit argument %r": "лишнее явно заданное значение: %r",
+    "ambiguous option: %(option)s could match %(matches)s": "неоднозначный параметр %(option)s; возможны: %(matches)s",
+    "can't open '%(filename)s': %(error)s": "не удалось открыть «%(filename)s»: %(error)s",
+    "unknown parser %(parser_name)r (choices: %(choices)s)": "неизвестная команда %(parser_name)r (доступны: %(choices)s)",
+    "conflicting option string: %s": "конфликт параметров: %s",
+    "conflicting option strings: %s": "конфликт параметров: %s",
+    "conflicting subparser: %s": "конфликт подкоманд: %s",
+    "conflicting subparser alias: %s": "конфликт псевдонимов подкоманд: %s",
+    "cannot have multiple subparser arguments": "нельзя задать несколько аргументов подкоманд",
+    "cannot merge actions - two groups are named %r": "нельзя объединить действия: две группы называются %r",
+    "dest= is required for options like %r": "для параметров вида %r требуется dest=",
+    "'required' is an invalid argument for positionals": "required недопустим для позиционных аргументов",
+    "invalid conflict_resolution value: %r": "неверное значение conflict_resolution: %r",
+    "invalid option string %(option)r: must start with a character %(prefix_chars)r": "неверный параметр %(option)r: нужен начальный символ из %(prefix_chars)r",
+    "mutually exclusive arguments must be optional": "взаимоисключающие аргументы должны быть необязательными",
+    "unexpected option string: %s": "неожиданный параметр: %s",
+    "argument \"-\" with mode %r": "аргумент «-» с режимом %r",
+    "%r is not callable": "%r не является вызываемым объектом",
+    ".__call__() not defined": ".__call__() не определён",
+}
+
+
+def _argparse_gettext(message):
+    return _ARGPARSE_RU.get(message, message)
+
+
+def _argparse_ngettext(singular, plural, count):
+    message = singular if count == 1 else plural
+    return _argparse_gettext(message)
+
+
+argparse._ = _argparse_gettext
+argparse.ngettext = _argparse_ngettext
+
+
 class _RussianUsageMixin:
     """Localize argparse's generated usage label without changing arguments."""
 
