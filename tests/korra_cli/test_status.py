@@ -41,9 +41,9 @@ def test_show_status_termux_gateway_section_skips_systemctl(monkeypatch, capsys,
     status_mod.show_status(SimpleNamespace(all=False, deep=False))
 
     output = capsys.readouterr().out
-    assert "Manager:      Termux / manual process" in output
-    assert "Start with:   hermes gateway" in output
-    assert "systemd (user)" not in output
+    assert "Управление:   Termux / ручной запуск" in output
+    assert "Запуск:       korra gateway" in output
+    assert "systemd (пользователь)" not in output
 def test_show_status_reports_vercel_backend_contract(monkeypatch, capsys, tmp_path):
     from korra_cli import status as status_mod
     import korra_cli.auth as auth_mod
@@ -65,14 +65,14 @@ def test_show_status_reports_vercel_backend_contract(monkeypatch, capsys, tmp_pa
     status_mod.show_status(SimpleNamespace(all=False, deep=False))
 
     output = capsys.readouterr().out
-    assert "Backend:      vercel_sandbox" in output
-    assert "Runtime:      python3.13" in output
-    assert "Auth:" in output and "OIDC token via VERCEL_OIDC_TOKEN" in output
-    assert "Auth detail:  mode: OIDC" in output
-    assert "Auth detail:  active env: VERCEL_OIDC_TOKEN" in output
+    assert "Среда:        vercel_sandbox" in output
+    assert "Среда запуска: python3.13" in output
+    assert "Вход:" in output and "Токен OIDC из VERCEL_OIDC_TOKEN" in output
+    assert "Подробности входа: режим: OIDC" in output
+    assert "Подробности входа: используется: VERCEL_OIDC_TOKEN" in output
     assert "oidc-token" not in output
-    assert "snapshot filesystem" in output
-    assert "live processes do not survive" in output
+    assert "снимок файлов" in output
+    assert "процессы не сохраняются" in output
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ class TestShowStatusXaiOAuth:
         status_mod.show_status(SimpleNamespace(all=False, deep=False))
         out = capsys.readouterr().out
 
-        assert "Auth file:  /home/u/.hermes/auth.json" in out
+        assert "Файл входа: /home/u/.hermes/auth.json" in out
 
 
     def test_no_auth_store_line_when_field_absent(self, monkeypatch, capsys, tmp_path):
@@ -132,7 +132,7 @@ class TestShowStatusXaiOAuth:
         out = capsys.readouterr().out
 
         xai_section = out.split("xAI OAuth", 1)[1].split("◆", 1)[0]
-        assert "Auth file:" not in xai_section
+        assert "Файл входа:" not in xai_section
 
 
     # ------------------------------------------------------------------
@@ -154,7 +154,7 @@ class TestShowStatusXaiOAuth:
         status_mod.show_status(SimpleNamespace(all=False, deep=False))
         out = capsys.readouterr().out
 
-        assert "◆ Auth Providers" in out
+        assert "◆ Учётные записи провайдеров" in out
 
     def test_import_failure_does_not_break_other_oauth_providers(self, monkeypatch, capsys, tmp_path):
         """Nous/Codex/MiniMax rows must still appear when xAI import fails."""
@@ -183,7 +183,7 @@ class TestShowStatusXaiOAuth:
         status_mod.show_status(SimpleNamespace(all=False, deep=False))
         out = capsys.readouterr().out
 
-        assert "◆ Auth Providers" in out
+        assert "◆ Учётные записи провайдеров" in out
 
     def test_status_function_returns_none_does_not_crash(self, monkeypatch, capsys, tmp_path):
         """get_xai_oauth_auth_status returning None must be handled gracefully."""
@@ -196,7 +196,7 @@ class TestShowStatusXaiOAuth:
         out = capsys.readouterr().out
 
         assert "xAI OAuth" in out
-        assert "not logged in (run: hermes auth add xai-oauth)" in out
+        assert "вход не выполнен (`korra auth add xai-oauth`)" in out
 
 
 def test_show_status_reports_gateway_session_last_activity(monkeypatch, capsys, tmp_path):
@@ -234,6 +234,6 @@ def test_show_status_reports_gateway_session_last_activity(monkeypatch, capsys, 
 
     status_mod.show_status(SimpleNamespace(all=False, deep=False))
     output = capsys.readouterr().out
-    assert "Active:       2 session(s)" in output
-    assert "Last activity:" in output
-    assert "1m ago" in output
+    assert "Активных:     2 бесед" in output
+    assert "Последняя активность:" in output
+    assert "1 мин назад" in output

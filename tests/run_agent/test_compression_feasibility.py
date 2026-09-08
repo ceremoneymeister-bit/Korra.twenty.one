@@ -132,7 +132,7 @@ def test_rejects_aux_below_minimum_context(mock_get_client, mock_ctx_len):
     assert "tiny-aux-model" in err
     assert "32,768" in err
     assert "64,000" in err
-    assert "below the minimum" in err
+    assert "меньше необходимого минимума" in err
 
 
 

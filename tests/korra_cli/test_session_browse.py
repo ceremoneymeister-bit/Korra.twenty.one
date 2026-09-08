@@ -44,7 +44,7 @@ class TestSessionBrowsePicker:
     def test_empty_sessions_returns_none(self, capsys):
         result = _session_browse_picker([])
         assert result is None
-        assert "No sessions found" in capsys.readouterr().out
+        assert "Беседы не найдены" in capsys.readouterr().out
 
 
     def test_fallback_mode_valid_selection(self):
@@ -211,6 +211,6 @@ class TestEdgeCases:
                 _session_browse_picker(sessions)
 
         output = capsys.readouterr().out
-        assert "just now" in output
-        assert "2h ago" in output
-        assert "3d ago" in output
+        assert "только что" in output
+        assert "2 ч назад" in output
+        assert "3 дн назад" in output

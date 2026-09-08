@@ -2496,14 +2496,7 @@ def check_compression_model_feasibility(agent: Any) -> None:
         # content.  Mirrors the main-model rejection pattern.
         if aux_context and aux_context < MINIMUM_CONTEXT_LENGTH:
             raise ValueError(
-                f"Auxiliary compression model {aux_model} has a context "
-                f"window of {aux_context:,} tokens, which is below the "
-                f"minimum {MINIMUM_CONTEXT_LENGTH:,} required by Korra "
-                f"Agent.  Choose a compression model with at least "
-                f"{MINIMUM_CONTEXT_LENGTH // 1000}K context (set "
-                f"auxiliary.compression.model in config.yaml), or set "
-                f"auxiliary.compression.context_length to override the "
-                f"detected value if it is wrong."
+                f"Модель сжатия {aux_model} поддерживает контекст {aux_context:,} токенов — меньше необходимого минимума {MINIMUM_CONTEXT_LENGTH:,}. Выберите модель с контекстом не менее {MINIMUM_CONTEXT_LENGTH // 1000} тысяч токенов через auxiliary.compression.model в config.yaml. Если размер определён неверно, задайте реальное значение в auxiliary.compression.context_length."
             )
 
         threshold = agent.context_compressor.threshold_tokens

@@ -18,13 +18,13 @@ def relative_time(ts) -> str:
         return "?"
     delta = _time.time() - ts
     if delta < 60:
-        return "just now"
+        return "только что"
     if delta < 3600:
-        return f"{int(delta / 60)}m ago"
+        return f"{int(delta / 60)} мин назад"
     if delta < 86400:
-        return f"{int(delta / 3600)}h ago"
+        return f"{int(delta / 3600)} ч назад"
     if delta < 172800:
-        return "yesterday"
+        return "вчера"
     if delta < 604800:
-        return f"{int(delta / 86400)}d ago"
+        return f"{int(delta / 86400)} дн назад"
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")

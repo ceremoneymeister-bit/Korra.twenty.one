@@ -47,8 +47,8 @@ def test_show_status_displays_configured_dict_model_and_provider_label(monkeypat
     status_mod.show_status(SimpleNamespace(all=False, deep=False))
 
     out = capsys.readouterr().out
-    assert "Model:        anthropic/claude-sonnet-4" in out
-    assert "Provider:     Anthropic" in out
+    assert "Модель:       anthropic/claude-sonnet-4" in out
+    assert "Провайдер:    Anthropic" in out
 
 
 def test_show_status_reports_empty_lmstudio_listing_as_reachable(monkeypatch, capsys, tmp_path):
@@ -79,4 +79,4 @@ def test_show_status_reports_empty_lmstudio_listing_as_reachable(monkeypatch, ca
 
     out = capsys.readouterr().out
     assert "LM Studio" in out
-    assert "reachable (0 model(s)) at http://127.0.0.1:1234/v1" in out
+    assert "доступно (моделей: 0), адрес: http://127.0.0.1:1234/v1" in out
