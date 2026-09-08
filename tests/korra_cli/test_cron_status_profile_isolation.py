@@ -42,7 +42,7 @@ class TestCronStatusHeartbeatGuard:
     """Ensure `hermes cron status` correctly warns when the heartbeat file is absent.
 
     Issue #98790 (root cause 2): profiles with no `cron/ticker_heartbeat` fall
-    through to the "✓ Gateway is running" branch even though ticks won't fire.
+    through to the "✓ Шлюз работает" branch even though ticks won't fire.
     """
 
     def test_no_heartbeat_triggers_yellow_warning(self, monkeypatch, capsys):
@@ -58,10 +58,10 @@ class TestCronStatusHeartbeatGuard:
             cron_mod.cron_status()
 
         stdout = capsys.readouterr().out
-        assert "⚠ Gateway is running but the cron ticker has not reported a heartbeat" in stdout
-        assert "Cron jobs will NOT fire" in stdout
+        assert "⚠ Шлюз запущен, но планировщик ещё не сообщил о своей активности" in stdout
+        assert "Задачи не начнутся" in stdout
         # Must NOT show the green ✓
-        assert "✓ Gateway is running" not in stdout
+        assert "✓ Шлюз работает" not in stdout
 
     def test_fresh_heartbeat_shows_green_checkmark(self, monkeypatch, capsys):
         from korra_cli import cron as cron_mod
@@ -75,7 +75,7 @@ class TestCronStatusHeartbeatGuard:
             cron_mod.cron_status()
 
         stdout = capsys.readouterr().out
-        assert "✓ Gateway is running — cron jobs will fire automatically" in stdout
+        assert "✓ Шлюз работает. Задачи будут запускаться автоматически." in stdout
         assert "⚠" not in stdout
 
 
@@ -178,8 +178,8 @@ class TestCronStatusMissingHeartbeat:
             cron_cli.cron_status()
 
         text = out.getvalue()
-        assert "has not reported a heartbeat" in text or "no heartbeat" in text.lower()
-        assert "will fire" not in text.lower() or "will NOT fire" in text
+        assert "ещё не сообщил о своей активности" in text or "не сообщил о своей активности" in text.lower()
+        assert "будут запускаться" not in text.lower() or "Задачи не начнутся" in text
 
     def test_missing_heartbeat_green_when_gateway_just_started(self, tmp_cron_dir, capsys, monkeypatch):
         import io
@@ -208,5 +208,5 @@ class TestCronStatusMissingHeartbeat:
             cron_cli.cron_status()
 
         text = out.getvalue()
-        assert "will fire" in text or "running" in text
-        assert "never ticked" not in text.lower()
+        assert "будут запускаться" in text or "запущен" in text
+        assert "ни одной проверки" not in text.lower()

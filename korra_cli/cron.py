@@ -27,6 +27,22 @@ from cron.lifecycle_guard import (  # noqa: F401  (re-exported for terminal_tool
 )
 
 
+def _status_label(value) -> str:
+    """Translate display text without modifying scheduler state or API values."""
+    raw = str(value or "?")
+    return {
+        "ok": "успешно", "success": "успешно", "succeeded": "успешно",
+        "error": "ошибка", "failed": "ошибка", "failure": "ошибка",
+        "running": "выполняется", "queued": "в очереди", "pending": "ожидает",
+        "claimed": "принята к выполнению", "completed": "завершена",
+        "cancelled": "отменена", "interrupted": "прервана",
+        "timeout": "время ожидания истекло", "timed_out": "время ожидания истекло",
+        "open": "открыто", "resolved": "устранено", "closed": "закрыто",
+        "acknowledged": "подтверждено",
+        "detected": "обнаружено", "alerted": "уведомление отправлено",
+    }.get(raw, raw)
+
+
 def _normalize_skills(single_skill=None, skills: Optional[Iterable[str]] = None) -> Optional[List[str]]:
     if skills is None:
         if single_skill is None:
@@ -127,10 +143,10 @@ def _warn_if_gateway_not_running() -> None:
     if _builtin_gateway_liveness() is not False:
         return
 
-    print(color("  ⚠  Gateway is not running — jobs won't fire automatically.", Colors.YELLOW))
-    print(color("     Start it with: hermes gateway install", Colors.DIM))
-    print(color("                    sudo hermes gateway install --system  # Linux servers", Colors.DIM))
-    print(color("     Check status:  hermes cron status", Colors.DIM))
+    print(color('  ⚠ Шлюз не запущен. Задачи не будут выполняться автоматически.', Colors.YELLOW))
+    print(color('     Установить службу: korra gateway install', Colors.DIM))
+    print(color('                        sudo korra gateway install --system  # сервер Linux', Colors.DIM))
+    print(color('     Проверить состояние: korra cron status', Colors.DIM))
 
 
 def cron_list(show_all: bool = False):
@@ -140,13 +156,13 @@ def cron_list(show_all: bool = False):
     jobs = list_jobs(include_disabled=show_all)
 
     if not jobs:
-        print(color("No scheduled jobs.", Colors.DIM))
-        print(color("Create one with 'hermes cron create ...' or the /cron command in chat.", Colors.DIM))
+        print(color('Задач по расписанию нет.', Colors.DIM))
+        print(color("Создайте задачу через 'korra cron create ...' или команду /cron в чате.", Colors.DIM))
         return
 
     print()
     print(color("┌─────────────────────────────────────────────────────────────────────────┐", Colors.CYAN))
-    print(color("│                         Scheduled Jobs                                  │", Colors.CYAN))
+    print(color('│                         Задачи по расписанию                            │', Colors.CYAN))
     print(color("└─────────────────────────────────────────────────────────────────────────┘", Colors.CYAN))
     print()
 
@@ -154,7 +170,7 @@ def cron_list(show_all: bool = False):
 
     for job in jobs:
         job_id = job.get("id", "?")
-        name = job.get("name", "(unnamed)")
+        name = job.get("name", '(без названия)')
         schedule = job.get("schedule_display", job.get("schedule", {}).get("value", "?"))
         # Derive from the scheduler-honoured flag — never show [paused] when
         # enabled=true (half-paused contradiction must not look frozen).
@@ -180,66 +196,64 @@ def cron_list(show_all: bool = False):
 
         skills = job.get("skills") or ([job["skill"]] if job.get("skill") else [])
         if state == "paused":
-            status = color("[paused]", Colors.YELLOW)
+            status = color('[на паузе]', Colors.YELLOW)
         elif state == "completed":
-            status = color("[completed]", Colors.BLUE)
+            status = color('[завершена]', Colors.BLUE)
         elif job.get("enabled", True):
-            status = color("[active]", Colors.GREEN)
+            status = color('[активна]', Colors.GREEN)
         else:
-            status = color("[disabled]", Colors.RED)
+            status = color('[выключена]', Colors.RED)
 
         print(f"  {color(job_id, Colors.YELLOW)} {status}")
-        print(f"    Name:      {name}")
-        print(f"    Schedule:  {schedule}")
-        print(f"    Repeat:    {repeat_str}")
-        print(f"    Next run:  {next_run}")
-        print(f"    Deliver:   {deliver_str}")
+        print(f'    Название:   {name}')
+        print(f'    Расписание: {schedule}')
+        print(f'    Повторы:    {repeat_str}')
+        print(f'    Следующий запуск: {next_run}')
+        print(f'    Доставка:   {deliver_str}')
         if skills:
-            print(f"    Skills:    {', '.join(skills)}")
+            print(f"    Навыки:     {', '.join(skills)}")
         script = job.get("script")
         if script:
-            print(f"    Script:    {script}")
+            print(f'    Скрипт:     {script}')
         monitor_source = job.get("monitor_script") or job.get("monitor_url")
         if monitor_source:
-            print(f"    Monitor:   {monitor_source} (agent runs only on output change)")
+            print(f'    Наблюдение: {monitor_source} (агент запускается только при изменении результата)')
             mon_state = job.get("monitor_state") or {}
             if mon_state.get("last_changed_at"):
-                print(f"    Changed:   {mon_state['last_changed_at']}")
+                print(f"    Изменено:   {mon_state['last_changed_at']}")
         if job.get("no_agent"):
-            print(f"    Mode:      {color('no-agent', Colors.DIM)} (script stdout delivered directly)")
+            print(f"    Режим:      {color('no-agent', Colors.DIM)} (результат скрипта доставляется напрямую)")
         workdir = job.get("workdir")
         if workdir:
-            print(f"    Workdir:   {workdir}")
+            print(f'    Рабочая папка: {workdir}')
 
         # Execution history
         last_status = job.get("last_status")
         if last_status:
             last_run = job.get("last_run_at", "?")
             if last_status == "ok":
-                status_display = color("ok", Colors.GREEN)
+                status_display = color("успешно", Colors.GREEN)
             else:
-                status_display = color(f"{last_status}: {job.get('last_error', '?')}", Colors.RED)
+                status_display = color(f"{_status_label(last_status)}: {job.get('last_error', '?')}", Colors.RED)
                 streak = int(job.get("failure_streak") or 0)
                 if streak >= 2:
-                    status_display += color(f"  ({streak} failures in a row)", Colors.RED)
-            print(f"    Last run:  {last_run}  {status_display}")
+                    status_display += color(f'  (ошибок подряд: {streak})', Colors.RED)
+            print(f'    Последний запуск: {last_run}  {status_display}')
 
         latest_execution = job.get("latest_execution")
         if latest_execution:
             print(
-                f"    Execution: {latest_execution.get('status', '?')}  "
-                f"{latest_execution.get('id', '?')}"
+                f"    Выполнение: {_status_label(latest_execution.get('status', '?'))}  {latest_execution.get('id', '?')}"
             )
 
         delivery_err = job.get("last_delivery_error")
         if delivery_err:
-            print(f"    {color('⚠ Delivery failed:', Colors.YELLOW)} {delivery_err}")
+            print(f"    {color('⚠ Ошибка доставки:', Colors.YELLOW)} {delivery_err}")
 
         fire_err = job.get("last_fire_error")
         if isinstance(fire_err, dict) and fire_err.get("detail"):
             print(
-                f"    {color('⚠ Missed scheduled fire:', Colors.RED)} "
-                f"{fire_err.get('at', '?')}  {fire_err['detail']}"
+                f"    {color('⚠ Пропущен запуск:', Colors.RED)} {fire_err.get('at', '?')}  {fire_err['detail']}"
             )
 
         print()
@@ -258,8 +272,7 @@ def cron_tick():
         # records one, report cleanly instead of a traceback.
         print(color(f"✗ {exc}", Colors.YELLOW))
         print(
-            "  A fresher gateway process owns the runtime lock and will fire "
-            "due jobs; this stale process yielded its tick."
+            '  Расписанием управляет более новый процесс шлюза. Этот процесс уступил ему запуск задач.'
         )
         return 1
     except OSError as exc:
@@ -267,8 +280,8 @@ def cron_tick():
         # EACCES on open, ...) instead of swallowing them as contention
         # (#87644). For the one-shot CLI surface, report cleanly instead of
         # dumping a traceback; the gateway ticker loop handles its own retry.
-        print(color(f"✗ Cron tick failed: {exc}", Colors.RED))
-        print("  Check `hermes cron status` and the gateway log for details.")
+        print(color(f'✗ Ошибка проверки расписания: {exc}', Colors.RED))
+        print('  Проверьте `korra cron status` и журнал шлюза.')
         return 1
     return 0
 
@@ -279,13 +292,11 @@ def cron_runs(job_id: Optional[str] = None, limit: int = 20):
 
     records = list_executions(job_id=job_id, limit=limit)
     if not records:
-        print("No cron execution attempts recorded.")
+        print('Попытки запуска задач пока не записаны.')
         return
     for record in records:
         print(
-            f"{record.get('id', '?')}  {record.get('status', '?'):<9}  "
-            f"job={record.get('job_id', '?')}  source={record.get('source', '?')}  "
-            f"{record.get('claimed_at', '?')}"
+            f"{record.get('id', '?')}  {_status_label(record.get('status', '?')):<9}  задача={record.get('job_id', '?')}  источник={record.get('source', '?')}  {record.get('claimed_at', '?')}"
         )
         if record.get("error"):
             print(f"    {record['error']}")
@@ -314,7 +325,7 @@ def cron_incidents(args) -> int:
         if not incident_id:
             print(
                 color(
-                    "✗ Incident ID required: hermes cron incidents ack <incident_id>",
+                    '✗ Укажите ID события: korra cron incidents ack <incident_id>',
                     Colors.RED,
                 )
             )
@@ -322,14 +333,14 @@ def cron_incidents(args) -> int:
         if ack_incident(incident_id):
             print(
                 color(
-                    f"✓ Incident {incident_id} acknowledged (closed).",
+                    f'✓ Событие {incident_id} подтверждено и закрыто.',
                     Colors.GREEN,
                 )
             )
         else:
             print(
                 color(
-                    f"Incident {incident_id} not found or already closed.",
+                    f'Событие {incident_id} не найдено или уже закрыто.',
                     Colors.YELLOW,
                 )
             )
@@ -338,9 +349,9 @@ def cron_incidents(args) -> int:
     state = getattr(args, "state", None)
     incidents = list_incidents(state=state)
     if not incidents:
-        print(color("No cron failure incidents recorded.", Colors.DIM))
+        print(color('Ошибок задач по расписанию не зарегистрировано.', Colors.DIM))
         if state:
-            print(color(f"  (filtered by state '{state}')", Colors.DIM))
+            print(color(f"  (фильтр состояния: '{state}')", Colors.DIM))
         return 0
 
     print()
@@ -352,7 +363,7 @@ def cron_incidents(args) -> int:
     )
     print(
         color(
-            "│                         Cron Failure Incidents                          │",
+            '│                         Ошибки задач по расписанию                       │',
             Colors.CYAN,
         )
     )
@@ -365,24 +376,23 @@ def cron_incidents(args) -> int:
     print()
     for inc in incidents:
         state_display = color(
-            inc["state"], _INCIDENT_STATE_COLORS.get(inc["state"], Colors.DIM)
+            _status_label(inc["state"]), _INCIDENT_STATE_COLORS.get(inc["state"], Colors.DIM)
         )
         print(f"  {color(inc['id'], Colors.YELLOW)}  {state_display}")
-        print(f"    Job:        {inc['job_id']}")
-        print(f"    Type:       {inc.get('failure_type', 'unknown')}")
-        print(f"    First seen: {inc.get('first_seen_at', '?')}")
-        print(f"    Last seen:  {inc.get('last_seen_at', '?')}")
+        print(f"    Задача:         {inc['job_id']}")
+        print(f"    Тип:            {inc.get('failure_type', 'неизвестно')}")
+        print(f"    Впервые:        {inc.get('first_seen_at', '?')}")
+        print(f"    Последний раз:  {inc.get('last_seen_at', '?')}")
         error_text = re.sub(r"\s+", " ", inc.get("error") or "").strip()
         if len(error_text) > 160:
             error_text = error_text[:157].rstrip() + "..."
-        print(f"    Error:      {error_text}")
+        print(f'    Ошибка:         {error_text}')
         if inc.get("output_file"):
-            print(f"    Output:     {inc['output_file']}")
+            print(f"    Файл результата: {inc['output_file']}")
         print()
     print(
         color(
-            f"  {len(incidents)} incident(s)  |  ack one with: "
-            "hermes cron incidents ack <id>",
+            f'  Событий: {len(incidents)}. Закрыть: korra cron incidents ack <ID>',
             Colors.DIM,
         )
     )
@@ -406,13 +416,11 @@ def cron_status():
         # healthy Chronos instance. Report the provider instead and skip the
         # ticker-liveness heuristics entirely.
         print(color(
-            f"✓ Cron provider: {provider} — jobs fire via the managed scheduler, "
-            "not the in-process ticker.",
+            f'✓ Планировщик: {provider}. Задачи запускаются внешним сервисом.',
             Colors.GREEN,
         ))
         print(color(
-            "  (No ticker heartbeat is expected for an external provider; "
-            "due jobs are delivered by an authenticated webhook.)",
+            '  Внешний планировщик отправляет задачи через защищённый вебхук; локальный сигнал активности ему не нужен.',
             Colors.DIM,
         ))
         print()
@@ -466,30 +474,28 @@ def cron_status():
             # - Gateway was started moments ago (heartbeat is written after startup),
             # - Or a configuration issue is blocking the ticker from starting at all.
             print(color(
-                "⚠ Gateway is running but the cron ticker has not reported a heartbeat.",
+                '⚠ Шлюз запущен, но планировщик ещё не сообщил о своей активности.',
                 Colors.YELLOW,
             ))
             if pids:
                 print(f"  PID: {', '.join(map(str, pids))}")
-            print("  Cron jobs will NOT fire until the ticker writes its first heartbeat.")
-            print("  If the gateway just started, wait ~60s and re-run `hermes cron status`.")
-            print("  If heartbeat never appears, restart: hermes gateway restart")
+            print('  Задачи не начнутся, пока планировщик не подтвердит готовность.')
+            print('  Если шлюз только запущен, подождите около минуты и повторите `korra cron status`.')
+            print('  Если сигнал активности не появится, выполните: korra gateway restart')
         elif hb_age > STALE_AFTER:
             # No heartbeat at all → the ticker thread is gone.
             print(color(
-                "⚠ Gateway is running but the cron ticker looks STALLED — "
-                f"no heartbeat for {int(hb_age)}s (expected every ~60s).",
+                f'⚠ Шлюз запущен, но планировщик не отвечает уже {int(hb_age)} с. Обычно он сообщает о себе раз в минуту.',
                 Colors.YELLOW,
             ))
             if pids:
                 print(f"  PID: {', '.join(map(str, pids))}")
-            print("  Cron jobs may NOT be firing. Restart: hermes gateway restart")
+            print('  Задачи могут не выполняться. Перезапустите шлюз: korra gateway restart')
         elif ok_age is not None and ok_age > STALE_AFTER:
             # Loop is alive (fresh heartbeat) but no tick has SUCCEEDED in a
             # long time → ticks are failing every iteration.
             print(color(
-                "⚠ Gateway and cron ticker are running, but no tick has "
-                f"succeeded in {int(ok_age)}s — ticks may be failing.",
+                f'⚠ Шлюз и планировщик работают, но успешных проверок расписания нет уже {int(ok_age)} с.',
                 Colors.YELLOW,
             ))
             if pids:
@@ -501,37 +507,31 @@ def cron_status():
                 # uid for ~14h in the field (#68483), or fd exhaustion
                 # (EMFILE) that used to stall the scheduler invisibly
                 # (#87644).
-                print(color(f"  Last tick error: {last_error}", Colors.RED))
+                print(color(f'  Последняя ошибка планировщика: {last_error}', Colors.RED))
                 if "Permission denied" in last_error:
                     print(color(
-                        "  Hint: jobs.json may be owned by another user "
-                        "(e.g. rewritten by a root `docker exec hermes "
-                        "hermes cron ...`). Fix ownership to match the "
-                        "gateway user, and prefer `docker exec -u <uid>:<gid>`.",
+                        '  Возможно, jobs.json принадлежит другому пользователю после команды docker exec от root. Исправьте владельца файла на пользователя шлюза. В дальнейшем используйте docker exec -u <uid>:<gid>.',
                         Colors.YELLOW,
                     ))
                 elif _cron_is_fd_exhaustion_text(last_error):
                     print(color(
-                        "  Hint: the ticker hit file-descriptor exhaustion "
-                        "(EMFILE). The scheduler now retries with backoff and "
-                        "attempts fd reclamation, but if the leak persists, "
-                        "restart the gateway to recover scheduling.",
+                        '  Планировщику не хватило файловых дескрипторов (EMFILE). Он повторяет попытки и освобождает ресурсы. Если проблема остаётся, перезапустите шлюз.',
                         Colors.YELLOW,
                     ))
-            print("  Check the gateway log for 'Cron tick error'.")
+            print("  В журнале шлюза найдите 'Cron tick error'.")
         else:
-            print(color("✓ Gateway is running — cron jobs will fire automatically", Colors.GREEN))
+            print(color('✓ Шлюз работает. Задачи будут запускаться автоматически.', Colors.GREEN))
             if pids:
                 print(f"  PID: {', '.join(map(str, pids))}")
             if hb_age is not None:
-                print(f"  Ticker heartbeat: {int(hb_age)}s ago")
+                print(f'  Планировщик сообщил об активности {int(hb_age)} с назад')
     else:
-        print(color("✗ Gateway is not running — cron jobs will NOT fire", Colors.RED))
+        print(color('✗ Шлюз не запущен. Задачи не выполняются.', Colors.RED))
         print()
-        print("  To enable automatic execution:")
-        print("    hermes gateway install    # Install as a user service")
-        print("    sudo hermes gateway install --system  # Linux servers: boot-time system service")
-        print("    hermes gateway            # Or run in foreground")
+        print('  Чтобы включить автоматический запуск:')
+        print('    korra gateway install    # служба пользователя')
+        print('    sudo korra gateway install --system  # системная служба Linux')
+        print('    korra gateway run        # запуск в текущем терминале')
 
     print()
 
@@ -545,11 +545,11 @@ def _print_active_jobs_summary(jobs) -> None:
     path (built-in ticker AND external provider)."""
     if jobs:
         next_runs = [j.get("next_run_at") for j in jobs if j.get("next_run_at")]
-        print(f"  {len(jobs)} active job(s)")
+        print(f'  Активных задач: {len(jobs)}')
         if next_runs:
-            print(f"  Next run: {min(next_runs)}")
+            print(f'  Следующий запуск: {min(next_runs)}')
     else:
-        print("  No active jobs")
+        print('  Активных задач нет')
 
 
 def _scripts_dir_for_cron() -> Path:
@@ -573,12 +573,12 @@ def _script_health_issue(script: str) -> Optional[str]:
     try:
         path.relative_to(scripts_dir)
     except ValueError:
-        return f"script resolves outside HERMES_HOME/scripts: {script!r}"
+        return f'скрипт находится вне папки scripts профиля Korra: {script!r}'
 
     if not path.exists():
-        return f"script not found: {path}"
+        return f'скрипт не найден: {path}'
     if not path.is_file():
-        return f"script path is not a file: {path}"
+        return f'путь к скрипту не является файлом: {path}'
     return None
 
 
@@ -596,15 +596,15 @@ def _next_run_overdue_issue(next_run: str) -> Optional[str]:
     try:
         dt = datetime.fromisoformat(next_run.replace("Z", "+00:00"))
     except ValueError:
-        return f"next_run_at is not a valid timestamp: {next_run!r}"
+        return f'неверное время next_run_at: {next_run!r}'
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     overdue_s = (datetime.now(timezone.utc) - dt).total_seconds()
     if overdue_s > _OVERDUE_GRACE_SECONDS:
         hours = overdue_s / 3600
         if hours >= 1:
-            return f"next_run_at is {hours:.1f}h overdue — job is not firing (is the scheduler running?)"
-        return f"next_run_at is {overdue_s / 60:.0f}m overdue — job is not firing (is the scheduler running?)"
+            return f'запуск просрочен на {hours:.1f} ч; задача не запускается. Проверьте планировщик'
+        return f'запуск просрочен на {overdue_s / 60:.0f} мин; задача не запускается. Проверьте планировщик'
     return None
 
 
@@ -613,17 +613,17 @@ def _cron_doctor_issues_for_job(job: Dict[str, Any]) -> List[str]:
 
     last_status = str(job.get("last_status") or "").strip().lower()
     if last_status and last_status != "ok":
-        err = str(job.get("last_error") or "unknown error").strip()
-        issues.append(f"last run failed: {err}")
+        err = str(job.get("last_error") or 'неизвестная ошибка').strip()
+        issues.append(f'последний запуск завершился с ошибкой: {err}')
 
     delivery_err = str(job.get("last_delivery_error") or "").strip()
     if delivery_err:
-        issues.append(f"last delivery failed: {delivery_err}")
+        issues.append(f'последняя доставка не удалась: {delivery_err}')
 
     if job.get("enabled", True) and job.get("state") not in {"paused", "completed"}:
         next_run = str(job.get("next_run_at") or "").strip()
         if not next_run:
-            issues.append("active job has no next_run_at")
+            issues.append('у активной задачи не задан следующий запуск (next_run_at)')
         else:
             overdue = _next_run_overdue_issue(next_run)
             if overdue:
@@ -631,7 +631,7 @@ def _cron_doctor_issues_for_job(job: Dict[str, Any]) -> List[str]:
 
     script = str(job.get("script") or "").strip()
     if job.get("no_agent") and not script:
-        issues.append("no-agent job has no script")
+        issues.append('у задачи без агента не задан скрипт')
     if script:
         script_issue = _script_health_issue(script)
         if script_issue:
@@ -639,7 +639,7 @@ def _cron_doctor_issues_for_job(job: Dict[str, Any]) -> List[str]:
 
     workdir = str(job.get("workdir") or "").strip()
     if workdir and not Path(workdir).expanduser().exists():
-        issues.append(f"workdir not found: {workdir}")
+        issues.append(f'рабочая папка не найдена: {workdir}')
 
     return issues
 
@@ -656,24 +656,24 @@ def cron_doctor() -> int:
             findings.append((job, issues))
 
     if not findings:
-        print(color("✓ Cron doctor found no issues", Colors.GREEN))
+        print(color('✓ Проверка расписания не обнаружила проблем.', Colors.GREEN))
         if jobs:
-            print(color(f"  Checked {len(jobs)} active job(s).", Colors.DIM))
+            print(color(f'  Проверено активных задач: {len(jobs)}.', Colors.DIM))
         else:
-            print(color("  No active jobs configured.", Colors.DIM))
+            print(color('  Активные задачи не настроены.', Colors.DIM))
         return 0
 
     issue_count = sum(len(issues) for _, issues in findings)
-    print(color(f"Cron doctor found {issue_count} issue(s) across {len(findings)} job(s):", Colors.YELLOW))
+    print(color(f'Проверка нашла проблем: {issue_count}; затронуто задач: {len(findings)}.', Colors.YELLOW))
     print()
     for job, issues in findings:
         job_id = job.get("id", "?")
-        name = job.get("name", "(unnamed)")
+        name = job.get("name", '(без названия)')
         print(f"  {color(job_id, Colors.YELLOW)} {name}")
         for issue in issues:
             print(f"    - {issue}")
     print()
-    print(color("Next: fix the listed job config, then run `hermes cron doctor` again.", Colors.DIM))
+    print(color('Исправьте настройки перечисленных задач и повторите `korra cron doctor`.', Colors.DIM))
     return 1
 
 
@@ -704,27 +704,27 @@ def cron_create(args):
         reasoning_effort=getattr(args, "reasoning_effort", None),
     )
     if not result.get("success"):
-        print(color(f"Failed to create job: {result.get('error', 'unknown error')}", Colors.RED))
+        print(color(f"Не удалось создать задачу: {result.get('error', 'неизвестная ошибка')}", Colors.RED))
         return 1
-    print(color(f"Created job: {result['job_id']}", Colors.GREEN))
-    print(f"  Name: {result['name']}")
-    print(f"  Schedule: {result['schedule']}")
+    print(color(f"Задача создана: {result['job_id']}", Colors.GREEN))
+    print(f"  Название: {result['name']}")
+    print(f"  Расписание: {result['schedule']}")
     if result.get("skills"):
-        print(f"  Skills: {', '.join(result['skills'])}")
+        print(f"  Навыки: {', '.join(result['skills'])}")
     job_data = result.get("job", {})
     if job_data.get("script"):
-        print(f"  Script: {job_data['script']}")
+        print(f"  Скрипт: {job_data['script']}")
     if job_data.get("monitor_script"):
-        print(f"  Monitor: {job_data['monitor_script']} (agent runs only on output change)")
+        print(f"  Наблюдение: {job_data['monitor_script']} (агент запускается при изменении результата)")
     if job_data.get("monitor_url"):
-        print(f"  Monitor: {job_data['monitor_url']} (agent runs only on output change)")
+        print(f"  Наблюдение: {job_data['monitor_url']} (агент запускается при изменении результата)")
     if job_data.get("no_agent"):
-        print("  Mode: no-agent (script stdout delivered directly)")
+        print('  Режим: no-agent (результат скрипта доставляется напрямую)')
     if job_data.get("continuity"):
-        print("  Continuity: on (each run sees the previous run's output)")
+        print('  Продолжение включено: каждый запуск получает результат предыдущего.')
     if job_data.get("workdir"):
-        print(f"  Workdir: {job_data['workdir']}")
-    print(f"  Next run: {result['next_run_at']}")
+        print(f"  Рабочая папка: {job_data['workdir']}")
+    print(f"  Следующий запуск: {result['next_run_at']}")
     _warn_if_gateway_not_running()
     return 0
 
@@ -737,10 +737,10 @@ def cron_edit(args):
     except AmbiguousJobReference as exc:
         print(color(str(exc), Colors.RED))
         for m in exc.matches:
-            print(f"  {m['id']}  (name: {m.get('name')!r})")
+            print(f"  {m['id']}  (название: {m.get('name')!r})")
         return 1
     if not job:
-        print(color(f"Job not found: {args.job_id}", Colors.RED))
+        print(color(f'Задача не найдена: {args.job_id}', Colors.RED))
         return 1
 
     existing_skills = list(job.get("skills") or ([] if not job.get("skill") else [job.get("skill")]))
@@ -779,29 +779,29 @@ def cron_edit(args):
         reasoning_effort=getattr(args, "reasoning_effort", None),
     )
     if not result.get("success"):
-        print(color(f"Failed to update job: {result.get('error', 'unknown error')}", Colors.RED))
+        print(color(f"Не удалось обновить задачу: {result.get('error', 'неизвестная ошибка')}", Colors.RED))
         return 1
 
     updated = result["job"]
-    print(color(f"Updated job: {updated['job_id']}", Colors.GREEN))
-    print(f"  Name: {updated['name']}")
-    print(f"  Schedule: {updated['schedule']}")
+    print(color(f"Задача обновлена: {updated['job_id']}", Colors.GREEN))
+    print(f"  Название: {updated['name']}")
+    print(f"  Расписание: {updated['schedule']}")
     if updated.get("skills"):
-        print(f"  Skills: {', '.join(updated['skills'])}")
+        print(f"  Навыки: {', '.join(updated['skills'])}")
     else:
-        print("  Skills: none")
+        print('  Навыки: нет')
     if updated.get("script"):
-        print(f"  Script: {updated['script']}")
+        print(f"  Скрипт: {updated['script']}")
     if updated.get("monitor_script"):
-        print(f"  Monitor: {updated['monitor_script']} (agent runs only on output change)")
+        print(f"  Наблюдение: {updated['monitor_script']} (агент запускается при изменении результата)")
     if updated.get("monitor_url"):
-        print(f"  Monitor: {updated['monitor_url']} (agent runs only on output change)")
+        print(f"  Наблюдение: {updated['monitor_url']} (агент запускается при изменении результата)")
     if updated.get("no_agent"):
-        print("  Mode: no-agent (script stdout delivered directly)")
+        print('  Режим: no-agent (результат скрипта доставляется напрямую)')
     if updated.get("continuity"):
-        print("  Continuity: on (each run sees the previous run's output)")
+        print('  Продолжение включено: каждый запуск получает результат предыдущего.')
     if updated.get("workdir"):
-        print(f"  Workdir: {updated['workdir']}")
+        print(f"  Рабочая папка: {updated['workdir']}")
     return 0
 
 
@@ -833,12 +833,12 @@ def _job_action(action: str, job_id: str, success_verb: str) -> int:
         if _stateless_reset is not None:
             _stateless_reset()
     if not result.get("success"):
-        print(color(f"Failed to {action} job: {result.get('error', 'unknown error')}", Colors.RED))
+        print(color(f"Не удалось выполнить действие {action} с задачей: {result.get('error', 'неизвестная ошибка')}", Colors.RED))
         return 1
     job = result.get("job") or result.get("removed_job") or {}
-    print(color(f"{success_verb} job: {job.get('name', job_id)} ({job_id})", Colors.GREEN))
+    print(color(f"{success_verb}: {job.get('name', job_id)} ({job_id})", Colors.GREEN))
     if action in {"resume", "run"} and result.get("job", {}).get("next_run_at"):
-        print(f"  Next run: {result['job']['next_run_at']}")
+        print(f"  Следующий запуск: {result['job']['next_run_at']}")
     if action == "run":
         job = result.get("job", {})
         # A manual run can be dispatched to the gateway daemon's background
@@ -852,16 +852,16 @@ def _job_action(action: str, job_id: str, success_verb: str) -> int:
         delegation_id = job.get("delegation_id")
         if job.get("execution_mode") == "background" or delegation_id:
             if delegation_id:
-                print(f"  Running in background (delegation {delegation_id}).")
+                print(f'  Выполняется в фоне (поручение {delegation_id}).')
             else:
-                print("  Running in background.")
+                print('  Выполняется в фоне.')
         elif job.get("executed"):
             outcome = "succeeded" if job.get("execution_success") else "failed"
-            print(f"  Ran now: {outcome}.")
+            print(f'  Запущено сейчас: {_status_label(outcome)}.')
         elif job.get("execution_skipped"):
             print(f"  {job['execution_skipped']}")
         else:
-            print("  It will run on the next scheduler tick.")
+            print('  Запуск произойдёт при ближайшей проверке расписания.')
     return 0
 
 
@@ -869,22 +869,22 @@ def cron_resume(args) -> int:
     """Resume a paused job or explicitly re-arm a completed one-shot."""
     if bool(getattr(args, "run_at", None)) == bool(getattr(args, "run_now", False)):
         if getattr(args, "run_at", None) or getattr(args, "run_now", False):
-            print(color("Use exactly one of --at or --run-now.", Colors.RED))
+            print(color('Укажите только один вариант: --at или --run-now.', Colors.RED))
             return 1
-        return _job_action("resume", args.job_id, "Resumed")
+        return _job_action("resume", args.job_id, 'Задача возобновлена')
     from cron.jobs import AmbiguousJobReference, _hermes_now, rearm_oneshot
 
     run_at = _hermes_now().isoformat() if args.run_now else args.run_at
     try:
         job = rearm_oneshot(args.job_id, run_at)
     except (AmbiguousJobReference, ValueError) as exc:
-        print(color(f"Failed to re-arm job: {exc}", Colors.RED))
+        print(color(f'Не удалось назначить задачу заново: {exc}', Colors.RED))
         return 1
     if not job:
-        print(color(f"Job not found: {args.job_id}", Colors.RED))
+        print(color(f'Задача не найдена: {args.job_id}', Colors.RED))
         return 1
-    print(color(f"Re-armed job: {job.get('name', args.job_id)} ({args.job_id})", Colors.GREEN))
-    print(f"  Next run: {job.get('next_run_at')}")
+    print(color(f"Задача назначена заново: {job.get('name', args.job_id)} ({args.job_id})", Colors.GREEN))
+    print(f"  Следующий запуск: {job.get('next_run_at')}")
     return 0
 
 
@@ -904,50 +904,50 @@ def cron_notepad(args) -> int:
     value = getattr(args, "value", None)
 
     if not job_id:
-        print(color("A job ID is required.", Colors.RED))
+        print(color('Укажите ID задачи.', Colors.RED))
         return 1
 
     try:
         if action == "set":
             if key is None or value is None:
-                print(color("Usage: hermes cron notepad <job_id> set <key> <value>", Colors.RED))
+                print(color('Использование: korra cron notepad <job_id> set <ключ> <значение>', Colors.RED))
                 return 1
             notepad.set_note(job_id, key, value)
-            print(color(f"Set notepad key '{key}' for job {job_id}.", Colors.GREEN))
+            print(color(f"Ключ заметки '{key}' сохранён для задачи {job_id}.", Colors.GREEN))
             return 0
 
         if action == "get":
             if key is None:
-                print(color("Usage: hermes cron notepad <job_id> get <key>", Colors.RED))
+                print(color('Использование: korra cron notepad <job_id> get <ключ>', Colors.RED))
                 return 1
             stored = notepad.get_note(job_id, key)
             if stored is None:
-                print(color(f"No notepad key '{key}' for job {job_id}.", Colors.YELLOW))
+                print(color(f"У задачи {job_id} нет заметки с ключом '{key}'.", Colors.YELLOW))
                 return 1
             print(stored)
             return 0
 
         if action == "delete":
             if key is None:
-                print(color("Usage: hermes cron notepad <job_id> delete <key>", Colors.RED))
+                print(color('Использование: korra cron notepad <job_id> delete <ключ>', Colors.RED))
                 return 1
             if notepad.delete_note(job_id, key):
-                print(color(f"Deleted notepad key '{key}' for job {job_id}.", Colors.GREEN))
+                print(color(f"Заметка с ключом '{key}' удалена у задачи {job_id}.", Colors.GREEN))
                 return 0
-            print(color(f"No notepad key '{key}' for job {job_id}.", Colors.YELLOW))
+            print(color(f"У задачи {job_id} нет заметки с ключом '{key}'.", Colors.YELLOW))
             return 1
 
         # list (default)
         notes = notepad.list_notes(job_id)
         if not notes:
-            print(color(f"Notepad for job {job_id} is empty.", Colors.DIM))
+            print(color(f'Заметки задачи {job_id} пусты.', Colors.DIM))
             return 0
         for note in notes:
             print(f"  {color(note['key'], Colors.YELLOW)} = {note['value']}")
-            print(f"    {color('updated: ' + str(note['updated_at']), Colors.DIM)}")
+            print(f"    {color('обновлено: ' + str(note['updated_at']), Colors.DIM)}")
         return 0
     except ValueError as exc:
-        print(color(f"Notepad error: {exc}", Colors.RED))
+        print(color(f'Ошибка заметок: {exc}', Colors.RED))
         return 1
 
 
@@ -987,17 +987,17 @@ def cron_command(args):
         return cron_edit(args)
 
     if subcmd == "pause":
-        return _job_action("pause", args.job_id, "Paused")
+        return _job_action("pause", args.job_id, 'Задача приостановлена')
 
     if subcmd == "resume":
         return cron_resume(args)
 
     if subcmd == "run":
-        return _job_action("run", args.job_id, "Triggered")
+        return _job_action("run", args.job_id, 'Задача поставлена на запуск')
 
     if subcmd in {"remove", "rm", "delete"}:
-        return _job_action("remove", args.job_id, "Removed")
+        return _job_action("remove", args.job_id, 'Задача удалена')
 
-    print(f"Unknown cron command: {subcmd}")
-    print("Usage: hermes cron [list|create|edit|pause|resume|run|remove|status|runs|doctor|tick]")
+    print(f'Неизвестная команда расписания: {subcmd}')
+    print('Использование: korra cron [list|create|edit|pause|resume|run|remove|status|runs|doctor|tick]')
     sys.exit(1)

@@ -44,7 +44,7 @@ class TestCronCommandLifecycle:
         updated = get_job(job["id"])
         assert updated["model"] == "new-model"
         assert updated["provider"] == "nous"
-        assert "Updated job" in capsys.readouterr().out
+        assert "Задача обновлена" in capsys.readouterr().out
 
     def test_edit_can_replace_and_clear_skills(self, tmp_cron_dir, capsys):
         job = create_job(
@@ -102,7 +102,7 @@ class TestCronCommandLifecycle:
         assert cleared["skill"] is None
 
         out = capsys.readouterr().out
-        assert "Updated job" in out
+        assert "Задача обновлена" in out
 
     def test_create_with_multiple_skills(self, tmp_cron_dir, capsys):
         cron_command(
@@ -121,7 +121,7 @@ class TestCronCommandLifecycle:
             )
         )
         out = capsys.readouterr().out
-        assert "Created job" in out
+        assert "Задача создана" in out
 
         jobs = list_jobs()
         assert len(jobs) == 1
@@ -142,11 +142,11 @@ class TestCronDoctor:
 
         out = capsys.readouterr().out
         assert rc == 1
-        assert "Cron doctor found 3 issue(s)" in out
+        assert "Проверка нашла проблем: 3" in out
         assert job["id"] in out
-        assert "last run failed: Provider returned error" in out
-        assert "last delivery failed: telegram timeout" in out
-        assert "script not found" in out
+        assert "последний запуск завершился с ошибкой: Provider returned error" in out
+        assert "последняя доставка не удалась: telegram timeout" in out
+        assert "скрипт не найден" in out
 
     def test_doctor_reports_healthy_jobs(self, tmp_cron_dir, capsys):
         scripts_dir = tmp_cron_dir / "scripts"
@@ -158,7 +158,7 @@ class TestCronDoctor:
 
         out = capsys.readouterr().out
         assert rc == 0
-        assert "✓ Cron doctor found no issues" in out
+        assert "✓ Проверка расписания не обнаружила проблем" in out
 
     def test_doctor_flags_overdue_next_run(self, tmp_cron_dir, capsys):
         from datetime import datetime, timedelta, timezone
@@ -173,8 +173,8 @@ class TestCronDoctor:
 
         out = capsys.readouterr().out
         assert rc == 1
-        assert "overdue" in out
-        assert "not firing" in out
+        assert "просрочен" in out
+        assert "задача не запускается" in out
 
     def test_doctor_tolerates_slightly_late_next_run(self, tmp_cron_dir, capsys):
         from datetime import datetime, timedelta, timezone
@@ -190,7 +190,7 @@ class TestCronDoctor:
 
         out = capsys.readouterr().out
         assert rc == 0
-        assert "✓ Cron doctor found no issues" in out
+        assert "✓ Проверка расписания не обнаружила проблем" in out
 
 
 class TestGatewayNotRunningWarning:
@@ -206,7 +206,7 @@ class TestGatewayNotRunningWarning:
         monkeypatch.setattr("korra_cli.gateway.find_gateway_pids", lambda: [])
         cron_command(Namespace(cron_command="list", all=True))
         out = capsys.readouterr().out
-        assert "Gateway is not running" in out
+        assert "Шлюз не запущен" in out
 
 
 class TestExternalCronProviderStatus:
@@ -226,17 +226,17 @@ class TestExternalCronProviderStatus:
             "korra_cli.cron._active_cron_provider_name", lambda: "chronos"
         )
         # Even with NO gateway process and NO ticker heartbeat, Chronos status
-        # must NOT report a stall / "not firing".
+        # must NOT report a stall / "задача не запускается".
         monkeypatch.setattr("korra_cli.gateway.find_gateway_pids", lambda: [])
         cron_command(Namespace(cron_command="status"))
         out = capsys.readouterr().out
         assert "chronos" in out
-        assert "managed scheduler" in out
-        assert "not firing" not in out.lower()
+        assert "внешним сервисом" in out
+        assert "задача не запускается" not in out.lower()
         assert "STALLED" not in out
-        assert "Gateway is not running" not in out
+        assert "Шлюз не запущен" not in out
         # Still surfaces the active-job summary.
-        assert "active job(s)" in out
+        assert "Активных задач:" in out
 
 
     def test_create_silent_for_chronos_even_without_gateway(
@@ -264,8 +264,8 @@ class TestExternalCronProviderStatus:
             )
         )
         out = capsys.readouterr().out
-        assert "Created job" in out
-        assert "Gateway is not running" not in out
+        assert "Задача создана" in out
+        assert "Шлюз не запущен" not in out
 
 
 def test_cron_list_warns_when_gateway_not_running(monkeypatch, capsys):
@@ -289,7 +289,7 @@ def test_cron_list_warns_when_gateway_not_running(monkeypatch, capsys):
     cron_cli.cron_list()
 
     out = capsys.readouterr().out
-    assert "Gateway is not running" in out
+    assert "Шлюз не запущен" in out
     assert "Nightly docs" in out
 
 
@@ -322,7 +322,7 @@ def test_cron_create_failure_returns_nonzero(monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert rc == 1
-    assert "Failed to create job: boom" in out
+    assert "Не удалось создать задачу: boom" in out
 
 
 class TestCronRunBackgroundDispatch:
@@ -363,9 +363,10 @@ class TestCronRunBackgroundDispatch:
         rc, out = self._run_cmd(capsys)
 
         assert rc == 0
-        assert "Running in background (delegation del-abc123)." in out
+        assert "Выполняется в фоне (поручение del-abc123)." in out
         assert "failed" not in out.lower()
-        assert "Ran now" not in out
+        assert "ошибка" not in out.lower()
+        assert "Запущено сейчас" not in out
 
     def test_background_dispatch_without_delegation_id(self, monkeypatch, capsys):
         monkeypatch.setattr(
@@ -384,8 +385,9 @@ class TestCronRunBackgroundDispatch:
         rc, out = self._run_cmd(capsys)
 
         assert rc == 0
-        assert "Running in background." in out
+        assert "Выполняется в фоне." in out
         assert "failed" not in out.lower()
+        assert "ошибка" not in out.lower()
 
     def test_sync_run_success_unchanged(self, monkeypatch, capsys):
         monkeypatch.setattr(
@@ -405,7 +407,7 @@ class TestCronRunBackgroundDispatch:
         rc, out = self._run_cmd(capsys)
 
         assert rc == 0
-        assert "Ran now: succeeded." in out
+        assert "Запущено сейчас: успешно." in out
 
     def test_sync_run_failure_still_reported(self, monkeypatch, capsys):
         # A genuine synchronous failure must keep reporting 'failed' — only
@@ -427,7 +429,7 @@ class TestCronRunBackgroundDispatch:
         rc, out = self._run_cmd(capsys)
 
         assert rc == 0
-        assert "Ran now: failed." in out
+        assert "Запущено сейчас: ошибка." in out
 
     def test_delegation_id_alone_counts_as_background(self, monkeypatch, capsys):
         # Some dispatchers may not set execution_mode but always return the
@@ -444,5 +446,6 @@ class TestCronRunBackgroundDispatch:
         rc, out = self._run_cmd(capsys)
 
         assert rc == 0
-        assert "Running in background (delegation del-xyz)." in out
+        assert "Выполняется в фоне (поручение del-xyz)." in out
         assert "failed" not in out.lower()
+        assert "ошибка" not in out.lower()

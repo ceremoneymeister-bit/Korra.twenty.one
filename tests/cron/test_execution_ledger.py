@@ -103,7 +103,7 @@ def test_cron_runs_cli_prints_execution_history(monkeypatch, tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert row["id"] in output
-    assert "failed" in output
+    assert "ошибка" in output
     assert "boom" in output
 
 
