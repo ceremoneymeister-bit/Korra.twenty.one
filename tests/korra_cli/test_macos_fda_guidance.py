@@ -33,7 +33,7 @@ class TestDoctorFdaCheck:
         tcc.mkdir(parents=True)
         monkeypatch.setattr(doctor_mod.Path, "home", classmethod(lambda cls: tmp_path))
         out = _capture(doctor_mod.check_macos_full_disk_access)
-        assert "Full Disk Access granted" in out
+        assert 'Полный доступ к диску macOS разрешён' in out
         assert "Privacy_AllFiles" not in out
 
     def test_denied_prints_one_switch_guidance(self, monkeypatch, tmp_path):
@@ -47,9 +47,9 @@ class TestDoctorFdaCheck:
 
         monkeypatch.setattr(doctor_mod.os, "listdir", _eperm)
         out = _capture(doctor_mod.check_macos_full_disk_access)
-        assert "Full Disk Access" in out
+        assert "полный доступ к диску" in out.lower()
         assert "Privacy_AllFiles" in out
-        assert "System Settings" in out
+        assert 'Системные настройки' in out
 
     def test_indeterminate_probe_is_silent(self, monkeypatch, tmp_path):
         """Missing TCC dir (weird install) must not nag."""
@@ -92,6 +92,6 @@ class TestSetupFdaTip:
 
         monkeypatch.setattr(setup_mod.os, "listdir", _eperm)
         out = _capture(_print_macos_fda_tip)
-        assert "Full Disk Access" in out
+        assert "полный доступ к диску" in out.lower()
         assert "Privacy_AllFiles" in out
-        assert "survives every Korra update" in out
+        assert 'сохраняется после обновления Korra' in out

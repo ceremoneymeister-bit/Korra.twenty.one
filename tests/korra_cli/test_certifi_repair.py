@@ -176,7 +176,7 @@ class TestDoctorCertificates:
         pip_cmd = calls["pip"][0]
         assert "--force-reinstall" in pip_cmd and "certifi" in pip_cmd
         assert calls["verify"] == 2, "must re-verify after the reinstall"
-        assert "repaired" in out.lower()
+        assert 'восстановлен' in out.lower()
         assert not issues
 
 
@@ -189,7 +189,7 @@ class TestDoctorCertificates:
         monkeypatch.setattr(doctor_mod.subprocess, "run", _fail_run)
         doctor_mod.check_certificates(should_fix=True, issues=[])
         out = capsys.readouterr().out
-        assert "valid" in out.lower()
+        assert 'исправен' in out.lower()
 
 
 # =========================================================================

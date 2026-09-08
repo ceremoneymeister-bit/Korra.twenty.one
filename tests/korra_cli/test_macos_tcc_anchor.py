@@ -530,7 +530,7 @@ class TestDoctorCheck:
         )
         doctor.check_macos_tcc_anchor(should_fix=False)
         out = capsys.readouterr().out
-        assert "macOS TCC anchor missing" in out
+        assert 'Постоянная подпись macOS TCC отсутствует' in out
 
     def test_fix_installs_anchor(self, monkeypatch, capsys):
         monkeypatch.setattr(
@@ -541,7 +541,7 @@ class TestDoctorCheck:
         )
         doctor.check_macos_tcc_anchor(should_fix=True)
         out = capsys.readouterr().out
-        assert "macOS TCC anchor installed" in out
+        assert 'Постоянная подпись macOS TCC установлена' in out
 
     def test_active_reports_ok(self, monkeypatch, capsys):
         monkeypatch.setattr(
@@ -549,7 +549,7 @@ class TestDoctorCheck:
         )
         doctor.check_macos_tcc_anchor(should_fix=False)
         out = capsys.readouterr().out
-        assert "macOS TCC anchor active" in out
+        assert 'Постоянная подпись macOS TCC активна' in out
 
     def test_skip_is_silent_on_non_macos(self, monkeypatch, capsys):
         monkeypatch.setattr(
@@ -565,7 +565,7 @@ class TestDoctorCheck:
         monkeypatch.setattr(tcc, "tcc_anchor_state", boom)
         doctor.check_macos_tcc_anchor(should_fix=False)
         out = capsys.readouterr().out
-        assert "macOS TCC anchor check failed" in out
+        assert 'Не удалось проверить постоянную подпись macOS TCC' in out
 
 
 @pytest.mark.macos_only

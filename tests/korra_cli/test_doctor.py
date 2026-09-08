@@ -51,7 +51,7 @@ class TestDoctorPlatformHints:
         hint = doctor._sqlite_upgrade_hint("nix")
 
         assert guidance in hint
-        assert f"run `{guidance}`" not in hint
+        assert f"выполните `{guidance}`" not in hint
         assert 'korra update' not in hint
 
 
@@ -599,11 +599,11 @@ def test_run_doctor_accepts_hermes_provider_ids_that_catalog_aliases(
         doctor_mod.run_doctor(Namespace(fix=False))
 
     out = buf.getvalue()
-    assert f"model.provider '{provider}' is not a recognised provider" not in out
-    assert f"model.provider '{provider}' is unknown" not in out
+    assert f"Неизвестный провайдер model.provider: «{provider}»" not in out
+    assert f"Неизвестный model.provider «{provider}»" not in out
     if provider in {"ai-gateway", "opencode-zen", "kilocode", "nvidia"}:
         assert (
-            f"model.default '{default_model}' uses a vendor/model slug but provider is '{provider}'"
+            f"model.default «{default_model}» содержит префикс поставщика, но выбран провайдер «{provider}»"
             not in out
         )
 
@@ -649,8 +649,7 @@ def test_run_doctor_accepts_vendor_slugs_for_named_custom_provider(monkeypatch, 
     assert 'Неизвестный провайдер model.provider: «custom:hpc-ai»' not in out
     assert 'Неизвестный model.provider «custom:hpc-ai»' not in out
     assert (
-        "model.default 'deepseek/deepseek-v4-flash' uses a vendor/model slug but provider is "
-        "'custom:hpc-ai'"
+        "model.default «deepseek/deepseek-v4-flash» содержит префикс поставщика, но выбран провайдер «custom:hpc-ai»"
         not in out
     )
     assert 'Выберите openrouter в model.provider или уберите префикс.' not in out
@@ -1147,7 +1146,7 @@ def _run_doctor_with_healthy_oauth_fallback(
             "minimax.io",
             {"logged_in": True, "region": "global"},
             None,
-            "Check MINIMAX_API_KEY in .env",
+            "Проверьте MINIMAX_API_KEY в .env",
         ),
         (
             "XAI_API_KEY",
@@ -1155,7 +1154,7 @@ def _run_doctor_with_healthy_oauth_fallback(
             "api.x.ai",
             {},
             {"logged_in": True, "auth_mode": "oauth_pkce"},
-            "Check XAI_API_KEY in .env",
+            "Проверьте XAI_API_KEY в .env",
         ),
     ],
 )

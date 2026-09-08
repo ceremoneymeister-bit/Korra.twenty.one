@@ -198,7 +198,7 @@ class TestGmiDoctor:
             doctor_mod.run_doctor(Namespace(fix=False))
         out = buf.getvalue()
 
-        assert "API key or custom endpoint configured" in out
+        assert 'Ключ API или собственный адрес сервера настроен' in out
         assert "GMI Cloud" in out
         assert any(url == "https://api.gmi-serving.com/v1/models" for url, _, _ in calls)
 

@@ -57,7 +57,7 @@ def test_doctor_reports_stale_relay_plugin_key():
     )
 
     replacement = findings["plugins.enabled: observability/nemo_relay"]
-    assert "remove it" in replacement
+    assert 'удалите' in replacement
     assert RELAY_PLUGINS_CONFIG_ENV in replacement
 
 
@@ -73,9 +73,9 @@ def test_doctor_reports_legacy_exporter_env_without_new_config(monkeypatch):
         )
     )
 
-    assert "now ignored" in findings["HERMES_NEMO_RELAY_ATIF_ENABLED"]
+    assert 'больше не используется' in findings["HERMES_NEMO_RELAY_ATIF_ENABLED"]
     assert RELAY_PLUGINS_CONFIG_ENV in findings["HERMES_NEMO_RELAY_ATIF_ENABLED"]
-    assert "now ignored" in findings["HERMES_NEMO_RELAY_ATIF_EXPORT_TIMEOUT_S"]
+    assert 'больше не используется' in findings["HERMES_NEMO_RELAY_ATIF_EXPORT_TIMEOUT_S"]
     assert (
         RELAY_PLUGINS_CONFIG_ENV
         in findings["HERMES_NEMO_RELAY_ATIF_EXPORT_TIMEOUT_S"]
