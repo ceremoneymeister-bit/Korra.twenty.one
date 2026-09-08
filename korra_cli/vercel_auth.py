@@ -14,6 +14,7 @@ class VercelAuthStatus:
     ok: bool
     label: str
     detail_lines: tuple[str, ...]
+    display_label: str = ""
 
 
 def _present(name: str) -> bool:
@@ -30,22 +31,26 @@ def describe_vercel_auth() -> VercelAuthStatus:
 
     if has_oidc:
         details = [
-            "mode: OIDC",
-            "active env: VERCEL_OIDC_TOKEN",
-            "note: OIDC tokens are development-only; use access-token auth for deployments and long-running processes",
+            "режим: OIDC",
+            "используется: VERCEL_OIDC_TOKEN",
+            "OIDC подходит только для разработки; для постоянной работы используйте токен доступа",
         ]
         if present_token_vars:
-            details.append(f"also present: {', '.join(present_token_vars)}")
-        return VercelAuthStatus(True, "OIDC token via VERCEL_OIDC_TOKEN", tuple(details))
+            details.append(f"также заданы: {', '.join(present_token_vars)}")
+        return VercelAuthStatus(
+            True, "OIDC token via VERCEL_OIDC_TOKEN", tuple(details),
+            "Токен OIDC из VERCEL_OIDC_TOKEN",
+        )
 
     if not missing_token_vars:
         return VercelAuthStatus(
             True,
             "access token + project/team via VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID",
             (
-                "mode: access token",
-                "active env: VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID",
+                "режим: токен доступа",
+                "используются: VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID",
             ),
+            "Токен доступа и проект/команда из VERCEL_TOKEN, VERCEL_PROJECT_ID, VERCEL_TEAM_ID",
         )
 
     if present_token_vars:
@@ -53,18 +58,20 @@ def describe_vercel_auth() -> VercelAuthStatus:
             False,
             f"partial access-token auth (missing {', '.join(missing_token_vars)})",
             (
-                "mode: incomplete access token",
-                f"present env: {', '.join(present_token_vars)}",
-                f"missing env: {', '.join(missing_token_vars)}",
-                "recommended: set VERCEL_TOKEN, VERCEL_PROJECT_ID, and VERCEL_TEAM_ID together",
+                "режим: токен доступа настроен не полностью",
+                f"заданы: {', '.join(present_token_vars)}",
+                f"не хватает: {', '.join(missing_token_vars)}",
+                "задайте вместе VERCEL_TOKEN, VERCEL_PROJECT_ID и VERCEL_TEAM_ID",
             ),
+            f"Вход настроен не полностью: не хватает {', '.join(missing_token_vars)}",
         )
 
     return VercelAuthStatus(
         False,
         "not configured",
         (
-            "recommended: set VERCEL_TOKEN, VERCEL_PROJECT_ID, and VERCEL_TEAM_ID",
-            "development-only alternative: set VERCEL_OIDC_TOKEN",
+            "задайте VERCEL_TOKEN, VERCEL_PROJECT_ID и VERCEL_TEAM_ID",
+            "только для разработки: можно задать VERCEL_OIDC_TOKEN",
         ),
+        "Не настроен",
     )

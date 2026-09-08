@@ -91,17 +91,16 @@ def _sqlite_upgrade_hint(install_method: str | None = None) -> str:
     method = install_method or detect_install_method(PROJECT_ROOT)
     if method == "docker":
         command = recommended_update_command_for_method(method)
-        action = f"run `{command}`, then recreate all Korra containers"
+        action = f'выполните `{command}`, затем пересоздайте все контейнеры Корры'
     elif is_nix_install_method(method):
         # The Nix helper is prose guidance, not a literal shell command.
         action = recommended_update_command_for_method(method)
     elif method == "apt":
-        action = f"run `{recommended_update_command_for_method(method)}`"
+        action = f'выполните `{recommended_update_command_for_method(method)}`'
     else:
-        action = "run `hermes update`"
+        action = 'выполните korra update'
     return (
-        f"({action}; fixed versions: 3.51.3+ / 3.50.7 / 3.44.6 — "
-        "see https://sqlite.org/wal.html#walresetbug)"
+        f'({action}; исправленные версии: 3.51.3+ / 3.50.7 / 3.44.6; см. https://sqlite.org/wal.html#walresetbug)'
     )
 
 
@@ -137,8 +136,8 @@ def _unreadable_reason(db_path: Path) -> str:
     except OSError as exc:
         return str(exc)
     if not os.access(db_path, os.R_OK):
-        return f"permission denied: {db_path}"
-    return "file could not be read"
+        return f'Нет доступа: {db_path}'
+    return 'Не удалось прочитать файл'
 
 
 def _read_journal_mode(db_path: Path) -> tuple[str | None, str | None]:
@@ -164,17 +163,17 @@ def _read_journal_mode(db_path: Path) -> tuple[str | None, str | None]:
     header = read_header_bytes_preopen(db_path, length=20)
     if header is None:
         if has_live_connection(db_path):
-            return None, "database is open in this process"
+            return None, 'База открыта в этом процессе'
         return None, _unreadable_reason(db_path)
     if len(header) == 0:
-        return None, "file is empty"
+        return None, 'Файл пуст'
     if len(header) < 20 or not header.startswith(_SQLITE_HEADER_MAGIC):
-        return None, "file is not a database"
+        return None, 'Файл не является базой данных'
     if header[18] == 2:
         return "wal", None
     if header[18] == 1:
         return "rollback", None
-    return None, f"unrecognized file-format version {header[18]}"
+    return None, f'Неизвестная версия формата файла: {header[18]}'
 
 
 def _format_db_size(db_path: Path) -> str:
@@ -185,7 +184,7 @@ def _format_db_size(db_path: Path) -> str:
     try:
         nbytes = db_path.stat().st_size
     except OSError:
-        return "size unknown"
+        return 'Размер неизвестен'
     return _format_size(nbytes)
 
 
@@ -201,7 +200,7 @@ def _report_database_journal_modes(
     try:
         databases = _hermes_database_paths(home)
     except Exception as exc:
-        check_warn(f"Could not list Korra databases: {exc}")
+        check_warn(f'Не удалось получить список баз Корры: {exc}')
         return
     exposed = []
     for name, path in databases:
@@ -212,26 +211,26 @@ def _report_database_journal_modes(
         if error is not None:
             if vulnerable:
                 check_warn(
-                    f"{name}: journal mode could not be read",
-                    f"({error}; cannot rule out WAL exposure)",
+                    f'{name}: не удалось прочитать режим журнала',
+                    f'({error}; риск ошибки WAL не исключён)',
                 )
             else:
-                check_info(f"{name}: journal mode could not be read ({error})")
+                check_info(f'{name}: не удалось прочитать режим журнала ({error})')
         elif mode == "wal":
             if vulnerable:
                 exposed.append(name)
                 check_warn(
-                    f"{name} is in WAL mode ({size})",
-                    "(exposed to the WAL-reset bug until SQLite is upgraded)",
+                    f'{name} использует режим WAL ({size})',
+                    '(подвержен ошибке сброса WAL до обновления SQLite)',
                 )
             else:
-                check_info(f"{name}: WAL journal mode ({size})")
+                check_info(f'{name}: журнал WAL ({size})')
         elif vulnerable:
-            check_info(f"{name}: rollback journal mode ({size}, not exposed)")
+            check_info(f'{name}: журнал отката ({size}, без этого риска)')
         else:
-            check_info(f"{name}: rollback journal mode ({size})")
+            check_info(f'{name}: журнал отката ({size})')
     if exposed:
-        check_info(f"To clear the exposure: {_wal_reset_repair_hint()}")
+        check_info(f'Чтобы устранить проблему: {_wal_reset_repair_hint()}')
 
 
 def _safe_which(cmd: str) -> str | None:
@@ -255,10 +254,10 @@ def _termux_browser_setup_steps(node_installed: bool) -> list[str]:
 
 def _termux_install_all_fallback_notes() -> list[str]:
     return [
-        "Termux install profile: use .[termux-all] for broad compatibility (installer default on Termux).",
-        "Matrix E2EE extra is excluded on Termux (python-olm currently fails to build).",
-        "Local faster-whisper extra is excluded on Termux (ctranslate2/av build path unavailable).",
-        "STT fallback: use Groq Whisper (set GROQ_API_KEY) or OpenAI Whisper (set VOICE_TOOLS_OPENAI_KEY).",
+        'Для Termux используйте .[termux-all] — совместимый набор по умолчанию.',
+        'Сквозное шифрование Matrix исключено в Termux: python-olm не собирается.',
+        'Локальный faster-whisper исключён в Termux: недоступна сборка ctranslate2/av.',
+        'Для распознавания речи используйте Groq Whisper с GROQ_API_KEY или OpenAI Whisper с VOICE_TOOLS_OPENAI_KEY.',
     ]
 
 
@@ -292,7 +291,7 @@ def _is_kanban_worker_env_gate(item: dict) -> bool:
 def _doctor_tool_availability_detail(toolset: str) -> str:
     """Optional explanatory suffix for toolsets whose doctor status needs context."""
     if toolset == "kanban" and not korra_env("KORRA_KANBAN_TASK"):
-        return "(runtime-gated; loaded only for dispatcher-spawned workers)"
+        return '(загружается только для исполнителей, запущенных диспетчером)'
     return ""
 
 
@@ -321,8 +320,8 @@ def _doctor_web_capability_rows() -> list[tuple[str, str, str]]:
         return rows
 
     for capability, getter in (
-        ("web search", get_active_search_provider),
-        ("web extract", get_active_extract_provider),
+        ('Поиск в интернете', get_active_search_provider),
+        ('Чтение веб-страниц', get_active_extract_provider),
     ):
         try:
             provider = getter()
@@ -333,7 +332,7 @@ def _doctor_web_capability_rows() -> list[tuple[str, str, str]]:
                 (
                     "warn",
                     capability,
-                    "(no provider selected or registered)",
+                    '(провайдер не выбран или не зарегистрирован)',
                 )
             )
             continue
@@ -345,7 +344,7 @@ def _doctor_web_capability_rows() -> list[tuple[str, str, str]]:
                 (
                     "warn",
                     capability,
-                    f"({name} selected; provider not configured)",
+                    f'(выбран {name}; провайдер не настроен)',
                 )
             )
     return rows
@@ -431,11 +430,11 @@ def _render_state_db_stats(stats: dict, holders=None) -> list:
 
     size_bits = []
     if logical is not None:
-        size_bits.append(f"logical size {_human_bytes(logical)}")
+        size_bits.append(f'размер данных {_human_bytes(logical)}')
     if stats.get("page_count") is not None:
-        size_bits.append(f"{stats['page_count']:,} pages")
+        size_bits.append(f"страниц: {stats['page_count']:,}")
     if freelist is not None:
-        size_bits.append(f"{freelist:,} free")
+        size_bits.append(f'свободно: {freelist:,}')
     if wal is not None:
         size_bits.append(f"WAL {_human_bytes(wal)}")
     if size_bits:
@@ -443,13 +442,13 @@ def _render_state_db_stats(stats: dict, holders=None) -> list:
 
     row_bits = []
     if stats.get("messages") is not None:
-        row_bits.append(f"{stats['messages']:,} messages")
+        row_bits.append(f"сообщений: {stats['messages']:,}")
     if stats.get("sessions") is not None:
-        row_bits.append(f"{stats['sessions']:,} sessions")
+        row_bits.append(f"бесед: {stats['sessions']:,}")
     if stats.get("journal_mode"):
-        row_bits.append(f"journal_mode={stats['journal_mode']}")
+        row_bits.append(f"режим журнала: {stats['journal_mode']}")
     if holders is not None:
-        row_bits.append(f"{holders} process(es) holding the DB open")
+        row_bits.append(f'процессов с открытой базой: {holders}')
     if row_bits:
         lines.append(("info", ", ".join(row_bits), ""))
 
@@ -458,7 +457,7 @@ def _render_state_db_stats(stats: dict, holders=None) -> list:
         present = [t for t, ok in fts.items() if ok]
         lines.append((
             "info",
-            "FTS tables: " + (", ".join(present) if present else "none"),
+            'Таблицы FTS: ' + (", ".join(present) if present else "none"),
             "",
         ))
 
@@ -468,10 +467,8 @@ def _render_state_db_stats(stats: dict, holders=None) -> list:
         pids = deferral.get("holder_pids") or []
         lines.append((
             "warn",
-            f"state.db FTS repair is blocked after {attempts or '?'} "
-            f"deferral(s) by PID(s) {pids or 'unknown'}",
-            "(stop the listed processes, then run 'hermes sessions "
-            "optimize-storage' with the gateway stopped)",
+            f"Восстановление FTS в state.db отложено {attempts or '?'} раз из-за процессов PID {pids or 'unknown'}",
+            '(остановите указанные процессы и шлюз, затем выполните korra sessions optimize-storage)',
         ))
 
     # Advisory: oversized database. Suggest auto_prune, and — when the v23
@@ -480,8 +477,7 @@ def _render_state_db_stats(stats: dict, holders=None) -> list:
     # optimize-storage pass that migrates/compacts the FTS indexes.
     if logical is not None and logical > STATE_DB_SIZE_WARN_BYTES:
         detail = (
-            "consider enabling sessions.auto_prune in config.yaml "
-            "to bound growth"
+            'включите sessions.auto_prune в config.yaml, чтобы ограничить рост базы'
         )
         legacy_trigram = (
             fts is not None
@@ -490,12 +486,11 @@ def _render_state_db_stats(stats: dict, holders=None) -> list:
         )
         if stats.get("fts_rebuild_pending") or legacy_trigram:
             detail += (
-                "; run 'hermes sessions optimize-storage' offline "
-                "(with the gateway stopped) to compact FTS storage"
+                '; для уменьшения индекса FTS выполните korra sessions optimize-storage при остановленном шлюзе'
             )
         lines.append((
             "warn",
-            f"state.db is large ({_human_bytes(logical)})",
+            f'База state.db большая ({_human_bytes(logical)})',
             f"({detail})",
         ))
 
@@ -542,10 +537,10 @@ _DEPRECATED_ENV_VARS: tuple[tuple[str, str], ...] = (
     # floor removed its only consumer (the v3→4 migration) — it is silently
     # ignored. HERMES_TOOL_PROGRESS_MODE is still read by the gateway as a
     # back-compat fallback but remains deprecated.
-    ("HERMES_TOOL_PROGRESS", "display.tool_progress in config.yaml — ignored/unsupported since config floor v12"),
-    ("HERMES_TOOL_PROGRESS_MODE", "display.tool_progress in config.yaml"),
-    ("TERMINAL_CWD", "terminal.cwd in config.yaml"),
-    ("MESSAGING_CWD", "terminal.cwd in config.yaml"),
+    ("HERMES_TOOL_PROGRESS", 'display.tool_progress в config.yaml; не поддерживается и игнорируется начиная с версии настроек v12'),
+    ("HERMES_TOOL_PROGRESS_MODE", 'display.tool_progress в config.yaml'),
+    ("TERMINAL_CWD", 'terminal.cwd в config.yaml'),
+    ("MESSAGING_CWD", 'terminal.cwd в config.yaml'),
     ("QQ_HOME_CHANNEL", "QQBOT_HOME_CHANNEL"),
     ("QQ_HOME_CHANNEL_NAME", "QQBOT_HOME_CHANNEL_NAME"),
 )
@@ -612,7 +607,7 @@ def collect_relay_plugin_cutover_findings(
                 findings.append(
                     (
                         f"plugins.enabled: {key}",
-                        f"remove it and configure {RELAY_PLUGINS_CONFIG_ENV}",
+                        f'удалите и настройте {RELAY_PLUGINS_CONFIG_ENV}',
                     )
                 )
 
@@ -631,8 +626,7 @@ def collect_relay_plugin_cutover_findings(
             findings.append(
                 (
                     name,
-                    f"move exporter settings to {RELAY_PLUGINS_CONFIG_ENV}; "
-                    "this variable is now ignored",
+                    f'перенесите настройки выгрузки в {RELAY_PLUGINS_CONFIG_ENV}; эта переменная больше не используется',
                 )
             )
     return findings
@@ -653,21 +647,21 @@ def report_deprecated_config_and_env(
     relay_cutover = collect_relay_plugin_cutover_findings(raw_config, env_map)
     findings = deprecated + relay_cutover
     if not findings:
-        check_ok("No deprecated config keys or env vars")
+        check_ok('Устаревших ключей настроек и переменных среды нет')
         return findings
 
     for legacy, replacement in deprecated:
         check_warn(
-            f"Deprecated: {legacy}",
-            f"(use {replacement} instead)",
+            f'Устарело: {legacy}',
+            f'(используйте {replacement})',
         )
-        check_info(f"Replace {legacy} → {replacement} (warn-only; not auto-migrated here)")
+        check_info(f'Замените {legacy} → {replacement}; здесь только предупреждение, без автоматической замены')
     for legacy, replacement in relay_cutover:
         check_warn(
-            f"Breaking Relay migration: {legacy}",
+            f'Требуется перенос подключения ретранслятора: {legacy}',
             f"({replacement})",
         )
-        check_info(f"Migrate {legacy}: {replacement}")
+        check_info(f'Перенесите {legacy}: {replacement}')
     return findings
 
 
@@ -740,13 +734,12 @@ def _check_version_consistency(issues: list[str]) -> None:
         # Installed wheel or unreadable pyproject — nothing to cross-check.
         return
     if pyproject_version == init_version:
-        check_ok("Version files consistent", f"({init_version})")
+        check_ok('Версии в исходных файлах совпадают', f"({init_version})")
     else:
         _fail_and_issue(
-            "Version mismatch between source files",
+            'Версии в исходных файлах не совпадают',
             f"(pyproject.toml {pyproject_version} != korra_cli/__init__.py {init_version})",
-            "Re-sync version files (e.g. run 'hermes update', or set "
-            "korra_cli/__init__.py __version__ to match pyproject.toml)",
+            'Синхронизируйте версии: выполните korra update или задайте __version__ в korra_cli/__init__.py по версии из pyproject.toml',
             issues,
         )
 
@@ -775,7 +768,7 @@ def _check_s6_supervision(issues: list[str]) -> None:
     if detect_service_manager() != "s6":
         return
 
-    _section("s6 Supervision")
+    _section('Контроль служб s6')
 
     mgr = S6ServiceManager()
 
@@ -783,18 +776,18 @@ def _check_s6_supervision(issues: list[str]) -> None:
     # so the same s6-svstat probe works.
     for static in ("main-hermes", "dashboard"):
         if mgr.is_running(static):
-            check_ok(f"{static}: up")
+            check_ok(f'{static}: работает')
         else:
-            check_info(f"{static}: down (expected if not enabled via env)")
+            check_info(f'{static}: остановлено; это нормально, если не включено в среде')
 
     profiles = mgr.list_profile_gateways()
     if not profiles:
-        check_info("No per-profile gateways registered yet — create one with `hermes profile create <name>`")
+        check_info('Шлюзы профилей ещё не настроены. Создайте профиль: korra profile create <name>')
         return
 
     up_count = sum(1 for p in profiles if mgr.is_running(f"gateway-{p}"))
     check_ok(
-        f"Per-profile gateways: {up_count}/{len(profiles)} supervised up"
+        f'Шлюзы профилей: {up_count}/{len(profiles)} работают под контролем службы'
         + (f" ({', '.join(sorted(profiles))})" if len(profiles) <= 8 else "")
     )
 
@@ -814,33 +807,32 @@ def check_certificates(should_fix: bool = False, issues: "list | None" = None) -
         from agent.ssl_guard import verify_ca_bundle_with_fallback
         from agent.errors import SSLConfigurationError
     except Exception as e:
-        check_warn("SSL certificate check skipped", str(e))
+        check_warn('Проверка сертификатов SSL пропущена', str(e))
         return
 
     try:
         verify_ca_bundle_with_fallback()
-        check_ok("SSL CA certificate bundle is valid")
+        check_ok('Набор корневых сертификатов SSL исправен')
         return
     except SSLConfigurationError as e:
         first_error = str(e)
     except Exception as e:
-        check_warn("SSL certificate check skipped", str(e))
+        check_warn('Проверка сертификатов SSL пропущена', str(e))
         return
 
     if not should_fix:
-        check_fail("SSL CA certificate bundle is broken", first_error)
+        check_fail('Набор корневых сертификатов SSL повреждён', first_error)
         if issues is not None:
             issues.append(
-                "Repair the CA bundle: run `hermes doctor --fix`, or "
-                f"`{sys.executable} -m pip install --force-reinstall certifi`"
+                f'Восстановите сертификаты: korra doctor --fix или `{sys.executable} -m pip install --force-reinstall certifi`'
             )
         return
 
     # --fix: force-reinstall certifi into the running interpreter's env and
     # re-verify. importlib caches are invalidated so certifi.where() resolves
     # the fresh install without a process restart.
-    check_fail("SSL CA certificate bundle is broken", first_error)
-    print("    → Repairing: force-reinstalling certifi...")
+    check_fail('Набор корневых сертификатов SSL повреждён', first_error)
+    print('    → Восстановление: переустановка certifi…')
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "--force-reinstall", "certifi"],
@@ -849,20 +841,18 @@ def check_certificates(should_fix: bool = False, issues: "list | None" = None) -
             timeout=300,
         )
     except Exception as exc:
-        check_fail("certifi repair could not run pip", str(exc))
+        check_fail('Не удалось запустить pip для восстановления certifi', str(exc))
         if issues is not None:
             issues.append(
-                f"Reinstall certifi manually: {sys.executable} -m pip install "
-                "--force-reinstall certifi"
+                f'Переустановите certifi вручную: {sys.executable} -m pip install --force-reinstall certifi'
             )
         return
     if result.returncode != 0:
         tail = (result.stderr or result.stdout or "")[-500:]
-        check_fail("certifi reinstall failed", tail)
+        check_fail('Не удалось переустановить certifi', tail)
         if issues is not None:
             issues.append(
-                f"Reinstall certifi manually: {sys.executable} -m pip install "
-                "--force-reinstall certifi"
+                f'Переустановите certifi вручную: {sys.executable} -m pip install --force-reinstall certifi'
             )
         return
 
@@ -874,14 +864,12 @@ def check_certificates(should_fix: bool = False, issues: "list | None" = None) -
 
     try:
         verify_ca_bundle_with_fallback()
-        check_ok("SSL CA certificate bundle repaired (certifi reinstalled)")
+        check_ok('Набор корневых сертификатов SSL восстановлен переустановкой certifi')
     except SSLConfigurationError as e:
-        check_fail("SSL CA certificate bundle still broken after reinstall", str(e))
+        check_fail('После переустановки набор корневых сертификатов SSL всё ещё повреждён', str(e))
         if issues is not None:
             issues.append(
-                "certifi reinstall did not restore the CA bundle — check for a "
-                "custom CA env var (SSL_CERT_FILE/REQUESTS_CA_BUNDLE) pointing "
-                "at a missing file, or recreate the venv."
+                'Переустановка certifi не восстановила сертификаты. Проверьте, не указывают ли SSL_CERT_FILE или REQUESTS_CA_BUNDLE на отсутствующий файл, либо пересоздайте виртуальное окружение.'
             )
 
 
@@ -901,7 +889,7 @@ def _check_gateway_service_linger(issues: list[str]) -> None:
         )
         from korra_cli.service_manager import detect_service_manager
     except Exception as e:
-        check_warn("Gateway service linger", f"(could not import gateway helpers: {e})")
+        check_warn('Работа шлюза после выхода из системы', f'(не удалось загрузить компоненты шлюза: {e})')
         return
 
     if not is_linux():
@@ -917,16 +905,16 @@ def _check_gateway_service_linger(issues: list[str]) -> None:
     if not unit_path.exists():
         return
 
-    _section("Gateway Service")
+    _section('Служба шлюза')
     linger_enabled, linger_detail = get_systemd_linger_status()
     if linger_enabled is True:
-        check_ok("Systemd linger enabled", "(gateway service survives logout)")
+        check_ok('Systemd linger включён', '(шлюз продолжает работать после выхода из системы)')
     elif linger_enabled is False:
-        check_warn("Systemd linger disabled", "(gateway may stop after logout)")
-        check_info("Run: sudo loginctl enable-linger $USER")
-        issues.append("Enable linger for the gateway user service: sudo loginctl enable-linger $USER")
+        check_warn('Systemd linger отключён', '(шлюз может остановиться после выхода из системы)')
+        check_info('Выполните: sudo loginctl enable-linger $USER')
+        issues.append('Разрешите службе шлюза работать после выхода: sudo loginctl enable-linger $USER')
     else:
-        check_warn("Could not verify systemd linger", f"({linger_detail})")
+        check_warn('Не удалось проверить systemd linger', f"({linger_detail})")
 
 
 _APIKEY_PROVIDERS_CACHE: list | None = None
@@ -1043,11 +1031,10 @@ def managed_scope_check() -> None:
     n_cfg = len(managed_scope.managed_config_keys())
     n_env = len(managed_scope.load_managed_env())
     check_ok(
-        f"Managed scope active: {n_cfg} config key(s), {n_env} env key(s) "
-        f"pinned by {managed_dir}"
+        f'Управляемые настройки: {n_cfg} ключей настроек и {n_env} переменных среды закреплены в {managed_dir}'
     )
     if korra_env("KORRA_MANAGED_DIR", "").strip():
-        check_info(f"managed dir set via HERMES_MANAGED_DIR={managed_dir}")
+        check_info(f'Папка управляемых настроек: HERMES_MANAGED_DIR={managed_dir}')
 
 
 def check_macos_tcc_grants() -> None:
@@ -1075,8 +1062,8 @@ def check_macos_tcc_grants() -> None:
     dr = _macos_desktop_dr(app)
     if not dr:
         check_warn(
-            "macOS TCC grant check",
-            "(could not read code-signing requirement of the desktop bundle)",
+            'Проверка разрешений macOS TCC',
+            '(не удалось прочитать требования подписи приложения)',
         )
         return
     # The DR string is the only readable signal — TCC.db itself needs Full
@@ -1086,31 +1073,24 @@ def check_macos_tcc_grants() -> None:
     # contract on DR wording.
     if "cdhash" in dr.lower():
         check_warn(
-            "macOS TCC grants will reset after every update",
-            "the desktop bundle's designated requirement is cdhash-pinned "
-            "(pre-#73681 build) — rebuilds invalidate all permission grants. "
-            "Run `hermes update` to get the stable identifier-pinned signing "
-            "identity, then re-grant permissions once.",
+            'Разрешения macOS TCC будут сбрасываться при каждом обновлении',
+            'Старая сборка привязывает разрешения к хешу приложения, поэтому пересборка их сбрасывает. Выполните korra update для постоянной подписи, затем выдайте разрешения ещё раз.',
         )
         return
     if "certificate" in dr.lower():
         # Certificate-anchored DR (hermes desktop --setup-tcc-identity, or a
         # notarized release build): the strongest anchor TCC can key on.
         check_ok(
-            "macOS TCC signing identity is stable",
-            "(certificate-anchored DR; grants survive rebuilds)",
+            'Подпись для разрешений macOS TCC стабильна',
+            '(привязка к сертификату сохраняет разрешения после пересборки)',
         )
     else:
         check_ok(
-            "macOS TCC signing identity is stable",
-            "(identifier-pinned DR; grants survive rebuilds — for the strongest "
-            "anchor, see `hermes desktop --setup-tcc-identity`)",
+            'Подпись для разрешений macOS TCC стабильна',
+            '(привязка к ID сохраняет разрешения после пересборки; для привязки к сертификату: korra desktop --setup-tcc-identity)',
         )
     check_info(
-        "If macOS still re-prompts for permissions (toggle shows ON): the stored "
-        "grant is stale — run `tccutil reset ScreenCapture com.nousresearch.hermes` "
-        "(repeat per affected service), toggle it ON in System Settings, then "
-        "fully quit & relaunch Korra once."
+        'Если macOS снова запрашивает уже включённое разрешение, сохранённая запись устарела. Выполните `tccutil reset ScreenCapture com.nousresearch.hermes` для нужного разрешения, включите его в настройках системы, затем полностью закройте и заново откройте Корру.'
     )
 
 
@@ -1169,19 +1149,19 @@ def check_macos_tcc_anchor(should_fix: bool = False) -> None:
         if status == "skip":
             return
         if status == "active":
-            check_ok("macOS TCC anchor active", f"({detail})")
+            check_ok('Постоянная подпись macOS TCC активна', f"({detail})")
             return
         if should_fix:
             anchored = tcc.ensure_tcc_anchor()
             if anchored is not None:
-                check_ok("macOS TCC anchor installed", f"({anchored})")
+                check_ok('Постоянная подпись macOS TCC установлена', f"({anchored})")
                 return
         check_warn(
-            "macOS TCC anchor missing" if status == "missing" else "macOS TCC anchor stale",
+            'Постоянная подпись macOS TCC отсутствует' if status == 'missing' else 'Постоянная подпись macOS TCC устарела',
             f"({detail})",
         )
     except Exception as e:  # diagnostics must never crash
-        check_warn("macOS TCC anchor check failed", f"({e})")
+        check_warn('Не удалось проверить постоянную подпись macOS TCC', f"({e})")
 
 
 def check_macos_full_disk_access() -> None:
@@ -1216,20 +1196,12 @@ def check_macos_full_disk_access() -> None:
         return
     if has_fda:
         check_ok(
-            "macOS Full Disk Access granted",
-            "(no per-folder permission prompts will occur)",
+            'Полный доступ к диску macOS разрешён',
+            '(отдельные запросы доступа к папкам не появятся)',
         )
         return
     check_info(
-        "One switch silences all macOS folder prompts: grant your terminal "
-        "app Full Disk Access and Hermes will never trip per-folder dialogs "
-        "(Desktop/Downloads/Documents/...) again. Open: System Settings → "
-        "Privacy & Security → Full Disk Access — or run:\n"
-        "      open \"x-apple.systempreferences:com.apple.preference"
-        ".security?Privacy_AllFiles\"\n"
-        "    then enable your terminal (and Hermes.app if you use Desktop), "
-        "and restart them once. With Hermes' stable signing identities the "
-        "grant survives every update."
+        'Чтобы macOS не спрашивала доступ к каждой папке, разрешите терминалу полный доступ к диску: Системные настройки → Конфиденциальность и безопасность → Полный доступ к диску. Открыть раздел командой: open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles". Включите терминал и приложение Корры, затем перезапустите их. Постоянная подпись сохраняет разрешения при обновлениях.'
     )
 
 
@@ -1253,21 +1225,18 @@ def run_doctor(args):
         valid_ids = {a.id for a in ADVISORIES}
         if ack_target not in valid_ids:
             print(color(
-                f"Unknown advisory ID: {ack_target!r}. Known IDs: "
-                f"{', '.join(sorted(valid_ids)) or '(none)'}",
+                f"Неизвестный ID предупреждения: {ack_target!r}. Известные ID: {', '.join(sorted(valid_ids)) or '(нет)'}",
                 Colors.RED,
             ))
             sys.exit(2)
         if ack_advisory(ack_target):
             print(color(
-                f"  ✓ Acknowledged advisory {ack_target}. "
-                f"It will no longer trigger startup banners.",
+                f'  ✓ Предупреждение {ack_target} отмечено просмотренным и больше не появится при запуске.',
                 Colors.GREEN,
             ))
         else:
             print(color(
-                f"  ✗ Failed to persist ack for {ack_target}. "
-                f"Check ~/.hermes/config.yaml is writable.",
+                f'  ✗ Не удалось сохранить отметку для {ack_target}. Проверьте доступ на запись в config.yaml профиля.',
                 Colors.RED,
             ))
             sys.exit(1)
@@ -1279,10 +1248,10 @@ def run_doctor(args):
 
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.CYAN))
-    print(color("│                 🩺 Korra Doctor                         │", Colors.CYAN))
+    print(color('│                 🩺 Диагностика Корры                    │', Colors.CYAN))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.CYAN))
 
-    _section("Security Advisories")
+    _section('Предупреждения безопасности')
     try:
         from korra_cli.security_advisories import (
             detect_compromised,
@@ -1308,10 +1277,7 @@ def run_doctor(args):
                 # Funnel into the action list so the summary block surfaces it
                 # for users who scroll past the section.
                 manual_issues.append(
-                    f"Resolve security advisory {hit.advisory.id}: "
-                    f"uninstall {hit.package}=={hit.installed_version} and "
-                    f"rotate credentials, then run "
-                    f"`hermes doctor --ack {hit.advisory.id}`."
+                    f'Устраните предупреждение безопасности {hit.advisory.id}: удалите {hit.package}=={hit.installed_version}, замените ключи доступа, затем выполните korra doctor --ack {hit.advisory.id}.'
                 )
             # Acked-but-still-installed: show as informational so the user
             # knows the package is still on disk after the ack.
@@ -1319,16 +1285,15 @@ def run_doctor(args):
             for h in all_hits:
                 if h.advisory.id in acked_ids:
                     check_warn(
-                        f"{h.package}=={h.installed_version} still installed "
-                        f"(advisory {h.advisory.id} acknowledged)",
+                        f'{h.package}=={h.installed_version} всё ещё установлен; предупреждение {h.advisory.id} отмечено просмотренным',
                     )
         else:
-            check_ok("No active security advisories")
+            check_ok('Действующих предупреждений безопасности нет')
     except Exception as e:
         # Never let a bug in the advisory check block the rest of doctor.
-        check_warn(f"Security advisory check failed: {e}")
+        check_warn(f'Не удалось проверить предупреждения безопасности: {e}')
 
-    _section("MCP Server Security")
+    _section('Безопасность серверов MCP')
     try:
         from korra_cli.config import load_config
         from korra_cli.mcp_security import validate_mcp_server_entry
@@ -1343,29 +1308,29 @@ def run_doctor(args):
                 if not issues_found:
                     continue
                 suspicious += 1
-                check_warn(f"MCP server '{name}' has suspicious stdio command", "; ".join(issues_found))
+                check_warn(f'У сервера MCP «{name}» подозрительная команда stdio', "; ".join(issues_found))
                 manual_issues.append(
-                    f"Review/remove mcp_servers.{name} in config.yaml; rotate any credentials that may have been exposed."
+                    f'Проверьте или удалите mcp_servers.{name} в config.yaml. Замените ключи доступа, которые могли быть раскрыты.'
                 )
         if suspicious == 0:
-            check_ok("No suspicious MCP stdio commands")
+            check_ok('Подозрительных команд stdio для MCP нет')
     except Exception as e:
-        check_warn(f"MCP security check failed: {e}")
+        check_warn(f'Не удалось проверить безопасность MCP: {e}')
     
-    _section("Python Environment")
+    _section('Окружение Python')
     py_version = sys.version_info
     if py_version >= (3, 11):
         check_ok(f"Python {py_version.major}.{py_version.minor}.{py_version.micro}")
     elif py_version >= (3, 10):
         check_ok(f"Python {py_version.major}.{py_version.minor}.{py_version.micro}")
-        check_warn("Python 3.11+ recommended for RL Training tools (tinker requires >= 3.11)")
+        check_warn('Для инструментов обучения RL рекомендуется Python 3.11 или новее; tinker требует минимум 3.11')
     elif py_version >= (3, 8):
-        check_warn(f"Python {py_version.major}.{py_version.minor}.{py_version.micro}", "(3.10+ recommended)")
+        check_warn(f"Python {py_version.major}.{py_version.minor}.{py_version.micro}", '(рекомендуется 3.10 или новее)')
     else:
         _fail_and_issue(
             f"Python {py_version.major}.{py_version.minor}.{py_version.micro}",
-            "(3.10+ required)",
-            "Upgrade Python to 3.10+",
+            '(требуется 3.10 или новее)',
+            'Обновите Python до 3.10 или новее',
             issues,
         )
 
@@ -1386,22 +1351,22 @@ def run_doctor(args):
             # Do not append to ``issues`` because runtime repair remains
             # best-effort and unsupported installs may need manual action.
             check_warn(
-                f"SQLite {_sqlite_ver} (WAL-reset bug)",
+                f'SQLite {_sqlite_ver}: ошибка сброса WAL',
                 _sqlite_upgrade_hint(),
             )
         else:
             check_ok(f"SQLite {_sqlite_ver}")
         if _sqlite_src_short:
-            check_info(f"SQLite source id: {_sqlite_src_short}")
+            check_info(f'ID исходников SQLite: {_sqlite_src_short}')
         _report_database_journal_modes()
     except Exception as e:
-        check_warn(f"SQLite version probe failed: {e}")
+        check_warn(f'Не удалось проверить версию SQLite: {e}')
     # Check if in virtual environment
     in_venv = sys.prefix != sys.base_prefix
     if in_venv:
-        check_ok("Virtual environment active")
+        check_ok('Виртуальное окружение активно')
     else:
-        check_warn("Not in virtual environment", "(recommended)")
+        check_warn('Виртуальное окружение не используется', '(рекомендуется)')
 
     # macOS TCC interpreter anchor (#95596): dylib-complete re-land of the
     # mechanism reverted in #95563. Silent on non-macOS.
@@ -1421,20 +1386,20 @@ def run_doctor(args):
     # to older binaries stay stale (toggle shows ON while macOS re-prompts).
     check_macos_tcc_grants()
 
-    _section("SSL / CA Certificates")
+    _section('Сертификаты SSL / CA')
     check_certificates(should_fix=should_fix, issues=manual_issues)
 
-    _section("Required Packages")
+    _section('Обязательные пакеты')
     required_packages = [
         ("openai", "OpenAI SDK"),
-        ("rich", "Rich (terminal UI)"),
+        ("rich", 'Rich (интерфейс терминала)'),
         ("dotenv", "python-dotenv"),
         ("yaml", "PyYAML"),
         ("httpx", "HTTPX"),
     ]
     
     optional_packages = [
-        ("croniter", "Croniter (cron expressions)"),
+        ("croniter", 'Croniter (выражения расписания)'),
         ("telegram", "python-telegram-bot"),
         ("discord", "discord.py"),
     ]
@@ -1444,22 +1409,22 @@ def run_doctor(args):
             __import__(module)
             check_ok(name)
         except ImportError:
-            _fail_and_issue(name, "(missing)", f"Install {name}: {_python_install_cmd()} {module}", issues)
+            _fail_and_issue(name, '(отсутствует)', f'Установите {name}: {_python_install_cmd()} {module}', issues)
     
     for module, name in optional_packages:
         try:
             __import__(module)
-            check_ok(name, "(optional)")
+            check_ok(name, '(необязательно)')
         except ImportError:
-            check_warn(name, "(optional, not installed)")
+            check_warn(name, '(необязательно, не установлен)')
     
-    _section("Configuration Files")
+    _section('Файлы настроек')
     # Managed scope (administrator-pinned config/env), when present.
     managed_scope_check()
     # Check ~/.hermes/.env (primary location for user config)
     env_path = HERMES_HOME / '.env'
     if env_path.exists():
-        check_ok(f"{_DHH}/.env file exists")
+        check_ok(f'Файл {_DHH}/.env существует')
         
         # Prefer UTF-8 (.env is written as UTF-8 elsewhere). Fall back to
         # latin-1 for Windows Notepad/cp1252 files that are not valid UTF-8 —
@@ -1469,17 +1434,17 @@ def run_doctor(args):
         except UnicodeDecodeError:
             content = env_path.read_text(encoding="latin-1")
         if _has_provider_env_config(content):
-            check_ok("API key or custom endpoint configured")
+            check_ok('Ключ API или собственный адрес сервера настроен')
         else:
-            check_warn(f"No API key found in {_DHH}/.env")
-            issues.append("Run 'hermes setup' to configure API keys")
+            check_warn(f'В {_DHH}/.env не найден ключ API')
+            issues.append('Настройте ключи API командой korra setup')
     else:
         # Also check project root as fallback
         fallback_env = PROJECT_ROOT / '.env'
         if fallback_env.exists():
-            check_ok(".env file exists (in project directory)")
+            check_ok('Файл .env существует в папке проекта')
         else:
-            check_fail(f"{_DHH}/.env file missing")
+            check_fail(f'Файл {_DHH}/.env отсутствует')
             if should_fix:
                 env_path.parent.mkdir(parents=True, exist_ok=True)
                 env_path.touch()
@@ -1490,17 +1455,17 @@ def run_doctor(args):
                     os.chmod(str(env_path), 0o600)
                 except OSError:
                     pass
-                check_ok(f"Created empty {_DHH}/.env")
-                check_info("Run 'hermes setup' to configure API keys")
+                check_ok(f'Создан пустой файл {_DHH}/.env')
+                check_info('Настройте ключи API командой korra setup')
                 fixed_count += 1
             else:
-                check_info("Run 'hermes setup' to create one")
-                issues.append("Run 'hermes setup' to create .env")
+                check_info('Создайте файл командой korra setup')
+                issues.append('Создайте .env командой korra setup')
     
     # Check ~/.hermes/config.yaml (primary) or project cli-config.yaml (fallback)
     config_path = HERMES_HOME / 'config.yaml'
     if config_path.exists():
-        check_ok(f"{_DHH}/config.yaml exists")
+        check_ok(f'Файл {_DHH}/config.yaml существует')
 
         # Validate model.provider and model.default values
         try:
@@ -1599,12 +1564,10 @@ def run_doctor(args):
                 ):
                     known_list = ", ".join(sorted(known_providers)) if known_providers else "(unavailable)"
                     _fail_and_issue(
-                        f"model.provider '{provider_raw}' is not a recognised provider",
-                        f"(known: {known_list})",
+                        f'Неизвестный провайдер model.provider: «{provider_raw}»',
+                        f'(известные: {known_list})',
                         (
-                            f"model.provider '{provider_raw}' is unknown. "
-                            f"Valid providers: {known_list}. "
-                            f"Fix: run 'hermes config set model.provider <valid_provider>'"
+                            f'Неизвестный model.provider «{provider_raw}». Допустимые провайдеры: {known_list}. Исправление: korra config set model.provider <valid_provider>'
                         ),
                         issues,
                     )
@@ -1646,12 +1609,11 @@ def run_doctor(args):
                 and not provider_accepts_vendor_slug
             ):
                 check_warn(
-                    f"model.default '{default_model}' uses a vendor/model slug but provider is '{provider_raw}'",
-                    "(vendor-prefixed slugs belong to aggregators like openrouter)",
+                    f'model.default «{default_model}» содержит префикс поставщика, но выбран провайдер «{provider_raw}»',
+                    '(имена с префиксом поставщика используются агрегаторами, например openrouter)',
                 )
                 issues.append(
-                    f"model.default '{default_model}' is vendor-prefixed but model.provider is '{provider_raw}'. "
-                    "Either set model.provider to 'openrouter', or drop the vendor prefix."
+                    f'У model.default «{default_model}» есть префикс поставщика, а model.provider — «{provider_raw}». Выберите openrouter в model.provider или уберите префикс.'
                 )
 
             # Check credentials for the configured provider.
@@ -1683,12 +1645,10 @@ def run_doctor(args):
                             )
                     if not configured:
                         _fail_and_issue(
-                            f"model.provider '{runtime_provider}' is set but no API key is configured",
-                            "(check ~/.hermes/.env or run 'hermes setup')",
+                            f'Выбран model.provider «{runtime_provider}», но ключ API не настроен',
+                            '(проверьте .env профиля или выполните korra setup)',
                             (
-                                f"No credentials found for provider '{runtime_provider}'. "
-                                f"Run 'hermes setup' or set the provider's API key in {_DHH}/.env, "
-                                f"or switch providers with 'hermes config set model.provider <name>'"
+                                f'Нет данных входа для провайдера «{runtime_provider}». Выполните korra setup, задайте его ключ API в {_DHH}/.env либо смените провайдера: korra config set model.provider <name>.'
                             ),
                             issues,
                         )
@@ -1696,25 +1656,25 @@ def run_doctor(args):
                     pass
 
         except Exception as e:
-            check_warn("Could not validate model/provider config", f"({e})")
+            check_warn('Не удалось проверить настройки модели и провайдера', f"({e})")
     else:
         fallback_config = PROJECT_ROOT / 'cli-config.yaml'
         if fallback_config.exists():
-            check_ok("cli-config.yaml exists (in project directory)")
+            check_ok('Файл cli-config.yaml существует в папке проекта')
         else:
             if should_fix:
                 config_path.parent.mkdir(parents=True, exist_ok=True)
                 example_config = PROJECT_ROOT / 'cli-config.yaml.example'
                 if example_config.exists():
                     shutil.copy2(str(example_config), str(config_path))
-                    check_ok(f"Created {_DHH}/config.yaml from cli-config.yaml.example")
+                    check_ok(f'Создан {_DHH}/config.yaml по шаблону cli-config.yaml.example')
                 else:
                     from korra_cli.config import DEFAULT_CONFIG, save_config
                     save_config(DEFAULT_CONFIG)
-                    check_ok(f"Created {_DHH}/config.yaml from defaults")
+                    check_ok(f'Создан {_DHH}/config.yaml с исходными настройками')
                 fixed_count += 1
             else:
-                check_warn("config.yaml not found", "(using defaults)")
+                check_warn('Файл config.yaml не найден', '(используются исходные настройки)')
 
     # Check config version and stale keys
     config_path = HERMES_HOME / 'config.yaml'
@@ -1724,21 +1684,21 @@ def run_doctor(args):
             current_ver, latest_ver = check_config_version()
             if current_ver < latest_ver:
                 check_warn(
-                    f"Config version outdated (v{current_ver} → v{latest_ver})",
-                    "(new settings available)"
+                    f'Версия настроек устарела: v{current_ver} → v{latest_ver}',
+                    '(доступны новые параметры)'
                 )
                 if should_fix:
                     try:
                         migrate_config(interactive=False, quiet=False)
-                        check_ok("Config migrated to latest version")
+                        check_ok('Формат настроек обновлён до последней версии')
                         fixed_count += 1
                     except Exception as mig_err:
-                        check_warn(f"Auto-migration failed: {mig_err}")
-                        issues.append("Run 'hermes setup' to migrate config")
+                        check_warn(f'Не удалось автоматически обновить формат: {mig_err}')
+                        issues.append('Обновите формат настроек командой korra setup')
                 else:
-                    issues.append("Run 'hermes doctor --fix' or 'hermes setup' to migrate config")
+                    issues.append('Обновите формат настроек: korra doctor --fix или korra setup')
             else:
-                check_ok(f"Config version up to date (v{current_ver})")
+                check_ok(f'Версия настроек актуальна: v{current_ver}')
         except Exception:
             pass
 
@@ -1750,8 +1710,8 @@ def run_doctor(args):
             stale_root_keys = [k for k in ("provider", "base_url") if k in raw_config and isinstance(raw_config[k], str)]
             if stale_root_keys:
                 check_warn(
-                    f"Stale root-level config keys: {', '.join(stale_root_keys)}",
-                    "(should be under 'model:' section)"
+                    f"Устаревшие ключи в корне настроек: {', '.join(stale_root_keys)}",
+                    '(должны находиться в разделе model:)'
                 )
                 if should_fix:
                     # Coerce scalar/None ``model:`` into a dict before mutation —
@@ -1773,10 +1733,10 @@ def run_doctor(args):
                             raw_config.pop(k)
                     from korra_cli.config import atomic_config_write
                     atomic_config_write(config_path, raw_config)
-                    check_ok("Migrated stale root-level keys into model section")
+                    check_ok('Устаревшие ключи перенесены из корня в раздел model')
                     fixed_count += 1
                 else:
-                    issues.append("Stale root-level provider/base_url in config.yaml — run 'hermes doctor --fix'")
+                    issues.append('Устаревшие provider/base_url в корне config.yaml; выполните korra doctor --fix')
         except Exception:
             pass
 
@@ -1811,27 +1771,23 @@ def run_doctor(args):
             )
             if drift:
                 check_warn(
-                    f"HERMES_MAX_ITERATIONS={env_ghost} in .env shadows "
-                    f"agent.max_turns={cfg_max_turns} in config.yaml",
-                    "(stale ghost from an earlier `hermes setup` run)",
+                    f'HERMES_MAX_ITERATIONS={env_ghost} в .env заменяет agent.max_turns={cfg_max_turns} из config.yaml',
+                    '(устаревшая запись от прежнего запуска korra setup)',
                 )
                 if should_fix:
                     if remove_env_value("HERMES_MAX_ITERATIONS"):
                         check_ok(
-                            "Removed stale HERMES_MAX_ITERATIONS from .env "
-                            f"(config.yaml agent.max_turns={cfg_max_turns} is now authoritative)"
+                            f'Устаревший HERMES_MAX_ITERATIONS удалён из .env; теперь действует agent.max_turns={cfg_max_turns} из config.yaml'
                         )
                         fixed_count += 1
                     else:
-                        check_warn("Could not remove HERMES_MAX_ITERATIONS from .env")
+                        check_warn('Не удалось удалить HERMES_MAX_ITERATIONS из .env')
                         manual_issues.append(
-                            "Manually delete the HERMES_MAX_ITERATIONS line from "
-                            f"{_DHH}/.env — config.yaml agent.max_turns is authoritative."
+                            f'Удалите строку HERMES_MAX_ITERATIONS из {_DHH}/.env вручную. Используется agent.max_turns из config.yaml.'
                         )
                 else:
                     issues.append(
-                        "Stale HERMES_MAX_ITERATIONS in .env shadows config.yaml — "
-                        "run 'hermes doctor --fix'"
+                        'Устаревший HERMES_MAX_ITERATIONS в .env перекрывает config.yaml; выполните korra doctor --fix'
                     )
         except Exception:
             pass
@@ -1860,7 +1816,7 @@ def run_doctor(args):
             from korra_cli.config import validate_config_structure
             config_issues = validate_config_structure()
             if config_issues:
-                _section("Config Structure")
+                _section('Структура настроек')
                 for ci in config_issues:
                     if ci.severity == "error":
                         check_fail(ci.message)
@@ -1886,7 +1842,7 @@ def run_doctor(args):
         except Exception:
             pass
 
-    _section("xAI Model Retirement (May 15, 2026)")
+    _section('Модели xAI, снятые с поддержки 15 мая 2026 года')
 
     try:
         from korra_cli.config import load_config
@@ -1899,19 +1855,18 @@ def run_doctor(args):
         _xai_cfg = load_config()
         retired_refs = find_retired_xai_refs(_xai_cfg)
         if not retired_refs:
-            check_ok("No retired xAI models in config")
+            check_ok('В настройках нет снятых с поддержки моделей xAI')
         else:
             for ref in retired_refs:
                 check_warn(format_issue(ref))
-            check_info(f"Migration guide: {MIGRATION_GUIDE_URL}")
+            check_info(f'Инструкция по переходу: {MIGRATION_GUIDE_URL}')
             manual_issues.append(
-                f"Update {len(retired_refs)} retired xAI model reference(s) "
-                f"in config.yaml — see {MIGRATION_GUIDE_URL}"
+                f'Замените устаревшие модели xAI в config.yaml ({len(retired_refs)} ссылок); см. {MIGRATION_GUIDE_URL}'
             )
     except Exception as _xai_check_err:
-        check_warn("xAI retirement check skipped", f"({_xai_check_err})")
+        check_warn('Проверка устаревших моделей xAI пропущена', f"({_xai_check_err})")
 
-    _section("Auth Providers")
+    _section('Вход у провайдеров')
 
     try:
         from korra_cli.auth import (
@@ -1924,15 +1879,15 @@ def run_doctor(args):
         # trigger an OAuth refresh as a side effect of a health check.
         nous_status = get_nous_auth_status_local()
         if nous_status.get("logged_in"):
-            check_ok("Nous Portal auth", "(logged in)")
+            check_ok('Вход Nous Portal', '(вход выполнен)')
         else:
-            check_warn("Nous Portal auth", "(not logged in)")
+            check_warn('Вход Nous Portal', '(вход не выполнен)')
 
         codex_status = get_codex_auth_status()
         if codex_status.get("logged_in"):
-            check_ok("OpenAI Codex auth", "(logged in)")
+            check_ok('Вход OpenAI Codex', '(вход выполнен)')
         else:
-            check_warn("OpenAI Codex auth", "(not logged in)")
+            check_warn('Вход OpenAI Codex', '(вход не выполнен)')
             if codex_status.get("error"):
                 check_info(codex_status["error"])
             # Native OAuth uses Hermes' own device-code flow — the Codex CLI is
@@ -1941,19 +1896,17 @@ def run_doctor(args):
             # remediation for whichever provider happens to print next (#27975).
             if not _safe_which("codex"):
                 check_info(
-                    "codex CLI not installed "
-                    "(optional — only required to import tokens "
-                    "from an existing Codex CLI login)"
+                    'Codex CLI не установлен; он необязателен и нужен только для импорта токенов уже выполненного входа'
                 )
 
         minimax_status = get_minimax_oauth_auth_status()
         if minimax_status.get("logged_in"):
             region = minimax_status.get("region", "global")
-            check_ok("MiniMax OAuth", f"(logged in, region={region})")
+            check_ok("MiniMax OAuth", f'(вход выполнен, регион {region})')
         else:
-            check_warn("MiniMax OAuth", "(not logged in)")
+            check_warn("MiniMax OAuth", '(вход не выполнен)')
     except Exception as e:
-        check_warn("Auth provider status", f"(could not check: {e})")
+        check_warn('Состояние входа у провайдера', f'(не удалось проверить: {e})')
 
     # xAI OAuth — separate try/except so an import failure here cannot
     # disrupt the already-printed Nous/Codex/Gemini/MiniMax rows above.
@@ -1961,37 +1914,37 @@ def run_doctor(args):
         from korra_cli.auth import get_xai_oauth_auth_status
         xai_oauth_status = get_xai_oauth_auth_status() or {}
         if xai_oauth_status.get("logged_in"):
-            check_ok("xAI OAuth", "(logged in)")
+            check_ok("xAI OAuth", '(вход выполнен)')
         else:
-            check_warn("xAI OAuth", "(not logged in)")
+            check_warn("xAI OAuth", '(вход не выполнен)')
             if xai_oauth_status.get("error"):
                 check_info(xai_oauth_status["error"])
     except Exception:
         pass
 
-    _section("Directory Structure")
+    _section('Папки данных')
     hermes_home = HERMES_HOME
     if hermes_home.exists():
-        check_ok(f"{_DHH} directory exists")
+        check_ok(f'Папка {_DHH} существует')
     elif should_fix:
         hermes_home.mkdir(parents=True, exist_ok=True)
-        check_ok(f"Created {_DHH} directory")
+        check_ok(f'Создана папка {_DHH}')
         fixed_count += 1
     else:
-        check_warn(f"{_DHH} not found", "(will be created on first use)")
+        check_warn(f'{_DHH} не найден', '(создастся при первом использовании)')
     
     # Check expected subdirectories
     expected_subdirs = ["cron", "sessions", "logs", "skills", "memories"]
     for subdir_name in expected_subdirs:
         subdir_path = hermes_home / subdir_name
         if subdir_path.exists():
-            check_ok(f"{_DHH}/{subdir_name}/ exists")
+            check_ok(f'Папка {_DHH}/{subdir_name}/ существует')
         elif should_fix:
             subdir_path.mkdir(parents=True, exist_ok=True)
-            check_ok(f"Created {_DHH}/{subdir_name}/")
+            check_ok(f'Создана папка {_DHH}/{subdir_name}/')
             fixed_count += 1
         else:
-            check_warn(f"{_DHH}/{subdir_name}/ not found", "(will be created on first use)")
+            check_warn(f'Папка {_DHH}/{subdir_name}/ не найдена', '(создастся при первом использовании)')
     
     # Check for SOUL.md persona file
     soul_path = hermes_home / "SOUL.md"
@@ -2000,11 +1953,11 @@ def run_doctor(args):
         # Check if it's just the template comments (no real content)
         lines = [l for l in content.splitlines() if l.strip() and not l.strip().startswith(("<!--", "-->", "#"))]
         if lines:
-            check_ok(f"{_DHH}/SOUL.md exists (persona configured)")
+            check_ok(f'Файл {_DHH}/SOUL.md существует; характер общения настроен')
         else:
-            check_info(f"{_DHH}/SOUL.md exists but is empty — edit it to customize personality")
+            check_info(f'Файл {_DHH}/SOUL.md пуст. Заполните его, чтобы настроить характер общения.')
     else:
-        check_warn(f"{_DHH}/SOUL.md not found", "(create it to give Korra a custom personality)")
+        check_warn(f'Файл {_DHH}/SOUL.md не найден', '(создайте его, чтобы задать характер общения Корры)')
         if should_fix:
             soul_path.parent.mkdir(parents=True, exist_ok=True)
             # Korra: сеем тот же канонический текст, что и первый запуск
@@ -2012,30 +1965,30 @@ def run_doctor(args):
             from korra_cli.default_soul import DEFAULT_SOUL_MD
 
             soul_path.write_text(DEFAULT_SOUL_MD + "\n", encoding="utf-8")
-            check_ok(f"Created {_DHH}/SOUL.md with basic template")
+            check_ok(f'Создан файл {_DHH}/SOUL.md с базовым шаблоном')
             fixed_count += 1
     
     # Check memory directory
     memories_dir = hermes_home / "memories"
     if memories_dir.exists():
-        check_ok(f"{_DHH}/memories/ directory exists")
+        check_ok(f'Папка {_DHH}/memories/ существует')
         memory_file = memories_dir / "MEMORY.md"
         user_file = memories_dir / "USER.md"
         if memory_file.exists():
             size = len(memory_file.read_text(encoding="utf-8").strip())
-            check_ok(f"MEMORY.md exists ({size} chars)")
+            check_ok(f'MEMORY.md существует: {size} символов')
         else:
-            check_info("MEMORY.md not created yet (will be created when the agent first writes a memory)")
+            check_info('MEMORY.md ещё не создан; появится при первой записи агента в память')
         if user_file.exists():
             size = len(user_file.read_text(encoding="utf-8").strip())
-            check_ok(f"USER.md exists ({size} chars)")
+            check_ok(f'USER.md существует: {size} символов')
         else:
-            check_info("USER.md not created yet (will be created when the agent first writes a memory)")
+            check_info('USER.md ещё не создан; появится при первой записи агента в память')
     else:
-        check_warn(f"{_DHH}/memories/ not found", "(will be created on first use)")
+        check_warn(f'Папка {_DHH}/memories/ не найдена', '(создастся при первом использовании)')
         if should_fix:
             memories_dir.mkdir(parents=True, exist_ok=True)
-            check_ok(f"Created {_DHH}/memories/")
+            check_ok(f'Создана папка {_DHH}/memories/')
             fixed_count += 1
     
     # Check SQLite session store
@@ -2047,7 +2000,7 @@ def run_doctor(args):
             cursor = conn.execute("SELECT COUNT(*) FROM sessions")
             count = cursor.fetchone()[0]
             conn.close()
-            check_ok(f"{_DHH}/state.db exists ({count} sessions)")
+            check_ok(f'База {_DHH}/state.db существует: {count} бесед')
 
             # FTS write-health probe (#50502): `SELECT COUNT(*)` above succeeds
             # even when the FTS index is corrupt and every message write fails
@@ -2059,7 +2012,7 @@ def run_doctor(args):
             _write_reason = _db_opens_cleanly(state_db_path)
             if _write_reason is not None:
                 check_warn(
-                    f"{_DHH}/state.db fails a write-health probe (FTS index may be corrupt)",
+                    f'Проверка записи в {_DHH}/state.db не прошла; возможно, повреждён поисковый индекс FTS',
                     f"({_write_reason})",
                 )
                 if should_fix:
@@ -2070,23 +2023,21 @@ def run_doctor(args):
                             if report.get("backup_path") else "n/a"
                         )
                         check_ok(
-                            "Repaired state.db FTS write health",
-                            f"(strategy: {report.get('strategy')}; backup: {backup_name})",
+                            'Запись в поисковый индекс FTS базы state.db восстановлена',
+                            f"(способ: {report.get('strategy')}; копия: {backup_name})",
                         )
                         fixed_count += 1
                     else:
                         check_warn(
-                            "state.db FTS write-health repair did not recover automatically",
-                            f"({report.get('error')}; backup: {report.get('backup_path')})",
+                            'Не удалось автоматически восстановить запись в FTS базы state.db',
+                            f"({report.get('error')}; копия: {report.get('backup_path')})",
                         )
                         issues.append(
-                            "state.db FTS write corruption and auto-repair failed — "
-                            "restore from the backup copy beside state.db"
+                            'Повреждён FTS в state.db, автоматическое восстановление не помогло. Восстановите резервную копию рядом с state.db.'
                         )
                 else:
                     issues.append(
-                        "state.db FTS write corruption — run 'hermes doctor --fix' "
-                        "(or 'hermes sessions repair') to rebuild the FTS index"
+                        'Повреждён поисковый индекс FTS в state.db. Восстановите его: korra doctor --fix или korra sessions repair.'
                     )
         except Exception as e:
             from korra_state import is_malformed_db_error, repair_state_db_schema
@@ -2097,7 +2048,7 @@ def run_doctor(args):
                 # this is NOT a plain FTS-index rebuild. Repair sqlite_master
                 # in place (backup first; sessions/messages preserved).
                 check_warn(
-                    f"{_DHH}/state.db schema is malformed (sessions hidden until repaired)",
+                    f'Повреждена структура {_DHH}/state.db; беседы скрыты до восстановления',
                     f"({e})",
                 )
                 if should_fix:
@@ -2116,26 +2067,24 @@ def run_doctor(args):
                             if report.get("backup_path") else "n/a"
                         )
                         check_ok(
-                            f"Repaired state.db schema ({count} sessions recovered)",
-                            f"(strategy: {report.get('strategy')}; backup: {backup_name})",
+                            f'Структура state.db восстановлена; возвращено бесед: {count}',
+                            f"(способ: {report.get('strategy')}; копия: {backup_name})",
                         )
                         fixed_count += 1
                     else:
                         check_warn(
-                            "state.db schema repair did not recover automatically",
-                            f"({report.get('error')}; backup: {report.get('backup_path')})",
+                            'Не удалось автоматически восстановить структуру state.db',
+                            f"({report.get('error')}; копия: {report.get('backup_path')})",
                         )
                         issues.append(
-                            "state.db schema malformed and auto-repair failed — "
-                            "restore from the backup copy beside state.db"
+                            'Повреждена структура state.db, автоматическое восстановление не помогло. Восстановите резервную копию рядом с state.db.'
                         )
                 else:
                     issues.append(
-                        "state.db schema malformed — run 'hermes doctor --fix' "
-                        "(or 'hermes sessions repair') to recover hidden sessions"
+                        'Повреждена структура state.db. Для возврата бесед выполните korra doctor --fix или korra sessions repair.'
                     )
             else:
-                check_warn(f"{_DHH}/state.db exists but has issues: {e}")
+                check_warn(f'Файл {_DHH}/state.db существует, но обнаружены проблемы: {e}')
 
         # Health/stats snapshot (#statedb-visibility): a multi-GB state.db
         # with a runaway WAL was previously invisible to every Hermes
@@ -2154,20 +2103,18 @@ def run_doctor(args):
                     check_warn(_text, _detail)
                     if "auto_prune" in _detail:
                         issues.append(
-                            "state.db is large — enable sessions.auto_prune "
-                            "in config.yaml"
+                            'База state.db большая; включите sessions.auto_prune в config.yaml'
                             + (
-                                " and run 'hermes sessions optimize-storage' "
-                                "offline (gateway stopped)"
+                                ' и выполните korra sessions optimize-storage при остановленном шлюзе'
                                 if "optimize-storage" in _detail else ""
                             )
                         )
                 else:
                     check_info(_text + (f" {_detail}" if _detail else ""))
         except Exception as _stats_exc:
-            check_info(f"state.db stats unavailable ({_stats_exc})")
+            check_info(f'Статистика state.db недоступна: {_stats_exc}')
     else:
-        check_info(f"{_DHH}/state.db not created yet (will be created on first session)")
+        check_info(f'Файл {_DHH}/state.db ещё не создан; появится при первой беседе')
 
     # Check WAL file size (unbounded growth indicates missed checkpoints)
     wal_path = hermes_home / "state.db-wal"
@@ -2176,8 +2123,8 @@ def run_doctor(args):
             wal_size = wal_path.stat().st_size
             if wal_size > 50 * 1024 * 1024:  # 50 MB
                 check_warn(
-                    f"WAL file is large ({wal_size // (1024*1024)} MB)",
-                    "(may indicate missed checkpoints)"
+                    f'Файл WAL большой: {wal_size // (1024 * 1024)} МБ',
+                    '(возможно, давно не выполнялось сохранение журнала)'
                 )
                 if should_fix:
                     import sqlite3
@@ -2185,12 +2132,12 @@ def run_doctor(args):
                     conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                     conn.close()
                     new_size = wal_path.stat().st_size if wal_path.exists() else 0
-                    check_ok(f"WAL checkpoint performed ({wal_size // 1024}K → {new_size // 1024}K)")
+                    check_ok(f'Журнал WAL сохранён: {wal_size // 1024} КБ → {new_size // 1024} КБ')
                     fixed_count += 1
                 else:
-                    issues.append("Large WAL file — run 'hermes doctor --fix' to checkpoint")
+                    issues.append('Файл WAL большой; выполните korra doctor --fix для сохранения журнала')
             elif wal_size > 10 * 1024 * 1024:  # 10 MB
-                check_info(f"WAL file is {wal_size // (1024*1024)} MB (normal for active sessions)")
+                check_info(f'Размер WAL — {wal_size // (1024 * 1024)} МБ; для активных бесед это нормально')
         except Exception:
             pass
 
@@ -2198,7 +2145,7 @@ def run_doctor(args):
     _check_s6_supervision(issues)
 
     if sys.platform != "win32":
-        _section("Command Installation")
+        _section('Установка команды')
         # Determine the venv entry point location
         _venv_bin = None
         for _venv_name in ("venv", ".venv"):
@@ -2220,71 +2167,71 @@ def run_doctor(args):
 
         if _venv_bin is None:
             check_warn(
-                "Venv entry point not found",
-                "(hermes not in venv/bin/ or .venv/bin/ — reinstall with pip install -e '.[all]')"
+                'Команда в виртуальном окружении не найдена',
+                "(команды нет в venv/bin/ или .venv/bin/; переустановите через pip install -e '.[all]')"
             )
             manual_issues.append(
-                f"Reinstall entry point: cd {PROJECT_ROOT} && source venv/bin/activate && pip install -e '.[all]'"
+                f"Переустановите команду: cd {PROJECT_ROOT} && source venv/bin/activate && pip install -e '.[all]'"
             )
         else:
-            check_ok(f"Venv entry point exists ({_venv_bin.relative_to(PROJECT_ROOT)})")
+            check_ok(f'Команда виртуального окружения существует: {_venv_bin.relative_to(PROJECT_ROOT)}')
 
             # Check the symlink at the command link location
             if _cmd_link.is_symlink():
                 _target = _cmd_link.resolve()
                 _expected = _venv_bin.resolve()
                 if _target == _expected:
-                    check_ok(f"{_cmd_link_display}/hermes → correct target")
+                    check_ok(f'{_cmd_link_display}/hermes → верная цель ссылки')
                 else:
                     check_warn(
-                        f"{_cmd_link_display}/hermes points to wrong target",
-                        f"(→ {_target}, expected → {_expected})"
+                        f'{_cmd_link_display}/hermes указывает не туда',
+                        f'(→ {_target}, ожидается → {_expected})'
                     )
                     if should_fix:
                         _cmd_link.unlink()
                         _cmd_link.symlink_to(_venv_bin)
-                        check_ok(f"Fixed symlink: {_cmd_link_display}/hermes → {_venv_bin}")
+                        check_ok(f'Ссылка исправлена: {_cmd_link_display}/hermes → {_venv_bin}')
                         fixed_count += 1
                     else:
-                        issues.append(f"Broken symlink at {_cmd_link_display}/hermes — run 'hermes doctor --fix'")
+                        issues.append(f'Повреждена ссылка {_cmd_link_display}/hermes; выполните korra doctor --fix')
             elif _cmd_link.exists():
                 # It's a regular file, not a symlink — possibly a wrapper script
-                check_ok(f"{_cmd_link_display}/hermes exists (non-symlink)")
+                check_ok(f'{_cmd_link_display}/hermes существует и не является ссылкой')
             else:
                 check_fail(
-                    f"{_cmd_link_display}/hermes not found",
-                    "(hermes command may not work outside the venv)"
+                    f'{_cmd_link_display}/hermes не найден',
+                    '(команда совместимости может не работать вне виртуального окружения)'
                 )
                 if should_fix:
                     _cmd_link_dir.mkdir(parents=True, exist_ok=True)
                     _cmd_link.symlink_to(_venv_bin)
-                    check_ok(f"Created symlink: {_cmd_link_display}/hermes → {_venv_bin}")
+                    check_ok(f'Создана ссылка: {_cmd_link_display}/hermes → {_venv_bin}')
                     fixed_count += 1
 
                     # Check if the link dir is on PATH
                     _path_dirs = os.environ.get("PATH", "").split(os.pathsep)
                     if str(_cmd_link_dir) not in _path_dirs:
                         check_warn(
-                            f"{_cmd_link_display} is not on your PATH",
-                            "(add it to your shell config: export PATH=\"$HOME/.local/bin:$PATH\")"
+                            f'Папка {_cmd_link_display} не входит в PATH',
+                            '(добавьте в настройки оболочки: export PATH="$HOME/.local/bin:$PATH")'
                         )
-                        manual_issues.append(f"Add {_cmd_link_display} to your PATH")
+                        manual_issues.append(f'Добавьте {_cmd_link_display} в PATH')
                 else:
-                    issues.append(f"Missing {_cmd_link_display}/hermes symlink — run 'hermes doctor --fix'")
+                    issues.append(f'Нет ссылки {_cmd_link_display}/hermes; выполните korra doctor --fix')
 
-    _section("External Tools")
+    _section('Внешние инструменты')
     # Git
     if _safe_which("git"):
         check_ok("git")
     else:
-        check_warn("git not found", "(optional)")
+        check_warn('git не найден', '(необязательно)')
     
     # ripgrep (optional, for faster file search)
     if _safe_which("rg"):
-        check_ok("ripgrep (rg)", "(faster file search)")
+        check_ok("ripgrep (rg)", '(ускоренный поиск файлов)')
     else:
-        check_warn("ripgrep (rg) not found", "(file search uses grep fallback)")
-        check_info(f"Install for faster search: {_system_package_install_cmd('ripgrep')}")
+        check_warn('ripgrep (rg) не найден', '(для поиска используется grep)')
+        check_info(f"Для ускорения поиска установите: {_system_package_install_cmd('ripgrep')}")
     
     # Docker (optional)
     terminal_env = os.getenv("TERMINAL_ENV", "local")
@@ -2303,8 +2250,7 @@ def run_doctor(args):
         # /var/run/docker.sock, so fall through to the normal check.
         if terminal_env != "docker":
             check_info(
-                "Running inside a container — using local terminal backend "
-                "(docker-in-docker is not configured by default)"
+                'Запуск внутри контейнера: используется локальный терминал; Docker внутри Docker по умолчанию не настроен'
             )
             # Skip to next section; Docker isn't relevant here.
             terminal_env = "local"
@@ -2316,24 +2262,24 @@ def run_doctor(args):
             except subprocess.TimeoutExpired:
                 result = None
             if result is not None and result.returncode == 0:
-                check_ok("docker", "(daemon running)")
+                check_ok("docker", '(служба работает)')
             else:
-                _fail_and_issue("docker daemon not running", "", "Start Docker daemon", issues)
+                _fail_and_issue('Служба Docker не работает', "", 'Запустите службу Docker', issues)
         else:
             _fail_and_issue(
-                "docker not found",
-                "(required for TERMINAL_ENV=docker)",
-                "Install Docker or change TERMINAL_ENV",
+                'docker не найден',
+                '(нужен для terminal.backend: docker)',
+                'Установите Docker или смените terminal.backend в config.yaml',
                 issues,
             )
     elif _safe_which("docker"):
-        check_ok("docker", "(optional)")
+        check_ok("docker", '(необязательно)')
     elif _is_termux():
-        check_info("Docker backend is not available inside Termux (expected on Android)")
+        check_info('Docker недоступен внутри Termux; для Android это ожидаемо')
     elif running_in_container:
         pass  # already explained above
     else:
-        check_warn("docker not found", "(optional)")
+        check_warn('docker не найден', '(необязательно)')
     
     # SSH (if using ssh backend)
     if terminal_env == "ssh":
@@ -2360,14 +2306,14 @@ def run_doctor(args):
             except subprocess.TimeoutExpired:
                 result = None
             if result is not None and result.returncode == 0:
-                check_ok(f"SSH connection to {ssh_host}")
+                check_ok(f'Подключение SSH к {ssh_host}')
             else:
-                _fail_and_issue(f"SSH connection to {ssh_host}", "", f"Check SSH configuration for {ssh_host}", issues)
+                _fail_and_issue(f'Подключение SSH к {ssh_host}', "", f'Проверьте настройки SSH для {ssh_host}', issues)
         else:
             _fail_and_issue(
-                "TERMINAL_SSH_HOST not set",
-                "(required for TERMINAL_ENV=ssh)",
-                "Set TERMINAL_SSH_HOST in .env",
+                'TERMINAL_SSH_HOST не задан',
+                '(нужен для terminal.backend: ssh)',
+                'Укажите SSH-сервер в настройках терминала: korra setup terminal',
                 issues,
             )
     
@@ -2375,22 +2321,22 @@ def run_doctor(args):
     if terminal_env == "daytona":
         daytona_key = os.getenv("DAYTONA_API_KEY")
         if daytona_key:
-            check_ok("Daytona API key", "(configured)")
+            check_ok('Ключ API Daytona', '(настроен)')
         else:
             _fail_and_issue(
-                "DAYTONA_API_KEY not set",
-                "(required for TERMINAL_ENV=daytona)",
-                "Set DAYTONA_API_KEY environment variable",
+                'DAYTONA_API_KEY не задан',
+                '(нужен для terminal.backend: daytona)',
+                'Задайте ключ DAYTONA_API_KEY',
                 issues,
             )
         try:
             from daytona import Daytona  # noqa: F401 — SDK presence check
-            check_ok("daytona SDK", "(installed)")
+            check_ok('SDK Daytona', '(установлен)')
         except ImportError:
             _fail_and_issue(
-                "daytona SDK not installed",
+                'SDK Daytona не установлен',
                 "(pip install daytona)",
-                "Install daytona SDK: pip install daytona",
+                'Установите SDK Daytona: pip install daytona',
                 issues,
             )
 
@@ -2399,62 +2345,62 @@ def run_doctor(args):
         runtime = os.getenv("TERMINAL_VERCEL_RUNTIME", "node24").strip() or "node24"
         from tools.terminal_tool import _SUPPORTED_VERCEL_RUNTIMES
         if runtime in _SUPPORTED_VERCEL_RUNTIMES:
-            check_ok("Vercel runtime", f"({runtime})")
+            check_ok('Среда выполнения Vercel', f"({runtime})")
         else:
             supported = ", ".join(_SUPPORTED_VERCEL_RUNTIMES)
             _fail_and_issue(
-                "Vercel runtime unsupported",
-                f"({runtime}; use {supported})",
-                f"Set TERMINAL_VERCEL_RUNTIME to one of: {supported}",
+                'Среда выполнения Vercel не поддерживается',
+                f'({runtime}; используйте {supported})',
+                f'Выберите среду Vercel в настройках терминала: {supported}',
                 issues,
             )
 
         disk = os.getenv("TERMINAL_CONTAINER_DISK", "51200").strip()
         if disk in {"", "0", "51200"}:
-            check_ok("Vercel disk setting", "(uses platform default)")
+            check_ok('Размер диска Vercel', '(используется значение платформы по умолчанию)')
         else:
             _fail_and_issue(
-                "Vercel custom disk unsupported",
-                "(reset terminal.container_disk to 51200)",
-                "Vercel Sandbox does not support custom container_disk; use the shared default 51200",
+                'Свой размер диска Vercel не поддерживается',
+                '(верните terminal.container_disk: 51200)',
+                'Vercel Sandbox не поддерживает свой container_disk; используйте общее значение 51200',
                 issues,
             )
 
         if importlib.util.find_spec("vercel") is not None:
-            check_ok("vercel SDK", "(installed)")
+            check_ok('SDK Vercel', '(установлен)')
         else:
             _fail_and_issue(
-                "vercel SDK not installed",
+                'SDK Vercel не установлен',
                 "(pip install 'hermes-agent[vercel]')",
-                "Install the Vercel optional dependency: pip install 'hermes-agent[vercel]'",
+                "Установите дополнительный пакет Vercel: pip install 'hermes-agent[vercel]'",
                 issues,
             )
 
         auth_status = describe_vercel_auth()
         if auth_status.ok:
-            check_ok("Vercel auth", f"({auth_status.label})")
+            check_ok('Вход Vercel', f"({auth_status.display_label or auth_status.label})")
         elif auth_status.label.startswith("partial"):
             _fail_and_issue(
-                "Vercel auth incomplete",
-                f"({auth_status.label})",
-                "Set VERCEL_TOKEN, VERCEL_PROJECT_ID, and VERCEL_TEAM_ID together",
+                'Вход Vercel настроен не полностью',
+                f"({auth_status.display_label or auth_status.label})",
+                'Задайте вместе VERCEL_TOKEN, VERCEL_PROJECT_ID и VERCEL_TEAM_ID',
                 issues,
             )
         else:
             _fail_and_issue(
-                "Vercel auth not configured",
-                f"({auth_status.label})",
-                "Configure Vercel Sandbox auth with VERCEL_TOKEN, VERCEL_PROJECT_ID, and VERCEL_TEAM_ID",
+                'Вход Vercel не настроен',
+                f"({auth_status.display_label or auth_status.label})",
+                'Настройте вход Vercel Sandbox: VERCEL_TOKEN, VERCEL_PROJECT_ID и VERCEL_TEAM_ID',
                 issues,
             )
         for line in auth_status.detail_lines:
-            check_info(f"Vercel auth {line}")
+            check_info(f'Вход Vercel: {line}')
 
         persistent = os.getenv("TERMINAL_CONTAINER_PERSISTENT", "true").lower() in {"1", "true", "yes", "on"}
         if persistent:
-            check_info("Vercel persistence: snapshot filesystem only; live processes do not survive sandbox recreation")
+            check_info('Хранение Vercel: сохраняется снимок файлов; работающие процессы не переживают пересоздание среды')
         else:
-            check_info("Vercel persistence: ephemeral filesystem")
+            check_info('Хранение Vercel: временная файловая система')
 
     # Plugin-registered terminal backends (if one is the active backend)
     if terminal_env not in {
@@ -2472,9 +2418,9 @@ def run_doctor(args):
             _provider = None
         if _provider is None:
             _fail_and_issue(
-                f"Unknown terminal backend '{terminal_env}'",
-                "(no built-in or plugin backend by that name)",
-                "Fix terminal.backend in config.yaml, or install/enable the plugin that provides it",
+                f'Неизвестная среда терминала «{terminal_env}»',
+                '(встроенной среды или плагина с таким именем нет)',
+                'Исправьте terminal.backend в config.yaml либо установите и включите нужный плагин',
                 issues,
             )
         else:
@@ -2501,7 +2447,7 @@ def run_doctor(args):
             _resolved_ab = None
 
         if _resolved_ab and _is_npx_agent_browser_sentinel(_resolved_ab):
-            check_ok("agent-browser", "(resolves via npx on first use)")
+            check_ok("agent-browser", '(будет получен через npx при первом использовании)')
             agent_browser_ok = True
             if should_fix:
                 # Doctor can't tell from here whether npx's cache already
@@ -2510,28 +2456,28 @@ def run_doctor(args):
                 # doesn't pay the registry fetch either way.
                 from tools.browser_tool import warm_agent_browser_npx_cache
                 if warm_agent_browser_npx_cache():
-                    check_info("  Warmed npx cache for agent-browser")
+                    check_info('  Кеш npx для agent-browser подготовлен')
                 else:
-                    check_info("  Could not warm npx cache (offline or npx unavailable)")
+                    check_info('  Не удалось подготовить кеш npx: нет сети или npx недоступен')
         elif _resolved_ab and agent_browser_runnable(_resolved_ab):
-            check_ok("agent-browser", "(browser automation)")
+            check_ok("agent-browser", '(управление браузером)')
             agent_browser_ok = True
         elif _resolved_ab:
             # Found on PATH but won't run — almost always a dangling global
             # symlink left behind by agent-browser's npm postinstall after a
             # `hermes update` wiped node_modules (issue #48521).
             check_warn(
-                "agent-browser found but not runnable",
-                f"(broken symlink at {_resolved_ab}? run: npx agent-browser --version)",
+                'agent-browser найден, но не запускается',
+                f'(возможно, повреждена ссылка {_resolved_ab}; проверьте: npx agent-browser --version)',
             )
         elif _is_termux():
-            check_info("agent-browser is not installed (expected in the tested Termux path)")
-            check_info("Install it manually later with: npm install -g agent-browser && agent-browser install")
-            check_info("Termux browser setup:")
+            check_info('agent-browser не установлен; это ожидаемо в проверенной конфигурации Termux')
+            check_info('Позже можно установить вручную: npm install -g agent-browser && agent-browser install')
+            check_info('Настройка браузера в Termux:')
             for step in _termux_browser_setup_steps(node_installed=True):
                 check_info(step)
         else:
-            check_warn("agent-browser not installed", "(requires npm/npx on PATH)")
+            check_warn('agent-browser не установлен', '(нужен npm или npx в PATH)')
 
         # Chromium presence — the browser tools silently fail to register when
         # agent-browser is found but no Playwright-managed Chromium is on disk
@@ -2566,30 +2512,28 @@ def run_doctor(args):
                 )
                 if not skip_chromium_check:
                     if _chromium_installed():
-                        check_ok("Playwright Chromium", "(browser engine)")
+                        check_ok("Playwright Chromium", '(движок браузера)')
                     else:
                         check_warn(
-                            "Playwright Chromium not installed",
-                            "(browser_* tools will be hidden from the agent)",
+                            'Playwright Chromium не установлен',
+                            '(инструменты browser_* будут скрыты от агента)',
                         )
                         if sys.platform == "win32":
                             check_info(
-                                f"Install with: cd {PROJECT_ROOT} && "
-                                "npx playwright install chromium"
+                                f'Установка: cd {PROJECT_ROOT} && npx playwright install chromium'
                             )
                         else:
                             check_info(
-                                f"Install with: cd {PROJECT_ROOT} && "
-                                "npx playwright install --with-deps chromium"
+                                f'Установка: cd {PROJECT_ROOT} && npx playwright install --with-deps chromium'
                             )
     elif _is_termux():
-        check_info("Node.js not found (browser tools are optional in the tested Termux path)")
-        check_info("Install Node.js on Termux with: pkg install nodejs")
-        check_info("Termux browser setup:")
+        check_info('Node.js не найден; браузерные инструменты необязательны в проверенной конфигурации Termux')
+        check_info('Установите Node.js в Termux: pkg install nodejs')
+        check_info('Настройка браузера в Termux:')
         for step in _termux_browser_setup_steps(node_installed=False):
             check_info(step)
     else:
-        check_warn("Node.js not found", "(optional, needed for browser tools)")
+        check_warn('Node.js не найден', '(необязателен, нужен для браузерных инструментов)')
 
     # Lightpanda engine (browser.engine / AGENT_BROWSER_ENGINE). Independent
     # of Node: Browser Use mode spawns ``lightpanda serve`` itself.
@@ -2605,19 +2549,18 @@ def run_doctor(args):
             try:
                 _lp_used, _lp_reason = lightpanda_engine_status()
             except Exception as e:
-                _lp_used, _lp_reason = False, f"status check failed: {e}"
+                _lp_used, _lp_reason = False, f'Не удалось проверить состояние: {e}'
             if not _lp_used:
-                check_warn("browser.engine=lightpanda is shadowed", f"({_lp_reason})")
+                check_warn('Настройка browser.engine=lightpanda перекрыта другой настройкой', f"({_lp_reason})")
                 check_info(
-                    "Fix: pick Lightpanda in `hermes tools` → Browser Automation, "
-                    "or set browser.engine: auto"
+                    'Выберите Lightpanda в korra tools → Управление браузером либо задайте browser.engine: auto'
                 )
             elif find_lightpanda_binary():
                 check_ok("Lightpanda", f"({_lp_reason})")
             else:
                 check_warn(
-                    "Lightpanda selected but binary not found",
-                    "(browser tools will fail until it is installed)",
+                    'Выбран Lightpanda, но программа не найдена',
+                    '(браузерные инструменты не заработают до установки)',
                 )
                 check_info(LIGHTPANDA_INSTALL_HINT)
 
@@ -2639,10 +2582,10 @@ def run_doctor(args):
         except Exception:
             _whatsapp_bridge_dir = PROJECT_ROOT / "scripts" / "whatsapp-bridge"
         npm_audit_targets = [
-            (PROJECT_ROOT, "Browser tools (agent-browser)", ["--workspaces=false"]),
-            (PROJECT_ROOT, "web workspace", ["--workspace", "web"]),
-            (PROJECT_ROOT, "ui-tui workspace", ["--workspace", "ui-tui"]),
-            (_whatsapp_bridge_dir, "WhatsApp bridge", []),
+            (PROJECT_ROOT, 'Браузерные инструменты (agent-browser)', ["--workspaces=false"]),
+            (PROJECT_ROOT, 'Рабочая область web', ["--workspace", "web"]),
+            (PROJECT_ROOT, 'Рабочая область ui-tui', ["--workspace", "ui-tui"]),
+            (_whatsapp_bridge_dir, 'Мост WhatsApp', []),
         ]
         for npm_dir, label, audit_extra in npm_audit_targets:
             # For workspace-scoped audits run from PROJECT_ROOT the
@@ -2681,19 +2624,18 @@ def run_doctor(args):
                 else:
                     fix_cmd = f"cd {npm_dir} && npm audit fix"
                 if total == 0:
-                    check_ok(f"{label} deps", "(no known vulnerabilities)")
+                    check_ok(f'Зависимости {label}', '(известных уязвимостей нет)')
                 elif critical > 0 or high > 0:
                     if fix_cmd:
                         vuln_detail = (
-                            f"{critical} critical, {high} high, {moderate} moderate — run: {fix_cmd}"
+                            f'критических: {critical}, серьёзных: {high}, умеренных: {moderate}; выполните: {fix_cmd}'
                         )
                     else:
                         vuln_detail = (
-                            f"{critical} critical, {high} high, {moderate} moderate — "
-                            "build-tool advisory; clears via lockfile bump"
+                            f'критических: {critical}, серьёзных: {high}, умеренных: {moderate}; замечание к сборке, исправляется обновлением файла зависимостей lock'
                         )
                     check_warn(
-                        f"{label} deps",
+                        f'Зависимости {label}',
                         f"({vuln_detail})"
                     )
                     if audit_extra and audit_extra[0] == "--workspace":
@@ -2703,29 +2645,25 @@ def run_doctor(args):
                         # arborist crash (edgesOut / isDescendantOf) on this monorepo
                         # tree — in that case it is an npm bug, not a Hermes one.
                         check_info(
-                            "  ^ build-time tooling (not runtime); if manual npm remediation "
-                            "errors with an arborist crash it's a known npm bug — clears "
-                            "via a lockfile bump"
+                            '  ^ Инструменты сборки, не выполнения. Если ручное исправление npm падает с arborist, это известная ошибка npm; помогает обновление файла зависимостей lock.'
                         )
                     issues.append(
-                        f"{label} has {total} npm "
-                        f"{'vulnerability' if total == 1 else 'vulnerabilities'}"
+                        f"{label}: {total} {('уязвимость' if total == 1 else 'уязвимостей')} npm"
                     )
                 else:
                     check_ok(
-                        f"{label} deps",
-                        f"({moderate} moderate "
-                        f"{'vulnerability' if moderate == 1 else 'vulnerabilities'})",
+                        f'Зависимости {label}',
+                        f"({moderate} умеренных {('уязвимость' if moderate == 1 else 'уязвимостей')})",
                     )
             except Exception:
                 pass
 
     if _is_termux():
-        check_info("Termux compatibility fallbacks:")
+        check_info('Варианты совместимости Termux:')
         for note in _termux_install_all_fallback_notes():
             check_info(note)
 
-    _section("API Connectivity")
+    _section('Подключение к API')
     # Refactor: every connectivity probe below is HTTP-bound and fully
     # independent. Running them in series spent ~5s wall on a typical
     # workstation (2s of that was boto3's IMDS lookup for AWS credentials,
@@ -2751,7 +2689,7 @@ def run_doctor(args):
             return _ConnectivityResult(
                 "OpenRouter API",
                 [(color("⚠", Colors.YELLOW), "OpenRouter API",
-                  color("(not configured)", Colors.DIM))],
+                  color('(не настроен)', Colors.DIM))],
                 [],
             )
         try:
@@ -2771,26 +2709,22 @@ def run_doctor(args):
                 return _ConnectivityResult(
                     "OpenRouter API",
                     [(color("✗", Colors.RED), "OpenRouter API",
-                      color("(invalid API key)", Colors.DIM))],
-                    ["Check OPENROUTER_API_KEY in .env"],
+                      color('(неверный ключ API)', Colors.DIM))],
+                    ['Проверьте OPENROUTER_API_KEY в .env'],
                 )
             if r.status_code == 402:
                 return _ConnectivityResult(
                     "OpenRouter API",
                     [(color("✗", Colors.RED), "OpenRouter API",
-                      color("(out of credits — payment required)", Colors.DIM))],
-                    ["OpenRouter account has insufficient credits. "
-                     "Fix: run 'hermes config set model.provider <provider>' "
-                     "to switch providers, or fund your OpenRouter account "
-                     "at https://openrouter.ai/settings/credits"],
+                      color('(баланс исчерпан; нужно пополнение)', Colors.DIM))],
+                    ['Недостаточно средств OpenRouter. Смените провайдера: korra config set model.provider <provider>, либо пополните баланс на https://openrouter.ai/settings/credits'],
                 )
             if r.status_code == 429:
                 return _ConnectivityResult(
                     "OpenRouter API",
                     [(color("✗", Colors.RED), "OpenRouter API",
-                      color("(rate limited)", Colors.DIM))],
-                    ["OpenRouter rate limit hit — consider switching to "
-                     "a different provider or waiting"],
+                      color('(достигнут лимит запросов)', Colors.DIM))],
+                    ['Достигнут лимит запросов OpenRouter. Подождите или выберите другого провайдера.'],
                 )
             return _ConnectivityResult(
                 "OpenRouter API",
@@ -2803,7 +2737,7 @@ def run_doctor(args):
                 "OpenRouter API",
                 [(color("✗", Colors.RED), "OpenRouter API",
                   color(f"({e})", Colors.DIM))],
-                ["Check network connectivity"],
+                ['Проверьте подключение к сети'],
             )
 
     def _probe_anthropic() -> _ConnectivityResult:
@@ -2858,13 +2792,13 @@ def run_doctor(args):
                 return _ConnectivityResult(
                     "Anthropic API",
                     [(color("✗", Colors.RED), "Anthropic API",
-                      color("(invalid API key)", Colors.DIM))],
+                      color('(неверный ключ API)', Colors.DIM))],
                     [],
                 )
             return _ConnectivityResult(
                 "Anthropic API",
                 [(color("⚠", Colors.YELLOW), "Anthropic API",
-                  color("(couldn't verify)", Colors.DIM))],
+                  color('(не удалось проверить)', Colors.DIM))],
                 [],
             )
         except Exception as e:
@@ -2889,7 +2823,7 @@ def run_doctor(args):
             return _ConnectivityResult(
                 pname,
                 [(color("✓", Colors.GREEN), label,
-                  color("(key configured)", Colors.DIM))],
+                  color('(ключ настроен)', Colors.DIM))],
                 [],
             )
         try:
@@ -2943,8 +2877,8 @@ def run_doctor(args):
                 return _ConnectivityResult(
                     pname,
                     [(color("✗", Colors.RED), label,
-                      color("(invalid API key)", Colors.DIM))],
-                    [f"Check {env_vars[0]} in .env"],
+                      color('(неверный ключ API)', Colors.DIM))],
+                    [f'Проверьте {env_vars[0]} в .env'],
                 )
             return _ConnectivityResult(
                 pname,
@@ -2990,16 +2924,16 @@ def run_doctor(args):
             return _ConnectivityResult(
                 "AWS Bedrock",
                 [(color("✓", Colors.GREEN), label,
-                  color(f"({auth_var}, {region}, {n} models)", Colors.DIM))],
+                  color(f'({auth_var}, {region}, моделей: {n})', Colors.DIM))],
                 [],
             )
         except ImportError:
             return _ConnectivityResult(
                 "AWS Bedrock",
                 [(color("⚠", Colors.YELLOW), label,
-                  color(f"(boto3 not installed — {sys.executable} -m pip install boto3)",
+                  color(f'(boto3 не установлен; выполните {sys.executable} -m pip install boto3)',
                         Colors.DIM))],
-                [f"Install boto3 for Bedrock: {sys.executable} -m pip install boto3"],
+                [f'Установите boto3 для Bedrock: {sys.executable} -m pip install boto3'],
             )
         except Exception as e:
             err_name = type(e).__name__
@@ -3007,8 +2941,7 @@ def run_doctor(args):
                 "AWS Bedrock",
                 [(color("⚠", Colors.YELLOW), label,
                   color(f"({err_name}: {e})", Colors.DIM))],
-                [f"AWS Bedrock: {err_name} — check IAM permissions for "
-                 f"bedrock:ListFoundationModels"],
+                [f'AWS Bedrock: {err_name}; проверьте права IAM для bedrock:ListFoundationModels'],
             )
 
     def _probe_azure_entra() -> _ConnectivityResult:
@@ -3047,16 +2980,16 @@ def run_doctor(args):
             return _ConnectivityResult(
                 "Azure Foundry (Entra ID)",
                 [(color("⚠", Colors.YELLOW), label,
-                  color(f"(adapter import failed: {exc})", Colors.DIM))],
-                [f"Azure Foundry adapter import failed: {exc}"],
+                  color(f'(не удалось загрузить адаптер: {exc})', Colors.DIM))],
+                [f'Не удалось загрузить адаптер Azure Foundry: {exc}'],
             )
 
         if not has_azure_identity_installed():
             return _ConnectivityResult(
                 "Azure Foundry (Entra ID)",
                 [(color("⚠", Colors.YELLOW), label,
-                  color("(azure-identity not installed)", Colors.DIM))],
-                [f"Install azure-identity: {sys.executable} -m pip install azure-identity"],
+                  color('(azure-identity не установлен)', Colors.DIM))],
+                [f'Установите azure-identity: {sys.executable} -m pip install azure-identity'],
             )
 
         entra_cfg = model_cfg.get("entra") or {}
@@ -3072,17 +3005,16 @@ def run_doctor(args):
         info = describe_active_credential(config=config, timeout_seconds=10.0)
         if info.get("ok"):
             env_sources = info.get("env_sources") or []
-            tag = ", ".join(env_sources) if env_sources else "default credential chain"
+            tag = ", ".join(env_sources) if env_sources else 'стандартная цепочка входа'
             return _ConnectivityResult(
                 "Azure Foundry (Entra ID)",
                 [(color("✓", Colors.GREEN), label,
                   color(f"({tag}, scope={scope})", Colors.DIM))],
                 [],
             )
-        err = info.get("error") or "credential chain exhausted"
+        err = info.get("error") or 'подходящих данных входа не найдено'
         hint = info.get("hint") or (
-            "Run `az login`, set AZURE_TENANT_ID/AZURE_CLIENT_ID/"
-            "AZURE_CLIENT_SECRET, or attach a managed identity to this VM."
+            'Выполните az login, задайте AZURE_TENANT_ID, AZURE_CLIENT_ID и AZURE_CLIENT_SECRET либо подключите управляемую учётную запись к этой виртуальной машине.'
         )
         return _ConnectivityResult(
             "Azure Foundry (Entra ID)",
@@ -3112,7 +3044,7 @@ def run_doctor(args):
 
     # Print a single status line so users see something happening, then
     # fan out. ``\r`` clears it once the first real result line lands.
-    print(f"  {color(f'Running {len(_probes)} connectivity checks in parallel…', Colors.DIM)}",
+    print(f"  {color(f'Проверяем {len(_probes)} подключений параллельно…', Colors.DIM)}",
           end="", flush=True)
 
     # Disable boto3's EC2 instance-metadata-service probe for the duration
@@ -3154,7 +3086,7 @@ def run_doctor(args):
         for _issue in _issues_to_add:
             issues.append(_issue)
 
-    _section("Tool Availability")
+    _section('Доступность инструментов')
     try:
         # Add project root to path for imports
         sys.path.insert(0, str(PROJECT_ROOT))
@@ -3186,9 +3118,9 @@ def run_doctor(args):
             env_vars = item.get("missing_vars") or item.get("env_vars") or []
             if env_vars:
                 vars_str = ", ".join(env_vars)
-                check_warn(item["name"], f"(missing {vars_str})")
+                check_warn(item["name"], f'(не хватает {vars_str})')
             else:
-                check_warn(item["name"], "(system dependency not met)")
+                check_warn(item["name"], '(отсутствует системная зависимость)')
 
         # Count missing API-key requirements only for toolsets enabled in the
         # current CLI platform. Default-off or explicitly disabled toolsets may
@@ -3196,29 +3128,29 @@ def run_doctor(args):
         api_disabled = _missing_api_key_toolsets_for_summary(unavailable)
         web_not_ready = any(status != "ok" for status, _, _ in web_rows)
         if api_disabled or web_not_ready:
-            issues.append("Run 'hermes setup' to configure missing API keys for full tool access")
+            issues.append('Для доступа ко всем инструментам настройте недостающие ключи API: korra setup')
     except Exception as e:
-        check_warn("Could not check tool availability", f"({e})")
+        check_warn('Не удалось проверить доступность инструментов', f"({e})")
     
-    _section("Skills Hub")
+    _section('Каталог навыков')
     hub_dir = HERMES_HOME / "skills" / ".hub"
     if hub_dir.exists():
-        check_ok("Skills Hub directory exists")
+        check_ok('Папка каталога навыков существует')
         lock_file = hub_dir / "lock.json"
         if lock_file.exists():
             try:
                 import json
                 lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
                 count = len(lock_data.get("installed", {}))
-                check_ok(f"Lock file OK ({count} hub-installed skill(s))")
+                check_ok(f'Файл учёта исправен: навыков из каталога — {count}')
             except Exception:
-                check_warn("Lock file", "(corrupted or unreadable)")
+                check_warn('Файл учёта навыков', '(повреждён или недоступен для чтения)')
         quarantine = hub_dir / "quarantine"
         q_count = sum(1 for d in quarantine.iterdir() if d.is_dir()) if quarantine.exists() else 0
         if q_count > 0:
-            check_warn(f"{q_count} skill(s) in quarantine", "(pending review)")
+            check_warn(f'Навыков в карантине: {q_count}', '(ожидают проверки)')
     else:
-        check_warn("Skills Hub directory not initialized", "(run: hermes skills list)")
+        check_warn('Папка каталога навыков ещё не создана', '(выполните korra skills list)')
 
     from korra_cli.config import get_env_value
 
@@ -3235,13 +3167,13 @@ def run_doctor(args):
 
     github_token = get_env_value("GITHUB_TOKEN") or get_env_value("GH_TOKEN")
     if github_token:
-        check_ok("GitHub token configured (authenticated API access)")
+        check_ok('Токен GitHub настроен; API доступен с авторизацией')
     elif _gh_authenticated():
-        check_ok("GitHub authenticated via gh CLI", "(full API access — no GITHUB_TOKEN needed)")
+        check_ok('Вход GitHub выполнен через gh CLI', '(полный доступ к API; GITHUB_TOKEN не нужен)')
     else:
-        check_warn("No GITHUB_TOKEN", f"(60 req/hr rate limit — set in {_DHH}/.env for better rates)")
+        check_warn('GITHUB_TOKEN отсутствует', f'(лимит 60 запросов в час; добавьте токен в {_DHH}/.env для увеличения лимита)')
 
-    _section("Memory Provider")
+    _section('Провайдер памяти')
     _active_memory_provider = ""
     try:
         from korra_cli.config import read_user_config_raw as _read_raw_mem
@@ -3259,7 +3191,7 @@ def run_doctor(args):
         pass
 
     if not _active_memory_provider:
-        check_ok("Built-in memory active", "(no external provider configured — this is fine)")
+        check_ok('Встроенная память работает', '(внешний провайдер не настроен — это нормально)')
     elif _active_memory_provider == "honcho":
         try:
             from plugins.memory.honcho.client import HonchoClientConfig, resolve_config_path
@@ -3271,18 +3203,18 @@ def run_doctor(args):
                 # Only warn if the config didn't actually resolve from env vars.
                 if hcfg.api_key or hcfg.base_url:
                     check_ok(
-                        "Honcho configured via environment variables",
-                        f"config file {_honcho_cfg_path} not found, using HONCHO_API_KEY env var",
+                        'Honcho настроен через переменные среды',
+                        f'Файл настроек {_honcho_cfg_path} не найден; используется переменная HONCHO_API_KEY',
                     )
                 else:
-                    check_warn("Honcho config not found", "run: hermes memory setup")
+                    check_warn('Настройки Honcho не найдены', 'Выполните: korra memory setup')
             elif not hcfg.enabled:
-                check_info(f"Honcho disabled (set enabled: true in {_honcho_cfg_path} to activate)")
+                check_info(f'Honcho отключён; для включения задайте enabled: true в {_honcho_cfg_path}')
             elif not (hcfg.api_key or hcfg.base_url):
                 _fail_and_issue(
-                    "Honcho API key or base URL not set",
-                    "run: hermes memory setup",
-                    "No Honcho API key — run 'hermes memory setup'",
+                    'Ключ API или основной адрес Honcho не задан',
+                    'Выполните: korra memory setup',
+                    'Нет ключа API Honcho; выполните korra memory setup',
                     issues,
                 )
             else:
@@ -3291,57 +3223,57 @@ def run_doctor(args):
                 try:
                     get_honcho_client(hcfg)
                     check_ok(
-                        "Honcho connected",
-                        f"workspace={hcfg.workspace_id} mode={hcfg.recall_mode} freq={hcfg.write_frequency}",
+                        'Honcho подключён',
+                        f'Проект: {hcfg.workspace_id}; режим: {hcfg.recall_mode}; частота: {hcfg.write_frequency}',
                     )
                 except Exception as _e:
-                    _fail_and_issue("Honcho connection failed", str(_e), f"Honcho unreachable: {_e}", issues)
+                    _fail_and_issue('Подключение Honcho не удалось', str(_e), f'Honcho недоступен: {_e}', issues)
         except ImportError:
             _fail_and_issue(
-                "honcho-ai not installed",
+                'honcho-ai не установлен',
                 "pip install honcho-ai",
-                "Honcho is set as memory provider but honcho-ai is not installed",
+                'Выбрана память Honcho, но пакет honcho-ai не установлен',
                 issues,
             )
         except Exception as _e:
-            check_warn("Honcho check failed", str(_e))
+            check_warn('Не удалось проверить Honcho', str(_e))
     elif _active_memory_provider == "mem0":
         try:
             from plugins.memory.mem0 import _load_config as _load_mem0_config
             mem0_cfg = _load_mem0_config()
             mem0_key = mem0_cfg.get("api_key", "")
             if mem0_key:
-                check_ok("Mem0 API key configured")
+                check_ok('Ключ API Mem0 настроен')
                 check_info(f"user_id={mem0_cfg.get('user_id', '?')}  agent_id={mem0_cfg.get('agent_id', '?')}")
             else:
                 _fail_and_issue(
-                    "Mem0 API key not set",
-                    "(set MEM0_API_KEY in .env or run hermes memory setup)",
-                    "Mem0 is set as memory provider but API key is missing",
+                    'Ключ API Mem0 не задан',
+                    '(задайте MEM0_API_KEY в .env или выполните korra memory setup)',
+                    'Выбрана память Mem0, но ключ API отсутствует',
                     issues,
                 )
         except ImportError:
             _fail_and_issue(
-                "Mem0 plugin not loadable",
+                'Не удалось загрузить плагин Mem0',
                 "pip install mem0ai",
-                "Mem0 is set as memory provider but mem0ai is not installed",
+                'Выбрана память Mem0, но пакет mem0ai не установлен',
                 issues,
             )
         except Exception as _e:
-            check_warn("Mem0 check failed", str(_e))
+            check_warn('Не удалось проверить Mem0', str(_e))
     else:
         # Generic check for other memory providers (openviking, hindsight, etc.)
         try:
             from plugins.memory import load_memory_provider
             _provider = load_memory_provider(_active_memory_provider)
             if _provider and _provider.is_available():
-                check_ok(f"{_active_memory_provider} provider active")
+                check_ok(f'Провайдер {_active_memory_provider} активен')
             elif _provider:
-                check_warn(f"{_active_memory_provider} configured but not available", "run: hermes memory status")
+                check_warn(f'{_active_memory_provider} настроен, но недоступен', 'Выполните: korra memory status')
             else:
-                check_warn(f"{_active_memory_provider} plugin not found", "run: hermes memory setup")
+                check_warn(f'Плагин {_active_memory_provider} не найден', 'Выполните: korra memory setup')
         except Exception as _e:
-            check_warn(f"{_active_memory_provider} check failed", str(_e))
+            check_warn(f'Не удалось проверить {_active_memory_provider}', str(_e))
 
     try:
         from korra_cli.profiles import list_profiles, _get_wrapper_dir, profile_exists
@@ -3349,22 +3281,22 @@ def run_doctor(args):
 
         named_profiles = [p for p in list_profiles() if not p.is_default]
         if named_profiles:
-            _section("Profiles")
-            check_ok(f"{len(named_profiles)} profile(s) found")
+            _section('Профили')
+            check_ok(f'Найдено профилей: {len(named_profiles)}')
             wrapper_dir = _get_wrapper_dir()
             for p in named_profiles:
                 parts = []
                 if p.gateway_running:
-                    parts.append("gateway running")
+                    parts.append('шлюз работает')
                 if p.model:
                     parts.append(p.model[:30])
                 if not (p.path / "config.yaml").exists():
-                    parts.append("⚠ missing config")
+                    parts.append('⚠ нет настроек')
                 if not (p.path / ".env").exists():
                     parts.append("no .env")
                 wrapper = wrapper_dir / p.name
                 if not wrapper.exists():
-                    parts.append("no alias")
+                    parts.append('нет команды-обёртки')
                 status = ", ".join(parts) if parts else "configured"
                 check_ok(f"  {p.name}: {status}")
 
@@ -3378,7 +3310,7 @@ def run_doctor(args):
                         if "hermes -p" in content:
                             _m = _re.search(r"hermes -p (\S+)", content)
                             if _m and not profile_exists(_m.group(1)):
-                                check_warn(f"Orphan alias: {wrapper.name} → profile '{_m.group(1)}' no longer exists")
+                                check_warn(f'Команда {wrapper.name} ссылается на несуществующий профиль «{_m.group(1)}»')
                     except Exception:
                         pass
     except ImportError:
@@ -3398,9 +3330,9 @@ def run_doctor(args):
     remaining_issues = issues + manual_issues
     if should_fix and fixed_count > 0:
         print(color("─" * 60, Colors.GREEN))
-        print(color(f"  Fixed {fixed_count} issue(s).", Colors.GREEN, Colors.BOLD), end="")
+        print(color(f'  Исправлено проблем: {fixed_count}.', Colors.GREEN, Colors.BOLD), end="")
         if remaining_issues:
-            print(color(f" {len(remaining_issues)} issue(s) require manual intervention.", Colors.YELLOW, Colors.BOLD))
+            print(color(f' Требуют ручного исправления: {len(remaining_issues)}.', Colors.YELLOW, Colors.BOLD))
         else:
             print()
         print()
@@ -3410,15 +3342,15 @@ def run_doctor(args):
             print()
     elif remaining_issues:
         print(color("─" * 60, Colors.YELLOW))
-        print(color(f"  Found {len(remaining_issues)} issue(s) to address:", Colors.YELLOW, Colors.BOLD))
+        print(color(f'  Найдено проблем для исправления: {len(remaining_issues)}:', Colors.YELLOW, Colors.BOLD))
         print()
         for i, issue in enumerate(remaining_issues, 1):
             print(f"  {i}. {issue}")
         print()
         if not should_fix:
-            print(color("  Tip: run 'hermes doctor --fix' to auto-fix what's possible.", Colors.DIM))
+            print(color('  Автоматическое исправление доступных проблем: korra doctor --fix.', Colors.DIM))
     else:
         print(color("─" * 60, Colors.GREEN))
-        print(color("  All checks passed! 🎉", Colors.GREEN, Colors.BOLD))
+        print(color('  Все проверки пройдены! 🎉', Colors.GREEN, Colors.BOLD))
     
     print()

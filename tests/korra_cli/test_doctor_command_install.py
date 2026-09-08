@@ -88,7 +88,7 @@ class TestDoctorCommandInstallation:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         out = _run_doctor(fix=True)
-        assert "Fixed symlink" in out
+        assert 'Ссылка исправлена' in out
 
         # Verify the symlink now points to the correct target
         assert cmd_link.is_symlink()
@@ -127,8 +127,8 @@ class TestDoctorCommandInstallation:
             pass
 
         out = _run_doctor(fix=False)
-        assert "Command Installation" in out
-        assert "Venv entry point not found" in out
+        assert 'Установка команды' in out
+        assert 'Команда в виртуальном окружении не найдена' in out
 
 
 
@@ -146,5 +146,5 @@ class TestDoctorCommandInstallation:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         out = _run_doctor(fix=False)
-        assert "Command Installation" in out
+        assert 'Установка команды' in out
         assert "$PREFIX/bin" in out

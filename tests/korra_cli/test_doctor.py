@@ -32,19 +32,19 @@ class TestDoctorPlatformHints:
         hint = doctor._sqlite_upgrade_hint()
 
         assert "docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest" in hint
-        assert "recreate all Korra containers" in hint
-        assert "hermes update" not in hint
+        assert 'пересоздайте все контейнеры Корры' in hint
+        assert 'korra update' not in hint
 
     def test_sqlite_upgrade_hint_keeps_git_runtime_repair(self):
         hint = doctor._sqlite_upgrade_hint("git")
 
-        assert "run `hermes update`" in hint
+        assert 'выполните korra update' in hint
 
     def test_sqlite_upgrade_hint_uses_pkg_for_apt_managed_install(self):
         hint = doctor._sqlite_upgrade_hint("apt")
 
-        assert "run `pkg upgrade hermes-agent`" in hint
-        assert "hermes update" not in hint
+        assert 'выполните `pkg upgrade hermes-agent`' in hint
+        assert 'korra update' not in hint
 
     def test_sqlite_upgrade_hint_preserves_nix_guidance_as_prose(self):
         guidance = doctor.recommended_update_command_for_method("nix")
@@ -52,7 +52,7 @@ class TestDoctorPlatformHints:
 
         assert guidance in hint
         assert f"run `{guidance}`" not in hint
-        assert "hermes update" not in hint
+        assert 'korra update' not in hint
 
 
 class TestProviderEnvDetection:
@@ -99,7 +99,7 @@ class TestDoctorToolAvailabilitySummary:
         rows = doctor._doctor_web_capability_rows()
         assert rows
         assert all(status == "warn" for status, _, _ in rows)
-        assert any("firecrawl selected; provider not configured" in detail for _, _, detail in rows)
+        assert any('выбран firecrawl; провайдер не настроен' in detail for _, _, detail in rows)
 
     def test_web_capability_rows_ok_when_provider_ready(self, monkeypatch):
         class _Ready:
@@ -120,8 +120,8 @@ class TestDoctorToolAvailabilitySummary:
 
         rows = doctor._doctor_web_capability_rows()
         assert rows == [
-            ("ok", "web search", "(ddgs)"),
-            ("ok", "web extract", "(ddgs)"),
+            ("ok", 'Поиск в интернете', "(ddgs)"),
+            ("ok", 'Чтение веб-страниц', "(ddgs)"),
         ]
 
 
@@ -267,16 +267,16 @@ def test_doctor_reports_vercel_backend_diagnostics(monkeypatch, tmp_path):
         doctor_mod.run_doctor(Namespace(fix=False))
 
     out = buf.getvalue()
-    assert "Vercel runtime" in out
+    assert 'Среда выполнения Vercel' in out
     assert "python3.13" in out
-    assert "Vercel custom disk unsupported" in out
-    assert "Vercel auth incomplete" in out
+    assert 'Свой размер диска Vercel не поддерживается' in out
+    assert 'Вход Vercel настроен не полностью' in out
     assert "VERCEL_PROJECT_ID" in out
-    assert "Vercel auth mode: incomplete access token" in out
-    assert "Vercel auth present env: VERCEL_TOKEN, VERCEL_TEAM_ID" in out
-    assert "Vercel auth missing env: VERCEL_PROJECT_ID" in out
+    assert "Вход Vercel: режим: токен доступа настроен не полностью" in out
+    assert "Вход Vercel: заданы: VERCEL_TOKEN, VERCEL_TEAM_ID" in out
+    assert "Вход Vercel: не хватает: VERCEL_PROJECT_ID" in out
     assert "super-secret-value" not in out
-    assert "snapshot filesystem only" in out
+    assert 'сохраняется снимок файлов' in out
 
 
 # ── Memory provider section (doctor should only check the *active* provider) ──
@@ -326,10 +326,10 @@ class TestDoctorMemoryProviderSection:
 
     def test_no_provider_shows_builtin_ok(self, monkeypatch, tmp_path):
         out = self._run_doctor_and_capture(monkeypatch, tmp_path, provider="")
-        assert "Memory Provider" in out
-        assert "Built-in memory active" in out
+        assert 'Провайдер памяти' in out
+        assert 'Встроенная память работает' in out
         # Should NOT mention Honcho or Mem0 errors
-        assert "Honcho API key" not in out
+        assert 'Ключ API Honcho' not in out
         assert "Mem0" not in out
 
 
@@ -337,8 +337,8 @@ class TestDoctorMemoryProviderSection:
         # Make mem0 import fail
         monkeypatch.setitem(sys.modules, "plugins.memory.mem0", None)
         out = self._run_doctor_and_capture(monkeypatch, tmp_path, provider="mem0")
-        assert "Memory Provider" in out
-        assert "Built-in memory active" not in out
+        assert 'Провайдер памяти' in out
+        assert 'Встроенная память работает' not in out
 
 
 def test_run_doctor_termux_treats_docker_and_browser_warnings_as_expected(monkeypatch, tmp_path):
@@ -357,19 +357,19 @@ def test_run_doctor_termux_treats_docker_and_browser_warnings_as_expected(monkey
 
     out = helper._run_doctor_and_capture(monkeypatch, tmp_path, provider="")
 
-    assert "Docker backend is not available inside Termux" in out
-    assert "Node.js not found (browser tools are optional in the tested Termux path)" in out
-    assert "Install Node.js on Termux with: pkg install nodejs" in out
-    assert "Termux browser setup:" in out
+    assert 'Docker недоступен внутри Termux' in out
+    assert 'Node.js не найден; браузерные инструменты необязательны в проверенной конфигурации Termux' in out
+    assert 'Установите Node.js в Termux: pkg install nodejs' in out
+    assert 'Настройка браузера в Termux:' in out
     assert "1) pkg install nodejs" in out
     assert "2) npm install -g agent-browser" in out
     assert "3) agent-browser install" in out
-    assert "Termux compatibility fallbacks:" in out
-    assert "use .[termux-all] for broad compatibility" in out
-    assert "Matrix E2EE extra is excluded on Termux" in out
-    assert "Local faster-whisper extra is excluded on Termux" in out
-    assert "STT fallback: use Groq Whisper (set GROQ_API_KEY) or OpenAI Whisper (set VOICE_TOOLS_OPENAI_KEY)." in out
-    assert "docker not found (optional)" not in out
+    assert 'Варианты совместимости Termux:' in out
+    assert 'используйте .[termux-all] — совместимый набор' in out
+    assert 'Сквозное шифрование Matrix исключено в Termux' in out
+    assert 'Локальный faster-whisper исключён в Termux' in out
+    assert 'Для распознавания речи используйте Groq Whisper с GROQ_API_KEY или OpenAI Whisper с VOICE_TOOLS_OPENAI_KEY.' in out
+    assert 'docker не найден (необязательно)' not in out
 
 
 def test_run_doctor_accepts_named_provider_from_providers_section(monkeypatch, tmp_path):
@@ -421,7 +421,7 @@ def test_run_doctor_accepts_named_provider_from_providers_section(monkeypatch, t
         doctor_mod.run_doctor(Namespace(fix=False))
 
     out = buf.getvalue()
-    assert "model.provider 'volcengine-plan' is not a recognised provider" not in out
+    assert 'Неизвестный провайдер model.provider: «volcengine-plan»' not in out
 
 
 def test_run_doctor_accepts_stable_key_when_provider_name_differs(
@@ -469,7 +469,7 @@ def test_run_doctor_accepts_stable_key_when_provider_name_differs(
         "model.provider 'custom:local-127.0.0.1:11434' is not a recognised provider"
         not in out
     )
-    assert "model.provider 'custom:local-127.0.0.1:11434' is unknown" not in out
+    assert 'Неизвестный model.provider «custom:local-127.0.0.1:11434»' not in out
 
 
 def test_run_doctor_accepts_bare_custom_provider(monkeypatch, tmp_path):
@@ -507,7 +507,7 @@ def test_run_doctor_accepts_bare_custom_provider(monkeypatch, tmp_path):
         doctor_mod.run_doctor(Namespace(fix=False))
 
     out = buf.getvalue()
-    assert "model.provider 'custom' is not a recognised provider" not in out
+    assert 'Неизвестный провайдер model.provider: «custom»' not in out
 
 
 def test_run_doctor_flags_missing_credentials_for_active_openrouter_provider(monkeypatch, tmp_path):
@@ -548,8 +548,8 @@ def test_run_doctor_flags_missing_credentials_for_active_openrouter_provider(mon
         doctor_mod.run_doctor(Namespace(fix=False))
 
     out = buf.getvalue()
-    assert "model.provider 'openrouter' is set but no API key is configured" in out
-    assert "No credentials found for provider 'openrouter'." in out
+    assert 'Выбран model.provider «openrouter», но ключ API не настроен' in out
+    assert 'Нет данных входа для провайдера «openrouter».' in out
 
 
 @pytest.mark.parametrize(
@@ -646,14 +646,14 @@ def test_run_doctor_accepts_vendor_slugs_for_named_custom_provider(monkeypatch, 
         doctor_mod.run_doctor(Namespace(fix=False))
 
     out = buf.getvalue()
-    assert "model.provider 'custom:hpc-ai' is not a recognised provider" not in out
-    assert "model.provider 'custom:hpc-ai' is unknown" not in out
+    assert 'Неизвестный провайдер model.provider: «custom:hpc-ai»' not in out
+    assert 'Неизвестный model.provider «custom:hpc-ai»' not in out
     assert (
         "model.default 'deepseek/deepseek-v4-flash' uses a vendor/model slug but provider is "
         "'custom:hpc-ai'"
         not in out
     )
-    assert "Either set model.provider to 'openrouter', or drop the vendor prefix." not in out
+    assert 'Выберите openrouter в model.provider или уберите префикс.' not in out
 
 
 
@@ -694,7 +694,7 @@ def test_run_doctor_accepts_kimi_coding_cn_provider(monkeypatch, tmp_path):
         doctor_mod.run_doctor(Namespace(fix=False))
 
     out = buf.getvalue()
-    assert "model.provider 'kimi-coding-cn' is not a recognised provider" not in out
+    assert 'Неизвестный провайдер model.provider: «kimi-coding-cn»' not in out
 
 
 def test_run_doctor_termux_does_not_mark_browser_available_without_agent_browser(monkeypatch, tmp_path):
@@ -736,8 +736,8 @@ def test_run_doctor_termux_does_not_mark_browser_available_without_agent_browser
 
     assert "✓ browser" not in out
     assert "browser" in out
-    assert "system dependency not met" in out
-    assert "agent-browser is not installed (expected in the tested Termux path)" in out
+    assert 'отсутствует системная зависимость' in out
+    assert 'agent-browser не установлен; это ожидаемо в проверенной конфигурации Termux' in out
     assert "npm install -g agent-browser && agent-browser install" in out
 
 
@@ -796,8 +796,8 @@ def test_run_doctor_reports_agent_browser_resolves_via_npx(monkeypatch, tmp_path
     out = buf.getvalue()
 
     assert "agent-browser" in out
-    assert "resolves via npx on first use" in out
-    assert "agent-browser not installed" not in out
+    assert 'будет получен через npx при первом использовании' in out
+    assert 'agent-browser не установлен' not in out
     # --fix was not requested: the warm-up must not fire on a plain check.
     assert not warm_calls
 
@@ -822,8 +822,8 @@ def test_run_doctor_fix_warms_npx_cache_when_agent_browser_resolves_via_npx(
     out = buf.getvalue()
 
     assert warm_calls, "warm_agent_browser_npx_cache() must be called under --fix"
-    assert "Warmed npx cache for agent-browser" in out
-    assert "Could not warm npx cache" not in out
+    assert 'Кеш npx для agent-browser подготовлен' in out
+    assert 'Не удалось подготовить кеш npx' not in out
 
 
 def test_run_doctor_fix_reports_when_npx_warmup_fails(monkeypatch, tmp_path):
@@ -841,8 +841,8 @@ def test_run_doctor_fix_reports_when_npx_warmup_fails(monkeypatch, tmp_path):
         doctor_mod.run_doctor(Namespace(fix=True))
     out = buf.getvalue()
 
-    assert "Could not warm npx cache (offline or npx unavailable)" in out
-    assert "Warmed npx cache for agent-browser" not in out
+    assert 'Не удалось подготовить кеш npx: нет сети или npx недоступен' in out
+    assert 'Кеш npx для agent-browser подготовлен' not in out
 
 
 def test_run_doctor_kimi_cn_env_is_detected_and_probe_is_null_safe(monkeypatch, tmp_path):
@@ -887,7 +887,7 @@ def test_run_doctor_kimi_cn_env_is_detected_and_probe_is_null_safe(monkeypatch, 
         doctor_mod.run_doctor(Namespace(fix=False))
     out = buf.getvalue()
 
-    assert "API key or custom endpoint configured" in out
+    assert 'Ключ API или собственный адрес сервера настроен' in out
     assert "Kimi / Moonshot (China)" in out
     assert "str expected, not NoneType" not in out
     assert any(url == "https://api.moonshot.cn/v1/models" for url, _, _ in calls)
@@ -937,7 +937,7 @@ def test_run_doctor_dashscope_retries_china_endpoint_after_intl_unauthorized(mon
     out = buf.getvalue()
 
     assert "Alibaba/DashScope" in out
-    assert "invalid API key" not in out
+    assert 'неверный ключ API' not in out
     assert any(
         url == "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models"
         for url, _, _ in calls
@@ -996,7 +996,7 @@ def test_run_doctor_opencode_go_skips_invalid_models_probe(monkeypatch, tmp_path
     out = buf.getvalue()
 
     assert any(
-        "OpenCode Go" in line and "(key configured)" in line
+        "OpenCode Go" in line and '(ключ настроен)' in line
         for line in out.splitlines()
     )
     assert not any(url == "https://opencode.ai/zen/go/v1/models" for url, _, _ in calls)
@@ -1034,8 +1034,8 @@ class TestGitHubTokenCheck:
             run_doctor(Namespace(fix=False))
         out = buf.getvalue()
 
-        assert "No GITHUB_TOKEN" in out
-        assert "60 req/hr" in out
+        assert 'GITHUB_TOKEN отсутствует' in out
+        assert '60 запросов в час' in out
 
 
     def test_gh_authenticated_without_env_token_shows_ok(self, monkeypatch, tmp_path):
@@ -1074,7 +1074,7 @@ class TestGitHubTokenCheck:
         out = buf.getvalue()
 
         assert "gh auth" in str(call_log) or any(c[0] == "gh" for c in call_log), f"gh not called: {call_log}"
-        assert "GitHub authenticated via gh CLI" in out or "token configured" in out
+        assert 'Вход GitHub выполнен через gh CLI' in out or 'токен настроен' in out
 
 
 def _run_doctor_with_healthy_oauth_fallback(
@@ -1179,7 +1179,7 @@ def test_run_doctor_ignores_invalid_direct_keys_when_oauth_fallback_is_healthy(
         xai_oauth_status=xai_oauth_status,
     )
 
-    assert "invalid API key" in out
+    assert 'неверный ключ API' in out
     assert unexpected_issue not in out
 
 
@@ -1252,8 +1252,8 @@ class TestDoctorXaiOAuthStatus:
         assert "xAI OAuth" in out
         # The xAI OAuth line itself must say "(logged in)", not "(not logged in)".
         xai_line = next(l for l in out.splitlines() if "xAI OAuth" in l)
-        assert "(logged in)" in xai_line
-        assert "(not logged in)" not in xai_line
+        assert '(вход выполнен)' in xai_line
+        assert '(вход не выполнен)' not in xai_line
 
 
     def test_import_failure_does_not_affect_other_providers(self, monkeypatch, tmp_path):
@@ -1284,8 +1284,8 @@ class TestDoctorXaiOAuthStatus:
         with contextlib.redirect_stdout(buf):
             doctor_mod.run_doctor(Namespace(fix=False))
         out = buf.getvalue()
-        assert "Nous Portal auth" in out
-        assert "logged in" in out
+        assert 'Вход Nous Portal' in out
+        assert 'вход выполнен' in out
 
     def test_function_raises_does_not_crash_doctor(self, monkeypatch, tmp_path):
         """A runtime exception from get_xai_oauth_auth_status must be swallowed."""
@@ -1293,7 +1293,7 @@ class TestDoctorXaiOAuthStatus:
             raise RuntimeError("simulated xAI status failure")
 
         out = self._run(monkeypatch, tmp_path, xai_auth_fn=_raise)
-        assert "Auth Providers" in out
+        assert 'Вход у провайдеров' in out
 
 
 # ---------------------------------------------------------------------------
@@ -1347,12 +1347,12 @@ class TestDoctorCodexCliHintPlacement:
 
     @staticmethod
     def _hint_line() -> str:
-        return "codex CLI not installed"
+        return "Codex CLI не установлен"
 
     def test_hint_appears_under_codex_auth_when_missing(self, monkeypatch, tmp_path):
         out = self._run(monkeypatch, tmp_path, codex_logged_in=False, codex_cli_present=False)
         lines = out.splitlines()
-        codex_idx = next(i for i, l in enumerate(lines) if "OpenAI Codex auth" in l)
+        codex_idx = next(i for i, l in enumerate(lines) if 'Вход OpenAI Codex' in l)
         hint_idx = next(i for i, l in enumerate(lines) if self._hint_line() in l)
         minimax_idx = next(i for i, l in enumerate(lines) if "MiniMax OAuth" in l)
         # Hint must sit between Codex auth and the next provider row (#27975).
@@ -1360,7 +1360,7 @@ class TestDoctorCodexCliHintPlacement:
 
     def test_hint_suppressed_when_codex_cli_present(self, monkeypatch, tmp_path):
         out = self._run(monkeypatch, tmp_path, codex_logged_in=False, codex_cli_present=True)
-        assert "OpenAI Codex auth" in out
+        assert 'Вход OpenAI Codex' in out
         assert self._hint_line() not in out
 
 
@@ -1421,7 +1421,7 @@ class TestDoctorStaleMaxIterationsDrift:
             os_environ_value=400,  # bridge contaminated os.environ
         )
         assert "HERMES_MAX_ITERATIONS=90" in out
-        assert "shadows" in out
+        assert 'заменяет' in out
         # Warn-only must NOT mutate .env.
         assert "HERMES_MAX_ITERATIONS=90" in (hermes_home / ".env").read_text(encoding="utf-8")
 
@@ -1430,7 +1430,7 @@ class TestDoctorStaleMaxIterationsDrift:
             monkeypatch, tmp_path, fix=True, ghost=90, cfg_turns=400,
             os_environ_value=400,
         )
-        assert "Removed stale HERMES_MAX_ITERATIONS" in out
+        assert 'Устаревший HERMES_MAX_ITERATIONS удалён' in out
         env_after = (hermes_home / ".env").read_text(encoding="utf-8")
         assert "HERMES_MAX_ITERATIONS" not in env_after
         assert "OPENAI_API_KEY=sk-test" in env_after  # other keys preserved
@@ -1440,7 +1440,7 @@ class TestDoctorStaleMaxIterationsDrift:
         out, _ = self._run_config_section(
             monkeypatch, tmp_path, fix=False, ghost=None, cfg_turns=400,
         )
-        assert "shadows" not in out
+        assert 'заменяет' not in out
 
 
 
@@ -1464,13 +1464,13 @@ class TestDoctorDeprecatedConfigAndEnv:
         findings = dict(
             doctor_mod.collect_deprecated_env_vars({"HERMES_TOOL_PROGRESS": "true"})
         )
-        assert "ignored/unsupported since config floor v12" in findings["HERMES_TOOL_PROGRESS"]
+        assert 'не поддерживается и игнорируется начиная с версии настроек v12' in findings["HERMES_TOOL_PROGRESS"]
         # The MODE variant is still read by the gateway fallback → keeps the
         # plain deprecation wording.
         mode = dict(
             doctor_mod.collect_deprecated_env_vars({"HERMES_TOOL_PROGRESS_MODE": "all"})
         )
-        assert mode["HERMES_TOOL_PROGRESS_MODE"] == "display.tool_progress in config.yaml"
+        assert mode["HERMES_TOOL_PROGRESS_MODE"] == 'display.tool_progress в config.yaml'
 
     def _run_doctor_with_config(self, monkeypatch, tmp_path, *, config_yaml: str, env_text: str = ""):
         hermes_home = tmp_path / ".hermes"
@@ -1515,9 +1515,9 @@ class TestDoctorDeprecatedConfigAndEnv:
         )
         out = capsys.readouterr().out
         assert len(findings) == 2
-        assert "Deprecated: delegation.max_async_children" in out
-        assert "Deprecated: HERMES_TOOL_PROGRESS_MODE" in out
-        assert "⚠" in out or "Deprecated" in out
+        assert 'Устарело: delegation.max_async_children' in out
+        assert 'Устарело: HERMES_TOOL_PROGRESS_MODE' in out
+        assert "⚠" in out or 'Устарело' in out
 
 
 class TestMacOSTCCGrants:
@@ -1556,9 +1556,9 @@ class TestMacOSTCCGrants:
         )
         doctor_mod.check_macos_tcc_grants()
         out = capsys.readouterr().out
-        assert "TCC grants will reset after every update" in out
-        assert "cdhash-pinned" in out
-        assert "hermes update" in out
+        assert 'TCC будут сбрасываться при каждом обновлении' in out
+        assert 'привязывает разрешения к хешу' in out
+        assert 'korra update' in out
 
     def test_ok_and_repair_info_on_identifier_dr(self, monkeypatch, capsys, tmp_path):
         """Post-#73681 identifier-only DR → stable + stale-grant repair info."""
@@ -1575,14 +1575,14 @@ class TestMacOSTCCGrants:
         )
         doctor_mod.check_macos_tcc_grants()
         out = capsys.readouterr().out
-        assert "TCC signing identity is stable" in out
-        assert "identifier-pinned" in out
+        assert 'Подпись для разрешений macOS TCC стабильна' in out
+        assert 'привязка к ID' in out
         # Identifier-pinned is stable but not the strongest anchor — the check
         # should point at the cert-anchored upgrade path.
         assert "--setup-tcc-identity" in out
         assert "tccutil reset ScreenCapture com.nousresearch.hermes" in out
-        assert "toggle" in out
-        assert "relaunch" in out
+        assert 'включите' in out
+        assert 'заново откройте' in out
 
     def test_ok_on_certificate_anchored_dr(self, monkeypatch, capsys, tmp_path):
         """A cert-anchored DR (hermes desktop --setup-tcc-identity, or a
@@ -1601,8 +1601,8 @@ class TestMacOSTCCGrants:
         )
         doctor_mod.check_macos_tcc_grants()
         out = capsys.readouterr().out
-        assert "TCC signing identity is stable" in out
-        assert "certificate-anchored" in out
+        assert 'Подпись для разрешений macOS TCC стабильна' in out
+        assert 'привязка к сертификату' in out
         assert "--setup-tcc-identity" not in out
         assert "tccutil reset ScreenCapture com.nousresearch.hermes" in out
 
@@ -1617,7 +1617,7 @@ class TestMacOSTCCGrants:
         monkeypatch.setattr(doctor_mod, "_macos_desktop_dr", lambda app: None)
         doctor_mod.check_macos_tcc_grants()
         out = capsys.readouterr().out
-        assert "could not read code-signing requirement" in out
+        assert 'не удалось прочитать требования подписи' in out
 
     def test_warns_when_dr_empty_string(self, monkeypatch, capsys, tmp_path):
         """Empty DR output must not false-positive as a stable identity."""
@@ -1630,8 +1630,8 @@ class TestMacOSTCCGrants:
         monkeypatch.setattr(doctor_mod, "_macos_desktop_dr", lambda app: "")
         doctor_mod.check_macos_tcc_grants()
         out = capsys.readouterr().out
-        assert "could not read code-signing requirement" in out
-        assert "stable" not in out
+        assert 'не удалось прочитать требования подписи' in out
+        assert 'стабильна' not in out
 
     def test_warns_when_codesign_times_out(self, monkeypatch, capsys, tmp_path):
         """A hanging codesign must degrade to the unreadable-DR warning, never crash."""
@@ -1648,8 +1648,8 @@ class TestMacOSTCCGrants:
         monkeypatch.setattr(doctor_mod.subprocess, "run", _timeout)
         doctor_mod.check_macos_tcc_grants()
         out = capsys.readouterr().out
-        assert "could not read code-signing requirement" in out
-        assert "stable" not in out
+        assert 'не удалось прочитать требования подписи' in out
+        assert 'стабильна' not in out
 
     def test_warns_when_codesign_missing(self, monkeypatch, capsys, tmp_path):
         """No codesign binary → same graceful unreadable-DR warning."""
@@ -1662,8 +1662,8 @@ class TestMacOSTCCGrants:
         monkeypatch.setattr(doctor_mod.shutil, "which", lambda _name: None)
         doctor_mod.check_macos_tcc_grants()
         out = capsys.readouterr().out
-        assert "could not read code-signing requirement" in out
-        assert "stable" not in out
+        assert 'не удалось прочитать требования подписи' in out
+        assert 'стабильна' not in out
 
 
 def test_run_doctor_reports_shadowed_lightpanda_engine(monkeypatch, tmp_path):
@@ -1676,7 +1676,7 @@ def test_run_doctor_reports_shadowed_lightpanda_engine(monkeypatch, tmp_path):
         lambda: (False, "cloud provider Browserbase is selected"),
     )
     out = helper._run_doctor_and_capture(monkeypatch, tmp_path)
-    assert "browser.engine=lightpanda is shadowed" in out
+    assert 'Настройка browser.engine=lightpanda перекрыта другой настройкой' in out
     assert "Browserbase" in out
 
 
@@ -1689,7 +1689,7 @@ def test_run_doctor_reports_lightpanda_ok(monkeypatch, tmp_path):
     monkeypatch.setattr("tools.browser_lightpanda.find_lightpanda_binary", lambda: "/opt/lightpanda")
     out = helper._run_doctor_and_capture(monkeypatch, tmp_path)
     assert "Lightpanda" in out
-    assert "shadowed" not in out
+    assert 'перекрыта' not in out
 
 
 def test_run_doctor_warns_when_lightpanda_binary_missing(monkeypatch, tmp_path):
@@ -1700,4 +1700,4 @@ def test_run_doctor_warns_when_lightpanda_binary_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(bt, "lightpanda_engine_status", lambda: (True, "Browser Use mode"))
     monkeypatch.setattr("tools.browser_lightpanda.find_lightpanda_binary", lambda: None)
     out = helper._run_doctor_and_capture(monkeypatch, tmp_path)
-    assert "Lightpanda selected but binary not found" in out
+    assert 'Выбран Lightpanda, но программа не найдена' in out

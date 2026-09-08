@@ -24,7 +24,7 @@ from korra_cli.sqlite_safe_read import (
 VULNERABLE = (3, 50, 4)
 FIXED_VERSIONS = [(3, 51, 3), (3, 52, 0), (3, 50, 7), (3, 44, 6)]
 
-EXPOSED_TEXT = "exposed to the WAL-reset bug"
+EXPOSED_TEXT = 'подвержен ошибке сброса WAL'
 
 
 def _make_db(path, journal_mode=None):
@@ -110,7 +110,7 @@ class TestReadJournalMode:
         mode, error = doctor._read_journal_mode(db)
 
         assert mode is None
-        assert error == "file is empty"
+        assert error == 'Файл пуст'
 
     def test_short_file_reports_error(self, tmp_path):
         db = tmp_path / "state.db"
@@ -119,7 +119,7 @@ class TestReadJournalMode:
         mode, error = doctor._read_journal_mode(db)
 
         assert mode is None
-        assert "not a database" in error
+        assert 'не является базой данных' in error
 
     def test_corrupt_file_reports_error(self, tmp_path):
         db = tmp_path / "state.db"
@@ -128,7 +128,7 @@ class TestReadJournalMode:
         mode, error = doctor._read_journal_mode(db)
 
         assert mode is None
-        assert "not a database" in error
+        assert 'не является базой данных' in error
 
     def test_locked_database_is_still_readable(self, tmp_path):
         db = tmp_path / "state.db"
@@ -193,7 +193,7 @@ class TestLiveConnectionSafety:
             mode, error = doctor._read_journal_mode(db)
 
             assert mode is None
-            assert error == "database is open in this process"
+            assert error == 'База открыта в этом процессе'
         finally:
             untrack_connection(db)
 
@@ -211,7 +211,7 @@ class TestLiveConnectionSafety:
             mode, error = doctor._read_journal_mode(db)
 
             assert mode is None
-            assert error == "database is open in this process"
+            assert error == 'База открыта в этом процессе'
         finally:
             conn.close()
 
@@ -253,9 +253,9 @@ class TestLiveConnectionSafety:
             conn.close()
 
         out = capsys.readouterr().out
-        assert "state.db: journal mode could not be read" in out
-        assert "database is open in this process" in out
-        assert "cannot rule out WAL exposure" in out
+        assert 'state.db: не удалось прочитать режим журнала' in out
+        assert 'База открыта в этом процессе' in out
+        assert 'риск ошибки WAL не исключён' in out
 
     def test_an_untracked_lock_holder_does_not_block_the_probe(self, tmp_path):
         """Only this process's *registered* connections gate the read.
@@ -300,7 +300,7 @@ class TestUnreadableReason:
             os.chmod(db, 0o644)
 
         assert mode is None
-        assert "permission denied" in error.lower()
+        assert 'нет доступа' in error.lower()
 
     def test_reason_does_not_open_the_file(self, tmp_path, monkeypatch):
         """_unreadable_reason must answer from metadata only.
@@ -316,7 +316,7 @@ class TestUnreadableReason:
 
         monkeypatch.setattr("builtins.open", _fail)
 
-        assert doctor._unreadable_reason(db) == "file could not be read"
+        assert doctor._unreadable_reason(db) == 'Не удалось прочитать файл'
 
 
 class TestReportDatabaseJournalModes:
@@ -326,7 +326,7 @@ class TestReportDatabaseJournalModes:
         doctor._report_database_journal_modes(tmp_path, VULNERABLE)
 
         out = capsys.readouterr().out
-        assert "state.db is in WAL mode" in out
+        assert 'state.db использует режим WAL' in out
         assert EXPOSED_TEXT in out
 
     def test_vulnerable_runtime_rollback_db_is_listed_not_exposed(self, tmp_path, capsys):
@@ -335,7 +335,7 @@ class TestReportDatabaseJournalModes:
         doctor._report_database_journal_modes(tmp_path, VULNERABLE)
 
         out = capsys.readouterr().out
-        assert "state.db: rollback journal mode" in out
+        assert 'state.db: журнал отката' in out
         assert EXPOSED_TEXT not in out
 
     @pytest.mark.parametrize("version", FIXED_VERSIONS)
@@ -345,7 +345,7 @@ class TestReportDatabaseJournalModes:
         doctor._report_database_journal_modes(tmp_path, version)
 
         out = capsys.readouterr().out
-        assert "state.db: WAL journal mode" in out
+        assert 'state.db: журнал WAL' in out
         assert EXPOSED_TEXT not in out
         assert "⚠" not in out
 
@@ -360,10 +360,10 @@ class TestReportDatabaseJournalModes:
         doctor._report_database_journal_modes(tmp_path, VULNERABLE)
 
         out = capsys.readouterr().out
-        assert "state.db is in WAL mode" in out
-        assert "projects.db: rollback journal mode" in out
-        assert "kanban.db: rollback journal mode" in out
-        assert "kanban/boards/myboard/kanban.db is in WAL mode" in out
+        assert 'state.db использует режим WAL' in out
+        assert 'projects.db: журнал отката' in out
+        assert 'kanban.db: журнал отката' in out
+        assert 'kanban/boards/myboard/kanban.db использует режим WAL' in out
 
     def test_missing_databases_are_skipped(self, tmp_path, capsys):
         doctor._report_database_journal_modes(tmp_path, VULNERABLE)
@@ -384,7 +384,7 @@ class TestReportDatabaseJournalModes:
             holder.close()
 
         out = capsys.readouterr().out
-        assert "state.db: rollback journal mode" in out
+        assert 'state.db: журнал отката' in out
 
     @pytest.mark.skipif(os.name == "nt", reason="chmod is a no-op on Windows")
     @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
@@ -398,8 +398,8 @@ class TestReportDatabaseJournalModes:
             os.chmod(db, 0o644)
 
         out = capsys.readouterr().out
-        assert "state.db: journal mode could not be read" in out
-        assert "cannot rule out WAL exposure" in out
+        assert 'state.db: не удалось прочитать режим журнала' in out
+        assert 'риск ошибки WAL не исключён' in out
 
     def test_corrupt_database_does_not_crash(self, tmp_path, capsys):
         (tmp_path / "state.db").write_bytes(b"garbage bytes, not sqlite" * 8)
@@ -407,7 +407,7 @@ class TestReportDatabaseJournalModes:
         doctor._report_database_journal_modes(tmp_path, VULNERABLE)
 
         out = capsys.readouterr().out
-        assert "state.db: journal mode could not be read" in out
+        assert 'state.db: не удалось прочитать режим журнала' in out
 
     def test_read_error_is_informational_on_fixed_runtime(self, tmp_path, capsys):
         (tmp_path / "state.db").write_bytes(b"garbage bytes, not sqlite" * 8)
@@ -415,8 +415,8 @@ class TestReportDatabaseJournalModes:
         doctor._report_database_journal_modes(tmp_path, (3, 51, 3))
 
         out = capsys.readouterr().out
-        assert "state.db: journal mode could not be read" in out
-        assert "cannot rule out WAL exposure" not in out
+        assert 'state.db: не удалось прочитать режим журнала' in out
+        assert 'риск ошибки WAL не исключён' not in out
         assert "⚠" not in out
 
     def test_report_creates_no_wal_sidecars(self, tmp_path, capsys):
@@ -438,17 +438,17 @@ class TestSizeAndRepairHint:
         out = capsys.readouterr().out
         # _format_size picks the unit (a fresh test DB is KB-scale).
         assert re.search(r"\(\d[\d.]* [KMGT]?B\)", out)
-        assert "To clear the exposure:" in out
+        assert 'Чтобы устранить проблему:' in out
 
     def test_no_repair_hint_when_nothing_is_exposed(self, tmp_path, capsys):
         _make_db(tmp_path / "state.db", journal_mode="DELETE")
         doctor._report_database_journal_modes(tmp_path, VULNERABLE)
-        assert "To clear the exposure:" not in capsys.readouterr().out
+        assert 'Чтобы устранить проблему:' not in capsys.readouterr().out
 
     def test_no_repair_hint_on_a_fixed_runtime(self, tmp_path, capsys):
         _make_db(tmp_path / "state.db", journal_mode="WAL")
         doctor._report_database_journal_modes(tmp_path, FIXED_VERSIONS[0])
-        assert "To clear the exposure:" not in capsys.readouterr().out
+        assert 'Чтобы устранить проблему:' not in capsys.readouterr().out
 
     def test_size_failure_does_not_crash(self, tmp_path, capsys):
-        assert doctor._format_db_size(tmp_path / "gone.db") == "size unknown"
+        assert doctor._format_db_size(tmp_path / "gone.db") == 'Размер неизвестен'
