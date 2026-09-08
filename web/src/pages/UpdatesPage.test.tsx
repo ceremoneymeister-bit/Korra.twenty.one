@@ -242,15 +242,22 @@ describe('ход обновления', () => {
     expect(container.textContent).toContain('Обновление прошло, всё на месте');
   });
 
-  it('после отката говорит, что вернули прежнюю версию', async () => {
+  it('после отката говорит, что вернули прежнюю версию, и не показывает шаги', async () => {
+    // Откат по смыслу возвращает НЕ целевой выпуск: installed_target здесь
+    // всегда false, и шаги обновления после него уже ничего не объясняют.
     calls.getUpdatesState.mockResolvedValue(state({
+      available: AVAILABLE,
+      up_to_date: false,
       progress: {
         ...running, status: 'rolled_back', step: 'check', phase: 'rollback_complete',
-        final: true, installed_target: true, release_id: INSTALLED.release_id,
+        final: true, installed_target: false,
       },
     }));
     await render();
+    expect(container.querySelector('.upd-steps')).toBeNull();
     expect(container.textContent).toContain('Вернули прежнюю версию');
     expect(container.textContent).toContain('Данные, память и доступы остались как были');
+    // Выпуск снова доступен: после отката его можно поставить заново.
+    expect(button('Обновить')).not.toBeNull();
   });
 });

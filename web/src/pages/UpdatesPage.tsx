@@ -175,7 +175,8 @@ function Progress({
 }) {
   const keys = steps.map((step) => step.key);
   const failed = progress.status === "failed" || progress.status === "rollback_failed";
-  const done = progress.status === "succeeded" || progress.status === "rolled_back";
+  const back = progress.status === "rolled_back";
+  const done = progress.status === "succeeded" || back;
   return (
     <section className="upd-card">
       <div className="upd-card-head">
@@ -184,7 +185,15 @@ function Progress({
             <Download size={17} aria-hidden />
             Обновление
           </p>
-          <h2>{done ? "Обновление завершено" : failed ? "Обновление не прошло" : "Идёт обновление"}</h2>
+          <h2>
+            {back
+              ? "Вернули прежнюю версию"
+              : done
+                ? "Обновление завершено"
+                : failed
+                  ? "Обновление не прошло"
+                  : "Идёт обновление"}
+          </h2>
           <p>{offline && !progress.final ? "Панель перезапускается — это шаг обновления. Страница вернётся сама." : progress.message}</p>
         </div>
         {!progress.final && (
@@ -330,7 +339,10 @@ export default function UpdatesPage() {
 
   const { installed, available, progress, request: pending, steps } = state;
   const active = Boolean(progress && !progress.final);
-  const finished = progress?.final && progress.installed_target;
+  // Операция «доехала»: цель установлена, либо это откат — он по смыслу
+  // возвращает НЕ целевой выпуск, и шаги обновления после него уже не нужны.
+  const finished =
+    progress?.final && (progress.installed_target || progress.status === "rolled_back");
 
   return (
     <div className="korra-updates">
