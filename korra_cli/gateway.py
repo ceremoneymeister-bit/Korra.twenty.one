@@ -3004,7 +3004,7 @@ def _preflight_user_systemd(*, auto_enable_linger: bool = True) -> None:
             username,
             reason='Фоновая работа после выхода включена, но управляющие сокеты пользовательского systemd отсутствуют.',
             fix_hint=(
-                f'  systemctl start user@{os.getuid()}.service\n  Может потребоваться sudo. После успешного выполнения повторите попытку.'
+                f'  systemctl start user@{os.getuid()}.service\n  Может потребоваться sudo. После успешного выполнения повторите попытку.'  # windows-footgun: ok — POSIX systemd helper, never invoked on Windows
             ),
         )
 
