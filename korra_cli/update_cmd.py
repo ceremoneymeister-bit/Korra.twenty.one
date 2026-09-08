@@ -304,7 +304,7 @@ def _check_and_apply_config_migration(
     not strand the user on an older config version.
     """
     print()
-    print("→ Checking configuration for new options...")
+    print('→ Проверяю новые параметры настройки…')
 
     # Reload config modules BEFORE any config reads so get_missing_*,
     # check_config_version, and migrate_config all use the updated code.
@@ -324,8 +324,8 @@ def _check_and_apply_config_migration(
         current_ver, latest_ver = _run_config_check_fresh()
     except Exception as exc:
         logger.debug("Config check during update failed: %s", exc)
-        print("  ⚠️  Could not check config version.")
-        print("     Run 'hermes config migrate' to check manually.")
+        print('  ⚠️ Не удалось проверить версию настроек.')
+        print('     Проверить вручную: korra config migrate')
         return
 
     has_new_options = bool(missing_env or missing_config)
@@ -342,13 +342,13 @@ def _check_and_apply_config_migration(
         # Tt2021). Apply it silently and say what actually happened.
         print()
         print(
-            f"  ℹ Updating config format (v{current_ver} → v{latest_ver})…"
+            f'  ℹ Обновляю формат настроек: v{current_ver} → v{latest_ver}…'
         )
         try:
             _mig_results = _run_migrate_config_fresh(
                 interactive=False, quiet=True
             )
-            print("  ✓ Config format updated (no new settings to configure)")
+            print('  ✓ Формат настроек обновлён. Новых параметров нет.')
             # quiet=True also mutes migration steps that RESET or REMOVE an
             # existing setting (e.g. the v33→v34 personality reset from
             # #81946, which records its note only in the results dict).
@@ -361,8 +361,8 @@ def _check_and_apply_config_migration(
             for _warn in _mig_results.get("warnings") or []:
                 print(f"  ⚠️  {_warn}")
         except Exception as _mig_err:
-            print(f"  ⚠️  Config format update failed: {_mig_err}")
-            print("     Run 'hermes config migrate' to retry.")
+            print(f'  ⚠️ Не удалось обновить формат настроек: {_mig_err}')
+            print('     Повторить: korra config migrate')
     elif needs_migration:
         print()
         # Show WHAT changed, not just a count, so the user can make an
@@ -386,38 +386,38 @@ def _check_and_apply_config_migration(
                     print(f"      • {name}")
             extra = len(items) - len(shown)
             if extra > 0:
-                print(f"      … and {extra} more")
+                print(f'      … ещё {extra}')
 
         if missing_env:
             print(
-                f"  ⚠️  {len(missing_env)} new required setting(s) need configuration"
+                f'  ⚠️ Требуется заполнить новых обязательных параметров: {len(missing_env)}'
             )
-            _print_items(missing_env, "New settings", "name")
+            _print_items(missing_env, 'Новые настройки', "name")
         if missing_config:
-            print(f"  ℹ️  {len(missing_config)} new config option(s) available")
-            _print_items(missing_config, "New options", "key")
+            print(f'  ℹ️ Доступно новых параметров: {len(missing_config)}')
+            _print_items(missing_config, 'Новые параметры', "key")
 
         print()
         if assume_yes:
             print(
-                "  ℹ --yes: auto-applying config migration (skipping API-key prompts)."
+                '  ℹ Указан --yes. Перенос настроек выполняется автоматически, запросы ключей API пропущены.'
             )
             response = "y"
         elif gateway_mode:
             response = (
                 _gateway_prompt(
-                    "Would you like to configure new options now? [Y/n]", "n"
+                    'Настроить новые параметры сейчас? [Y — да / n — нет]', "n"
                 )
                 .strip()
                 .lower()
             )
         elif not (sys.stdin.isatty() and sys.stdout.isatty()):
-            print("  ℹ Non-interactive session — applying safe config migrations.")
+            print('  ℹ Запуск без участия пользователя. Применяю безопасные изменения настроек.')
             response = "auto"
         else:
             try:
                 response = (
-                    input("Would you like to configure them now? [Y/n]: ")
+                    input('Настроить эти параметры сейчас? [Y — да / n — нет]: ')
                     .strip()
                     .lower()
                 )
@@ -429,8 +429,7 @@ def _check_and_apply_config_migration(
                 # embedded terminal). Without this, the exception escapes
                 # here and crashes the update at this prompt.
                 print(
-                    "  ⚠ Could not read input (encoding issue). Skipping. "
-                    "Run 'hermes config migrate' manually to configure."
+                    '  ⚠ Не удалось прочитать ввод из-за кодировки. Пропускаю. Настроить вручную: korra config migrate'
                 )
                 response = "n"
 
@@ -448,14 +447,14 @@ def _check_and_apply_config_migration(
 
             if results["env_added"] or results["config_added"]:
                 print()
-                print("✓ Configuration updated!")
+                print('✓ Настройки обновлены!')
             if (gateway_mode or assume_yes or response == "auto") and missing_env:
-                print("  ℹ API keys require manual entry: hermes config migrate")
+                print('  ℹ Ключи API нужно ввести вручную: korra config migrate')
         else:
             print()
-            print("Skipped. Run 'hermes config migrate' later to configure.")
+            print('Пропущено. Настроить позже: korra config migrate')
     else:
-        print("  ✓ Configuration is up to date")
+        print('  ✓ Настройки соответствуют текущей версии.')
 
     # Fleet-wide config migration (#91277 Phase 2; #20438 earliest report,
     # #54926, #79048): the shared checkout serves EVERY profile, but the
@@ -470,8 +469,7 @@ def _check_and_apply_config_migration(
         _migrated_siblings = _migrate_sibling_profile_configs()
         for _name, _from_ver, _to_ver in _migrated_siblings:
             print(
-                f"  ✓ Profile '{_name}': config format updated "
-                f"(v{_from_ver} → v{_to_ver})"
+                f"  ✓ Профиль '{_name}': формат настроек обновлён, v{_from_ver} → v{_to_ver}."
             )
     except Exception as exc:
         logger.debug("Sibling config migration failed: %s", exc)
@@ -489,9 +487,7 @@ def _check_and_apply_config_migration(
         if cron_restore:
             print()
             print(
-                "  ⚠️  cron/jobs.json lost jobs during this update — "
-                f"restored {cron_restore['job_count']} job(s) from "
-                f"pre-update snapshot {cron_restore['snapshot_id']}."
+                f"  ⚠️ При обновлении из cron/jobs.json исчезли задачи. Восстановлено задач: {cron_restore['job_count']}, резервная копия: {cron_restore['snapshot_id']}."
             )
     except Exception as exc:
         # Never let the cron safety net break an otherwise-good update.
@@ -508,10 +504,7 @@ def _check_and_apply_config_migration(
         ):
             print()
             print(
-                f"  ⚠️  Profile '{_restored['profile']}': cron/jobs.json "
-                f"lost jobs during this update — restored "
-                f"{_restored['job_count']} job(s) from pre-update "
-                f"snapshot {_restored['snapshot_id']}."
+                f"  ⚠️ Профиль '{_restored['profile']}': из cron/jobs.json исчезли задачи. Восстановлено: {_restored['job_count']}, резервная копия: {_restored['snapshot_id']}."
             )
     except Exception as exc:
         logger.debug("Sibling cron auto-restore check failed: %s", exc)
@@ -844,7 +837,7 @@ def _gateway_prompt(prompt_text: str, default: str = "", timeout: float = 300.0)
     # Timeout — clean up and use default
     prompt_path.unlink(missing_ok=True)
     response_path.unlink(missing_ok=True)
-    print(f"  (no response after {int(timeout)}s, using default: {default!r})")
+    print(f'  Ответ не получен за {int(timeout)} с. Использую значение по умолчанию: {default!r}.')
     return default
 
 def _npm_bin_exists(bin_dir: Path, name: str) -> bool:
@@ -907,16 +900,14 @@ def _print_curator_first_run_notice() -> None:
         hours = 24 * 7
     days = max(1, hours // 24)
     print()
-    print("ℹ Skill curator")
+    print('ℹ Обслуживание навыков')
     print(
-        f"  Background skill maintenance is enabled. First pass is deferred "
-        f"~{days}d after installation; only agent-created skills are in "
-        f"scope and nothing is ever auto-deleted (archive is recoverable)."
+        f'  Фоновое обслуживание навыков включено. Первый запуск — примерно через {days} дн. после установки. Обрабатываются только навыки, созданные агентом. Ничего не удаляется безвозвратно: архив можно восстановить.'
     )
-    print("  Preview now:  hermes curator run --dry-run")
-    print("  Pause it:     hermes curator pause")
+    print('  Предпросмотр: korra curator run --dry-run')
+    print('  Приостановить: korra curator pause')
     print(
-        "  Docs:         https://github.com/ceremoneymeister-bit/Korra.twenty.one/blob/main/website/docs/user-guide/features/curator.md"
+        '  Инструкция: https://github.com/ceremoneymeister-bit/Korra.twenty.one/blob/main/website/docs/user-guide/features/curator.md'
     )
 
 def _print_fts_optimize_available_notice() -> None:
@@ -999,37 +990,29 @@ def _print_fts_optimize_available_notice() -> None:
 
     if interrupted:
         print()
-        print("◆ Session database optimization incomplete")
+        print('◆ Оптимизация базы диалогов не завершена')
         print(
-            "  A previous `hermes sessions optimize-storage` run was "
-            "interrupted. Search still works; re-run the command to resume "
-            "and finish reclaiming disk:"
+            '  Предыдущая оптимизация `korra sessions optimize-storage` была прервана. Поиск работает. Повторите команду, чтобы продолжить освобождение места:'
         )
-        print("    hermes sessions optimize-storage")
+        print('    korra sessions optimize-storage')
         return
 
     # Concrete size framing — lead with the savings the user cares about.
     est_reclaim = size_gb * 0.6
     print()
     if mode == "require":
-        print("◆ Session database upgrade required")
+        print('◆ Требуется обновить формат базы диалогов')
         print(
-            f"  Your search index uses the OLD storage layout and should be "
-            f"upgraded. The new layout typically frees ~60% of state.db "
-            f"(≈{est_reclaim:.1f} GB of your current {size_gb:.1f} GB) and is "
-            f"required for continued optimal operation."
+            f'  Поиск использует старый формат хранения. Новый формат обычно освобождает около 60% state.db: примерно {est_reclaim:.1f} ГБ из ваших {size_gb:.1f} ГБ. Он нужен для дальнейшей работы.'
         )
     else:
-        print("◆ Reclaim ~60% of your session database disk")
+        print('◆ Освободите около 60% места базы диалогов')
         print(
-            f"  Your search index uses the old storage layout. Upgrading it "
-            f"typically frees ~60% of state.db — about {est_reclaim:.1f} GB "
-            f"of your current {size_gb:.1f} GB."
+            f'  Поиск использует старый формат хранения. Обновление обычно освобождает около 60% state.db: примерно {est_reclaim:.1f} ГБ из ваших {size_gb:.1f} ГБ.'
         )
-    print("  Run when convenient:  hermes sessions optimize-storage")
+    print('  Когда удобно, выполните: korra sessions optimize-storage')
     print(
-        "  It runs in the foreground with a progress bar, is safe to "
-        "interrupt/re-run, and never changes your conversations."
+        '  Команда показывает прогресс в терминале. Её можно безопасно прервать и повторить. Содержимое диалогов не меняется.'
     )
 
 def _print_curator_recent_run_notice() -> None:
@@ -1082,12 +1065,11 @@ def _print_curator_recent_run_notice() -> None:
     # Format the timestamp as "Xh ago" for readability.
     when = _format_time_ago(last_run_at)
     print()
-    print(f"ℹ Skill curator — last run {when}")
+    print(f'ℹ Обслуживание навыков — последний запуск: {when}')
     for line in summary.splitlines():
         print(f"  {line}")
     print(
-        "  (This message shows once per curator run. "
-        "View anytime: hermes curator status)"
+        '  Уведомление показывается один раз после каждого запуска. Посмотреть состояние: korra curator status.'
     )
 
     # Stamp shown so we don't repeat on the next update.
@@ -1107,14 +1089,14 @@ def _format_time_ago(iso_ts: str) -> str:
         delta = datetime.now(timezone.utc) - ts
         secs = int(delta.total_seconds())
         if secs < 60:
-            return "just now"
+            return 'только что'
         if secs < 3600:
-            return f"{secs // 60}m ago"
+            return f"{secs // 60} мин назад"
         if secs < 86400:
-            return f"{secs // 3600}h ago"
-        return f"{secs // 86400}d ago"
+            return f"{secs // 3600} ч назад"
+        return f"{secs // 86400} дн. назад"
     except Exception:
-        return "recently"
+        return "недавно"
 
 def _reload_process_scan_modules() -> None:
     """Force-reload the process-scan modules from disk after an update.
@@ -1165,8 +1147,8 @@ def _finish_dashboard_update_cleanup(
     """
     if node_failures:
         print()
-        print("  ℹ Leaving running dashboard process(es) untouched because the")
-        print("    Node.js dependency refresh did not complete.")
+        print('  ℹ Работающая панель не остановлена, поскольку обновление')
+        print('    зависимостей Node.js не завершилось.')
         return
 
     # The scan path lazy-imports symbols from _subprocess_compat; make sure
@@ -1181,11 +1163,10 @@ def _finish_dashboard_update_cleanup(
 
     print()
     print(
-        "⚠ A web dashboard/serve process was stopped during update and could "
-        "not be auto-restarted."
+        '⚠ Панель или сервер API были остановлены при обновлении, но автоматически запустить их не удалось.'
     )
-    print("  Re-launch it when you want the web UI back:")
-    print("    hermes dashboard --port <port>")
+    print('  Чтобы вернуть панель, выполните:')
+    print('    korra dashboard --port <порт>')
 
 def _atomic_replace_dir(src: str, dst: str) -> None:
     """Replace directory *dst* with *src* without leaving *dst* half-deleted.
@@ -1444,32 +1425,29 @@ def _print_parked_branch_skip_warning(
         behind = None
 
     if reason == "dirty":
-        why = "the working tree has uncommitted changes"
+        why = 'в рабочей папке есть изменения без коммита'
     elif reason == "disabled":
-        why = "updates.auto_switch_parked_branch is set to false in config.yaml"
+        why = 'в config.yaml отключено updates.auto_switch_parked_branch'
     else:
         why = (
-            f"the branch state could not be verified against "
-            f"origin/{target_branch}"
+            f'не удалось сравнить состояние ветки с origin/{target_branch}'
         )
 
     bar = "=" * 68
     print()
     print(bar)
-    print(f"⚠ CODE UPDATE SKIPPED — checkout is parked on '{current_branch}'")
-    print(f"  Not auto-switching to {target_branch}: {why}.")
+    print(f"⚠ ОБНОВЛЕНИЕ КОДА ПРОПУЩЕНО — выбрана ветка '{current_branch}'.")
+    print(f'  Автоматического перехода на {target_branch} не будет: {why}.')
     if behind is not None and behind > 0:
         print(
-            f"  This checkout is {behind} commit(s) BEHIND "
-            f"origin/{target_branch} — the code you are running is stale."
+            f'  Эта копия отстаёт от origin/{target_branch}. Не хватает коммитов: {behind}. Сейчас используется устаревший код.'
         )
     print()
-    print("  To resolve, inspect the branch and switch back yourself:")
+    print('  Проверьте ветку и переключитесь вручную:')
     print(f"    git -C {cwd} status")
-    print(f"    git -C {cwd} checkout {target_branch} && hermes update")
+    print(f'    git -C {cwd} checkout {target_branch} && korra update')
     print(
-        "  (commit or stash your work on the branch first if you want to "
-        "keep it)"
+        '  Если хотите сохранить свои изменения, сначала сделайте коммит или отложите их в stash.'
     )
     print(bar)
 
@@ -1490,15 +1468,13 @@ def _print_parked_branch_kept_notice(
     print()
     print(bar)
     print(
-        f"⚠ Checkout was parked on '{current_branch}' with "
-        f"{unmerged_count} commit(s) not merged into origin/{target_branch}."
+        f"⚠ В ветке '{current_branch}' есть коммиты ({unmerged_count}), не вошедшие в origin/{target_branch}."
     )
     print(
-        f"  Switching to {target_branch} so the update can proceed — your "
-        f"commit(s) are safe on '{current_branch}'."
+        f"  Перехожу на {target_branch} для обновления. Ваши коммиты сохранены в ветке '{current_branch}'."
     )
     print()
-    print("  To pick the work back up later:")
+    print('  Чтобы вернуться к своей работе:')
     print(f"    git checkout {current_branch}")
     print(bar)
 
@@ -1569,10 +1545,10 @@ def _format_update_failure_stage(exc: subprocess.CalledProcessError) -> str:
     actually having failed (#87304, #85840).
     """
     if _called_process_error_is_python_dep_install(exc):
-        return "Python dependency install failed"
+        return 'Не удалось установить зависимости Python'
     if _called_process_error_is_git(exc):
-        return "Git update failed"
-    return "Update step failed"
+        return 'Не удалось обновить код через Git'
+    return 'Не удалось выполнить этап обновления'
 
 
 def _shim_quarantine_error_type() -> "type[BaseException]":
@@ -1602,15 +1578,15 @@ def _refuse_update_for_contended_shims(exc: BaseException) -> None:
     launch after the holder exits. Exits 2 (refused) so the command-boundary
     receipt net records it as a refusal, not a failure.
     """
-    print("✗ Cannot continue the update: live Korra launcher(s) could not be")
-    print("  moved aside:")
+    print('✗ Обновление не может продолжиться. Не удалось временно переместить')
+    print('  занятые файлы запуска Korra:')
     for name in getattr(exc, "failed_shims", []) or ["hermes.exe"]:
         print(f"    {name}")
-    print("  Another process is holding this install's venv — typically Korra")
-    print("  Desktop, a gateway, or another hermes REPL — and mutating the venv")
-    print("  now would strand it half-updated.")
-    print("  The dependency install has been deferred: close the process(es)")
-    print("  above, then run any `hermes` command to finish it automatically.")
+    print('  Другой процесс использует среду Python этой установки. Обычно это')
+    print('  настольная Korra, шлюз или диалог в терминале. Обновление среды сейчас')
+    print('  может оставить её в неработоспособном состоянии.')
+    print('  Установка зависимостей отложена. Закройте указанные процессы,')
+    print('  затем запустите любую команду `korra`: установка завершится автоматически.')
     # Idempotent: the git path already dropped the marker before the sync;
     # this covers the ZIP/repair paths so the deferral is never silent.
     _write_update_incomplete_marker()
@@ -1643,7 +1619,7 @@ def _print_called_process_error_tail(
     lines = [line for line in str(blob).splitlines() if line.strip()]
     if not lines:
         return
-    print("  Last output:")
+    print('  Последний вывод:')
     for line in lines[-limit:]:
         print(f"    {line}")
 
@@ -1688,7 +1664,7 @@ def _zip_overlay_block_reason(
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip().splitlines()
         suffix = f" ({detail[0]})" if detail else ""
-        return f"could not check the working tree{suffix}"
+        return f'не удалось проверить рабочую папку{suffix}'
     lines = [line for line in (result.stdout or "").splitlines() if line.strip()]
     # --ignored=all reports the ZIP path's own preserved entries (venv,
     # node_modules are gitignored on every normal install). The swap never
@@ -1700,7 +1676,7 @@ def _zip_overlay_block_reason(
             line for line in lines if not _is_zip_staging_artifact_status_line(line)
         ]
     if lines:
-        return "the working tree has uncommitted changes or untracked files"
+        return 'в рабочей папке есть изменения без коммита или файлы вне Git'
     return None
 
 
@@ -1748,13 +1724,12 @@ def _abort_zip_update_if_dirty_tree() -> None:
     reason = _zip_overlay_block_reason(_m().PROJECT_ROOT)
     if reason is None:
         return
-    print(f"✗ ZIP fallback refused: {reason}.")
+    print(f'✗ Резервное обновление из ZIP отменено: {reason}.')
     print(
-        "  Overlaying the ZIP would overwrite uncommitted edits and permanently "
-        "delete untracked files."
+        '  Распаковка поверх текущих файлов затрёт несохранённые изменения и удалит файлы вне Git.'
     )
-    print("  Stash or commit your changes, then rerun `hermes update`.")
-    print("  To inspect: git status --porcelain")
+    print('  Сохраните изменения коммитом или в stash, затем повторите `korra update`.')
+    print('  Проверить изменения: git status --porcelain')
     _m().sys.exit(1)
 
 
@@ -1788,10 +1763,10 @@ def _update_complete_message(pre_version: str | None) -> str:
     """
     post_version = _read_project_version()
     if pre_version and post_version and pre_version != post_version:
-        return f"✓ Update complete! (v{pre_version} → v{post_version})"
+        return f'✓ Обновление завершено! (v{pre_version} → v{post_version})'
     if post_version:
-        return f"✓ Update complete! (v{post_version})"
-    return "✓ Update complete!"
+        return f'✓ Обновление завершено! (v{post_version})'
+    return '✓ Обновление завершено!'
  
  
 def _clear_stale_sqlite_sidecars(db_path: Path) -> None:
@@ -1828,18 +1803,18 @@ def _print_update_summary(
         parts = []
         if node_failures:
             parts.append(
-                f"Node.js dependencies for {', '.join(node_failures)} did not refresh"
+                f"зависимости Node.js для {', '.join(node_failures)} не обновлены"
             )
         if not desktop_build_ok:
             parts.append(
-                "the desktop app was not rebuilt and is still on the previous build"
+                'настольное приложение не пересобрано и осталось на прежней версии'
             )
-        print("⚠ Update partially complete — " + "; ".join(parts) + ".")
+        print('⚠ Обновление выполнено частично — ' + "; ".join(parts) + ".")
         if node_failures:
-            print("  Code and Python deps are updated, but the dashboard/TUI may")
-            print("  be in a mixed state until the Node deps are rebuilt.")
+            print('  Код и зависимости Python обновлены, но панель или терминальный интерфейс')
+            print('  могут работать некорректно до пересборки зависимостей Node.js.')
         if not desktop_build_ok:
-            print("  Run `hermes desktop` to retry the desktop rebuild.")
+            print('  Повторить сборку настольного приложения: `korra desktop`.')
     else:
         _print_update_completion(_update_complete_message(pre_update_version))
 
@@ -1876,9 +1851,7 @@ def _restore_state_db_from_snapshot(state_path: Path, snap_state: Path) -> bool:
     holders = _foreign_db_holder_pids(state_path)
     if holders:
         print(
-            f"  ✗ Auto-restore refused: process(es) {holders} still hold "
-            "state.db or its WAL open. Stop them (hermes gateway stop), "
-            "then restore manually with /snapshot restore."
+            f'  ✗ Автовосстановление отменено: процессы {holders} ещё используют state.db или журнал WAL. Остановите их (`korra gateway stop`), затем восстановите вручную через /snapshot restore.'
         )
         return False
     _clear_stale_sqlite_sidecars(state_path)
@@ -1916,14 +1889,10 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
     branch = _m()._resolve_update_branch(args)
     if branch != "main":
         print(
-            f"✗ --branch={branch} is not supported on the Windows ZIP-fallback "
-            "update path."
+            f'✗ Обновление из ZIP в Windows не поддерживает --branch={branch}.'
         )
         print(
-            "  This path runs when git file I/O is broken on the system. "
-            "Either resolve the git-side breakage (typically an antivirus "
-            "or NTFS filter holding files open) and rerun `hermes update "
-            f"--branch {branch}`, or update against main with `hermes update`."
+            f'  Этот способ используется при ошибках файловых операций Git. Исправьте проблему с Git (часто файлы блокирует антивирус) и повторите `korra update --branch {branch}`. Либо обновите основную ветку командой `korra update`.'
         )
         _m().sys.exit(1)
     _abort_zip_update_if_dirty_tree()
@@ -1933,13 +1902,13 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
         f"/archive/refs/heads/{branch}.zip"
     )
 
-    print("→ Downloading latest version...")
+    print('→ Загружаю последнюю версию…')
     tmp_dir = tempfile.mkdtemp(prefix="hermes-update-")
     try:
         zip_path = os.path.join(tmp_dir, f"hermes-agent-{branch}.zip")
         urlretrieve(zip_url, zip_path)
 
-        print("→ Extracting...")
+        print('→ Распаковываю…')
         import stat as _stat
         with zipfile.ZipFile(zip_path, "r") as zf:
             # Validate paths to prevent zip-slip (path traversal) AND reject
@@ -1955,14 +1924,14 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
                     and member_path != tmp_dir_real
                 ):
                     raise ValueError(
-                        f"Zip-slip detected: {member.filename} escapes extraction directory"
+                        f'Небезопасный архив: путь {member.filename} выходит за пределы папки распаковки'
                     )
                 # Unix mode lives in the upper 16 bits of external_attr;
                 # mask to the file-type bits.
                 mode = (member.external_attr >> 16) & 0o170000
                 if _stat.S_ISLNK(mode):
                     raise ValueError(
-                        f"ZIP contains unsupported symlink member: {member.filename}"
+                        f'Архив ZIP содержит неподдерживаемую символическую ссылку: {member.filename}'
                     )
             zf.extractall(tmp_dir)
 
@@ -2011,9 +1980,7 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
         free = shutil.disk_usage(str(_m().PROJECT_ROOT)).free
         if free < required:
             raise RuntimeError(
-                f"not enough free disk space to stage the update safely "
-                f"(need ~{required // (1024 * 1024)} MB, have "
-                f"{free // (1024 * 1024)} MB)"
+                f'для подготовки обновления не хватает места: нужно около {required // (1024 * 1024)} МБ, доступно {free // (1024 * 1024)} МБ'
             )
 
         staged: list[tuple[str, str]] = []
@@ -2055,12 +2022,11 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
             )
             if recheck_reason is not None:
                 _discard_staged(staged)
-                print(f"✗ ZIP fallback aborted before the swap: {recheck_reason}.")
+                print(f'✗ Обновление из ZIP отменено до замены файлов: {recheck_reason}.')
                 print(
-                    "  Files appeared in the checkout while the update was "
-                    "downloading; committing the swap would delete them."
+                    '  Во время загрузки в рабочей папке появились новые файлы. Замена установки удалила бы их.'
                 )
-                print("  Stash or commit your changes, then rerun `hermes update`.")
+                print('  Сохраните изменения коммитом или в stash, затем повторите `korra update`.')
                 _m().sys.exit(1)
             _commit_staged_replacements(staged)
         except Exception:
@@ -2077,17 +2043,16 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
             raise
         update_count = len(staged)
 
-        print(f"✓ Updated {update_count} items from ZIP")
+        print(f'✓ Обновлено элементов из ZIP: {update_count}')
 
     except Exception as e:
-        print(f"✗ ZIP update failed: {e}")
+        print(f'✗ Не удалось обновить из ZIP: {e}')
         # The two-phase replace either commits every entry or rolls them all
         # back, so a failure here does not leave a mixed-version tree — don't
         # scare the user toward a reinstall they don't need.
-        print("  Your existing install was left in place.")
+        print('  Существующая установка сохранена.')
         print(
-            "  Re-run `hermes update` to retry; if the agent won't start, "
-            "reinstall from https://github.com/ceremoneymeister-bit/Korra.twenty.one"
+            '  Повторите `korra update`. Если агент не запускается, установите его заново: https://github.com/ceremoneymeister-bit/Korra.twenty.one'
         )
         _m().sys.exit(1)
     finally:
@@ -2097,7 +2062,7 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
     removed = _m()._clear_bytecode_cache(_m().PROJECT_ROOT)
     if removed:
         print(
-            f"  ✓ Cleared {removed} stale __pycache__ director{'y' if removed == 1 else 'ies'}"
+            f'  ✓ Удалены устаревшие папки __pycache__: {removed}'
         )
     _m()._record_bytecode_fingerprint()
     _m()._refresh_bootstrap_cache_scripts(branch)
@@ -2110,7 +2075,7 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
     # above is already committed; defer only the dependency sync when this
     # process holds a native extension the sync must rewrite.
     _m()._abort_dependency_sync_if_self_locked()
-    print("→ Updating Python dependencies...")
+    print('→ Обновляю зависимости Python…')
 
     from korra_cli.managed_uv import ensure_uv, update_managed_uv
 
@@ -2187,11 +2152,11 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
     )
     if not import_ok:
         print()
-        print("✗ Update left the install in an unimportable state:")
+        print('✗ После обновления не удаётся загрузить модули:')
         print(f"  {failing_module}: {import_error}")
         print()
-        print("  This usually means the copy was interrupted partway through.")
-        print("  Re-run `hermes update` to complete it.")
+        print('  Возможно, копирование файлов было прервано.')
+        print('  Повторите `korra update`, чтобы завершить обновление.')
         _m().sys.exit(1)
 
     node_failures = _update_node_dependencies()
@@ -2205,29 +2170,27 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
     try:
         from tools.skills_sync import sync_skills
 
-        print("→ Syncing bundled skills...")
+        print('→ Синхронизирую встроенные навыки…')
         result = sync_skills(quiet=True)
         if result["copied"]:
-            print(f"  + {len(result['copied'])} new: {', '.join(result['copied'])}")
+            print(f"  + Новых навыков: {len(result['copied'])}. {', '.join(result['copied'])}")
         if result.get("updated"):
             print(
-                f"  ↑ {len(result['updated'])} updated: {', '.join(result['updated'])}"
+                f"  ↑ Обновлено навыков: {len(result['updated'])}. {', '.join(result['updated'])}"
             )
         if result.get("user_modified"):
-            print(f"  ~ {len(result['user_modified'])} user-modified (kept)")
+            print(f"  ~ Изменённые вами навыки сохранены: {len(result['user_modified'])}")
             print(
-                "    → see them: hermes skills list-modified  "
-                "(diff/reset to resume updates)"
+                '    → Посмотреть: korra skills list-modified. Команды diff/reset позволят снова получать обновления.'
             )
         if result.get("cleaned"):
-            print(f"  − {len(result['cleaned'])} removed from manifest")
+            print(f"  − Удалено из каталога: {len(result['cleaned'])}")
         if result.get("relocated"):
             print(
-                f"  → {len(result['relocated'])} moved to new upstream paths: "
-                f"{', '.join(result['relocated'])}"
+                f"  → Перемещено по новым путям исходного проекта: {len(result['relocated'])}. {', '.join(result['relocated'])}"
             )
         if not result["copied"] and not result.get("updated"):
-            print("  ✓ Skills are up to date")
+            print('  ✓ Навыки обновлены.')
     except Exception:
         pass
 
@@ -2237,7 +2200,7 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
         from korra_cli.model_catalog import seed_cache_from_checkout
 
         if seed_cache_from_checkout(_m().PROJECT_ROOT):
-            print("  ✓ Model catalog cache refreshed from checkout")
+            print('  ✓ Кеш каталога моделей обновлён из текущей установки.')
     except Exception as e:
         logger.debug("Model catalog seed during zip update failed: %s", e)
 
@@ -2255,7 +2218,7 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
             if not _state_ok.get("valid"):
                 print()
                 print(
-                    "⚠ state.db is corrupted after update: "
+                    '⚠ После обновления база state.db повреждена: '
                     + _state_ok.get("message", "unknown error")
                 )
                 _snap_root = _quick_snapshot_root(get_hermes_home())
@@ -2276,18 +2239,16 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False) -> boo
                                         _state_path, _snap_state
                                     ):
                                         print(
-                                            "  ✓ Auto-restored from snapshot "
-                                            f"{_snap_dir.name}"
+                                            f'  ✓ Автоматически восстановлено из снимка {_snap_dir.name}'
                                         )
                                     else:
                                         print(
-                                            "  ✗ Auto-restore FAILED — restored "
-                                            "copy also failed integrity"
+                                            '  ✗ Автовосстановление не удалось: восстановленная копия тоже повреждена.'
                                         )
                                     break
                                 except OSError as _exc:
                                     print(
-                                        f"  ✗ Auto-restore file copy failed: {_exc}"
+                                        f'  ✗ Не удалось скопировать файлы при автовосстановлении: {_exc}'
                                     )
                                     break
     except Exception as exc:
@@ -2343,7 +2304,7 @@ def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[st
         text=True, encoding="utf-8", errors="replace",
     )
     if unmerged.stdout.strip():
-        print("→ Clearing unmerged index entries from a previous conflict...")
+        print('→ Очищаю конфликтующие записи Git от предыдущей попытки…')
         subprocess.run(git_cmd + ["reset"], cwd=cwd, capture_output=True)
 
     from datetime import datetime, timezone
@@ -2351,7 +2312,7 @@ def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[st
     stash_name = datetime.now(timezone.utc).strftime(
         "hermes-update-autostash-%Y%m%d-%H%M%S"
     )
-    print("→ Local changes detected — stashing before update...")
+    print('→ Найдены локальные изменения. Сохраняю их в stash перед обновлением…')
     prev_stash = subprocess.run(
         git_cmd + ["rev-parse", "--verify", "refs/stash"],
         cwd=cwd,
@@ -2388,12 +2349,10 @@ def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[st
             if push.stderr.strip():
                 print(push.stderr.strip())
             print(
-                "  ⚠ Some untracked files could not be removed from the "
-                "working tree (permission denied)."
+                '  ⚠ Часть файлов вне Git не удалось удалить из рабочей папки: нет доступа.'
             )
             print(
-                "    They were still saved to the stash and were left in "
-                "place — the update will continue."
+                '    Они сохранены в stash и оставлены на месте. Продолжаю обновление.'
             )
             # A partially-failed stash push also aborts its working-tree
             # cleanup for TRACKED modifications — they are saved in the stash
@@ -2407,12 +2366,11 @@ def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[st
         else:
             # No stash entry was created: the changes were NOT saved.  This
             # is a real failure — bail out before the update touches HEAD.
-            print("✗ Could not stash local changes — update aborted.")
+            print('✗ Не удалось сохранить локальные изменения в stash. Обновление отменено.')
             if push.stderr.strip():
                 print(f"  {push.stderr.strip().splitlines()[0]}")
             print(
-                "  Commit, stash, or clean up your local changes manually, "
-                "then re-run `hermes update`."
+                '  Сохраните изменения коммитом или в stash либо удалите их вручную, затем повторите `korra update`.'
             )
             raise subprocess.CalledProcessError(
                 push.returncode, push.args, output=push.stdout, stderr=push.stderr
@@ -2440,14 +2398,14 @@ def _print_stash_cleanup_guidance(
     stash_ref: str, stash_selector: Optional[str] = None
 ) -> None:
     print(
-        "  Check `git status` first so you don't accidentally reapply the same change twice."
+        '  Сначала проверьте `git status`, чтобы случайно не применить изменения дважды.'
     )
-    print("  Find the saved entry with: git stash list --format='%gd %H %s'")
+    print("  Найти сохранённые изменения: git stash list --format='%gd %H %s'")
     if stash_selector:
-        print(f"  Remove it with: git stash drop {stash_selector}")
+        print(f'  Удалить запись: git stash drop {stash_selector}')
     else:
         print(
-            f"  Look for commit {stash_ref}, then drop its selector with: git stash drop stash@{{N}}"
+            f'  Найдите коммит {stash_ref} и удалите его запись: git stash drop stash@{{N}}'
         )
 
 def _stash_apply_failed_only_on_existing_untracked(stderr: str) -> bool:
@@ -2488,9 +2446,9 @@ def _park_stashed_changes(stash_ref: str) -> None:
     lost — the entry stays in ``git stash`` with printed recovery guidance.
     """
     print()
-    print("ℹ️  Local changes were stashed before updating and were NOT re-applied (--keep-stash).")
-    print(f"  Stash ref: {stash_ref}")
-    print(f"  Restore manually with: git stash apply {stash_ref}")
+    print('ℹ️ Локальные изменения сохранены в stash и не восстановлены, поскольку указан --keep-stash.')
+    print(f'  Запись stash: {stash_ref}')
+    print(f'  Восстановить вручную: git stash apply {stash_ref}')
 
 
 def _git_untracked_paths(git_cmd: list[str], cwd: Path) -> set[str] | None:
@@ -2508,8 +2466,7 @@ def _git_untracked_paths(git_cmd: list[str], cwd: Path) -> set[str] | None:
         result = None
     if result is None or result.returncode != 0:
         print(
-            "  ⚠ Could not enumerate untracked files while validating the "
-            "restored stash."
+            '  ⚠ Не удалось перечислить файлы вне Git при проверке восстановленных изменений.'
         )
         return None
     return {path for path in result.stdout.split("\0") if path}
@@ -2535,7 +2492,7 @@ def _restored_python_paths(
     except (OSError, subprocess.SubprocessError):
         changed = None
     if changed is None or changed.returncode != 0:
-        print("  ⚠ Could not enumerate tracked Python files restored from the stash.")
+        print('  ⚠ Не удалось перечислить отслеживаемые Python-файлы из stash.')
         return None
     paths = set(changed.stdout.split("\0"))
     untracked = _git_untracked_paths(git_cmd, cwd)
@@ -2556,8 +2513,8 @@ def _reject_unsafe_stash_restore(
 ) -> None:
     """Restore the clean updated tree, preserve the stash, and abort the update."""
     print()
-    print("✗ Restored local changes made the Korra agent unexecutable.")
-    print(f"  Health check failed: {failing_target}")
+    print('✗ После восстановления локальных изменений Корра перестала запускаться.')
+    print(f'  Проверка работоспособности не пройдена: {failing_target}')
     if detail:
         for line in str(detail).splitlines()[:6]:
             print(f"    {line}")
@@ -2603,14 +2560,14 @@ def _reject_unsafe_stash_restore(
             cleanup_ok = False
 
     if cleanup_ok:
-        print("  The clean updated tree has been restored; the gateway was not restarted.")
+        print('  Восстановлен чистый обновлённый код. Шлюз не перезапущен.')
     else:
-        print("  ⚠ The clean updated tree could not be fully restored automatically.")
-        print("    Inspect `git status` and run `git reset --hard HEAD` before retrying.")
-    print("  Platform connectivity alone does not mean the agent can execute turns.")
-    print(f"  Your local changes remain preserved in stash: {stash_ref}")
-    print(f"  Inspect them with: git stash show --stat {stash_ref}")
-    print(f"  Restore manually after fixing them: git stash apply {stash_ref}")
+        print('  ⚠ Не удалось полностью восстановить чистый обновлённый код.')
+        print('    Перед повторной попыткой проверьте `git status` и выполните `git reset --hard HEAD`.')
+    print('  Одного подключения к мессенджерам недостаточно: агент должен выполнять запросы.')
+    print(f'  Ваши изменения сохранены в stash: {stash_ref}')
+    print(f'  Посмотреть их: git stash show --stat {stash_ref}')
+    print(f'  Восстановить после исправления: git stash apply {stash_ref}')
     raise SystemExit(1)
 
 
@@ -2625,14 +2582,14 @@ def _restore_stashed_changes(
         remote_prompt = input_fn is not None
         prompt_suffix = "[y/N]" if remote_prompt else "[Y/n]"
         print()
-        print("⚠ Local changes were stashed before updating.")
+        print('⚠ Локальные изменения сохранены в stash перед обновлением.')
         print(
-            "  Restoring them may reapply local customizations onto the updated codebase."
+            '  Их восстановление вернёт ваши правки поверх обновлённого кода.'
         )
-        print("  Review the result afterward if Korra behaves unexpectedly.")
-        print(f"Restore local changes now? {prompt_suffix}")
+        print('  Если Korra работает необычно, проверьте восстановленные изменения.')
+        print(f'Восстановить локальные изменения сейчас? {prompt_suffix}')
         if input_fn is not None:
-            response = input_fn(f"Restore local changes now? {prompt_suffix}", "n")
+            response = input_fn(f'Восстановить локальные изменения сейчас? {prompt_suffix}', "n")
         else:
             try:
                 response = input().strip().lower()
@@ -2645,20 +2602,20 @@ def _restore_stashed_changes(
                 response = "n"
         accepted = response in {"y", "yes"} or (not remote_prompt and response == "")
         if not accepted:
-            print("Skipped restoring local changes.")
-            print("Your changes are still preserved in git stash.")
-            print(f"Restore manually with: git stash apply {stash_ref}")
+            print('Восстановление локальных изменений пропущено.')
+            print('Ваши изменения сохранены в git stash.')
+            print(f'Восстановить вручную: git stash apply {stash_ref}')
             return False
 
     preexisting_untracked = _git_untracked_paths(git_cmd, cwd)
     if preexisting_untracked is None:
-        print("  The stash was not restored because its cleanup baseline is unknown.")
-        print(f"  Restore manually with: git stash apply {stash_ref}")
+        print('  Изменения не восстановлены: неизвестно исходное состояние для очистки.')
+        print(f'  Восстановить вручную: git stash apply {stash_ref}')
         return False
     clean_import_failures = _critical_module_import_failures(
         cwd, report_runtime_errors=True
     )
-    print("→ Restoring local changes...")
+    print('→ Восстанавливаю локальные изменения…')
     restore = subprocess.run(
         git_cmd + ["stash", "apply", stash_ref],
         cwd=cwd,
@@ -2684,11 +2641,10 @@ def _restore_stashed_changes(
         # refuses to overwrite them). Their content was never touched —
         # nothing is lost. Treat as restored.
         print(
-            "  ⚠ Some stashed untracked files already exist in the working "
-            "tree and were kept as-is."
+            '  ⚠ Часть сохранённых в stash файлов уже существует. Текущие файлы оставлены без изменений.'
         )
     elif restore.returncode != 0 or has_conflicts:
-        print("✗ Update pulled new code, but restoring local changes hit conflicts.")
+        print('✗ Новый код получен, но восстановление локальных изменений вызвало конфликты.')
         if restore.stdout.strip():
             print(restore.stdout.strip())
         if restore.stderr.strip():
@@ -2697,12 +2653,12 @@ def _restore_stashed_changes(
         # Show which files conflicted
         conflicted_files = unmerged.stdout.strip()
         if conflicted_files:
-            print("\nConflicted files:")
+            print('\nФайлы с конфликтами:')
             for f in conflicted_files.splitlines():
                 print(f"  • {f}")
 
-        print("\nYour stashed changes are preserved — nothing is lost.")
-        print(f"  Stash ref: {stash_ref}")
+        print('\nВаши изменения сохранены в stash. Данные не потеряны.')
+        print(f'  Запись stash: {stash_ref}')
 
         # Always reset to clean state — leaving conflict markers in source
         # files makes hermes completely unrunnable (SyntaxError on import).
@@ -2712,8 +2668,8 @@ def _restore_stashed_changes(
             cwd=cwd,
             capture_output=True,
         )
-        print("Working tree reset to clean state.")
-        print(f"Restore your changes later with: git stash apply {stash_ref}")
+        print('Рабочая папка возвращена в чистое состояние.')
+        print(f'Восстановить свои изменения позже: git stash apply {stash_ref}')
         # Don't sys.exit — the code update itself succeeded, only the stash
         # restore had conflicts.  Let cmd_update continue with pip install,
         # skill sync, and gateway restart.
@@ -2767,10 +2723,10 @@ def _restore_stashed_changes(
     stash_selector = _resolve_stash_selector(git_cmd, cwd, stash_ref)
     if stash_selector is None:
         print(
-            "⚠ Local changes were restored, but Korra couldn't find the stash entry to drop."
+            '⚠ Локальные изменения восстановлены, но запись stash для удаления не найдена.'
         )
         print(
-            "  The stash was left in place. You can remove it manually after checking the result."
+            '  Запись сохранена. Её можно удалить вручную после проверки результата.'
         )
         _print_stash_cleanup_guidance(stash_ref)
     else:
@@ -2782,19 +2738,19 @@ def _restore_stashed_changes(
         )
         if drop.returncode != 0:
             print(
-                "⚠ Local changes were restored, but Korra couldn't drop the saved stash entry."
+                '⚠ Локальные изменения восстановлены, но удалить запись stash не удалось.'
             )
             if drop.stdout.strip():
                 print(drop.stdout.strip())
             if drop.stderr.strip():
                 print(drop.stderr.strip())
             print(
-                "  The stash was left in place. You can remove it manually after checking the result."
+                '  Запись сохранена. Её можно удалить вручную после проверки результата.'
             )
             _print_stash_cleanup_guidance(stash_ref, stash_selector)
 
-    print("⚠ Local changes were restored on top of the updated codebase.")
-    print("  Review `git diff` / `git status` if Korra behaves unexpectedly.")
+    print('⚠ Локальные изменения восстановлены поверх обновлённого кода.')
+    print('  Если Korra работает необычно, проверьте `git diff` и `git status`.')
     return True
 
 def _discard_stashed_changes(
@@ -2819,8 +2775,7 @@ def _discard_stashed_changes(
     stash_selector = _resolve_stash_selector(git_cmd, cwd, stash_ref)
     if stash_selector is None:
         print(
-            "⚠ Configured to discard local changes on non-interactive update, "
-            "but Korra couldn't find the stash entry to drop."
+            '⚠ Настроено удаление локальных изменений при обновлении без участия пользователя, но запись stash не найдена.'
         )
         _print_stash_cleanup_guidance(stash_ref)
         return False
@@ -2833,15 +2788,14 @@ def _discard_stashed_changes(
     )
     if drop.returncode != 0:
         print(
-            "⚠ Configured to discard local changes, but Korra couldn't drop "
-            "the saved stash entry."
+            '⚠ Настроено удаление локальных изменений, но удалить сохранённую запись stash не удалось.'
         )
         if drop.stderr.strip():
             print(f"  {drop.stderr.strip().splitlines()[0]}")
         _print_stash_cleanup_guidance(stash_ref, stash_selector)
         return False
 
-    print("→ Discarded local source changes (updates.non_interactive_local_changes=discard).")
+    print('→ Локальные изменения кода удалены по настройке updates.non_interactive_local_changes=discard.')
     return True
 
 # Korra: жёсткий форк — «официальный» репозиторий это МЫ.
@@ -2993,8 +2947,8 @@ def _sync_with_upstream_if_needed(
             return False
 
         print()
-        print("ℹ Your fork is not tracking the official Korra repository.")
-        print("  This means you may miss updates from ceremoneymeister-bit/Korra.twenty.one.")
+        print('ℹ Ваша копия репозитория не отслеживает официальный репозиторий Korra.')
+        print('  Вы можете пропускать обновления ceremoneymeister-bit/Korra.twenty.one.')
         print()
 
         if assume_yes or (
@@ -3002,23 +2956,23 @@ def _sync_with_upstream_if_needed(
         ):
             # --yes means "don't block", not "mutate my git remotes". Skip
             # without persisting the decline so interactive runs still get asked.
-            print("  Skipping upstream setup (non-interactive run).")
+            print('  Настройка исходного репозитория пропущена: запуск без участия пользователя.')
             print(
-                "  Add it later with: git remote add upstream " + OFFICIAL_REPO_URL
+                '  Добавить позже: git remote add upstream ' + OFFICIAL_REPO_URL
             )
             return False
 
         # Ask user if they want to add upstream
         if input_fn is not None:
             response = (
-                input_fn("Add official repo as 'upstream' remote? [y/N]", "n")
+                input_fn('Добавить официальный репозиторий как upstream? [y — да / N — нет]', "n")
                 .strip()
                 .lower()
             )
         else:
             try:
                 response = (
-                    input("Add official repo as 'upstream' remote? [Y/n]: ")
+                    input('Добавить официальный репозиторий как upstream? [Y — да / n — нет]: ')
                     .strip()
                     .lower()
                 )
@@ -3027,18 +2981,18 @@ def _sync_with_upstream_if_needed(
                 response = "n"
 
         if response in {"", "y", "yes"}:
-            print("→ Adding upstream remote...")
+            print('→ Добавляю исходный репозиторий upstream…')
             if _add_upstream_remote(git_cmd, cwd):
                 print(
-                    "  ✓ Added upstream: " + OFFICIAL_REPO_URL
+                    '  ✓ Добавлен upstream: ' + OFFICIAL_REPO_URL
                 )
                 has_upstream = True
             else:
-                print("  ✗ Failed to add upstream remote. Skipping upstream sync.")
+                print('  ✗ Не удалось добавить upstream. Синхронизация пропущена.')
                 return False
         else:
             print(
-                "  Skipped. Run 'git remote add upstream " + OFFICIAL_REPO_URL + "' to add later."
+                "  Пропущено. Выполните 'git remote add upstream " + OFFICIAL_REPO_URL + "' — добавить позже."
             )
             _mark_skip_upstream_prompt()
             return False
@@ -3047,7 +3001,7 @@ def _sync_with_upstream_if_needed(
     # origin/main, so there's no reason to pull every upstream ref — and a bare
     # fetch drags in thousands of auto-generated branches.
     print()
-    print("→ Fetching upstream...")
+    print('→ Получаю изменения исходного репозитория…')
     try:
         subprocess.run(
             git_cmd + ["fetch", "upstream", "main", "--quiet"],
@@ -3056,7 +3010,7 @@ def _sync_with_upstream_if_needed(
             check=True,
         )
     except subprocess.CalledProcessError:
-        print("  ✗ Failed to fetch upstream. Skipping upstream sync.")
+        print('  ✗ Не удалось получить изменения upstream. Синхронизация пропущена.')
         return False
 
     # Compare origin/main with upstream/main
@@ -3066,27 +3020,27 @@ def _sync_with_upstream_if_needed(
     )
 
     if origin_ahead < 0 or upstream_ahead < 0:
-        print("  ✗ Could not compare branches. Skipping upstream sync.")
+        print('  ✗ Не удалось сравнить ветки. Синхронизация с исходным репозиторием пропущена.')
         return False
 
     # If origin/main has commits not on upstream, don't trample
     if origin_ahead > 0:
         print()
-        print(f"ℹ Your fork has {origin_ahead} commit(s) not on upstream.")
-        print("  Skipping upstream sync to preserve your changes.")
-        print("  If you want to merge upstream changes, run:")
+        print(f'ℹ В вашей копии есть собственные коммиты: {origin_ahead}.')
+        print('  Синхронизация пропущена, чтобы сохранить ваши изменения.')
+        print('  Чтобы объединить изменения вручную, выполните:')
         print("    git pull upstream main")
         return True
 
     # If upstream is not ahead, fork is up to date
     if upstream_ahead == 0:
-        print("  ✓ Fork is up to date with upstream")
+        print('  ✓ Копия соответствует исходному репозиторию.')
         return True
 
     # origin/main is strictly behind upstream/main (can fast-forward)
     print()
-    print(f"→ Fork is {upstream_ahead} commit(s) behind upstream")
-    print("→ Pulling from upstream...")
+    print(f'→ В вашей копии не хватает коммитов исходного репозитория: {upstream_ahead}.')
+    print('→ Загружаю изменения исходного репозитория…')
 
     try:
         subprocess.run(
@@ -3096,21 +3050,21 @@ def _sync_with_upstream_if_needed(
         )
     except subprocess.CalledProcessError:
         print(
-            "  ✗ Failed to pull from upstream. You may need to resolve conflicts manually."
+            '  ✗ Не удалось загрузить изменения upstream. Возможно, конфликты нужно разрешить вручную.'
         )
         return False
 
-    print("  ✓ Updated from upstream")
+    print('  ✓ Изменения исходного репозитория получены.')
 
     # Try to sync fork back to origin
-    print("→ Syncing fork...")
+    print('→ Синхронизирую вашу копию репозитория…')
     if _sync_fork_with_upstream(git_cmd, cwd):
-        print("  ✓ Fork synced with upstream")
+        print('  ✓ Копия синхронизирована с исходным репозиторием.')
     else:
         print(
-            "  ℹ Got updates from upstream but couldn't push to fork (no write access?)"
+            '  ℹ Обновления получены, но отправить их в вашу копию не удалось. Возможно, нет прав записи.'
         )
-        print("    Your local repo is updated, but your fork on GitHub may be behind.")
+        print('    Локальный репозиторий обновлён, но копия на GitHub может отставать.')
     return True
 
 def _invalidate_update_cache():
@@ -3285,17 +3239,16 @@ def _warn_pending_fleet_restart(*, startup: bool = False) -> None:
     """Print the specific interrupted-update fleet-restart warning."""
     stream = sys.stderr if startup else sys.stdout
     print(
-        "⚠ A previous `hermes update` pulled new code but did not "
-        "restart running gateways.",
+        '⚠ Предыдущее обновление `korra update` загрузило новый код, но не перезапустило шлюзы.',
         file=stream,
     )
     print(
-        "  Gateways may still be serving pre-update modules (mixed sys.modules).",
+        '  Шлюзы могут продолжать использовать модули старой версии.',
         file=stream,
     )
     if startup:
         print(
-            "  Run `hermes update` or `hermes gateway restart`.",
+            '  Выполните `korra update` или `korra gateway restart`.',
             file=stream,
         )
 
@@ -3371,7 +3324,7 @@ def _run_pending_fleet_restart() -> bool:
     Returns True when restart completed or no services were running.
     Returns False if restart was incomplete. Never raises.
     """
-    print("→ Restarting gateways left on pre-update code...")
+    print('→ Перезапускаю шлюзы, оставшиеся на старой версии…')
     try:
         _m()._purge_stale_hermes_modules()
     except Exception:
@@ -3396,7 +3349,7 @@ def _run_pending_fleet_restart() -> bool:
         pids = None
 
     if pids == []:
-        print("  ✓ No running gateways — nothing to restart.")
+        print('  ✓ Работающих шлюзов нет. Перезапуск не требуется.')
         return True
 
     failed: list = []
@@ -3433,7 +3386,7 @@ def _run_pending_fleet_restart() -> bool:
         if failed:
             _warn_incomplete_gateway_fleet_restart(failed)
             return False
-        print("  ✓ Pending fleet restart completed.")
+        print('  ✓ Отложенный перезапуск всех шлюзов завершён.')
         return True
     except Exception as exc:
         surviving = None
@@ -3455,11 +3408,11 @@ def _apply_pending_fleet_restart_catchup() -> None:
         return
     print()
     _warn_pending_fleet_restart()
-    print("→ Running the pending fleet restart...")
+    print('→ Выполняю отложенный перезапуск всех шлюзов…')
     if _run_pending_fleet_restart():
         _clear_fleet_restart_pending_marker()
         return
-    print("  ⚠ Fleet restart incomplete. Recover with: hermes gateway restart")
+    print('  ⚠ Не все шлюзы перезапущены. Повторить: korra gateway restart')
     sys.exit(1)
 
 
@@ -3468,24 +3421,24 @@ def _format_concurrent_instances_message(
 ) -> str:
     """Build a human-readable explanation + remediation hint for the user."""
     shim = scripts_dir / "hermes.exe"
-    lines = ["✗ Another hermes.exe is running:"]
+    lines = ['✗ Другой процесс средства запуска Korra уже работает:']
     for pid, name in matches:
         lines.append(f"    PID {pid}  {name}")
     lines.append("")
-    lines.append(f"  Updating now would fail to overwrite {shim} because")
-    lines.append("  Windows blocks REPLACE on a running executable.")
+    lines.append(f'  Сейчас нельзя заменить {shim}, поскольку')
+    lines.append('  Windows запрещает замену работающего исполняемого файла.')
     lines.append("")
-    lines.append("  Close Hermes Desktop, exit any open `hermes` REPLs, and")
-    lines.append("  stop the gateway (`hermes gateway stop`) before retrying.")
+    lines.append('  Закройте настольную Korra и диалоги Korra в терминале,')
+    lines.append('  остановите шлюз (`korra gateway stop`), затем повторите попытку.')
     lines.append("")
     if matches:
         pid_args = " ".join(f"/PID {pid}" for pid, _ in matches)
-        lines.append("  If you've already closed everything and these PIDs are")
-        lines.append("  stale, terminate them directly, then retry the update:")
+        lines.append('  Если вы уже всё закрыли, но указанные процессы остались,')
+        lines.append('  завершите их вручную и повторите обновление:')
         lines.append(f"      taskkill {pid_args} /F")
         lines.append("")
-    lines.append("  Override with `hermes update --force` if you've already")
-    lines.append("  confirmed those processes will not write to the venv.")
+    lines.append('  Используйте `korra update --force`, если уже убедились,')
+    lines.append('  что эти процессы больше не будут менять среду Python.')
     return "\n".join(lines)
 
 
@@ -3644,7 +3597,7 @@ def _restore_active_tool_dependencies(
         return
 
     print()
-    print(f"→ Restoring {len(missing)} Hermes Tools dependency set(s)...")
+    print(f'→ Восстанавливаю наборы зависимостей инструментов Korra: {len(missing)}…')
     restored: list[str] = []
     failed: list[tuple[str, str]] = []
     for name, install_args in missing:
@@ -3661,11 +3614,11 @@ def _restore_active_tool_dependencies(
             failed.append((name, str(exc)))
 
     if restored:
-        print(f"  ✓ {len(restored)} restored: {', '.join(restored)}")
+        print(f"  ✓ Восстановлено {len(restored)}: {', '.join(restored)}")
     for name, reason in failed:
         if len(reason) > 200:
             reason = reason[:200] + "..."
-        print(f"  ⚠ {name} failed to restore: {reason}")
+        print(f'  ⚠ Не удалось восстановить {name}: {reason}')
 
 
 def _refresh_active_lazy_features(
@@ -3713,7 +3666,7 @@ def _refresh_active_lazy_features(
         return True
 
     print()
-    print(f"→ Refreshing {len(active)} active lazy backend(s)...")
+    print(f'→ Обновляю активные компоненты по запросу: {len(active)}…')
 
     unexpected_failure = False
     try:
@@ -3724,7 +3677,7 @@ def _refresh_active_lazy_features(
     except Exception as exc:
         # refresh_active_features is documented as never-raise, but defend
         # the update flow against future regressions.
-        print(f"  ⚠ Lazy refresh failed unexpectedly: {exc}")
+        print(f'  ⚠ Неожиданная ошибка обновления компонентов по запросу: {exc}')
         results = {}
         unexpected_failure = True
 
@@ -3734,15 +3687,15 @@ def _refresh_active_lazy_features(
     skipped = [(f, s) for f, s in results.items() if s.startswith("skipped:")]
 
     if refreshed:
-        print(f"  ↑ {len(refreshed)} refreshed: {', '.join(refreshed)}")
+        print(f"  ↑ Обновлено {len(refreshed)}: {', '.join(refreshed)}")
     if current:
-        print(f"  ✓ {len(current)} already current")
+        print(f'  ✓ {len(current)} уже обновлён')
     if skipped:
         # Most common reason: security.allow_lazy_installs=false. Show one
         # line so the user knows why; not an error.
         names = ", ".join(f for f, _ in skipped)
         reason = skipped[0][1].split(": ", 1)[-1]
-        print(f"  · {len(skipped)} skipped ({reason}): {names}")
+        print(f'  · {len(skipped)} пропущен ({reason}): {names}')
 
     if not failed and not unexpected_failure:
         return True
@@ -3752,10 +3705,10 @@ def _refresh_active_lazy_features(
         # Clip noisy pip stderr to keep update output legible.
         if len(reason) > 200:
             reason = reason[:200] + "..."
-        print(f"  ⚠ {feature} failed to refresh: {reason}")
+        print(f'  ⚠ Не удалось обновить {feature}: {reason}')
 
     if install_cmd_prefix is None:
-        print("  ⚠ Lazy refresh failed; rerun `hermes update` once resolved.")
+        print('  ⚠ Не удалось обновить компоненты по запросу. После исправления повторите `korra update`.')
         return False
 
     # Immediate import-based recovery — metadata-only verifiers miss the case
@@ -3764,18 +3717,18 @@ def _refresh_active_lazy_features(
     status = _m()._repair_venv_via_import_probes(install_cmd_prefix, env=env)
     if status == "repaired":
         print(
-            "  Lazy backend(s) keep their previous version until refresh succeeds."
+            '  До успешного обновления эти компоненты останутся на прежней версии.'
         )
         return True
     if status == "healthy":
         print(
-            "  Lazy backend(s) keep their previous version; probed packages look intact."
+            '  Компоненты по запросу остались на прежней версии. Проверенные пакеты исправны.'
         )
-        print("  Rerun `hermes update` once the upstream issue is resolved.")
+        print('  Повторите `korra update`, когда проблема исходного сервиса будет устранена.')
         return True
     if status == "indeterminate":
         print(
-            "  ⚠ Leaving `.lazy-refresh-incomplete` until import probes can confirm health."
+            '  ⚠ Маркер .lazy-refresh-incomplete сохранён до успешной проверки загрузки модулей.'
         )
     return False
 
@@ -3820,12 +3773,12 @@ def _refresh_active_memory_provider_dependencies() -> None:
         return
 
     print()
-    print(f"→ Refreshing active memory provider dependencies ({provider})...")
+    print(f'→ Обновляю зависимости активного сервиса памяти ({provider})…')
 
     try:
         _install_dependencies(provider, force=True)
     except Exception as exc:
-        print(f"  ⚠ {provider} dependencies failed to refresh: {exc}")
+        print(f'  ⚠ Не удалось обновить зависимости {provider}: {exc}')
 
 def _is_android_python() -> bool:
     return _m().sys.platform == "android"
@@ -3888,7 +3841,7 @@ def _ensure_uv_for_termux(pip_cmd: list[str]) -> str | None:
     if system_uv:
         return system_uv
     try:
-        print("  → Termux detected: trying to install uv for faster dependency updates...")
+        print('  → Обнаружен Termux. Пробую установить uv для ускорения обновления зависимостей…')
         result = subprocess.run(
             pip_cmd + ["install", "uv", "--only-binary", ":all:"],
             cwd=_m().PROJECT_ROOT,
@@ -3997,7 +3950,7 @@ def _repair_node_deps_on_current_checkout(
     assume_yes: bool = False,
     gateway_mode: bool = False,
     pre_update_snapshot_id: str | None = None,
-    completion_message: str = "✓ Already up to date!",
+    completion_message: str = '✓ Установлена актуальная версия!',
 ) -> None:
     """Repair Node deps on the ``commit_count == 0`` path (#77211).
 
@@ -4013,10 +3966,10 @@ def _repair_node_deps_on_current_checkout(
     """
     node_failures = _update_node_dependencies()
     if node_failures:
-        print(f"  ⚠ Node.js refresh failed for: {', '.join(node_failures)}")
-        print("    Fix npm and re-run `hermes update`.")
+        print(f"  ⚠ Не удалось обновить зависимости Node.js для: {', '.join(node_failures)}")
+        print('    Исправьте npm и повторите `korra update`.')
         print_completion(
-            "⚠ Checkout is current, but Node.js dependencies could not be repaired."
+            '⚠ Код актуален, но исправить зависимости Node.js не удалось.'
         )
         return
     # Pair the refresh with the web build like every other
@@ -4050,10 +4003,10 @@ def _update_node_dependencies() -> list[str]:
 
         path_npm = shutil.which("npm")
         if is_wsl() and path_npm and _m()._is_windows_npm_path(path_npm):
-            print("→ Updating Node.js dependencies...")
-            print("  ⚠ Skipped: only a Windows npm is reachable from this WSL shell.")
-            print("    Install Node.js inside the WSL distro (nvm, or your distro's")
-            print("    package manager), then re-run `hermes update`.")
+            print('→ Обновляю зависимости Node.js…')
+            print('  ⚠ Пропущено: из WSL доступен только npm для Windows.')
+            print('    Установите Node.js внутри WSL через nvm или пакетный менеджер')
+            print('    вашей системы, затем повторите `korra update`.')
             failed = []
             if any(
                 (_m().PROJECT_ROOT / workspace / "package.json").exists()
@@ -4074,7 +4027,7 @@ def _update_node_dependencies() -> list[str]:
     # the lockfile-unchanged early return below since that's the common
     # `hermes update` case. Synchronous and can block ~11s on a true cold
     # cache (~0.4s once warm) — print first so that doesn't look like a hang.
-    print("→ Warming npx cache for agent-browser...")
+    print('→ Подготавливаю кеш npx для agent-browser…')
     try:
         from tools.browser_tool import warm_agent_browser_npx_cache
         warm_agent_browser_npx_cache()
@@ -4095,13 +4048,13 @@ def _update_node_dependencies() -> list[str]:
     # in Electron as a devDependency with a ~200MB postinstall download, so
     # it's deliberately never named here — desktop deps install on demand
     # (see _desktop_build_needed).
-    print("→ Updating Node.js dependencies...")
+    print('→ Обновляю зависимости Node.js…')
 
     def _partial_update_failure(*labels: str) -> list[str]:
         print()
-        print("  ⚠ Node.js dependency refresh did not complete cleanly; the")
-        print("    installation may be in a mixed state (updated code, stale Node")
-        print("    deps). Fix npm and re-run `hermes update`.")
+        print('  ⚠ Обновление зависимостей Node.js не завершилось.')
+        print('    Код уже может быть новым, а зависимости — старыми.')
+        print('    Исправьте npm и повторите `korra update`.')
         return list(labels)
 
     install_args = [
@@ -4134,10 +4087,10 @@ def _update_node_dependencies() -> list[str]:
     )
     if result.returncode == 0:
         _record_npm_lockfile_hash(shared_hermes_root)
-        print("  ✓ ui-tui, web workspaces installed (desktop skipped)")
+        print('  ✓ Зависимости ui-tui и web установлены. Настольное приложение пропущено.')
         failures: list[str] = []
     else:
-        print("  ⚠ npm install failed")
+        print('  ⚠ Команда npm install не выполнена.')
         stderr = (result.stderr or "").strip() if result.stderr else ""
         if stderr:
             print(f"    {stderr.splitlines()[-1]}")
@@ -4207,19 +4160,17 @@ def _classify_fetch_failure(stderr: str) -> str:
 
     if _has_http_code("429") or "rate limit" in stderr.lower():
         return (
-            "✗ GitHub is rate limiting requests or having an outage (HTTP 429)"
-            " — try again in 5 minutes."
+            '✗ GitHub ограничил запросы или временно недоступен (HTTP 429). Повторите через 5 минут.'
         )
     if _has_http_code("500", "502", "503", "504"):
         return (
-            "✗ GitHub appears to be having an outage — try again in a few"
-            " minutes (https://www.githubstatus.com)."
+            '✗ Похоже, GitHub временно не работает. Повторите через несколько минут. Состояние сервиса: https://www.githubstatus.com.'
         )
     if "Could not resolve host" in stderr or "unable to access" in stderr:
-        return "✗ Network error — cannot reach the remote repository."
+        return '✗ Ошибка сети: удалённый репозиторий недоступен.'
     if "Authentication failed" in stderr or "could not read Username" in stderr:
-        return "✗ Authentication failed — check your git credentials or SSH key."
-    return "✗ Failed to fetch updates from origin."
+        return '✗ Не удалось войти в репозиторий. Проверьте данные доступа Git или ключ SSH.'
+    return '✗ Не удалось получить обновления из origin.'
 
 
 def _print_fetch_failure(stderr: str) -> None:
@@ -4257,7 +4208,7 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
 
     git_dir = _m().PROJECT_ROOT / ".git"
     if not git_dir.exists():
-        print("✗ Not a git repository — cannot check for updates.")
+        print('✗ Это не репозиторий Git. Проверить обновления нельзя.')
         sys.exit(1)
 
     git_cmd = ["git"]
@@ -4272,13 +4223,13 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
 
     cleared = clear_stale_git_locks(_m().PROJECT_ROOT)
     for lock_path in cleared:
-        print(f"  (removed stale git lock: {lock_path})")
+        print(f'  Удалена устаревшая блокировка Git: {lock_path}')
     # Aborted fetches on flaky lines also strand tmp_pack_* debris in
     # .git/objects/pack — unchecked it reached 6 GB and corrupted the pack
     # dir outright (#93732). Same age+process safety contract as the locks.
     swept = clear_stale_tmp_packs(_m().PROJECT_ROOT)
     if swept:
-        print(f"  (removed {len(swept)} aborted-fetch pack temp file(s))")
+        print(f'  Удалены временные файлы прерванной загрузки Git: {len(swept)}')
 
     # Fetch only the branch we compare against; prefer upstream as the canonical
     # reference. A bare `git fetch <remote>` pulls every ref, and this repo has
@@ -4318,7 +4269,7 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
         )
         fetch_result = None
         if has_upstream_remote:
-            print("→ Fetching from upstream...")
+            print('→ Получаю изменения из upstream…')
             fetch_result = subprocess.run(
                 git_cmd + ["fetch"] + depth_args + ["upstream", branch],
                 cwd=_m().PROJECT_ROOT,
@@ -4330,7 +4281,7 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
             compare_branch = f"upstream/{branch}"
         else:
             # No upstream remote, or the upstream fetch failed — use origin.
-            print("→ Fetching from origin...")
+            print('→ Получаю изменения из origin…')
             fetch_result = subprocess.run(
                 git_cmd + ["fetch"] + depth_args + ["origin", branch],
                 cwd=_m().PROJECT_ROOT,
@@ -4341,7 +4292,7 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
             compare_branch = f"origin/{branch}"
     else:
         # Non-default branch: compare against origin/<branch> directly.
-        print("→ Fetching from origin...")
+        print('→ Получаю изменения из origin…')
         fetch_result = subprocess.run(
             git_cmd + ["fetch"] + depth_args + ["origin", branch],
             cwd=_m().PROJECT_ROOT,
@@ -4366,7 +4317,7 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
         text=True, encoding="utf-8", errors="replace",
     )
     if verify_result.returncode != 0:
-        print(f"✗ Branch '{branch}' not found on {compare_branch.split('/', 1)[0]}.")
+        print(f"✗ Ветка '{branch}' не найдена в {compare_branch.split('/', 1)[0]}.")
         sys.exit(1)
 
     if is_shallow:
@@ -4383,7 +4334,7 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
             cwd=_m().PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
         ).stdout.strip()
         if head_sha and target_sha and head_sha == target_sha:
-            print("✓ Already up to date.")
+            print('✓ Установлена актуальная версия.')
         else:
             from korra_cli.banner import _github_compare_behind
             from korra_cli.config import recommended_update_command
@@ -4391,14 +4342,13 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
             counted = _github_compare_behind(head_sha, target_sha)
             if counted == 0:
                 # Local commits on top of the remote tip — not behind.
-                print("✓ Already up to date.")
+                print('✓ Установлена актуальная версия.')
                 return
             if counted is not None:
-                commits_word = "commit" if counted == 1 else "commits"
-                print(f"⚕ Update available: {counted} {commits_word} behind {compare_branch}.")
+                print(f'⚕ Доступно обновление из {compare_branch}. Отставание в коммитах: {counted}.')
             else:
-                print(f"⚕ Update available (behind {compare_branch}).")
-            print(f"  Run '{recommended_update_command()}' to install.")
+                print(f'⚕ Доступно обновление. Эта версия отстаёт от {compare_branch}.')
+            print(f"  Чтобы установить, выполните '{recommended_update_command()}'.")
         return
 
     rev_result = subprocess.run(
@@ -4411,13 +4361,12 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
     behind = int(rev_result.stdout.strip())
 
     if behind == 0:
-        print("✓ Already up to date.")
+        print('✓ Установлена актуальная версия.')
     else:
-        commits_word = "commit" if behind == 1 else "commits"
-        print(f"⚕ Update available: {behind} {commits_word} behind {compare_branch}.")
+        print(f'⚕ Доступно обновление из {compare_branch}. Отставание в коммитах: {behind}.')
         from korra_cli.config import recommended_update_command
 
-        print(f"  Run '{recommended_update_command()}' to install.")
+        print(f"  Чтобы установить, выполните '{recommended_update_command()}'.")
 
 def _ensure_fhs_path_guard() -> None:
     """Ensure /usr/local/bin is on PATH for RHEL-family root non-login shells.
@@ -4500,12 +4449,12 @@ def _ensure_fhs_path_guard() -> None:
             with cfg.open("a", encoding="utf-8") as f:
                 f.write("\n" + path_comment + "\n" + path_line + "\n")
         except OSError as e:
-            print(f"  ⚠ Could not update {cfg}: {e}")
+            print(f'  ⚠ Не удалось обновить {cfg}: {e}')
             continue
-        print(f"  ✓ Added /usr/local/bin to PATH in {cfg}")
+        print(f'  ✓ Путь /usr/local/bin добавлен в PATH: {cfg}')
         wrote_any = True
     if wrote_any:
-        print("    (reload your shell or run 'source ~/.bashrc' to pick it up)")
+        print('    Перезапустите терминал или выполните source ~/.bashrc.')
 
 def _ensure_acp_launcher() -> None:
     r"""Self-heal: install a ``hermes-acp`` launcher next to the ``hermes`` one.
@@ -4559,7 +4508,7 @@ def _ensure_acp_launcher() -> None:
             acp_cmd.chmod(acp_cmd.stat().st_mode | 0o755)
         except OSError:
             continue
-        print(f"  ✓ Installed hermes-acp launcher → {acp_cmd}")
+        print(f'  ✓ Средство запуска ACP установлено: {acp_cmd}')
 
 _PRE_UPDATE_SNAPSHOT_KEEP = 1
 # Sibling-profile snapshot ids from the current run's pre-update backup
@@ -4645,7 +4594,7 @@ def _run_pre_update_backup(args) -> Optional[str]:
 
     if mode == "off":
         if getattr(args, "no_backup", False):
-            print("◆ Pre-update backup: skipped (--no-backup)")
+            print('◆ Резервное копирование пропущено: указан --no-backup.')
             print()
         # Config-level off is silent — the user opted out; don't spam them
         # on every update.
@@ -4688,7 +4637,7 @@ def _run_pre_update_backup(args) -> Optional[str]:
                 if not _integrity.get("valid"):
                     _msg = _integrity.get("message", "unknown error")
                     print(
-                        f"  ⚠ state.db integrity check FAILED after snapshot: {_msg}"
+                        f'  ⚠ После снимка проверка целостности state.db не пройдена: {_msg}'
                     )
                     # Check if the snapshot itself is valid.
                     _snap_root = _quick_snapshot_root(_get_home())
@@ -4699,23 +4648,22 @@ def _run_pre_update_backup(args) -> Optional[str]:
                         )
                         if _snap_ok.get("valid"):
                             print(
-                                "  ✓ Snapshot copy is valid — continuing update."
+                                '  ✓ Снимок исправен. Продолжаю обновление.'
                             )
                             print(
-                                "    If state.db is lost after update it will be auto-restored."
+                                '    Если state.db пропадёт после обновления, он будет восстановлен автоматически.'
                             )
                         else:
                             print(
-                                "  ✗ Snapshot copy ALSO failed integrity — "
-                                "the source was already corrupted before the backup."
+                                '  ✗ Снимок тоже не прошёл проверку. Исходная база была повреждена ещё до копирования.'
                             )
                     else:
                         print(
-                            "  ⚠ Snapshot does not contain state.db (was skipped or too large)."
+                            '  ⚠ Снимок не содержит state.db: файл пропущен или слишком большой.'
                         )
                     print()
         if snapshot_id:
-            print(f"◆ Pre-update snapshot: {snapshot_id}")
+            print(f'◆ Резервный снимок перед обновлением: {snapshot_id}')
 
         # #66140: the code swap + fleet restart touch EVERY profile, so
         # every profile gets the same snapshot (same set, same 1GiB cap,
@@ -4729,7 +4677,7 @@ def _run_pre_update_backup(args) -> Optional[str]:
             )
             if _sibling_snaps:
                 print(
-                    f"◆ Sibling profile snapshot(s): "
+                    f'◆ Снимки других профилей: '
                     + ", ".join(sorted(_sibling_snaps))
                 )
                 try:
@@ -4763,7 +4711,7 @@ def _run_pre_update_backup(args) -> Optional[str]:
         from korra_cli.backup import create_pre_update_backup
     except Exception as exc:
         print(
-            f"⚠ Pre-update backup: could not load backup module ({exc}); continuing update."
+            f'⚠ Не удалось загрузить модуль резервного копирования ({exc}). Продолжаю обновление.'
         )
         print()
         return snapshot_id
@@ -4775,20 +4723,20 @@ def _run_pre_update_backup(args) -> Optional[str]:
     except Exception:
         _keep = 5
 
-    print("◆ Creating pre-update backup...")
+    print('◆ Создаю резервную копию перед обновлением…')
     t0 = _time.monotonic()
     try:
         out_path = create_pre_update_backup(keep=int(_keep))
     except Exception as exc:  # defensive — helper already swallows, but just in case
-        print(f"  ⚠ Backup failed: {exc}")
-        print("  Continuing with update.")
+        print(f'  ⚠ Не удалось создать резервную копию: {exc}')
+        print('  Продолжаю обновление.')
         print()
         return snapshot_id
 
     elapsed = _time.monotonic() - t0
 
     if out_path is None:
-        print("  ⚠ Backup skipped (no files found or write failed); continuing update.")
+        print('  ⚠ Резервная копия пропущена: нет файлов или не удалось записать архив. Продолжаю обновление.')
         print()
         return snapshot_id
 
@@ -4814,9 +4762,9 @@ def _run_pre_update_backup(args) -> Optional[str]:
     except Exception:
         display_path = str(out_path)
 
-    print(f"  Saved:    {display_path} ({size_str}, {elapsed:.1f}s)")
-    print(f"  Restore:  hermes import {out_path}")
-    print("  Disable:  set updates.pre_update_backup: quick (or off) in config.yaml")
+    print(f'  Сохранено: {display_path} ({size_str}, {elapsed:.1f} с)')
+    print(f'  Восстановить: korra import {out_path}')
+    print('  Изменить: updates.pre_update_backup: quick или off в config.yaml')
     print()
     return snapshot_id
 
@@ -5239,15 +5187,15 @@ def _defer_update_for_self_lock(loaded: list[str]) -> None:
     install before importing anything heavy), explain, and exit 2 like the
     other preflight refusals.
     """
-    print("✗ This updater process has already loaded native venv modules that")
-    print("  the dependency sync must replace:")
+    print('✗ Этот процесс обновления уже загрузил системные модули Python,')
+    print('  которые требуется заменить:')
     for name in loaded:
         print(f"    {name}")
     print()
-    print("  On Windows a mapped extension cannot be replaced by the process")
-    print("  holding it. The code update has been applied; only the dependency")
-    print("  sync has been deferred: the next `hermes` launch will complete it")
-    print("  in a fresh process before anything imports these modules.")
+    print('  В Windows процесс не может заменить используемую им библиотеку.')
+    print('  Код уже обновлён; синхронизация зависимостей отложена.')
+    print('  Следующий запуск `korra` завершит её в новом процессе')
+    print('  до загрузки этих модулей.')
     _m()._write_update_incomplete_marker()
 
 
@@ -5350,11 +5298,11 @@ def _format_venv_python_holders_message(matches: list[tuple[int, str, str]]) -> 
     hint rather than a wrong one.
     """
     lines = [
-        "✗ Other Korra processes are running from this install's venv:",
+        '✗ Другие процессы Korra используют среду Python этой установки:',
     ]
     hint_by_subcommand = {
-        "serve": "  ← Korra backend (if the Desktop app is open, close it)",
-        "dashboard": "  ← hermes dashboard (stop it: hermes dashboard stop, or close that terminal)",
+        "serve": '  ← сервер Korra; закройте настольное приложение, если оно открыто',
+        "dashboard": '  ← панель Korra; остановите её командой korra dashboard stop или закройте её терминал',
         "gateway": "  ← gateway",
     }
     for pid, name, cmdline in matches[:6]:
@@ -5365,16 +5313,16 @@ def _format_venv_python_holders_message(matches: list[tuple[int, str, str]]) -> 
         lines.append(f"  ... and {len(matches) - 6} more")
     lines.append("")
     lines.append(
-        "  On Windows these keep native extension files (.pyd) locked, so the"
+        '  В Windows эти процессы блокируют файлы расширений .pyd.'
     )
     lines.append(
-        "  dependency update would fail partway and leave a broken install."
+        '  Из-за этого обновление зависимостей может прерваться и нарушить работу установки.'
     )
     lines.append(
-        "  Close the Korra desktop app / other Korra terminals, then re-run:"
+        '  Закройте настольную Korra и другие её терминалы, затем повторите:'
     )
-    lines.append("    hermes update")
-    lines.append("  (or use `hermes update --force-venv` to proceed anyway at your own risk)")
+    lines.append('    korra update')
+    lines.append('  Чтобы всё равно продолжить с риском ошибки, используйте `korra update --force-venv`.')
     return "\n".join(lines)
 
 def _venv_launcher_ancestors(pids: list[int]) -> list[int]:
@@ -5540,15 +5488,13 @@ def _refuse_gateway_ancestor_tree_kill(
 
     rendered = ", ".join(str(pid) for pid in ancestors)
     print(
-        "✗ Refusing to stop the gateway process tree because this updater "
-        f"is running inside it (gateway PID(s): {rendered})."
+        f'✗ Нельзя остановить дерево процессов шлюза: обновление выполняется внутри него (PID шлюзов: {rendered}).'
     )
     print(
-        "  On Windows, taskkill /T would terminate the updater before the "
-        "update can run."
+        '  В Windows taskkill /T завершит процесс обновления до окончания работы.'
     )
-    print("  From a chat platform, use `/update` instead.")
-    print("  Otherwise, run `hermes update` from a separate terminal.")
+    print('  В мессенджере используйте команду `/update`.')
+    print('  Либо выполните `korra update` в отдельном терминале.')
     return True
 
 
@@ -5640,12 +5586,11 @@ def _relaunch_stopped_serves(token: dict) -> None:
     skipped = len(entries) - len(commands)
     failed: list = []
     if commands:
-        print("  ⟲ Relaunching stopped serve/dashboard backend(s)")
+        print('  ⟲ Восстанавливаю остановленные серверы API и панели…')
         failed = _m()._respawn_dashboard_processes(commands)
     if skipped or failed:
         print(
-            "  ⚠ Some stopped backends could not be relaunched automatically; "
-            "restart them manually (hermes serve --host <ip> --port <port>)."
+            '  ⚠ Не все остановленные серверы удалось запустить. Запустите их вручную: korra serve --host <IP> --port <порт>.'
         )
     try:
         from korra_cli.update_receipt import record_step
@@ -6203,7 +6148,7 @@ def _pause_windows_gateways_for_update() -> dict | None:
         )
     except Exception as exc:
         raise RuntimeError(
-            f"Could not prepare Windows gateway pause for update: {exc}"
+            f'Не удалось подготовить паузу шлюза Windows перед обновлением: {exc}'
         ) from exc
 
     try:
@@ -6211,7 +6156,7 @@ def _pause_windows_gateways_for_update() -> dict | None:
         profile_processes = {proc.pid: proc for proc in profile_process_list}
     except Exception as exc:
         raise RuntimeError(
-            f"Could not map Windows gateway PIDs to profiles: {exc}"
+            f'Не удалось сопоставить процессы шлюза Windows с профилями: {exc}'
         ) from exc
 
     try:
@@ -6220,7 +6165,7 @@ def _pause_windows_gateways_for_update() -> dict | None:
         )
     except Exception as exc:
         raise RuntimeError(
-            f"Could not determine Windows gateway service ownership: {exc}"
+            f'Не удалось определить владельца службы шлюза Windows: {exc}'
         ) from exc
 
     service_gateway_pids = {int(service.gateway_pid) for service in service_gateways}
@@ -6236,7 +6181,7 @@ def _pause_windows_gateways_for_update() -> dict | None:
         )
     except Exception as exc:
         raise RuntimeError(
-            f"Could not discover Windows gateway PIDs before update: {exc}"
+            f'Не удалось найти процессы шлюза Windows перед обновлением: {exc}'
         ) from exc
     if not running_pids:
         # No gateway is running right now, but the user may have installed an
@@ -6328,7 +6273,7 @@ def _pause_windows_gateways_for_update() -> dict | None:
     # update even though the gateway itself is stopped.
     launcher_pids = _m()._venv_launcher_ancestors(mapped_pids)
 
-    print("→ Stopping Windows gateway process(es) before updating Korra...")
+    print('→ Останавливаю процессы шлюза Windows перед обновлением Korra…')
     try:
         drain_timeout = max(float(_get_restart_drain_timeout()), 1.0)
     except Exception:
@@ -6347,8 +6292,7 @@ def _pause_windows_gateways_for_update() -> dict | None:
         except Exception:
             pass
         print(
-            f"  → {len(socket_acks)} gateway(s) ACKed socket pause; "
-            f"waiting up to {int(drain_timeout)}s for graceful exit"
+            f'  → Шлюзы подтвердили паузу: {len(socket_acks)}. Жду до {int(drain_timeout)} с завершения работы.'
         )
     survivors = _m()._wait_for_windows_update_gateway_exit(
         mapped_pids,
@@ -6394,19 +6338,19 @@ def _pause_windows_gateways_for_update() -> dict | None:
             pass
 
     if profiles:
-        print(f"  ✓ Paused gateway profile(s): {', '.join(sorted(profiles))}")
+        print(f"  ✓ Приостановлены профили шлюза: {', '.join(sorted(profiles))}")
     if force_killed:
-        print(f"  → Force-stopped {len(force_killed)} gateway process(es)")
+        print(f'  → Принудительно остановлено процессов шлюза: {len(force_killed)}')
 
     if unmapped_pids:
         respawnable = sum(1 for u in unmapped if u.get("argv"))
         print(
-            f"  → Stopped {len(unmapped_pids)} gateway process(es) without profile mapping"
+            f'  → Остановлено процессов шлюза без привязки к профилю: {len(unmapped_pids)}'
         )
         if respawnable < len(unmapped_pids):
             # Some had no recoverable command line (psutil missing, access
             # denied, already gone): those still need a manual restart.
-            print("    Restart manually after update: hermes gateway run")
+            print('    Запустить после обновления вручную: korra gateway run')
 
     token = {
         "resume_needed": True,
@@ -6450,7 +6394,7 @@ def _pause_windows_gateways_for_update() -> dict | None:
                 if str(service.name) in paused_services
             }
             print(
-                "  ✓ Paused Windows gateway service(s): "
+                '  ✓ Службы шлюза Windows приостановлены: '
                 + ", ".join(paused_services)
             )
         return token
@@ -6471,9 +6415,9 @@ def _pause_windows_gateways_for_update() -> dict | None:
             except Exception as restore_exc:
                 rollback_failures.append(f"ordinary gateways: {restore_exc}")
         failed_service = current_service_name or "unknown"
-        detail = f"Could not stop Windows gateway service {failed_service}: {exc}"
+        detail = f'Не удалось остановить службу шлюза Windows {failed_service}: {exc}'
         if rollback_failures:
-            detail += "; rollback failures: " + "; ".join(rollback_failures)
+            detail += '; ошибки восстановления: ' + "; ".join(rollback_failures)
         raise RuntimeError(detail) from exc
 
 
@@ -6506,7 +6450,7 @@ def _cold_start_windows_gateway_after_update() -> bool:
         from korra_cli.gateway import find_gateway_pids
     except Exception as exc:
         raise RuntimeError(
-            f"Could not load Windows gateway cold-start helpers: {exc}"
+            f'Не удалось загрузить компоненты запуска шлюза Windows: {exc}'
         ) from exc
 
     # Re-check liveness right before spawning — between pause and resume the
@@ -6517,7 +6461,7 @@ def _cold_start_windows_gateway_after_update() -> bool:
             return True
     except Exception as exc:
         raise RuntimeError(
-            f"Could not re-check gateway liveness before cold-start: {exc}"
+            f'Не удалось проверить состояние шлюза перед запуском: {exc}'
         ) from exc
 
     try:
@@ -6528,26 +6472,24 @@ def _cold_start_windows_gateway_after_update() -> bool:
             return True
     except Exception as exc:
         raise RuntimeError(
-            "Could not re-check Desktop gateway-lifecycle ownership before cold-start: "
-            f"{exc}"
+            f'Не удалось проверить, управляет ли настольное приложение шлюзом: {exc}'
         ) from exc
 
     try:
         pid = gateway_windows._spawn_detached()
     except Exception as exc:
-        raise RuntimeError(f"Could not cold-start Windows gateway after update: {exc}") from exc
+        raise RuntimeError(f'Не удалось запустить шлюз Windows после обновления: {exc}') from exc
 
     if not pid:
-        raise RuntimeError("Windows gateway cold-start did not return a process ID")
+        raise RuntimeError('Запуск шлюза Windows не вернул PID процесса')
     ready_pids = gateway_windows._wait_for_gateway_ready()
     if not ready_pids:
         raise RuntimeError(
-            f"Windows gateway cold-start PID {pid} did not become ready"
+            f'Шлюз Windows с PID {pid} не стал готов к работе'
         )
     print()
     print(
-        "✓ Gateway started via cold-start after update "
-        f"(PID: {', '.join(map(str, ready_pids))})"
+        f"✓ После обновления шлюз запущен заново (PID: {', '.join(map(str, ready_pids))})."
     )
     return True
 
@@ -6623,7 +6565,7 @@ def _warn_incomplete_gateway_fleet_restart(failed_units: list) -> None:
         seen.add(name)
         ordered.append(name)
     print()
-    print("⚠ Update incomplete — some units were not restarted:")
+    print('⚠ Обновление не завершено. Не перезапущены службы:')
     for name in ordered:
         print(f"    - {name}")
     if is_macos():
@@ -6631,21 +6573,21 @@ def _warn_incomplete_gateway_fleet_restart(failed_units: list) -> None:
         # live process after the restart (#88848), so the unit is not merely
         # stale — it is very likely deregistered, and `launchctl kickstart`
         # cannot revive a job launchd no longer knows about.
-        print("  Listed services may be deregistered from launchd, or still")
-        print("  running pre-update code (mixed sys.modules). Recover with:")
-        print("    hermes gateway status")
+        print('  Указанные службы могли быть удалены из launchd или продолжают')
+        print('  использовать старый код. Для восстановления:')
+        print('    korra gateway status')
         print("    launchctl list | grep <label>")
         print("    launchctl bootstrap gui/$(id -u) "
               "~/Library/LaunchAgents/<label>.plist")
         return
-    print("  Skipped units may still be running pre-update code (mixed")
-    print("  sys.modules). Restart them manually, then verify:")
-    print("    hermes gateway status")
+    print('  Пропущенные службы могут продолжать выполнять старый код.')
+    print('  Перезапустите их вручную, затем проверьте:')
+    print('    korra gateway status')
     if any(not name.startswith("ai.hermes.") for name in ordered):
-        print("    systemctl --user restart <unit>   # user-scope")
-        print("    sudo systemctl restart <unit>     # system-scope")
+        print('    systemctl --user restart <служба>   # Пользовательская служба')
+        print('    sudo systemctl restart <служба>     # Системная служба')
     if any(name.startswith("ai.hermes.") for name in ordered):
-        print("    launchctl kickstart -k gui/$UID/<label>   # macOS (or user/$UID)")
+        print('    launchctl kickstart -k gui/$UID/<метка>   # macOS, также возможен user/$UID')
 
 
 def _restart_launchd_gateway_after_update(
@@ -6690,9 +6632,7 @@ def _restart_launchd_gateway_after_update(
         except subprocess.CalledProcessError as e:
             stderr = (getattr(e, "stderr", "") or "").strip()
             print(
-                f"  ⚠ Gateway restart failed: {stderr}\n"
-                "    The gateway may be DOWN on pre-update code. "
-                "Recover manually: hermes gateway restart"
+                f'  ⚠ Не удалось перезапустить шлюз: {stderr}\n    Шлюз может быть остановлен на старой версии. Восстановить: korra gateway restart'
             )
             return [], [current_label]
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
@@ -6701,9 +6641,7 @@ def _restart_launchd_gateway_after_update(
         # restarting. The old code `pass`ed here (#74973's second silent
         # variant); count it and tell the operator.
         print(
-            "  ⚠ Could not restart the gateway "
-            f"({e.__class__.__name__}: {e}).\n"
-            "    Recover manually: hermes gateway restart"
+            f'  ⚠ Не удалось перезапустить шлюз ({e.__class__.__name__}: {e}).\n    Восстановить вручную: korra gateway restart'
         )
         return [], [current_label]
 
@@ -6721,8 +6659,7 @@ def _restart_launchd_gateway_after_update(
     if wait_for_launchd_gateway_supervision(label=current_label):
         return [current_label], []
     print(
-        f"  ✗ {current_label} restarted but launchd is not supervising it.\n"
-        "    Check logs, then: hermes gateway restart"
+        f'  ✗ {current_label} перезапущен, но launchd не управляет процессом.\n    Проверьте журнал и выполните: korra gateway restart'
     )
     return [], [current_label]
 
@@ -6785,7 +6722,7 @@ def _restart_macos_launchd_gateways(
                 continue
             graceful_ok = False
             if old_pid is not None and old_pid > 0:
-                print(f"  → {label}: draining (up to {int(drain_budget)}s)...")
+                print(f'  → {label}: завершаю задачи, ожидание до {int(drain_budget)} с…')
                 graceful_ok = _graceful_restart_via_sigusr1(
                     old_pid, drain_timeout=drain_budget
                 )
@@ -6802,8 +6739,7 @@ def _restart_macos_launchd_gateways(
                 stderr = (getattr(e, "stderr", "") or "").strip()
                 failed_or_stale_units.append(label)
                 print(
-                    f"  ⚠ Failed to restart {label}: {stderr}\n"
-                    f"    Recover manually: launchctl kickstart -k {domain}/{label}"
+                    f'  ⚠ Не удалось перезапустить {label}: {stderr}\n    Восстановить вручную: launchctl kickstart -k {domain}/{label}'
                 )
                 continue
             if _wait_for_launchd_service_pid(
@@ -6813,14 +6749,12 @@ def _restart_macos_launchd_gateways(
             else:
                 failed_or_stale_units.append(label)
                 print(
-                    f"  ✗ {label} failed to come back after restart.\n"
-                    f"    Check logs, then: launchctl kickstart -k {domain}/{label}"
+                    f'  ✗ {label} не восстановился после перезапуска.\n    Проверьте журнал и выполните: launchctl kickstart -k {domain}/{label}'
                 )
         except subprocess.TimeoutExpired:
             failed_or_stale_units.append(label)
             print(
-                f"  ⚠ launchctl timed out restarting {label}; "
-                "continuing with remaining gateways"
+                f'  ⚠ Истекло время перезапуска {label} через launchctl. Продолжаю с остальными шлюзами.'
             )
 
 
@@ -7081,13 +7015,11 @@ def _recover_gateway_restart_after_abort(
 
     if verified:
         print(
-            "  ✓ Restarted supervised gateway(s) in a fresh process"
-            " (systemd-verified active): " + ", ".join(sorted(verified))
+            '  ✓ Шлюзы перезапущены в новых процессах. systemd подтвердил работу: ' + ", ".join(sorted(verified))
         )
     if relaunch_attempted:
         print(
-            "  ⚠ Relaunch attempted in a fresh process but not"
-            " supervisor-verified (check these gateways manually): "
+            '  ⚠ Повторный запуск выполнен, но диспетчер служб не подтвердил работу. Проверьте шлюзы вручную: '
             + ", ".join(sorted(relaunch_attempted))
         )
     return {
@@ -7111,16 +7043,16 @@ def _warn_gateway_restart_phase_aborted(exc: BaseException, pids) -> None:
     died with an ImportError.
     """
     print()
-    print(f"⚠ Update incomplete — gateway auto-restart failed: {exc}")
+    print(f'⚠ Обновление не завершено. Автоматический перезапуск шлюза не удался: {exc}')
     if pids:
         listed = ", ".join(str(pid) for pid in pids)
-        print(f"  Gateway process(es) still running pre-update code: {listed}")
+        print(f'  Процессы шлюза всё ещё используют старый код: {listed}')
     else:
-        print("  Any gateway still running is serving pre-update code")
-        print("  (mixed sys.modules) against the updated checkout.")
-    print("  Restart it manually, then verify:")
-    print("    hermes gateway restart")
-    print("    hermes gateway status")
+        print('  Работающие шлюзы могут использовать модули старой версии')
+        print('  вместе с уже обновлёнными файлами.')
+    print('  Перезапустите вручную, затем проверьте:')
+    print('    korra gateway restart')
+    print('    korra gateway status')
 
 def _refresh_windows_gateway_launchers() -> None:
     """Regenerate installed Windows gateway launcher scripts after update.
@@ -7147,7 +7079,7 @@ def _refresh_windows_gateway_launchers() -> None:
         if not gateway_windows.is_installed():
             return
         gateway_windows._write_task_script()
-        print("  ✓ Refreshed Windows gateway launcher scripts")
+        print('  ✓ Скрипты запуска шлюза Windows обновлены.')
     except Exception as exc:
         logger.debug("Could not refresh Windows gateway launchers after update: %s", exc)
 
@@ -7223,7 +7155,7 @@ def _refresh_bootstrap_cache_scripts(branch: str = "main") -> None:
             refreshed.append(cached.name)
         if refreshed:
             print(
-                "  ✓ Refreshed installer bootstrap-cache script(s): "
+                '  ✓ Скрипты начальной установки обновлены: '
                 + ", ".join(sorted(refreshed))
             )
     except Exception as exc:
@@ -7259,14 +7191,14 @@ def _resume_windows_gateways_after_update(token: dict | None) -> None:
                 service_name,
                 exc,
             )
-            print(f"  ⚠ Could not restart Windows gateway service: {service_name}")
+            print(f'  ⚠ Не удалось перезапустить службу шлюза Windows: {service_name}')
             failed_services.append(str(service_name))
 
     if failed_services:
         token["services"] = failed_services
         token["restarted_services"] = verified_restarts
         raise RuntimeError(
-            "Could not restart Windows gateway service(s): "
+            'Не удалось перезапустить службы шлюза Windows: '
             + ", ".join(failed_services)
         )
     token["services"] = []
@@ -7274,7 +7206,7 @@ def _resume_windows_gateways_after_update(token: dict | None) -> None:
     if restarted_services:
         print()
         print(
-            "  ✓ Restarted Windows gateway service(s): "
+            '  ✓ Службы шлюза Windows перезапущены: '
             + ", ".join(restarted_services)
         )
 
@@ -7284,7 +7216,7 @@ def _resume_windows_gateways_after_update(token: dict | None) -> None:
     if not profiles and not any(u.get("argv") for u in unmapped):
         if cold_start:
             if not _m()._cold_start_windows_gateway_after_update():
-                raise RuntimeError("Windows gateway cold-start was not verified")
+                raise RuntimeError('Запуск шлюза Windows не подтверждён проверкой')
             token["cold_start_if_installed"] = False
         token["resume_needed"] = False
         return
@@ -7296,7 +7228,7 @@ def _resume_windows_gateways_after_update(token: dict | None) -> None:
         )
     except Exception as exc:
         raise RuntimeError(
-            f"Could not load Windows gateway restart helper: {exc}"
+            f'Не удалось загрузить компонент перезапуска шлюза Windows: {exc}'
         ) from exc
 
     relaunched = []
@@ -7355,17 +7287,17 @@ def _resume_windows_gateways_after_update(token: dict | None) -> None:
     token["profiles"] = failed_profiles
     token["unmapped"] = failed_unmapped
     if failed_profiles or failed_unmapped:
-        raise RuntimeError("Could not restart every paused Windows gateway")
+        raise RuntimeError('Не все приостановленные шлюзы Windows удалось перезапустить')
     token["resume_needed"] = False
 
     if relaunched:
         print()
-        print(f"  ✓ Restarting Windows gateway profile(s): {', '.join(relaunched)}")
+        print(f"  ✓ Перезапускаю профили шлюза Windows: {', '.join(relaunched)}")
     if unmapped_relaunched:
         if not relaunched:
             print()
         print(
-            f"  ✓ Restarting {unmapped_relaunched} unmapped Windows gateway process(es)"
+            f'  ✓ Перезапускаю процессы шлюза Windows без привязки к профилю: {unmapped_relaunched}'
         )
 
 def _git_is_trampoline(git_cmd: list) -> bool:
@@ -7465,13 +7397,11 @@ def _ensure_non_trampoline_git(git_cmd: list) -> list:
     real_git = _locate_real_git()
     if real_git is None:
         print(
-            "⚠ Detected a broken git trampoline and could not locate a real "
-            "git binary — the update will fall back to the ZIP path."
+            '⚠ Найдена неисправная обёртка Git. Настоящий Git не найден. Обновление продолжится из ZIP.'
         )
         return git_cmd
     print(
-        f"⚠ Detected a broken git trampoline; switching to real git at "
-        f"{real_git}"
+        f'⚠ Найдена неисправная обёртка Git. Использую настоящий Git: {real_git}'
     )
     return [str(real_git)] + list(git_cmd[1:])
 
@@ -7513,7 +7443,7 @@ def _discard_lockfile_churn(git_cmd, repo_root):
             text=True, encoding="utf-8", errors="replace",
             check=False,
         )
-        print(f"→ Discarded npm lockfile churn ({len(dirty)} file(s))")
+        print(f'→ Отменены побочные изменения файлов блокировки npm: {len(dirty)}')
     except Exception:
         # Never let lockfile cleanup block an update.
         pass
@@ -7617,7 +7547,7 @@ def _normalize_managed_eol(git_cmd, repo_root):
                 # Still dirty — persisting the pin here would only surface churn
                 # we failed to clear. Leave the checkout as we found it.
                 return
-            print(f"→ Normalized line-ending churn ({len(eol_only)} file(s))")
+            print(f'→ Устранены побочные изменения окончаний строк: {len(eol_only)} файлов.')
 
         subprocess.run(
             git_cmd + ["config", "core.autocrlf", "false"],
@@ -7660,7 +7590,7 @@ def _rebuild_desktop_after_update(
     ):
         return True
 
-    print("→ Checking if desktop app needs rebuilding...")
+    print('→ Проверяю, нужна ли пересборка настольного приложения…')
     # Consult the content-hash stamp IN-PROCESS first. The spawned
     # `hermes desktop --build-only` subprocess re-imports the whole CLI stack
     # (~1-3 s) just to reach the same _m()._desktop_build_needed check; when
@@ -7676,7 +7606,7 @@ def _rebuild_desktop_after_update(
     except Exception:
         skip_desktop_build = False
     if skip_desktop_build:
-        print("  ✓ Desktop app up to date")
+        print('  ✓ Настольное приложение обновлено.')
         return True
 
     desktop_build_cmd = [sys.executable, "-m", "korra_cli.main", "desktop", "--build-only"]
@@ -7702,15 +7632,15 @@ def _rebuild_desktop_after_update(
             desktop_build_cmd, cwd=_m().PROJECT_ROOT, env=build_env
         )
     if build_result.returncode != 0:
-        print("  ⚠ Desktop build failed (run `hermes desktop` to retry)")
+        print('  ⚠ Не удалось собрать настольное приложение. Повторить: `korra desktop`.')
         tail = "\n".join((build_result.stdout or "").strip().splitlines()[-15:])
         if tail:
             print(tail)
         from korra_constants import display_hermes_home as _dhh
 
-        print(f"  Full build log: {_dhh()}/logs/update.log")
+        print(f'  Полный журнал сборки: {_dhh()}/logs/update.log')
         return False
-    print("  ✓ Desktop app up to date")
+    print('  ✓ Настольное приложение обновлено.')
     return True
 
 
@@ -7817,15 +7747,15 @@ def _refuse_update_if_venv_foreign_owned(project_root) -> None:
     foreign = _venv_foreign_owned_paths(Path(project_root) / "venv")
     if not foreign:
         return
-    print("\n✗ Update stopped: this install's venv contains files owned by another user.")
-    print("  Updating now would fail midway (Permission denied) and leave Korra broken.")
-    print("  This usually happens after running hermes or pip with sudo. Offending paths:")
+    print('\n✗ Обновление остановлено: в среде Python есть файлы другого владельца.')
+    print('  Обновление может прерваться из-за отсутствия доступа и нарушить работу Korra.')
+    print('  Обычно это происходит после запуска Korra или pip через sudo. Проблемные пути:')
     for p, uid in foreign:
-        print(f"    - {p} (owner uid {uid})")
-    print("\n  Fix ownership, then re-run the update:")
+        print(f'    - {p} (UID владельца: {uid})')
+    print('\n  Исправьте владельца файлов, затем повторите обновление:')
     print(f"    sudo chown -R $(id -un): {project_root}")
-    print("    hermes update")
-    print("\n  Nothing in the venv was modified.")
+    print('    korra update')
+    print('\n  Среда Python не изменена.')
     sys.exit(1)
 
 
@@ -7883,7 +7813,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             logger.debug("Could not read updates.non_interactive_local_changes: %s", exc)
             discard_local_changes = False
 
-    print("⚕ Updating Korra...")
+    print('⚕ Обновляю Korra…')
     print()
 
     # Phase 1 (#91277): structured update receipt — record what this run
@@ -7917,7 +7847,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             _profiles = ", ".join(
                 sorted({r.profile for r in _pre_update_plan.runtimes})
             )
-            print(f"→ Fleet: {_n} running service(s) across profiles: {_profiles}")
+            print(f'→ Работает служб во всех профилях: {_n}. {_profiles}')
     except Exception as _plan_exc:
         logger.debug("Update plan phase failed: %s", _plan_exc)
 
@@ -8006,8 +7936,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 from gateway.status import get_process_start_time, terminate_pid
 
                 print(
-                    f"  ⚠ {len(_gateway_holders)} gateway process(es) still "
-                    "hold the venv after the pause; stopping them"
+                    f'  ⚠ Процессы шлюза ({len(_gateway_holders)}) всё ещё используют среду Python после паузы. Останавливаю их.'
                 )
                 for _pid in _gateway_holders:
                     try:
@@ -8032,8 +7961,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             _ledger_backends = _m()._ledger_reapable_backend_pids(_venv_holders)
             if _ledger_backends:
                 print(
-                    f"  ⚠ {len(_ledger_backends)} ledger-identified orphaned "
-                    "Korra backend process(es) hold the venv; stopping their trees"
+                    f'  ⚠ По журналу процессов найдено отделившихся серверов Korra, использующих среду Python: {len(_ledger_backends)}. Останавливаю их.'
                 )
                 _m()._stop_process_trees(_ledger_backends)
                 _time.sleep(1.0)
@@ -8052,8 +7980,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 # backend_pids returns None for them) — that path keeps the
                 # refusal, because the app would just respawn what we kill.
                 print(
-                    f"  ⚠ {len(_orphan_backends)} orphaned Desktop backend "
-                    "process(es) still hold the venv; stopping their trees"
+                    f'  ⚠ Отделившиеся серверы настольной Korra всё ещё используют среду Python: {len(_orphan_backends)}. Останавливаю их.'
                 )
                 _m()._stop_process_trees(_orphan_backends)
                 _time.sleep(1.0)
@@ -8073,9 +8000,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             _serve_entries = _m()._ledger_manual_serve_holders(_venv_holders)
             if _serve_entries:
                 print(
-                    f"  ⚠ {len(_serve_entries)} manual serve/dashboard "
-                    "backend(s) hold the venv; stopping them for the update "
-                    "(they will be relaunched on their recorded endpoints)"
+                    f'  ⚠ Серверы API и панели ({len(_serve_entries)}) используют среду Python. Останавливаю их для обновления; затем они будут запущены по прежним адресам.'
                 )
                 _m()._stop_process_trees(
                     [int(e["pid"]) for e in _serve_entries]
@@ -8131,9 +8056,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 _handoff_backends = _m()._handoff_reapable_backend_pids(_venv_holders)
                 if _handoff_backends:
                     print(
-                        f"  ⚠ {len(_handoff_backends)} Korra backend process(es) "
-                        "still hold the venv after the Desktop hand-off; "
-                        "stopping their trees"
+                        f'  ⚠ После остановки настольной Korra её серверы ({len(_handoff_backends)}) ещё используют среду Python. Останавливаю их.'
                     )
                     _m()._stop_process_trees(_handoff_backends)
                     _time.sleep(1.0)
@@ -8169,7 +8092,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         if sys.platform == "win32":
             use_zip_update = True
         else:
-            print("✗ Not a git repository. Please reinstall:")
+            print('✗ Это не репозиторий Git. Установите Korra заново:')
             print(
                 "  curl -fsSL https://raw.githubusercontent.com/ceremoneymeister-bit/Korra.twenty.one/main/scripts/install.sh | bash"
             )
@@ -8220,7 +8143,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
     is_fork = _is_fork(origin_url)
 
     if is_fork:
-        print("⚠ Updating from fork:")
+        print('⚠ Обновление из сторонней копии репозитория:')
         print(f"  {origin_url}")
         print()
 
@@ -8255,12 +8178,12 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
         cleared = clear_stale_git_locks(_m().PROJECT_ROOT)
         if cleared:
-            print("  (removed stale git lock(s): %s)" % ", ".join(cleared))
+            print('  Удалены устаревшие блокировки Git: %s' % ", ".join(cleared))
         swept = clear_stale_tmp_packs(_m().PROJECT_ROOT)
         if swept:
-            print("  (removed %d aborted-fetch pack temp file(s))" % len(swept))
+            print('  Удалены временные файлы прерванной загрузки Git: %d' % len(swept))
 
-        print("→ Fetching updates...")
+        print('→ Получаю обновления…')
         fetch_result = subprocess.run(
             git_cmd + ["fetch", "origin", branch],
             cwd=_m().PROJECT_ROOT,
@@ -8324,8 +8247,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 )
                 print()
                 print(
-                    "⚠ Update finished — code update SKIPPED"
-                    f"{_branch_head_suffix(git_cmd, _m().PROJECT_ROOT)}"
+                    f'⚠ Обновление завершено, но обновление кода ПРОПУЩЕНО{_branch_head_suffix(git_cmd, _m().PROJECT_ROOT)}.'
                 )
                 _m()._resume_windows_gateways_after_update(
                     _windows_gateway_resume
@@ -8357,12 +8279,11 @@ def _cmd_update_impl(args, gateway_mode: bool):
                         text=True, encoding="utf-8", errors="replace",
                     )
                     if verify_ref.returncode != 0:
-                        print(f"✗ Branch '{branch}' does not exist locally or on origin.")
+                        print(f"✗ Ветка '{branch}' не найдена ни локально, ни в origin.")
                         sys.exit(1)
                     in_place_update = True
                     print(
-                        f"  ℹ On branch '{current_branch}' — updating it in place from "
-                        f"origin/{branch} (no branch switch; local commits preserved)."
+                        f"  ℹ Текущая ветка — '{current_branch}'. Обновляю её из origin/{branch} без переключения. Локальные коммиты сохраняются."
                     )
                 else:
                     parked_branch_switched = True
@@ -8374,15 +8295,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
             else:
                 parked_branch_switched = True
                 print(
-                    f"  ⚠ Checkout was parked on '{current_branch}' "
-                    f"(fully merged) — switching back to {branch}..."
+                    f"  ⚠ Коммиты ветки '{current_branch}' уже объединены. Возвращаюсь на {branch}…"
                 )
 
         if not in_place_update and current_branch != branch:
             if current_branch == "HEAD":
                 print(
-                    f"  ⚠ Currently on detached HEAD — switching to {branch} "
-                    "for update..."
+                    f'  ⚠ Сейчас HEAD не привязан к ветке. Переключаюсь на {branch} для обновления…'
                 )
             # Stash before checkout so uncommitted work isn't lost
             auto_stash_ref = _m()._stash_local_changes_if_needed(git_cmd, _m().PROJECT_ROOT)
@@ -8414,7 +8333,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             prompt_user=False,
                             input_fn=gw_input_fn,
                         )
-                    print(f"✗ Branch '{branch}' does not exist locally or on origin.")
+                    print(f"✗ Ветка '{branch}' не найдена ни локально, ни в origin.")
                     if track_result.stderr.strip():
                         print(f"  {track_result.stderr.strip().splitlines()[0]}")
                     sys.exit(1)
@@ -8519,14 +8438,11 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 if switch_block_reason.startswith("unmerged:"):
                     _count = switch_block_reason.split(":", 1)[1]
                     print(
-                        f"  ✓ Checkout was parked on '{current_branch}' — "
-                        f"switched back to {branch}; {_count} unmerged "
-                        f"commit(s) kept on '{current_branch}'."
+                        f"  ✓ Из ветки '{current_branch}' вернулись на {branch}. Необъединённые коммиты ({_count}) сохранены в '{current_branch}'."
                     )
                 else:
                     print(
-                        f"  ✓ Checkout was parked on '{current_branch}' (fully "
-                        f"merged) — switched back to {branch}."
+                        f"  ✓ Коммиты ветки '{current_branch}' уже объединены. Выполнен возврат на {branch}."
                     )
             elif current_branch not in {branch, "HEAD"}:
                 subprocess.run(
@@ -8567,11 +8483,11 @@ def _cmd_update_impl(args, gateway_mode: bool):
             # was spawned for.
             handed_off_sync = os.environ.get(_m()._UPDATE_REEXEC_ENV) == "1"
             if handed_off_sync:
-                print("→ Finishing the dependency install handed off by hermes.exe...")
+                print('→ Завершаю установку зависимостей, переданную средством запуска hermes.exe…')
             elif not healthy:
-                print("⚠ Checkout is current, but the venv is unhealthy:")
+                print('⚠ Код актуален, но среда Python неисправна:')
                 print(f"  {detail}")
-                print("→ Repairing Python dependencies...")
+                print('→ Исправляю зависимости Python…')
             if handed_off_sync or not healthy:
                 # Self-lock deferral (#86735): the repair rewrites the venv
                 # too — same mapped-extension hazard as the update sync.
@@ -8589,7 +8505,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     )
                 ).exists()
                 if venv_python_missing and repair_uv:
-                    print("→ Recreating virtual environment...")
+                    print('→ Пересоздаю среду Python…')
                     subprocess.run(
                         [repair_uv, "venv", "venv"],
                         cwd=_m().PROJECT_ROOT,
@@ -8630,16 +8546,16 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 _m()._clear_update_incomplete_marker()
                 healthy_after, detail_after = _venv_core_imports_healthy()
                 if healthy_after:
-                    print("✓ Dependencies repaired!")
+                    print('✓ Зависимости исправлены!')
                     _check_and_apply_config_migration(
                         assume_yes=assume_yes,
                         gateway_mode=gateway_mode,
                         pre_update_snapshot_id=pre_update_snapshot_id,
                     )
-                    _print_update_completion("✓ Update complete!")
+                    _print_update_completion('✓ Обновление завершено!')
                 else:
-                    print(f"⚠ Venv still unhealthy after repair: {detail_after}")
-                    print("  Close all Korra windows/gateways and re-run: hermes update")
+                    print(f'⚠ После исправления среда Python всё ещё неисправна: {detail_after}')
+                    print('  Закройте окна Korra и остановите шлюзы, затем повторите: korra update')
             else:
                 _repair_node_deps_on_current_checkout(
                     _print_update_completion,
@@ -8647,21 +8563,20 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     gateway_mode=gateway_mode,
                     pre_update_snapshot_id=pre_update_snapshot_id,
                     completion_message=(
-                        "✓ Already up to date!"
+                        '✓ Установлена актуальная версия!'
                         if upstream_checked
-                        else "✓ Up to date with your fork (official repo not checked)."
+                        else '✓ Ваша копия репозитория обновлена. Официальный репозиторий не проверялся.'
                     ),
                 )
             if runtime_repaired is not None and not _m()._is_windows():
                 print()
                 print(
-                    "⚠ Restart required to finish the managed Python runtime repair."
+                    '⚠ Для завершения исправления среды Python требуется перезапуск.'
                 )
                 print(
-                    "  Any running Korra gateways, Desktop backends, or other "
-                    "long-lived processes still use the previous runtime."
+                    '  Работающие шлюзы, настольные серверы и другие длительные процессы всё ещё используют прежнюю среду.'
                 )
-                print("  Restart each of them to pick up the repaired runtime.")
+                print('  Перезапустите их, чтобы использовать исправленную среду.')
             _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
             # Git is current, but a prior pull may still owe the fleet a
             # restart (#95294). Catch up even on the "Already up to date"
@@ -8671,13 +8586,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
             return
 
         if commit_count > 0:
-            print(f"→ Found {commit_count} new commit(s)")
+            print(f'→ Найдено новых коммитов: {commit_count}')
         else:
             # Shallow checkout, exact count unrecoverable (offline/rate-limited
             # compare API) — the tips differ, so there IS an update.
-            print("→ Updates available (commit count unknown on this shallow checkout)")
+            print('→ Доступны обновления. В этой неполной копии Git нельзя определить число коммитов.')
 
-        print("→ Pulling updates...")
+        print('→ Загружаю обновления…')
         update_succeeded = False
         # Capture the pre-pull SHA so we can auto-roll-back if the new code
         # has a syntax error in a critical-path file (PR #28452 incident:
@@ -8716,8 +8631,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 ).strip()
                 if _cur_branch and _cur_branch != branch:
                     print(
-                        f"  ⚠ Checkout is on custom branch '{_cur_branch}' — "
-                        f"merging origin/{branch} instead of resetting so local commits survive..."
+                        f"  ⚠ Выбрана ваша ветка '{_cur_branch}'. Объединяю изменения origin/{branch}, чтобы сохранить локальные коммиты…"
                     )
                     # Best-effort safety tag; recovery anchor if anything goes wrong.
                     subprocess.run(
@@ -8741,15 +8655,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             check=False,
                         )
                         print(
-                            "✗ Merge conflict between local commits and upstream — "
-                            "update stopped, nothing was changed."
+                            '✗ Конфликт между локальными коммитами и исходным репозиторием. Обновление остановлено, изменения не внесены.'
                         )
                         print(
-                            f"  Resolve manually: cd {_m().PROJECT_ROOT} && "
-                            f"git merge origin/{branch}"
+                            f'  Разрешить вручную: cd {_m().PROJECT_ROOT} && git merge origin/{branch}'
                         )
                         print(
-                            "  Then re-run the update. Local work is untouched."
+                            '  Затем повторите обновление. Ваша работа сохранена.'
                         )
                         sys.exit(1)
                 else:
@@ -8757,7 +8669,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     # force-push/rebase. Local changes are already stashed;
                     # reset to match the remote exactly (original behaviour).
                     print(
-                        "  ⚠ Fast-forward not possible (history diverged), resetting to match remote..."
+                        '  ⚠ Ветки разошлись. Сбрасываю локальную ветку до состояния удалённой…'
                     )
                     reset_result = subprocess.run(
                         git_cmd + ["reset", "--hard", f"origin/{branch}"],
@@ -8766,11 +8678,11 @@ def _cmd_update_impl(args, gateway_mode: bool):
                         text=True, encoding="utf-8", errors="replace",
                     )
                     if reset_result.returncode != 0:
-                        print(f"✗ Failed to reset to origin/{branch}.")
+                        print(f'✗ Не удалось сбросить код до origin/{branch}.')
                         if reset_result.stderr.strip():
                             print(f"  {reset_result.stderr.strip()}")
                         print(
-                            f"  Try manually: git fetch origin && git reset --hard origin/{branch}"
+                            f'  Попробуйте вручную: git fetch origin && git reset --hard origin/{branch}'
                         )
                         sys.exit(1)
 
@@ -8785,7 +8697,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             )
             if not syntax_ok:
                 print()
-                print("✗ Pulled code has a syntax error in a critical file:")
+                print('✗ В загруженном коде найдена синтаксическая ошибка в важном файле:')
                 print(f"  {failing_path}")
                 if syntax_error:
                     # py_compile errors can be multi-line; show the first
@@ -8794,7 +8706,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                         print(f"    {line}")
                 if pre_pull_sha:
                     print()
-                    print(f"→ Rolling back to {pre_pull_sha[:10]}...")
+                    print(f'→ Возвращаюсь к версии {pre_pull_sha[:10]}…')
                     rollback_result = subprocess.run(
                         git_cmd + ["reset", "--hard", pre_pull_sha],
                         cwd=_m().PROJECT_ROOT,
@@ -8802,16 +8714,16 @@ def _cmd_update_impl(args, gateway_mode: bool):
                         text=True, encoding="utf-8", errors="replace",
                     )
                     if rollback_result.returncode == 0:
-                        print("  ✓ Rollback complete — your install is unchanged.")
-                        print("  Try ``hermes update`` again later once a fix lands.")
+                        print('  ✓ Возврат к предыдущей версии завершён. Установка не изменилась.')
+                        print('  Повторите `korra update` позже, когда появится исправление.')
                     else:
-                        print("  ✗ Rollback failed. Recover manually with:")
+                        print('  ✗ Не удалось вернуться к предыдущей версии. Восстановите вручную:')
                         print(f"    cd {_m().PROJECT_ROOT} && git reset --hard {pre_pull_sha}")
                         if rollback_result.stderr.strip():
                             print(f"    ({rollback_result.stderr.strip().splitlines()[0]})")
                 else:
                     print()
-                    print("  Could not capture pre-pull SHA — recover manually with:")
+                    print('  Не удалось сохранить SHA до обновления. Восстановите вручную:')
                     print(f"    cd {_m().PROJECT_ROOT} && git reflog && git reset --hard <prev-sha>")
                 sys.exit(1)
 
@@ -8822,9 +8734,9 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 # working tree is in an unknown state.
                 if not update_succeeded:
                     print(
-                        f"  ℹ️  Local changes preserved in stash (ref: {auto_stash_ref})"
+                        f'  ℹ️ Локальные изменения сохранены в stash: {auto_stash_ref}'
                     )
-                    print("  Restore manually with: git stash apply")
+                    print('  Восстановить вручную: git stash apply')
                 elif discard_local_changes:
                     # Non-interactive update + user opted into discarding local
                     # source edits (updates.non_interactive_local_changes:
@@ -8863,14 +8775,12 @@ def _cmd_update_impl(args, gateway_mode: bool):
         post_pull_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)
         if pre_pull_sha and post_pull_sha == pre_pull_sha:
             print()
-            print("✗ Code did not move — update was a no-op.")
+            print('✗ Версия кода не изменилась. Обновление не выполнено.')
             print(
-                f"  HEAD is pinned to {pre_pull_sha[:10]} (detached checkout); "
-                f"origin/{branch} advanced but the working tree stayed put."
+                f'  HEAD закреплён на {pre_pull_sha[:10]}. Ветка origin/{branch} обновилась, но рабочие файлы остались прежними.'
             )
             print(
-                "  Reattach to the branch and retry: "
-                f"git -C {_m().PROJECT_ROOT} checkout {branch} && hermes update"
+                f'  Переключитесь на ветку и повторите: git -C {_m().PROJECT_ROOT} checkout {branch} && korra update'
             )
             _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
             sys.exit(1)
@@ -8898,12 +8808,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
         ):
             print()
             print(
-                f"✗ Update pulled origin/{branch}, but the checkout is on "
-                f"'{post_pull_branch}' — not claiming success."
+                f"✗ Изменения origin/{branch} получены, но выбрана ветка '{post_pull_branch}'. Обновление не завершено."
             )
             print(
-                "  Switch to the target branch and retry: "
-                f"git -C {_m().PROJECT_ROOT} checkout {branch} && hermes update"
+                f'  Переключитесь на нужную ветку и повторите: git -C {_m().PROJECT_ROOT} checkout {branch} && korra update'
             )
             _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
             sys.exit(1)
@@ -8921,7 +8829,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         removed = _m()._clear_bytecode_cache(_m().PROJECT_ROOT)
         if removed:
             print(
-                f"  ✓ Cleared {removed} stale __pycache__ director{'y' if removed == 1 else 'ies'}"
+                f'  ✓ Удалены устаревшие папки __pycache__: {removed}'
             )
         _m()._record_bytecode_fingerprint()
         _m()._refresh_bootstrap_cache_scripts(branch)
@@ -8960,9 +8868,9 @@ def _cmd_update_impl(args, gateway_mode: bool):
             git_cmd, _m().PROJECT_ROOT, pre_pull_sha
         )
         if deps_current:
-            print("→ Python dependencies unchanged — skipping reinstall")
+            print('→ Зависимости Python не изменились. Переустановка не требуется.')
         else:
-            print("→ Updating Python dependencies...")
+            print('→ Обновляю зависимости Python…')
         from korra_cli.managed_uv import ensure_uv, update_managed_uv
 
         # Keep managed uv current — runs `uv self update` if we already have one.
@@ -8987,10 +8895,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 uv_env.pop("PYTHONPATH", None)
                 uv_env.pop("PYTHONHOME", None)
                 install_group = "termux-all"
-                print("  → Termux detected: using uv + curated termux-all optional profile...")
+                print('  → Обнаружен Termux. Использую uv и набор компонентов termux-all…')
             if not deps_current:
                 if _m()._is_termux_env(uv_env) and _is_android_python():
-                    print("  → Termux/Android detected: prebuilding psutil with Linux source path compatibility...")
+                    print('  → Обнаружен Termux/Android. Собираю psutil с совместимыми путями Linux…')
                     _install_psutil_android_compat([uv_bin, "pip"], env=uv_env)
                 _m()._install_python_dependencies_with_optional_fallback(
                     [uv_bin, "pip"], env=uv_env, group=install_group
@@ -9016,10 +8924,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 )
             if _m()._is_termux_env():
                 install_group = "termux-all"
-                print("  → Termux detected: using curated termux-all optional profile...")
+                print('  → Обнаружен Termux. Использую набор компонентов termux-all…')
             if not deps_current:
                 if _m()._is_termux_env() and _is_android_python():
-                    print("  → Termux/Android detected: prebuilding psutil with Linux source path compatibility...")
+                    print('  → Обнаружен Termux/Android. Собираю psutil с совместимыми путями Linux…')
                     _install_psutil_android_compat(pip_cmd)
                 _m()._install_python_dependencies_with_optional_fallback(pip_cmd, group=install_group)
 
@@ -9051,7 +8959,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         removed = _m()._clear_bytecode_cache(_m().PROJECT_ROOT)
         if removed:
             print(
-                f"  ✓ Cleared {removed} stale __pycache__ director{'y' if removed == 1 else 'ies'}"
+                f'  ✓ Удалены устаревшие папки __pycache__: {removed}'
             )
         _m()._record_bytecode_fingerprint()
         _m()._refresh_bootstrap_cache_scripts(branch)
@@ -9073,8 +8981,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             _m()._clear_lazy_refresh_incomplete_marker()
         else:
             print(
-                "  ⚠ Lazy-refresh recovery incomplete — run `hermes` again "
-                "to finish import-based venv repair."
+                '  ⚠ Восстановление компонентов по запросу не завершено. Запустите `korra` ещё раз для проверки и исправления среды Python.'
             )
 
         _m()._restore_active_tool_dependencies(
@@ -9101,9 +9008,9 @@ def _cmd_update_impl(args, gateway_mode: bool):
         )
         if not import_ok:
             print()
-            print(f"  ⚠ {failing_module} still fails to import after updating:")
+            print(f'  ⚠ После обновления модуль {failing_module} всё ещё не загружается:')
             print(f"      {import_error}")
-            print("    Run `hermes update` again — if it persists, reinstall:")
+            print('    Повторите `korra update`. Если это не поможет, установите Korra заново:')
             print("    https://github.com/ceremoneymeister-bit/Korra.twenty.one")
 
         node_failures = _update_node_dependencies()
@@ -9115,7 +9022,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         )
 
         print()
-        print(f"✓ Code updated!{_branch_head_suffix(git_cmd, _m().PROJECT_ROOT)}")
+        print(f'✓ Код обновлён!{_branch_head_suffix(git_cmd, _m().PROJECT_ROOT)}')
 
         # ── macOS TCC stale-grant notice (#86385) ──────────────────────
         # Locally-built desktop bundles are re-signed on every update. With the
@@ -9127,11 +9034,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         if sys.platform == "darwin" and had_desktop_app_before_update:
             print()
             print(
-                "  ℹ macOS: if Korra re-prompts for permissions you already "
-                "granted (toggle shows ON), the stored grant is stale — run "
-                "`tccutil reset ScreenCapture com.nousresearch.hermes` (repeat "
-                "per affected service), toggle it ON in System Settings, then "
-                "fully quit & relaunch once."
+                '  ℹ macOS: если снова запрашиваются уже выданные разрешения, сбросьте устаревший доступ командой `tccutil reset ScreenCapture com.nousresearch.hermes`. Повторите для нужных разрешений, включите доступ в настройках macOS, полностью закройте и запустите приложение.'
             )
 
         # macOS TCC interpreter anchor (#95596): dylib-complete re-land.
@@ -9166,7 +9069,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 else:
                     print()
                     print(
-                        "⚠ state.db is corrupted after update: "
+                        '⚠ После обновления база state.db повреждена: '
                         + _state_ok.get("message", "unknown error")
                     )
                     _pre_snap_id = pre_update_snapshot_id
@@ -9186,28 +9089,26 @@ def _cmd_update_impl(args, gateway_mode: bool):
                                         _state_path, _snap_state
                                     ):
                                         print(
-                                            "  ✓ Auto-restored from pre-update "
-                                            f"snapshot ({_pre_snap_id})"
+                                            f'  ✓ Автоматически восстановлено из снимка перед обновлением ({_pre_snap_id})'
                                         )
                                     else:
                                         print(
-                                            "  ✗ Auto-restore FAILED — restored "
-                                            "copy also failed integrity"
+                                            '  ✗ Автовосстановление не удалось: восстановленная копия тоже повреждена.'
                                         )
                                 except OSError as _exc:
                                     print(
-                                        f"  ✗ Auto-restore file copy failed: {_exc}"
+                                        f'  ✗ Не удалось скопировать файлы при автовосстановлении: {_exc}'
                                     )
                             else:
                                 print(
-                                    "  ✗ Pre-update snapshot also failed integrity"
+                                    '  ✗ Снимок перед обновлением тоже не прошёл проверку целостности.'
                                 )
                         else:
                             print(
-                                "  ⚠ Pre-update snapshot does not contain state.db"
+                                '  ⚠ Снимок перед обновлением не содержит state.db.'
                             )
                     else:
-                        print("  ⚠ No pre-update snapshot was taken")
+                        print('  ⚠ Снимок перед обновлением не был создан.')
                     print()
         except Exception as exc:
             logger.debug("Post-update state.db integrity check failed: %s", exc)
@@ -9224,7 +9125,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             from korra_cli.model_catalog import seed_cache_from_checkout
 
             if seed_cache_from_checkout(_m().PROJECT_ROOT):
-                print("  ✓ Model catalog cache refreshed from checkout")
+                print('  ✓ Кеш каталога моделей обновлён из текущей установки.')
         except Exception as e:
             logger.debug("Model catalog seed during update failed: %s", e)
 
@@ -9233,29 +9134,27 @@ def _cmd_update_impl(args, gateway_mode: bool):
             from tools.skills_sync import sync_skills
 
             print()
-            print("→ Syncing bundled skills...")
+            print('→ Синхронизирую встроенные навыки…')
             result = sync_skills(quiet=True)
             if result["copied"]:
-                print(f"  + {len(result['copied'])} new: {', '.join(result['copied'])}")
+                print(f"  + Новых навыков: {len(result['copied'])}. {', '.join(result['copied'])}")
             if result.get("updated"):
                 print(
-                    f"  ↑ {len(result['updated'])} updated: {', '.join(result['updated'])}"
+                    f"  ↑ Обновлено навыков: {len(result['updated'])}. {', '.join(result['updated'])}"
                 )
             if result.get("user_modified"):
-                print(f"  ~ {len(result['user_modified'])} user-modified (kept)")
+                print(f"  ~ Изменённые вами навыки сохранены: {len(result['user_modified'])}")
                 print(
-                    "    → see them: hermes skills list-modified  "
-                    "(diff/reset to resume updates)"
+                    '    → Посмотреть: korra skills list-modified. Команды diff/reset позволят снова получать обновления.'
                 )
             if result.get("cleaned"):
-                print(f"  − {len(result['cleaned'])} removed from manifest")
+                print(f"  − Удалено из каталога: {len(result['cleaned'])}")
             if result.get("relocated"):
                 print(
-                    f"  → {len(result['relocated'])} moved to new upstream paths: "
-                    f"{', '.join(result['relocated'])}"
+                    f"  → Перемещено по новым путям исходного проекта: {len(result['relocated'])}. {', '.join(result['relocated'])}"
                 )
             if not result["copied"] and not result.get("updated"):
-                print("  ✓ Skills are up to date")
+                print('  ✓ Навыки обновлены.')
         except Exception as e:
             logger.debug("Skills sync during update failed: %s", e)
 
@@ -9273,29 +9172,29 @@ def _cmd_update_impl(args, gateway_mode: bool):
             all_profiles = list_profiles()
             if all_profiles:
                 print()
-                print("→ Syncing bundled skills to all profiles...")
+                print('→ Синхронизирую встроенные навыки во всех профилях…')
                 for p in all_profiles:
                     try:
                         r = seed_profile_skills(p.path, quiet=True)
                         if r and r.get("skipped_opt_out"):
-                            status = "opted out (--no-skills)"
+                            status = "пропущено (--no-skills)"
                         elif r:
                             copied = len(r.get("copied", []))
                             updated = len(r.get("updated", []))
                             modified = len(r.get("user_modified", []))
                             parts = []
                             if copied:
-                                parts.append(f"+{copied} new")
+                                parts.append(f"новых: +{copied}")
                             if updated:
-                                parts.append(f"↑{updated} updated")
+                                parts.append(f"обновлено: ↑{updated}")
                             if modified:
-                                parts.append(f"~{modified} user-modified")
-                            status = ", ".join(parts) if parts else "up to date"
+                                parts.append(f"ваших изменений: ~{modified}")
+                            status = ", ".join(parts) if parts else "обновлено"
                         else:
-                            status = "sync failed"
+                            status = "синхронизация не удалась"
                         print(f"  {p.name}: {status}")
                     except Exception as pe:
-                        print(f"  {p.name}: error ({pe})")
+                        print(f'  {p.name}: ошибка ({pe})')
         except Exception:
             pass  # profiles module not available or no profiles
 
@@ -9309,8 +9208,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             if backfilled:
                 print()
                 print(
-                    f"→ Seeded .env for {len(backfilled)} profile(s) "
-                    f"(copied from default): {', '.join(backfilled)}"
+                    f"→ Файл .env скопирован из основного профиля в профили ({len(backfilled)}): {', '.join(backfilled)}"
                 )
         except Exception:
             pass  # profiles module not available or no profiles
@@ -9321,7 +9219,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
             synced = sync_honcho_profiles_quiet()
             if synced:
-                print(f"\n-> Honcho: synced {synced} profile(s)")
+                print(f'\n→ Honcho: синхронизировано профилей — {synced}')
         except Exception:
             pass  # honcho plugin not installed or not configured
 
@@ -9429,7 +9327,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 from korra_cli.tools_config import install_cua_driver
 
                 print()
-                print("→ Refreshing cua-driver (Computer Use)...")
+                print('→ Обновляю cua-driver для управления компьютером…')
                 # require_confirmed_update: only run the (multi-minute,
                 # silent) upstream installer when the driver's native
                 # check-update verb positively reports a newer release.
@@ -9726,9 +9624,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     except subprocess.TimeoutExpired as exc:
                         # Discovery timeout — skip this scope, keep the other.
                         print(
-                            f"  ⚠ systemctl timed out listing {scope}-scope "
-                            f"gateway units ({exc.cmd if exc.cmd else 'unknown command'}). "
-                            f"Check the gateway with: hermes gateway status"
+                            f"  ⚠ Истекло время получения служб шлюза в области {scope} через systemctl ({(exc.cmd if exc.cmd else 'unknown command')}). Проверьте: korra gateway status"
                         )
                         continue
 
@@ -9809,15 +9705,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
                                 # path — its drain (incl. the #86684 cron
                                 # floor) is untouched.
                                 print(
-                                    f"  ⚠ {svc_name}: gateway event loop is "
-                                    "unresponsive — skipping drain, forcing "
-                                    "a bounded stop..."
+                                    f'  ⚠ {svc_name}: шлюз не отвечает. Перехожу к принудительной остановке с ограничением времени…'
                                 )
                                 _escalate_wedged_gateway(_main_pid)
                                 _graceful_ok = True
                             else:
                                 print(
-                                    f"  → {svc_name}: draining (up to {int(_drain_budget)}s)..."
+                                    f'  → {svc_name}: завершаю задачи, ожидание до {int(_drain_budget)} с…'
                                 )
                                 _graceful_ok = _graceful_restart_via_sigusr1(
                                     _main_pid,
@@ -9891,9 +9785,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             )
                             if _manage_cmd is None and _restart_sec > 5.0:
                                 print(
-                                    f"  → {svc_name}: waiting for systemd "
-                                    f"auto-restart (~{int(_restart_sec)}s; "
-                                    "no root for an immediate restart)..."
+                                    f'  → {svc_name}: жду автоматического перезапуска через systemd, около {int(_restart_sec)} с. Для немедленного перезапуска нужны права root.'
                                 )
                             if _wait_for_service_active(
                                 scope_cmd,
@@ -9907,7 +9799,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             # RestartForceExitStatus=75).  Fall through
                             # to systemctl start/restart.
                             print(
-                                f"  ⚠ {svc_name} drained but didn't relaunch — forcing restart"
+                                f'  ⚠ {svc_name} завершился, но не запустился снова. Перезапускаю принудительно…'
                             )
 
                         # Forcing a restart requires manage-units
@@ -9919,11 +9811,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                         if _manage_cmd is None:
                             failed_or_stale_units.append(svc_name)
                             print(
-                                f"  ⚠ {svc_name} is a system service and restarting it needs root.\n"
-                                f"    Restart it manually to load the new version:\n"
-                                f"      sudo systemctl restart {svc_name}\n"
-                                f"    To let `hermes update` restart it automatically, allow\n"
-                                f"    passwordless sudo for systemctl, or run updates with sudo."
+                                f'  ⚠ {svc_name} — системная служба. Для перезапуска нужны права root.\n    Чтобы загрузить новую версию, выполните:\n      sudo systemctl restart {svc_name}\n    Для автоматического перезапуска при `korra update` разрешите\n    systemctl через sudo без пароля или выполняйте обновления с sudo.'
                             )
                             return
 
@@ -9973,7 +9861,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                                 # retry isn't blocked by the previous
                                 # crash.
                                 print(
-                                    f"  ⚠ {svc_name} died after restart, retrying..."
+                                    f'  ⚠ {svc_name} остановился после перезапуска. Повторяю попытку…'
                                 )
                                 subprocess.run(
                                     _manage_cmd + ["reset-failed", svc_name],
@@ -9993,22 +9881,18 @@ def _cmd_update_impl(args, gateway_mode: bool):
                                     timeout=10.0,
                                 ):
                                     restarted_services.append(svc_name)
-                                    print(f"  ✓ {svc_name} recovered on retry")
+                                    print(f'  ✓ {svc_name} восстановился при повторной попытке')
                                 else:
                                     failed_or_stale_units.append(svc_name)
                                     _scope_flag = "--user " if scope == "user" else ""
                                     _sudo_hint = "sudo " if scope == "system" else ""
                                     print(
-                                        f"  ✗ {svc_name} failed to stay running after restart.\n"
-                                        f"    Check logs: {_sudo_hint}journalctl {_scope_flag}-u {svc_name} --since '2 min ago'\n"
-                                        f"    Recover manually:\n"
-                                        f"      {_sudo_hint}systemctl {_scope_flag}reset-failed {svc_name}\n"
-                                        f"      {_sudo_hint}systemctl {_scope_flag}restart {svc_name}"
+                                        f"  ✗ {svc_name} не смог продолжить работу после перезапуска.\n    Посмотреть журнал: {_sudo_hint}journalctl {_scope_flag}-u {svc_name} --since '2 min ago'\n    Восстановить вручную:\n      {_sudo_hint}systemctl {_scope_flag}reset-failed {svc_name}\n      {_sudo_hint}systemctl {_scope_flag}restart {svc_name}"
                                     )
                         else:
                             failed_or_stale_units.append(svc_name)
                             print(
-                                f"  ⚠ Failed to restart {svc_name}: {restart.stderr.strip()}"
+                                f'  ⚠ Не удалось перезапустить {svc_name}: {restart.stderr.strip()}'
                             )
 
                     def _on_unit_timeout(svc_name: str, exc: subprocess.TimeoutExpired) -> None:
@@ -10017,9 +9901,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                         # later gateway and leave the fleet on mixed code.
                         failed_or_stale_units.append(svc_name)
                         print(
-                            f"  ⚠ systemctl timed out restarting {svc_name} "
-                            f"({exc.cmd if exc.cmd else 'unknown command'}); "
-                            f"continuing with remaining gateways"
+                            f"  ⚠ Истекло время перезапуска {svc_name} через systemctl ({(exc.cmd if exc.cmd else 'unknown command')}). Продолжаю с остальными шлюзами."
                         )
 
                     _for_each_systemd_gateway_unit(
@@ -10072,9 +9954,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     # relaunched nor stopped nor mentioned, so it kept serving
                     # from stale modules with no operator signal at all.
                     print(
-                        f"  ⚠ {proc.profile}: could not arm an automatic "
-                        f"gateway restart for PID {pid} — stopping it instead "
-                        "so it cannot keep running pre-update code"
+                        f'  ⚠ {proc.profile}: не удалось подготовить автоматический перезапуск шлюза с PID {pid}. Останавливаю его, чтобы он не продолжал работать на старом коде.'
                     )
                     unrestartable_pids.add(pid)
                     continue
@@ -10088,8 +9968,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 # that stream update progress (the desktop updater most of
                 # all) the silence reads as a hung update (#44515).
                 print(
-                    f"  → {proc.profile}: draining gateway PID {pid} "
-                    f"(up to {int(_drain_budget)}s)..."
+                    f'  → {proc.profile}: жду завершения задач шлюза с PID {pid}, до {int(_drain_budget)} с…'
                 )
                 from korra_cli.gateway import (
                     GATEWAY_LOOP_WEDGED,
@@ -10106,8 +9985,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     # a fresh heartbeat and never takes this branch, so live
                     # drains (incl. the #86684 cron floor) are unaffected.
                     print(
-                        f"  ⚠ {proc.profile}: gateway event loop is "
-                        "unresponsive — skipping drain, forcing a bounded stop..."
+                        f'  ⚠ {proc.profile}: шлюз не отвечает. Перехожу к принудительной остановке с ограничением времени…'
                     )
                     _escalate_wedged_gateway(pid)
                     drained = True
@@ -10154,15 +10032,14 @@ def _cmd_update_impl(args, gateway_mode: bool):
             if restarted_services or killed_pids:
                 print()
                 for svc in restarted_services:
-                    print(f"  ✓ Restarted {svc}")
+                    print(f'  ✓ {svc} перезапущен')
                 if relaunched_profiles:
                     names = ", ".join(relaunched_profiles)
-                    print(f"  ✓ Restarting manual gateway profile(s): {names}")
+                    print(f'  ✓ Перезапускаю профили шлюза, запущенные вручную: {names}')
                 if externally_supervised_profiles:
                     names = ", ".join(externally_supervised_profiles)
                     print(
-                        "  ✓ Handed gateway profile(s) back to their external "
-                        f"supervisor: {names}"
+                        f'  ✓ Профили шлюза переданы их внешнему диспетчеру служб: {names}'
                     )
                 unmapped_count = (
                     len(killed_pids)
@@ -10170,11 +10047,11 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     - len(externally_supervised_profiles)
                 )
                 if unmapped_count:
-                    print(f"  → Stopped {unmapped_count} manual gateway process(es)")
-                    print("    Restart manually: hermes gateway run")
+                    print(f'  → Остановлено процессов шлюза, запущенных вручную: {unmapped_count}')
+                    print('    Запустить вручную: korra gateway run')
                     if unmapped_count > 1:
                         print(
-                            "    (or: hermes -p <profile> gateway run  for each profile)"
+                            '    Или запускайте для каждого профиля: korra -p <профиль> gateway run'
                         )
 
             if failed_or_stale_units:
@@ -10229,7 +10106,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 if _stuck:
                     print()
                     print(
-                        f"  ⚠ {len(_stuck)} gateway process(es) ignored SIGTERM — force-killing"
+                        f'  ⚠ Процессы шлюза ({len(_stuck)}) не ответили на SIGTERM. Завершаю принудительно.'
                     )
                     from gateway.status import (
                         get_process_start_time as _get_process_start_time,
@@ -10351,8 +10228,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             gateway_fleet_restart_incomplete = True
             gateway_restart_phase_errors.append(str(_windows_resume_exc))
             print(
-                "  ⚠ Windows gateway service restart incomplete: "
-                f"{_windows_resume_exc}"
+                f'  ⚠ Перезапуск службы шлюза Windows не завершён: {_windows_resume_exc}'
             )
             if gateway_mode:
                 _exit_code_path = get_hermes_home() / ".update_exit_code"
@@ -10432,18 +10308,18 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
             if supports_systemd_services() and has_legacy_hermes_units():
                 print()
-                print("⚠ Legacy Korra gateway unit(s) detected:")
+                print('⚠ Найдены устаревшие службы шлюза Korra:')
                 for name, path, is_sys in _find_legacy_hermes_units():
                     scope = "system" if is_sys else "user"
-                    print(f"    {path}  ({scope} scope)")
+                    print(f'    {path}  (область: {scope})')
                 print()
-                print("  These pre-rename units (hermes.service) fight the current")
-                print("  hermes-gateway.service for the bot token and cause SIGTERM")
-                print("  flap loops. Remove them with:")
+                print('  Старая служба hermes.service конфликтует с текущей')
+                print('  hermes-gateway.service: они используют один токен бота,')
+                print('  что вызывает постоянные остановки. Удалить старые службы:')
                 print()
-                print("    hermes gateway migrate-legacy")
+                print('    korra gateway migrate-legacy')
                 print()
-                print("  (add `sudo` if any are in system scope)")
+                print('  Для системных служб добавьте sudo.')
         except Exception as e:
             logger.debug("Legacy unit check during update failed: %s", e)
 
@@ -10461,8 +10337,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
         )
 
         print()
-        print("Tip: You can now select a provider and model:")
-        print("  hermes model              # Select provider and model")
+        print('Подсказка: теперь можно выбрать провайдера и модель:')
+        print('  korra model              # Выбрать провайдера и модель')
 
         # Phase 1 (#91277): post-update fleet version verification. Compare
         # every live gateway's stamped code_sha against the freshly-updated
@@ -10541,8 +10417,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 # so the receipt records "partial" and the exit code is 1
                 # (#93406).
                 print(
-                    "\n⚠ Fleet version check returned no rows even though"
-                    " gateway runtimes were expected — verification incomplete."
+                    '\n⚠ Проверка версий шлюзов не вернула результатов, хотя ожидались работающие шлюзы. Проверка не завершена.'
                 )
                 gateway_fleet_restart_incomplete = True
         except Exception as _fleet_exc:
@@ -10611,7 +10486,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         stage = _format_update_failure_stage(e)
         if _should_zip_fallback_on_update_error(e):
             print(f"⚠ {stage}: {e}")
-            print("→ Falling back to ZIP download...")
+            print('→ Перехожу к резервной загрузке из ZIP…')
             print()
             desktop_build_ok = _update_via_zip(
                 args,
@@ -10624,12 +10499,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
             _print_called_process_error_tail(e)
             if _called_process_error_is_python_dep_install(e):
                 print(
-                    "  The git update already finished. Re-downloading the source "
-                    "ZIP cannot fix a dependency install error and would overwrite "
-                    "local files."
+                    '  Обновление кода через Git уже завершено. Загрузка ZIP не исправит ошибку зависимостей и затрёт локальные файлы.'
                 )
                 if _m()._is_windows():
-                    print("  Retry through the venv interpreter:")
+                    print('  Повторите через интерпретатор из среды Python:')
                     print(
                         '    venv\\Scripts\\python.exe -c '
                         '"from korra_cli.main import main; main()" update --yes'
@@ -10749,7 +10622,7 @@ def _print_items(items, label, key, fallback_key=None):
             print(f"      • {name}")
     extra = len(items) - len(shown)
     if extra > 0:
-        print(f"      … and {extra} more")
+        print(f'      … ещё {extra}')
 
 def _wait_for_service_active(
     scope_cmd_: list,

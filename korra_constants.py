@@ -2010,11 +2010,10 @@ def partial_update_hint(exc: BaseException) -> list[str]:
         return []
     return [
         "",
-        "This looks like a partially-updated install: one module was refreshed "
-        "and a related one was not.",
-        "Re-run the update to bring the whole tree to the same version:",
-        "    hermes update",
-        "If that also fails, reinstall: https://hermes-agent.nousresearch.com",
+        "Похоже, обновление завершилось частично: часть модулей обновлена, а часть осталась прежней.",
+        "Повторите обновление, чтобы все файлы были одной версии:",
+        "    korra update",
+        "Если это не поможет, установите Korra заново: https://github.com/ceremoneymeister-bit/Korra.twenty.one",
     ]
 
 
@@ -2028,7 +2027,7 @@ def emit_partial_update_hint(exc: BaseException, *, file=None) -> bool:
     if not lines:
         return False
     out = sys.stderr if file is None else file
-    print(f"Error: {exc}", file=out)
+    print(f"Ошибка: {exc}", file=out)
     for line in lines:
         print(line, file=out)
     return True
