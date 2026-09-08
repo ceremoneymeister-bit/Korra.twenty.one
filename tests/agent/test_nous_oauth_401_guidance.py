@@ -54,3 +54,26 @@ def test_nous_401_guidance_strings_present():
     # Must point at the portal so users can check account/credit status.
     assert "portal.nousresearch.com" in source
 
+
+def test_retry_diagnostics_for_nous_and_anthropic_are_russian():
+    """The pre-terminal retry branch is visible in CLI and chat progress."""
+    source = inspect.getsource(conversation_loop.run_conversation)
+
+    assert "Ключ агента Nous обновлён после ошибки 401" in source
+    assert "Nous 401 — не удалось подтвердить вход" in source
+    assert "Войдите заново: korra auth add nous" in source
+    assert "Данные входа Anthropic обновлены после ошибки 401" in source
+    assert "Anthropic 401 — не удалось подтвердить данные входа" in source
+    assert "Запустите `korra doctor`" in source
+    assert 'korra config set ANTHROPIC_TOKEN \\\"\\\"' in source
+
+    for obsolete in (
+        "Nous agent key refreshed after 401",
+        "Portal authentication failed",
+        "Anthropic credentials refreshed after 401",
+        "Anthropic 401 — authentication failed",
+        "hermes auth add nous",
+        "hermes doctor",
+        "hermes config set ANTHROPIC",
+    ):
+        assert obsolete not in source

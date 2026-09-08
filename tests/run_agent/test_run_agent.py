@@ -4126,7 +4126,7 @@ class TestRunConversation:
             for m in replayed
         )
 
-    def test_nous_401_refreshes_after_remint_and_retries(self, agent):
+    def test_nous_401_refreshes_after_remint_and_retries(self, agent, capsys):
         self._setup_agent(agent)
         agent.provider = "nous"
         agent.api_mode = "chat_completions"
@@ -4166,6 +4166,77 @@ class TestRunConversation:
         assert calls["refresh"] == 1
         assert result["completed"] is True
         assert result["final_response"] == "Recovered after remint"
+        output = capsys.readouterr().out
+        assert "Ключ агента Nous обновлён после ошибки 401" in output
+        assert "hermes" not in output.lower()
+
+    @pytest.mark.parametrize(
+        ("provider", "api_mode", "expected"),
+        [
+            ("nous", "chat_completions", "Nous 401 — не удалось подтвердить вход"),
+            (
+                "anthropic",
+                "anthropic_messages",
+                "Anthropic 401 — не удалось подтвердить данные входа",
+            ),
+        ],
+    )
+    def test_401_failure_diagnostics_are_russian(
+        self, agent, capsys, provider, api_mode, expected
+    ):
+        self._setup_agent(agent)
+        agent.provider = provider
+        agent.api_mode = api_mode
+        agent._anthropic_api_key = "sk-ant-test-key-long-enough"
+
+        class _UnauthorizedError(RuntimeError):
+            def __init__(self):
+                super().__init__("Error code: 401 - unauthorized")
+                self.status_code = 401
+
+        patches = [
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+            patch.object(
+                agent,
+                "_interruptible_api_call",
+                side_effect=_UnauthorizedError(),
+            ),
+            patch.object(
+                agent,
+                "_try_refresh_nous_client_credentials",
+                return_value=False,
+            ),
+            patch.object(
+                agent,
+                "_try_refresh_anthropic_client_credentials",
+                return_value=False,
+            ),
+            patch(
+                "agent.conversation_loop._print_nous_entitlement_guidance",
+                return_value=False,
+            ),
+        ]
+
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+        ):
+            result = agent.run_conversation("hello")
+
+        output = capsys.readouterr().out
+        assert result["completed"] is False
+        assert expected in output
+        assert "Что проверить:" in output
+        assert "hermes auth" not in output.lower()
+        assert "hermes doctor" not in output.lower()
+        assert "hermes config" not in output.lower()
 
     def test_context_compression_triggered(self, agent):
         """When compressor says should_compress, compression runs."""

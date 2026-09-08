@@ -5168,7 +5168,7 @@ def run_conversation(
                 ):
                     _retry.nous_auth_retry_attempted = True
                     if agent._try_refresh_nous_client_credentials(force=True):
-                        print(f"{agent.log_prefix}🔐 Nous agent key refreshed after 401. Retrying request...")
+                        print(f"{agent.log_prefix}🔐 Ключ агента Nous обновлён после ошибки 401. Повторяю запрос...")
                         continue
                     # Credential refresh didn't help — show diagnostic info.
                     # Most common causes: Portal OAuth expired/revoked,
@@ -5182,16 +5182,16 @@ def run_conversation(
                             _body_text = str(_body)[:200]
                     except Exception:
                         pass
-                    print(f"{agent.log_prefix}🔐 Nous 401 — Portal authentication failed.")
+                    print(f"{agent.log_prefix}🔐 Nous 401 — не удалось подтвердить вход в Portal.")
                     if _body_text:
-                        print(f"{agent.log_prefix}   Response: {_body_text}")
-                    if not _print_nous_entitlement_guidance(agent, "Nous model access"):
-                        print(f"{agent.log_prefix}   Most likely: Portal OAuth expired, account out of credits, or agent key revoked.")
-                    print(f"{agent.log_prefix}   Troubleshooting:")
-                    print(f"{agent.log_prefix}     • Re-authenticate: hermes auth add nous")
-                    print(f"{agent.log_prefix}     • Check credits / billing: https://portal.nousresearch.com")
-                    print(f"{agent.log_prefix}     • Verify stored credentials: {_dhh}/auth.json")
-                    print(f"{agent.log_prefix}     • Switch providers temporarily: /model <model> --provider openrouter")
+                        print(f"{agent.log_prefix}   Ответ: {_body_text}")
+                    if not _print_nous_entitlement_guidance(agent, "доступ к моделям Nous"):
+                        print(f"{agent.log_prefix}   Скорее всего, истёк OAuth-сеанс Portal, закончились средства или ключ агента отозван.")
+                    print(f"{agent.log_prefix}   Что проверить:")
+                    print(f"{agent.log_prefix}     • Войдите заново: korra auth add nous")
+                    print(f"{agent.log_prefix}     • Проверьте средства и оплату: https://portal.nousresearch.com")
+                    print(f"{agent.log_prefix}     • Проверьте сохранённые данные входа: {_dhh}/auth.json")
+                    print(f"{agent.log_prefix}     • Временно смените провайдера: /model <model> --provider openrouter")
                 if (
                     _is_copilot_provider(agent)
                     and status_code == 401
@@ -5211,33 +5211,33 @@ def run_conversation(
                     from agent.anthropic_adapter import _is_oauth_token
                     from agent.azure_identity_adapter import is_token_provider
                     if agent._try_refresh_anthropic_client_credentials():
-                        print(f"{agent.log_prefix}🔐 Anthropic credentials refreshed after 401. Retrying request...")
+                        print(f"{agent.log_prefix}🔐 Данные входа Anthropic обновлены после ошибки 401. Повторяю запрос...")
                         continue
                     # Credential refresh didn't help — show diagnostic info
                     key = agent._anthropic_api_key
-                    print(f"{agent.log_prefix}🔐 Anthropic 401 — authentication failed.")
+                    print(f"{agent.log_prefix}🔐 Anthropic 401 — не удалось подтвердить данные входа.")
                     if is_token_provider(key):
                         # Azure Foundry Entra ID — the bearer token is
                         # minted per-request by an httpx event hook on a
                         # custom http_client passed to the SDK. The 401
                         # means Azure rejected the JWT (RBAC role missing,
                         # az login expired, IMDS unreachable, etc.).
-                        print(f"{agent.log_prefix}   Auth method: Microsoft Entra ID (httpx event hook)")
-                        print(f"{agent.log_prefix}   Run `hermes doctor` for credential-chain diagnostics, or")
-                        print(f"{agent.log_prefix}   `az login` if your developer session expired.")
+                        print(f"{agent.log_prefix}   Способ входа: Microsoft Entra ID (обработчик httpx)")
+                        print(f"{agent.log_prefix}   Запустите `korra doctor`, чтобы проверить цепочку данных входа, или")
+                        print(f"{agent.log_prefix}   выполните `az login`, если срок сеанса разработчика истёк.")
                     else:
-                        auth_method = "Bearer (OAuth/setup-token)" if _is_oauth_token(key) else "x-api-key (API key)"
-                        print(f"{agent.log_prefix}   Auth method: {auth_method}")
-                        print(f"{agent.log_prefix}   Token prefix: {key[:12]}..." if isinstance(key, str) and len(key) > 12 else f"{agent.log_prefix}   Token: (empty or short)")
-                    print(f"{agent.log_prefix}   Troubleshooting:")
+                        auth_method = "Bearer (OAuth/токен настройки)" if _is_oauth_token(key) else "x-api-key (API-ключ)"
+                        print(f"{agent.log_prefix}   Способ входа: {auth_method}")
+                        print(f"{agent.log_prefix}   Начало токена: {key[:12]}..." if isinstance(key, str) and len(key) > 12 else f"{agent.log_prefix}   Токен пустой или слишком короткий")
+                    print(f"{agent.log_prefix}   Что проверить:")
                     from korra_constants import display_hermes_home as _dhh_fn
                     _dhh = _dhh_fn()
-                    print(f"{agent.log_prefix}     • Check ANTHROPIC_TOKEN in {_dhh}/.env for Korra-managed OAuth/setup tokens")
-                    print(f"{agent.log_prefix}     • Check ANTHROPIC_API_KEY in {_dhh}/.env for API keys or legacy token values")
-                    print(f"{agent.log_prefix}     • For API keys: verify at https://platform.claude.com/settings/keys")
-                    print(f"{agent.log_prefix}     • For Claude Code: run 'claude /login' to refresh, then retry")
-                    print(f"{agent.log_prefix}     • Legacy cleanup: hermes config set ANTHROPIC_TOKEN \"\"")
-                    print(f"{agent.log_prefix}     • Clear stale keys: hermes config set ANTHROPIC_API_KEY \"\"")
+                    print(f"{agent.log_prefix}     • Для OAuth и токенов настройки проверьте ANTHROPIC_TOKEN в {_dhh}/.env")
+                    print(f"{agent.log_prefix}     • Для API-ключей и старых токенов проверьте ANTHROPIC_API_KEY в {_dhh}/.env")
+                    print(f"{agent.log_prefix}     • Проверьте API-ключ: https://platform.claude.com/settings/keys")
+                    print(f"{agent.log_prefix}     • Для Claude Code выполните `claude /login`, затем повторите запрос")
+                    print(f"{agent.log_prefix}     • Удалите старый токен: korra config set ANTHROPIC_TOKEN \"\"")
+                    print(f"{agent.log_prefix}     • Удалите устаревший ключ: korra config set ANTHROPIC_API_KEY \"\"")
 
                 # Thinking block signature recovery.
                 #
