@@ -62,7 +62,8 @@ DRAIN_CODE = r'''
 import inspect, json, sys
 from pathlib import Path
 from gateway.control_socket import query_gateway_control
-from gateway.drain_control import write_drain_request, clear_drain_request
+from gateway.drain_control import (write_drain_request, clear_drain_request,
+                                   drain_requested, read_drain_request)
 from gateway.run import GatewayRunner
 from gateway.platforms.api_server import APIServerAdapter
 action, principal = sys.argv[1:3]
@@ -78,16 +79,21 @@ for home in homes:
         continue
     state = query_gateway_control(home, 'status')
     if action == 'cancel':
-        marker = home / '.drain_request.json'
-        if marker.exists() and json.loads(marker.read_text()).get('principal') == principal:
+        body = read_drain_request(home=home)
+        if body is not None and body.get('principal') == principal:
             clear_drain_request(home=home)
     if not state:
         if home == root:
             raise RuntimeError('Gateway control socket unavailable')
         continue
     if action == 'drain':
-        marker = home / '.drain_request.json'
-        if marker.exists() and json.loads(marker.read_text()).get('principal') != principal:
+        # Чей это drain — решаем по тому же признаку, по которому сам движок
+        # решает, действует ли drain (gateway/drain_control.drain_requested):
+        # маркер прежней инстанции контейнера или переживший свой срок
+        # движок уже игнорирует, и операции он мешать не должен тоже.
+        # Голая проверка существования файла запирала установку навсегда.
+        body = read_drain_request(home=home) or {}
+        if drain_requested(home=home) and body.get('principal') != principal:
             raise RuntimeError('Drain is owned by another operation')
         write_drain_request(home=home, principal=principal, suppress_notification=True)
     result.append({'home': str(home), 'state': state})
@@ -568,6 +574,19 @@ class Updater:
             time.sleep(1)
         raise UpdateError("Drain timed out; cancellation sent but admission restoration unconfirmed")
 
+    def release_drain(self):
+        """Убрать собственный маркер drain после удавшегося переключения.
+
+        Уборка, а не часть транзакции: обновление к этому моменту уже прошло
+        приёмку, и отменять его из-за неубранного файла нельзя. Оставшийся
+        маркер безвреден сам по себе — он от прежней инстанции контейнера, и
+        движок его игнорирует, — но в DATA клиента ему делать нечего.
+        """
+        try:
+            self.native_states("cancel")
+        except Exception as exc:  # noqa: BLE001 — уборка не отменяет результат
+            self.log(f"Drain marker cleanup skipped: {exc}")
+
     def prune_skills(self, old, target):
         removed = []
         homes = [self.data]
@@ -975,6 +994,12 @@ print(json.dumps(changed))
             stopped = False
             self.phase("smoke")
             self.smoke(target)
+            # Снять СВОЙ маркер drain: на успешном пути его до сих пор никто не
+            # снимал, а в снимок он не попадает (VOLATILE) — поэтому после
+            # отката данные приходили без него, а после удавшегося обновления
+            # он оставался в DATA (найдено живым прогоном 08.09.2026).
+            # Отмена сверяет principal, поэтому чужой маркер не тронет.
+            self.release_drain()
             (self.home / "IMAGE.prev").write_text(old + "\n")
             self.phase("complete", status="succeeded")
         except Exception as exc:

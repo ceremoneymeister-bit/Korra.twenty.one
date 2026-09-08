@@ -7,7 +7,9 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import sys
 import tarfile
+import types
 
 import pytest
 
@@ -64,10 +66,15 @@ class FakeDockerUpdater(u.Updater):
 
     def native_states(self, action="status"):
         self.calls.append(("native", action))
+        # Маркер настоящий: внутри контейнера drain — это файл в DATA, и
+        # «не остался ли он после операции» проверяется по файлу, а не по флагу.
+        marker = self.data / ".drain_request.json"
         if action == "drain":
             self.is_draining = True
+            marker.write_text(json.dumps({"action": "drain", "principal": "host-updater:fixture-job"}))
         if action == "cancel":
             self.is_draining = False
+            marker.unlink(missing_ok=True)
         return [{"home": "/opt/data", "state": {"gateway_state": "draining" if self.is_draining else "running", "active_agents": 1 if self.busy else 0, "served_profiles": ["default", "secretary"]}}]
 
     def start_image(self, image):
@@ -159,6 +166,135 @@ def test_drain_timeout_restores_admission_and_never_stops(updater, monkeypatch):
     assert updater.running and not updater.is_draining
     assert not any(call[0] == "stop" for call in updater.calls)
     assert not (updater.job / "before").exists()
+
+
+def test_successful_update_leaves_no_drain_marker_in_data(updater):
+    # Маркер, оставшийся после удавшегося обновления, запирал следующее:
+    # в снимок он не попадает, поэтому после отката его не было, а после
+    # обычного успеха он лежал в DATA и упирал вторую операцию в «чужой drain».
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    assert not (updater.data / ".drain_request.json").exists()
+    assert updater.calls.index(("native", "cancel")) > updater.calls.index(("start_image", NEW))
+
+
+def test_second_update_after_a_successful_one_still_drains(updater):
+    updater.update("registry.example/korra:latest")
+    updater.tags.clear()
+    updater.receipt = {}
+    updater.initialize("second-job", "registry.example/korra:latest")
+    updater.image = OLD
+    (updater.home / "IMAGE").write_text(OLD)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+
+
+def test_drain_cleanup_failure_does_not_undo_a_finished_update(updater, monkeypatch):
+    real = updater.native_states
+
+    def flaky(action="status"):
+        if action == "cancel":
+            raise u.UpdateError("docker exec failed (exit 1)")
+        return real(action)
+
+    monkeypatch.setattr(updater, "native_states", flaky)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded" and updater.image == NEW
+    assert "Drain marker cleanup skipped" in (updater.home / "updates.log").read_text()
+
+
+def run_drain_code(monkeypatch, root, action, principal):
+    """Выполнить DRAIN_CODE так же, как его выполняет `docker exec` в образе.
+
+    Настоящий `gateway.drain_control` не подменяется: смысл проверки в том,
+    что updater и движок одинаково отвечают на вопрос «drain сейчас идёт?».
+    """
+    import pathlib as real_pathlib
+
+    class Runner:
+        def _drain_control_watcher(self):
+            return "_persist_active_agents"
+
+        def _active_api_run_count(self):
+            return "active_agent_work_count"
+
+    control = types.ModuleType("gateway.control_socket")
+    control.query_gateway_control = lambda home, what: {"gateway_state": "running", "active_agents": 0}
+    runner = types.ModuleType("gateway.run")
+    runner.GatewayRunner = Runner
+    api_server = types.ModuleType("gateway.platforms.api_server")
+    api_server.APIServerAdapter = object
+    stub_pathlib = types.ModuleType("pathlib")
+    stub_pathlib.Path = lambda value: root if str(value) == "/opt/data" else real_pathlib.Path(value)
+    for name, module in (("gateway.control_socket", control), ("gateway.run", runner),
+                         ("gateway.platforms.api_server", api_server), ("pathlib", stub_pathlib)):
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(sys, "argv", ["-c", action, principal])
+    exec(compile(u.DRAIN_CODE, "DRAIN_CODE", "exec"), {"__name__": "__main__"})
+
+
+@pytest.fixture
+def drain_root(tmp_path):
+    from gateway import drain_control
+
+    root = tmp_path / "opt-data"
+    (root / "profiles").mkdir(parents=True)
+    drain_control.current_instantiation_epoch.cache_clear()
+    yield root
+    drain_control.current_instantiation_epoch.cache_clear()
+
+
+def test_drain_marker_left_by_a_previous_container_does_not_block_a_new_update(monkeypatch, drain_root):
+    from gateway import drain_control
+
+    marker = drain_control.drain_request_path(drain_root)
+    marker.write_text(json.dumps({"action": "drain", "principal": "host-updater:earlier-job",
+                                  "epoch": "boot-of-a-container-that-is-gone:1"}))
+    run_drain_code(monkeypatch, drain_root, "drain", "host-updater:new-job")
+    assert json.loads(marker.read_text())["principal"] == "host-updater:new-job"
+
+
+def test_expired_same_epoch_drain_marker_does_not_block_a_new_update(monkeypatch, drain_root):
+    from gateway import drain_control
+
+    drain_control.write_drain_request(home=drain_root, principal="host-updater:abandoned-job")
+    marker = drain_control.drain_request_path(drain_root)
+    body = json.loads(marker.read_text())
+    body["requested_at"] = "2026-09-08T00:00:00+00:00"
+    marker.write_text(json.dumps(body))
+    monkeypatch.setattr(drain_control, "_marker_is_expired", lambda body: True)
+    run_drain_code(monkeypatch, drain_root, "drain", "host-updater:new-job")
+    assert json.loads(marker.read_text())["principal"] == "host-updater:new-job"
+
+
+def test_drain_of_another_live_operation_is_still_refused(monkeypatch, drain_root):
+    from gateway import drain_control
+
+    drain_control.write_drain_request(home=drain_root, principal="host-updater:running-job")
+    with pytest.raises(RuntimeError, match="owned by another operation"):
+        run_drain_code(monkeypatch, drain_root, "drain", "host-updater:new-job")
+    marker = drain_control.drain_request_path(drain_root)
+    assert json.loads(marker.read_text())["principal"] == "host-updater:running-job"
+
+
+def test_cancel_keeps_a_foreign_marker_and_survives_a_corrupt_one(monkeypatch, drain_root):
+    from gateway import drain_control
+
+    marker = drain_control.drain_request_path(drain_root)
+    drain_control.write_drain_request(home=drain_root, principal="host-updater:other-job")
+    run_drain_code(monkeypatch, drain_root, "cancel", "host-updater:new-job")
+    assert json.loads(marker.read_text())["principal"] == "host-updater:other-job"
+    marker.write_text("{половина файла")
+    run_drain_code(monkeypatch, drain_root, "cancel", "host-updater:new-job")
+    assert marker.exists()
+
+
+def test_cancel_removes_our_own_marker(monkeypatch, drain_root):
+    from gateway import drain_control
+
+    drain_control.write_drain_request(home=drain_root, principal="host-updater:new-job")
+    run_drain_code(monkeypatch, drain_root, "cancel", "host-updater:new-job")
+    assert not drain_control.drain_request_path(drain_root).exists()
 
 
 def test_failed_update_rolls_back_data_preserving_new_auth_and_export(updater):
