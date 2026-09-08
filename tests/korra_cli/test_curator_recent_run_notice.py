@@ -75,8 +75,8 @@ def test_format_time_ago_buckets(curator_env):
     """Smoke test the time formatter — drives the `last run Xh ago` line."""
     fmt = curator_env["main"]._format_time_ago
     now = datetime.now(timezone.utc)
-    assert fmt((now - timedelta(seconds=10)).isoformat()) == "just now"
-    assert fmt((now - timedelta(minutes=5)).isoformat()) == "5m ago"
-    assert fmt((now - timedelta(hours=3)).isoformat()) == "3h ago"
-    assert fmt((now - timedelta(days=2)).isoformat()) == "2d ago"
-    assert fmt("not-a-real-iso-string") == "recently"
+    assert fmt((now - timedelta(seconds=10)).isoformat()) == "только что"
+    assert fmt((now - timedelta(minutes=5)).isoformat()) == "5 мин назад"
+    assert fmt((now - timedelta(hours=3)).isoformat()) == "3 ч назад"
+    assert fmt((now - timedelta(days=2)).isoformat()) == "2 дн. назад"
+    assert fmt("not-a-real-iso-string") == "недавно"

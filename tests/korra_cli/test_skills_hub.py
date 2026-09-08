@@ -467,7 +467,7 @@ def test_do_update_skips_locally_edited_skill(monkeypatch, tmp_path):
 
     assert installs == []
     out = sink.getvalue()
-    assert "local edits" in out
+    assert "локальные правки" in out
     assert "--force" in out
 
 
@@ -478,7 +478,7 @@ def test_do_update_force_overwrites_local_edits(monkeypatch, tmp_path):
     do_update(console=console, force=True)
 
     assert installs == ["someone/hub-skill"]
-    assert "local edits" not in sink.getvalue()
+    assert "локальные правки" not in sink.getvalue()
 
 
 def test_do_update_unmodified_skill_updates_normally(monkeypatch, tmp_path):
@@ -488,4 +488,4 @@ def test_do_update_unmodified_skill_updates_normally(monkeypatch, tmp_path):
     do_update(console=console)
 
     assert installs == ["someone/hub-skill"]
-    assert "Updated 1 skill(s)" in sink.getvalue()
+    assert "Обновлено навыков: 1" in sink.getvalue()

@@ -149,8 +149,8 @@ def test_model_command_prompts_to_reuse_or_reauthenticate_codex_session(monkeypa
     _model_flow_openai_codex({}, current_model="gpt-5.4")
 
     out = capsys.readouterr().out
-    assert "Use existing credentials" in out
-    assert "Reauthenticate (new OAuth login)" in out
+    assert "Использовать сохранённый вход" in out
+    assert "Войти заново через OAuth" in out
     assert captured["login_calls"] == 1
     assert captured["force_new_login"] is True
 
@@ -238,4 +238,3 @@ class TestNormalizeModelForProvider:
         assert changed is True
         # Uses first from available list
         assert cli.model == "gpt-5.3-codex"
-

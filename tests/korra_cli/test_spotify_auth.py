@@ -73,7 +73,7 @@ def test_auth_spotify_status_command_reports_logged_in(capsys, monkeypatch: pyte
 
     auth_status_command(SimpleNamespace(provider="spotify"))
     output = capsys.readouterr().out
-    assert "spotify: logged in" in output
+    assert "spotify: вход выполнен" in output
     assert "client_id: spotify-client" in output
 
 
@@ -164,5 +164,4 @@ def test_resolve_credentials_quarantines_dead_tokens_on_terminal_refresh_failure
 
     # Active provider must be unchanged.
     assert auth_mod.get_active_provider() == "nous"
-
 

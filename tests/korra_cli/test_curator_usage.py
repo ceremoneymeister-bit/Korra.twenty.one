@@ -44,7 +44,9 @@ def test_usage_lists_all_provenances(monkeypatch, capsys):
     assert curator_cli._cmd_usage(args) == 0
     out = capsys.readouterr().out
     # Header tally and all three skills present.
-    assert "agent=1" in out and "bundled=1" in out and "hub=1" in out
+    assert "создано агентом: 1" in out
+    assert "встроенных: 1" in out
+    assert "из каталога: 1" in out
     assert "agent-skill" in out
     assert "bundled-skill" in out
     assert "hub-skill" in out
@@ -57,7 +59,7 @@ def test_usage_empty(monkeypatch, capsys):
     monkeypatch.setattr(skill_usage, "usage_report", lambda: [])
     args = SimpleNamespace(sort="activity", provenance=None, json=False)
     assert curator_cli._cmd_usage(args) == 0
-    assert "no skills found" in capsys.readouterr().out
+    assert "Навыки не найдены" in capsys.readouterr().out
 
 
 def test_usage_command_is_registered():

@@ -514,10 +514,10 @@ def test_plugins_show_includes_emits_listens(tmp_path, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert "showplug" in out
-    assert "Emits:" in out
+    assert "Создаёт события:" in out
     assert "ping" in out
     assert "pong" in out
-    assert "Listens:" in out
+    assert "Обрабатывает события:" in out
     assert "other:ready" in out
 
 
@@ -528,4 +528,4 @@ def test_plugins_show_not_found_exits(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         plugins_cmd.cmd_show("nope")
     out = capsys.readouterr().out
-    assert "not found" in out.lower()
+    assert "не найден" in out.lower()

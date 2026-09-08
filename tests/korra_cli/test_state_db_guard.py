@@ -117,8 +117,8 @@ class TestPreUpdateBackupIntegrityGuard:
         snap_id = _run_pre_update_backup(Namespace(no_backup=False, backup=False))
         out = capsys.readouterr().out
         assert snap_id is not None
-        assert "Pre-update snapshot" in out
-        assert "integrity check FAILED" not in out
+        assert "Резервный снимок перед обновлением" in out
+        assert "проверка целостности state.db не пройдена" not in out
 
     def test_zeroed_db_after_snapshot_is_loud(self, hermes_home, capsys, monkeypatch):
         """If state.db is zeroed right after the snapshot completes, the
@@ -140,5 +140,5 @@ class TestPreUpdateBackupIntegrityGuard:
         snap_id = _run_pre_update_backup(Namespace(no_backup=False, backup=False))
         out = capsys.readouterr().out
         assert snap_id is not None
-        assert "integrity check FAILED" in out
-        assert "Snapshot copy is valid" in out
+        assert "проверка целостности state.db не пройдена" in out
+        assert "Снимок исправен" in out

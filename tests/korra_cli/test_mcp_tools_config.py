@@ -72,4 +72,4 @@ def test_empty_tools_server_skipped(capsys):
 
     assert len(checklist_calls) == 0
     captured = capsys.readouterr()
-    assert "no tools found" in captured.out
+    assert "инструменты не найдены" in captured.out

@@ -35,7 +35,7 @@ class TestSanitizePluginName:
 
 
     def test_rejects_dot_dot(self, tmp_path):
-        with pytest.raises(ValueError, match="must not contain"):
+        with pytest.raises(ValueError, match="недопустимый фрагмент"):
             _sanitize_plugin_name("../../etc/passwd", tmp_path)
 
 
@@ -553,7 +553,7 @@ class TestCopyExampleFiles:
             _copy_example_files(tmp_path, console)
 
         # Should have printed a warning
-        assert any("Warning" in str(c) for c in console.print.call_args_list)
+        assert any("Внимание" in str(c) for c in console.print.call_args_list)
 
 
 class TestPromptPluginEnvVars:

@@ -204,7 +204,7 @@ class TestInstallCuaDriverUpgrade:
             ) is True
 
         info.assert_called_once_with(
-            "→ Refreshing cua-driver (Computer Use)..."
+            "→ Refreshing cua-driver для управления компьютером…"
         )
 
     @pytest.mark.linux_only
@@ -324,7 +324,7 @@ class TestInstallCuaDriverUpgrade:
             assert tools_config.install_cua_driver(upgrade=True) is True
             runner.assert_not_called()
             assert any(
-                "/Applications is not writable" in call.args[0]
+                "Нет прав записи в /Applications" in call.args[0]
                 for call in info.call_args_list
             )
 
@@ -340,7 +340,7 @@ class TestInstallCuaDriverUpgrade:
             assert tools_config.install_cua_driver(upgrade=False) is False
             runner.assert_not_called()
             assert any(
-                "/Applications is not writable" in call.args[0]
+                "Нет прав записи в /Applications" in call.args[0]
                 for call in info.call_args_list
             )
 
@@ -536,7 +536,7 @@ class TestRequireConfirmedUpdate:
         assert ok is True
         runner.assert_not_called()
         assert any(
-            "keeping the installed version" in call.args[0]
+            "Сохраняем установленную" in call.args[0]
             for call in info.call_args_list
         )
 
@@ -1715,14 +1715,14 @@ class TestUnattendedRefreshPreflights:
         ok, popen, info, _, _ = self._run(120, lock_held=True)
         assert ok is False
         popen.assert_not_called()
-        assert any("install lock is held" in c.args[0]
+        assert any("занята блокировка" in c.args[0]
                    for c in info.call_args_list)
 
     def test_unreachable_host_skips_unattended_run(self):
         ok, popen, info, _, _ = self._run(120, reachable=False)
         assert ok is False
         popen.assert_not_called()
-        assert any("unreachable" in c.args[0] for c in info.call_args_list)
+        assert any("недоступен" in c.args[0] for c in info.call_args_list)
 
     def test_explicit_install_bypasses_preflights(self):
         """installer_timeout=None (explicit `computer-use install --upgrade`):

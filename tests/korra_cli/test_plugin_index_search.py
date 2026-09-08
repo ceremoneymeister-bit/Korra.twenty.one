@@ -376,7 +376,7 @@ class TestInstallResolution:
         assert exc.value.code == 1
         assert not called
         out = capsys.readouterr().out
-        assert "ambiguous" in out
+        assert "неоднозначно" in out
         assert "hermes-media-studio" in out
         assert "hermes-telegram-business" in out
 
@@ -389,7 +389,7 @@ class TestInstallResolution:
         with pytest.raises(SystemExit) as exc:
             plugins_cmd.cmd_install("totally-unknown", enable=False)
         assert exc.value.code == 1
-        assert "not found" in capsys.readouterr().out
+        assert "не найден" in capsys.readouterr().out
 
     def test_owner_repo_passthrough_skips_index(self, hermes_home, monkeypatch):
         """Explicit owner/repo installs never consult the index."""
@@ -454,7 +454,7 @@ class TestCmdSearch:
             plugin_index, "load_index", lambda **kw: (_parse_entries(SAMPLE), "seed")
         )
         plugins_cmd.cmd_search("zzzznope")
-        assert "No plugins matched" in capsys.readouterr().out
+        assert "не найдены" in capsys.readouterr().out
 
     def test_parser_accepts_search(self):
         import argparse

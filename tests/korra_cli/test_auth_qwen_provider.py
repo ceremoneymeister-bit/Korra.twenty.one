@@ -201,7 +201,7 @@ def test_model_flow_qwen_oauth_stale_token_shows_reauth_guidance(qwen_env, monke
     _model_flow_qwen_oauth({}, current_model="qwen3-coder-plus")
 
     out = capsys.readouterr().out
-    assert "Run: qwen auth qwen-oauth" in out
+    assert "Выполните: qwen auth qwen-oauth" in out
     assert "Qwen refresh rejected" in out
     assert prompt_called["value"] is False
     assert update_called["value"] is False

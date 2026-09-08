@@ -38,6 +38,6 @@ def test_status_surfaces_env_inheritance_hint_when_unavailable(monkeypatch, caps
     memory_setup.cmd_status(object())
     out = capsys.readouterr().out
 
-    assert "not available" in out
+    assert "недоступен" in out
     assert "HINDSIGHT_API_KEY" in out  # names the missing var
     assert ".env" in out               # systemd/gateway root-cause hint

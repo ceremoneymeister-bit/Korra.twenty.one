@@ -40,7 +40,7 @@ class TestToolsDisableMcp:
                 Namespace(tools_action="disable", names=["unknown:tool"], platform="cli")
             )
         out = capsys.readouterr().out
-        assert "MCP server 'unknown' not found in config" in out
+        assert "Сервер MCP «unknown» не найден в настройках" in out
 
 
 # ── MCP tool enable ──────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ def test_tools_action_accepts_deferred_plugin_without_materializing(action, caps
         discover.assert_called()
         loader.assert_not_called()
         if action == "list":
-            assert f"Built-in toolsets ({platform}):" in out
+            assert f"Встроенные наборы инструментов ({platform}):" in out
             save.assert_not_called()
         else:
             save.assert_called()

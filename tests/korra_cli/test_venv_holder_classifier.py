@@ -48,7 +48,7 @@ class TestHolderMessage:
     def test_dashboard_not_labeled_desktop_backend(self):
         message = self._msg(r"C:\v\Scripts\python.exe -m korra_cli.main dashboard")
         assert "close the desktop app" not in message.lower()
-        assert "hermes dashboard" in message
+        assert "korra dashboard" in message
 
     def test_preserve_cache_not_labeled_serve(self):
         message = self._msg(r"python -m korra_cli.main kanban --preserve-cache")
@@ -59,7 +59,7 @@ class TestHolderMessage:
 
     def test_serve_gets_backend_hint(self):
         message = self._msg(r"python -m korra_cli.main serve --host 127.0.0.1 --port 0")
-        assert "Korra backend" in message
+        assert "сервер Korra" in message
 
     def test_gateway_hint(self):
         message = self._msg(r"python -m korra_cli.main gateway run")

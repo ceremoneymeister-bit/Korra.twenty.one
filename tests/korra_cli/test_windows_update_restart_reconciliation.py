@@ -82,7 +82,7 @@ def test_resume_omits_profiles_whose_relaunch_failed(monkeypatch):
         # Fail-closed contract: a profile whose relaunch failed
         # raises so the update is marked incomplete (the caller catches,
         # records the phase error, and exits 1 in gateway mode).
-        with pytest.raises(RuntimeError, match="Could not restart every paused"):
+        with pytest.raises(RuntimeError, match="Не все приостановленные шлюзы Windows"):
             _resume_windows_gateways_after_update(token)
 
     assert token["relaunched_profiles"] == ["default"]

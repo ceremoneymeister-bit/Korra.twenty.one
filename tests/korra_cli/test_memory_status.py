@@ -44,14 +44,13 @@ class TestMemoryStatusLabels:
     def test_shows_memory_injection_enabled_by_default(self, capfd):
         """Memory injection defaults to enabled."""
         out = _run_cmd_status(capfd)
-        assert "Memory injection:" in out
-        assert "enabled ✓" in out
+        assert "Добавление воспоминаний:" in out
+        assert "включено ✓" in out
 
     def test_shows_memory_injection_disabled(self, capfd):
         """When memory_enabled is false, status reflects it."""
         out = _run_cmd_status(capfd, mem_config={"memory_enabled": False})
-        assert "Memory injection:" in out
-        assert "disabled ✗" in out
-
+        assert "Добавление воспоминаний:" in out
+        assert "выключено ✗" in out
 
 

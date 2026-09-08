@@ -60,7 +60,7 @@ class TestStaleOAuthTokenDetection:
 
         output = capsys.readouterr().out
         # Must show auth method choice since token is stale
-        assert "subscription" in output or "API key" in output, (
+        assert "подписк" in output.lower() or "ключ api" in output.lower(), (
             f"Expected auth method menu but got: {output!r}"
         )
 
@@ -99,7 +99,7 @@ class TestStaleOAuthTokenDetection:
 
         output = capsys.readouterr().out
         # Should show "Use existing credentials" menu, NOT auth method choice
-        assert "Use existing" in output or "credentials" in output.lower()
+        assert "Использовать сохранённый вход" in output
 
 
 class TestStaleOAuthGuardLogic:
@@ -142,4 +142,3 @@ class TestStaleOAuthGuardLogic:
 
         assert existing_is_stale_oauth is False
         assert has_creds is True
-

@@ -52,8 +52,8 @@ def test_pin_unmanaged_records_flag_and_prints_adopt_hint(monkeypatch, capsys):
     assert calls == [("legacy-skill", True)]
     assert rc == 0
     out = capsys.readouterr().out
-    assert "unmanaged" in out
-    assert "hermes curator adopt legacy-skill" in out
+    assert "без обслуживания" in out
+    assert "korra curator adopt legacy-skill" in out
     # The old lie must be gone: the pin does NOT bypass anything here.
     assert "will bypass auto-transitions" not in out
 
@@ -68,8 +68,8 @@ def test_pin_managed_keeps_bypass_message(monkeypatch, capsys):
     assert calls == [("agent-skill", True)]
     assert rc == 0
     out = capsys.readouterr().out
-    assert "will bypass auto-transitions" in out
-    assert "unmanaged" not in out
+    assert "защищён от автоматического изменения" in out
+    assert "без обслуживания" not in out
 
 
 def test_unpin_unmanaged_says_it_was_never_managed(monkeypatch, capsys):
@@ -82,8 +82,8 @@ def test_unpin_unmanaged_says_it_was_never_managed(monkeypatch, capsys):
     assert calls == [("legacy-skill", False)]
     assert rc == 0
     out = capsys.readouterr().out
-    assert "unmanaged" in out
-    assert "never under auto-transitions" in out
+    assert "без обслуживания" in out
+    assert "раньше не менялся автоматически" in out
 
 
 def test_pin_still_refuses_bundled_skills(monkeypatch, capsys):
@@ -99,4 +99,4 @@ def test_pin_still_refuses_bundled_skills(monkeypatch, capsys):
 
     assert rc == 1
     assert calls == []
-    assert "cannot pin" in capsys.readouterr().out
+    assert "Закрепление недоступно" in capsys.readouterr().out
