@@ -50,6 +50,7 @@ import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
 
 import BubbleChatPage from "@/pages/BubbleChatPage";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { IntakePreparationPanel } from "@/components/IntakePreparationPanel";
 import { api } from "@/lib/api";
 import { soulNamedAs } from "@/lib/agent-wizard";
 import { ownerFacingError } from "@/lib/owner-facing-error";
@@ -1021,6 +1022,9 @@ export default function AgentWorkbenchPage() {
                   navigate(`/orders?order=${encodeURIComponent(orderId)}`)
                 }
               />
+            )}
+            {managedCalculator && tab.profile === MAIN_AGENT_TAB.profile && intakeView?.record && !intakeDismissed && (
+              <IntakePreparationPanel handoffId={intakeView.record.handoff_id} />
             )}
             <BubbleChatPage
               agentProfile={tab.profile}

@@ -82,6 +82,40 @@ def test_native_title_keeps_identity_for_long_duplicate_folder_names():
     assert calc_intake._session_title(left) != calc_intake._session_title(right)
 
 
+def test_preparation_answers_http_cli_reload_replay_and_scope(cabinet, monkeypatch):
+    client, config, root, order = cabinet
+    calls = install_native(monkeypatch, run_status="completed")
+    record = client.post(f"/api/calc/orders/{order}/intake-handoff").json()
+    hid = record["handoff_id"]
+    with sqlite3.connect(root / "registry.db") as db:
+        db.execute("UPDATE intake_handoffs SET received_at=1 WHERE handoff_id=?", (hid,))
+    assert client.get(f"/api/calc/intake-handoffs/{hid}").json()["status"] == "received"
+    path = f"/api/calc/intake-handoffs/{hid}/preparation"
+    before = baseline(root)
+    view = client.get(path).json()
+    assert view["editable"] is True
+    assert view["summary"]["engineering_documents"] == 1
+    assert view["summary"]["service_files"] == 0
+    body = {"snapshot_id": view["snapshot_id"], "expected_revision": 0,
+            "request_id": "save-whole", "answers": {"scope": "whole", "scope_note": "",
+            "more_documents": "unknown", "quantity_source": "unknown", "notes": ""}}
+    saved = client.post(path + "/answers", json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["initial_answers"]["answers"]["scope"] == "whole"
+    assert saved.json()["initial_answers"]["receipt"]["actor"] == "panel"
+    assert client.get(path).json()["initial_answers"] == saved.json()["initial_answers"]
+    assert client.post(path + "/answers", json=body).json()["initial_answers"] == saved.json()["initial_answers"]
+    assert client.post(path + "/answers", json={**body, "request_id": "new"}).status_code == 409
+    assert client.post(path + "/answers", json={**body, "snapshot_id": "snap_other"}).status_code == 409
+    assert client.post(path + "/answers", json={**body, "actor": "model"}).status_code == 422
+    assert client.post(path + "/answers", content=b"x" * 25000).status_code == 413
+    assert baseline(root) == before
+    assert len([c for c in calls if c[1] == "/v1/runs"]) == 1
+    config["mcp_servers"]["metal_calc"]["env"]["METAL_CALC_ROLE"] = "tech"
+    assert client.get(path).status_code == 403
+    assert client.post(path + "/answers", json=body).status_code == 403
+
+
 def test_concurrent_clicks_bind_once_and_do_not_process_sources(cabinet, monkeypatch):
     client, config, root, order = cabinet
     calls = install_native(monkeypatch)

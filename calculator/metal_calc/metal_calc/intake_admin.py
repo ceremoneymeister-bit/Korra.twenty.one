@@ -17,6 +17,9 @@ def register(subparsers):
             parser.add_argument("--run-id", required=True)
         elif command == "error":
             parser.add_argument("--error-code", required=True)
+    for command in ("preparation", "answers-save"):
+        parser = subparsers.add_parser("intake-" + command)
+        parser.add_argument("--handoff-id", required=True)
 
 
 def run(args, emit):
@@ -24,6 +27,18 @@ def run(args, emit):
         if os.environ.get("METAL_CALC_ROLE") != "front":
             raise OrderScopeDenied("Передача доступна в кабинете приёма заказов")
         store = IntakeHandoffs(Settings.from_env().orders_root)
+        if args.command in {"intake-preparation", "intake-answers-save"}:
+            from .intake_preparation import IntakePreparation
+            from .admin import _read_stdin_json
+            from .errors import InvalidState
+            preparation = IntakePreparation(store)
+            if args.command == "intake-answers-save":
+                body = _read_stdin_json(limit=24 * 1024)
+                if set(body) != {"snapshot_id", "expected_revision", "request_id", "answers"}:
+                    raise InvalidState("Некорректный запрос сохранения начальных ответов")
+                preparation.save(args.handoff_id, **body)
+            emit(preparation.view(args.handoff_id, classify=True))
+            return
         method = {"intake-prepare": "prepare", "intake-get": "get", "intake-claim": "claim",
                   "intake-session-created": "mark_session_created", "intake-dispatched": "mark_dispatched",
                   "intake-error": "mark_error", "intake-received": "mark_received",

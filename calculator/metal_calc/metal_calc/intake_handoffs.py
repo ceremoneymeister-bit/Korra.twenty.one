@@ -221,11 +221,16 @@ class IntakeHandoffs:
         record = self.mark_received(record["handoff_id"])
         counts = {status: sum(item["status"] == status for item in cached.values())
                   for status in ("complete", "partial", "failed", "unsupported")}
+        from .intake_preparation import IntakePreparation
+        preparation = IntakePreparation(self).view(record["handoff_id"])
         return {"order_id": record["order_id"], "order_name": record["order_name"],
                 "snapshot_id": record["snapshot_id"], "document_set_revision": record["document_set_revision"],
                 "files_total": len(sources), "cached_observations": len(cached),
                 "files_without_observation": len(sources) - len(cached),
                 "cached_status_counts": counts,
+                "document_summary": preparation["summary"],
+                "initial_answers": preparation["initial_answers"],
+                "next_action": "Уточните только неизвестные начальные ответы; сотрудник сохраняет их в панели «Комплект и исходные ответы». Разбор ещё не запущен.",
                 "receipt": "context_delivered", "composition_status": "not_proposed",
                 "human_approved": False, "use_for_calculation": False}
 
@@ -238,8 +243,13 @@ class IntakeHandoffs:
         self._page(offset, limit, 100)
         record = self.for_session(session_id)
         sources, cached = self._cached(record)
+        from .document_classification import DocumentClassification
+        projection = DocumentClassification(self.jobs.orders_root).get_snapshot(record["order_id"], record["snapshot_id"])
+        classifications = {s["source_id"]: s for s in projection["sources"]}
         return {"order_id": record["order_id"], "snapshot_id": record["snapshot_id"],
                 "sources": [{**source, "observation_cached": source["source_id"] in cached,
+                             "classification": classifications[source["source_id"]]["classification"],
+                             "classification_reason": classifications[source["source_id"]]["reason"],
                              "observation_status": cached.get(source["source_id"], {}).get("status")}
                             for source in sources[offset:offset + limit]],
                 "offset": offset, "limit": limit, "total": len(sources),

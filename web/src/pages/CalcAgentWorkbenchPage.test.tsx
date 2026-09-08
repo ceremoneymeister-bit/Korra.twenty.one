@@ -65,6 +65,9 @@ vi.mock("@/pages/BubbleChatPage", () => ({
   ),
 }));
 vi.mock("@/components/DeleteConfirmDialog", () => ({ DeleteConfirmDialog: () => null }));
+vi.mock("@/components/IntakePreparationPanel", () => ({
+  IntakePreparationPanel: ({ handoffId }: { handoffId: string }) => <div data-preparation={handoffId} />,
+}));
 vi.mock("@nous-research/ui/ui/components/toast", () => ({ Toast: () => null }));
 
 let container: HTMLDivElement;
@@ -118,6 +121,7 @@ describe("calculator agent workbench", () => {
       expect(menu.textContent).not.toContain(action);
     }
     expect(container.querySelector('[aria-label="Добавить вкладку агента"]')).toBeNull();
+    expect(container.querySelector('[data-preparation]')).toBeNull();
   });
 
   it("сохраняет управление агентами в основном интерфейсе Korra21", async () => {
@@ -186,6 +190,8 @@ describe("calculator agent workbench", () => {
     expect(rootChat.getAttribute("data-guard-locked")).toBe("false");
     expect(container.textContent).toContain("Заказ передан");
     expect(container.textContent).toContain("Сделка 124");
+    expect(container.querySelectorAll('[data-preparation]')).toHaveLength(1);
+    expect(container.querySelector('[data-preparation]')?.getAttribute("data-preparation")).toBe(id);
     expect(container.querySelector('[data-profile="calc-norm"]')?.getAttribute("data-session-request")).toBeNull();
   });
 
@@ -213,6 +219,7 @@ describe("calculator agent workbench", () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="switch-root"]')!.click());
     expect(container.textContent).not.toContain("Передача заказа приёмщику");
+    expect(container.querySelector('[data-preparation]')).toBeNull();
     const rootChat = container.querySelector('[data-profile=""]')!;
     expect(rootChat.getAttribute("data-session-request")).toBeNull();
     // Guard remains attached to the original durable session in case it is
