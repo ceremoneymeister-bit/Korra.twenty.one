@@ -56,7 +56,7 @@ def _resolve_short_name(name: str, sources, console: Console) -> str:
     from tools.skills_hub import unified_search
 
     c = console or _console
-    c.print(f"[dim]Resolving '{name}'...[/]")
+    c.print(f'[dim]Ищем «{name}»…[/]')
 
     results = unified_search(name, sources, source_filter="all", limit=20)
 
@@ -64,7 +64,7 @@ def _resolve_short_name(name: str, sources, console: Console) -> str:
     exact = [r for r in results if r.name.lower() == name.lower()]
 
     if len(exact) == 1:
-        c.print(f"[dim]Resolved to: {exact[0].identifier}[/]")
+        c.print(f'[dim]Найдено: {exact[0].identifier}[/]')
         return exact[0].identifier
 
     if len(exact) > 1:
@@ -73,32 +73,32 @@ def _resolve_short_name(name: str, sources, console: Console) -> str:
         # curated official/... entry, not stall on skills.sh duplicates.
         official = [r for r in exact if r.source == "official"]
         if len(official) == 1:
-            c.print(f"[dim]Resolved to: {official[0].identifier} (official catalog)[/]")
+            c.print(f'[dim]Найдено в официальном каталоге: {official[0].identifier}[/]')
             return official[0].identifier
-        c.print(f"\n[yellow]Multiple skills named '{name}' found:[/]")
+        c.print(f'[yellow]Найдено несколько навыков «{name}»:[/]')
         table = Table()
-        table.add_column("Source", style="dim")
-        table.add_column("Trust", style="dim")
+        table.add_column('Источник', style="dim")
+        table.add_column('Доверие', style="dim")
         # overflow="fold" keeps the full slug visible (wraps instead of ellipsis-truncating)
         # so users can copy it for `hermes skills install`.
-        table.add_column("Identifier", style="bold cyan", overflow="fold", no_wrap=False)
+        table.add_column('Идентификатор', style="bold cyan", overflow="fold", no_wrap=False)
         for r in exact:
             trust_style = {"builtin": "bright_cyan", "trusted": "green", "community": "yellow"}.get(r.trust_level, "dim")
             trust_label = "official" if r.source == "official" else r.trust_level
             table.add_row(r.source, f"[{trust_style}]{trust_label}[/]", r.identifier)
         c.print(table)
-        c.print("[bold]Use the full identifier to install a specific one.[/]\n")
+        c.print('[bold]Для выбора конкретного навыка укажите полный идентификатор.[/]')
         return ""
 
     # No exact match — check if there are partial matches to suggest
     if results:
-        c.print(f"[yellow]No exact match for '{name}'. Did you mean one of these?[/]")
+        c.print(f'[yellow]Точного совпадения для «{name}» нет. Возможно, вам нужен один из этих навыков:[/]')
         for r in results[:5]:
             c.print(f"  [cyan]{r.name}[/] — {r.identifier}")
         c.print()
         return ""
 
-    c.print(f"[bold red]Error:[/] No skill named '{name}' found in any source.\n")
+    c.print(f'[bold red]Ошибка:[/] Навык «{name}» не найден ни в одном источнике.')
     return ""
 
 
@@ -125,13 +125,12 @@ def _print_tier1_advisory(skill_dir, console) -> None:
         style = "red" if report.secrets_findings else "yellow"
         console.print(Panel(
             text,
-            title="SkillEvaluator Tier 1 (advisory)",
+            title='SkillEvaluator: дополнительная проверка уровня 1',
             border_style=style,
         ))
         if report.secrets_findings:
             console.print(
-                "[bold red]Possible credentials detected above.[/] "
-                "Review the flagged lines before using this skill.\n"
+                '[bold red]Выше обнаружены возможные ключи или пароли.[/] Проверьте отмеченные строки до использования навыка.'
             )
     except Exception as exc:  # advisory only — never break an install
         logging.getLogger(__name__).debug("Tier 1 advisory scan skipped: %s", exc)
@@ -250,25 +249,22 @@ def _prompt_for_skill_name(c: Console, url: str, default: str = "") -> Optional[
     """Prompt interactively for a skill name. Returns None on cancel/EOF."""
     c.print()
     c.print(
-        f"[yellow]The SKILL.md at {url} doesn't declare a `name:` in its "
-        f"frontmatter,[/]\n[yellow]and the URL path doesn't produce a valid "
-        f"identifier either.[/]"
+        f'[yellow]В SKILL.md по адресу {url} нет поля name:, а из адреса нельзя получить допустимое имя.[/]'
     )
     default_hint = f" [{default}]" if default else ""
     c.print(
-        f"[bold]Enter a skill name{default_hint}:[/] "
-        f"[dim](lowercase letters, digits, hyphens, underscores; starts with a letter)[/]"
+        f'[bold]Введите имя навыка{default_hint}:[/] [dim]латинские строчные буквы, цифры, дефисы и подчёркивания; начало — буква[/]'
     )
     from korra_cli.cli_output import line_input
 
     try:
-        answer = line_input("Name: ").strip()
+        answer = line_input('Имя: ').strip()
     except (EOFError, KeyboardInterrupt):
         return None
     if not answer and default:
         answer = default
     if not _is_valid_installed_skill_name(answer):
-        c.print(f"[bold red]Invalid name:[/] {answer!r}. Aborting install.\n")
+        c.print(f'[bold red]Недопустимое имя:[/] {answer!r}. Установка отменена.')
         return None
     return answer
 
@@ -278,24 +274,23 @@ def _prompt_for_category(c: Console, existing: List[str]) -> str:
     c.print()
     if existing:
         c.print(
-            "[bold]Pick a category[/] "
-            "[dim](reuse an existing bucket, type a new one, or press Enter to install flat)[/]"
+            '[bold]Выберите категорию:[/] [dim]существующую, новую или Enter для установки без категории[/]'
         )
-        c.print(f"[dim]Existing: {', '.join(existing)}[/]")
+        c.print(f"[dim]Уже есть: {', '.join(existing)}[/]")
     else:
         c.print(
-            "[bold]Category[/] [dim](optional — press Enter to install flat at ~/.hermes/skills/<name>/)[/]"
+            '[bold]Категория[/] [dim]необязательно; Enter — установить прямо в папку навыков профиля[/]'
         )
     from korra_cli.cli_output import line_input
 
     try:
-        answer = line_input("Category: ").strip()
+        answer = line_input('Категория: ').strip()
     except (EOFError, KeyboardInterrupt):
         return ""
     if not answer:
         return ""
     if not _VALID_CATEGORY_RE.match(answer):
-        c.print(f"[dim]Invalid category {answer!r} — installing flat.[/]")
+        c.print(f'[dim]Недопустимая категория {answer!r}. Устанавливаем без категории.[/]')
         return ""
     return answer
 
@@ -333,24 +328,24 @@ def do_search(query: str, source: str = "all", limit: int = 10,
         print(json.dumps(payload, indent=2))
         return
 
-    c.print(f"\n[bold]Searching for:[/] {query}")
+    c.print(f'[bold]Поиск:[/] {query}')
     with c.status("[bold]Searching registries..."):
         results = unified_search(query, sources, source_filter=source, limit=limit)
 
     if not results:
-        c.print("[dim]No skills found matching your query.[/]\n")
+        c.print('[dim]По вашему запросу навыки не найдены.[/]')
         return
 
-    table = Table(title=f"Skills Hub — {len(results)} result(s)")
-    table.add_column("Name", style="bold cyan")
-    table.add_column("Description", max_width=60)
-    table.add_column("Source", style="dim")
-    table.add_column("Trust", style="dim")
+    table = Table(title=f'Каталог навыков: результатов {len(results)}')
+    table.add_column('Название', style="bold cyan")
+    table.add_column('Описание', max_width=60)
+    table.add_column('Источник', style="dim")
+    table.add_column('Доверие', style="dim")
     # overflow="fold" keeps the full slug visible (wraps instead of
     # ellipsis-truncating). Browse.sh slugs end in a `-XXXXXX` hash that
     # is part of the actual identifier — truncating it makes copy-paste
     # into `hermes skills install` fail.
-    table.add_column("Identifier", style="dim", overflow="fold", no_wrap=False)
+    table.add_column('Идентификатор', style="dim", overflow="fold", no_wrap=False)
 
     for r in results:
         trust_style = {"builtin": "bright_cyan", "trusted": "green", "community": "yellow"}.get(r.trust_level, "dim")
@@ -364,9 +359,7 @@ def do_search(query: str, source: str = "all", limit: int = 10,
         )
 
     c.print(table)
-    c.print("[dim]Use: hermes skills inspect <identifier> to preview, "
-            "hermes skills install <identifier> to install "
-            "(--json for scripting)[/]\n")
+    c.print('[dim]Просмотр: korra skills inspect <identifier>. Установка: korra skills install <identifier>. Для скриптов — --json.[/]')
 
 
 def do_browse(page: int = 1, page_size: int = 20, source: str = "all",
@@ -432,7 +425,7 @@ def do_browse(page: int = 1, page_size: int = 20, source: str = "all",
         )
 
     if not all_results:
-        c.print("[dim]No skills found in the Skills Hub.[/]\n")
+        c.print('[dim]В каталоге навыков ничего не найдено.[/]')
         return
 
     # Provider filter (nvidia/openai/...) narrows GitHub-tap skills by their
@@ -442,7 +435,7 @@ def do_browse(page: int = 1, page_size: int = 20, source: str = "all",
     if source.strip().lower() in _PROVIDER_FILTER_VALUES:
         all_results = _filter_results_by_provider(all_results, source)
         if not all_results:
-            c.print(f"[dim]No skills found for provider '{source}'.[/]\n")
+            c.print(f'[dim]Навыки провайдера «{source}» не найдены.[/]')
             return
 
     # Deduplicate by identifier, preferring higher trust.
@@ -478,23 +471,22 @@ def do_browse(page: int = 1, page_size: int = 20, source: str = "all",
     loaded_label = f"{total} skills loaded"
     if timed_out:
         loaded_label += f", {len(timed_out)} source(s) still loading"
-    c.print(f"\n[bold]Skills Hub — Browse {source_label}[/]"
-            f"  [dim]({loaded_label}, page {page}/{total_pages})[/]")
+    c.print(f'[bold]Каталог навыков — {source_label}[/] [dim]({loaded_label}, страница {page}/{total_pages})[/]')
     if official_count > 0 and page == 1:
-        c.print(f"[bright_cyan]★ {official_count} official optional skill(s) from Nous Research[/]")
+        c.print(f'[bright_cyan]★ Официальных дополнительных навыков Nous Research: {official_count}[/]')
     c.print()
 
     # Build table
     table = Table(show_header=True, header_style="bold")
     table.add_column("#", style="dim", width=4, justify="right")
-    table.add_column("Name", style="bold cyan", max_width=22)
-    table.add_column("Description", max_width=44)
-    table.add_column("Source", style="dim", width=12)
-    table.add_column("Trust", width=10)
+    table.add_column('Название', style="bold cyan", max_width=22)
+    table.add_column('Описание', max_width=44)
+    table.add_column('Источник', style="dim", width=12)
+    table.add_column('Доверие', width=10)
     # The identifier is what you pass to `hermes skills install`. Browse used
     # to omit it entirely, so users couldn't act on what they saw without a
     # second `search`. overflow="fold" keeps long slugs copy-pasteable.
-    table.add_column("Identifier", style="dim", overflow="fold", no_wrap=False)
+    table.add_column('Идентификатор', style="dim", overflow="fold", no_wrap=False)
 
     for i, r in enumerate(page_items, start=start + 1):
         trust_style = {"builtin": "bright_cyan", "trusted": "green",
@@ -529,15 +521,12 @@ def do_browse(page: int = 1, page_size: int = 20, source: str = "all",
     # Source summary
     if source == "all" and source_counts:
         parts = [f"{sid}: {ct}" for sid, ct in sorted(source_counts.items())]
-        c.print(f"  [dim]Sources: {', '.join(parts)}[/]")
+        c.print(f"  [dim]Источники: {', '.join(parts)}[/]")
 
     if timed_out:
-        c.print(f"  [yellow]⚡ Slow sources skipped: {', '.join(timed_out)} "
-                f"— run again for cached results[/]")
+        c.print(f"  [yellow]⚡ Медленные источники пропущены: {', '.join(timed_out)}. Повторите запрос для получения результатов из кеша.[/]")
 
-    c.print("[dim]Tip: 'hermes skills inspect <identifier>' to preview, "
-            "'hermes skills install <identifier>' to install, "
-            "'hermes skills search <query>' to search deeper[/]\n")
+    c.print('[dim]Просмотр: korra skills inspect <identifier>; установка: korra skills install <identifier>; поиск: korra skills search <query>.[/]')
 
 
 def do_install(identifier: str, category: str = "", force: bool = False,
@@ -581,9 +570,7 @@ def do_install(identifier: str, category: str = "", force: bool = False,
             sources = pinned
         else:
             c.print(
-                f"[bold red]Error:[/] no source adapter for '{source_id}'. "
-                f"Refusing to resolve '{identifier}' against other registries "
-                f"(that would change the skill's provenance).\n"
+                f'[bold red]Ошибка:[/] Нет адаптера источника «{source_id}». Не будем искать «{identifier}» в другом каталоге, чтобы не подменить источник навыка.'
             )
             return
 
@@ -593,7 +580,7 @@ def do_install(identifier: str, category: str = "", force: bool = False,
         if not identifier:
             return
 
-    c.print(f"\n[bold]Fetching:[/] {identifier}")
+    c.print(f'[bold]Загружаем:[/] {identifier}')
 
     meta, bundle, _matched_source = _resolve_source_meta_and_bundle(identifier, sources)
 
@@ -604,14 +591,10 @@ def do_install(identifier: str, category: str = "", force: bool = False,
             or getattr(getattr(src, "github", None), "is_rate_limited", False)
             for src in sources
         )
-        c.print(f"[bold red]Error:[/] Could not fetch '{identifier}' from any source.")
+        c.print(f'[bold red]Ошибка:[/] Не удалось загрузить «{identifier}» ни из одного источника.')
         if rate_limited:
             c.print(
-                "[yellow]Hint:[/] GitHub API rate limit exhausted "
-                "(unauthenticated: 60 requests/hour).\n"
-                "Set [bold]GITHUB_TOKEN[/] in your .env or install the "
-                "[bold]gh[/] CLI and run [bold]gh auth login[/] "
-                "to raise the limit to 5,000/hr.\n"
+                '[yellow]Подсказка:[/] Исчерпан лимит GitHub API: 60 запросов в час без входа. Добавьте GITHUB_TOKEN в .env или установите gh и выполните gh auth login, чтобы увеличить лимит до 5000 запросов в час.'
             )
         else:
             c.print()
@@ -628,9 +611,7 @@ def do_install(identifier: str, category: str = "", force: bool = False,
             bundle_meta["awaiting_name"] = False
         elif name_override:
             c.print(
-                f"[bold red]Invalid --name:[/] {name_override!r}. "
-                "Must be a lowercase identifier (letters, digits, hyphens, "
-                "underscores; starts with a letter).\n"
+                f'[bold red]Недопустимое --name:[/] {name_override!r}. Используйте строчные латинские буквы, цифры, дефисы и подчёркивания; первый символ — буква.'
             )
             return
         elif skip_confirm:
@@ -638,14 +619,7 @@ def do_install(identifier: str, category: str = "", force: bool = False,
             # prompt — emit an actionable error.
             url = bundle_meta.get("url") or identifier
             c.print(
-                f"[bold red]Cannot install from URL:[/] {url}\n"
-                "[yellow]The SKILL.md has no `name:` in its frontmatter, "
-                "and the URL path doesn't produce a valid identifier.[/]\n\n"
-                "Retry with an explicit name:\n"
-                f"  [bold]/skills install {url} --name <your-name>[/]\n"
-                f"  [bold]hermes skills install {url} --name <your-name>[/]\n\n"
-                "[dim]Or ask the SKILL.md's author to add a `name:` field to "
-                "its YAML frontmatter.[/]\n"
+                f'[bold red]Не удалось установить по адресу:[/] {url}. [yellow]В SKILL.md нет поля name:, а из адреса нельзя получить допустимое имя.[/] Повторите с явным именем: [bold]/skills install {url} --name <name>[/] или [bold]korra skills install {url} --name <name>[/]. Можно попросить автора добавить поле name: в метаданные YAML.'
             )
             return
         else:
@@ -653,7 +627,7 @@ def do_install(identifier: str, category: str = "", force: bool = False,
             url = bundle_meta.get("url") or identifier
             chosen = _prompt_for_skill_name(c, url)
             if not chosen:
-                c.print("[dim]Installation cancelled.[/]\n")
+                c.print('[dim]Установка отменена.[/]')
                 return
             bundle.name = chosen
             bundle_meta["awaiting_name"] = False
@@ -681,9 +655,9 @@ def do_install(identifier: str, category: str = "", force: bool = False,
     lock = HubLockFile()
     existing = lock.get_installed(bundle.name)
     if existing:
-        c.print(f"[yellow]Warning:[/] '{bundle.name}' is already installed at {existing['install_path']}")
+        c.print(f"[yellow]Внимание:[/] «{bundle.name}» уже установлен в {existing['install_path']}")
         if not force:
-            c.print("Use --force to reinstall.\n")
+            c.print('Для переустановки используйте --force.')
             return
 
     extra_metadata = dict(getattr(meta, "extra", {}) or {})
@@ -693,15 +667,15 @@ def do_install(identifier: str, category: str = "", force: bool = False,
     try:
         q_path = quarantine_bundle(bundle)
     except ValueError as exc:
-        c.print(f"[bold red]Installation blocked:[/] {exc}\n")
+        c.print(f'[bold red]Установка запрещена:[/] {exc}')
         from tools.skills_hub import append_audit_log
         append_audit_log("BLOCKED", bundle.name, bundle.source,
                          bundle.trust_level, "invalid_path", str(exc))
         return
-    c.print(f"[dim]Quarantined to {q_path.relative_to(q_path.parent.parent.parent)}[/]")
+    c.print(f'[dim]Помещён в карантин: {q_path.relative_to(q_path.parent.parent.parent)}[/]')
 
     # Scan
-    c.print("[bold]Running security scan...[/]")
+    c.print('[bold]Проверяем безопасность…[/]')
     if bundle.source == "official":
         scan_source = "official"
     else:
@@ -720,19 +694,17 @@ def do_install(identifier: str, category: str = "", force: bool = False,
     c.print(format_scan_report(result))
     freshness = "fresh" if scan_provenance["fresh"] else "cached"
     c.print(
-        f"[dim]Scan provenance: {freshness}; scanner "
-        f"{scan_provenance['scanner_version']}; hash {scan_provenance['bundle_hash']}[/]"
+        f"[dim]Источник проверки: {freshness}; сканер: {scan_provenance['scanner_version']}; хеш: {scan_provenance['bundle_hash']}[/]"
     )
     rules = ", ".join(scan_provenance["rules"]) or "none"
     c.print(
-        f"[dim]Source: {scan_provenance['source_url']}; scanned "
-        f"{scan_provenance['scanned_at']}; rules: {rules}[/]"
+        f"[dim]Источник: {scan_provenance['source_url']}; проверено: {scan_provenance['scanned_at']}; правила: {rules}[/]"
     )
 
     # Check install policy
     allowed, reason = should_allow_install(result, force=force)
     if not allowed:
-        c.print(f"\n[bold red]Installation blocked:[/] {reason}")
+        c.print(f'[bold red]Установка запрещена:[/] {reason}')
         # Clean up quarantine
         shutil.rmtree(q_path, ignore_errors=True)
         from tools.skills_hub import append_audit_log
@@ -750,7 +722,7 @@ def do_install(identifier: str, category: str = "", force: bool = False,
     if extra_metadata:
         metadata_lines = _format_extra_metadata_lines(extra_metadata)
         if metadata_lines:
-            c.print(Panel("\n".join(metadata_lines), title="Upstream Metadata", border_style="blue"))
+            c.print(Panel("\n".join(metadata_lines), title='Сведения из источника', border_style="blue"))
 
     # Confirm with user — show appropriate warning based on source
     # skip_confirm bypasses the prompt (needed in TUI mode where input() hangs)
@@ -758,30 +730,23 @@ def do_install(identifier: str, category: str = "", force: bool = False,
         c.print()
         if bundle.source == "official":
             c.print(Panel(
-                "[bold bright_cyan]This is an official optional skill maintained by Nous Research.[/]\n\n"
-                "It ships with hermes-agent but is not activated by default.\n"
-                "Installing will copy it to your skills directory where the agent can use it.\n\n"
-                f"Files will be at: [cyan]{display_hermes_home()}/skills/{category + '/' if category else ''}{bundle.name}/[/]",
-                title="Official Skill",
+                f"[bold bright_cyan]Официальный дополнительный навык Nous Research.[/] Поставляется с Коррой, но по умолчанию не включён. Установка скопирует его в папку навыков для использования агентом. Файлы: [cyan]{display_hermes_home()}/skills/{(category + '/' if category else '')}{bundle.name}/[/]",
+                title='Официальный навык',
                 border_style="bright_cyan",
             ))
         else:
             c.print(Panel(
-                "[bold yellow]You are installing a third-party skill at your own risk.[/]\n\n"
-                "External skills can contain instructions that influence agent behavior,\n"
-                "shell commands, and scripts. Even after automated scanning, you should\n"
-                "review the installed files before use.\n\n"
-                f"Files will be at: [cyan]{display_hermes_home()}/skills/{category + '/' if category else ''}{bundle.name}/[/]",
-                title="Disclaimer",
+                f"[bold yellow]Сторонний навык устанавливается на ваш риск.[/] Он может содержать инструкции, команды и скрипты, влияющие на работу агента. Проверьте файлы до использования, даже после автоматической проверки. Файлы: [cyan]{display_hermes_home()}/skills/{(category + '/' if category else '')}{bundle.name}/[/]",
+                title='Перед установкой',
                 border_style="yellow",
             ))
-        c.print(f"[bold]Install '{bundle.name}'?[/]")
+        c.print(f'[bold]Установить «{bundle.name}»?[/]')
         try:
-            answer = input("Confirm [y/N]: ").strip().lower()
+            answer = input('Подтвердить [y/N]: ').strip().lower()
         except (EOFError, KeyboardInterrupt):
             answer = "n"
         if answer not in {"y", "yes"}:
-            c.print("[dim]Installation cancelled.[/]\n")
+            c.print('[dim]Установка отменена.[/]')
             shutil.rmtree(q_path, ignore_errors=True)
             return
 
@@ -789,15 +754,15 @@ def do_install(identifier: str, category: str = "", force: bool = False,
     try:
         install_dir = install_from_quarantine(q_path, bundle.name, category, bundle, result)
     except ValueError as exc:
-        c.print(f"[bold red]Installation blocked:[/] {exc}\n")
+        c.print(f'[bold red]Установка запрещена:[/] {exc}')
         shutil.rmtree(q_path, ignore_errors=True)
         from tools.skills_hub import append_audit_log
         append_audit_log("BLOCKED", bundle.name, bundle.source,
                          bundle.trust_level, "invalid_path", str(exc))
         return
     from tools.skills_hub import SKILLS_DIR
-    c.print(f"[bold green]Installed:[/] {install_dir.resolve().relative_to(Path(SKILLS_DIR).resolve()).as_posix()}")
-    c.print(f"[dim]Files: {', '.join(bundle.files.keys())}[/]\n")
+    c.print(f'[bold green]Установлено:[/] {install_dir.resolve().relative_to(Path(SKILLS_DIR).resolve()).as_posix()}')
+    c.print(f"[dim]Файлы: {', '.join(bundle.files.keys())}[/]")
 
     # Blueprint detection: if the installed skill declares a
     # metadata.hermes.blueprint block, it is a runnable automation. Register it as
@@ -810,32 +775,26 @@ def do_install(identifier: str, category: str = "", force: bool = False,
         try:
             spec = blueprint_spec_for_installed(bundle.name)
         except BlueprintError as _rec_err:
-            c.print(f"[yellow]Blueprint block present but invalid:[/] {_rec_err}\n")
+            c.print(f'[yellow]Блок шаблона автоматизации некорректен:[/] {_rec_err}')
             spec = None
         if spec is not None:
             registered = register_blueprint_suggestion(spec)
             if registered is not None:
                 c.print(
-                    f"[bold cyan]Blueprint:[/] '{bundle.name}' is an automation "
-                    f"(schedule [bold]{spec.schedule}[/])."
+                    f'[bold cyan]Шаблон:[/] «{bundle.name}» — автоматизация с расписанием [bold]{spec.schedule}[/].'
                 )
                 c.print(
-                    "[dim]Added to your suggestions — run[/] [bold]/suggestions[/] "
-                    "[dim]to schedule or dismiss it.[/]\n"
+                    '[dim]Добавлено в предложения. Команда[/] [bold]/suggestions[/] [dim]позволяет включить расписание или отклонить предложение.[/]'
                 )
             else:
                 # Dropped: already offered/dismissed (latched) or the pending
                 # list is at its cap. Say so instead of silently doing nothing —
                 # the user can still schedule it by hand.
                 c.print(
-                    f"[bold cyan]Blueprint:[/] '{bundle.name}' is an automation "
-                    f"(schedule [bold]{spec.schedule}[/]), but it wasn't added to "
-                    "your suggestions (already offered/dismissed, or the pending "
-                    "list is full — run [bold]/suggestions[/] to review)."
+                    f'[bold cyan]Шаблон:[/] «{bundle.name}» — автоматизация с расписанием [bold]{spec.schedule}[/]. В предложения не добавлена: уже предлагалась, отклонена или список заполнен. Проверьте [bold]/suggestions[/].'
                 )
                 c.print(
-                    "[dim]You can still schedule it any time by asking the agent "
-                    "or via[/] [bold]hermes cron add[/][dim].[/]\n"
+                    '[dim]Настроить расписание можно в любое время: попросите агента или выполните[/] [bold]korra cron add[/][dim].[/]'
                 )
     except Exception:  # pragma: no cover - blueprint detection is best-effort
         pass
@@ -848,8 +807,8 @@ def do_install(identifier: str, category: str = "", force: bool = False,
         except Exception:
             pass
     else:
-        c.print("[dim]Skill will be available in your next session.[/]")
-        c.print("[dim]Use /reset to start a new session now, or --now to activate immediately (invalidates prompt cache).[/]\n")
+        c.print('[dim]Навык появится в следующей беседе.[/]')
+        c.print('[dim]/reset начнёт новую беседу; --now включит навык сразу, сбросив кеш запросов.[/]')
 
 
 def do_inspect(identifier: str, console: Optional[Console] = None) -> None:
@@ -868,7 +827,7 @@ def do_inspect(identifier: str, console: Optional[Console] = None) -> None:
     meta, bundle, _matched_source = _resolve_source_meta_and_bundle(identifier, sources)
 
     if not meta:
-        c.print(f"[bold red]Error:[/] Could not find '{identifier}' in any source.\n")
+        c.print(f'[bold red]Ошибка:[/] «{identifier}» не найден ни в одном источнике.')
         return
 
     c.print()
@@ -886,7 +845,7 @@ def do_inspect(identifier: str, console: Optional[Console] = None) -> None:
         info_lines.append(f"[bold]Tags:[/] {', '.join(meta.tags)}")
     info_lines.extend(_format_extra_metadata_lines(meta.extra))
 
-    c.print(Panel("\n".join(info_lines), title=f"Skill: {meta.name}"))
+    c.print(Panel("\n".join(info_lines), title=f'Навык: {meta.name}'))
 
     if bundle and "SKILL.md" in bundle.files:
         content = bundle.files["SKILL.md"]
@@ -897,7 +856,7 @@ def do_inspect(identifier: str, console: Optional[Console] = None) -> None:
         preview = "\n".join(lines[:50])
         if len(lines) > 50:
             preview += f"\n\n... ({len(lines) - 50} more lines)"
-        c.print(Panel(preview, title="SKILL.md Preview", subtitle="hermes skills install <id> to install"))
+        c.print(Panel(preview, title='Просмотр SKILL.md', subtitle='Установка: korra skills install <id>'))
 
     c.print()
 
@@ -1023,11 +982,11 @@ def do_list(source_filter: str = "all",
         title += " (enabled only)"
 
     table = Table(title=title)
-    table.add_column("Name", style="bold cyan")
-    table.add_column("Category", style="dim")
-    table.add_column("Source", style="dim")
-    table.add_column("Trust", style="dim")
-    table.add_column("Status", style="dim")
+    table.add_column('Название', style="bold cyan")
+    table.add_column('Категория', style="dim")
+    table.add_column('Источник', style="dim")
+    table.add_column('Доверие', style="dim")
+    table.add_column('Состояние', style="dim")
 
     hub_count = 0
     builtin_count = 0
@@ -1095,20 +1054,20 @@ def do_check(name: Optional[str] = None, console: Optional[Console] = None) -> N
     c = console or _console
     results = check_for_skill_updates(name=name)
     if not results:
-        c.print("[dim]No hub-installed skills to check.[/]\n")
+        c.print('[dim]Нет навыков из каталога для проверки.[/]')
         return
 
-    table = Table(title="Skill Updates")
-    table.add_column("Name", style="bold cyan")
-    table.add_column("Source", style="dim")
-    table.add_column("Status", style="dim")
+    table = Table(title='Обновления навыков')
+    table.add_column('Название', style="bold cyan")
+    table.add_column('Источник', style="dim")
+    table.add_column('Состояние', style="dim")
 
     for entry in results:
         table.add_row(entry.get("name", ""), entry.get("source", ""), entry.get("status", ""))
 
     c.print(table)
     update_count = sum(1 for entry in results if entry.get("status") == "update_available")
-    c.print(f"[dim]{update_count} update(s) available across {len(results)} checked skill(s)[/]\n")
+    c.print(f'[dim]Доступно обновлений: {update_count}; проверено навыков: {len(results)}[/]')
 
 
 def do_update(name: Optional[str] = None, console: Optional[Console] = None,
@@ -1131,7 +1090,7 @@ def do_update(name: Optional[str] = None, console: Optional[Console] = None,
     lock = HubLockFile()
     updates = [entry for entry in check_for_skill_updates(name=name) if entry.get("status") == "update_available"]
     if not updates:
-        c.print("[dim]No updates available.[/]\n")
+        c.print('[dim]Обновлений нет.[/]')
         return
 
     skipped_local: list[str] = []
@@ -1149,11 +1108,10 @@ def do_update(name: Optional[str] = None, console: Optional[Console] = None,
                 if disk_hash != recorded_hash:
                     skipped_local.append(entry["name"])
                     c.print(
-                        f"[yellow]Skipping:[/] {entry['name']} — you have local edits "
-                        "(update would overwrite them)."
+                        f"[yellow]Пропускаем:[/] {entry['name']}: обновление заменило бы ваши локальные правки."
                     )
                     continue
-        c.print(f"[bold]Updating:[/] {entry['name']}")
+        c.print(f"[bold]Обновляем:[/] {entry['name']}")
         # Pin the update to the source registry recorded in the lockfile.
         # Without this, a bare (slash-less) identifier such as "reddit" falls
         # through to _resolve_short_name()'s fuzzy catalog search inside
@@ -1171,13 +1129,12 @@ def do_update(name: Optional[str] = None, console: Optional[Console] = None,
 
     updated_count = len(updates) - len(skipped_local)
     if updated_count:
-        c.print(f"[bold green]Updated {updated_count} skill(s).[/]\n")
+        c.print(f'[bold green]Обновлено навыков: {updated_count}.[/]')
     if skipped_local:
         c.print(
-            f"[dim]{len(skipped_local)} skill(s) kept your local edits: "
-            f"{', '.join(sorted(skipped_local))}.[/]"
+            f"[dim]Навыков с сохранёнными локальными правками: {len(skipped_local)}: {', '.join(sorted(skipped_local))}.[/]"
         )
-        c.print("[dim]Overwrite with: hermes skills update <name> --force[/]\n")
+        c.print('[dim]Для замены: korra skills update <name> --force[/]')
 
 
 def do_audit(name: Optional[str] = None, console: Optional[Console] = None,
@@ -1196,17 +1153,17 @@ def do_audit(name: Optional[str] = None, console: Optional[Console] = None,
     installed = lock.list_installed()
 
     if not installed:
-        c.print("[dim]No hub-installed skills to audit.[/]\n")
+        c.print('[dim]Нет навыков из каталога для проверки безопасности.[/]')
         return
 
     targets = installed
     if name:
         targets = [e for e in installed if e["name"] == name]
         if not targets:
-            c.print(f"[bold red]Error:[/] '{name}' is not a hub-installed skill.\n")
+            c.print(f'[bold red]Ошибка:[/] «{name}» не является навыком из каталога.')
             return
 
-    c.print(f"\n[bold]Auditing {len(targets)} skill(s)...[/]\n")
+    c.print(f'[bold]Проверяем навыки: {len(targets)}…[/]')
 
     if deep:
         from tools.skills_ast_audit import ast_scan_path, format_ast_report
@@ -1214,7 +1171,7 @@ def do_audit(name: Optional[str] = None, console: Optional[Console] = None,
     for entry in targets:
         skill_path = SKILLS_DIR / entry["install_path"]
         if not skill_path.exists():
-            c.print(f"[yellow]Warning:[/] {entry['name']} — path missing: {entry['install_path']}")
+            c.print(f"[yellow]Внимание:[/] {entry['name']}: путь не найден — {entry['install_path']}")
             continue
 
         result = scan_skill(skill_path, source=entry.get("identifier", entry["source"]))
@@ -1236,13 +1193,13 @@ def do_uninstall(name: str, console: Optional[Console] = None,
 
     # skip_confirm bypasses the prompt (needed in TUI mode where input() hangs)
     if not skip_confirm:
-        c.print(f"\n[bold]Uninstall '{name}'?[/]")
+        c.print(f'[bold]Удалить «{name}»?[/]')
         try:
-            answer = input("Confirm [y/N]: ").strip().lower()
+            answer = input('Подтвердить [y/N]: ').strip().lower()
         except (EOFError, KeyboardInterrupt):
             answer = "n"
         if answer not in {"y", "yes"}:
-            c.print("[dim]Cancelled.[/]\n")
+            c.print('[dim]Отменено.[/]')
             return
 
     success, msg = uninstall_skill(name)
@@ -1255,10 +1212,10 @@ def do_uninstall(name: str, console: Optional[Console] = None,
             except Exception:
                 pass
         else:
-            c.print("[dim]Change will take effect in your next session.[/]")
-            c.print("[dim]Use /reset to start a new session now, or --now to apply immediately (invalidates prompt cache).[/]\n")
+            c.print('[dim]Изменение вступит в силу в следующей беседе.[/]')
+            c.print('[dim]/reset начнёт новую беседу; --now применит изменение сразу, сбросив кеш запросов.[/]')
     else:
-        c.print(f"[bold red]Error:[/] {msg}\n")
+        c.print(f'[bold red]Ошибка:[/] {msg}')
 
 
 def do_reset(name: str, restore: bool = False,
@@ -1271,28 +1228,28 @@ def do_reset(name: str, restore: bool = False,
     c = console or _console
 
     if not skip_confirm and restore:
-        c.print(f"\n[bold]Restore '{name}' from bundled source?[/]")
-        c.print("[dim]This will DELETE your current copy and re-copy the bundled version.[/]")
+        c.print(f'[bold]Восстановить «{name}» из поставки?[/]')
+        c.print('[dim]Ваша текущая копия будет удалена и заменена версией из поставки.[/]')
         try:
-            answer = input("Confirm [y/N]: ").strip().lower()
+            answer = input('Подтвердить [y/N]: ').strip().lower()
         except (EOFError, KeyboardInterrupt):
             answer = "n"
         if answer not in {"y", "yes"}:
-            c.print("[dim]Cancelled.[/]\n")
+            c.print('[dim]Отменено.[/]')
             return
 
     result = reset_bundled_skill(name, restore=restore)
 
     if not result["ok"]:
-        c.print(f"[bold red]Error:[/] {result['message']}\n")
+        c.print(f"[bold red]Ошибка:[/] {result['message']}")
         return
 
     c.print(f"[bold green]{result['message']}[/]")
     synced = result.get("synced") or {}
     if synced.get("copied"):
-        c.print(f"[dim]Copied: {', '.join(synced['copied'])}[/]")
+        c.print(f"[dim]Скопировано: {', '.join(synced['copied'])}[/]")
     if synced.get("updated"):
-        c.print(f"[dim]Updated: {', '.join(synced['updated'])}[/]")
+        c.print(f"[dim]Обновлено: {', '.join(synced['updated'])}[/]")
     c.print()
 
     if invalidate_cache:
@@ -1302,8 +1259,8 @@ def do_reset(name: str, restore: bool = False,
         except Exception:
             pass
     else:
-        c.print("[dim]Change will take effect in your next session.[/]")
-        c.print("[dim]Use /reset to start a new session now, or --now to apply immediately (invalidates prompt cache).[/]\n")
+        c.print('[dim]Изменение вступит в силу в следующей беседе.[/]')
+        c.print('[dim]/reset начнёт новую беседу; --now применит изменение сразу, сбросив кеш запросов.[/]')
 
 
 def do_list_modified(console: Optional[Console] = None,
@@ -1321,17 +1278,16 @@ def do_list_modified(console: Optional[Console] = None,
         return
 
     if not modified:
-        c.print("[dim]No user-modified bundled skills — everything tracks upstream.[/]\n")
+        c.print('[dim]Изменённых встроенных навыков нет. Все получают обновления из источника.[/]')
         return
 
-    c.print(f"\n[bold]{len(modified)} user-modified bundled skill(s)[/] "
-            "[dim](kept as-is by `hermes update`):[/]")
+    c.print(f'[bold]Изменённых вами встроенных навыков: {len(modified)}[/] [dim]korra update сохраняет их без изменений:[/]')
     for entry in modified:
         c.print(f"  [yellow]~[/] {entry['name']}")
     c.print()
-    c.print("[dim]See changes:   hermes skills diff <name>[/]")
-    c.print("[dim]Resume updates: hermes skills reset <name>          (keep your copy, re-baseline)[/]")
-    c.print("[dim]Revert to stock: hermes skills reset <name> --restore[/]\n")
+    c.print('[dim]Посмотреть изменения: korra skills diff <name>[/]')
+    c.print('[dim]Вернуть обновления, сохранив вашу копию: korra skills reset <name>[/]')
+    c.print('[dim]Вернуть версию из поставки: korra skills reset <name> --restore[/]')
 
 
 def do_diff(name: str, console: Optional[Console] = None) -> None:
@@ -1342,7 +1298,7 @@ def do_diff(name: str, console: Optional[Console] = None) -> None:
     result = diff_bundled_skill(name)
 
     if not result["ok"]:
-        c.print(f"[bold red]Error:[/] {result['message']}\n")
+        c.print(f"[bold red]Ошибка:[/] {result['message']}")
         return
 
     if not result["modified"]:
@@ -1364,13 +1320,13 @@ def do_diff(name: str, console: Optional[Console] = None) -> None:
                 else:
                     c.print(line, highlight=False)
         elif status == "added":
-            c.print(f"[green]+ only in your copy:[/] {entry['path']}")
+            c.print(f"[green]+ Только в вашей копии:[/] {entry['path']}")
         elif status == "removed":
-            c.print(f"[red]- only in stock:[/] {entry['path']}")
+            c.print(f"[red]- Только в поставке:[/] {entry['path']}")
         else:  # binary
-            c.print(f"[yellow]~ {entry['path']}:[/] binary file differs")
+            c.print(f"[yellow]~ {entry['path']}:[/] двоичные файлы отличаются")
     c.print()
-    c.print(f"[dim]Revert with: hermes skills reset {name} --restore[/]\n")
+    c.print(f'[dim]Восстановление: korra skills reset {name} --restore[/]')
 
 
 def do_opt_out(remove: bool = False,
@@ -1394,14 +1350,13 @@ def do_opt_out(remove: bool = False,
     # Write the marker first (the always-safe part).
     res = set_bundled_skills_opt_out(True)
     if not res["ok"]:
-        c.print(f"[bold red]Error:[/] {res['message']}\n")
+        c.print(f"[bold red]Ошибка:[/] {res['message']}")
         return
     c.print(f"[bold green]{res['message']}[/]")
-    c.print(f"[dim]Marker: {res['marker']}[/]")
+    c.print(f"[dim]Файл-метка: {res['marker']}[/]")
 
     if not remove:
-        c.print("[dim]Existing skills on disk were left in place. "
-                "Re-run with --remove to also delete unmodified bundled skills.[/]\n")
+        c.print('[dim]Установленные навыки сохранены. Повторите с --remove, чтобы удалить и неизменённые встроенные навыки.[/]')
         return
 
     # Destructive step: preview, confirm, then delete.
@@ -1409,30 +1364,28 @@ def do_opt_out(remove: bool = False,
     candidates = preview["removed"]
     kept = preview["skipped"]
     if not candidates:
-        c.print("[dim]No pristine bundled skills to remove "
-                "(nothing tracked, or all are user-modified/local).[/]\n")
+        c.print('[dim]Неизменённых встроенных навыков для удаления нет: они не отслеживаются или изменены вами.[/]')
         return
 
-    c.print(f"\n[bold]Will remove {len(candidates)} unmodified bundled skill(s):[/]")
+    c.print(f'[bold]Будут удалены неизменённые встроенные навыки ({len(candidates)}):[/]')
     c.print(f"[dim]{', '.join(candidates)}[/]")
     if kept:
-        c.print(f"[dim]Keeping {len(kept)} (user-modified or non-bundled).[/]")
+        c.print(f'[dim]Сохраняем {len(kept)}: изменён вами или не входит в поставку.[/]')
 
     if not skip_confirm:
-        c.print("[dim]This deletes the on-disk copies. User-edited and "
-                "hub/local skills are NOT touched.[/]")
+        c.print('[dim]Копии на диске будут удалены. Ваши правки, локальные навыки и навыки из каталога сохранятся.[/]')
         try:
-            answer = input("Confirm [y/N]: ").strip().lower()
+            answer = input('Подтвердить [y/N]: ').strip().lower()
         except (EOFError, KeyboardInterrupt):
             answer = "n"
         if answer not in {"y", "yes"}:
-            c.print("[dim]Marker kept; no skills deleted.[/]\n")
+            c.print('[dim]Метка сохранена; навыки не удалены.[/]')
             return
 
     result = remove_pristine_bundled_skills(dry_run=False)
     c.print(f"[bold green]{result['message']}[/]")
     if result["removed"]:
-        c.print(f"[dim]Removed: {', '.join(result['removed'])}[/]")
+        c.print(f"[dim]Удалено: {', '.join(result['removed'])}[/]")
     c.print()
 
     if invalidate_cache:
@@ -1457,14 +1410,14 @@ def do_opt_in(sync: bool = False,
 
     res = set_bundled_skills_opt_out(False)
     if not res["ok"]:
-        c.print(f"[bold red]Error:[/] {res['message']}\n")
+        c.print(f"[bold red]Ошибка:[/] {res['message']}")
         return
     c.print(f"[bold green]{res['message']}[/]")
 
     if sync:
         synced = sync_skills(quiet=True)
         copied = len(synced.get("copied", []))
-        c.print(f"[dim]Re-seeded {copied} bundled skill(s).[/]")
+        c.print(f'[dim]Восстановлено встроенных навыков: {copied}.[/]')
         if invalidate_cache:
             try:
                 from agent.prompt_builder import clear_skills_system_prompt_cache
@@ -1483,29 +1436,29 @@ def do_repair_official(name: str, restore: bool = False,
 
     c = console or _console
     if restore and not skip_confirm:
-        c.print(f"\n[bold]Restore official optional skill '{name}' from repo source?[/]")
-        c.print("[dim]Existing matching active copies will be moved to a restore backup before copying the official source.[/]")
+        c.print(f'[bold]Восстановить официальный дополнительный навык «{name}» из репозитория?[/]')
+        c.print('[dim]Существующие соответствующие копии сначала будут сохранены в резервную папку.[/]')
         try:
-            answer = input("Confirm [y/N]: ").strip().lower()
+            answer = input('Подтвердить [y/N]: ').strip().lower()
         except (EOFError, KeyboardInterrupt):
             answer = "n"
         if answer not in {"y", "yes"}:
-            c.print("[dim]Cancelled.[/]\n")
+            c.print('[dim]Отменено.[/]')
             return
 
     result = restore_official_optional_skill(name, restore=restore)
     if not result.get("ok"):
-        c.print(f"[bold red]Error:[/] {result.get('message', 'Repair failed')}\n")
+        c.print(f"[bold red]Ошибка:[/] {result.get('message', 'Repair failed')}")
         return
 
     c.print(f"[bold green]{result['message']}[/]")
     if result.get("restored"):
-        c.print(f"[dim]Restored: {', '.join(result['restored'])}[/]")
+        c.print(f"[dim]Восстановлено: {', '.join(result['restored'])}[/]")
     if result.get("backfilled"):
-        c.print(f"[dim]Backfilled provenance: {', '.join(result['backfilled'])}[/]")
+        c.print(f"[dim]Сведения об источнике восстановлены: {', '.join(result['backfilled'])}[/]")
     if result.get("backed_up"):
-        c.print(f"[dim]Backed up: {', '.join(result['backed_up'])}[/]")
-        c.print(f"[dim]Backup dir: {result.get('backup_dir')}[/]")
+        c.print(f"[dim]Сохранена резервная копия: {', '.join(result['backed_up'])}[/]")
+        c.print(f"[dim]Папка резервных копий: {result.get('backup_dir')}[/]")
     c.print()
 
     if invalidate_cache:
@@ -1526,11 +1479,11 @@ def do_tap(action: str, repo: str = "", console: Optional[Console] = None) -> No
     if action == "list":
         taps = mgr.list_taps()
         if not taps:
-            c.print("[dim]No custom taps configured. Using default sources only.[/]\n")
+            c.print('[dim]Свои источники не настроены. Используются только стандартные.[/]')
             return
-        table = Table(title="Configured Taps")
-        table.add_column("Repo", style="bold cyan")
-        table.add_column("Path", style="dim")
+        table = Table(title='Подключённые источники')
+        table.add_column('Репозиторий', style="bold cyan")
+        table.add_column('Путь', style="dim")
         for t in taps:
             label = t.get("repo") or t.get("name") or t.get("path", "unknown")
             table.add_row(label, t.get("path", "skills/"))
@@ -1539,24 +1492,24 @@ def do_tap(action: str, repo: str = "", console: Optional[Console] = None) -> No
 
     elif action == "add":
         if not repo:
-            c.print("[bold red]Error:[/] Repo required. Usage: hermes skills tap add owner/repo\n")
+            c.print('[bold red]Ошибка:[/] Укажите репозиторий: korra skills tap add owner/repo')
             return
         if mgr.add(repo):
-            c.print(f"[bold green]Added tap:[/] {repo}\n")
+            c.print(f'[bold green]Источник добавлен:[/] {repo}')
         else:
-            c.print(f"[yellow]Tap already exists:[/] {repo}\n")
+            c.print(f'[yellow]Источник уже добавлен:[/] {repo}')
 
     elif action == "remove":
         if not repo:
-            c.print("[bold red]Error:[/] Repo required. Usage: hermes skills tap remove owner/repo\n")
+            c.print('[bold red]Ошибка:[/] Укажите репозиторий: korra skills tap remove owner/repo')
             return
         if mgr.remove(repo):
-            c.print(f"[bold green]Removed tap:[/] {repo}\n")
+            c.print(f'[bold green]Источник удалён:[/] {repo}')
         else:
-            c.print(f"[bold red]Error:[/] Tap not found: {repo}\n")
+            c.print(f'[bold red]Ошибка:[/] Источник не найден: {repo}')
 
     else:
-        c.print(f"[bold red]Unknown tap action:[/] {action}. Use: list, add, remove\n")
+        c.print(f'[bold red]Неизвестное действие источника:[/] {action}. Доступны list, add, remove.')
 
 
 def do_publish(skill_path: str, target: str = "github", repo: str = "",
@@ -1572,7 +1525,7 @@ def do_publish(skill_path: str, target: str = "github", repo: str = "",
     if not path.is_absolute():
         path = SKILLS_DIR / path
     if not path.exists() or not (path / "SKILL.md").exists():
-        c.print(f"[bold red]Error:[/] No SKILL.md found at {path}\n")
+        c.print(f'[bold red]Ошибка:[/] SKILL.md не найден в {path}')
         return
 
     # Validate the skill
@@ -1592,41 +1545,38 @@ def do_publish(skill_path: str, target: str = "github", repo: str = "",
     name = fm.get("name", path.name)
     description = fm.get("description", "")
     if not description:
-        c.print("[bold red]Error:[/] SKILL.md must have a 'description' in frontmatter.\n")
+        c.print('[bold red]Ошибка:[/] В метаданных SKILL.md должно быть поле description.')
         return
 
     # Self-scan before publishing
-    c.print(f"[bold]Scanning '{name}' before publish...[/]")
+    c.print(f'[bold]Проверяем «{name}» перед публикацией…[/]')
     result = scan_skill(path, source="self")
     c.print(format_scan_report(result))
     if result.verdict == "dangerous":
-        c.print("[bold red]Cannot publish a skill with DANGEROUS verdict.[/]\n")
+        c.print('[bold red]Нельзя публиковать навык с результатом проверки DANGEROUS.[/]')
         return
 
     if target == "github":
         if not repo:
-            c.print("[bold red]Error:[/] --repo required for GitHub publish.\n"
-                    "Usage: hermes skills publish <path> --to github --repo owner/repo\n")
+            c.print('[bold red]Ошибка:[/] Для публикации в GitHub нужен --repo. Использование: korra skills publish <path> --to github --repo owner/repo')
             return
 
         auth = GitHubAuth()
         if not auth.is_authenticated():
-            c.print("[bold red]Error:[/] GitHub authentication required.\n"
-                    f"Set GITHUB_TOKEN in {display_hermes_home()}/.env or run 'gh auth login'.\n")
+            c.print(f'[bold red]Ошибка:[/] Нужен вход GitHub. Задайте GITHUB_TOKEN в {display_hermes_home()}/.env или выполните gh auth login.')
             return
 
-        c.print(f"[bold]Publishing '{name}' to {repo}...[/]")
+        c.print(f'[bold]Публикуем «{name}» в {repo}…[/]')
         success, msg = _github_publish(path, name, repo, auth)
         if success:
             c.print(f"[bold green]{msg}[/]\n")
         else:
-            c.print(f"[bold red]Error:[/] {msg}\n")
+            c.print(f'[bold red]Ошибка:[/] {msg}')
 
     elif target == "clawhub":
-        c.print("[yellow]ClawHub publishing is not yet supported. "
-                "Submit manually at https://clawhub.ai/submit[/]\n")
+        c.print('[yellow]Публикация в ClawHub пока не поддерживается. Отправьте навык вручную: https://clawhub.ai/submit[/]')
     else:
-        c.print(f"[bold red]Unknown target:[/] {target}. Use 'github' or 'clawhub'.\n")
+        c.print(f'[bold red]Неизвестное место публикации:[/] {target}. Укажите github или clawhub.')
 
 
 def _github_publish(skill_path: Path, skill_name: str, target_repo: str,
@@ -1762,8 +1712,8 @@ def do_snapshot_export(output_path: str, console: Optional[Console] = None) -> N
     else:
         out = Path(output_path)
         out.write_text(payload, encoding="utf-8")
-        c.print(f"[bold green]Snapshot exported:[/] {out}")
-        c.print(f"[dim]{len(installed)} skill(s), {len(tap_list)} tap(s)[/]\n")
+        c.print(f'[bold green]Снимок сохранён:[/] {out}')
+        c.print(f'[dim]Навыков: {len(installed)}; источников: {len(tap_list)}[/]')
 
 
 def do_snapshot_import(input_path: str, force: bool = False,
@@ -1774,13 +1724,13 @@ def do_snapshot_import(input_path: str, force: bool = False,
     c = console or _console
     inp = Path(input_path)
     if not inp.exists():
-        c.print(f"[bold red]Error:[/] File not found: {inp}\n")
+        c.print(f'[bold red]Ошибка:[/] Файл не найден: {inp}')
         return
 
     try:
         snapshot = json.loads(inp.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        c.print(f"[bold red]Error:[/] Invalid JSON in {inp}\n")
+        c.print(f'[bold red]Ошибка:[/] Некорректный JSON в {inp}')
         return
 
     # Restore taps first
@@ -1791,26 +1741,26 @@ def do_snapshot_import(input_path: str, force: bool = False,
             repo = tap.get("repo", "")
             if repo:
                 mgr.add(repo, tap.get("path", "skills/"))
-        c.print(f"[dim]Restored {len(taps)} tap(s)[/]")
+        c.print(f'[dim]Восстановлено источников: {len(taps)}[/]')
 
     # Install skills
     skills = snapshot.get("skills", [])
     if not skills:
-        c.print("[dim]No skills in snapshot to install.[/]\n")
+        c.print('[dim]В снимке нет навыков для установки.[/]')
         return
 
-    c.print(f"[bold]Importing {len(skills)} skill(s) from snapshot...[/]\n")
+    c.print(f'[bold]Импортируем навыки из снимка: {len(skills)}…[/]')
     for entry in skills:
         identifier = entry.get("identifier", "")
         category = entry.get("category", "")
         if not identifier:
-            c.print(f"[yellow]Skipping entry with no identifier: {entry.get('name', '?')}[/]")
+            c.print(f"[yellow]Пропускаем запись без идентификатора: {entry.get('name', '?')}[/]")
             continue
 
         c.print(f"[bold]--- {entry.get('name', identifier)} ---[/]")
         do_install(identifier, category=category, force=force, console=c)
 
-    c.print("[bold green]Snapshot import complete.[/]\n")
+    c.print('[bold green]Импорт снимка завершён.[/]')
 
 
 # ---------------------------------------------------------------------------
@@ -1875,17 +1825,17 @@ def skills_command(args) -> None:
         elif snap_action == "import":
             do_snapshot_import(args.input, force=getattr(args, "force", False))
         else:
-            _console.print("Usage: hermes skills snapshot [export|import]\n")
+            _console.print('Использование: korra skills snapshot [export|import]')
     elif action == "tap":
         tap_action = getattr(args, "tap_action", None)
         repo = getattr(args, "repo", "") or getattr(args, "name", "")
         if not tap_action:
-            _console.print("Usage: hermes skills tap [list|add|remove]\n")
+            _console.print('Использование: korra skills tap [list|add|remove]')
             return
         do_tap(tap_action, repo=repo)
     else:
-        _console.print("Usage: hermes skills [browse|search|install|inspect|list|list-modified|diff|check|update|audit|uninstall|reset|opt-out|opt-in|publish|snapshot|tap]\n")
-        _console.print("Run 'hermes skills <command> --help' for details.\n")
+        _console.print('Использование: korra skills [browse|search|install|inspect|list|list-modified|diff|check|update|audit|uninstall|reset|opt-out|opt-in|publish|snapshot|tap]')
+        _console.print('Подробнее: korra skills <command> --help')
 
 
 # ---------------------------------------------------------------------------
@@ -1956,7 +1906,7 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
 
     elif action == "search":
         if not args:
-            c.print("[bold red]Usage:[/] /skills search <query> [--source skills-sh|github|official|nvidia|openai|anthropic|huggingface] [--limit N] [--json]\n")
+            c.print('[bold red]Использование:[/] /skills search <query> [--source skills-sh|github|official|nvidia|openai|anthropic|huggingface] [--limit N] [--json]')
             return
         source = "all"
         limit = 25
@@ -1984,7 +1934,7 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
 
     elif action == "install":
         if not args:
-            c.print("[bold red]Usage:[/] /skills install <identifier-or-url> [--name <name>] [--category <cat>] [--force] [--now]\n")
+            c.print('[bold red]Использование:[/] /skills install <identifier-or-url> [--name <name>] [--category <cat>] [--force] [--now]')
             return
         identifier = args[0]
         category = ""
@@ -2007,7 +1957,7 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
 
     elif action == "inspect":
         if not args:
-            c.print("[bold red]Usage:[/] /skills inspect <identifier>\n")
+            c.print('[bold red]Использование:[/] /skills inspect <identifier>')
             return
         do_inspect(args[0], console=c)
 
@@ -2037,7 +1987,7 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
 
     elif action == "uninstall":
         if not args:
-            c.print("[bold red]Usage:[/] /skills uninstall <name> [--now]\n")
+            c.print('[bold red]Использование:[/] /skills uninstall <name> [--now]')
             return
         # Slash commands run inside prompt_toolkit where input() hangs.
         skip_confirm = True
@@ -2047,9 +1997,9 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
 
     elif action == "reset":
         if not args:
-            c.print("[bold red]Usage:[/] /skills reset <name> [--restore] [--now]\n")
-            c.print("[dim]Clears the bundled-skills manifest entry so future updates stop marking it as user-modified.[/]")
-            c.print("[dim]Pass --restore to also replace the current copy with the bundled version.[/]\n")
+            c.print('[bold red]Использование:[/] /skills reset <name> [--restore] [--now]')
+            c.print('[dim]Удаляет отметку о ручном изменении встроенного навыка, чтобы он снова получал обновления.[/]')
+            c.print('[dim]--restore также заменяет вашу копию версией из поставки.[/]')
             return
         name = args[0]
         restore = "--restore" in args
@@ -2063,13 +2013,13 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
 
     elif action == "diff":
         if not args:
-            c.print("[bold red]Usage:[/] /skills diff <name>\n")
+            c.print('[bold red]Использование:[/] /skills diff <name>')
             return
         do_diff(args[0], console=c)
 
     elif action == "publish":
         if not args:
-            c.print("[bold red]Usage:[/] /skills publish <skill-path> [--to github] [--repo owner/repo]\n")
+            c.print('[bold red]Использование:[/] /skills publish <skill-path> [--to github] [--repo owner/repo]')
             return
         skill_path = args[0]
         target = "github"
@@ -2083,7 +2033,7 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
 
     elif action == "snapshot":
         if not args:
-            c.print("[bold red]Usage:[/] /skills snapshot export <file> | /skills snapshot import <file>\n")
+            c.print('[bold red]Использование:[/] /skills snapshot export <file> | /skills snapshot import <file>')
             return
         snap_action = args[0]
         if snap_action == "export" and len(args) > 1:
@@ -2092,7 +2042,7 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
             force = "--force" in args
             do_snapshot_import(args[1], force=force, console=c)
         else:
-            c.print("[bold red]Usage:[/] /skills snapshot export <file> | /skills snapshot import <file>\n")
+            c.print('[bold red]Использование:[/] /skills snapshot export <file> | /skills snapshot import <file>')
 
     elif action == "tap":
         if not args:
@@ -2106,29 +2056,13 @@ def handle_skills_slash(cmd: str, console: Optional[Console] = None) -> None:
         _print_skills_help(c)
 
     else:
-        c.print(f"[bold red]Unknown action:[/] {action}")
+        c.print(f'[bold red]Неизвестное действие:[/] {action}')
         _print_skills_help(c)
 
 
 def _print_skills_help(console: Console) -> None:
     """Print help for the /skills slash command."""
     console.print(Panel(
-        "[bold]Skills Hub Commands:[/]\n\n"
-        "  [cyan]browse[/] [--source official]   Browse all available skills (paginated)\n"
-        "  [cyan]search[/] <query>              Search registries for skills\n"
-        "  [cyan]install[/] <identifier>        Install a skill (with security scan)\n"
-        "  [cyan]inspect[/] <identifier>        Preview a skill without installing\n"
-        "  [cyan]list[/] [--source hub|builtin|local] [--enabled-only]\n"
-        "       List installed skills; --enabled-only filters to the active profile's live set\n"
-        "  [cyan]check[/] [name]                Check hub skills for upstream updates\n"
-        "  [cyan]update[/] [name]               Update hub skills with upstream changes\n"
-        "  [cyan]audit[/] [name]                Re-scan hub skills for security\n"
-        "  [cyan]uninstall[/] <name>            Remove a hub-installed skill\n"
-        "  [cyan]list-modified[/]               List bundled skills you've edited (kept by update)\n"
-        "  [cyan]diff[/] <name>                 Diff your copy of a bundled skill vs the stock version\n"
-        "  [cyan]reset[/] <name> [--restore]    Reset bundled-skill tracking (fix 'user-modified' flag)\n"
-        "  [cyan]publish[/] <path> --repo <r>   Publish a skill to GitHub via PR\n"
-        "  [cyan]snapshot[/] export|import      Export/import skill configurations\n"
-        "  [cyan]tap[/] list|add|remove         Manage skill sources\n",
+        '[bold]Команды каталога навыков:[/]\n\n  [cyan]browse[/] [--source official]   Просмотреть навыки по страницам\n  [cyan]search[/] <query>              Поиск в каталогах\n  [cyan]install[/] <identifier>        Установить навык с проверкой безопасности\n  [cyan]inspect[/] <identifier>        Просмотреть без установки\n  [cyan]list[/] [--source hub|builtin|local] [--enabled-only]\n       Показать установленные; --enabled-only — только активные для профиля\n  [cyan]check[/] [name]                Проверить обновления\n  [cyan]update[/] [name]               Обновить навыки из каталога\n  [cyan]audit[/] [name]                Проверить безопасность\n  [cyan]uninstall[/] <name>            Удалить навык из каталога\n  [cyan]list-modified[/]               Показать встроенные навыки с вашими правками\n  [cyan]diff[/] <name>                 Сравнить вашу копию с версией из поставки\n  [cyan]reset[/] <name> [--restore]    Вернуть отслеживание обновлений навыка\n  [cyan]publish[/] <path> --repo <r>   Опубликовать в GitHub через запрос изменений\n  [cyan]snapshot[/] export|import      Сохранить или загрузить набор навыков\n  [cyan]tap[/] list|add|remove         Управление источниками\n',
         title="/skills",
     ))

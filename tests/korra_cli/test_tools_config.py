@@ -33,6 +33,12 @@ from korra_cli.tools_config import (
 )
 
 
+@pytest.mark.parametrize("label", ["Анализ изображений", "Синтез речи", "Image Analysis", "图像 分析"])
+def test_gui_toolset_label_preserves_words_and_removes_only_icons(label):
+    assert gui_toolset_label(label) == label
+    assert gui_toolset_label(f"👁️ {label}") == label
+
+
 
 
 def test_all_invalid_platform_toolsets_logs_runtime_warning(caplog):
@@ -401,7 +407,7 @@ class TestAgentBrowserPostSetup:
 
         run.assert_not_called()
         warn.assert_called_once()
-        assert "npx not found" in warn.call_args.args[0]
+        assert "npx не найден" in warn.call_args.args[0]
 
     def test_browserbase_returns_before_any_chromium_check(self):
         """browserbase hosts its own Chromium; it must never reach the
@@ -430,7 +436,7 @@ class TestAgentBrowserPostSetup:
 
         run.assert_not_called()
         success.assert_called_once()
-        assert "already installed" in success.call_args.args[0]
+        assert "уже установлен" in success.call_args.args[0]
 
     def test_docker_with_missing_chromium_warns_instead_of_installing(self):
         with patch("shutil.which", return_value="/usr/bin/npx"), patch(
@@ -470,7 +476,7 @@ class TestAgentBrowserPostSetup:
         run.assert_not_called()
         chromium_check.assert_not_called()
         docker_check.assert_not_called()
-        assert any("browser tools require Node.js" in c.args[0] for c in warn.call_args_list)
+        assert any("браузерных инструментов нужен Node.js" in c.args[0] for c in warn.call_args_list)
 
     def test_installs_chromium_via_npx_when_no_local_binary_resolved(self):
         """When _find_agent_browser falls through to npx, the install command
@@ -549,7 +555,7 @@ class TestAgentBrowserPostSetup:
             _run_post_setup("agent_browser")  # must not raise
 
         run.assert_not_called()
-        assert any("npx not found" in c.args[0] for c in warn.call_args_list)
+        assert any("npx не найден" in c.args[0] for c in warn.call_args_list)
 
     def test_installs_chromium_via_resolved_local_binary_path(self):
         """When _find_agent_browser resolves a concrete executable (global
@@ -624,7 +630,7 @@ class TestAgentBrowserPostSetup:
             _bt._cached_chromium_installed = "sentinel"
             _run_post_setup("agent_browser")
 
-        assert any("Chromium install failed" in c.args[0] for c in warn.call_args_list)
+        assert any("Не удалось установить Chromium" in c.args[0] for c in warn.call_args_list)
         assert any("fatal: network error" in c.args[0] for c in info.call_args_list)
         assert _bt._cached_chromium_installed == "sentinel", (
             "a failed install must not invalidate the chromium cache"
@@ -647,7 +653,7 @@ class TestAgentBrowserPostSetup:
         ) as warn:
             _run_post_setup("agent_browser")  # must not raise
 
-        assert any("timed out" in c.args[0] for c in warn.call_args_list)
+        assert any("превысила 10 минут" in c.args[0] for c in warn.call_args_list)
 
 
 class TestBrowserUseCliInstalledForAllNonCamofoxBackends:
@@ -1272,7 +1278,7 @@ class TestLightpandaPostSetup:
              patch("korra_cli.tools_config._print_warning") as warn, \
              patch("korra_cli.tools_config._print_info") as info:
             _run_post_setup("lightpanda")
-        assert "not found" in warn.call_args.args[0]
+        assert "не найдена" in warn.call_args.args[0]
         assert any(LIGHTPANDA_INSTALL_URL in c.args[0] for c in info.call_args_list)
 
     def test_post_setup_key_is_valid_and_readiness_gated(self):

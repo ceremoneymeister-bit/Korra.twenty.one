@@ -92,8 +92,8 @@ class TestListCommand:
         from korra_cli.fallback_cmd import cmd_fallback_list
         cmd_fallback_list(types.SimpleNamespace())
         out = capsys.readouterr().out
-        assert "No fallback providers configured" in out
-        assert "hermes fallback add" in out
+        assert "Резервные провайдеры не настроены" in out
+        assert "korra fallback add" in out
 
     def test_list_with_entries(self, isolated_home, capsys):
         _write_config(isolated_home, {
@@ -106,7 +106,7 @@ class TestListCommand:
         from korra_cli.fallback_cmd import cmd_fallback_list
         cmd_fallback_list(types.SimpleNamespace())
         out = capsys.readouterr().out
-        assert "Fallback chain (2 entries)" in out
+        assert "Порядок резервных моделей (всего 2)" in out
         assert "anthropic/claude-sonnet-4.6" in out
         assert "Hermes-4" in out
         # Primary should be shown too
@@ -154,7 +154,7 @@ class TestAddCommand:
             }
         ]
         out = capsys.readouterr().out
-        assert "Added fallback" in out
+        assert "Добавлена резервная модель" in out
 
 
     def test_add_rejects_same_as_primary(self, isolated_home, capsys):
@@ -177,7 +177,7 @@ class TestAddCommand:
         cfg = _read_config(isolated_home)
         assert "fallback_providers" not in cfg or cfg["fallback_providers"] == []
         out = capsys.readouterr().out
-        assert "matches the current primary" in out
+        assert "Выбрана текущая основная модель" in out
 
     def test_add_preserves_primary_when_picker_changes_it(self, isolated_home):
         """The picker mutates config["model"]; fallback_add must restore the primary."""
@@ -243,7 +243,7 @@ class TestRemoveCommand:
             {"provider": "anthropic", "model": "claude-sonnet-4-6"},
         ]
         out = capsys.readouterr().out
-        assert "Removed fallback" in out
+        assert "Резервная модель удалена" in out
         assert "Hermes-4" in out
 
 
@@ -267,7 +267,7 @@ class TestClearCommand:
         cfg = _read_config(isolated_home)
         assert cfg.get("fallback_providers") == []
         out = capsys.readouterr().out
-        assert "Fallback chain cleared" in out
+        assert "Список резервных моделей очищен" in out
 
 
 # ---------------------------------------------------------------------------

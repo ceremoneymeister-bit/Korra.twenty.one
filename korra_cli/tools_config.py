@@ -138,7 +138,7 @@ def gui_toolset_label(label: str) -> str:
     if not text:
         return text
     parts = text.split(None, 1)
-    if len(parts) == 2 and parts[0] and not any(ch.isascii() and ch.isalnum() for ch in parts[0]):
+    if len(parts) == 2 and parts[0] and not any(ch.isalnum() for ch in parts[0]):
         return parts[1].strip()
     return text
 
@@ -310,15 +310,15 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Microsoft Edge TTS",
-                "badge": "★ recommended · free",
-                "tag": "Good quality, no API key needed",
+                "badge": '★ рекомендуется · бесплатно',
+                "tag": 'Хорошее качество, ключ API не нужен',
                 "env_vars": [],
                 "tts_provider": "edge",
             },
             {
                 "name": "Nous Subscription",
-                "badge": "subscription",
-                "tag": "Managed OpenAI TTS billed to your subscription",
+                "badge": 'по подписке',
+                "tag": 'Синтез речи OpenAI с оплатой по вашей подписке',
                 "env_vars": [],
                 "tts_provider": "openai",
                 "requires_nous_auth": True,
@@ -327,70 +327,70 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "OpenAI TTS",
-                "badge": "paid",
-                "tag": "High quality voices",
+                "badge": 'платно',
+                "tag": 'Голоса высокого качества',
                 "env_vars": [
-                    {"key": "VOICE_TOOLS_OPENAI_KEY", "prompt": "OpenAI API key", "url": "https://platform.openai.com/api-keys"},
+                    {"key": "VOICE_TOOLS_OPENAI_KEY", "prompt": 'Ключ API OpenAI', "url": "https://platform.openai.com/api-keys"},
                 ],
                 "tts_provider": "openai",
             },
             {
                 "name": "xAI TTS",
-                "tag": "Grok voices — uses xAI Grok OAuth or XAI_API_KEY",
+                "tag": 'Голоса Grok через вход xAI Grok OAuth или XAI_API_KEY',
                 "env_vars": [],
                 "tts_provider": "xai",
                 "post_setup": "xai_grok",
             },
             {
                 "name": "ElevenLabs",
-                "badge": "paid",
-                "tag": "Most natural voices",
+                "badge": 'платно',
+                "tag": 'Естественное звучание голосов',
                 "env_vars": [
-                    {"key": "ELEVENLABS_API_KEY", "prompt": "ElevenLabs API key", "url": "https://elevenlabs.io/app/settings/api-keys"},
+                    {"key": "ELEVENLABS_API_KEY", "prompt": 'Ключ API ElevenLabs', "url": "https://elevenlabs.io/app/settings/api-keys"},
                 ],
                 "tts_provider": "elevenlabs",
             },
             # Mistral Voxtral TTS — `mistralai` SDK lazy-installs on first use.
             {
                 "name": "Mistral (Voxtral TTS)",
-                "badge": "paid",
-                "tag": "Multilingual, native Opus",
+                "badge": 'платно',
+                "tag": 'Несколько языков, поддержка Opus',
                 "env_vars": [
-                    {"key": "MISTRAL_API_KEY", "prompt": "Mistral API key", "url": "https://console.mistral.ai/"},
+                    {"key": "MISTRAL_API_KEY", "prompt": 'Ключ API Mistral', "url": "https://console.mistral.ai/"},
                 ],
                 "tts_provider": "mistral",
             },
             {
                 "name": "Google Gemini TTS",
-                "badge": "preview",
-                "tag": "30 prebuilt voices, controllable via prompts",
+                "badge": 'предварительная версия',
+                "tag": '30 готовых голосов с управлением через инструкции',
                 "env_vars": [
-                    {"key": "GEMINI_API_KEY", "prompt": "Gemini API key", "url": "https://aistudio.google.com/app/apikey"},
+                    {"key": "GEMINI_API_KEY", "prompt": 'Ключ API Gemini', "url": "https://aistudio.google.com/app/apikey"},
                 ],
                 "tts_provider": "gemini",
             },
             {
                 "name": "KittenTTS",
-                "badge": "local · free",
-                "tag": "Lightweight local ONNX TTS (~25MB), no API key",
+                "badge": 'локально · бесплатно',
+                "tag": 'Локальный синтез речи ONNX около 25 МБ, без ключа API',
                 "env_vars": [],
                 "tts_provider": "kittentts",
                 "post_setup": "kittentts",
             },
             {
                 "name": "Piper",
-                "badge": "local · free",
-                "tag": "Local neural TTS, 44 languages (voices ~20-90MB)",
+                "badge": 'локально · бесплатно',
+                "tag": 'Локальный нейросетевой синтез речи на 44 языках; голоса около 20–90 МБ',
                 "env_vars": [],
                 "tts_provider": "piper",
                 "post_setup": "piper",
             },
             {
                 "name": "DeepInfra TTS",
-                "badge": "paid",
-                "tag": "Chatterbox, Qwen3-TTS, … — live catalog from api.deepinfra.com",
+                "badge": 'платно',
+                "tag": 'Chatterbox, Qwen3-TTS и другие; актуальный каталог api.deepinfra.com',
                 "env_vars": [
-                    {"key": "DEEPINFRA_API_KEY", "prompt": "DeepInfra API key", "url": "https://deepinfra.com/dash/api_keys"},
+                    {"key": "DEEPINFRA_API_KEY", "prompt": 'Ключ API DeepInfra', "url": "https://deepinfra.com/dash/api_keys"},
                 ],
                 "tts_provider": "deepinfra",
             },
@@ -402,16 +402,16 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Local Whisper",
-                "badge": "★ recommended · free",
-                "tag": "faster-whisper on-device, no API key",
+                "badge": '★ рекомендуется · бесплатно',
+                "tag": 'Распознавание faster-whisper на вашем устройстве, без ключа API',
                 "env_vars": [],
                 "stt_provider": "local",
                 "post_setup": "faster_whisper",
             },
             {
                 "name": "Nous Subscription",
-                "badge": "subscription",
-                "tag": "Managed OpenAI transcription billed to your subscription",
+                "badge": 'по подписке',
+                "tag": 'Распознавание речи OpenAI с оплатой по вашей подписке',
                 "env_vars": [],
                 "stt_provider": "openai",
                 "requires_nous_auth": True,
@@ -420,35 +420,35 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "OpenAI",
-                "badge": "paid",
+                "badge": 'платно',
                 "tag": "whisper-1, gpt-4o-transcribe, gpt-transcribe",
                 "env_vars": [
-                    {"key": "VOICE_TOOLS_OPENAI_KEY", "prompt": "OpenAI API key", "url": "https://platform.openai.com/api-keys"},
+                    {"key": "VOICE_TOOLS_OPENAI_KEY", "prompt": 'Ключ API OpenAI', "url": "https://platform.openai.com/api-keys"},
                 ],
                 "stt_provider": "openai",
             },
             {
                 "name": "Groq",
-                "badge": "free tier",
-                "tag": "Whisper large-v3 family — very fast",
+                "badge": 'есть бесплатный тариф',
+                "tag": 'Быстрое распознавание семейства Whisper large-v3',
                 "env_vars": [
-                    {"key": "GROQ_API_KEY", "prompt": "Groq API key", "url": "https://console.groq.com/keys"},
+                    {"key": "GROQ_API_KEY", "prompt": 'Ключ API Groq', "url": "https://console.groq.com/keys"},
                 ],
                 "stt_provider": "groq",
             },
             {
                 "name": "xAI",
-                "tag": "grok-stt — uses xAI Grok OAuth or XAI_API_KEY",
+                "tag": 'grok-stt через вход xAI Grok OAuth или XAI_API_KEY',
                 "env_vars": [],
                 "stt_provider": "xai",
                 "post_setup": "xai_grok",
             },
             {
                 "name": "ElevenLabs Scribe",
-                "badge": "paid",
-                "tag": "scribe_v2 — diarization + audio-event tagging",
+                "badge": 'платно',
+                "tag": 'scribe_v2: различение говорящих и звуковых событий',
                 "env_vars": [
-                    {"key": "ELEVENLABS_API_KEY", "prompt": "ElevenLabs API key", "url": "https://elevenlabs.io/app/settings/api-keys"},
+                    {"key": "ELEVENLABS_API_KEY", "prompt": 'Ключ API ElevenLabs', "url": "https://elevenlabs.io/app/settings/api-keys"},
                 ],
                 "stt_provider": "elevenlabs",
             },
@@ -457,10 +457,10 @@ TOOL_CATEGORIES = {
             # Restore alongside the dashboard stt.provider option.
             {
                 "name": "DeepInfra",
-                "badge": "paid",
-                "tag": "Live STT catalog from api.deepinfra.com",
+                "badge": 'платно',
+                "tag": 'Актуальный каталог распознавания речи api.deepinfra.com',
                 "env_vars": [
-                    {"key": "DEEPINFRA_API_KEY", "prompt": "DeepInfra API key", "url": "https://deepinfra.com/dash/api_keys"},
+                    {"key": "DEEPINFRA_API_KEY", "prompt": 'Ключ API DeepInfra', "url": "https://deepinfra.com/dash/api_keys"},
                 ],
                 "stt_provider": "deepinfra",
             },
@@ -468,7 +468,7 @@ TOOL_CATEGORIES = {
     },
     "web": {
         "name": "Web Search & Extract",
-        "setup_title": "Select Search Provider",
+        "setup_title": 'Выберите провайдера поиска',
         "setup_note": "A free DuckDuckGo search skill is also included — skip this if you don't need a premium provider.",
         "icon": "🔍",
         # Per-provider rows are injected at runtime from
@@ -483,8 +483,8 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Nous Subscription",
-                "badge": "subscription",
-                "tag": "Managed Firecrawl billed to your subscription",
+                "badge": 'по подписке',
+                "tag": 'Firecrawl с оплатой по вашей подписке',
                 "web_backend": "firecrawl",
                 "env_vars": [],
                 "requires_nous_auth": True,
@@ -493,11 +493,11 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Firecrawl Self-Hosted",
-                "badge": "free · self-hosted",
-                "tag": "Run your own Firecrawl instance (Docker)",
+                "badge": 'бесплатно · свой сервер',
+                "tag": 'Свой сервер Firecrawl в Docker',
                 "web_backend": "firecrawl",
                 "env_vars": [
-                    {"key": "FIRECRAWL_API_URL", "prompt": "Your Firecrawl instance URL (e.g., http://localhost:3002)"},
+                    {"key": "FIRECRAWL_API_URL", "prompt": 'Адрес вашего сервера Firecrawl, например http://localhost:3002'},
                 ],
             },
         ],
@@ -518,8 +518,8 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Nous Subscription",
-                "badge": "subscription",
-                "tag": "Managed FAL image generation billed to your subscription",
+                "badge": 'по подписке',
+                "tag": 'Создание изображений FAL с оплатой по вашей подписке',
                 "env_vars": [],
                 "requires_nous_auth": True,
                 "managed_nous_feature": "image_gen",
@@ -538,8 +538,8 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Nous Subscription",
-                "badge": "subscription",
-                "tag": "Managed FAL video generation billed to your subscription",
+                "badge": 'по подписке',
+                "tag": 'Создание видео FAL с оплатой по вашей подписке',
                 "env_vars": [],
                 "requires_nous_auth": True,
                 "managed_nous_feature": "video_gen",
@@ -554,7 +554,7 @@ TOOL_CATEGORIES = {
     },
     "x_search": {
         "name": "X (Twitter) Search",
-        "setup_title": "Select xAI Credential Source",
+        "setup_title": 'Выберите источник входа xAI',
         "setup_note": (
             "Korra routes X searches through xAI's built-in x_search "
             "Responses tool for read-only public X discovery. Use the xurl "
@@ -568,19 +568,19 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "xAI Grok OAuth (SuperGrok / Premium+)",
-                "badge": "subscription",
-                "tag": "Browser login at accounts.x.ai — no API key required",
+                "badge": 'по подписке',
+                "tag": 'Вход в браузере на accounts.x.ai, без ключа API',
                 "env_vars": [],
                 "post_setup": "xai_grok",
             },
             {
                 "name": "xAI API key",
-                "badge": "paid",
-                "tag": "Direct xAI API billing via XAI_API_KEY",
+                "badge": 'платно',
+                "tag": 'Прямая оплата xAI API через XAI_API_KEY',
                 "env_vars": [
                     {
                         "key": "XAI_API_KEY",
-                        "prompt": "xAI API key",
+                        "prompt": 'Ключ API xAI',
                         "url": "https://console.x.ai/",
                     },
                 ],
@@ -612,8 +612,8 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Local Browser",
-                "badge": "★ recommended · free",
-                "tag": "Headless Chromium, no API key needed",
+                "badge": '★ рекомендуется · бесплатно',
+                "tag": 'Фоновый Chromium, ключ API не нужен',
                 "env_vars": [],
                 "browser_provider": "local",
                 "browser_engine": "auto",
@@ -621,8 +621,8 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Lightpanda",
-                "badge": "free · local · no Chromium",
-                "tag": "Zig headless browser spawned by Korra, text-only (no screenshots)",
+                "badge": 'бесплатно · локально · без Chromium',
+                "tag": 'Фоновый браузер на Zig, запускаемый Коррой: только текст, без снимков экрана',
                 "env_vars": [],
                 "browser_provider": "local",
                 "browser_engine": "lightpanda",
@@ -630,8 +630,8 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Nous Subscription (Browser Use cloud)",
-                "badge": "subscription",
-                "tag": "Managed Browser Use billed to your subscription",
+                "badge": 'по подписке',
+                "tag": 'Browser Use с оплатой по вашей подписке',
                 "env_vars": [],
                 "browser_provider": "browser-use",
                 "requires_nous_auth": True,
@@ -646,10 +646,10 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Camofox",
-                "badge": "free · local",
-                "tag": "Anti-detection browser (Firefox/Camoufox)",
+                "badge": 'бесплатно · локально',
+                "tag": 'Браузер с защитой от отслеживания на Firefox/Camoufox',
                 "env_vars": [
-                    {"key": "CAMOFOX_URL", "prompt": "Camofox server URL", "default": "http://localhost:9377",
+                    {"key": "CAMOFOX_URL", "prompt": 'Адрес сервера Camofox', "default": "http://localhost:9377",
                      "url": "https://github.com/jo-inc/camofox-browser"},
                 ],
                 "browser_provider": "camofox",
@@ -657,8 +657,8 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Browser Use",
-                "badge": "free · local · cloud",
-                "tag": "New SOTA web harness (CLI 3.0)",
+                "badge": 'бесплатно · локально · облако',
+                "tag": 'Браузерная автоматизация через CLI 3.0',
                 "env_vars": [],
                 "browser_backend": "browser-use",
                 "post_setup": "browser_use_cli",
@@ -671,10 +671,10 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Home Assistant",
-                "tag": "REST API integration",
+                "tag": 'Подключение через REST API',
                 "env_vars": [
-                    {"key": "HASS_TOKEN", "prompt": "Home Assistant Long-Lived Access Token"},
-                    {"key": "HASS_URL", "prompt": "Home Assistant URL", "default": "http://homeassistant.local:8123"},
+                    {"key": "HASS_TOKEN", "prompt": 'Долгосрочный токен доступа Home Assistant'},
+                    {"key": "HASS_URL", "prompt": 'Адрес Home Assistant', "default": "http://homeassistant.local:8123"},
                 ],
             },
         ],
@@ -685,7 +685,7 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Spotify Web API",
-                "tag": "PKCE OAuth — opens the setup wizard",
+                "tag": 'Вход OAuth с PKCE: открывает мастер настройки',
                 "env_vars": [],
                 "post_setup": "spotify",
             },
@@ -700,10 +700,9 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "cua-driver (background)",
-                "badge": "★ recommended · free · local",
+                "badge": '★ рекомендуется · бесплатно · локально',
                 "tag": (
-                    "Background computer-use via cua-driver — does NOT steal "
-                    "your cursor or focus. Works with any model."
+                    'Фоновое управление компьютером через cua-driver не перехватывает курсор и фокус. Работает с любой моделью.'
                 ),
                 "env_vars": [
                     # cua-driver reads HOME/TMPDIR from the process env, no
@@ -722,20 +721,20 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Langfuse Cloud",
-                "tag": "Hosted Langfuse (cloud.langfuse.com)",
+                "tag": 'Облачный Langfuse на cloud.langfuse.com',
                 "env_vars": [
-                    {"key": "HERMES_LANGFUSE_PUBLIC_KEY", "prompt": "Langfuse public key (pk-lf-...)", "url": "https://cloud.langfuse.com"},
-                    {"key": "HERMES_LANGFUSE_SECRET_KEY", "prompt": "Langfuse secret key (sk-lf-...)", "url": "https://cloud.langfuse.com"},
+                    {"key": "HERMES_LANGFUSE_PUBLIC_KEY", "prompt": 'Публичный ключ Langfuse: pk-lf-...', "url": "https://cloud.langfuse.com"},
+                    {"key": "HERMES_LANGFUSE_SECRET_KEY", "prompt": 'Секретный ключ Langfuse: sk-lf-...', "url": "https://cloud.langfuse.com"},
                 ],
                 "post_setup": "langfuse",
             },
             {
                 "name": "Langfuse Self-Hosted",
-                "tag": "Self-hosted Langfuse instance",
+                "tag": 'Langfuse на своём сервере',
                 "env_vars": [
-                    {"key": "HERMES_LANGFUSE_PUBLIC_KEY", "prompt": "Langfuse public key (pk-lf-...)"},
-                    {"key": "HERMES_LANGFUSE_SECRET_KEY", "prompt": "Langfuse secret key (sk-lf-...)"},
-                    {"key": "HERMES_LANGFUSE_BASE_URL", "prompt": "Langfuse server URL (e.g. http://localhost:3000)", "default": "http://localhost:3000"},
+                    {"key": "HERMES_LANGFUSE_PUBLIC_KEY", "prompt": 'Публичный ключ Langfuse: pk-lf-...'},
+                    {"key": "HERMES_LANGFUSE_SECRET_KEY", "prompt": 'Секретный ключ Langfuse: sk-lf-...'},
+                    {"key": "HERMES_LANGFUSE_BASE_URL", "prompt": 'Адрес сервера Langfuse, например http://localhost:3000', "default": "http://localhost:3000"},
                 ],
                 "post_setup": "langfuse",
             },
@@ -909,7 +908,7 @@ def _pip_install(
             creationflags=_post_setup_no_window_flags(),
         )
         if probe.returncode != 0:
-            raise FileNotFoundError("pip not in venv")
+            raise FileNotFoundError('pip отсутствует в виртуальном окружении')
     except (subprocess.TimeoutExpired, FileNotFoundError):
         try:
             subprocess.run(
@@ -1032,7 +1031,7 @@ def install_cua_driver(
             # Silent on unsupported platforms — `hermes update` calls this
             # for every user; only macOS/Windows/Linux users care.
             return False
-        _print_warning("    Computer Use (cua-driver) is unsupported on this platform; skipping.")
+        _print_warning('    Computer Use через cua-driver не поддерживается в этой системе. Пропускаем.')
         return False
 
     is_windows = system == "Windows"
@@ -1051,11 +1050,10 @@ def install_cua_driver(
     override = korra_env("KORRA_CUA_DRIVER_CMD", "").strip()
     if override and not binary:
         _print_warning(
-            "    HERMES_CUA_DRIVER_CMD does not resolve to an executable: "
-            f"{override}"
+            f'    HERMES_CUA_DRIVER_CMD не указывает на исполняемую программу: {override}'
         )
         _print_info(
-            "    Fix or unset the override before running computer-use install."
+            '    Исправьте или снимите эту настройку перед computer-use install.'
         )
         return False
 
@@ -1063,14 +1061,14 @@ def install_cua_driver(
     if not binary and not upgrade:
         if not _cua_install_target_writable():
             _print_info(
-                "    /Applications is not writable; skipping cua-driver install."
+                '    Нет прав записи в /Applications. Установка cua-driver пропущена.'
             )
             _print_info(
-                "    Run from an admin account or install cua-driver manually."
+                '    Запустите от администратора или установите cua-driver вручную.'
             )
             return False
         if not shutil.which(fetch_tool):
-            _print_warning(f"    {fetch_tool} not found — install manually:")
+            _print_warning(f'    {fetch_tool} не найден. Установите вручную:')
             _print_info("      https://github.com/trycua/cua/blob/main/libs/cua-driver/README.md")
             return False
         # Pre-install asset probe deleted — see comment near the top of
@@ -1098,62 +1096,58 @@ def install_cua_driver(
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, env=_cua_driver_env(),
                 creationflags=_post_setup_no_window_flags(),
             ).stdout.strip()
-            _print_success(f"    {driver_cmd} already installed: {version or 'unknown version'}")
+            _print_success(f"    {driver_cmd} уже установлен: {version or 'версия неизвестна'}")
         except Exception:
-            _print_success(f"    {driver_cmd} already installed.")
+            _print_success(f'    {driver_cmd} уже установлен.')
         if is_windows:
             if not _repair_cua_driver_autostart_windows(binary, verbose=False):
                 _print_warning(
-                    "    cua-driver is compatible, but Windows autostart repair failed."
+                    '    cua-driver совместим, но восстановить автозапуск Windows не удалось.'
                 )
                 return False
-            _print_info("    cua-driver may spawn a UIAccess worker (cua-driver-uia.exe);")
-            _print_info("    Windows/SmartScreen may prompt the first time it runs.")
+            _print_info('    cua-driver может запустить процесс доступа UIAccess — cua-driver-uia.exe.')
+            _print_info('    При первом запуске Windows или SmartScreen могут запросить разрешение.')
         elif is_linux:
-            _print_warning("    Linux support is alpha.")
+            _print_warning('    Поддержка Linux пока экспериментальная.')
         else:
-            _print_info("    Grant macOS permissions if not done yet:")
-            _print_info("      System Settings > Privacy & Security > Accessibility")
-            _print_info("      System Settings > Privacy & Security > Screen Recording")
+            _print_info('    Если ещё не выдали разрешения macOS, включите:')
+            _print_info('      Системные настройки → Конфиденциальность и безопасность → Универсальный доступ')
+            _print_info('      Системные настройки → Конфиденциальность и безопасность → Запись экрана')
         return True
 
     if repair_existing:
         version = contract.get("version") or "unknown version"
         reason = contract.get("reason") or "required runtime features are missing"
         _print_warning(
-            f"    Found cua-driver {version}, but Korra cannot use its current "
-            f"runtime contract: {reason}."
+            f'    Найден cua-driver {version}, но его возможности несовместимы с Коррой: {reason}.'
         )
         if korra_env("KORRA_CUA_DRIVER_CMD", "").strip():
             _print_info(
-                "    Update the binary selected by HERMES_CUA_DRIVER_CMD, or unset "
-                "the override and run: hermes computer-use install --upgrade"
+                '    Обновите программу из HERMES_CUA_DRIVER_CMD либо снимите эту настройку и выполните korra computer-use install --upgrade.'
             )
             return False
         if is_windows and require_confirmed_update:
             _print_info(
-                "    Automatic Windows updates cannot safely run cua-driver's "
-                "interactive repair installer."
+                '    Автоматическое обновление Windows не может безопасно запустить интерактивное восстановление cua-driver.'
             )
             _print_info(
-                "    Repair it from an interactive terminal with: "
-                "hermes computer-use install --upgrade"
+                '    Восстановите из интерактивного терминала: korra computer-use install --upgrade'
             )
             return False
-        _print_info("    Repairing it with the current upstream installer.")
+        _print_info('    Восстанавливаем с помощью актуального официального установщика.')
 
     # upgrade=True path — refresh to the latest upstream release.
     if not _cua_install_target_writable():
         _print_info(
-            "    /Applications is not writable; skipping cua-driver refresh."
+            '    Нет прав записи в /Applications. Обновление cua-driver пропущено.'
         )
         _print_info(
-            "    Run `hermes computer-use install --upgrade` from an admin account to update it."
+            '    Для обновления выполните korra computer-use install --upgrade от администратора.'
         )
         return bool(binary)
 
     if not shutil.which(fetch_tool):
-        _print_warning(f"    {fetch_tool} not found — cannot refresh cua-driver.")
+        _print_warning(f'    {fetch_tool} не найден. Обновить cua-driver нельзя.')
         return bool(binary)
 
     # Pre-install asset probe deleted (see top-of-file comment). The
@@ -1179,18 +1173,15 @@ def install_cua_driver(
             _state = None
         if _state is not None and not _state.get("update_available"):
             _print_success(
-                f"    {driver_cmd} is already on the latest release "
-                f"({_state.get('current_version') or 'unknown'})."
+                f"    {driver_cmd} уже последней версии: {_state.get('current_version') or 'неизвестно'}."
             )
             return True
         if _state is None and require_confirmed_update:
             _print_info(
-                f"    Could not confirm a newer {driver_cmd} release "
-                "(offline, rate-limited, or driver too old to check); "
-                "keeping the installed version."
+                f'    Не удалось проверить новую версию {driver_cmd}: нет сети, достигнут лимит или драйвер слишком старый. Сохраняем установленную.'
             )
             _print_info(
-                "    Force a refresh with: hermes computer-use install --upgrade"
+                '    Принудительное обновление: korra computer-use install --upgrade'
             )
             return True
         if _state is not None and _state.get("update_available"):
@@ -1223,12 +1214,10 @@ def install_cua_driver(
         # never launch install.ps1, which can demand console/UAC consent the
         # hidden updater cannot provide (#87703).
         _print_info(
-            "    cua-driver is not installed; automatic Windows updates "
-            "cannot safely run its interactive installer."
+            '    cua-driver не установлен. Автоматическое обновление Windows не может безопасно запустить его интерактивный установщик.'
         )
         _print_info(
-            "    Install it from an interactive terminal with: "
-            "hermes computer-use install --upgrade"
+            '    Установите из интерактивного терминала: korra computer-use install --upgrade'
         )
         return False
 
@@ -1260,10 +1249,9 @@ def install_cua_driver(
         repaired = _cua_driver_contract_status()
         if not repaired.get("ready"):
             _print_warning(
-                "    cua-driver was reinstalled, but its runtime contract is still "
-                f"unusable: {repaired.get('reason') or 'unknown error'}."
+                f"    cua-driver переустановлен, но всё ещё несовместим: {repaired.get('reason') or 'неизвестная ошибка'}."
             )
-            _print_info("    Run: hermes computer-use doctor")
+            _print_info('    Выполните: korra computer-use doctor')
             return False
     if ok and before:
         try:
@@ -1273,9 +1261,9 @@ def install_cua_driver(
                 creationflags=_post_setup_no_window_flags(),
             ).stdout.strip()
             if after and after != before:
-                _print_success(f"    {driver_cmd} upgraded: {before} → {after}")
+                _print_success(f'    {driver_cmd} обновлён: {before} → {after}')
             elif after:
-                _print_info(f"    {driver_cmd} up to date: {after}")
+                _print_info(f'    {driver_cmd} актуален: {after}')
         except Exception:
             pass
     return ok
@@ -1407,7 +1395,7 @@ def _clear_stale_windows_cua_install_lock() -> None:
             return
 
         logger.info("Cleared stale Windows cua-driver install lock at %s", lock_file)
-        _print_info(f"    Cleared stale cua-driver install lock ({lock_file}).")
+        _print_info(f'    Удалена устаревшая блокировка установки cua-driver: {lock_file}.')
     except Exception as e:
         logger.debug("stale Windows cua install lock check failed: %s", e)
 
@@ -1462,7 +1450,7 @@ def _clear_stale_cua_install_lock() -> None:
         import shutil as _shutil
         _shutil.rmtree(lock_dir, ignore_errors=True)
         logger.info("Cleared stale cua-driver install lock at %s", lock_dir)
-        _print_info(f"    Cleared stale cua-driver install lock ({lock_dir}).")
+        _print_info(f'    Удалена устаревшая блокировка установки cua-driver: {lock_dir}.')
     except Exception as e:
         logger.debug("stale cua install lock check failed: %s", e)
 
@@ -1583,9 +1571,9 @@ def _repair_cua_driver_autostart_windows(driver_cmd: str, *, verbose: bool) -> b
     )
 
     if verbose:
-        _print_info("    Registering cua-driver auto-start...")
+        _print_info('    Настраиваем автозапуск cua-driver…')
     else:
-        _print_info("    Repairing cua-driver auto-start registration...")
+        _print_info('    Восстанавливаем настройку автозапуска cua-driver…')
 
     try:
         result = subprocess.run(
@@ -1598,20 +1586,20 @@ def _repair_cua_driver_autostart_windows(driver_cmd: str, *, verbose: bool) -> b
             env=_cua_driver_env(),
         )
     except subprocess.TimeoutExpired:
-        _print_warning("    cua-driver autostart registration timed out.")
+        _print_warning('    Время настройки автозапуска cua-driver истекло.')
         return False
     except Exception as exc:
-        _print_warning(f"    cua-driver autostart registration failed: {exc}")
+        _print_warning(f'    Не удалось настроить автозапуск cua-driver: {exc}')
         return False
 
     if result.returncode == 0:
         return True
 
     tail = (result.stderr or result.stdout or "").strip().splitlines()[-3:]
-    _print_warning("    cua-driver autostart registration failed.")
+    _print_warning('    Не удалось настроить автозапуск cua-driver.')
     for line in tail:
         _print_info(f"      {line[:200]}")
-    _print_info("    From an elevated shell, run: cua-driver autostart enable")
+    _print_info('    Выполните от администратора: cua-driver autostart enable')
     return False
 
 
@@ -1686,7 +1674,7 @@ def _run_cua_driver_installer(
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
             )
         except (subprocess.TimeoutExpired, OSError) as e:
-            _print_warning(f"    cua-driver installer download failed: {e}")
+            _print_warning(f'    Не удалось загрузить установщик cua-driver: {e}')
             try:
                 os.remove(script_path)
             except OSError:
@@ -1694,8 +1682,7 @@ def _run_cua_driver_installer(
             return False
         if dl.returncode != 0:
             _print_warning(
-                "    cua-driver installer download failed: "
-                f"{(dl.stderr or '').strip()[:200]}"
+                f"    Не удалось загрузить установщик cua-driver: {(dl.stderr or '').strip()[:200]}"
             )
             try:
                 os.remove(script_path)
@@ -1707,9 +1694,9 @@ def _run_cua_driver_installer(
 
     if show_progress:
         if verbose:
-            _print_info(f"    {label} cua-driver (background computer-use)...")
+            _print_info(f'    {label} cua-driver для фонового управления компьютером…')
         else:
-            _print_info(f"→ {label} cua-driver (Computer Use)...")
+            _print_info(f'→ {label} cua-driver для управления компьютером…')
     driver_cmd = _cua_driver_cmd()
     timeout = (
         _CUA_INSTALLER_TIMEOUT
@@ -1743,18 +1730,15 @@ def _run_cua_driver_installer(
     if installer_timeout is not None:
         if _cua_install_lock_held():
             _print_info(
-                "    Another cua-driver install is in progress (upstream "
-                "install lock is held) — skipping this refresh."
+                '    cua-driver уже устанавливается: занята блокировка официального установщика. Это обновление пропущено.'
             )
             _print_info(
-                "    If no install is really running, retry with: "
-                "hermes computer-use install --upgrade"
+                '    Если другая установка не запущена, повторите: korra computer-use install --upgrade'
             )
             return False
         if not _cua_release_endpoint_reachable():
             _print_info(
-                "    github.com is unreachable — skipping cua-driver "
-                "refresh (will retry on the next update)."
+                '    github.com недоступен. Обновление cua-driver пропущено; повторим при следующем обновлении.'
             )
             return False
         if is_windows:
@@ -1941,38 +1925,36 @@ def _run_cua_driver_installer(
                 installed_binary, verbose=verbose
             ):
                 _print_warning(
-                    "    cua-driver installed, but auto-start was not registered."
+                    '    cua-driver установлен, но автозапуск не настроен.'
                 )
             if verbose:
-                _print_success(f"    {driver_cmd} installed.")
+                _print_success(f'    {driver_cmd} установлен.')
                 if is_windows:
-                    _print_info("    cua-driver may spawn a UIAccess worker (cua-driver-uia.exe);")
-                    _print_info("    Windows/SmartScreen may prompt the first time it runs.")
+                    _print_info('    cua-driver может запустить процесс доступа UIAccess — cua-driver-uia.exe.')
+                    _print_info('    При первом запуске Windows или SmartScreen могут запросить разрешение.')
                 elif is_linux:
-                    _print_warning("    Linux support is alpha.")
+                    _print_warning('    Поддержка Linux пока экспериментальная.')
                 else:
-                    _print_info("    IMPORTANT — grant macOS permissions now:")
-                    _print_info("      System Settings > Privacy & Security > Accessibility")
-                    _print_info("      System Settings > Privacy & Security > Screen Recording")
-                    _print_info("    Both must allow the terminal / Korra process.")
+                    _print_info('    Выдайте разрешения macOS сейчас:')
+                    _print_info('      Системные настройки → Конфиденциальность и безопасность → Универсальный доступ')
+                    _print_info('      Системные настройки → Конфиденциальность и безопасность → Запись экрана')
+                    _print_info('    В обоих разделах разрешите доступ терминалу или процессу Корры.')
             return True
-        _print_warning(f"    cua-driver {label.lower()} did not complete. Re-run manually:")
+        _print_warning(f'    Действие cua-driver «{label.lower()}» не завершено. Повторите вручную:')
         _print_info(f"      {manual_hint}")
         return False
     except subprocess.TimeoutExpired:
         _print_warning(
-            f"    cua-driver {label.lower()} timed out after "
-            f"{timeout}s."
+            f'    Время действия cua-driver «{label.lower()}» истекло через {timeout} с.'
         )
         if not is_windows:
             _print_info(
-                "    If this repeats, a stale installer lock may be present — "
-                f"check {_cua_install_lock_dir()}"
+                f'    При повторении проверьте устаревшую блокировку установщика: {_cua_install_lock_dir()}'
             )
-        _print_info(f"    Re-run manually:  {manual_hint}")
+        _print_info(f'    Повторите вручную: {manual_hint}')
         return False
     except Exception as e:
-        _print_warning(f"    cua-driver {label.lower()} failed: {e}")
+        _print_warning(f'    Действие cua-driver «{label.lower()}» не удалось: {e}')
         return False
     finally:
         if script_path:
@@ -2001,7 +1983,7 @@ def _ensure_browser_use_cli(*, verbose_hints: bool = False) -> None:
     provisions it, so resolution always lands on a binary Hermes installs
     and updates rather than a user-level side install.
     """
-    _print_info("    Ensuring browser-use CLI (managed install)...")
+    _print_info('    Проверяем установку browser-use CLI…')
     try:
         from tools.browser_use_cli import install_cli
 
@@ -2014,12 +1996,12 @@ def _ensure_browser_use_cli(*, verbose_hints: bool = False) -> None:
         for line in str(message).splitlines():
             _print_warning(f"    {line[:200]}")
         if shutil.which("uvx"):
-            _print_info("    Falling back to zero-install runs via `uvx browser-use`")
+            _print_info('    Используется запуск без постоянной установки через uvx browser-use')
         else:
-            _print_info("    Install manually: uv tool install browser-use  (https://docs.astral.sh/uv/)")
+            _print_info('    Установка вручную: uv tool install browser-use; https://docs.astral.sh/uv/')
     if verbose_hints:
-        _print_info("    Local Chrome needs remote debugging: chrome://inspect/#remote-debugging")
-        _print_info("    Cloud browsers: browser-use auth login  (or set BROWSER_USE_API_KEY)")
+        _print_info('    Для локального Chrome включите удалённую отладку: chrome://inspect/#remote-debugging')
+        _print_info('    Для облачного браузера: browser-use auth login или BROWSER_USE_API_KEY')
 
 
 def _run_post_setup(post_setup_key: str):
@@ -2038,14 +2020,14 @@ def _run_post_setup(post_setup_key: str):
 
         lightpanda_bin = find_lightpanda_binary()
         if lightpanda_bin:
-            _print_success(f"    Lightpanda found: {lightpanda_bin}")
+            _print_success(f'    Lightpanda найден: {lightpanda_bin}')
         else:
             _print_warning(
-                "    lightpanda binary not found on PATH, ~/.lightpanda or ~/.local/bin"
+                '    Программа lightpanda не найдена в PATH, ~/.lightpanda или ~/.local/bin'
             )
             _print_info(f"    {LIGHTPANDA_INSTALL_HINT}")
             if os.name == "nt":
-                _print_info("    Lightpanda has no native Windows build; run Korra under WSL2.")
+                _print_info('    У Lightpanda нет версии для обычной Windows. Запускайте Корру в WSL2.')
         return
 
     if post_setup_key in {"agent_browser", "browserbase"}:
@@ -2069,7 +2051,7 @@ def _run_post_setup(post_setup_key: str):
                 AGENT_BROWSER_NPX_SPEC,
             )
         except Exception as exc:  # pragma: no cover — defensive
-            _print_warning(f"    Could not check Chromium status: {exc}")
+            _print_warning(f'    Не удалось проверить Chromium: {exc}')
             return
 
         # Reuse the same resolution cascade browser tools use at runtime
@@ -2081,7 +2063,7 @@ def _run_post_setup(post_setup_key: str):
             browser_cmd = _find_agent_browser(validate=False)
         except FileNotFoundError:
             _print_warning(
-                "    npx not found - browser tools require Node.js: https://nodejs.org"
+                '    npx не найден. Для браузерных инструментов нужен Node.js: https://nodejs.org'
             )
             return
 
@@ -2097,15 +2079,15 @@ def _run_post_setup(post_setup_key: str):
         # image bakes Chromium in at build time, and runtime users usually
         # can't write to PLAYWRIGHT_BROWSERS_PATH anyway.
         if _chromium_installed():
-            _print_success("    Chromium browser already installed, nothing to do")
+            _print_success('    Chromium уже установлен, ничего делать не нужно')
             return
 
         if _running_in_docker():
             _print_warning(
-                "    Chromium is missing but you're running in Docker."
+                '    Chromium отсутствует, но Корра работает в Docker.'
             )
             _print_info(
-                "    Pull the latest image to get the bundled Chromium:"
+                '    Получите новый образ со встроенным Chromium:'
             )
             _print_info(
                 "      docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest"
@@ -2124,14 +2106,14 @@ def _run_post_setup(post_setup_key: str):
             npx_bin = _resolve_npx_bin()
             if not npx_bin:
                 _print_warning(
-                    "    npx not found - install Chromium manually: npx agent-browser install --with-deps"
+                    '    npx не найден. Установите Chromium вручную: npx agent-browser install --with-deps'
                 )
                 return
             install_cmd = [npx_bin, "--ignore-scripts", "-y", AGENT_BROWSER_NPX_SPEC, "install", "--with-deps"]
         else:
             install_cmd = [browser_cmd, "install", "--with-deps"]
 
-        _print_info("    Installing Chromium (~170MB one-time download)...")
+        _print_info('    Устанавливаем Chromium: однократная загрузка около 170 МБ…')
         import subprocess
         try:
             result = subprocess.run(
@@ -2140,23 +2122,23 @@ def _run_post_setup(post_setup_key: str):
                 creationflags=_post_setup_no_window_flags(),
             )
             if result.returncode == 0:
-                _print_success("    Chromium installed")
+                _print_success('    Chromium установлен')
                 # Invalidate the cached "missing" result so subsequent
                 # check_browser_requirements() calls see the new install.
                 import tools.browser_tool as _bt
                 _bt._cached_chromium_installed = None
             else:
-                _print_warning("    Chromium install failed:")
+                _print_warning('    Не удалось установить Chromium:')
                 tail = (result.stderr or result.stdout or "").strip().splitlines()[-3:]
                 for line in tail:
                     _print_info(f"      {line[:200]}")
-                _print_info("    Run manually: npx agent-browser install --with-deps")
+                _print_info('    Выполните вручную: npx agent-browser install --with-deps')
         except subprocess.TimeoutExpired:
-            _print_warning("    Chromium install timed out (>10min)")
-            _print_info("    Run manually: npx agent-browser install --with-deps")
+            _print_warning('    Установка Chromium превысила 10 минут')
+            _print_info('    Выполните вручную: npx agent-browser install --with-deps')
         except Exception as exc:
-            _print_warning(f"    Chromium install failed: {exc}")
-            _print_info("    Run manually: npx agent-browser install --with-deps")
+            _print_warning(f'    Не удалось установить Chromium: {exc}')
+            _print_info('    Выполните вручную: npx agent-browser install --with-deps')
 
     elif post_setup_key == "browser_use_cli":
         _ensure_browser_use_cli(verbose_hints=True)
@@ -2165,9 +2147,9 @@ def _run_post_setup(post_setup_key: str):
         camofox_dir = PROJECT_ROOT / "node_modules" / "@askjo" / "camofox-browser"
         _npm_bin = find_node_executable("npm")
         if camofox_dir.exists():
-            _print_success("    Camofox already installed, nothing to do")
+            _print_success('    Camofox уже установлен, ничего делать не нужно')
         elif _npm_bin:
-            _print_info("    Installing Camofox browser server...")
+            _print_info('    Устанавливаем сервер браузера Camofox…')
             import subprocess
             # Absolute npm path so .cmd shim executes on Windows.
             result = subprocess.run(
@@ -2177,16 +2159,16 @@ def _run_post_setup(post_setup_key: str):
                 creationflags=_post_setup_no_window_flags(),
             )
             if result.returncode == 0:
-                _print_success("    Camofox installed")
+                _print_success('    Camofox установлен')
             else:
-                _print_warning("    npm install failed - run manually: npm install --workspaces=false")
+                _print_warning('    npm install не удался. Выполните вручную: npm install --workspaces=false')
         if camofox_dir.exists():
-            _print_info("    Start the Camofox server:")
+            _print_info('    Запустите сервер Camofox:')
             _print_info("      npx @askjo/camofox-browser")
-            _print_info("    First run downloads the Camoufox engine (~300MB)")
-            _print_info("    Or use Docker: docker run -p 9377:9377 -e CAMOFOX_PORT=9377 jo-inc/camofox-browser")
+            _print_info('    При первом запуске загрузится движок Camoufox, около 300 МБ')
+            _print_info('    Или используйте Docker: docker run -p 9377:9377 -e CAMOFOX_PORT=9377 jo-inc/camofox-browser')
         elif not _npm_bin:
-            _print_warning("    Node.js not found. Install Camofox via Docker:")
+            _print_warning('    Node.js не найден. Установите Camofox через Docker:')
             _print_info("      docker run -p 9377:9377 -e CAMOFOX_PORT=9377 jo-inc/camofox-browser")
 
     elif post_setup_key == "cua_driver":
@@ -2196,33 +2178,33 @@ def _run_post_setup(post_setup_key: str):
         import subprocess
         try:
             __import__("faster_whisper")
-            _print_success("    faster-whisper is already installed")
+            _print_success('    faster-whisper уже установлен')
             return
         except ImportError:
             pass
-        _print_info("    Installing faster-whisper (model ~150MB downloads on first use)...")
+        _print_info('    Устанавливаем faster-whisper; при первом использовании загрузится модель около 150 МБ…')
         try:
             result = _pip_install(["-U", "faster-whisper", "--quiet"], timeout=300)
             if result.returncode == 0:
-                _print_success("    faster-whisper installed")
-                _print_info("    Model sizes: tiny, base (default), small, medium, large-v3")
-                _print_info("    Change via stt.local.model in ~/.hermes/config.yaml")
+                _print_success('    faster-whisper установлен')
+                _print_info('    Размеры моделей: tiny, base (по умолчанию), small, medium, large-v3')
+                _print_info('    Настройка: stt.local.model в config.yaml профиля')
             else:
-                _print_warning("    faster-whisper install failed:")
+                _print_warning('    Не удалось установить faster-whisper:')
                 _print_info(f"      {(result.stderr or '').strip()[:300]}")
-                _print_info("    Run manually: uv pip install -U faster-whisper")
+                _print_info('    Выполните вручную: uv pip install -U faster-whisper')
         except subprocess.TimeoutExpired:
-            _print_warning("    faster-whisper install timed out (>5min)")
-            _print_info("    Run manually: uv pip install -U faster-whisper")
+            _print_warning('    Установка faster-whisper превысила 5 минут')
+            _print_info('    Выполните вручную: uv pip install -U faster-whisper')
 
     elif post_setup_key == "kittentts":
         try:
             __import__("kittentts")
-            _print_success("    kittentts is already installed")
+            _print_success('    kittentts уже установлен')
             return
         except ImportError:
             pass
-        _print_info("    Installing kittentts (~25-80MB model, CPU-only)...")
+        _print_info('    Устанавливаем kittentts: модель около 25–80 МБ, работает на процессоре…')
         wheel_url = (
             "https://github.com/KittenML/KittenTTS/releases/download/"
             "0.8.1/kittentts-0.8.1-py3-none-any.whl"
@@ -2230,61 +2212,61 @@ def _run_post_setup(post_setup_key: str):
         try:
             result = _pip_install(["-U", wheel_url, "soundfile", "--quiet"], timeout=300)
             if result.returncode == 0:
-                _print_success("    kittentts installed")
-                _print_info("    Voices: Jasper, Bella, Luna, Bruno, Rosie, Hugo, Kiki, Leo")
-                _print_info("    Models: KittenML/kitten-tts-nano-0.8-int8 (25MB), micro (41MB), mini (80MB)")
+                _print_success('    kittentts установлен')
+                _print_info('    Голоса: Jasper, Bella, Luna, Bruno, Rosie, Hugo, Kiki, Leo')
+                _print_info('    Модели: KittenML/kitten-tts-nano-0.8-int8 (25 МБ), micro (41 МБ), mini (80 МБ)')
             else:
-                _print_warning("    kittentts install failed:")
+                _print_warning('    Не удалось установить kittentts:')
                 _print_info(f"      {(result.stderr or '').strip()[:300]}")
-                _print_info(f"    Run manually: uv pip install -U '{wheel_url}' soundfile")
+                _print_info(f"    Выполните вручную: uv pip install -U '{wheel_url}' soundfile")
         except subprocess.TimeoutExpired:
-            _print_warning("    kittentts install timed out (>5min)")
-            _print_info(f"    Run manually: uv pip install -U '{wheel_url}' soundfile")
+            _print_warning('    Установка kittentts превысила 5 минут')
+            _print_info(f"    Выполните вручную: uv pip install -U '{wheel_url}' soundfile")
 
     elif post_setup_key == "piper":
         try:
             __import__("piper")
-            _print_success("    piper-tts is already installed")
+            _print_success('    piper-tts уже установлен')
         except ImportError:
-            _print_info("    Installing piper-tts (~14MB wheel, voices downloaded on first use)...")
+            _print_info('    Устанавливаем piper-tts: пакет около 14 МБ, голоса загрузятся при первом использовании…')
             try:
                 result = _pip_install(["-U", "piper-tts", "--quiet"], timeout=300)
                 if result.returncode == 0:
-                    _print_success("    piper-tts installed")
+                    _print_success('    piper-tts установлен')
                 else:
-                    _print_warning("    piper-tts install failed:")
+                    _print_warning('    Не удалось установить piper-tts:')
                     _print_info(f"      {(result.stderr or '').strip()[:300]}")
-                    _print_info("    Run manually: uv pip install -U piper-tts")
+                    _print_info('    Выполните вручную: uv pip install -U piper-tts')
                     return
             except subprocess.TimeoutExpired:
-                _print_warning("    piper-tts install timed out (>5min)")
-                _print_info("    Run manually: uv pip install -U piper-tts")
+                _print_warning('    Установка piper-tts превысила 5 минут')
+                _print_info('    Выполните вручную: uv pip install -U piper-tts')
                 return
-        _print_info("    Default voice: en_US-lessac-medium (downloaded on first TTS call)")
-        _print_info("    Full voice list: https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/VOICES.md")
-        _print_info("    Switch voices by setting tts.piper.voice in ~/.hermes/config.yaml")
+        _print_info('    Голос по умолчанию: en_US-lessac-medium; загрузится при первом синтезе речи')
+        _print_info('    Все голоса: https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/VOICES.md')
+        _print_info('    Выбор голоса: tts.piper.voice в config.yaml профиля')
 
     elif post_setup_key == "ddgs":
         try:
             __import__("ddgs")
-            _print_success("    ddgs is already installed")
+            _print_success('    ddgs уже установлен')
         except ImportError:
-            _print_info("    Installing ddgs (DuckDuckGo search package)...")
+            _print_info('    Устанавливаем ddgs для поиска DuckDuckGo…')
             try:
                 result = _pip_install(["-U", "ddgs", "--quiet"], timeout=300)
                 if result.returncode == 0:
-                    _print_success("    ddgs installed")
+                    _print_success('    ddgs установлен')
                 else:
-                    _print_warning("    ddgs install failed:")
+                    _print_warning('    Не удалось установить ddgs:')
                     _print_info(f"      {(result.stderr or '').strip()[:300]}")
-                    _print_info("    Run manually: uv pip install -U ddgs")
+                    _print_info('    Выполните вручную: uv pip install -U ddgs')
                     return
             except subprocess.TimeoutExpired:
-                _print_warning("    ddgs install timed out (>5min)")
-                _print_info("    Run manually: uv pip install -U ddgs")
+                _print_warning('    Установка ddgs превысила 5 минут')
+                _print_info('    Выполните вручную: uv pip install -U ddgs')
                 return
-        _print_info("    No API key required. DuckDuckGo enforces server-side rate limits.")
-        _print_info("    Pair with an extract provider if you also need web_extract.")
+        _print_info('    Ключ API не нужен. DuckDuckGo ограничивает частоту запросов на своей стороне.')
+        _print_info('    Если нужно также читать веб-страницы через web_extract, подключите провайдера извлечения текста.')
 
     elif post_setup_key == "spotify":
         # Run the full `hermes auth spotify` flow — if the user has no
@@ -2296,37 +2278,37 @@ def _run_post_setup(post_setup_key: str):
         try:
             from korra_cli.auth import login_spotify_command
         except Exception as exc:
-            _print_warning(f"    Could not load Spotify auth: {exc}")
-            _print_info("    Run manually: hermes auth spotify")
+            _print_warning(f'    Не удалось загрузить вход Spotify: {exc}')
+            _print_info('    Выполните вручную: korra auth spotify')
             return
-        _print_info("    Starting Spotify login...")
+        _print_info('    Открываем вход Spotify…')
         try:
             login_spotify_command(SimpleNamespace(
                 client_id=None, redirect_uri=None, scope=None,
                 no_browser=False, timeout=None,
             ))
-            _print_success("    Spotify authenticated")
+            _print_success('    Вход Spotify выполнен')
         except SystemExit as exc:
             # User aborted the wizard, or OAuth failed — don't fail the
             # toolset enable; they can retry with `hermes auth spotify`.
-            _print_warning(f"    Spotify login did not complete: {exc}")
-            _print_info("    Run later: hermes auth spotify")
+            _print_warning(f'    Вход Spotify не завершён: {exc}')
+            _print_info('    Войти позже: korra auth spotify')
         except Exception as exc:
-            _print_warning(f"    Spotify login failed: {exc}")
-            _print_info("    Run manually: hermes auth spotify")
+            _print_warning(f'    Не удалось войти в Spotify: {exc}')
+            _print_info('    Выполните вручную: korra auth spotify')
 
     elif post_setup_key == "langfuse":
         # Install the langfuse SDK.
         try:
             __import__("langfuse")
-            _print_success("    langfuse SDK already installed")
+            _print_success('    SDK Langfuse уже установлен')
         except ImportError:
-            _print_info("    Installing langfuse SDK...")
+            _print_info('    Устанавливаем SDK Langfuse…')
             result = _pip_install(["langfuse", "--quiet"], timeout=120)
             if result.returncode == 0:
-                _print_success("    langfuse SDK installed")
+                _print_success('    SDK Langfuse установлен')
             else:
-                _print_warning("    langfuse SDK install failed — run manually: uv pip install langfuse")
+                _print_warning('    Не удалось установить SDK Langfuse. Выполните вручную: uv pip install langfuse')
         # Opt the bundled observability/langfuse plugin into plugins.enabled.
         # The plugin ships in the repo but doesn't load until the user enables
         # it (standalone plugins are opt-in).
@@ -2334,16 +2316,16 @@ def _run_post_setup(post_setup_key: str):
             from korra_cli.plugins_cmd import _get_enabled_set, _save_enabled_set
             enabled = _get_enabled_set()
             if "observability/langfuse" in enabled or "langfuse" in enabled:
-                _print_success("    Plugin observability/langfuse already enabled")
+                _print_success('    Плагин observability/langfuse уже включён')
             else:
                 enabled.add("observability/langfuse")
                 _save_enabled_set(enabled)
-                _print_success("    Plugin observability/langfuse enabled")
+                _print_success('    Плагин observability/langfuse включён')
         except Exception as exc:
-            _print_warning(f"    Could not enable plugin automatically: {exc}")
-            _print_info("    Run manually: hermes plugins enable observability/langfuse")
-        _print_info("    Restart Korra for tracing to take effect.")
-        _print_info("    Verify: hermes plugins list")
+            _print_warning(f'    Не удалось автоматически включить плагин: {exc}')
+            _print_info('    Выполните вручную: korra plugins enable observability/langfuse')
+        _print_info('    Перезапустите Корру, чтобы включить трассировку.')
+        _print_info('    Проверка: korra plugins list')
 
     elif post_setup_key == "xai_grok":
         # Shared credential bootstrap for any picker entry that talks to xAI
@@ -2361,14 +2343,14 @@ def _run_post_setup(post_setup_key: str):
 
         if oauth_logged_in:
             _print_success(
-                "    xAI will use your xAI Grok OAuth (SuperGrok / Premium+) credentials"
+                '    xAI будет использовать вход Grok OAuth через SuperGrok / Premium+'
             )
             return
         if existing_api_key:
-            _print_success("    xAI will use your existing XAI_API_KEY")
+            _print_success('    xAI будет использовать существующий XAI_API_KEY')
             return
 
-        _print_info("    xAI needs credentials. Choose one:")
+        _print_info('    xAI нужны данные входа. Выберите способ:')
         try:
             from korra_cli.setup import (
                 _run_xai_oauth_login_from_setup,
@@ -2377,8 +2359,8 @@ def _run_post_setup(post_setup_key: str):
             )
             from korra_cli.config import save_env_value
         except Exception as exc:
-            _print_warning(f"    Could not load setup helpers: {exc}")
-            _print_info("    Run later: hermes auth add xai-oauth   (or set XAI_API_KEY)")
+            _print_warning(f'    Не удалось загрузить мастер настройки: {exc}')
+            _print_info('    Выполните позже korra auth add xai-oauth или задайте XAI_API_KEY')
             return
 
         idx = prompt_choice(
@@ -2393,24 +2375,23 @@ def _run_post_setup(post_setup_key: str):
         if idx == 0:
             if _run_xai_oauth_login_from_setup():
                 _print_success(
-                    "    Logged in — xAI will use these OAuth credentials"
+                    '    Вход выполнен; xAI будет использовать эти данные OAuth'
                 )
             else:
                 _print_warning(
-                    "    xAI Grok OAuth login did not complete. "
-                    "Run later: hermes auth add xai-oauth"
+                    '    Вход xAI Grok OAuth не завершён. Войти позже: korra auth add xai-oauth'
                 )
         elif idx == 1:
             api_key = _setup_prompt("    xAI API key", password=True)
             if api_key:
                 save_env_value("XAI_API_KEY", api_key)
-                _print_success("    XAI_API_KEY saved")
+                _print_success('    XAI_API_KEY сохранён')
             else:
                 _print_warning(
-                    "    No API key provided. Run later: hermes auth add xai-oauth"
+                    '    Ключ API не указан. Выполните позже korra auth add xai-oauth.'
                 )
         else:
-            _print_info("    xAI will remain inactive until credentials are configured.")
+            _print_info('    xAI останется неактивным, пока не настроен вход.')
 
 
 def valid_post_setup_keys() -> Set[str]:
@@ -2456,22 +2437,21 @@ def run_post_setup_command(args) -> int:
     """
     key = getattr(args, "post_setup_key", None)
     if not key:
-        _print_error("Usage: hermes tools post-setup <key>")
+        _print_error('Использование: korra tools post-setup <key>')
         return 2
     valid = valid_post_setup_keys()
     if key not in valid:
         _print_error(
-            f"Unknown post-setup key: {key!r}. "
-            f"Valid keys: {', '.join(sorted(valid)) or '(none)'}"
+            f"Неизвестный шаг настройки: {key!r}. Доступны: {', '.join(sorted(valid)) or '(нет)'}"
         )
         return 2
-    _print_info(f"Running post-setup hook: {key}")
+    _print_info(f'Выполняем завершающий шаг настройки: {key}')
     try:
         _run_post_setup(key)
     except Exception as exc:  # pragma: no cover — defensive
-        _print_error(f"Post-setup failed: {exc}")
+        _print_error(f'Не удалось завершить настройку: {exc}')
         return 1
-    _print_success(f"Post-setup '{key}' complete")
+    _print_success(f'Завершающий шаг «{key}» выполнен')
     return 0
 
 
@@ -3221,7 +3201,7 @@ def _prompt_toolset_checklist(
             return f"Est. tool context: ~{total} tokens"
 
     chosen = curses_checklist(
-        f"Tools for {platform_label}",
+        f'Инструменты для {platform_label}',
         labels,
         pre_selected,
         cancel_returns=pre_selected,
@@ -3963,8 +3943,8 @@ def _configure_tool_category(
         req = cat["requires_python"]
         if sys.version_info < req:
             print()
-            _print_error(f"  {name} requires Python {req[0]}.{req[1]}+ (current: {sys.version_info.major}.{sys.version_info.minor})")
-            _print_info("  Upgrade Python and reinstall to enable this tool.")
+            _print_error(f'  Для {name} нужен Python {req[0]}.{req[1]} или новее; сейчас {sys.version_info.major}.{sys.version_info.minor}')
+            _print_info('  Обновите Python и переустановите для включения инструмента.')
             return
 
     if len(providers) == 1:
@@ -4048,7 +4028,7 @@ def _configure_tool_category(
 
         # Skip selected
         if provider_idx >= len(providers):
-            _print_info(f"  Skipped {name}")
+            _print_info(f'  Пропущено: {name}')
             return
 
         _configure_provider(providers[provider_idx], config, force_fresh=force_fresh)
@@ -4361,14 +4341,14 @@ def _configure_imagegen_model(backend_name: str, config: dict) -> None:
         rows.append(row)
 
     idx = _prompt_choice(
-        f"  Choose {backend['display']} model:",
+        f"  Выберите модель {backend['display']}:",
         rows,
         default=0,
     )
 
     chosen = ordered[idx]
     cur_cfg["model"] = chosen
-    _print_success(f"  Model set to: {chosen}")
+    _print_success(f'  Выбрана модель: {chosen}')
 
 
 def _plugin_image_gen_catalog(plugin_name: str):
@@ -4443,14 +4423,14 @@ def _configure_imagegen_model_for_plugin(plugin_name: str, config: dict) -> None
         rows.append(row)
 
     idx = _prompt_choice(
-        f"  Choose {plugin_name} model:",
+        f'  Выберите модель {plugin_name}:',
         rows,
         default=0,
     )
 
     chosen = ordered[idx]
     cur_cfg["model"] = chosen
-    _print_success(f"  Model set to: {chosen}")
+    _print_success(f'  Выбрана модель: {chosen}')
 
 
 def _configure_xai_imagine_storage(section_name: str, config: dict) -> None:
@@ -4469,31 +4449,30 @@ def _configure_xai_imagine_storage(section_name: str, config: dict) -> None:
         xai_cfg["storage"] = storage_cfg
 
     _print_warning(
-        "  xAI Imagine can store generated media and create reusable public URLs. "
-        "xAI may bill for stored files and public URL hosting."
+        '  xAI Imagine может хранить созданные файлы и выдавать постоянные публичные ссылки. Хранение и размещение ссылок могут оплачиваться отдельно.'
     )
     idx = _prompt_choice(
-        "  Stored public URLs:",
+        '  Хранение публичных ссылок:',
         [
-            "Enable public URLs without automatic expiry (recommended)",
-            "Disable stored public URLs",
-            "Enable public URLs for 2 days",
+            'Включить публичные ссылки без автоматического срока удаления — рекомендуется',
+            'Отключить хранение публичных ссылок',
+            'Включить публичные ссылки на 2 дня',
         ],
         default=0,
     )
     if idx == 1:
         storage_cfg["enabled"] = False
-        _print_success("  xAI stored public URLs disabled")
+        _print_success('  Хранение публичных ссылок xAI отключено')
     elif idx == 2:
         storage_cfg["enabled"] = True
         storage_cfg["public_url"] = True
         storage_cfg["expires_after"] = 2 * 24 * 60 * 60
-        _print_success("  xAI stored public URLs enabled for 2 days")
+        _print_success('  Публичные ссылки xAI включены на 2 дня')
     else:
         storage_cfg["enabled"] = True
         storage_cfg["public_url"] = True
         storage_cfg["expires_after"] = None
-        _print_success("  xAI stored public URLs enabled without automatic expiry")
+        _print_success('  Публичные ссылки xAI включены без автоматического срока удаления')
 
 
 def _select_plugin_image_gen_provider(plugin_name: str, config: dict, *, use_gateway: bool = False) -> None:
@@ -4511,7 +4490,7 @@ def _select_plugin_image_gen_provider(plugin_name: str, config: dict, *, use_gat
         config["image_gen"] = img_cfg
     img_cfg["provider"] = NOUS_MANAGED_PROVIDER if use_gateway else plugin_name
     img_cfg.pop("use_gateway", None)
-    _print_success(f"  image_gen.provider set to: {img_cfg['provider']}")
+    _print_success(f"  Выбран image_gen.provider: {img_cfg['provider']}")
     _configure_imagegen_model_for_plugin(plugin_name, config)
     if plugin_name == "xai":
         _configure_xai_imagine_storage("image_gen", config)
@@ -4597,14 +4576,14 @@ def _configure_videogen_model_for_plugin(plugin_name: str, config: dict) -> None
         rows.append(row)
 
     idx = _prompt_choice(
-        f"  Choose {plugin_name} model:",
+        f'  Выберите модель {plugin_name}:',
         rows,
         default=0,
     )
 
     chosen = ordered[idx]
     cur_cfg["model"] = chosen
-    _print_success(f"  Model set to: {chosen}")
+    _print_success(f'  Выбрана модель: {chosen}')
 
 
 # Per-provider STT model catalogs for the interactive picker. Keys are
@@ -4644,10 +4623,10 @@ def _configure_stt_model(stt_provider: str, config: dict) -> None:
     current = str(prov_cfg.get(model_key) or "").strip()
     ordered = list(catalog)
     default_idx = ordered.index(current) if current in ordered else 0
-    idx = _prompt_choice("  Select STT model:", ordered, default_idx)
+    idx = _prompt_choice('  Выберите модель распознавания речи:', ordered, default_idx)
     chosen = ordered[idx]
     prov_cfg[model_key] = chosen
-    _print_success(f"  STT model set to: {chosen}")
+    _print_success(f'  Модель распознавания речи: {chosen}')
 
 
 def _select_plugin_video_gen_provider(plugin_name: str, config: dict, *, use_gateway: bool = False) -> None:
@@ -4663,7 +4642,7 @@ def _select_plugin_video_gen_provider(plugin_name: str, config: dict, *, use_gat
         config["video_gen"] = vid_cfg
     vid_cfg["provider"] = NOUS_MANAGED_PROVIDER if use_gateway else plugin_name
     vid_cfg.pop("use_gateway", None)
-    _print_success(f"  video_gen.provider set to: {vid_cfg['provider']}")
+    _print_success(f"  Выбран video_gen.provider: {vid_cfg['provider']}")
     _configure_videogen_model_for_plugin(plugin_name, config)
     if plugin_name == "xai":
         _configure_xai_imagine_storage("video_gen", config)
@@ -4874,7 +4853,7 @@ def _configure_provider(
             coverage_category=MANAGED_FEATURE_COVERAGE_CATEGORY.get(managed_feature),
         ):
             _print_warning(
-                "  Not enabled — Nous Portal access is required for this backend."
+                '  Не включено: этой среде нужен доступ через Nous Portal.'
             )
             return
 
@@ -4892,7 +4871,7 @@ def _configure_provider(
                 capability=f"{provider.get('name', 'Nous Subscription')}",
             )
             _print_warning(
-                f"  {message or 'Nous Subscription is only available after logging into Nous Portal.'}"
+                f"  {message or 'Подписка Nous доступна только после входа в Nous Portal.'}"
             )
             return
 
@@ -4906,25 +4885,25 @@ def _configure_provider(
 
     # Set STT provider in config if applicable
     if provider.get("stt_provider"):
-        _print_success(f"  STT provider set to: {provider['stt_provider']}")
+        _print_success(f"  Провайдер распознавания речи: {provider['stt_provider']}")
 
     # Set browser cloud provider in config if applicable
     if "browser_provider" in provider:
         bp = provider["browser_provider"]
         if bp == "local":
-            _print_success("  Browser set to local mode")
+            _print_success('  Браузер переключён в локальный режим')
         elif bp:
-            _print_success(f"  Browser cloud provider set to: {bp}")
+            _print_success(f'  Облачный провайдер браузера: {bp}')
 
     if provider.get("browser_backend"):
-        _print_success("  Browser set to Browser Use (browser_exec via CLI 3.0)")
+        _print_success('  Выбран Browser Use: browser_exec через CLI 3.0')
 
     if provider.get("browser_engine") and provider["browser_engine"] != "auto":
-        _print_success(f"  Browser engine set to: {provider['browser_engine']}")
+        _print_success(f"  Движок браузера: {provider['browser_engine']}")
 
     # Set web search backend in config if applicable
     if provider.get("web_backend"):
-        _print_success(f"  Web backend set to: {provider['web_backend']}")
+        _print_success(f"  Провайдер работы с интернетом: {provider['web_backend']}")
 
     # Persist the provider/backend config keys + use_gateway flags. Shared
     # with the GUI provider-select endpoint via apply_provider_selection so
@@ -4934,9 +4913,9 @@ def _configure_provider(
     if not env_vars:
         if provider.get("post_setup"):
             _run_post_setup(provider["post_setup"])
-        _print_success(f"  {provider['name']} - no configuration needed!")
+        _print_success(f"  {provider['name']} не требует настройки.")
         if managed_feature:
-            _print_info("  Requests for this tool will be billed to your Nous subscription.")
+            _print_info('  Запросы этого инструмента оплачиваются по вашей подписке Nous.')
         # Plugin-registered image_gen provider: write image_gen.provider
         # and route model selection to the plugin's own catalog.
         plugin_name = provider.get("image_gen_plugin_name")
@@ -4994,18 +4973,18 @@ def _configure_provider(
             _show_portal_hint = False
 
     if _show_portal_hint:
-        _print_info("  Available through Nous Portal subscription.")
+        _print_info('  Доступно по подписке Nous Portal.')
 
     for var in env_vars:
         existing = get_env_value(var["key"])
         if existing:
-            _print_success(f"  {var['key']}: already configured")
+            _print_success(f"  {var['key']}: уже настроено")
             # Don't ask to update - this is a new enable flow.
             # Reconfigure is handled separately.
         else:
             url = var.get("url", "")
             if url:
-                _print_info(f"  Get yours at: {url}")
+                _print_info(f'  Получить: {url}')
 
             default_val = var.get("default", "")
             if default_val:
@@ -5015,9 +4994,9 @@ def _configure_provider(
 
             if value:
                 save_env_value(var["key"], value)
-                _print_success("    Saved")
+                _print_success('    Сохранено')
             else:
-                _print_warning("    Skipped")
+                _print_warning('    Пропущено')
                 all_configured = False
 
     # Run post-setup hooks if needed
@@ -5025,7 +5004,7 @@ def _configure_provider(
         _run_post_setup(provider["post_setup"])
 
     if all_configured:
-        _print_success(f"  {provider['name']} configured!")
+        _print_success(f"  {provider['name']} настроен.")
         plugin_name = provider.get("image_gen_plugin_name")
         if plugin_name:
             _select_plugin_image_gen_provider(plugin_name, config, use_gateway=bool(managed_feature))
@@ -5061,9 +5040,9 @@ def _configure_vision_backend() -> None:
     the resolver uses the main model / aggregator fallback chain.
     """
     print()
-    print(color("  Vision / Image Analysis needs a multimodal model.", Colors.YELLOW))
+    print(color('  Для анализа изображений нужна мультимодальная модель.', Colors.YELLOW))
     print(color(
-        "  Pick any provider + model (like /model), or let it auto-detect.",
+        '  Выберите провайдера и модель, как в /model, либо оставьте автоматический выбор.',
         Colors.DIM,
     ))
 
@@ -5073,7 +5052,7 @@ def _configure_vision_backend() -> None:
         "Custom OpenAI-compatible endpoint — base URL, API key, model",
         "Skip",
     ]
-    idx = _prompt_choice("  Configure vision backend", choices, 0)
+    idx = _prompt_choice('  Настройка анализа изображений', choices, 0)
 
     config = load_config()
     aux = config.setdefault("auxiliary", {})
@@ -5090,7 +5069,7 @@ def _configure_vision_backend() -> None:
         for key in ("provider", "model", "base_url", "api_key", "api_mode"):
             vision_cfg.pop(key, None)
         save_config(config)
-        _print_success("  Vision set to auto (main model / aggregator fallback)")
+        _print_success('  Анализ изображений: автоматический выбор основной модели или резервного агрегатора')
         return
 
     if idx == 1:
@@ -5098,16 +5077,16 @@ def _configure_vision_backend() -> None:
         return
 
     if idx == 2:
-        base_url = _prompt("    Base URL (blank for OpenAI)").strip() or "https://api.openai.com/v1"
+        base_url = _prompt('    Основной адрес API; пусто — OpenAI').strip() or "https://api.openai.com/v1"
         is_native_openai = base_url_hostname(base_url) == "api.openai.com"
         key_label = "    OPENAI_API_KEY" if is_native_openai else "    API key"
         api_key = _prompt(key_label, password=True)
         if not (api_key and api_key.strip()):
-            _print_warning("    Skipped")
+            _print_warning('    Пропущено')
             return
         default_model = "gpt-4o-mini" if is_native_openai else ""
         model = _prompt(
-            f"    Vision model{f' (blank for {default_model})' if default_model else ''}"
+            f"    Модель анализа изображений{(f' (пусто — {default_model})' if default_model else '')}"
         ).strip() or default_model
         save_env_value("OPENAI_API_KEY", api_key.strip())
         # Only base_url + model go to config.yaml; the key is the secret.
@@ -5122,11 +5101,11 @@ def _configure_vision_backend() -> None:
         else:
             vision_cfg.pop("model", None)
         save_config(config)
-        _print_success(f"  Vision set to custom endpoint{f' ({model})' if model else ''}")
+        _print_success(f"  Для анализа изображений выбран свой сервер{(f' ({model})' if model else '')}")
         return
 
     # Skip
-    _print_info("  Skipped vision configuration")
+    _print_info('  Настройка анализа изображений пропущена')
 
 
 def _configure_vision_provider_model(config: dict, vision_cfg: dict) -> None:
@@ -5145,7 +5124,7 @@ def _configure_vision_provider_model(config: dict, vision_cfg: dict) -> None:
             format_aux_picker_entries,
         )
     except Exception as exc:  # pragma: no cover - import guard
-        _print_warning(f"  Could not load provider list: {exc}")
+        _print_warning(f'  Не удалось загрузить список провайдеров: {exc}')
         return
 
     current_provider = str(vision_cfg.get("provider") or "").strip()
@@ -5160,13 +5139,12 @@ def _configure_vision_provider_model(config: dict, vision_cfg: dict) -> None:
             max_models=40,
         )
     except Exception as exc:
-        _print_warning(f"  Could not detect providers: {exc}")
+        _print_warning(f'  Не удалось определить провайдеров: {exc}')
         providers = []
 
     if not providers:
         _print_warning(
-            "  No authenticated providers found. Configure a provider first "
-            "with `hermes model`, then re-run this."
+            '  Провайдеры с выполненным входом не найдены. Сначала настройте провайдера через korra model, затем повторите.'
         )
         return
 
@@ -5180,9 +5158,9 @@ def _configure_vision_provider_model(config: dict, vision_cfg: dict) -> None:
     ]
     provider_labels.append("Cancel")
 
-    pidx = _prompt_choice("  Choose vision provider:", provider_labels, 0)
+    pidx = _prompt_choice('  Выберите провайдера анализа изображений:', provider_labels, 0)
     if pidx >= len(providers):
-        _print_info("  Cancelled")
+        _print_info('  Отменено')
         return
 
     chosen = providers[pidx]
@@ -5191,16 +5169,16 @@ def _configure_vision_provider_model(config: dict, vision_cfg: dict) -> None:
 
     model_choices = list(models) + ["Type a custom model id…"]
     midx = _prompt_choice(
-        f"  Choose vision model for {chosen.get('name') or slug}:",
+        f"  Выберите модель анализа изображений у {chosen.get('name') or slug}:",
         model_choices,
         0,
     )
     if midx < len(models):
         model = models[midx]
     else:
-        model = _prompt("    Model id").strip()
+        model = _prompt('    ID модели').strip()
         if not model:
-            _print_warning("  No model entered — cancelled")
+            _print_warning('  Модель не указана. Отменено.')
             return
 
     vision_cfg["provider"] = slug
@@ -5209,7 +5187,7 @@ def _configure_vision_provider_model(config: dict, vision_cfg: dict) -> None:
     vision_cfg.pop("base_url", None)
     vision_cfg.pop("api_key", None)
     save_config(config)
-    _print_success(f"  Vision set to {slug} / {model}")
+    _print_success(f'  Анализ изображений: {slug} / {model}')
 
 
 def _configure_simple_requirements(ts_key: str):
@@ -5230,17 +5208,17 @@ def _configure_simple_requirements(ts_key: str):
 
     ts_label = next((l for k, l, _ in _get_effective_configurable_toolsets() if k == ts_key), ts_key)
     print()
-    print(color(f"  {ts_label} requires configuration:", Colors.YELLOW))
+    print(color(f'  Нужно настроить {ts_label}:', Colors.YELLOW))
 
     for var, url in missing:
         if url:
-            _print_info(f"  Get key at: {url}")
+            _print_info(f'  Получить ключ: {url}')
         value = _prompt(f"    {var}", password=True)
         if value and value.strip():
             save_env_value(var, value.strip())
-            _print_success("    Saved")
+            _print_success('    Сохранено')
         else:
-            _print_warning("    Skipped")
+            _print_warning('    Пропущено')
 
 
 def _reconfigure_tool(
@@ -5262,13 +5240,13 @@ def _reconfigure_tool(
                 configurable.append((ts_key, ts_label))
 
     if not configurable:
-        _print_info("No configured tools to reconfigure.")
+        _print_info('Настроенных инструментов для изменения нет.')
         return
 
     choices = [label for _, label in configurable]
     choices.append("Cancel")
 
-    idx = _prompt_choice("  Which tool would you like to reconfigure?", choices, len(choices) - 1)
+    idx = _prompt_choice('  Какой инструмент настроить заново?', choices, len(choices) - 1)
 
     if idx >= len(configurable):
         return  # Cancel
@@ -5339,7 +5317,7 @@ def _configure_tool_category_for_reconfig(
         _reconfigure_provider(provider, config, force_fresh=force_fresh)
     else:
         print()
-        print(color(f"  --- {icon} {name} - Choose a provider ---", Colors.CYAN))
+        print(color(f'  --- {icon} {name}: выберите провайдера ---', Colors.CYAN))
         if hidden_nous_message:
             for line in hidden_nous_message.splitlines():
                 _print_warning(f"  {line}")
@@ -5366,7 +5344,7 @@ def _configure_tool_category_for_reconfig(
             force_fresh=force_fresh,
         )
 
-        provider_idx = _prompt_choice("  Select provider:", provider_choices, default_idx)
+        provider_idx = _prompt_choice('  Выберите провайдера:', provider_choices, default_idx)
         _reconfigure_provider(
             providers[provider_idx],
             config,
@@ -5397,7 +5375,7 @@ def _reconfigure_provider(
             coverage_category=MANAGED_FEATURE_COVERAGE_CATEGORY.get(managed_feature),
         ):
             _print_warning(
-                "  Not enabled — Nous Portal access is required for this backend."
+                '  Не включено: этой среде нужен доступ через Nous Portal.'
             )
             return
 
@@ -5414,7 +5392,7 @@ def _reconfigure_provider(
                 capability=f"{provider.get('name', 'Nous Subscription')}",
             )
             _print_warning(
-                f"  {message or 'Nous Subscription is only available after logging into Nous Portal.'}"
+                f"  {message or 'Подписка Nous доступна только после входа в Nous Portal.'}"
             )
             return
 
@@ -5428,7 +5406,7 @@ def _reconfigure_provider(
             NOUS_MANAGED_PROVIDER if managed_feature else provider["tts_provider"]
         )
         tts_cfg.pop("use_gateway", None)
-        _print_success(f"  TTS provider set to: {provider['tts_provider']}")
+        _print_success(f"  Провайдер синтеза речи: {provider['tts_provider']}")
 
     if provider.get("stt_provider"):
         stt_cfg = config.setdefault("stt", {})
@@ -5436,20 +5414,20 @@ def _reconfigure_provider(
             NOUS_MANAGED_PROVIDER if managed_feature else provider["stt_provider"]
         )
         stt_cfg.pop("use_gateway", None)
-        _print_success(f"  STT provider set to: {provider['stt_provider']}")
+        _print_success(f"  Провайдер распознавания речи: {provider['stt_provider']}")
 
     if "browser_provider" in provider:
         bp = provider["browser_provider"]
         browser_cfg = config.setdefault("browser", {})
         if managed_feature:
             browser_cfg["cloud_provider"] = NOUS_MANAGED_PROVIDER
-            _print_success(f"  Browser cloud provider set to: {bp or 'nous'}")
+            _print_success(f"  Облачный провайдер браузера: {bp or 'nous'}")
         elif bp == "local":
             browser_cfg["cloud_provider"] = "local"
-            _print_success("  Browser set to local mode")
+            _print_success('  Браузер переключён в локальный режим')
         elif bp:
             browser_cfg["cloud_provider"] = bp
-            _print_success(f"  Browser cloud provider set to: {bp}")
+            _print_success(f'  Облачный провайдер браузера: {bp}')
         # Browser Use mode (browser.backend) composes with the provider —
         # switching providers keeps the driver choice intact.
         browser_cfg.pop("use_gateway", None)
@@ -5457,13 +5435,13 @@ def _reconfigure_provider(
     if provider.get("browser_backend"):
         browser_cfg = config.setdefault("browser", {})
         browser_cfg["backend"] = provider["browser_backend"]
-        _print_success("  Browser set to Browser Use (browser_exec via CLI 3.0)")
+        _print_success('  Выбран Browser Use: browser_exec через CLI 3.0')
 
     if provider.get("browser_engine"):
         browser_cfg = config.setdefault("browser", {})
         browser_cfg["engine"] = provider["browser_engine"]
         if provider["browser_engine"] != "auto":
-            _print_success(f"  Browser engine set to: {provider['browser_engine']}")
+            _print_success(f"  Движок браузера: {provider['browser_engine']}")
 
     # Set web search backend in config if applicable
     if provider.get("web_backend"):
@@ -5477,20 +5455,19 @@ def _reconfigure_provider(
             if isinstance(tiers, dict):
                 tiers[provider["web_backend"]] = provider["web_tier"]
             _print_success(
-                f"  Web backend set to: {provider['web_backend']} "
-                f"({provider['web_tier']} tier)"
+                f"  Провайдер работы с интернетом: {provider['web_backend']}; тариф {provider['web_tier']}"
             )
         else:
             stale_tiers = web_cfg.get("provider_tier")
             if isinstance(stale_tiers, dict):
                 stale_tiers.pop(provider["web_backend"], None)
-            _print_success(f"  Web backend set to: {provider['web_backend']}")
+            _print_success(f"  Провайдер работы с интернетом: {provider['web_backend']}")
 
     # Set computer_use backend in config if applicable
     if provider.get("computer_use_backend"):
         cu_cfg = config.setdefault("computer_use", {})
         cu_cfg["backend"] = provider["computer_use_backend"]
-        _print_success(f"  Computer Use backend set to: {provider['computer_use_backend']}")
+        _print_success(f"  Среда управления компьютером: {provider['computer_use_backend']}")
 
     if managed_feature and managed_feature not in {"web", "tts", "stt", "browser"}:
         section = config.setdefault(managed_feature, {})
@@ -5510,9 +5487,9 @@ def _reconfigure_provider(
     if not env_vars:
         if provider.get("post_setup"):
             _run_post_setup(provider["post_setup"])
-        _print_success(f"  {provider['name']} - no configuration needed!")
+        _print_success(f"  {provider['name']} не требует настройки.")
         if managed_feature:
-            _print_info("  Requests for this tool will be billed to your Nous subscription.")
+            _print_info('  Запросы этого инструмента оплачиваются по вашей подписке Nous.')
         plugin_name = provider.get("image_gen_plugin_name")
         if plugin_name:
             _select_plugin_image_gen_provider(plugin_name, config, use_gateway=bool(managed_feature))
@@ -5545,17 +5522,17 @@ def _reconfigure_provider(
     for var in env_vars:
         existing = get_env_value(var["key"])
         if existing:
-            _print_info(f"  {var['key']}: configured ({existing[:8]}...)")
+            _print_info(f"  {var['key']}: настроено ({existing[:8]}…)")
         url = var.get("url", "")
         if url:
-            _print_info(f"  Get yours at: {url}")
+            _print_info(f'  Получить: {url}')
         default_val = var.get("default", "")
-        value = _prompt(f"    {var.get('prompt', var['key'])} (Enter to keep current)", password=not default_val)
+        value = _prompt(f"    {var.get('prompt', var['key'])}; Enter — сохранить текущее", password=not default_val)
         if value and value.strip():
             save_env_value(var["key"], value.strip())
-            _print_success("    Updated")
+            _print_success('    Обновлено')
         else:
-            _print_info("    Kept current")
+            _print_info('    Текущее значение сохранено')
 
     if provider.get("post_setup"):
         _run_post_setup(provider["post_setup"])
@@ -5610,15 +5587,15 @@ def _reconfigure_simple_requirements(ts_key: str):
     for var, url in requirements:
         existing = get_env_value(var)
         if existing:
-            _print_info(f"  {var}: configured ({existing[:8]}...)")
+            _print_info(f'  {var}: настроено ({existing[:8]}…)')
         if url:
-            _print_info(f"  Get key at: {url}")
-        value = _prompt(f"    {var} (Enter to keep current)", password=True)
+            _print_info(f'  Получить ключ: {url}')
+        value = _prompt(f'    {var}; Enter — сохранить текущее', password=True)
         if value and value.strip():
             save_env_value(var, value.strip())
-            _print_success("    Updated")
+            _print_success('    Обновлено')
         else:
-            _print_info("    Kept current")
+            _print_info('    Текущее значение сохранено')
 
 
 # ─── Main Entry Point ─────────────────────────────────────────────────────────
@@ -5643,7 +5620,7 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
     # Non-interactive summary mode for CLI usage
     if getattr(args, "summary", False):
         total = len(_get_effective_configurable_toolsets())
-        print(color("⚕ Tool Summary", Colors.CYAN, Colors.BOLD))
+        print(color('⚕ Сводка инструментов', Colors.CYAN, Colors.BOLD))
         print()
         summary = _platform_toolset_summary(config, enabled_platforms)
         for pkey in enabled_platforms:
@@ -5656,13 +5633,13 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
                     label = next((l for k, l, _ in _get_effective_configurable_toolsets() if k == ts_key), ts_key)
                     print(color(f"    ✓ {label}", Colors.GREEN))
             else:
-                print(color("    (none enabled)", Colors.DIM))
+                print(color('    (ничего не включено)', Colors.DIM))
         print()
         return
-    print(color("⚕ Korra Tool Configuration", Colors.CYAN, Colors.BOLD))
-    print(color("  Enable or disable tools per platform.", Colors.DIM))
-    print(color("  Tools that need API keys will be configured when enabled.", Colors.DIM))
-    print(color("  Guide: https://github.com/ceremoneymeister-bit/Korra.twenty.one/blob/main/website/docs/user-guide/features/tools.md", Colors.DIM))
+    print(color('⚕ Настройка инструментов Корры', Colors.CYAN, Colors.BOLD))
+    print(color('  Включайте и отключайте инструменты для каждой платформы.', Colors.DIM))
+    print(color('  Ключи API будут запрошены при включении инструментов, которым они нужны.', Colors.DIM))
+    print(color('  Инструкция: https://github.com/ceremoneymeister-bit/Korra.twenty.one/blob/main/website/docs/user-guide/features/tools.md', Colors.DIM))
     print()
 
     # ── First-time install: linear flow, no platform menu ──
@@ -5702,7 +5679,7 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
             )
             for ts_key in sorted(auto_configured):
                 label = next((l for k, l, _ in CONFIGURABLE_TOOLSETS if k == ts_key), ts_key)
-                print(color(f"  ✓ {label}: using your Nous subscription defaults", Colors.GREEN))
+                print(color(f'  ✓ {label}: используются исходные настройки вашей подписки Nous', Colors.GREEN))
 
             # Walk through ALL selected tools that have provider options or
             # need API keys.  This ensures browser (Local vs Browserbase),
@@ -5716,18 +5693,18 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
 
             if to_configure:
                 print()
-                print(color(f"  Configuring {len(to_configure)} tool(s):", Colors.YELLOW))
+                print(color(f'  Настраиваем инструменты: {len(to_configure)}', Colors.YELLOW))
                 for ts_key in to_configure:
                     label = next((l for k, l, _ in _get_effective_configurable_toolsets() if k == ts_key), ts_key)
                     print(color(f"    • {label}", Colors.DIM))
-                print(color("  You can skip any tool you don't need right now.", Colors.DIM))
+                print(color('  Любой ненужный сейчас инструмент можно пропустить.', Colors.DIM))
                 print()
                 for ts_key in to_configure:
                     _configure_toolset(ts_key, config)
 
             _save_platform_tools(config, pkey, new_enabled)
             save_config(config)
-            print(color(f"  ✓ Saved {pinfo['label']} tool configuration", Colors.GREEN))
+            print(color(f"  ✓ Настройки инструментов {pinfo['label']} сохранены", Colors.GREEN))
             print()
 
         return
@@ -5762,7 +5739,7 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
     _done_idx = _reconfig_idx + (2 if _has_mcp else 1)
 
     while True:
-        idx = _prompt_choice("Select an option:", platform_choices, default=0)
+        idx = _prompt_choice('Выберите действие:', platform_choices, default=0)
 
         # "Done" selected
         if idx == _done_idx:
@@ -5805,11 +5782,11 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
 
             if selected_to_configure:
                 print()
-                print(color(f"  Configuring {len(selected_to_configure)} selected tool(s):", Colors.YELLOW))
+                print(color(f'  Настраиваем выбранные инструменты: {len(selected_to_configure)}', Colors.YELLOW))
                 for ts_key in selected_to_configure:
                     label = next((l for k, l, _ in _get_effective_configurable_toolsets() if k == ts_key), ts_key)
                     print(color(f"    • {label}", Colors.DIM))
-                print(color("  You can skip any tool you don't need right now.", Colors.DIM))
+                print(color('  Любой ненужный сейчас инструмент можно пропустить.', Colors.DIM))
                 print()
                 for ts_key in selected_to_configure:
                     _configure_toolset(ts_key, config)
@@ -5848,14 +5825,14 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
                                 _configure_toolset(ts_key, config)
                     _save_platform_tools(config, pk, new_enabled)
                 save_config(config)
-                print(color("  ✓ Saved configuration for all platforms", Colors.GREEN))
+                print(color('  ✓ Настройки всех платформ сохранены', Colors.GREEN))
                 # Update choice labels
                 for ci, pk in enumerate(platform_keys):
                     new_count = len(_get_platform_tools(config, pk, include_default_mcp_servers=False))
                     total = len(_get_effective_configurable_toolsets())
                     platform_choices[ci] = f"Configure {PLATFORMS[pk]['label']}  ({new_count}/{total} enabled)"
             else:
-                print(color("  No changes", Colors.DIM))
+                print(color('  Без изменений', Colors.DIM))
             print()
             continue
 
@@ -5890,11 +5867,11 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
 
         if selected_to_configure:
             print()
-            print(color(f"  Configuring {len(selected_to_configure)} selected tool(s):", Colors.YELLOW))
+            print(color(f'  Настраиваем выбранные инструменты: {len(selected_to_configure)}', Colors.YELLOW))
             for ts_key in selected_to_configure:
                 label = next((l for k, l, _ in _get_effective_configurable_toolsets() if k == ts_key), ts_key)
                 print(color(f"    • {label}", Colors.DIM))
-            print(color("  You can skip any tool you don't need right now.", Colors.DIM))
+            print(color('  Любой ненужный сейчас инструмент можно пропустить.', Colors.DIM))
             print()
             for ts_key in selected_to_configure:
                 _configure_toolset(ts_key, config)
@@ -5929,9 +5906,9 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
 
             _save_platform_tools(config, pkey, new_enabled)
             save_config(config)
-            print(color(f"  ✓ Saved {pinfo['label']} configuration", Colors.GREEN))
+            print(color(f"  ✓ Настройки {pinfo['label']} сохранены", Colors.GREEN))
         else:
-            print(color(f"  No changes to {pinfo['label']}", Colors.DIM))
+            print(color(f"  Настройки {pinfo['label']} не изменены", Colors.DIM))
 
         print()
 
@@ -5942,8 +5919,8 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
 
     print()
     from korra_constants import display_hermes_home
-    print(color(f"  Tool configuration saved to {display_hermes_home()}/config.yaml", Colors.DIM))
-    print(color("  Changes take effect on next 'hermes' or gateway restart.", Colors.DIM))
+    print(color(f'  Настройки инструментов сохранены в {display_hermes_home()}/config.yaml', Colors.DIM))
+    print(color('  Изменения вступят в силу при следующем запуске Корры или перезапуске шлюза.', Colors.DIM))
     print()
 
 
@@ -5961,7 +5938,7 @@ def _configure_mcp_tools_interactive(config: dict):
 
     mcp_servers = config.get("mcp_servers") or {}
     if not mcp_servers:
-        _print_info("No MCP servers configured.")
+        _print_info('Серверы MCP не настроены.')
         return
 
     # Count enabled servers
@@ -5970,40 +5947,40 @@ def _configure_mcp_tools_interactive(config: dict):
         if v.get("enabled", True) not in {False, "false", "0", "no", "off"}
     ]
     if not enabled_names:
-        _print_info("All MCP servers are disabled.")
+        _print_info('Все серверы MCP отключены.')
         return
 
     print()
-    print(color("  Discovering tools from MCP servers...", Colors.YELLOW))
-    print(color(f"  Connecting to {len(enabled_names)} server(s): {', '.join(enabled_names)}", Colors.DIM))
+    print(color('  Получаем инструменты серверов MCP…', Colors.YELLOW))
+    print(color(f"  Подключаемся к серверам ({len(enabled_names)}): {', '.join(enabled_names)}", Colors.DIM))
 
     try:
         from tools.mcp_tool import probe_mcp_server_tools
         server_tools = probe_mcp_server_tools()
     except Exception as exc:
-        _print_error(f"Failed to probe MCP servers: {exc}")
+        _print_error(f'Не удалось проверить серверы MCP: {exc}')
         return
 
     if not server_tools:
-        _print_warning("Could not discover tools from any MCP server.")
-        _print_info("Check that server commands/URLs are correct and dependencies are installed.")
+        _print_warning('Не удалось получить инструменты ни с одного сервера MCP.')
+        _print_info('Проверьте команды или адреса серверов и наличие зависимостей.')
         return
 
     # Report discovery results
     failed = [n for n in enabled_names if n not in server_tools]
     if failed:
         for name in failed:
-            _print_warning(f"  Could not connect to '{name}'")
+            _print_warning(f'  Не удалось подключиться к «{name}»')
 
     total_tools = sum(len(tools) for tools in server_tools.values())
-    print(color(f"  Found {total_tools} tool(s) across {len(server_tools)} server(s)", Colors.GREEN))
+    print(color(f'  Найдено инструментов: {total_tools}; серверов: {len(server_tools)}', Colors.GREEN))
     print()
 
     any_changes = False
 
     for server_name, tools in server_tools.items():
         if not tools:
-            _print_info(f"  {server_name}: no tools found")
+            _print_info(f'  {server_name}: инструменты не найдены')
             continue
 
         srv_cfg = mcp_servers.get(server_name, {})
@@ -6049,14 +6026,14 @@ def _configure_mcp_tools_interactive(config: dict):
                 pre_selected.add(i)
 
         chosen = curses_checklist(
-            f"MCP Server: {server_name}  ({len(tools)} tools)",
+            f'Сервер MCP: {server_name}; инструментов: {len(tools)}',
             labels,
             pre_selected,
             cancel_returns=pre_selected,
         )
 
         if chosen == pre_selected:
-            _print_info(f"  {server_name}: no changes")
+            _print_info(f'  {server_name}: без изменений')
             continue
 
         # Update config
@@ -6096,11 +6073,7 @@ def _configure_mcp_tools_interactive(config: dict):
             )
             if glob_shadowed:
                 _print_warning(
-                    f"  {server_name}: {len(glob_shadowed)} re-enabled "
-                    f"tool(s) still match glob exclude pattern(s) "
-                    f"{glob_entries} and stay excluded — edit "
-                    f"mcp_servers.{server_name}.tools.exclude in config.yaml "
-                    "to enable them."
+                    f'  {server_name}: инструменты ({len(glob_shadowed)}), которые вы включили, всё ещё исключены шаблонами {glob_entries}. Для включения измените mcp_servers.{server_name}.tools.exclude в config.yaml.'
                 )
             if not new_exclude:
                 tools_cfg.pop("exclude", None)
@@ -6117,16 +6090,16 @@ def _configure_mcp_tools_interactive(config: dict):
         enabled_count = len(chosen)
         disabled_count = len(tools) - enabled_count
         _print_success(
-            f"  {server_name}: {enabled_count} enabled, {disabled_count} disabled"
+            f'  {server_name}: включено {enabled_count}, отключено {disabled_count}'
         )
         any_changes = True
 
     if any_changes:
         save_config(config)
         print()
-        print(color("  ✓ MCP tool configuration saved", Colors.GREEN))
+        print(color('  ✓ Настройки инструментов MCP сохранены', Colors.GREEN))
     else:
-        print(color("  No changes to MCP tools", Colors.DIM))
+        print(color('  Инструменты MCP не изменены', Colors.DIM))
 
 
 # ─── Non-interactive disable/enable ──────────────────────────────────────────
@@ -6176,7 +6149,7 @@ def _print_tools_list(enabled_toolsets: set, mcp_servers: dict, platform: str = 
     ]
     builtin_keys = {ts_key for ts_key, _, _ in CONFIGURABLE_TOOLSETS}
 
-    print(f"Built-in toolsets ({platform}):")
+    print(f'Встроенные наборы инструментов ({platform}):')
     for ts_key, label, _ in effective:
         if ts_key not in builtin_keys:
             continue
@@ -6188,7 +6161,7 @@ def _print_tools_list(enabled_toolsets: set, mcp_servers: dict, platform: str = 
     plugin_entries = [(k, l) for k, l, _ in effective if k not in builtin_keys]
     if plugin_entries:
         print()
-        print(f"Plugin toolsets ({platform}):")
+        print(f'Наборы инструментов плагинов ({platform}):')
         for ts_key, label in plugin_entries:
             status = (color("✓ enabled", Colors.GREEN) if ts_key in enabled_toolsets
                       else color("✗ disabled", Colors.RED))
@@ -6196,17 +6169,17 @@ def _print_tools_list(enabled_toolsets: set, mcp_servers: dict, platform: str = 
 
     if mcp_servers:
         print()
-        print("MCP servers:")
+        print('Серверы MCP:')
         for srv_name, srv_cfg in mcp_servers.items():
             tools_cfg = srv_cfg.get("tools") or {}
             exclude = tools_cfg.get("exclude") or []
             include = tools_cfg.get("include") or []
             if include:
-                _print_info(f"{srv_name}  [include only: {', '.join(include)}]")
+                _print_info(f"{srv_name} [только эти: {', '.join(include)}]")
             elif exclude:
-                _print_info(f"{srv_name}  [excluded: {color(', '.join(exclude), Colors.YELLOW)}]")
+                _print_info(f"{srv_name} [исключены: {color(', '.join(exclude), Colors.YELLOW)}]")
             else:
-                _print_info(f"{srv_name}  {color('all tools enabled', Colors.DIM)}")
+                _print_info(f"{srv_name}  {color('все инструменты включены', Colors.DIM)}")
 
 
 def _known_tool_platforms() -> set[str]:
@@ -6242,7 +6215,7 @@ def tools_disable_enable_command(args):
 
     valid_platforms = _known_tool_platforms()
     if platform not in valid_platforms:
-        _print_error(f"Unknown platform '{platform}'. Valid: {', '.join(sorted(valid_platforms))}")
+        _print_error(f"Неизвестная платформа «{platform}». Доступны: {', '.join(sorted(valid_platforms))}")
         return
 
     if action == "list":
@@ -6258,7 +6231,7 @@ def tools_disable_enable_command(args):
     unknown_toolsets = [t for t in toolset_targets if t not in valid_toolsets]
     if unknown_toolsets:
         for name in unknown_toolsets:
-            _print_error(f"Unknown toolset '{name}'")
+            _print_error(f'Неизвестный набор инструментов «{name}»')
         toolset_targets = [t for t in toolset_targets if t in valid_toolsets]
 
     # Reject platform-scoped toolsets on platforms that don't allow them.
@@ -6270,8 +6243,7 @@ def tools_disable_enable_command(args):
         for name in restricted_targets:
             allowed = sorted(_TOOLSET_PLATFORM_RESTRICTIONS.get(name) or set())
             _print_error(
-                f"Toolset '{name}' is not available on platform '{platform}' "
-                f"(only: {', '.join(allowed)})"
+                f"Набор «{name}» недоступен на платформе «{platform}». Доступные платформы: {', '.join(allowed)}"
             )
         toolset_targets = [t for t in toolset_targets if t not in restricted_targets]
 
@@ -6282,7 +6254,7 @@ def tools_disable_enable_command(args):
     if mcp_targets:
         failed_servers = _apply_mcp_change(config, mcp_targets, action)
         for srv in failed_servers:
-            _print_error(f"MCP server '{srv}' not found in config")
+            _print_error(f'Сервер MCP «{srv}» не найден в настройках')
 
     save_config(config)
 

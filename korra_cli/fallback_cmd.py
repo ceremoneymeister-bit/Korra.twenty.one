@@ -53,7 +53,7 @@ def _format_entry(entry: Dict[str, Any]) -> str:
     model = entry.get("model", "?")
     base = entry.get("base_url")
     suffix = f"  [{base}]" if base else ""
-    return f"{model}  (via {provider}){suffix}"
+    return f'{model}  (через {provider}){suffix}'
 
 
 def _extract_fallback_from_model_cfg(model_cfg: Any) -> Optional[Dict[str, Any]]:
@@ -113,22 +113,22 @@ def cmd_fallback_list(args) -> None:  # noqa: ARG001
 
     print()
     if not chain:
-        print("  No fallback providers configured.")
+        print('  Резервные провайдеры не настроены.')
         print()
-        print("  Add one with:  hermes fallback add")
+        print('  Добавить: korra fallback add')
         print()
         return
 
     primary = _describe_primary(config)
     if primary:
-        print(f"  Primary:   {primary}")
+        print(f'  Основная модель: {primary}')
         print()
-    print(f"  Fallback chain ({len(chain)} {'entry' if len(chain) == 1 else 'entries'}):")
+    print(f'  Порядок резервных моделей (всего {len(chain)}):')
     for i, entry in enumerate(chain, 1):
         print(f"    {i}. {_format_entry(entry)}")
     print()
-    print("  Tried in order when the primary fails (rate-limit, 5xx, connection errors).")
-    print("  Docs: https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers")
+    print('  Используются по порядку при лимитах, ошибках сервера или соединения основного провайдера.')
+    print('  Инструкция: https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers')
     print()
 
 
@@ -138,7 +138,7 @@ def _describe_primary(config: Dict[str, Any]) -> Optional[str]:
     if isinstance(model_cfg, dict):
         provider = (model_cfg.get("provider") or "?").strip() or "?"
         model = (model_cfg.get("default") or model_cfg.get("model") or "?").strip() or "?"
-        return f"{model}  (via {provider})"
+        return f'{model}  (через {provider})'
     if isinstance(model_cfg, str) and model_cfg.strip():
         return model_cfg.strip()
     return None
@@ -158,8 +158,8 @@ def cmd_fallback_add(args) -> None:
     active_provider_before = _snapshot_auth_active_provider()
 
     print()
-    print("  Adding a fallback provider.  The picker below is the same one used by")
-    print("  `hermes model` — select the provider + model you want as a fallback.")
+    print('  Добавляем резервного провайдера. Выберите его и модель')
+    print('  так же, как в `korra model`.')
     print()
 
     try:
@@ -180,7 +180,7 @@ def cmd_fallback_add(args) -> None:
         _restore_model_cfg(model_before)
         _restore_auth_active_provider(active_provider_before)
         print()
-        print("  No fallback added.")
+        print('  Резервный провайдер не добавлен.')
         return
 
     # Picker picked the same thing that's already the primary → nothing changed,
@@ -207,8 +207,8 @@ def cmd_fallback_add(args) -> None:
         _restore_model_cfg(model_before)
         _restore_auth_active_provider(active_provider_before)
         print()
-        print(f"  Selected model matches the current primary ({_format_entry(new_entry)}).")
-        print("  A provider cannot be a fallback for itself — no change.")
+        print(f'  Выбрана текущая основная модель: {_format_entry(new_entry)}.')
+        print('  Основной провайдер не может быть резервным для себя. Изменений нет.')
         return
 
     # Reload the config with the primary restored, then append the new entry
@@ -233,7 +233,7 @@ def cmd_fallback_add(args) -> None:
             new_ident,
         ):
             print()
-            print(f"  {_format_entry(new_entry)} is already in the fallback chain — skipped.")
+            print(f'  {_format_entry(new_entry)} уже есть среди резервных моделей. Пропущено.')
             return
 
     chain.append(new_entry)
@@ -241,10 +241,10 @@ def cmd_fallback_add(args) -> None:
     save_config(final_cfg)
 
     print()
-    print(f"  Added fallback: {_format_entry(new_entry)}")
-    print(f"  Chain is now {len(chain)} {'entry' if len(chain) == 1 else 'entries'} long.")
+    print(f'  Добавлена резервная модель: {_format_entry(new_entry)}')
+    print(f'  Всего резервных моделей: {len(chain)}.')
     print()
-    print("  Run `hermes fallback list` to view, or `hermes fallback remove` to delete.")
+    print('  Посмотреть: `korra fallback list`. Удалить: `korra fallback remove`.')
 
 
 def _restore_model_cfg(model_before: Any) -> None:
@@ -268,22 +268,22 @@ def cmd_fallback_remove(args) -> None:  # noqa: ARG001
 
     if not chain:
         print()
-        print("  No fallback providers configured — nothing to remove.")
+        print('  Резервные провайдеры не настроены. Удалять нечего.')
         print()
         return
 
     choices = [_format_entry(e) for e in chain]
-    choices.append("Cancel")
+    choices.append('Отмена')
 
     try:
         from korra_cli.setup import _curses_prompt_choice
-        idx = _curses_prompt_choice("Select a fallback to remove:", choices, 0)
+        idx = _curses_prompt_choice('Выберите резервную модель для удаления:', choices, 0)
     except Exception:
-        idx = _numbered_pick("Select a fallback to remove:", choices)
+        idx = _numbered_pick('Выберите резервную модель для удаления:', choices)
 
     if idx is None or idx < 0 or idx >= len(chain):
         print()
-        print("  Cancelled — no change.")
+        print('  Отменено. Изменений нет.')
         return
 
     removed = chain.pop(idx)
@@ -291,11 +291,11 @@ def cmd_fallback_remove(args) -> None:  # noqa: ARG001
     save_config(config)
 
     print()
-    print(f"  Removed fallback: {_format_entry(removed)}")
+    print(f'  Резервная модель удалена: {_format_entry(removed)}')
     if chain:
-        print(f"  Chain is now {len(chain)} {'entry' if len(chain) == 1 else 'entries'} long.")
+        print(f'  Всего резервных моделей: {len(chain)}.')
     else:
-        print("  Fallback chain is now empty.")
+        print('  Список резервных моделей теперь пуст.')
     print()
 
 
@@ -308,29 +308,29 @@ def cmd_fallback_clear(args) -> None:  # noqa: ARG001
 
     if not chain:
         print()
-        print("  No fallback providers configured — nothing to clear.")
+        print('  Резервные провайдеры не настроены. Очищать нечего.')
         print()
         return
 
     print()
-    print(f"  Current fallback chain ({len(chain)} {'entry' if len(chain) == 1 else 'entries'}):")
+    print(f'  Текущий порядок резервных моделей (всего {len(chain)}):')
     for i, entry in enumerate(chain, 1):
         print(f"    {i}. {_format_entry(entry)}")
     print()
     try:
-        resp = input("  Clear all entries? [y/N]: ").strip().lower()
+        resp = input('  Удалить все записи? [y — да / N — нет]: ').strip().lower()
     except (KeyboardInterrupt, EOFError):
         print()
-        print("  Cancelled.")
+        print('  Отменено.')
         return
     if resp not in {"y", "yes"}:
-        print("  Cancelled — no change.")
+        print('  Отменено. Изменений нет.')
         return
 
     _write_chain(config, [])
     save_config(config)
     print()
-    print("  Fallback chain cleared.")
+    print('  Список резервных моделей очищен.')
     print()
 
 
@@ -342,15 +342,15 @@ def _numbered_pick(question: str, choices: List[str]) -> Optional[int]:
     print()
     while True:
         try:
-            val = input(f"Choice [1-{len(choices)}]: ").strip()
+            val = input(f'Выбор [1–{len(choices)}]: ').strip()
             if not val:
                 return None
             idx = int(val) - 1
             if 0 <= idx < len(choices):
                 return idx
-            print(f"Please enter 1-{len(choices)}")
+            print(f'Введите число от 1 до {len(choices)}')
         except ValueError:
-            print("Please enter a number")
+            print('Введите число')
         except (KeyboardInterrupt, EOFError):
             print()
             return None
@@ -372,6 +372,6 @@ def cmd_fallback(args) -> None:
     elif sub == "clear":
         cmd_fallback_clear(args)
     else:
-        print(f"Unknown fallback subcommand: {sub}")
-        print("Use one of: list, add, remove, clear")
+        print(f'Неизвестная подкоманда резервных моделей: {sub}')
+        print('Доступны: list, add, remove, clear')
         raise SystemExit(2)

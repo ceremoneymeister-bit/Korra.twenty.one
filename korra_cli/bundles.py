@@ -44,17 +44,15 @@ def _cmd_list(args) -> None:
     bundles = list_bundles()
     if not bundles:
         c.print(
-            f"[dim]No bundles installed yet. Create one with:\n"
-            f"  hermes bundles create <name> --skill skill1 --skill skill2[/]\n"
-            f"Bundles directory: [bold]{_bundles_dir()}[/]"
+            f'[dim]Наборы навыков пока не установлены. Создать:\n  korra bundles create <имя> --skill skill1 --skill skill2[/]\nПапка наборов: [bold]{_bundles_dir()}[/]'
         )
         return
 
-    table = Table(title=f"Skill Bundles ({len(bundles)})", show_lines=False)
-    table.add_column("Command", style="bold cyan")
-    table.add_column("Name", style="bold")
-    table.add_column("Skills", justify="right")
-    table.add_column("Description")
+    table = Table(title=f'Наборы навыков ({len(bundles)})', show_lines=False)
+    table.add_column('Команда', style="bold cyan")
+    table.add_column('Название', style="bold")
+    table.add_column('Навыки', justify="right")
+    table.add_column('Описание')
 
     for info in bundles:
         skill_count = len(info.get("skills", []))
@@ -65,24 +63,24 @@ def _cmd_list(args) -> None:
             info.get("description") or "",
         )
     c.print(table)
-    c.print(f"\n[dim]Bundles directory: {_bundles_dir()}[/]")
+    c.print(f'\n[dim]Папка наборов: {_bundles_dir()}[/]')
 
 
 def _cmd_show(args) -> None:
     c = _console()
     info = get_bundle(args.name)
     if not info:
-        c.print(f"[bold red]Bundle {args.name!r} not found.[/]")
+        c.print(f'[bold red]Набор {args.name!r} не найден.[/]')
         sys.exit(1)
     c.print(f"[bold cyan]/{info['slug']}[/]  [bold]{info['name']}[/]")
     if info.get("description"):
         c.print(f"  {info['description']}")
-    c.print(f"  [dim]File: {info['path']}[/]")
-    c.print(f"  [bold]Skills ({len(info['skills'])}):[/]")
+    c.print(f"  [dim]Файл: {info['path']}[/]")
+    c.print(f"  [bold]Навыки ({len(info['skills'])}):[/]")
     for s in info["skills"]:
         c.print(f"    - {s}")
     if info.get("instruction"):
-        c.print(f"  [bold]Instruction:[/]\n    {info['instruction']}")
+        c.print(f"  [bold]Инструкция:[/]\n    {info['instruction']}")
 
 
 def _cmd_create(args) -> None:
@@ -96,21 +94,20 @@ def _cmd_create(args) -> None:
     if not skills:
         # Interactive prompt for skills if none were passed on the CLI.
         c.print(
-            "[dim]No skills passed via --skill. Enter one skill name per line.\n"
-            "Submit an empty line to finish.[/]"
+            '[dim]Навыки через --skill не указаны. Введите по одному имени на строку.\nПустая строка завершит ввод.[/]'
         )
         try:
             while True:
-                line = line_input("skill> ").strip()
+                line = line_input('навык> ').strip()
                 if not line:
                     break
                 skills.append(line)
         except (EOFError, KeyboardInterrupt):
-            c.print("\n[yellow]Cancelled.[/]")
+            c.print('\n[yellow]Отменено.[/]')
             sys.exit(1)
 
     if not skills:
-        c.print("[bold red]A bundle must reference at least one skill.[/]")
+        c.print('[bold red]В наборе должен быть хотя бы один навык.[/]')
         sys.exit(1)
 
     try:
@@ -122,18 +119,17 @@ def _cmd_create(args) -> None:
             overwrite=overwrite,
         )
     except FileExistsError as exc:
-        c.print(f"[bold red]{exc}[/]\n[dim]Pass --force to overwrite.[/]")
+        c.print(f'[bold red]{exc}[/]\n[dim]Для перезаписи добавьте --force.[/]')
         sys.exit(1)
     except ValueError as exc:
         c.print(f"[bold red]{exc}[/]")
         sys.exit(1)
 
-    c.print(f"[bold green]Created bundle:[/] {path}")
+    c.print(f'[bold green]Набор создан:[/] {path}')
     info = get_bundle(name)
     if info:
         c.print(
-            f"  Invoke with: [bold cyan]/{info['slug']}[/]  "
-            f"(loads {len(info['skills'])} skills)"
+            f"  Запустить: [bold cyan]/{info['slug']}[/]  (загружается навыков: {len(info['skills'])})"
         )
 
 
@@ -144,24 +140,24 @@ def _cmd_delete(args) -> None:
     except FileNotFoundError as exc:
         c.print(f"[bold red]{exc}[/]")
         sys.exit(1)
-    c.print(f"[bold green]Deleted bundle:[/] {path}")
+    c.print(f'[bold green]Набор удалён:[/] {path}')
 
 
 def _cmd_reload(args) -> None:
     c = _console()
     diff = reload_bundles()
     if diff["added"]:
-        c.print(f"[bold green]Added ({len(diff['added'])}):[/]")
+        c.print(f"[bold green]Добавлено ({len(diff['added'])}):[/]")
         for entry in diff["added"]:
             c.print(f"  + {entry['name']} — {entry.get('description', '')}")
     if diff["removed"]:
-        c.print(f"[bold red]Removed ({len(diff['removed'])}):[/]")
+        c.print(f"[bold red]Удалено ({len(diff['removed'])}):[/]")
         for entry in diff["removed"]:
             c.print(f"  - {entry['name']}")
     if not diff["added"] and not diff["removed"]:
-        c.print(f"[dim]No changes. {diff['total']} bundle(s) loaded.[/]")
+        c.print(f"[dim]Изменений нет. Загружено наборов: {diff['total']}.[/]")
     else:
-        c.print(f"[dim]Total bundles now: {diff['total']}[/]")
+        c.print(f"[dim]Всего наборов: {diff['total']}[/]")
 
 
 def register_cli(subparser) -> None:

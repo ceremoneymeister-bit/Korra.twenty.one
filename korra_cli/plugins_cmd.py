@@ -173,37 +173,37 @@ def _sanitize_plugin_name(
     ``~/.hermes/plugins/<name>/``.
     """
     if not name:
-        raise ValueError("Plugin name must not be empty.")
+        raise ValueError('Имя плагина не должно быть пустым.')
 
     if allow_subdir:
         name = name.strip("/")
         if not name:
-            raise ValueError("Plugin name must not be empty.")
+            raise ValueError('Имя плагина не должно быть пустым.')
 
     if name in {".", ".."}:
         raise ValueError(
-            f"Invalid plugin name '{name}': must not reference the plugins directory itself."
+            f'Неверное имя плагина «{name}»: нельзя ссылаться на саму папку плагинов.'
         )
 
     # Reject obvious traversal characters
     bad_chars = ("\\", "..") if allow_subdir else ("/", "\\", "..")
     for bad in bad_chars:
         if bad in name:
-            raise ValueError(f"Invalid plugin name '{name}': must not contain '{bad}'.")
+            raise ValueError(f'Неверное имя плагина «{name}»: недопустимый фрагмент «{bad}».')
 
     target = (plugins_dir / name).resolve()
     plugins_resolved = plugins_dir.resolve()
 
     if target == plugins_resolved:
         raise ValueError(
-            f"Invalid plugin name '{name}': resolves to the plugins directory itself."
+            f'Неверное имя плагина «{name}»: путь ведёт в саму папку плагинов.'
         )
 
     try:
         target.relative_to(plugins_resolved)
     except ValueError:
         raise ValueError(
-            f"Invalid plugin name '{name}': resolves outside the plugins directory."
+            f'Неверное имя плагина «{name}»: путь выходит за пределы папки плагинов.'
         )
 
     return target
@@ -284,9 +284,7 @@ def _resolve_git_url(identifier: str) -> tuple[str, Optional[str]]:
         return git_url, (subdir or None)
 
     raise ValueError(
-        f"Invalid plugin identifier: '{identifier}'. "
-        "Use a Git URL or 'owner/repo' shorthand (optionally with a subdirectory: "
-        "'owner/repo/path/to/plugin')."
+        f'Неверный идентификатор плагина: «{identifier}». Укажите адрес Git или owner/repo; можно с подпапкой: owner/repo/path/to/plugin.'
     )
 
 
@@ -373,11 +371,11 @@ def _copy_example_files(plugin_dir: Path, console) -> None:
             try:
                 shutil.copy2(example_file, real_path)
                 console.print(
-                    f"[dim]  Created {real_name} from {example_file.name}[/dim]"
+                    f'[dim]  Создан {real_name} из {example_file.name}[/dim]'
                 )
             except OSError as e:
                 console.print(
-                    f"[yellow]Warning:[/yellow] Failed to copy {example_file.name}: {e}"
+                    f'[yellow]Внимание:[/yellow] Не удалось скопировать {example_file.name}: {e}'
                 )
 
 
@@ -414,14 +412,12 @@ def _print_python_dependencies(manifest: dict, console) -> None:
         return
     plugin_name = manifest.get("name", "this plugin")
     console.print(
-        f"\n[bold]{plugin_name}[/bold] declares Python dependencies "
-        "(not installed automatically):"
+        f'[bold]{plugin_name}[/bold] требует пакеты Python; автоматически они не устанавливаются:'
     )
     for dep in deps:
         console.print(f"  - {dep}")
     console.print(
-        "[dim]Install them yourself if needed: "
-        f"pip install {' '.join(repr(d) for d in deps)}[/dim]\n"
+        f"[dim]При необходимости установите вручную: pip install {' '.join((repr(d) for d in deps))}[/dim]"
     )
 
 
@@ -466,7 +462,7 @@ def _prompt_plugin_env_vars(manifest: dict, console) -> None:
         return
 
     plugin_name = manifest.get("name", "this plugin")
-    console.print(f"\n[bold]{plugin_name}[/bold] requires the following environment variables:\n")
+    console.print(f'Для [bold]{plugin_name}[/bold] нужны переменные среды:')
 
     for spec in missing:
         name = spec["name"]
@@ -479,7 +475,7 @@ def _prompt_plugin_env_vars(manifest: dict, console) -> None:
             label += f" — {desc}"
         console.print(label)
         if url:
-            console.print(f"  [dim]Get yours at: {url}[/dim]")
+            console.print(f'  [dim]Получить: {url}[/dim]')
 
         try:
             if secret:
@@ -487,15 +483,15 @@ def _prompt_plugin_env_vars(manifest: dict, console) -> None:
             else:
                 value = line_input(f"  {name}: ").strip()
         except (EOFError, KeyboardInterrupt):
-            console.print(f"\n[dim]  Skipped (you can set these later in {display_hermes_home()}/.env)[/dim]")
+            console.print(f'[dim]  Пропущено. Позже можно настроить в {display_hermes_home()}/.env.[/dim]')
             return
 
         if value:
             save_env_value(name, value)
             os.environ[name] = value
-            console.print(f"  [green]✓[/green] Saved to {display_hermes_home()}/.env")
+            console.print(f'  [green]✓[/green] Сохранено в {display_hermes_home()}/.env')
         else:
-            console.print(f"  [dim]  Skipped (set {name} in {display_hermes_home()}/.env later)[/dim]")
+            console.print(f'  [dim]  Пропущено. Позже задайте {name} в {display_hermes_home()}/.env.[/dim]')
 
     console.print()
 
@@ -519,10 +515,9 @@ def _display_after_install(plugin_dir: Path, identifier: str) -> None:
         console.print()
         console.print(
             Panel(
-                f"[green bold]Plugin installed:[/] {identifier}\n"
-                f"[dim]Location:[/] {plugin_dir}",
+                f'[green bold]Плагин установлен:[/] {identifier}. [dim]Папка:[/] {plugin_dir}',
                 border_style="green",
-                title="✓ Installed",
+                title='✓ Установлено',
                 expand=False,
             )
         )
@@ -535,7 +530,7 @@ def _display_removed(name: str, plugins_dir: Path) -> None:
 
     console = Console()
     console.print()
-    console.print(f"[red]✗[/red] Plugin [bold]{name}[/bold] removed from {plugins_dir}")
+    console.print(f'[red]✗[/red] Плагин [bold]{name}[/bold] удалён из {plugins_dir}')
     console.print()
 
 
@@ -545,8 +540,7 @@ def _require_installed_plugin(name: str, plugins_dir: Path, console) -> Path:
     if not target.exists():
         installed = ", ".join(d.name for d in plugins_dir.iterdir() if d.is_dir()) or "(none)"
         console.print(
-            f"[red]Error:[/red] Plugin '{name}' not found in {plugins_dir}.\n"
-            f"Installed plugins: {installed}"
+            f'[red]Ошибка:[/red] Плагин «{name}» не найден в {plugins_dir}. Установлены: {installed}'
         )
         sys.exit(1)
     return target
@@ -918,17 +912,14 @@ def _resolve_index_name(identifier: str, console) -> tuple[str, Optional[str]]:
     if entry is None:
         if len(candidates) > 1:
             console.print(
-                f"[red]Error:[/red] Plugin name '{identifier}' is ambiguous in the "
-                f"community index ({source}). Candidates:"
+                f'[red]Ошибка:[/red] Имя «{identifier}» неоднозначно в каталоге сообщества ({source}). Варианты:'
             )
             for c in candidates:
                 console.print(f"  {c.name}  →  {c.install_identifier}")
-            console.print("Re-run with the exact name or the owner/repo identifier.")
+            console.print('Повторите с точным именем или идентификатором owner/repo.')
         else:
             console.print(
-                f"[red]Error:[/red] Plugin '{identifier}' was not found in the "
-                f"community index ({source}). Use `hermes plugins search <term>` to "
-                "browse, or install directly with an owner/repo identifier."
+                f'[red]Ошибка:[/red] Плагин «{identifier}» не найден в каталоге сообщества ({source}). Поиск: korra plugins search <term>. Можно установить напрямую по owner/repo.'
             )
         sys.exit(1)
 
@@ -937,12 +928,10 @@ def _resolve_index_name(identifier: str, console) -> tuple[str, Optional[str]]:
         pinned_ref = entry.ref.lower()
     elif entry.ref:
         console.print(
-            f"[dim]Index pins ref '{entry.ref}' (not an exact commit SHA); "
-            "installing the default branch head instead.[/dim]"
+            f'[dim]В каталоге указана ссылка «{entry.ref}», а не точный SHA коммита. Устанавливаем последнюю версию основной ветки.[/dim]'
         )
     console.print(
-        f"[dim]Resolved '{entry.name}' via community index ({source}) → "
-        f"{entry.install_identifier}"
+        f'[dim]«{entry.name}» найден в каталоге сообщества ({source}) → {entry.install_identifier}'
         + (f" @ {pinned_ref[:12]}[/dim]" if pinned_ref else "[/dim]")
     )
     console.print(f"[dim]{SECURITY_FOOTER}[/dim]")
@@ -976,32 +965,31 @@ def cmd_install(
     try:
         git_url, _subdir = _resolve_git_url(identifier)
     except ValueError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f'[red]Ошибка:[/red] {e}')
         sys.exit(1)
 
     if git_url.startswith(("http://", "file://")):
         console.print(
-            "[yellow]Warning:[/yellow] Using insecure/local URL scheme. "
-            "Consider using https:// or git@ for production installs.",
+            '[yellow]Внимание:[/yellow] Используется локальный или незащищённый адрес. Для постоянной работы используйте https:// или git@.',
         )
 
     if _subdir:
-        console.print(f"[dim]Cloning {git_url} (subdir: {_subdir})...[/dim]")
+        console.print(f'[dim]Копируем {git_url}, подпапка {_subdir}…[/dim]')
     else:
-        console.print(f"[dim]Cloning {git_url}...[/dim]")
+        console.print(f'[dim]Копируем {git_url}…[/dim]')
 
     def _interactive_scan_decision(scan_result) -> bool:
         """Prompt the user to accept a caution-verdict plugin (Cowork 'warn')."""
         from tools.plugin_guard import format_scan_report
 
         console.print()
-        console.print("[yellow]⚠ Security scan flagged this plugin:[/yellow]")
+        console.print('[yellow]⚠ Проверка безопасности обнаружила замечания к плагину:[/yellow]')
         console.print(format_scan_report(scan_result))
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             return False
         try:
             answer = input(
-                "  Install anyway? Only continue if you trust the source. [y/N]: ",
+                '  Всё равно установить? Продолжайте только при доверии к источнику. [y/N]: ',
             ).strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
@@ -1015,18 +1003,17 @@ def cmd_install(
             scan_decision_cb=_interactive_scan_decision,
         )
     except PluginScanBlocked as e:
-        console.print(f"[red]Blocked:[/red] {e}")
+        console.print(f'[red]Запрещено:[/red] {e}')
         sys.exit(1)
     except PluginOperationError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f'[red]Ошибка:[/red] {e}')
         sys.exit(1)
 
     if not (target / "plugin.yaml").exists() and not (target / "plugin.yml").exists() and not (target / "plugin.json").exists() and not (
         target / "__init__.py"
     ).exists():
         console.print(
-            f"[yellow]Warning:[/yellow] {installed_name} doesn't contain plugin.yaml, "
-            f"plugin.json, or __init__.py. It may not be a valid Korra plugin.",
+            f'[yellow]Внимание:[/yellow] В {installed_name} нет plugin.yaml, plugin.json или __init__.py. Возможно, это не плагин Корры.',
         )
 
     _prompt_plugin_env_vars(installed_manifest, console)
@@ -1040,7 +1027,7 @@ def cmd_install(
         if sys.stdin.isatty() and sys.stdout.isatty():
             try:
                 answer = input(
-                    f"  Enable '{installed_name}' now? [y/N]: ",
+                    f'  Включить «{installed_name}» сейчас? [y/N]: ',
                 ).strip().lower()
                 should_enable = answer in {"y", "yes"}
             except (EOFError, KeyboardInterrupt):
@@ -1056,12 +1043,11 @@ def cmd_install(
         _save_enabled_set(enabled)
         _save_disabled_set(disabled)
         console.print(
-            f"[green]✓[/green] Plugin [bold]{installed_name}[/bold] enabled.",
+            f'[green]✓[/green] Плагин [bold]{installed_name}[/bold] включён.',
         )
     else:
         console.print(
-            f"[dim]Plugin installed but not enabled. "
-            f"Run `hermes plugins enable {installed_name}` to activate.[/dim]",
+            f'[dim]Плагин установлен, но выключен. Включить: korra plugins enable {installed_name}.[/dim]',
         )
 
     # Capability consent (#64228): if the manifest declares capabilities,
@@ -1075,8 +1061,8 @@ def cmd_install(
             console, installed_name, declared_caps, context="install"
         )
 
-    console.print("[dim]Restart the gateway for the plugin to take effect:[/dim]")
-    console.print("[dim]  hermes gateway restart[/dim]")
+    console.print('[dim]Чтобы применить плагин, перезапустите шлюз:[/dim]')
+    console.print('[dim]  korra gateway restart[/dim]')
     console.print()
 
 
@@ -1091,37 +1077,33 @@ def cmd_update(name: str) -> None:
     try:
         target = _require_installed_plugin(name, plugins_dir, console)
     except ValueError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f'[red]Ошибка:[/red] {e}')
         sys.exit(1)
 
     try:
         metadata = _read_install_metadata()
     except PluginOperationError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
+        console.print(f'[red]Ошибка:[/red] {exc}')
         sys.exit(1)
     install_record = metadata.get(target.name, {})
     if install_record.get("pinned") is True:
         recorded_source = escape(str(install_record.get("source", "<source>")))
         console.print(
-            f"[red]Error:[/red] Plugin '{name}' is pinned to "
-            f"{install_record.get('revision')}. To move it, run "
-            f"`hermes plugins install {recorded_source} --force "
-            "--ref <40-character commit SHA>`."
+            f"[red]Ошибка:[/red] Плагин «{name}» закреплён на {install_record.get('revision')}. Для смены версии: korra plugins install {recorded_source} --force --ref <40-character commit SHA>."
         )
         sys.exit(1)
 
     if not (target / ".git").exists():
         console.print(
-            f"[red]Error:[/red] Plugin '{name}' was not installed from git "
-            f"(no .git directory). Cannot update."
+            f'[red]Ошибка:[/red] Плагин «{name}» установлен без Git: папки .git нет. Обновить нельзя.'
         )
         sys.exit(1)
 
-    console.print(f"[dim]Updating {name}...[/dim]")
+    console.print(f'[dim]Обновляем {name}…[/dim]')
 
     ok, output = _git_pull_plugin_dir(target)
     if not ok:
-        console.print(f"[red]Error:[/red] {output}")
+        console.print(f'[red]Ошибка:[/red] {output}')
         sys.exit(1)
 
     if install_record:
@@ -1147,7 +1129,7 @@ def cmd_update(name: str) -> None:
         if allowed is not True:
             console.print()
             console.print(
-                f"[yellow]⚠ Security scan flagged the updated plugin:[/yellow] {reason}",
+                f'[yellow]⚠ Проверка безопасности нашла замечания в обновлённом плагине:[/yellow] {reason}',
             )
             console.print(format_scan_report(scan_result))
             if scan_result.verdict == "dangerous":
@@ -1159,9 +1141,7 @@ def cmd_update(name: str) -> None:
                     _save_enabled_set(enabled)
                     _save_disabled_set(disabled)
                 console.print(
-                    f"[red]Plugin '{name}' has been disabled.[/red] Review the "
-                    f"findings, then re-enable with `hermes plugins enable {name}` "
-                    f"if you trust them.",
+                    f'[red]Плагин «{name}» отключён.[/red] Проверьте замечания. Если доверяете плагину, включите заново: korra plugins enable {name}.',
                 )
 
     # Same stale-bytecode class as the main checkout (#6207/#60242): the
@@ -1197,10 +1177,10 @@ def cmd_update(name: str) -> None:
     out = output.strip()
     if "Already up to date" in out:
         console.print(
-            f"[green]✓[/green] Plugin [bold]{name}[/bold] is already up to date."
+            f'[green]✓[/green] Плагин [bold]{name}[/bold] уже актуален.'
         )
     else:
-        console.print(f"[green]✓[/green] Plugin [bold]{name}[/bold] updated.")
+        console.print(f'[green]✓[/green] Плагин [bold]{name}[/bold] обновлён.')
         console.print(f"[dim]{out}[/dim]")
 
 
@@ -1243,13 +1223,13 @@ def cmd_remove(name: str) -> None:
     try:
         target = _require_installed_plugin(name, plugins_dir, console)
     except ValueError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f'[red]Ошибка:[/red] {e}')
         sys.exit(1)
 
     try:
         _remove_plugin_core(target)
     except (OSError, PluginOperationError) as exc:
-        console.print(f"[red]Error:[/red] Could not remove plugin '{name}': {exc}")
+        console.print(f'[red]Ошибка:[/red] Не удалось удалить плагин «{name}»: {exc}')
         sys.exit(1)
     _display_removed(name, plugins_dir)
 
@@ -1421,8 +1401,7 @@ def cmd_enable(name: str, allow_tool_override: Optional[bool] = None) -> None:
     console = Console()
     if name in LEGACY_RELAY_PLUGIN_KEYS:
         console.print(
-            f"[red]Plugin '{name}' was removed.[/red] Relay lifecycle is owned "
-            f"by Korra core; configure {RELAY_PLUGINS_CONFIG_ENV} instead."
+            f'[red]Плагин «{name}» удалён.[/red] Подключение ретранслятора теперь управляется Коррой; настройте {RELAY_PLUGINS_CONFIG_ENV}.'
         )
         sys.exit(1)
 
@@ -1430,14 +1409,13 @@ def cmd_enable(name: str, allow_tool_override: Optional[bool] = None) -> None:
     # nested category plugins — and normalize to its canonical registry key.
     resolved = _resolve_plugin_key_and_source(name)
     if resolved is None:
-        console.print(f"[red]Plugin '{name}' is not installed or bundled.[/red]")
+        console.print(f'[red]Плагин «{name}» не установлен и не входит в поставку.[/red]')
         sys.exit(1)
     key, source = resolved
 
     if key in LEGACY_RELAY_PLUGIN_KEYS:
         console.print(
-            f"[red]Plugin '{key}' was removed.[/red] Relay lifecycle is owned "
-            f"by Korra core; configure {RELAY_PLUGINS_CONFIG_ENV} instead."
+            f'[red]Плагин «{key}» удалён.[/red] Подключение ретранслятора теперь управляется Коррой; настройте {RELAY_PLUGINS_CONFIG_ENV}.'
         )
         sys.exit(1)
 
@@ -1467,11 +1445,10 @@ def cmd_enable(name: str, allow_tool_override: Optional[bool] = None) -> None:
         _save_enabled_set(enabled)
         _save_disabled_set(disabled)
         console.print(
-            f"[green]✓[/green] Plugin [bold]{key}[/bold] enabled. "
-            "Takes effect on next session."
+            f'[green]✓[/green] Плагин [bold]{key}[/bold] включён. Изменение вступит в силу в следующей беседе.'
         )
     else:
-        console.print(f"[dim]Plugin '{key}' is already enabled.[/dim]")
+        console.print(f'[dim]Плагин «{key}» уже включён.[/dim]')
 
     # Built-in tool override is a privileged grant. Bundled plugins ship with
     # Hermes core and are trusted; every other source needs operator opt-in.
@@ -1571,41 +1548,32 @@ def _run_capability_consent(
 
     verb = "requests" if context == "install" else "now requests"
     console.print(
-        f"\n  [yellow]Plugin [bold]{plugin_id}[/bold] {verb} the following "
-        "capabilities:[/yellow]"
+        f'  [yellow]Плагин [bold]{plugin_id}[/bold] {verb} следующие возможности:[/yellow]'
     )
     _print_capability_list(console, pending)
     console.print(
-        "  [dim]Granting trusts the plugin author with these host surfaces. "
-        "This is consent, not a sandbox — plugins run as regular Python "
-        "in-process.[/dim]"
+        '  [dim]Эти разрешения дают автору плагина доступ к указанным возможностям Корры. Это согласие, а не изоляция: плагины выполняются как обычный код Python в процессе.[/dim]'
     )
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         console.print(
-            "  [yellow]Non-interactive session: capabilities NOT granted "
-            "(fail closed).[/yellow] Run "
-            f"`hermes plugins capabilities {plugin_id}` to review and "
-            f"`hermes plugins enable {plugin_id}` to grant interactively."
+            f'  [yellow]Без интерактивного ввода возможности не предоставляются.[/yellow] Проверьте korra plugins capabilities {plugin_id} и выдайте разрешения в меню korra plugins enable {plugin_id}.'
         )
         return False
 
     try:
-        answer = console.input("  Grant these capabilities? [y/N] ").strip().lower()
+        answer = console.input('  Предоставить эти возможности? [y/N] ').strip().lower()
     except (EOFError, KeyboardInterrupt):
         answer = ""
     if answer in {"y", "yes"}:
         record_consent(plugin_id, pending, declared)
         console.print(
-            f"  [green]✓[/green] Granted: {', '.join(pending)} "
-            f"([dim]plugins.entries.{plugin_id}.granted_capabilities[/dim])"
+            f"  [green]✓[/green] Разрешено: {', '.join(pending)} ([dim]plugins.entries.{plugin_id}.granted_capabilities[/dim])"
         )
         return True
 
     console.print(
-        f"  [dim]Declined. {plugin_id} stays enabled with these capabilities "
-        "off; it should degrade gracefully (ctx.has_capability()). Re-run "
-        f"`hermes plugins enable {plugin_id}` to grant later.[/dim]"
+        f'  [dim]Отказано. {plugin_id} остаётся включённым без этих возможностей; плагин должен учитывать это через ctx.has_capability(). Разрешить позже: korra plugins enable {plugin_id}.[/dim]'
     )
     return False
 
@@ -1641,17 +1609,17 @@ def cmd_capabilities(name: Optional[str] = None) -> None:
         rows.append((key, entry[3], declared, granted, effective))
 
     if name is not None and not rows:
-        console.print(f"[red]Plugin '{name}' is not installed or bundled.[/red]")
+        console.print(f'[red]Плагин «{name}» не установлен и не входит в поставку.[/red]')
         sys.exit(1)
 
     if not rows:
-        console.print("[dim]No plugins declare or hold capabilities.[/dim]")
+        console.print('[dim]Плагины не запрашивали и не получали дополнительных возможностей.[/dim]')
         return
 
     for key, source, declared, granted, effective in sorted(rows):
         console.print(f"[bold]{key}[/bold] [dim]({source})[/dim]")
         if not declared:
-            console.print("  declared: [dim](none)[/dim]")
+            console.print('  Запрошено: [dim]ничего[/dim]')
         for cap in declared:
             if cap in effective:
                 mark = "[green]granted[/green]"
@@ -1662,8 +1630,7 @@ def cmd_capabilities(name: Optional[str] = None) -> None:
             console.print(f"  {cap}: {mark}")
         for cap in sorted(effective - set(declared)):
             console.print(
-                f"  {cap}: [green]granted[/green] "
-                "[dim](not declared in manifest)[/dim]"
+                f'  {cap}: [green]разрешено[/green] [dim](не заявлено в манифесте)[/dim]'
             )
 
 
@@ -1695,15 +1662,11 @@ def _resolve_tool_override_grant(
     _set_plugin_entry_flag(plugin_id, "allow_tool_override", allow_tool_override)
     if allow_tool_override:
         console.print(
-            f"[green]✓[/green] Granted [bold]{key}[/bold] permission to "
-            "override built-in tools "
-            f"([dim]plugins.entries.{plugin_id}.allow_tool_override: true[/dim])."
+            f'[green]✓[/green] Плагину [bold]{key}[/bold] разрешено заменять встроенные инструменты ([dim]plugins.entries.{plugin_id}.allow_tool_override: true[/dim]).'
         )
     else:
         console.print(
-            f"[dim]{key} may not override built-in tools. Re-run "
-            f"`hermes plugins enable {key} --allow-tool-override` to grant "
-            "this later.[/dim]"
+            f'[dim]{key} не может заменять встроенные инструменты. Разрешить позже: korra plugins enable {key} --allow-tool-override.[/dim]'
         )
 
 
@@ -1714,14 +1677,14 @@ def cmd_disable(name: str) -> None:
     console = Console()
     key = _resolve_plugin_key(name)
     if key is None:
-        console.print(f"[red]Plugin '{name}' is not installed or bundled.[/red]")
+        console.print(f'[red]Плагин «{name}» не установлен и не входит в поставку.[/red]')
         sys.exit(1)
 
     enabled = _get_enabled_set()
     disabled = _get_disabled_set()
 
     if key not in enabled and key in disabled:
-        console.print(f"[dim]Plugin '{key}' is already disabled.[/dim]")
+        console.print(f'[dim]Плагин «{key}» уже отключён.[/dim]')
         return
 
     enabled.discard(key)
@@ -1734,8 +1697,7 @@ def cmd_disable(name: str) -> None:
     _save_enabled_set(enabled)
     _save_disabled_set(disabled)
     console.print(
-        f"[yellow]\u2298[/yellow] Plugin [bold]{key}[/bold] disabled. "
-        "Takes effect on next session."
+        f'[yellow]⊘[/yellow] Плагин [bold]{key}[/bold] отключён. Изменение вступит в силу в следующей беседе.'
     )
 
 
@@ -1958,8 +1920,8 @@ def cmd_list(args: Any | None = None) -> None:
     console = Console()
     entries = _discover_all_plugins()
     if not entries:
-        console.print("[dim]No plugins installed.[/dim]")
-        console.print("[dim]Install with:[/dim] hermes plugins install owner/repo")
+        console.print('[dim]Плагины не установлены.[/dim]')
+        console.print('[dim]Установка:[/dim] korra plugins install owner/repo')
         return
 
     enabled = _get_enabled_set()
@@ -1987,15 +1949,15 @@ def cmd_list(args: Any | None = None) -> None:
         return
 
     if not entries:
-        console.print("[dim]No plugins matched the selected filters.[/dim]")
+        console.print('[dim]Плагины с выбранными фильтрами не найдены.[/dim]')
         return
 
-    table = Table(title="Plugins", show_lines=False)
-    table.add_column("Name", style="bold")
-    table.add_column("Status")
-    table.add_column("Version", style="dim")
-    table.add_column("Description")
-    table.add_column("Source", style="dim")
+    table = Table(title='Плагины', show_lines=False)
+    table.add_column('Название', style="bold")
+    table.add_column('Состояние')
+    table.add_column('Версия', style="dim")
+    table.add_column('Описание')
+    table.add_column('Источник', style="dim")
 
     for name, version, description, source, _dir, key in entries:
         status_name = _plugin_status(name, enabled, disabled, key=key)
@@ -2010,10 +1972,10 @@ def cmd_list(args: Any | None = None) -> None:
     console.print()
     console.print(table)
     console.print()
-    console.print("[dim]Compact view:[/dim] hermes plugins list --plain --no-bundled")
-    console.print("[dim]Interactive toggle:[/dim] hermes plugins")
-    console.print("[dim]Enable/disable:[/dim] hermes plugins enable/disable <name>")
-    console.print("[dim]Plugins are opt-in by default — only 'enabled' plugins load.[/dim]")
+    console.print('[dim]Краткий список:[/dim] korra plugins list --plain --no-bundled')
+    console.print('[dim]Меню включения:[/dim] korra plugins')
+    console.print('[dim]Включить или отключить:[/dim] korra plugins enable/disable <name>')
+    console.print('[dim]Плагины подключаются по вашему выбору; загружаются только включённые.[/dim]')
 
 
 # ---------------------------------------------------------------------------
@@ -2128,7 +2090,7 @@ def _configure_memory_provider() -> bool:
         selected = len(items) - 1
 
     choice = curses_radiolist(
-        title="Memory Provider (select one)",
+        title='Провайдер памяти: выберите один',
         items=items,
         selected=selected,
     )
@@ -2166,7 +2128,7 @@ def _configure_context_engine() -> bool:
         selected = len(items) - 1
 
     choice = curses_radiolist(
-        title="Context Engine (select one)",
+        title='Движок контекста: выберите один',
         items=items,
         selected=selected,
     )
@@ -2203,8 +2165,8 @@ def cmd_show(name: str) -> None:
             break
 
     if match is None:
-        console.print(f"[red]Plugin '{name}' not found.[/red]")
-        console.print("[dim]List installed plugins:[/dim] hermes plugins list")
+        console.print(f'[red]Плагин «{name}» не найден.[/red]')
+        console.print('[dim]Список установленных:[/dim] korra plugins list')
         sys.exit(1)
 
     pname, version, description, source, dir_path, key = match
@@ -2220,14 +2182,14 @@ def cmd_show(name: str) -> None:
     console.print(f"[bold]{pname}[/bold]" + (f" [dim]v{version}[/dim]" if version else ""))
     if description:
         console.print(description)
-    console.print(f"[dim]Status:[/dim] {status}")
-    console.print(f"[dim]Source:[/dim] {source}")
-    console.print(f"[dim]Key:[/dim] {key}")
+    console.print(f'[dim]Состояние:[/dim] {status}')
+    console.print(f'[dim]Источник:[/dim] {source}')
+    console.print(f'[dim]Ключ:[/dim] {key}')
     console.print(
-        "[dim]Emits:[/dim] " + (", ".join(emits) if emits else "[dim](none)[/dim]")
+        '[dim]Создаёт события:[/dim] ' + (", ".join(emits) if emits else '[dim]нет[/dim]')
     )
     console.print(
-        "[dim]Listens:[/dim] " + (", ".join(listens) if listens else "[dim](none)[/dim]")
+        '[dim]Обрабатывает события:[/dim] ' + (", ".join(listens) if listens else '[dim]нет[/dim]')
     )
     console.print()
 
@@ -2284,13 +2246,13 @@ def cmd_toggle() -> None:
     has_categories = bool(categories)
 
     if not has_plugins and not has_categories:
-        console.print("[dim]No plugins installed and no provider categories available.[/dim]")
-        console.print("[dim]Install with:[/dim] hermes plugins install owner/repo")
+        console.print('[dim]Установленных плагинов и доступных категорий провайдеров нет.[/dim]')
+        console.print('[dim]Установка:[/dim] korra plugins install owner/repo')
         return
 
     # Non-TTY fallback
     if not sys.stdin.isatty():
-        console.print("[dim]Interactive mode requires a terminal.[/dim]")
+        console.print('[dim]Для меню нужен интерактивный терминал.[/dim]')
         return
 
     # Launch the composite curses UI
@@ -2551,22 +2513,20 @@ def _run_composite_ui(curses, plugin_keys, plugin_labels, plugin_selected,
         _save_enabled_set(new_enabled)
         _save_disabled_set(new_disabled)
         console.print(
-            f"\n[green]\u2713[/green] General plugins: {len(new_enabled)} enabled, "
-            f"{len(plugin_keys) - len(new_enabled)} disabled."
+            f'[green]✓[/green] Обычные плагины: включено {len(new_enabled)}, отключено {len(plugin_keys) - len(new_enabled)}.'
         )
     elif n_plugins > 0:
-        console.print("\n[dim]General plugins unchanged.[/dim]")
+        console.print('[dim]Обычные плагины не изменены.[/dim]')
 
     if result_holder["providers_changed"]:
         new_memory = _get_current_memory_provider() or "built-in"
         new_context = _get_current_context_engine()
         console.print(
-            f"[green]\u2713[/green] Memory provider: [bold]{new_memory}[/bold]  "
-            f"Context engine: [bold]{new_context}[/bold]"
+            f'[green]✓[/green] Провайдер памяти: [bold]{new_memory}[/bold]. Движок контекста: [bold]{new_context}[/bold]'
         )
 
     if n_plugins > 0 or result_holder["providers_changed"]:
-        console.print("[dim]Changes take effect on next session.[/dim]")
+        console.print('[dim]Изменения вступят в силу в следующей беседе.[/dim]')
     console.print()
 
 
@@ -2575,13 +2535,13 @@ def _run_composite_fallback(plugin_keys, plugin_labels, plugin_selected,
     """Text-based fallback for the composite plugins UI."""
     from korra_cli.colors import Colors, color
 
-    print(color("\n  Plugins", Colors.YELLOW))
+    print(color('  Плагины', Colors.YELLOW))
 
     # General plugins
     if plugin_keys:
         chosen = set(plugin_selected)
-        print(color("\n  General Plugins", Colors.YELLOW))
-        print(color("  Toggle by number, Enter to confirm.\n", Colors.DIM))
+        print(color('  Обычные плагины', Colors.YELLOW))
+        print(color('  Переключайте по номеру; Enter — подтвердить.', Colors.DIM))
 
         while True:
             for i, label in enumerate(plugin_labels):
@@ -2589,7 +2549,7 @@ def _run_composite_fallback(plugin_keys, plugin_labels, plugin_selected,
                 print(f"  {marker} {i + 1:>2}. {label}")
             print()
             try:
-                val = input(color("  Toggle # (or Enter to confirm): ", Colors.DIM)).strip()
+                val = input(color('  Номер для переключения; Enter — подтвердить: ', Colors.DIM)).strip()
                 if not val:
                     break
                 idx = int(val) - 1
@@ -2620,12 +2580,12 @@ def _run_composite_fallback(plugin_keys, plugin_labels, plugin_selected,
 
     # Provider categories
     if categories:
-        print(color("\n  Provider Plugins", Colors.YELLOW))
+        print(color('  Плагины провайдеров', Colors.YELLOW))
         for ci, (cat_name, cat_current, cat_fn) in enumerate(categories):
             print(f"  {ci + 1}. {cat_name} [{cat_current}]")
         print()
         try:
-            val = input(color("  Configure # (or Enter to skip): ", Colors.DIM)).strip()
+            val = input(color('  Номер для настройки; Enter — пропустить: ', Colors.DIM)).strip()
             if val:
                 ci = int(val) - 1
                 if 0 <= ci < len(categories):
@@ -3096,25 +3056,24 @@ def cmd_search(
 
     if not results:
         console.print(
-            f"[yellow]No plugins matched '{term}'[/yellow] "
-            f"[dim](index source: {source})[/dim]"
+            f'[yellow]Плагины по запросу «{term}» не найдены[/yellow] [dim](источник каталога: {source})[/dim]'
         )
         return
 
     from rich.table import Table
 
     table = Table(title=f"Community plugins ({len(results)} match{'es' if len(results) != 1 else ''})")
-    table.add_column("Name", style="bold")
-    table.add_column("Description")
-    table.add_column("Author")
-    table.add_column("Tags", style="dim")
+    table.add_column('Название', style="bold")
+    table.add_column('Описание')
+    table.add_column('Автор')
+    table.add_column('Метки', style="dim")
     for e in results:
         desc = e.description
         if len(desc) > 70:
             desc = desc[:67] + "..."
         table.add_row(e.name, desc, e.author, ", ".join(e.tags))
     console.print(table)
-    console.print(f"[dim]Index source: {source}. Install: hermes plugins install <name>[/dim]")
+    console.print(f'[dim]Источник каталога: {source}. Установка: korra plugins install <name>[/dim]')
     console.print(f"[dim]{SECURITY_FOOTER}[/dim]")
 
 
@@ -3174,5 +3133,5 @@ def plugins_command(args) -> None:
     else:
         from rich.console import Console
 
-        Console().print(f"[red]Unknown plugins action: {action}[/red]")
+        Console().print(f'[red]Неизвестное действие plugins: {action}[/red]')
         sys.exit(1)
