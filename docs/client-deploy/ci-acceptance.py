@@ -148,7 +148,10 @@ elif mode == 'bootstrap':
     cfg = data / 'config.yaml'
     assert cfg.read_bytes() == template.read_bytes(), 'clean config differs from image template'
     config = yaml.safe_load(cfg.read_text())
-    assert config == {'gateway': {'multiplex_profiles': True}}, 'unexpected enabled clean config'
+    assert config == {
+        'gateway': {'multiplex_profiles': True},
+        'terminal': {'cwd': '/opt/data/workspace'},
+    }, 'unexpected enabled clean config'
     env_template = (root / 'korra-env.example').read_text()
     env = (data / '.env').read_text()
     env_without_key = re.sub(r'^API_SERVER_KEY=[^\n]*\n?', '', env, flags=re.M)

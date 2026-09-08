@@ -59,6 +59,10 @@ class TestSeedTemplateAgreesWithDefaults:
         """Вкладки агентов в панели без мультиплекса не работают."""
         assert template["gateway"]["multiplex_profiles"] is True
 
+    def test_template_keeps_agent_files_in_the_visible_workspace(self, template):
+        """Созданные агентом файлы должны появляться в разделе «Файлы»."""
+        assert template["terminal"]["cwd"] == "/opt/data/workspace"
+
     def test_template_is_short_and_russian(self):
         """Шаблон читает владелец контура, а не разработчик апстрима."""
         text = KORRA_CONFIG_TEMPLATE.read_text(encoding="utf-8")
