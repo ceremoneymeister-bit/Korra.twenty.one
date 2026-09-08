@@ -605,6 +605,18 @@ class TestValidatePostLoginTarget:
 
         assert _validate_post_login_target(unsafe) == ""
 
+    @pytest.mark.parametrize(
+        ("encoded", "decoded"),
+        [
+            ("/sessions?q=hello%20world", "/sessions?q=hello world"),
+            ("/projects/My%20Project", "/projects/My Project"),
+        ],
+    )
+    def test_allows_percent_encoded_regular_spaces(self, encoded, decoded):
+        from korra_cli.dashboard_auth.routes import _validate_post_login_target
+
+        assert _validate_post_login_target(encoded) == decoded
+
 
 
 # ---------------------------------------------------------------------------

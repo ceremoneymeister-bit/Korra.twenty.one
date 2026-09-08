@@ -46,11 +46,13 @@ _warned_malformed_prefixes: set = set()
 
 
 def has_unsafe_path_characters(value: str) -> bool:
-    """Detect characters WHATWG URL parsing may canonicalize across origins."""
-    return any(
-        char == "\\" or char.isspace() or not char.isprintable()
-        for char in value
-    )
+    """Detect path characters WHATWG may canonicalize across origins.
+
+    A regular space is safe and may legitimately come from a decoded ``%20``.
+    Backslashes and non-printable control characters are not: browsers can
+    reinterpret them while resolving a URL or a redirect target.
+    """
+    return any(char == "\\" or not char.isprintable() for char in value)
 
 
 def _warn_if_malformed(source: str, raw: str) -> None:
