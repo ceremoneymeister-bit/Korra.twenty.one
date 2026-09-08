@@ -225,7 +225,7 @@ class TestLoadConfigParseFailure:
             assert after["approvals"]["deny"] == ["curl*evil.com*"]
             # Warning says we kept the previous config, not defaults
             err = capsys.readouterr().err
-            assert "previously loaded config" in err
+            assert 'ранее загруженные настройки' in err
 
 
 
@@ -293,7 +293,7 @@ class TestSaveAndLoadRoundtrip:
 
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
             with patch("builtins.open", side_effect=self._deny_config_reads(config_path)):
-                with pytest.raises(RuntimeError, match="Refusing to overwrite"):
+                with pytest.raises(RuntimeError, match='не изменён'):
                     save_config({"model": "test/replacement"})
 
         assert config_path.read_text(encoding="utf-8") == original
@@ -326,7 +326,7 @@ class TestSaveAndLoadRoundtrip:
         config_path.write_text(original, encoding="utf-8")
 
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
-            with pytest.raises(RuntimeError, match="not valid YAML"):
+            with pytest.raises(RuntimeError, match='некорректный YAML'):
                 set_config_value("model.default", "gpt-4o")
 
         assert config_path.read_text(encoding="utf-8") == original
@@ -342,7 +342,7 @@ class TestSaveAndLoadRoundtrip:
         (tmp_path / ".env").write_text("TERMINAL_TIMEOUT=30\n", encoding="utf-8")
 
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
-            with pytest.raises(RuntimeError, match="not valid YAML"):
+            with pytest.raises(RuntimeError, match='некорректный YAML'):
                 unset_config_value("terminal.timeout")
 
         assert config_path.read_text(encoding="utf-8") == original
@@ -358,7 +358,7 @@ class TestSaveAndLoadRoundtrip:
         config_path.write_text(original, encoding="utf-8")
 
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
-            with pytest.raises(RuntimeError, match="must be a mapping"):
+            with pytest.raises(RuntimeError, match='должен быть словарём'):
                 set_config_value("model.default", "gpt-4o")
 
         assert config_path.read_text(encoding="utf-8") == original
@@ -373,7 +373,7 @@ class TestSaveAndLoadRoundtrip:
         config_path.write_text(original, encoding="utf-8")
 
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
-            with pytest.raises(RuntimeError, match="must be a mapping"):
+            with pytest.raises(RuntimeError, match='должен быть словарём'):
                 unset_config_value("model.default")
 
         assert config_path.read_text(encoding="utf-8") == original
@@ -398,7 +398,7 @@ class TestSaveAndLoadRoundtrip:
         original = "broken: [unterminated\n"
         config_path.write_text(original, encoding="utf-8")
 
-        with pytest.raises(RuntimeError, match="not valid YAML"):
+        with pytest.raises(RuntimeError, match='некорректный YAML'):
             atomic_config_write(config_path, {"model": {"provider": "openai"}})
 
         assert config_path.read_text(encoding="utf-8") == original
@@ -606,7 +606,7 @@ class TestSanitizeEnvLines:
             migrate_config(interactive=False)
 
         assert capsys.readouterr().out == (
-            "  ✓ Normalized .env line formatting (2 line(s) changed)\n"
+            "  ✓ Формат строк .env исправлен; изменено строк: 2\n"
         )
 
 
@@ -821,7 +821,7 @@ class TestConfigSupportFloor:
         assert "_config_version: 12" in captured.out
         assert any(expected_fragment in w for w in results["warnings"])
         # No 'Config version: X → Y' line — nothing was migrated.
-        assert "Config version:" not in captured.out
+        assert "Версия настроек:" not in captured.out
 
     def test_v11_quiet_still_warns_on_stderr_only(self, tmp_path, capsys):
         config_path, original = self._write_config(
@@ -1785,7 +1785,7 @@ class TestConfigCommandFailClosedSurface:
 
         assert excinfo.value.code == 1
         err = capsys.readouterr().err
-        assert "not valid YAML" in err
+        assert 'некорректный YAML' in err
         assert config_path.read_text(encoding="utf-8") == original
 
     def test_config_command_unset_exits_cleanly_on_broken_yaml(self, tmp_path, capsys):
@@ -1800,5 +1800,5 @@ class TestConfigCommandFailClosedSurface:
                 config_command(self._args(config_command="unset", key="model.default"))
 
         assert excinfo.value.code == 1
-        assert "not valid YAML" in capsys.readouterr().err
+        assert 'некорректный YAML' in capsys.readouterr().err
         assert config_path.read_text(encoding="utf-8") == original

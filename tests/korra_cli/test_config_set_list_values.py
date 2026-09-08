@@ -54,7 +54,7 @@ def test_invalid_list_literal_warns_and_stores_string(user_home, capsys):
 
     set_config_value("platform_toolsets.line", '["unclosed')
     captured = capsys.readouterr()
-    assert "not valid" in captured.err.lower() or "warning" in captured.err.lower()
+    assert "не является корректным" in captured.err.lower() or "внимание" in captured.err.lower()
     raw = read_raw_config()
     assert raw["platform_toolsets"]["line"] == '["unclosed'
 

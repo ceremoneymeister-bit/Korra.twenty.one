@@ -30,7 +30,7 @@ class TestCustomProvidersValidation:
             "fallback_providers": [],
         })
         errors = [i for i in issues if i.severity == "error"]
-        assert any("dict" in i.message and "list" in i.message for i in errors), (
+        assert any("словарём" in i.message and "список" in i.message for i in errors), (
             "Should detect custom_providers as dict instead of list"
         )
 
@@ -45,7 +45,7 @@ class TestCustomProvidersValidation:
         })
         warnings = [i for i in issues if i.severity == "warning"]
         # Should flag base_url, api_key as looking like custom_providers entry fields
-        misplaced = [i for i in warnings if "custom_providers entry fields" in i.message]
+        misplaced = [i for i in warnings if "поля элемента custom_providers" in i.message]
         assert len(misplaced) == 1
 
 
@@ -55,7 +55,7 @@ class TestCustomProvidersValidation:
             "custom_providers": ["not-a-dict"],
             "model": {"provider": "custom"},
         })
-        assert any("not a dict" in i.message for i in issues)
+        assert any("должен быть словарём" in i.message for i in issues)
 
 
 
@@ -72,7 +72,7 @@ class TestMissingModelSection:
             "model": {"provider": "custom", "default": "test-model"},
         })
         # Should not warn about missing model section
-        assert not any("no 'model' section" in i.message for i in issues)
+        assert not any("нет раздела model" in i.message for i in issues)
 
 
 class TestConfigIssueDataclass:
@@ -136,7 +136,7 @@ class TestUnknownTopLevelKeys:
         })
         misplaced = [
             i for i in issues
-            if i.severity == "warning" and "looks misplaced" in i.message
+            if i.severity == "warning" and "в корне, возможно" in i.message
         ]
         assert any("base_url" in i.message for i in misplaced)
         assert any("api_key" in i.message for i in misplaced)

@@ -44,7 +44,7 @@ def test_cmd_update_in_docker_prints_guidance_and_exits(
     out = capsys.readouterr().out
     # Spot-check the key guidance — exhaustive wording is locked in by the
     # config-module test below to keep these CLI tests resilient to copy edits.
-    assert "doesn't apply inside the Docker container" in out
+    assert 'недоступна внутри Docker-контейнера' in out
     assert "docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest" in out
 
     # No git invocations — the early-return must beat every git command.
@@ -80,7 +80,7 @@ def test_format_docker_update_message_contents():
     assert "docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest" in msg
 
     # The four key concepts the message must cover:
-    assert "restart" in msg.lower(), "must explain that a restart is required"
+    assert 'пересоздайте контейнер' in msg.lower(), "must explain that a restart is required"
     assert "--version" in msg, "must show how to verify the new version"
     assert ":latest" in msg, "must mention tag pinning caveat"
     assert "HERMES_HOME" in msg or "/opt/data" in msg, (

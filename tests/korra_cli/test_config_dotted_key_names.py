@@ -149,7 +149,7 @@ class TestUnescapedDottedModelKeys:
         with pytest.raises(SystemExit):
             set_config_value("providers.myprov.models.grok-4.7.context_length", "128000")
         err = capsys.readouterr().err
-        assert "Refusing to create nested key" in err
+        assert 'не создан внутри' in err
         assert "grok-4" in err
         # Config untouched.
         saved = _read_config(_isolated_hermes_home)

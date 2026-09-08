@@ -108,14 +108,14 @@ class TestConfigYamlRouting:
         """The script timeout read by cron must be accepted by config set."""
         set_config_value("cron.script_timeout_seconds", "600")
 
-        assert "not a recognized config key" not in capsys.readouterr().out
+        assert "Неизвестный ключ" not in capsys.readouterr().out
         assert "script_timeout_seconds: 600" in _read_config(_isolated_hermes_home)
 
     def test_memory_nudge_interval_is_recognized(self, _isolated_hermes_home, capsys):
         """The documented background-memory review interval is runtime config."""
         set_config_value("memory.nudge_interval", "0")
 
-        assert "not a recognized config key" not in capsys.readouterr().out
+        assert "Неизвестный ключ" not in capsys.readouterr().out
         assert "nudge_interval: 0" in _read_config(_isolated_hermes_home)
 
     def test_terminal_docker_cwd_mount_flag_goes_to_config_and_env(self, _isolated_hermes_home):
@@ -140,7 +140,7 @@ class TestConfigYamlRouting:
         assert "TERMINAL_DOCKER_SHARED_CONTAINER_KEY=off" in _read_env(
             _isolated_hermes_home
         )
-        assert "not a recognized config key" not in capsys.readouterr().out
+        assert "Неизвестный ключ" not in capsys.readouterr().out
 
     def test_terminal_vercel_runtime_goes_to_config_and_env(self, _isolated_hermes_home):
         set_config_value("terminal.vercel_runtime", "python3.13")
@@ -197,7 +197,7 @@ class TestConfigGetUnset:
         reloaded = yaml.safe_load(_read_config(_isolated_hermes_home)) or {}
         assert reloaded == {}
         assert "TERMINAL_ENV=" not in _read_env(_isolated_hermes_home)
-        assert "Unset terminal.backend" in capsys.readouterr().out
+        assert 'Удалено terminal.backend' in capsys.readouterr().out
 
 
     def test_config_unset_removes_dotted_token_yaml_key(self, _isolated_hermes_home, capsys):
@@ -216,7 +216,7 @@ class TestConfigGetUnset:
         reloaded = yaml.safe_load(_read_config(_isolated_hermes_home))
         assert "access_token" not in reloaded["platforms"]["teams"]["extra"]
         assert reloaded["platforms"]["teams"]["extra"]["tenant_id"] == "tenant"
-        assert "Unset platforms.teams.extra.access_token" in capsys.readouterr().out
+        assert 'Удалено platforms.teams.extra.access_token' in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +343,7 @@ class TestCronModelDriftConfigWarning:
         set_config_value("model.default", "new-model")
 
         warning = capsys.readouterr().out
-        assert "hermes cron edit <job_id> --provider <provider> --model <model>" in warning
+        assert 'korra cron edit <job_id> --provider <provider> --model <model>' in warning
         assert "cronjob action=update" not in warning
 
 
@@ -375,8 +375,8 @@ class TestCronModelDriftConfigWarning:
         reloaded = yaml.safe_load(_read_config(_isolated_hermes_home))
         captured = capsys.readouterr()
         assert reloaded["cron"]["model_drift_guard"] is False
-        assert "Set model.default = new-model" in captured.out
-        assert "fail closed" not in captured.out
+        assert 'Сохранено model.default = new-model' in captured.out
+        assert "остановятся с ошибкой" not in captured.out
 
 
     @pytest.mark.parametrize(
@@ -481,13 +481,13 @@ class TestSecretRedactionInDisplay:
 
         captured = capsys.readouterr()
         assert secret not in captured.out
-        assert "Set model.api_key" in captured.out
+        assert 'Сохранено model.api_key' in captured.out
 
     def test_set_echo_keeps_nonsecret_value(self, _isolated_hermes_home, capsys):
         set_config_value("model.reasoning_effort", "high")
 
         captured = capsys.readouterr()
-        assert "Set model.reasoning_effort = high" in captured.out
+        assert 'Сохранено model.reasoning_effort = high' in captured.out
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +516,7 @@ class TestSchemaValidation:
         import yaml
         saved = yaml.safe_load(_read_config(_isolated_hermes_home))
         assert saved["desktop"]["macos_signing_identity"] == "Hermes Local Signing"
-        assert "not a recognized config key" not in capsys.readouterr().out
+        assert "Неизвестный ключ" not in capsys.readouterr().out
 
 
 
@@ -525,7 +525,7 @@ class TestSchemaValidation:
         forward-compat writes)."""
         set_config_value("brand_new_future_key", "value", force=True)
         out = capsys.readouterr().out
-        assert "not a recognized config key" not in out
+        assert "Неизвестный ключ" not in out
         # And the value WAS written.
         content = _read_config(_isolated_hermes_home)
         assert "brand_new_future_key" in content
@@ -754,12 +754,12 @@ class TestMalformedYAMLConfigPreservation:
         """set_config_value must raise, not overwrite the broken config."""
         self._write_broken_config(_isolated_hermes_home)
 
-        with pytest.raises(RuntimeError, match="not valid YAML"):
+        with pytest.raises(RuntimeError, match='некорректный YAML'):
             set_config_value("agent.max_turns", "50")
 
         captured = capsys.readouterr()
         combined = captured.out + captured.err
-        assert "Failed to parse" in combined or "not valid YAML" in combined
+        assert "Не удалось прочитать" in combined or 'некорректный YAML' in combined
         # Original config must remain intact
         raw = _read_config(_isolated_hermes_home)
         assert raw == self.BROKEN_CONFIG, f"Config was overwritten:\n{raw}"
@@ -770,12 +770,12 @@ class TestMalformedYAMLConfigPreservation:
 
         self._write_broken_config(_isolated_hermes_home)
 
-        with pytest.raises(RuntimeError, match="not valid YAML"):
+        with pytest.raises(RuntimeError, match='некорректный YAML'):
             unset_config_value("model")
 
         captured = capsys.readouterr()
         combined = captured.out + captured.err
-        assert "Failed to parse" in combined or "not valid YAML" in combined
+        assert "Не удалось прочитать" in combined or 'некорректный YAML' in combined
         raw = _read_config(_isolated_hermes_home)
         assert raw == self.BROKEN_CONFIG
 
@@ -836,7 +836,7 @@ class TestLiteralDotKeyEscaping:
         # Sibling provider untouched.
         assert providers["openrouter"] == {"api_key": "or-keep"}
         # Escaped key is schema-known (providers.* is an open dict) — no warning.
-        assert "not a recognized config key" not in capsys.readouterr().out
+        assert "Неизвестный ключ" not in capsys.readouterr().out
 
     def test_unset_removes_literal_dot_provider_key(self, _isolated_hermes_home, capsys):
         self._write_config(_isolated_hermes_home, {
@@ -856,7 +856,7 @@ class TestLiteralDotKeyEscaping:
         saved = yaml.safe_load(_read_config(_isolated_hermes_home))
         assert "qwen3.5-397b-wafer-non-zdr" not in saved["providers"]
         assert saved["providers"]["openrouter"] == {"api_key": "or-keep"}
-        assert "Unset providers.qwen3\\.5-397b-wafer-non-zdr" in capsys.readouterr().out
+        assert 'Удалено providers.qwen3\\.5-397b-wafer-non-zdr' in capsys.readouterr().out
 
     def test_unset_nested_field_under_literal_dot_key(self, _isolated_hermes_home, capsys):
         self._write_config(_isolated_hermes_home, {

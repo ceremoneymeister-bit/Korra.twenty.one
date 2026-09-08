@@ -162,7 +162,26 @@ def _warn_config_parse_failure(
         msg += f" A copy of the corrupted file was saved to {backup_path}."
     logger.warning(msg)
     try:
-        sys.stderr.write(f"⚠️  hermes config: {msg}\n")
+        user_message = f"Не удалось прочитать {config_path}: {exc}. "
+        if fallback == "last-known-good":
+            user_message += (
+                "Используются ранее загруженные настройки. Изменения config.yaml "
+                "не применятся, пока не исправлен YAML."
+            )
+        elif fallback == "refuse-write":
+            user_message += (
+                "Запись config.yaml отменена, исходный файл сохранён. "
+                "Исправьте YAML через korra config edit и повторите."
+            )
+        else:
+            user_message += (
+                "Используются исходные настройки. Ваши настройки моделей, "
+                "вспомогательных провайдеров и резервной цепочки не применены. "
+                "Исправьте YAML и перезапустите Корру."
+            )
+        if backup_path is not None:
+            user_message += f" Копия повреждённого файла сохранена в {backup_path}."
+        sys.stderr.write(f"⚠️ Настройки Корры: {user_message}\n")
         sys.stderr.flush()
     except Exception:
         pass
@@ -265,13 +284,7 @@ def _reject_denylisted_env_var(key: str) -> None:
     policy_name = _env_var_policy_name(key)
     if any(alias in _ENV_VAR_NAME_DENYLIST for alias in korra_env_aliases(policy_name)):
         raise ValueError(
-            f"Environment variable {key!r} is on the writer denylist. "
-            "Names that influence subprocess execution (LD_PRELOAD, "
-            "PYTHONPATH, PATH, EDITOR, ...) or Korra runtime location "
-            "and security policy (HERMES_HOME, HERMES_YOLO_MODE, ...) "
-            "cannot be persisted via "
-            "the env writer. If you really need this, edit "
-            "~/.hermes/.env directly."
+            f'Переменная {key!r} входит в список запретов записи (denylist). Через запись .env нельзя сохранять переменные запуска программ (LD_PRELOAD, PYTHONPATH, PATH, EDITOR и другие), расположения Корры или правил безопасности (HERMES_HOME, HERMES_YOLO_MODE и другие). При необходимости измените .env профиля вручную.'
         )
 
 
@@ -282,7 +295,7 @@ def validate_env_var_name_for_write(key: str) -> None:
     validate their complete request before writing the first value.
     """
     if not _ENV_VAR_NAME_RE.match(key):
-        raise ValueError(f"Invalid environment variable name: {key!r}")
+        raise ValueError(f'Неверное имя переменной среды: {key!r}')
     _reject_denylisted_env_var(key)
 
 _LAST_EXPANDED_CONFIG_BY_PATH: Dict[str, Any] = {}
@@ -449,8 +462,7 @@ def is_managed() -> bool:
 # home-manager), and the running process cannot tell which one. Thus this text
 # names the routes instead of one command.
 _NIX_UPDATE_MSG = (
-    "Update Korra through the Nix source that installed it "
-    "(e.g. nix profile upgrade, or update your flake input and rebuild with nixos-rebuild or home-manager switch)"
+    'Обновите Корру через исходный способ установки Nix: nix profile upgrade либо обновление flake и пересборка через nixos-rebuild или home-manager switch'
 )
 
 
@@ -638,7 +650,7 @@ def recommended_update_command_for_method(method: str) -> str:
         # By contract, the current "apt" install method is the Termux APT
         # distribution. It deliberately uses Termux's `pkg` frontend.
         return "pkg upgrade hermes-agent"
-    return "hermes update"
+    return 'korra update'
 
 
 def recommended_update_command() -> str:
@@ -668,30 +680,27 @@ def recommended_update_command() -> str:
 #   - The right action is ``docker pull`` + restart the container; this
 #     helper spells that out, with notes on tag pinning and config
 #     persistence so users don't get blindsided.
-_DOCKER_UPDATE_MESSAGE = """\
-✗ ``hermes update`` doesn't apply inside the Docker container.
+_DOCKER_UPDATE_MESSAGE = """✗ Команда korra update недоступна внутри Docker-контейнера.
 
-Korra runs as a published image (ghcr.io/ceremoneymeister-bit/korra.twenty.one),
-not a git checkout — the container has no working tree to pull into.  Update by
-pulling a fresh image and restarting your container instead:
+Корра установлена из образа ghcr.io/ceremoneymeister-bit/korra.twenty.one.
+Для обновления загрузите новый образ и пересоздайте контейнер:
 
   docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
-  # then restart whatever started the container, e.g.:
   docker compose up -d --force-recreate korra
-  # or, for ad-hoc runs, exit the current container and `docker run` again
 
-Verify the new version after restart:
+Если контейнер запущен через docker run, завершите его и запустите заново.
+Проверка версии нового образа:
+
   docker run --rm ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest --version
 
-Notes:
-  • If you pinned a specific tag the ``:latest`` tag won't move your
-    container — pull the newer tag you actually want, or switch to
-    ``:latest`` / ``:main`` for rolling updates.
-  • Your config and session history live under ``$HERMES_HOME`` (``/opt/data``
-    in the container, typically bind-mounted from the host) and persist
-    across image upgrades — re-pulling doesn't lose any state.
-  • Running a fork?  Build your own image with this repo's ``Dockerfile``
-    and replace the ``docker pull`` step with your build/push pipeline."""
+Если вы закрепили конкретный тег, загрузите нужный новый тег: latest сам
+по себе не переключит такой контейнер. Для последовательных обновлений
+можно использовать latest или main.
+
+Настройки и история в $HERMES_HOME (/opt/data внутри контейнера) сохранятся,
+если папка подключена с компьютера. Загрузка нового образа их не удаляет.
+Для собственного форка соберите образ из Dockerfile и используйте свой
+процесс публикации вместо docker pull."""
 
 
 def format_docker_update_message() -> str:
@@ -704,15 +713,14 @@ def format_docker_update_message() -> str:
     return _DOCKER_UPDATE_MESSAGE
 
 
-def format_managed_message(action: str = "modify this Korra installation") -> str:
+def format_managed_message(action: str = 'изменить эту установку Корры') -> str:
     """Build a user-facing error for managed installs."""
-    managed_system = get_managed_system() or "a package manager"
+    managed_system = get_managed_system() or 'менеджером пакетов'
     return (
-        f"Cannot {action}: this Korra installation is managed by {managed_system}.\n"
-        "Use your package manager to upgrade or reinstall Korra."
+        f'Нельзя {action}: эта установка Корры управляется {managed_system}. Для обновления или переустановки используйте ваш менеджер пакетов.'
     )
 
-def managed_error(action: str = "modify configuration"):
+def managed_error(action: str = 'изменить настройки'):
     """Print user-friendly error for managed mode."""
     print(format_managed_message(action), file=sys.stderr)
 
@@ -997,12 +1005,12 @@ def _ensure_hermes_home_managed(home: Path):
     """Managed-mode variant: verify dirs exist (activation creates them), seed SOUL.md."""
     if not home.is_dir():
         raise RuntimeError(
-            f"HERMES_HOME {home} does not exist."
+            f'Папка HERMES_HOME не существует: {home}'
         )
     for subdir in ("cron", "sessions", "logs", "memories"):
         d = home / subdir
         if not d.is_dir():
-            raise RuntimeError(f"{d} does not exist.")
+            raise RuntimeError(f'Не существует: {d}')
     # Curator reports dir is a sub-path of logs/; create it if missing.
     # In managed mode the activation script may not know about this subdir,
     # so we mkdir it ourselves (it's inside an already-secured logs/ dir).
@@ -1187,8 +1195,7 @@ def _set_nested(config, dotted_key: str, value):
                 idx = int(part)
             except (TypeError, ValueError):
                 raise TypeError(
-                    f"Cannot navigate into list at key {dotted_key!r}: "
-                    f"segment {part!r} is not a numeric index"
+                    f'Нельзя перейти в список по ключу {dotted_key!r}: часть пути {part!r} должна быть числовым индексом'
                 )
             current = current[idx]
             i += 1
@@ -1216,17 +1223,14 @@ def _set_nested(config, dotted_key: str, value):
             if shadowed is not None:
                 escaped = shadowed.replace(".", "\\.")
                 raise ValueError(
-                    f"Refusing to create nested key {part!r} in {dotted_key!r}: "
-                    f"the mapping already contains a literal key {shadowed!r} "
-                    f"that contains a dot. If you meant that key, escape its "
-                    f"dots with a backslash (e.g. {escaped})."
+                    f'Ключ {part!r} не создан внутри {dotted_key!r}: уже есть ключ {shadowed!r} с точкой в имени. Для обращения к нему поставьте обратную косую черту перед точками, например {escaped}.'
                 )
             current[part] = {}
             current = current[part]
             i += 1
         else:
             raise TypeError(
-                f"Cannot navigate into {type(current).__name__} at key {dotted_key!r}"
+                f'Нельзя перейти внутрь значения типа {type(current).__name__} по ключу {dotted_key!r}'
             )
 
 
@@ -1420,7 +1424,7 @@ def get_missing_config_fields() -> List[Dict[str, Any]]:
                 missing.append({
                     "key": full_key,
                     "default": default_value,
-                    "description": f"New config option: {full_key}",
+                    "description": f'Новый параметр: {full_key}',
                 })
             elif isinstance(default_value, dict) and isinstance(current.get(key), dict):
                 _check(default_value, current[key], full_key)
@@ -2295,7 +2299,7 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
         try:
             config = load_config()
         except Exception:
-            return [ConfigIssue("error", "Could not load config.yaml", "Run 'hermes setup' to create a valid config")]
+            return [ConfigIssue("error", 'Не удалось загрузить config.yaml', 'Создайте корректные настройки: korra setup')]
 
     issues: List[ConfigIssue] = []
 
@@ -2309,8 +2313,8 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
         if normalized_submit_mode not in {"direct", "draft"}:
             issues.append(ConfigIssue(
                 "error",
-                f"voice.submit_mode must be 'direct' or 'draft', got {submit_mode!r}",
-                "Set voice.submit_mode to direct (submit immediately) or draft (edit before sending)",
+                f'voice.submit_mode должен быть direct или draft; получено {submit_mode!r}',
+                'Выберите voice.submit_mode: direct — отправлять сразу, draft — редактировать перед отправкой',
             ))
 
     # ── custom_providers must be a list, not a dict ──────────────────────
@@ -2319,12 +2323,8 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
         if isinstance(cp, dict):
             issues.append(ConfigIssue(
                 "error",
-                "custom_providers is a dict — it must be a YAML list (items prefixed with '-')",
-                "Change to:\n"
-                "  custom_providers:\n"
-                "    - name: my-provider\n"
-                "      base_url: https://...\n"
-                "      api_key: ...",
+                'custom_providers задан словарём, а нужен список YAML с элементами, начинающимися с «-»',
+                'Задайте custom_providers списком: каждый элемент начинается с «- name: my-provider», далее с отступом base_url: https://... и api_key: ...',
             ))
             # Check if dict keys look like they should be list-entry fields
             cp_keys = set(cp.keys()) if isinstance(cp, dict) else set()
@@ -2332,8 +2332,8 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
             if suspicious:
                 issues.append(ConfigIssue(
                     "warning",
-                    f"Root-level keys {sorted(suspicious)} look like custom_providers entry fields",
-                    "These should be indented under a '- name: ...' list entry, not at root level",
+                    f'Ключи {sorted(suspicious)} в корне похожи на поля элемента custom_providers',
+                    'Разместите их с отступом внутри элемента списка «- name: ...», а не в корне',
                 ))
         elif isinstance(cp, list):
             # Validate each entry in the list
@@ -2341,21 +2341,21 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
                 if not isinstance(entry, dict):
                     issues.append(ConfigIssue(
                         "warning",
-                        f"custom_providers[{i}] is not a dict (got {type(entry).__name__})",
-                        "Each entry should have at minimum: name, base_url",
+                        f'custom_providers[{i}] должен быть словарём; получено {type(entry).__name__}',
+                        'В каждом элементе обязательны как минимум name и base_url',
                     ))
                     continue
                 if not entry.get("name"):
                     issues.append(ConfigIssue(
                         "warning",
-                        f"custom_providers[{i}] is missing 'name' field",
-                        "Add a name, e.g.: name: my-provider",
+                        f'В custom_providers[{i}] отсутствует поле name',
+                        'Добавьте имя, например name: my-provider',
                     ))
                 if not entry.get("base_url"):
                     issues.append(ConfigIssue(
                         "warning",
-                        f"custom_providers[{i}] is missing 'base_url' field",
-                        "Add the API endpoint URL, e.g.: base_url: https://api.example.com/v1",
+                        f'В custom_providers[{i}] отсутствует поле base_url',
+                        'Добавьте адрес API, например base_url: https://api.example.com/v1',
                     ))
 
     # ── fallback_model: single dict OR list of dicts (chain) ─────────────
@@ -2367,51 +2367,48 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
                 if not isinstance(entry, dict):
                     issues.append(ConfigIssue(
                         "error",
-                        f"fallback_model[{i}] should be a dict, got {type(entry).__name__}",
-                        "Each entry needs provider + model",
+                        f'fallback_model[{i}] должен быть словарём; получено {type(entry).__name__}',
+                        'Каждому элементу нужны provider и model',
                     ))
                 else:
                     if not entry.get("provider"):
                         issues.append(ConfigIssue(
                             "warning",
-                            f"fallback_model[{i}] is missing 'provider' field",
-                            "Add: provider: openrouter (or another provider)",
+                            f'В fallback_model[{i}] отсутствует поле provider',
+                            'Добавьте provider: openrouter или другого провайдера',
                         ))
                     if not entry.get("model"):
                         issues.append(ConfigIssue(
                             "warning",
-                            f"fallback_model[{i}] is missing 'model' field",
-                            "Add: model: <model-name>",
+                            f'В fallback_model[{i}] отсутствует поле model',
+                            'Добавьте model: <model-name>',
                         ))
         elif not isinstance(fb, dict):
             issues.append(ConfigIssue(
                 "error",
-                f"fallback_model should be a dict with 'provider' and 'model', got {type(fb).__name__}",
-                "Change to:\n"
-                "  fallback_model:\n"
-                "    provider: openrouter\n"
-                "    model: anthropic/claude-sonnet-4",
+                f'fallback_model должен быть словарём с provider и model; получено {type(fb).__name__}',
+                'Задайте раздел fallback_model с полями provider: openrouter и model: anthropic/claude-sonnet-4',
             ))
         elif fb:
             if not fb.get("provider"):
                 issues.append(ConfigIssue(
                     "warning",
-                    "fallback_model is missing 'provider' field — fallback will be disabled",
-                    "Add: provider: openrouter (or another provider)",
+                    'В fallback_model нет поля provider; резервная модель будет отключена',
+                    'Добавьте provider: openrouter или другого провайдера',
                 ))
             if not fb.get("model"):
                 issues.append(ConfigIssue(
                     "warning",
-                    "fallback_model is missing 'model' field — fallback will be disabled",
-                    "Add: model: anthropic/claude-sonnet-4 (or another model)",
+                    'В fallback_model нет поля model; резервная модель будет отключена',
+                    'Добавьте model: anthropic/claude-sonnet-4 или другую модель',
                 ))
 
     # ── Check for fallback_model accidentally nested inside custom_providers ──
     if isinstance(cp, dict) and "fallback_model" not in config and "fallback_model" in (cp or {}):
         issues.append(ConfigIssue(
             "error",
-            "fallback_model appears inside custom_providers instead of at root level",
-            "Move fallback_model to the top level of config.yaml (no indentation)",
+            'fallback_model находится внутри custom_providers, хотя должен быть в корне',
+            'Перенесите fallback_model на верхний уровень config.yaml без отступа',
         ))
 
     # ── model section: should exist when custom_providers is configured ──
@@ -2419,12 +2416,8 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
     if cp and not model_cfg:
         issues.append(ConfigIssue(
             "warning",
-            "custom_providers defined but no 'model' section — Korra won't know which provider to use",
-            "Add a model section:\n"
-            "  model:\n"
-            "    provider: custom\n"
-            "    default: your-model-name\n"
-            "    base_url: https://...",
+            'Есть custom_providers, но нет раздела model: Корра не сможет выбрать провайдера',
+            'Добавьте раздел model с полями provider: custom, default: your-model-name и base_url: https://...',
         ))
 
     # ── Root-level keys that look misplaced ──────────────────────────────
@@ -2439,8 +2432,8 @@ def validate_config_structure(config: Optional[Dict[str, Any]] = None) -> List["
         if key not in _KNOWN_ROOT_KEYS and key in _CUSTOM_PROVIDER_LIKE_FIELDS:
             issues.append(ConfigIssue(
                 "warning",
-                f"Root-level key '{key}' looks misplaced — should it be under 'model:' or inside a 'custom_providers' entry?",
-                f"Move '{key}' under the appropriate section",
+                f'Ключ «{key}» в корне, возможно, должен находиться в model: или внутри элемента custom_providers',
+                f'Перенесите «{key}» в подходящий раздел',
             ))
 
     return issues
@@ -2460,11 +2453,11 @@ def print_config_warnings(config: Optional[Dict[str, Any]] = None) -> None:
     if not issues:
         return
 
-    lines = ["\033[33m⚠ Config issues detected in config.yaml:\033[0m"]
+    lines = ['\x1b[33m⚠ В config.yaml найдены проблемы:\x1b[0m']
     for ci in issues:
         marker = "\033[31m✗\033[0m" if ci.severity == "error" else "\033[33m⚠\033[0m"
         lines.append(f"  {marker} {ci.message}")
-    lines.append("  \033[2mRun 'hermes doctor' for fix suggestions.\033[0m")
+    lines.append('  \x1b[2mСпособы исправления: korra doctor.\x1b[0m')
     sys.stderr.write("\n".join(lines) + "\n\n")
 
 
@@ -2487,25 +2480,22 @@ def warn_deprecated_cwd_env_vars() -> None:
     lines: list[str] = []
     if messaging_cwd:
         lines.append(
-            f"  \033[33m⚠\033[0m MESSAGING_CWD={messaging_cwd} found in .env — "
-            f"this is deprecated."
+            f'  \x1b[33m⚠\x1b[0m MESSAGING_CWD={messaging_cwd} в .env — устаревшая настройка.'
         )
     if terminal_cwd_env:
         lines.append(
-            f"  \033[33m⚠\033[0m TERMINAL_CWD={terminal_cwd_env} found in .env — "
-            f"this is deprecated."
+            f'  \x1b[33m⚠\x1b[0m TERMINAL_CWD={terminal_cwd_env} в .env — устаревшая настройка.'
         )
     if lines:
         from korra_constants import display_hermes_home
 
         hint_path = display_hermes_home()
-        lines.insert(0, "\033[33m⚠ Deprecated .env settings detected:\033[0m")
+        lines.insert(0, '\x1b[33m⚠ В .env найдены устаревшие настройки:\x1b[0m')
         lines.append(
-            "  \033[2mMove to config.yaml instead:  "
-            "terminal:\\n    cwd: /your/project/path\033[0m"
+            '  \x1b[2mПеренесите в config.yaml:  terminal:\\n    cwd: /your/project/path\x1b[0m'
         )
         lines.append(
-            f"  \033[2mThen remove the old entries from {hint_path}/.env\033[0m"
+            f'  \x1b[2mЗатем удалите старые записи из {hint_path}/.env\x1b[0m'
         )
         sys.stderr.write("\n".join(lines) + "\n\n")
 
@@ -2553,7 +2543,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
     try:
         fixes = sanitize_env_file()
         if fixes and not quiet:
-            print(f"  ✓ Normalized .env line formatting ({fixes} line(s) changed)")
+            print(f'  ✓ Формат строк .env исправлен; изменено строк: {fixes}')
     except Exception:
         pass  # best-effort; don't block migration on sanitize failure
 
@@ -2593,7 +2583,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
         results["warnings"].append(msg)
         # stderr so it is visible even on quiet startup paths, matching the
         # corrupt-config warning posture in _warn_config_parse_failure().
-        sys.stderr.write(f"⚠ hermes config: {msg}\n")
+        sys.stderr.write(f"⚠ Настройки Корры: {msg}\n")
         if not quiet:
             print(f"  ⚠ {msg}")
     else:
@@ -2628,12 +2618,12 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 entry["enabled"] = False
                 mcp_touched = True
                 results["warnings"].append(
-                    f"Disabled suspicious MCP server '{server_name}'"
+                    f'Подозрительный сервер MCP «{server_name}» отключён'
                 )
                 if not quiet:
                     for issue in issues:
                         print(f"  ⚠ {issue}")
-                    print(f"  ⚠ Disabled MCP server '{server_name}' pending review")
+                    print(f'  ⚠ Сервер MCP «{server_name}» отключён до проверки')
             if mcp_touched:
                 config["mcp_servers"] = raw_mcp_servers
                 _persist_migration(config)
@@ -2662,21 +2652,21 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
         logger.debug("platform_toolsets validation skipped: %s", _ts_val_err)
 
     if current_ver < latest_ver and not quiet and not floor_refused:
-        print(f"Config version: {current_ver} → {latest_ver}")
+        print(f'Версия настроек: {current_ver} → {latest_ver}')
 
     # Check for missing required env vars
     missing_env = get_missing_env_vars(required_only=True)
     
     if missing_env and not quiet:
-        print("\n⚠️  Missing required environment variables:")
+        print('⚠️ Не хватает обязательных переменных среды:')
         for var in missing_env:
             print(f"   • {var['name']}: {var['description']}")
     
     if interactive and missing_env:
-        print("\nLet's configure them now:\n")
+        print('Настроим их сейчас:')
         for var in missing_env:
             if var.get("url"):
-                print(f"  Get your key at: {var['url']}")
+                print(f"  Получить ключ: {var['url']}")
             
             if var.get("password"):
                 value = masked_secret_prompt(f"  {var['prompt']}: ")
@@ -2686,9 +2676,9 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             if value:
                 save_env_value(var["name"], value)
                 results["env_added"].append(var["name"])
-                print(f"  ✓ Saved {var['name']}")
+                print(f"  ✓ Сохранено: {var['name']}")
             else:
-                results["warnings"].append(f"Skipped {var['name']} - some features may not work")
+                results["warnings"].append(f"Пропущено {var['name']}; некоторые возможности могут не работать")
             print()
     
     # Check for missing optional env vars and offer to configure interactively
@@ -2712,12 +2702,12 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
             if not get_env_value(name) and name in OPTIONAL_ENV_VARS
         ]
         if new_and_unset:
-            print(f"\n  {len(new_and_unset)} new optional key(s) in this update:")
+            print(f'  Новых необязательных ключей в этом обновлении: {len(new_and_unset)}')
             for name, info in new_and_unset:
                 print(f"    • {name} — {info.get('description', '')}")
             print()
             try:
-                answer = input("  Configure new keys? [y/N]: ").strip().lower()
+                answer = input('  Настроить новые ключи? [y/N]: ').strip().lower()
             except (EOFError, KeyboardInterrupt):
                 answer = "n"
 
@@ -2726,22 +2716,22 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 for name, info in new_and_unset:
                     if info.get("url"):
                         print(f"  {info.get('description', name)}")
-                        print(f"  Get your key at: {info['url']}")
+                        print(f"  Получить ключ: {info['url']}")
                     else:
                         print(f"  {info.get('description', name)}")
                     if info.get("password"):
                         value = masked_secret_prompt(
-                            f"  {info.get('prompt', name)} (Enter to skip): "
+                            f"  {info.get('prompt', name)} (Enter — пропустить): "
                         )
                     else:
-                        value = line_input(f"  {info.get('prompt', name)} (Enter to skip): ").strip()
+                        value = line_input(f"  {info.get('prompt', name)} (Enter — пропустить): ").strip()
                     if value:
                         save_env_value(name, value)
                         results["env_added"].append(name)
-                        print(f"  ✓ Saved {name}")
+                        print(f'  ✓ Сохранено: {name}')
                     print()
             else:
-                print("  Set later with: hermes config set <key> <value>")
+                print('  Можно настроить позже: korra config set <key> <value>')
     
     # Check for missing config fields.
     #
@@ -2765,13 +2755,13 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
     # Prompt for any that are missing/empty.
     missing_skill_config = get_missing_skill_config_vars()
     if missing_skill_config and interactive and not quiet:
-        print(f"\n  {len(missing_skill_config)} skill setting(s) not configured:")
+        print(f'  Не настроено параметров навыков: {len(missing_skill_config)}')
         for var in missing_skill_config:
             skill_name = var.get("skill", "unknown")
-            print(f"    • {var['key']} — {var['description']} (from skill: {skill_name})")
+            print(f"    • {var['key']} — {var['description']} (из навыка {skill_name})")
         print()
         try:
-            answer = input("  Configure skill settings? [y/N]: ").strip().lower()
+            answer = input('  Настроить параметры навыков? [y/N]: ').strip().lower()
         except (EOFError, KeyboardInterrupt):
             answer = "n"
 
@@ -2784,7 +2774,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 SKILL_CONFIG_PREFIX = "skills.config"
             for var in missing_skill_config:
                 default = var.get("default", "")
-                default_hint = f" (default: {default})" if default else ""
+                default_hint = f' (по умолчанию: {default})' if default else ""
                 value = line_input(f"  {var['prompt']}{default_hint}: ").strip()
                 if not value and default:
                     value = str(default)
@@ -2792,15 +2782,15 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     storage_key = f"{SKILL_CONFIG_PREFIX}.{var['key']}"
                     _set_nested(config, storage_key, value)
                     results["config_added"].append(var["key"])
-                    print(f"  ✓ Saved {var['key']} = {value}")
+                    print(f"  ✓ Сохранено {var['key']} = {value}")
                 else:
                     results["warnings"].append(
-                        f"Skipped {var['key']} — skill '{var.get('skill', '?')}' may ask for it later"
+                        f"Пропущено {var['key']}; навык «{var.get('skill', '?')}» может запросить это позже"
                     )
                 print()
             _persist_migration(config)
         else:
-            print("  Set later with: hermes config set <key> <value>")
+            print('  Можно настроить позже: korra config set <key> <value>')
 
     return results
 
@@ -3645,8 +3635,7 @@ def require_readable_config_before_write(
         return {}
     except OSError as exc:
         raise RuntimeError(
-            f"Refusing to overwrite {config_path}: existing config.yaml cannot be accessed "
-            f"({exc}). Fix the file permissions or move it aside first."
+            f'Файл {config_path} не изменён: config.yaml недоступен ({exc}). Исправьте права доступа или переместите файл.'
         ) from exc
 
     try:
@@ -3654,8 +3643,7 @@ def require_readable_config_before_write(
             f.read(1)
     except OSError as exc:
         raise RuntimeError(
-            f"Refusing to overwrite {config_path}: existing config.yaml cannot be read "
-            f"({exc}). Fix the file permissions or move it aside first."
+            f'Файл {config_path} не изменён: config.yaml не читается ({exc}). Исправьте права доступа или переместите файл.'
         ) from exc
 
     return _load_user_config_for_mutation(config_path)
@@ -3676,26 +3664,22 @@ def _load_user_config_for_mutation(config_path: Path) -> Dict[str, Any]:
             loaded = fast_safe_load(f)
     except OSError as exc:
         raise RuntimeError(
-            f"Refusing to overwrite {config_path}: existing config.yaml cannot be read "
-            f"({exc}). Fix the file permissions or move it aside first."
+            f'Файл {config_path} не изменён: config.yaml не читается ({exc}). Исправьте права доступа или переместите файл.'
         ) from exc
     except Exception as exc:
         _warn_config_parse_failure(config_path, exc, fallback="refuse-write")
         raise RuntimeError(
-            f"Refusing to overwrite {config_path}: existing config.yaml is not valid YAML "
-            f"({exc}). Fix the file or restore from a .corrupt.*.bak backup first."
+            f'Файл {config_path} не изменён: config.yaml содержит некорректный YAML ({exc}). Исправьте файл или восстановите копию .corrupt.*.bak.'
         ) from exc
     if loaded is None:
         return {}
     if not isinstance(loaded, dict):
         exc = TypeError(
-            f"top-level YAML must be a mapping, got {type(loaded).__name__}"
+            f'верхний уровень YAML должен быть словарём; получено {type(loaded).__name__}'
         )
         _warn_config_parse_failure(config_path, exc, fallback="refuse-write")
         raise RuntimeError(
-            f"Refusing to overwrite {config_path}: top-level YAML must be a mapping, "
-            f"got {type(loaded).__name__}. Fix the file or restore from a "
-            f".corrupt.*.bak backup first."
+            f'Файл {config_path} не изменён: верхний уровень YAML должен быть словарём, получено {type(loaded).__name__}. Исправьте файл или восстановите копию .corrupt.*.bak.'
         ) from exc
     return loaded
 
@@ -4099,14 +4083,12 @@ def _load_config_impl(*, want_deepcopy: bool) -> Dict[str, Any]:
 
 
 _SECURITY_COMMENT = """
-# ── Security ──────────────────────────────────────────────────────────
-# Secret redaction is ON by default — strings that look like API keys,
-# tokens, and passwords are masked in tool output, logs, and chat
-# responses before the model or user ever sees them. Set redact_secrets
-# to false to disable (e.g. when developing the redactor itself).
-# tirith pre-exec scanning is enabled by default when the tirith binary
-# is available. Configure via security.tirith_* keys or env vars
-# (TIRITH_ENABLED, TIRITH_BIN, TIRITH_TIMEOUT, TIRITH_FAIL_OPEN).
+# ── Безопасность ─────────────────────────────────────────────────────
+# Скрытие секретов включено по умолчанию: ключи API, токены и пароли
+# скрываются в выводе инструментов, журналах и ответах до показа модели
+# или пользователю. redact_secrets: false отключает скрытие.
+# Проверка tirith перед выполнением включена, если программа установлена.
+# Настройка — security.tirith_* в config.yaml.
 #
 # security:
 #   redact_secrets: true
@@ -4117,23 +4099,23 @@ _SECURITY_COMMENT = """
 """
 
 _FALLBACK_COMMENT = """
-# ── Fallback Model ────────────────────────────────────────────────────
-# Automatic provider failover when primary is unavailable.
-# Uncomment and configure to enable. Triggers on rate limits (429),
-# overload (529), service errors (503), or connection failures.
+# ── Резервная модель ─────────────────────────────────────────────────
+# Автоматическая смена провайдера, если основной недоступен.
+# Уберите знаки комментария и настройте для включения. Срабатывает при
+# лимитах (429), перегрузке (529), сбое сервиса (503) и ошибках соединения.
 #
-# Supported providers:
-#   openrouter   (OPENROUTER_API_KEY)  — routes to any model
-#   openai-codex (OAuth — hermes auth) — OpenAI Codex
-#   nous         (OAuth — hermes auth) — Nous Portal
-#   zai          (ZAI_API_KEY)         — Z.AI / GLM
-#   kimi-coding  (KIMI_API_KEY)        — Kimi / Moonshot
-#   kimi-coding-cn (KIMI_CN_API_KEY)   — Kimi / Moonshot (China)
-#   minimax      (MINIMAX_API_KEY)     — MiniMax
-#   minimax-cn   (MINIMAX_CN_API_KEY)  — MiniMax (China)
-#   bedrock      (AWS IAM / boto3)     — AWS Bedrock (Converse API)
+# Поддерживаемые провайдеры:
+#   openrouter     (OPENROUTER_API_KEY) — доступ к разным моделям
+#   openai-codex   (OAuth — korra auth) — OpenAI Codex
+#   nous           (OAuth — korra auth) — Nous Portal
+#   zai            (ZAI_API_KEY)       — Z.AI / GLM
+#   kimi-coding    (KIMI_API_KEY)      — Kimi / Moonshot
+#   kimi-coding-cn (KIMI_CN_API_KEY)   — Kimi / Moonshot, Китай
+#   minimax        (MINIMAX_API_KEY)   — MiniMax
+#   minimax-cn     (MINIMAX_CN_API_KEY) — MiniMax, Китай
+#   bedrock        (AWS IAM / boto3)   — AWS Bedrock, Converse API
 #
-# For custom OpenAI-compatible endpoints, add base_url and key_env.
+# Для своего сервера с API OpenAI добавьте base_url и key_env.
 #
 # fallback_model:
 #   provider: openrouter
@@ -4196,7 +4178,7 @@ def save_config(
     """
     with _CONFIG_LOCK:
         if is_managed():
-            managed_error("save configuration")
+            managed_error('сохранить настройки')
             return
         # Managed scope: strip any leaf the managed layer pins, so a bulk write
         # (wizard / programmatic save) never persists a user value that would
@@ -4210,8 +4192,7 @@ def save_config(
             config, _stripped = _strip_dotted_keys(copy.deepcopy(config), managed_keys)
             if _stripped:
                 print(
-                    f"Note: {len(_stripped)} managed setting(s) were not saved "
-                    f"(managed by your administrator): {', '.join(sorted(_stripped))}",
+                    f"Не сохранено настроек, закреплённых администратором: {len(_stripped)}. Ключи: {', '.join(sorted(_stripped))}",
                     file=sys.stderr,
                 )
         from utils import atomic_yaml_write
@@ -4481,18 +4462,14 @@ def _check_non_ascii_credential(key: str, value: str) -> str:
     bad_chars: list[str] = []
     for i, ch in enumerate(value):
         if ord(ch) > 127:
-            bad_chars.append(f"  position {i}: {ch!r} (U+{ord(ch):04X})")
+            bad_chars.append(f'  позиция {i}: {ch!r} (U+{ord(ch):04X})')
     sanitized = value.encode("ascii", errors="ignore").decode("ascii")
 
     print(
-        f"\n  Warning: {key} contains non-ASCII characters that will break API requests.\n"
-        f"  This usually happens when copy-pasting from a PDF, rich-text editor,\n"
-        f"  or web page that substitutes lookalike Unicode glyphs for ASCII letters.\n"
-        f"\n"
+        f'  Внимание: {key} содержит символы не из ASCII, которые мешают запросам API. Обычно это происходит при копировании из PDF, редактора или страницы, подменяющей латинские буквы похожими символами Unicode.'
         + "\n".join(f"  {line}" for line in bad_chars[:5])
-        + ("\n  ... and more" if len(bad_chars) > 5 else "")
-        + "\n\n  The non-ASCII characters have been stripped automatically.\n"
-        "  If authentication fails, re-copy the key from the provider's dashboard.\n",
+        + ('  … и другие' if len(bad_chars) > 5 else "")
+        + '  Недопустимые символы автоматически удалены. Если вход не удаётся, скопируйте ключ заново из кабинета провайдера.',
         file=sys.stderr,
     )
     return sanitized
@@ -4551,7 +4528,7 @@ def _env_line_defines_key(
 def save_env_value(key: str, value: str):
     """Save or update a value in ~/.hermes/.env."""
     if is_managed():
-        managed_error(f"set {key}")
+        managed_error(f'задать {key}')
         return
     # Managed scope guard: a managed env key can't be set by the user — the
     # managed .env wins at load anyway. Distinct from is_managed() above.
@@ -4559,10 +4536,9 @@ def save_env_value(key: str, value: str):
 
     if managed_scope.is_env_managed(key):
         managed_dir = managed_scope.get_managed_dir()
-        src = (managed_dir / ".env") if managed_dir else "the managed scope"
+        src = (managed_dir / ".env") if managed_dir else 'управляемая область настроек'
         print(
-            f"Cannot set {key}: it is managed by your administrator ({src}) "
-            f"and cannot be changed.",
+            f'Нельзя изменить {key}: настройка закреплена администратором ({src}).',
             file=sys.stderr,
         )
         return
@@ -4665,22 +4641,21 @@ def remove_env_value(key: str) -> bool:
     Returns True if the key was found and removed, False otherwise.
     """
     if is_managed():
-        managed_error(f"remove {key}")
+        managed_error(f'удалить {key}')
         return False
     # Managed scope guard: a managed env key can't be removed by the user.
     from korra_cli import managed_scope
 
     if managed_scope.is_env_managed(key):
         managed_dir = managed_scope.get_managed_dir()
-        src = (managed_dir / ".env") if managed_dir else "the managed scope"
+        src = (managed_dir / ".env") if managed_dir else 'управляемая область настроек'
         print(
-            f"Cannot remove {key}: it is managed by your administrator ({src}) "
-            f"and cannot be changed.",
+            f'Нельзя удалить {key}: настройка закреплена администратором ({src}).',
             file=sys.stderr,
         )
         return False
     if not _ENV_VAR_NAME_RE.match(key):
-        raise ValueError(f"Invalid environment variable name: {key!r}")
+        raise ValueError(f'Неверное имя переменной среды: {key!r}')
     env_path = get_env_path()
     if not env_path.exists():
         korra_env_pop(os.environ, key)
@@ -4879,7 +4854,7 @@ def redact_key(key: str) -> str:
     "(not set)" placeholder in dim color for the empty case.
     """
     from agent.redact import mask_secret
-    return mask_secret(key, empty=color("(not set)", Colors.DIM))
+    return mask_secret(key, empty=color('(не задано)', Colors.DIM))
 
 
 # Key names (case-insensitive, exact match) whose VALUE is a credential and
@@ -4942,7 +4917,7 @@ def show_config():
 
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.CYAN))
-    print(color("│              ⚕ Korra Configuration                     │", Colors.CYAN))
+    print(color('│              ⚕ Настройки Корры                         │', Colors.CYAN))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.CYAN))
 
     # Managed scope: surface that some settings are administrator-pinned so the
@@ -4955,32 +4930,31 @@ def show_config():
         _managed_dir = managed_scope.get_managed_dir()
         print()
         print(color(
-            f"  ⚷ Some settings are managed by your administrator ({_managed_dir}) "
-            f"and cannot be changed",
+            f'  ⚷ Некоторые настройки закреплены администратором ({_managed_dir}) и недоступны для изменения',
             Colors.YELLOW,
             Colors.BOLD,
         ))
         if _managed_keys:
             print(color(
-                f"    Managed config keys: {', '.join(sorted(_managed_keys))}",
+                f"    Закреплённые настройки: {', '.join(sorted(_managed_keys))}",
                 Colors.YELLOW,
             ))
         if _managed_env:
             print(color(
-                f"    Managed env keys: {', '.join(sorted(_managed_env))}",
+                f"    Закреплённые переменные среды: {', '.join(sorted(_managed_env))}",
                 Colors.YELLOW,
             ))
 
     # Paths
     print()
-    print(color("◆ Paths", Colors.CYAN, Colors.BOLD))
-    print(f"  Config:       {get_config_path()}")
-    print(f"  Secrets:      {get_env_path()}")
-    print(f"  Install:      {get_project_root()}")
+    print(color('◆ Пути', Colors.CYAN, Colors.BOLD))
+    print(f'  Настройки:    {get_config_path()}')
+    print(f'  Секреты:      {get_env_path()}')
+    print(f'  Установка:    {get_project_root()}')
     
     # API Keys
     print()
-    print(color("◆ API Keys", Colors.CYAN, Colors.BOLD))
+    print(color('◆ Ключи API', Colors.CYAN, Colors.BOLD))
     
     keys = [
         ("OPENROUTER_API_KEY", "OpenRouter"),
@@ -5002,10 +4976,10 @@ def show_config():
     
     # Model settings
     print()
-    print(color("◆ Model", Colors.CYAN, Colors.BOLD))
-    print(f"  Model:        {redact_config_value(config.get('model', 'not set'))}")
+    print(color('◆ Модель', Colors.CYAN, Colors.BOLD))
+    print(f"  Модель:       {redact_config_value(config.get('model', 'не задано'))}")
     _cfg_max_turns = config.get('agent', {}).get('max_turns', DEFAULT_CONFIG['agent']['max_turns'])
-    print(f"  Max turns:    {_cfg_max_turns}")
+    print(f'  Лимит ходов:  {_cfg_max_turns}')
     # Warn on stale HERMES_MAX_ITERATIONS ghost in .env that disagrees with
     # config.yaml (issue #17534). Read the .env FILE directly so we catch the
     # ghost even when the gateway bridge already overrode os.environ.
@@ -5013,8 +4987,7 @@ def show_config():
         _env_ghost = korra_env("KORRA_MAX_ITERATIONS", env=load_env())
         if _env_ghost is not None and str(_env_ghost).strip() != str(_cfg_max_turns).strip():
             print(color(
-                f"                ⚠ .env has stale HERMES_MAX_ITERATIONS={_env_ghost} "
-                f"(run 'hermes doctor --fix' to remove)",
+                f'                ⚠ В .env остался HERMES_MAX_ITERATIONS={_env_ghost}. Удалить: korra doctor --fix.',
                 Colors.YELLOW,
             ))
     except Exception:
@@ -5022,7 +4995,7 @@ def show_config():
     
     # Display
     print()
-    print(color("◆ Display", Colors.CYAN, Colors.BOLD))
+    print(color('◆ Отображение', Colors.CYAN, Colors.BOLD))
     display = config.get('display', {})
     try:
         from korra_cli.personality import active_personality_name
@@ -5030,77 +5003,77 @@ def show_config():
         _active_personality = active_personality_name(config) or 'none'
     except Exception:
         _active_personality = display.get('personality') or 'none'
-    print(f"  Personality:  {_active_personality}")
-    print(f"  Reasoning:    {'on' if display.get('show_reasoning', True) else 'off'}")
-    print(f"  Bell:         {'on' if display.get('bell_on_complete', False) else 'off'}")
+    print(f'  Характер:     {_active_personality}')
+    print(f"  Рассуждения:  {('вкл.' if display.get('show_reasoning', True) else 'выкл.')}")
+    print(f"  Звук:         {('вкл.' if display.get('bell_on_complete', False) else 'выкл.')}")
     ump = display.get('user_message_preview', {}) if isinstance(display.get('user_message_preview', {}), dict) else {}
     ump_first = ump.get('first_lines', 2)
     ump_last = ump.get('last_lines', 2)
-    print(f"  User preview: first {ump_first} line(s), last {ump_last} line(s)")
+    print(f'  Превью запроса: первые {ump_first} строк, последние {ump_last} строк')
 
     # Terminal
     print()
-    print(color("◆ Terminal", Colors.CYAN, Colors.BOLD))
+    print(color('◆ Терминал', Colors.CYAN, Colors.BOLD))
     terminal = config.get('terminal', {})
-    print(f"  Backend:      {terminal.get('backend', 'local')}")
-    print(f"  Working dir:  {terminal.get('cwd', '.')}")
-    print(f"  Timeout:      {terminal.get('timeout', 60)}s")
+    print(f"  Среда:        {terminal.get('backend', 'local')}")
+    print(f"  Рабочая папка: {terminal.get('cwd', '.')}")
+    print(f"  Время ожидания: {terminal.get('timeout', 60)} с")
     
     if terminal.get('backend') == 'docker':
-        print(f"  Docker image: {terminal.get('docker_image', 'nikolaik/python-nodejs:python3.11-nodejs20')}")
+        print(f"  Образ Docker: {terminal.get('docker_image', 'nikolaik/python-nodejs:python3.11-nodejs20')}")
     elif terminal.get('backend') == 'singularity':
-        print(f"  Image:        {terminal.get('singularity_image', 'docker://nikolaik/python-nodejs:python3.11-nodejs20')}")
+        print(f"  Образ:        {terminal.get('singularity_image', 'docker://nikolaik/python-nodejs:python3.11-nodejs20')}")
     elif terminal.get('backend') == 'modal':
-        print(f"  Modal image:  {terminal.get('modal_image', 'nikolaik/python-nodejs:python3.11-nodejs20')}")
+        print(f"  Образ Modal:  {terminal.get('modal_image', 'nikolaik/python-nodejs:python3.11-nodejs20')}")
         modal_token = get_env_value('MODAL_TOKEN_ID')
-        print(f"  Modal token:  {'configured' if modal_token else '(not set)'}")
+        print(f"  Токен Modal:  {('настроено' if modal_token else '(не задано)')}")
     elif terminal.get('backend') == 'daytona':
-        print(f"  Daytona image: {terminal.get('daytona_image', 'nikolaik/python-nodejs:python3.11-nodejs20')}")
+        print(f"  Образ Daytona: {terminal.get('daytona_image', 'nikolaik/python-nodejs:python3.11-nodejs20')}")
         daytona_key = get_env_value('DAYTONA_API_KEY')
-        print(f"  API key:      {'configured' if daytona_key else '(not set)'}")
+        print(f"  Ключ API:     {('настроено' if daytona_key else '(не задано)')}")
     elif terminal.get('backend') == 'vercel_sandbox':
-        print(f"  Vercel runtime: {terminal.get('vercel_runtime', 'node24')}")
-        print(f"  Vercel auth:    {'configured' if get_env_value('VERCEL_OIDC_TOKEN') or (get_env_value('VERCEL_TOKEN') and get_env_value('VERCEL_PROJECT_ID') and get_env_value('VERCEL_TEAM_ID')) else '(not set)'}")
+        print(f"  Среда Vercel: {terminal.get('vercel_runtime', 'node24')}")
+        print(f"  Вход Vercel:  {('настроено' if get_env_value('VERCEL_OIDC_TOKEN') or (get_env_value('VERCEL_TOKEN') and get_env_value('VERCEL_PROJECT_ID') and get_env_value('VERCEL_TEAM_ID')) else '(не задано)')}")
     elif terminal.get('backend') == 'ssh':
         ssh_host = get_env_value('TERMINAL_SSH_HOST')
         ssh_user = get_env_value('TERMINAL_SSH_USER')
-        print(f"  SSH host:     {ssh_host or '(not set)'}")
-        print(f"  SSH user:     {ssh_user or '(not set)'}")
+        print(f"  Сервер SSH:   {ssh_host or '(не задано)'}")
+        print(f"  Пользователь SSH: {ssh_user or '(не задано)'}")
     
     # Timezone
     print()
-    print(color("◆ Timezone", Colors.CYAN, Colors.BOLD))
+    print(color('◆ Часовой пояс', Colors.CYAN, Colors.BOLD))
     tz = config.get('timezone', '')
     if tz:
-        print(f"  Timezone:     {tz}")
+        print(f'  Часовой пояс: {tz}')
     else:
-        print(f"  Timezone:     {color('(server-local)', Colors.DIM)}")
+        print(f"  Часовой пояс: {color('(часовой пояс сервера)', Colors.DIM)}")
 
     # Compression
     print()
-    print(color("◆ Context Compression", Colors.CYAN, Colors.BOLD))
+    print(color('◆ Сжатие контекста', Colors.CYAN, Colors.BOLD))
     compression = config.get('compression', {})
     enabled = compression.get('enabled', True)
-    print(f"  Enabled:      {'yes' if enabled else 'no'}")
+    print(f"  Включено:     {('да' if enabled else 'нет')}")
     if enabled:
-        print(f"  Threshold:    {compression.get('threshold', 0.50) * 100:.0f}%")
+        print(f"  Порог:        {compression.get('threshold', 0.5) * 100:.0f}%")
         _tt = compression.get('threshold_tokens')
         if _tt is not None:
             try:
                 _tt = int(_tt)
                 if _tt > 0:
-                    print(f"  Token cap:    {_tt:,} tokens (takes lower of ratio vs absolute)")
+                    print(f'  Лимит токенов: {_tt:,}; используется меньшее из относительного и абсолютного ограничений')
             except (TypeError, ValueError):
                 pass
-        print(f"  Target ratio: {compression.get('target_ratio', 0.20) * 100:.0f}% of threshold preserved")
-        print(f"  Protect last: {compression.get('protect_last_n', 20)} messages")
-        print(f"  Protect first: {compression.get('protect_first_n', 3)} non-system head messages")
+        print(f"  Сохранять:    {compression.get('target_ratio', 0.2) * 100:.0f}% от порога")
+        print(f"  Сохранять в конце: {compression.get('protect_last_n', 20)} сообщений")
+        print(f"  Сохранять в начале: {compression.get('protect_first_n', 3)} сообщений без системных")
         _aux_comp = config.get('auxiliary', {}).get('compression', {})
         _sm = _aux_comp.get('model', '') or '(auto)'
-        print(f"  Model:        {_sm}")
+        print(f'  Модель:       {_sm}')
         comp_provider = _aux_comp.get('provider', 'auto')
         if comp_provider and comp_provider != 'auto':
-            print(f"  Provider:     {comp_provider}")
+            print(f'  Провайдер:    {comp_provider}')
     
     # Auxiliary models
     auxiliary = config.get('auxiliary', {})
@@ -5113,7 +5086,7 @@ def show_config():
     )
     if has_overrides:
         print()
-        print(color("◆ Auxiliary Models (overrides)", Colors.CYAN, Colors.BOLD))
+        print(color('◆ Вспомогательные модели: особые настройки', Colors.CYAN, Colors.BOLD))
         for label, task_cfg in aux_tasks.items():
             prov = task_cfg.get('provider', 'auto')
             mdl = task_cfg.get('model', '')
@@ -5125,13 +5098,13 @@ def show_config():
     
     # Messaging
     print()
-    print(color("◆ Messaging Platforms", Colors.CYAN, Colors.BOLD))
+    print(color('◆ Мессенджеры', Colors.CYAN, Colors.BOLD))
     
     telegram_token = get_env_value('TELEGRAM_BOT_TOKEN')
     discord_token = get_env_value('DISCORD_BOT_TOKEN')
     
-    print(f"  Telegram:     {'configured' if telegram_token else color('not configured', Colors.DIM)}")
-    print(f"  Discord:      {'configured' if discord_token else color('not configured', Colors.DIM)}")
+    print(f"  Telegram:     {'настроено' if telegram_token else color('не настроено', Colors.DIM)}")
+    print(f"  Discord:      {'настроено' if discord_token else color('не настроено', Colors.DIM)}")
     
     # Skill config
     try:
@@ -5140,35 +5113,35 @@ def show_config():
         if skill_vars:
             resolved = resolve_skill_config_values(skill_vars)
             print()
-            print(color("◆ Skill Settings", Colors.CYAN, Colors.BOLD))
+            print(color('◆ Настройки навыков', Colors.CYAN, Colors.BOLD))
             for var in skill_vars:
                 key = var["key"]
                 value = resolved.get(key, "")
                 skill_name = var.get("skill", "")
-                display_val = str(value) if value else color("(not set)", Colors.DIM)
+                display_val = str(value) if value else color('(не задано)', Colors.DIM)
                 print(f"  {key:<20s} {display_val}  {color(f'[{skill_name}]', Colors.DIM)}")
     except Exception:
         pass
 
     print()
     print(color("─" * 60, Colors.DIM))
-    print(color("  hermes config edit     # Edit config file", Colors.DIM))
-    print(color("  hermes config set <key> <value>", Colors.DIM))
-    print(color("  hermes setup           # Run setup wizard", Colors.DIM))
+    print(color('  korra config edit     # Открыть файл настроек', Colors.DIM))
+    print(color('  korra config set <key> <value>', Colors.DIM))
+    print(color('  korra setup           # Открыть мастер настройки', Colors.DIM))
     print()
 
 
 def edit_config():
     """Open config file in user's editor."""
     if is_managed():
-        managed_error("edit configuration")
+        managed_error('изменить настройки')
         return
     config_path = get_config_path()
     
     # Ensure config exists
     if not config_path.exists():
         save_config(DEFAULT_CONFIG, strip_defaults=False)
-        print(f"Created {config_path}")
+        print(f'Создан {config_path}')
     
     # Find editor
     editor = os.getenv('EDITOR') or os.getenv('VISUAL')
@@ -5190,11 +5163,11 @@ def edit_config():
                 break
     
     if not editor:
-        print("No editor found. Config file is at:")
+        print('Редактор не найден. Файл настроек:')
         print(f"  {config_path}")
         return
     
-    print(f"Opening {config_path} in {editor}...")
+    print(f'Открываем {config_path} в {editor}…')
     subprocess.run([editor, str(config_path)])
 
 
@@ -5344,7 +5317,7 @@ def _cron_impact_job_name(value: Any, job_id: str) -> str:
         name = " ".join(printable.split())[:_CRON_MODEL_IMPACT_NAME_LIMIT].rstrip()
         if name:
             return name
-    return f"Job {job_id}"[:_CRON_MODEL_IMPACT_NAME_LIMIT].rstrip()
+    return f'Задача {job_id}'[:_CRON_MODEL_IMPACT_NAME_LIMIT].rstrip()
 
 
 def _unavailable_cron_model_impact(guard_enabled: bool) -> Dict[str, Any]:
@@ -5460,15 +5433,13 @@ def warn_unpinned_cron_jobs_after_model_config_change(
         return
 
     snapshot_field = f"{axis}_snapshot"
-    noun = "job" if affected == 1 else "jobs"
-    verb = "has" if affected == 1 else "have"
+    axis_label = {"provider": "провайдера", "model": "модели"}[axis]
     print(
-        f"⚠️  {affected} enabled unpinned cron {noun} {verb} stored "
-        f"{snapshot_field} values that differ from the new global {axis}. "
-        "They will fail closed on their next run instead of silently using the "
-        "changed model/provider. Inspect with `hermes cron list`, then pin the "
-        "intended values with `hermes cron edit <job_id> --provider <provider> "
-        "--model <model>`."
+        f"⚠️ Задач расписания с прежним {snapshot_field}: {affected}. "
+        f"После смены {axis_label} их сохранённые значения не совпадают с общими. "
+        "При следующем запуске они остановятся с ошибкой, чтобы не использовать "
+        "другую модель незаметно. Проверьте korra cron list и закрепите нужные "
+        "значения: korra cron edit <job_id> --provider <provider> --model <model>."
     )
 
 
@@ -5752,20 +5723,19 @@ def set_config_value(key: str, value: str, force: bool = False):
             CLI exposes this via ``hermes config set --force``.
     """
     if is_managed():
-        managed_error("set configuration values")
+        managed_error('задать значения настроек')
         return
     # Reject malformed dotted keys with empty segments (leading/trailing/
     # double dots). ``"agent."`` split to ["agent", ""] and _set_nested wrote
     # config["agent"][""] = ..., polluting a live schema section with a
     # garbage empty-string key that round-tripped through get (CFG-04).
     if key != key.strip() or not key.strip():
-        print(f"✗ Invalid config key: {key!r} (empty or surrounding whitespace).",
+        print(f'✗ Неверный ключ настройки: {key!r}. Он пуст или содержит пробелы по краям.',
               file=sys.stderr)
         sys.exit(1)
     if any(seg == "" for seg in _split_key_path(key)):
         print(
-            f"✗ Invalid config key: {key!r} — contains an empty path segment "
-            "(leading, trailing, or doubled '.').",
+            f'✗ Неверный ключ настройки: {key!r}. Пустая часть пути: точка в начале, в конце или две точки подряд.',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -5778,10 +5748,9 @@ def set_config_value(key: str, value: str, force: bool = False):
 
     if managed_scope.is_key_managed(key):
         managed_dir = managed_scope.get_managed_dir()
-        src = (managed_dir / "config.yaml") if managed_dir else "the managed scope"
+        src = (managed_dir / "config.yaml") if managed_dir else 'управляемая область настроек'
         print(
-            f"Cannot set '{key}': it is managed by your administrator ({src}) "
-            f"and cannot be changed. Contact your administrator to modify it.",
+            f'Нельзя изменить «{key}»: настройка закреплена администратором ({src}). Обратитесь к администратору.',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -5792,7 +5761,7 @@ def set_config_value(key: str, value: str, force: bool = False):
         from korra_cli.credential_lifecycle import save_provider_env_credential
 
         save_provider_env_credential(key.upper(), value)
-        print(f"✓ Set {key} in {get_env_path()}")
+        print(f'✓ Сохранено {key} в {get_env_path()}')
         return
 
     # Unknown-key notice (#34067): the key is still written (arbitrary keys
@@ -5862,15 +5831,12 @@ def set_config_value(key: str, value: str, force: bool = False):
                     coerced_value = parsed
                 else:
                     print(
-                        f"Warning: value for '{key}' looks like a list/mapping but "
-                        f"parsed as {type(parsed).__name__}; storing as string.",
+                        f'Внимание: значение «{key}» похоже на список или словарь, но распознано как {type(parsed).__name__}; сохраняем как строку.',
                         file=sys.stderr,
                     )
             except yaml.YAMLError:
                 print(
-                    f"Warning: value for '{key}' looks like a list/mapping but is "
-                    f"not valid YAML/JSON; storing as string. Most isinstance-gated "
-                    f"readers will ignore a string here.",
+                    f'Внимание: значение «{key}» похоже на список или словарь, но не является корректным YAML/JSON; сохраняем строкой. Компоненты, ожидающие список или словарь, обычно её проигнорируют.',
                     file=sys.stderr,
                 )
 
@@ -5898,47 +5864,44 @@ def set_config_value(key: str, value: str, force: bool = False):
                 if force:
                     # --force: allow destructive section overwrite.
                     print(
-                        f"⚠ Replacing entire 'model' section with a scalar "
-                        f"(discarding {len(_existing)} existing sub-key(s))"
+                        f'⚠ Весь раздел model заменяется простым значением; существующих вложенных ключей будет удалено: {len(_existing)}'
                     )
                 else:
                     # Redirect bare-model shorthand to model.default while
                     # keeping every sibling mapping key intact.
                     key = "model.default"
                     print(
-                        f"✓ Redirecting bare 'model' to 'model.default' "
-                        f"(preserving {len(_existing)} existing model sub-key(s))"
+                        f'✓ Значение model сохраняется в model.default; остальных вложенных ключей сохранено: {len(_existing)}'
                     )
                     # value was already coerced above; proceed to _set_nested
             elif not force:
                 _sub = [k for k in _existing if isinstance(k, str)]
                 print(
-                    f"✗ Cannot set '{key}' to a scalar — '{key}' is a "
-                    f"configuration section with {len(_sub)} sub-key(s).",
+                    f'✗ Нельзя задать простое значение «{key}»: «{key}» — раздел настроек с {len(_sub)} вложенными ключами.',
                     file=sys.stderr,
                 )
                 if _sub:
                     _sub_list = ", ".join(_sub[:8])
-                    print(f"  Sub-keys: {_sub_list}", file=sys.stderr)
+                    print(f'  Вложенные ключи: {_sub_list}', file=sys.stderr)
                     if len(_sub) > 8:
                         print(
-                            f"  ... and {len(_sub) - 8} more",
+                            f'  … и ещё {len(_sub) - 8}',
                             file=sys.stderr,
                         )
                 print(
-                    "  Use a dotted path to set a specific leaf key:",
+                    '  Для отдельного значения укажите путь через точку:',
                     file=sys.stderr,
                 )
                 print(
-                    f"    hermes config set {key}.<sub-key> <value>",
+                    f'    korra config set {key}.<sub-key> <value>',
                     file=sys.stderr,
                 )
                 print(
-                    "  Or use --force to replace the entire section:",
+                    '  Для замены всего раздела используйте --force:',
                     file=sys.stderr,
                 )
                 print(
-                    f"    hermes config set --force {key} {value!r}",
+                    f'    korra config set --force {key} {value!r}',
                     file=sys.stderr,
                 )
                 sys.exit(1)
@@ -5955,7 +5918,7 @@ def set_config_value(key: str, value: str, force: bool = False):
     if _alias_norm in ("model.api_base", "api_base"):
         user_config = _normalize_root_model_keys(user_config)
         key = "model.base_url"
-        print("  (note: 'api_base' is an alias — saved as model.base_url)")
+        print('  (api_base — другое имя; сохранено как model.base_url)')
     # Write only user config back (not the full merged defaults)
     ensure_hermes_home()
     from utils import atomic_yaml_write
@@ -5990,23 +5953,20 @@ def set_config_value(key: str, value: str, force: bool = False):
         _display_value = mask_secret(value)
     else:
         _display_value = value
-    print(f"✓ Set {key} = {_display_value} in {config_path}")
+    print(f'✓ Сохранено {key} = {_display_value} в {config_path}')
     warn_unpinned_cron_jobs_after_model_config_change(key, value, user_config)
 
     # Post-write unknown-key notice (#34067): value IS saved, but tell the
     # user the runtime may never read it and suggest the likely-intended path.
     if not is_known and not force:
         print(color(
-            f"⚠ '{key}' is not a recognized config key — it was saved anyway, "
-            "but Korra may not read it.",
+            f'⚠ Неизвестный ключ «{key}» сохранён, но Корра может его не использовать.',
             Colors.YELLOW,
         ))
         if suggestion:
-            print(color(f"  Did you mean: {suggestion}", Colors.YELLOW))
+            print(color(f'  Возможно, вы имели в виду: {suggestion}', Colors.YELLOW))
         print(color(
-            "  (Custom top-level keys are supported and bridged to the "
-            "environment for skills/external tools. Use --force to skip "
-            "this notice.)",
+            '  (Свои ключи верхнего уровня поддерживаются и передаются навыкам и внешним инструментам через среду. --force скрывает это уведомление.)',
             Colors.DIM,
         ))
 
@@ -6020,7 +5980,7 @@ def get_config_value(key: str, *, as_json: bool = False):
         value = _get_nested(load_config(), key)
 
     if value is _MISSING:
-        print(f"Config key not set: {key}", file=sys.stderr)
+        print(f'Настройка не задана: {key}', file=sys.stderr)
         sys.exit(1)
 
     print(_format_config_get_value(value, as_json=as_json))
@@ -6029,7 +5989,7 @@ def get_config_value(key: str, *, as_json: bool = False):
 def unset_config_value(key: str):
     """Remove a user-set configuration or .env value."""
     if is_managed():
-        managed_error("unset configuration values")
+        managed_error('удалить значения настроек')
         return
     # Managed scope guard: a key pinned by the managed layer cannot be unset by
     # the user — the next load would reinstate it anyway (mirrors set_config_value).
@@ -6037,10 +5997,9 @@ def unset_config_value(key: str):
 
     if managed_scope.is_key_managed(key):
         managed_dir = managed_scope.get_managed_dir()
-        src = (managed_dir / "config.yaml") if managed_dir else "the managed scope"
+        src = (managed_dir / "config.yaml") if managed_dir else 'управляемая область настроек'
         print(
-            f"Cannot unset '{key}': it is managed by your administrator ({src}) "
-            f"and cannot be changed. Contact your administrator to modify it.",
+            f'Нельзя удалить «{key}»: настройка закреплена администратором ({src}). Обратитесь к администратору.',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -6052,9 +6011,9 @@ def unset_config_value(key: str):
         from korra_cli.credential_lifecycle import remove_provider_env_credential
 
         if not remove_provider_env_credential(key.upper()).get("found"):
-            print(f"Config key not set: {key}", file=sys.stderr)
+            print(f'Настройка не задана: {key}', file=sys.stderr)
             sys.exit(1)
-        print(f"✓ Unset {key} from {get_env_path()}")
+        print(f'✓ Удалено {key} из {get_env_path()}')
         return
 
     config_path = get_config_path()
@@ -6070,13 +6029,13 @@ def unset_config_value(key: str):
         removed = remove_env_value(env_var) or removed
 
     if not removed:
-        print(f"Config key not set: {key}", file=sys.stderr)
+        print(f'Настройка не задана: {key}', file=sys.stderr)
         sys.exit(1)
 
     ensure_hermes_home()
     from utils import atomic_yaml_write
     atomic_yaml_write(config_path, user_config, sort_keys=False)
-    print(f"✓ Unset {key} from {config_path}")
+    print(f'✓ Удалено {key} из {config_path}')
 
 
 # =============================================================================
@@ -6096,12 +6055,12 @@ def config_command(args):
     elif subcmd == "get":
         key = getattr(args, 'key', None)
         if not key:
-            print("Usage: hermes config get <key> [--json]")
+            print('Использование: korra config get <key> [--json]')
             print()
-            print("Examples:")
-            print("  hermes config get model")
-            print("  hermes config get terminal.backend")
-            print("  hermes config get skills.config --json")
+            print('Примеры:')
+            print('  korra config get model')
+            print('  korra config get terminal.backend')
+            print('  korra config get skills.config --json')
             sys.exit(1)
         get_config_value(key, as_json=getattr(args, 'json', False))
 
@@ -6110,15 +6069,15 @@ def config_command(args):
         value = getattr(args, 'value', None)
         force = bool(getattr(args, 'force', False))
         if not key or value is None:
-            print("Usage: hermes config set [--force] <key> <value>")
+            print('Использование: korra config set [--force] <key> <value>')
             print()
-            print("Examples:")
-            print("  hermes config set model anthropic/claude-sonnet-4")
-            print("  hermes config set terminal.backend docker")
-            print("  hermes config set OPENROUTER_API_KEY sk-or-...")
+            print('Примеры:')
+            print('  korra config set model anthropic/claude-sonnet-4')
+            print('  korra config set terminal.backend docker')
+            print('  korra config set OPENROUTER_API_KEY sk-or-...')
             print()
-            print("  --force: skip the unknown-key notice for unrecognized keys,")
-            print("           and allow a scalar to replace a whole mapping section")
+            print('  --force: скрыть уведомление о неизвестном ключе')
+            print('           и разрешить замену всего раздела простым значением')
             sys.exit(1)
         try:
             set_config_value(key, value, force=force)
@@ -6131,12 +6090,12 @@ def config_command(args):
     elif subcmd == "unset":
         key = getattr(args, 'key', None)
         if not key:
-            print("Usage: hermes config unset <key>")
+            print('Использование: korra config unset <key>')
             print()
-            print("Examples:")
-            print("  hermes config unset model")
-            print("  hermes config unset terminal.backend")
-            print("  hermes config unset OPENROUTER_API_KEY")
+            print('Примеры:')
+            print('  korra config unset model')
+            print('  korra config unset terminal.backend')
+            print('  korra config unset OPENROUTER_API_KEY')
             sys.exit(1)
         try:
             unset_config_value(key)
@@ -6153,7 +6112,7 @@ def config_command(args):
     
     elif subcmd == "migrate":
         print()
-        print(color("🔄 Checking configuration for updates...", Colors.CYAN, Colors.BOLD))
+        print(color('🔄 Проверяем обновления настроек…', Colors.CYAN, Colors.BOLD))
         print()
         
         # Check what's missing
@@ -6162,16 +6121,16 @@ def config_command(args):
         current_ver, latest_ver = check_config_version()
         
         if not missing_env and not missing_config and current_ver >= latest_ver:
-            print(color("✓ Configuration is up to date!", Colors.GREEN))
+            print(color('✓ Настройки актуальны!', Colors.GREEN))
             print()
             return
         
         # Show what needs to be updated
         if current_ver < latest_ver:
-            print(f"  Config version: {current_ver} → {latest_ver}")
+            print(f'  Версия настроек: {current_ver} → {latest_ver}')
         
         if missing_config:
-            print(f"\n  {len(missing_config)} new config option(s) will be added with defaults")
+            print(f'  Будут добавлены новые параметры с исходными значениями: {len(missing_config)}')
         
         required_missing = [v for v in missing_env if v.get("is_required")]
         optional_missing = [
@@ -6180,15 +6139,15 @@ def config_command(args):
         ]
         
         if required_missing:
-            print(f"\n  ⚠️  {len(required_missing)} required API key(s) missing:")
+            print(f'  ⚠️ Не хватает обязательных ключей API: {len(required_missing)}')
             for var in required_missing:
                 print(f"     • {var['name']}")
         
         if optional_missing:
-            print(f"\n  ℹ️  {len(optional_missing)} optional API key(s) not configured:")
+            print(f'  ℹ️ Не настроено необязательных ключей API: {len(optional_missing)}')
             for var in optional_missing:
                 tools = var.get("tools", [])
-                tools_str = f" (enables: {', '.join(tools[:2])})" if tools else ""
+                tools_str = f" (включает: {', '.join(tools[:2])})" if tools else ""
                 print(f"     • {var['name']}{tools_str}")
         
         print()
@@ -6198,7 +6157,7 @@ def config_command(args):
         
         print()
         if results["env_added"] or results["config_added"]:
-            print(color("✓ Configuration updated!", Colors.GREEN))
+            print(color('✓ Настройки обновлены!', Colors.GREEN))
         
         if results["warnings"]:
             print()
@@ -6210,25 +6169,25 @@ def config_command(args):
     elif subcmd == "check":
         # Non-interactive check for what's missing
         print()
-        print(color("📋 Configuration Status", Colors.CYAN, Colors.BOLD))
+        print(color('📋 Состояние настроек', Colors.CYAN, Colors.BOLD))
         print()
         
         current_ver, latest_ver = check_config_version()
         if current_ver >= latest_ver:
-            print(f"  Config version: {current_ver} ✓")
+            print(f'  Версия настроек: {current_ver} ✓')
         else:
-            print(color(f"  Config version: {current_ver} → {latest_ver} (update available)", Colors.YELLOW))
+            print(color(f'  Версия настроек: {current_ver} → {latest_ver}; доступно обновление', Colors.YELLOW))
         
         print()
-        print(color("  Required:", Colors.BOLD))
+        print(color('  Обязательные:', Colors.BOLD))
         for var_name in REQUIRED_ENV_VARS:
             if get_env_value(var_name):
                 print(f"    ✓ {var_name}")
             else:
-                print(color(f"    ✗ {var_name} (missing)", Colors.RED))
+                print(color(f'    ✗ {var_name} (отсутствует)', Colors.RED))
         
         print()
-        print(color("  Optional:", Colors.BOLD))
+        print(color('  Необязательные:', Colors.BOLD))
         for var_name, info in OPTIONAL_ENV_VARS.items():
             if get_env_value(var_name):
                 print(f"    ✓ {var_name}")
@@ -6240,24 +6199,24 @@ def config_command(args):
         missing_config = get_missing_config_fields()
         if missing_config:
             print()
-            print(color(f"  {len(missing_config)} new config option(s) available", Colors.YELLOW))
-            print("    Run 'hermes config migrate' to add them")
+            print(color(f'  Доступно новых параметров: {len(missing_config)}', Colors.YELLOW))
+            print('    Добавьте их командой korra config migrate')
         
         print()
     
     else:
-        print(f"Unknown config command: {subcmd}")
+        print(f'Неизвестная команда настроек: {subcmd}')
         print()
-        print("Available commands:")
-        print("  hermes config           Show current configuration")
-        print("  hermes config edit      Open config in editor")
-        print("  hermes config get <key>          Print a resolved config value")
-        print("  hermes config set <key> <value>   Set a config value")
-        print("  hermes config unset <key>        Remove a config value")
-        print("  hermes config check     Check for missing/outdated config")
-        print("  hermes config migrate   Update config with new options")
-        print("  hermes config path      Show config file path")
-        print("  hermes config env-path  Show .env file path")
+        print('Доступные команды:')
+        print('  korra config                    Показать настройки')
+        print('  korra config edit               Открыть настройки в редакторе')
+        print('  korra config get <key>          Показать действующее значение')
+        print('  korra config set <key> <value>   Изменить значение')
+        print('  korra config unset <key>        Удалить значение')
+        print('  korra config check              Проверить недостающие и устаревшие настройки')
+        print('  korra config migrate            Добавить новые параметры')
+        print('  korra config path               Показать путь к настройкам')
+        print('  korra config env-path           Показать путь к .env')
         sys.exit(1)
 
 
@@ -6288,8 +6247,8 @@ def _inject_profile_env_vars() -> None:
                     continue
                 _is_key = not _var.endswith("_BASE_URL") and not _var.endswith("_URL")
                 OPTIONAL_ENV_VARS[_var] = {
-                    "description": f"{_pp.display_name or _pp.name} {'API key' if _is_key else 'base URL override'}",
-                    "prompt": f"{_pp.display_name or _pp.name} {'API key' if _is_key else 'base URL (leave empty for default)'}",
+                    "description": f"{_pp.display_name or _pp.name} {'Ключ API' if _is_key else 'другой адрес API'}",
+                    "prompt": f"{_pp.display_name or _pp.name} {'Ключ API' if _is_key else 'адрес API; пусто — по умолчанию'}",
                     "url": _pp.signup_url or None,
                     "password": _is_key,
                     "category": "provider",
@@ -6385,7 +6344,7 @@ def _inject_platform_plugin_env_vars() -> None:
                 OPTIONAL_ENV_VARS[name] = {
                     "description": (
                         meta.get("description")
-                        or f"{label} configuration"
+                        or f'Настройка {label}'
                     ),
                     "prompt": meta.get("prompt") or name,
                     "url": meta.get("url") or None,

@@ -119,7 +119,7 @@ def test_summary_handles_legacy_and_malformed_records_without_hiding_valid_sibli
     assert impact["affected_count"] == 2
     assert impact["jobs"] == [
         {"id": "job-1", "name": "Morning summary", "drifted_axes": ["provider", "model"]},
-        {"id": "job-2", "name": "Job job-2", "drifted_axes": ["provider", "model"]},
+        {"id": "job-2", "name": "Задача job-2", "drifted_axes": ["provider", "model"]},
     ]
 
 
@@ -159,7 +159,7 @@ def test_fallback_name_respects_the_desktop_code_point_limit() -> None:
     impact = _impact([_job(id=job_id, name=42)])
 
     assert impact["affected_count"] == 1
-    assert impact["jobs"][0]["name"] == (f"Job {job_id}")[:120]
+    assert impact["jobs"][0]["name"] == (f"Задача {job_id}")[:120]
 
 
 def test_guard_disabled_summary_is_available_but_empty() -> None:

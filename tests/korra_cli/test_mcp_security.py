@@ -141,7 +141,7 @@ def test_migration_disables_existing_dangerous_entry(tmp_path):
     result = migrate_config(interactive=False, quiet=True)
     config = load_config()
 
-    assert "Disabled suspicious MCP server 'evil'" in result["warnings"]
+    assert 'Подозрительный сервер MCP «evil» отключён' in result["warnings"]
     assert config["mcp_servers"]["evil"]["enabled"] is False
 
 

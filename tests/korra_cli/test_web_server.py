@@ -182,7 +182,7 @@ class TestRedactKey:
 
     def test_empty_key(self):
         result = redact_key("")
-        assert "not set" in result.lower() or result == "***" or "\x1b" in result
+        assert "не задано" in result.lower() or result == "***" or "\x1b" in result
 
 
 class TestSessionTokenInjection:

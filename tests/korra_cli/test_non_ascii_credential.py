@@ -27,7 +27,7 @@ class TestCheckNonAsciiCredential:
         assert "ʋ" not in result
         # Should print a warning
         captured = capsys.readouterr()
-        assert "non-ASCII" in captured.err
+        assert 'не из ASCII' in captured.err
 
     def test_strips_multiple_non_ascii(self, capsys):
         key = "sk-proj-aʋbécd"
