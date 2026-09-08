@@ -1295,11 +1295,17 @@ def _redact_api_error_text(value: Any, *, limit: int | None = None) -> str:
     return redacted
 
 
+def _display_api_error(value: Any, *, reason: str = "") -> str:
+    from agent.error_surface import format_error_for_user
+
+    return format_error_for_user(_redact_api_error_text(value), reason=reason)
+
+
 def _openai_error(message: str, err_type: str = "invalid_request_error", param: str = None, code: str = None) -> Dict[str, Any]:
     """OpenAI-style error envelope."""
     return {
         "error": {
-            "message": _redact_api_error_text(message),
+            "message": _display_api_error(message),
             "type": err_type,
             "param": param,
             "code": code,
@@ -5783,6 +5789,13 @@ class APIServerAdapter(BasePlatformAdapter):
         else:
             finish_reason = "stop"
 
+        # Classify using the original diagnostic above. Only human text is
+        # localized; finish_reason and error_code retain their wire semantics.
+        if finish_reason != "stop" and err_msg:
+            if is_failed and final_response == (result.get("error") or ""):
+                final_response = _display_api_error(final_response, reason=result.get("failure_reason", ""))
+            err_msg = _display_api_error(err_msg, reason=result.get("failure_reason", ""))
+
         response_headers = {
             "X-Hermes-Session-Id": result.get("session_id", session_id),
         }
@@ -5842,7 +5855,9 @@ class APIServerAdapter(BasePlatformAdapter):
             response_headers["X-Hermes-Completed"] = "false"
             response_headers["X-Hermes-Partial"] = "true" if is_partial else "false"
             if err_msg:
-                response_headers["X-Hermes-Error"] = _redact_api_error_text(err_msg, limit=200)
+                response_headers["X-Hermes-Error"] = re.sub(
+                    r"[\x00-\x1f\x7f]+", " ", _redact_api_error_text(raw_err_msg)
+                )[:200]
 
         return web.json_response(response_data, headers=response_headers)
 
@@ -6011,6 +6026,12 @@ class APIServerAdapter(BasePlatformAdapter):
                 finish_reason = "error"
             else:
                 finish_reason = "stop"
+
+            if finish_reason != "stop" and err_msg:
+                err_msg = _display_api_error(
+                    err_msg,
+                    reason=result.get("failure_reason", "") if isinstance(result, dict) else "",
+                )
 
             # Finish chunk
             finish_chunk = {
