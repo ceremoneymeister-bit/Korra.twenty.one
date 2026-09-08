@@ -602,55 +602,55 @@ def run_gui_uninstall(args):
 
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.MAGENTA, Colors.BOLD))
-    print(color("│         ⚕ Korra Chat GUI Uninstaller                   │", Colors.MAGENTA, Colors.BOLD))
+    print(color("│         ⚕ Удаление интерфейса Korra                   │", Colors.MAGENTA, Colors.BOLD))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.MAGENTA, Colors.BOLD))
     print()
 
     if not summary["gui_installed"]:
-        print("No Korra Chat GUI installation was found.")
-        print(f"  Checked: {hermes_home}, and the standard app locations for this OS.")
+        print("Интерфейс чата Korra не найден.")
+        print(f"  Проверено: {hermes_home} и стандартные папки приложений этой ОС.")
         return
 
-    print(color("This removes the Chat GUI only. The Korra agent stays installed.", Colors.CYAN))
+    print(color("Будет удалён только интерфейс чата. Агент Korra останется.", Colors.CYAN))
     print()
-    print(color("Will remove:", Colors.YELLOW, Colors.BOLD))
+    print(color("Будет удалено:", Colors.YELLOW, Colors.BOLD))
     for p in summary["source_built_artifacts"]:
         print(f"  • {p}")
     for p in summary["packaged_app_paths"]:
         print(f"  • {p}")
     if summary["userdata_exists"]:
-        print(f"  • {summary['userdata_dir']}  (desktop app data)")
+        print(f"  • {summary['userdata_dir']}  (данные настольного приложения)")
     print()
     if agent_is_installed(hermes_home):
-        print(color("Kept intact:", Colors.GREEN, Colors.BOLD))
-        print(f"  • The Korra agent at {hermes_home / 'hermes-agent'}")
-        print(f"  • Your config, sessions, and secrets under {hermes_home}")
+        print(color("Останется без изменений:", Colors.GREEN, Colors.BOLD))
+        print(f"  • агент Korra в {hermes_home / 'hermes-agent'}")
+        print(f"  • настройки, беседы и секреты в {hermes_home}")
         print()
 
     if not skip_confirm:
         try:
-            confirm = input(f"Type '{color('yes', Colors.YELLOW)}' to remove the Chat GUI: ").strip().lower()
+            confirm = input(f"Введите '{color('да', Colors.YELLOW)}', чтобы удалить интерфейс: ").strip().lower()
         except (KeyboardInterrupt, EOFError):
             print()
-            print("Cancelled.")
+            print("Отменено.")
             return
-        if confirm != "yes":
+        if confirm not in {"yes", "да"}:
             print()
-            print("Uninstall cancelled.")
+            print("Удаление отменено.")
             return
 
     print()
-    print(color("Uninstalling Chat GUI...", Colors.CYAN, Colors.BOLD))
+    print(color("Удаляю интерфейс чата…", Colors.CYAN, Colors.BOLD))
     print()
     uninstall_gui(hermes_home)
 
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.GREEN, Colors.BOLD))
-    print(color("│            ✓ Chat GUI Uninstalled!                      │", Colors.GREEN, Colors.BOLD))
+    print(color("│            ✓ Интерфейс чата удалён!                    │", Colors.GREEN, Colors.BOLD))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.GREEN, Colors.BOLD))
     print()
-    print("The Korra agent is still installed. Run 'hermes' to use the CLI,")
-    print("or 'hermes uninstall' to remove the agent too.")
+    print("Агент Korra по-прежнему установлен. Для CLI запустите `korra`,")
+    print("а для удаления агента — `korra uninstall`.")
     print()
 
 
@@ -699,47 +699,47 @@ def run_uninstall(args):
 
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.MAGENTA, Colors.BOLD))
-    print(color("│            ⚕ Korra Uninstaller                         │", Colors.MAGENTA, Colors.BOLD))
+    print(color("│            ⚕ Удаление Korra                           │", Colors.MAGENTA, Colors.BOLD))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.MAGENTA, Colors.BOLD))
     print()
     
     # Show what will be affected
-    print(color("Current Installation:", Colors.CYAN, Colors.BOLD))
-    print(f"  Code:    {project_root}")
-    print(f"  Config:  {hermes_home / 'config.yaml'}")
-    print(f"  Secrets: {hermes_home / '.env'}")
-    print(f"  Data:    {hermes_home / 'cron/'}, {hermes_home / 'sessions/'}, {hermes_home / 'logs/'}")
+    print(color("Текущая установка:", Colors.CYAN, Colors.BOLD))
+    print(f"  Код:       {project_root}")
+    print(f"  Настройки: {hermes_home / 'config.yaml'}")
+    print(f"  Секреты:   {hermes_home / '.env'}")
+    print(f"  Данные:    {hermes_home / 'cron/'}, {hermes_home / 'sessions/'}, {hermes_home / 'logs/'}")
     print()
 
     if named_profiles:
-        print(color("Other profiles detected:", Colors.CYAN, Colors.BOLD))
+        print(color("Найдены другие профили:", Colors.CYAN, Colors.BOLD))
         for p in named_profiles:
-            running = " (gateway running)" if getattr(p, "gateway_running", False) else ""
+            running = " (шлюз работает)" if getattr(p, "gateway_running", False) else ""
             print(f"  • {p.name}{running}: {p.path}")
         print()
     
     # Ask for confirmation
-    print(color("Uninstall Options:", Colors.YELLOW, Colors.BOLD))
+    print(color("Варианты удаления:", Colors.YELLOW, Colors.BOLD))
     print()
-    print("  1) " + color("Keep data", Colors.GREEN) + " - Remove code only, keep configs/sessions/logs")
-    print("     (Recommended - you can reinstall later with your settings intact)")
+    print("  1) " + color("Сохранить данные", Colors.GREEN) + " — удалить только код")
+    print("     (рекомендуется: Korra можно установить снова с прежними настройками)")
     print()
-    print("  2) " + color("Full uninstall", Colors.RED) + " - Remove everything including all data")
-    print("     (Warning: This deletes all configs, sessions, and logs permanently)")
+    print("  2) " + color("Удалить полностью", Colors.RED) + " — удалить код и все данные")
+    print("     (внимание: настройки, беседы и журналы будут удалены безвозвратно)")
     print()
-    print("  3) " + color("Cancel", Colors.CYAN) + " - Don't uninstall")
+    print("  3) " + color("Отмена", Colors.CYAN) + " — ничего не удалять")
     print()
     
     try:
-        choice = input(color("Select option [1/2/3]: ", Colors.BOLD)).strip()
+        choice = input(color("Выберите [1/2/3]: ", Colors.BOLD)).strip()
     except (KeyboardInterrupt, EOFError):
         print()
-        print("Cancelled.")
+        print("Отменено.")
         return
     
     if choice == "3" or choice.lower() in {"c", "cancel", "q", "quit", "n", "no"}:
         print()
-        print("Uninstall cancelled.")
+        print("Удаление отменено.")
         return
     
     full_uninstall = (choice == "2")
@@ -751,46 +751,46 @@ def run_uninstall(args):
     remove_profiles = False
     if full_uninstall and named_profiles:
         print()
-        print(color("Other profiles will NOT be removed by default.", Colors.YELLOW))
-        print(f"Found {len(named_profiles)} named profile(s): " +
+        print(color("Другие профили по умолчанию НЕ удаляются.", Colors.YELLOW))
+        print(f"Найдено именованных профилей: {len(named_profiles)}: " +
               ", ".join(p.name for p in named_profiles))
         print()
         try:
             resp = input(color(
-                f"Also stop and remove these {len(named_profiles)} profile(s)? [y/N]: ",
+                f"Также остановить и удалить эти профили ({len(named_profiles)})? [д/Н]: ",
                 Colors.BOLD
             )).strip().lower()
         except (KeyboardInterrupt, EOFError):
             print()
-            print("Cancelled.")
+            print("Отменено.")
             return
-        remove_profiles = resp in {"y", "yes"}
+        remove_profiles = resp in {"y", "yes", "д", "да"}
 
     # Final confirmation
     print()
     if full_uninstall:
-        print(color("⚠️  WARNING: This will permanently delete ALL Korra data!", Colors.RED, Colors.BOLD))
-        print(color("   Including: configs, API keys, sessions, scheduled jobs, logs", Colors.RED))
+        print(color("⚠️ ВНИМАНИЕ: все данные Korra будут удалены безвозвратно!", Colors.RED, Colors.BOLD))
+        print(color("   Включая настройки, ключи API, беседы, задачи расписания и журналы", Colors.RED))
         if remove_profiles:
             print(color(
-                f"   Plus {len(named_profiles)} profile(s): " +
+                f"   А также профили ({len(named_profiles)}): " +
                 ", ".join(p.name for p in named_profiles),
                 Colors.RED
             ))
     else:
-        print("This will remove the Korra code but keep your configuration and data.")
+        print("Код Korra будет удалён, а настройки и данные сохранятся.")
     
     print()
     try:
-        confirm = input(f"Type '{color('yes', Colors.YELLOW)}' to confirm: ").strip().lower()
+        confirm = input(f"Введите '{color('да', Colors.YELLOW)}' для подтверждения: ").strip().lower()
     except (KeyboardInterrupt, EOFError):
         print()
-        print("Cancelled.")
+        print("Отменено.")
         return
     
-    if confirm != "yes":
+    if confirm not in {"yes", "да"}:
         print()
-        print("Uninstall cancelled.")
+        print("Удаление отменено.")
         return
 
     _perform_uninstall(
@@ -805,24 +805,24 @@ def run_uninstall(args):
 def _print_uninstall_dry_run(*, project_root: Path, hermes_home: Path, full_uninstall: bool) -> None:
     """Print the uninstall plan without stopping services or deleting files."""
     print()
-    print(color("Dry run: no files, services, or environment entries will be changed.", Colors.CYAN, Colors.BOLD))
+    print(color("Проверка: файлы, службы и окружение не будут изменены.", Colors.CYAN, Colors.BOLD))
     print()
-    print(color("Would inspect/remove:", Colors.YELLOW, Colors.BOLD))
-    print("  • Gateway services and standalone gateway processes")
-    print("  • Korra PATH entries from shell configs / Windows User PATH")
-    print("  • Korra wrapper scripts and Korra-managed node/npm/npx symlinks")
-    print("  • Desktop Chat GUI artifacts")
-    print(f"  • Code checkout: {project_root}")
+    print(color("Будет проверено и удалено:", Colors.YELLOW, Colors.BOLD))
+    print("  • службы шлюза и отдельные процессы шлюза")
+    print("  • записи Korra в настройках PATH оболочки и Windows")
+    print("  • сценарии запуска Korra и управляемые ссылки node/npm/npx")
+    print("  • файлы настольного приложения чата")
+    print(f"  • папка кода: {project_root}")
     if full_uninstall:
-        print(f"  • Korra config/data: {hermes_home}")
+        print(f"  • настройки и данные Korra: {hermes_home}")
         if _is_default_hermes_home(hermes_home):
             profiles = _discover_named_profiles()
             if profiles:
-                print("  • Named profiles (interactive uninstall asks before removing):")
+                print("  • именованные профили; перед удалением будет задан вопрос:")
                 for prof in profiles:
                     print(f"    - {prof.name}: {prof.path}")
     else:
-        print(f"  • Keep Korra config/data: {hermes_home}")
+        print(f"  • сохранить настройки и данные Korra: {hermes_home}")
     print()
 
 
@@ -843,7 +843,7 @@ def _perform_uninstall(
     wipe ``$HERMES_HOME`` data and named profiles on full uninstall.
     """
     print()
-    print(color("Uninstalling...", Colors.CYAN, Colors.BOLD))
+    print(color("Удаляю Korra…", Colors.CYAN, Colors.BOLD))
     print()
     
     # 1. Stop and uninstall gateway service + kill standalone processes
@@ -999,12 +999,12 @@ def _perform_uninstall(
     # Done
     print()
     print(color("┌─────────────────────────────────────────────────────────┐", Colors.GREEN, Colors.BOLD))
-    print(color("│              ✓ Uninstall Complete!                      │", Colors.GREEN, Colors.BOLD))
+    print(color("│              ✓ Удаление завершено!                     │", Colors.GREEN, Colors.BOLD))
     print(color("└─────────────────────────────────────────────────────────┘", Colors.GREEN, Colors.BOLD))
     print()
     
     if not full_uninstall:
-        print(color("Your configuration and data have been preserved:", Colors.CYAN))
+        print(color("Настройки и данные сохранены:", Colors.CYAN))
         print(f"  {hermes_home}/")
         print()
         print("To reinstall later with your existing settings:")
@@ -1021,7 +1021,7 @@ def _perform_uninstall(
         print(color("Reload your shell to complete the process:", Colors.YELLOW))
         print("  source ~/.bashrc  # or ~/.zshrc")
     print()
-    print("Thank you for using Korra! ⚕")
+    print("Спасибо, что пользовались Korra! ⚕")
     print()
 
 
