@@ -233,20 +233,20 @@ def _print_rows_text(rows: List[_Row]) -> None:
     as the default output of `hermes mcp catalog`."""
     if not rows:
         print()
-        print(color("  No MCPs in the catalog or configured.", Colors.DIM))
+        print(color("  В каталоге и настройках нет серверов MCP.", Colors.DIM))
         print()
         return
 
     print()
-    print(color("  MCP Catalog + configured servers:", Colors.CYAN + Colors.BOLD))
+    print(color("  Каталог и настроенные серверы MCP:", Colors.CYAN + Colors.BOLD))
     print()
-    print(f"  {'Name':<18} {'Status':<24} Description")
+    print(f"  {'Имя':<18} {'Состояние':<24} Описание")
     print(f"  {'-' * 18} {'-' * 24} {'-' * 11}")
     for row in rows:
         print(f"  {_format_row(row)}")
     print()
     print(color(
-        "  Install: hermes mcp install <name>    Picker: hermes mcp",
+        "  Установить: korra mcp install <имя>    Выбрать: korra mcp",
         Colors.DIM,
     ))
 
@@ -258,8 +258,8 @@ def _print_rows_text(rows: List[_Row]) -> None:
         print()
         for name, _, msg in future:
             print(color(
-                f"  ⚠ '{name}' requires a newer Korra — run `hermes update` "
-                "to install this entry.",
+                f"  ⚠ Для «{name}» нужна более новая Korra. Выполните `korra update`, "
+                "чтобы установить этот сервер.",
                 Colors.YELLOW,
             ))
         print()
@@ -309,8 +309,8 @@ def install_by_name(identifier: str) -> int:
     entry = get_entry(identifier)
     if entry is None:
         print(color(
-            f"  ✗ '{identifier}' is not in the catalog. "
-            "Run `hermes mcp catalog` to see available entries.",
+            f"  ✗ Сервера «{identifier}» нет в каталоге. "
+            "Выполните `korra mcp catalog`, чтобы посмотреть доступные серверы.",
             Colors.RED,
         ))
         return 1

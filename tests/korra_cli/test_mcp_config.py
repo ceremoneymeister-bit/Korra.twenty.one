@@ -90,6 +90,16 @@ class TestMcpList:
         assert "korra mcp add" in out
         assert "hermes" not in out.lower()
 
+    def test_user_facing_command_hints_do_not_use_legacy_brand(self):
+        source = Path("korra_cli/mcp_config.py").read_text(encoding="utf-8")
+        output_lines = [
+            line
+            for line in source.splitlines()
+            if "_info(" in line or "_error(" in line or "_success(" in line
+        ]
+
+        assert not any("hermes mcp" in line.lower() for line in output_lines)
+
     def test_list_with_servers(self, tmp_path, capsys):
         _seed_config(tmp_path, {
             "ink": {
@@ -679,7 +689,8 @@ class TestDispatcher:
         _seed_config(tmp_path, {})
         mcp_command(_make_args(mcp_action=None))
         out = capsys.readouterr().out
-        assert "Commands:" in out or "No MCP servers" in out
+        assert "Команды:" in out or "Серверы MCP не настроены" in out
+        assert "hermes mcp" not in out.lower()
 
 
 # ---------------------------------------------------------------------------

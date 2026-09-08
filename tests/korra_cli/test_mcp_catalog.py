@@ -556,7 +556,7 @@ class TestPicker:
 
         show_catalog()
         out = capsys.readouterr().out
-        assert "No MCPs in the catalog or configured" in out
+        assert "В каталоге и настройках нет серверов MCP" in out
 
 
     def test_install_by_name_success(self, catalog_dir):
@@ -577,7 +577,8 @@ class TestPicker:
 
         run_picker()
         out = capsys.readouterr().out
-        assert "MCP Catalog + configured servers" in out
+        assert "Каталог и настроенные серверы MCP" in out
+        assert "hermes" not in out.lower()
 
 
 # ---------------------------------------------------------------------------

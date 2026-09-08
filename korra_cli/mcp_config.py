@@ -474,9 +474,9 @@ def cmd_mcp_add(args):
     if not url and not command:
         _error("Must specify --url <endpoint>, --command <cmd>, or --preset <name>")
         _info("Examples:")
-        _info('  hermes mcp add ink --url "https://mcp.ml.ink/mcp"')
-        _info('  hermes mcp add github --command npx --args @modelcontextprotocol/server-github')
-        _info('  hermes mcp add myserver --preset mypreset')
+        _info('  korra mcp add ink --url "https://mcp.ml.ink/mcp"')
+        _info('  korra mcp add github --command npx --args @modelcontextprotocol/server-github')
+        _info('  korra mcp add myserver --preset mypreset')
         return
 
     # Check if server already exists
@@ -570,7 +570,7 @@ def cmd_mcp_add(args):
             server_config["enabled"] = False
             if _save_mcp_server(name, server_config):
                 _success(f"Saved '{name}' to config (disabled)")
-                _info("Fix the issue, then: hermes mcp test " + name)
+                _info("После исправления проверьте подключение: korra mcp test " + name)
         return
 
     if not tools:
@@ -821,7 +821,7 @@ def _reauth_oauth_server(name: str, server_config: dict) -> bool:
         return False
     if server_config.get("auth") != "oauth":
         _error(f"Server '{name}' is not configured for OAuth (auth={server_config.get('auth')})")
-        _info("Use `hermes mcp remove` + `hermes mcp add` to reconfigure auth.")
+        _info("Чтобы изменить способ входа, выполните `korra mcp remove`, затем `korra mcp add`.")
         return False
 
     # Wipe both disk and in-memory cache so the next probe forces a fresh
@@ -887,7 +887,7 @@ def _reauth_oauth_server(name: str, server_config: dict) -> bool:
             print(color("          client_id: \"<your-oauth-client-id>\"", Colors.DIM))
             print(color("          client_secret: \"<your-oauth-client-secret>\"", Colors.DIM))
             print()
-            _info("Then re-run `hermes mcp login " + name + "`.")
+            _info("Затем снова выполните `korra mcp login " + name + "`.")
             return False
         if tools:
             _success(f"Authenticated — {len(tools)} tool(s) available")
@@ -971,7 +971,7 @@ def cmd_mcp_reauth(args):
 
     if not name:
         _error("Specify a server name, or use --all to re-auth every OAuth server.")
-        _info("Usage: hermes mcp reauth <name>   |   hermes mcp reauth --all")
+        _info("Использование: korra mcp reauth <имя>   |   korra mcp reauth --all")
         return
     if name not in servers:
         _error(f"Server '{name}' not found in config.")
@@ -1187,18 +1187,18 @@ def mcp_command(args):
         # "try enabling and it flows you into setup" UX matching `hermes plugin`.
         from korra_cli.mcp_picker import run_picker
         run_picker()
-        print(color("  Commands:", Colors.CYAN))
-        _info("hermes mcp                                    Open the catalog picker (default)")
-        _info("hermes mcp catalog                            List Nous-approved MCPs")
-        _info("hermes mcp install <name>                     Install a catalog MCP")
-        _info("hermes mcp serve                              Run as MCP server")
-        _info("hermes mcp add <name> --url <endpoint>        Add a custom MCP server")
-        _info("hermes mcp add <name> --command <cmd>         Add a stdio server")
-        _info("hermes mcp add <name> --preset <preset>       Add from a known preset")
-        _info("hermes mcp remove <name>                      Remove a server")
-        _info("hermes mcp list                               List configured servers")
-        _info("hermes mcp test <name>                        Test connection")
-        _info("hermes mcp configure <name>                   Toggle tools")
-        _info("hermes mcp login <name>                       Re-authenticate OAuth")
-        _info("hermes mcp reauth <name> | --all              Re-auth one or all OAuth servers")
+        print(color("  Команды:", Colors.CYAN))
+        _info("korra mcp                                    Открыть каталог (по умолчанию)")
+        _info("korra mcp catalog                            Показать одобренные Nous серверы MCP")
+        _info("korra mcp install <имя>                     Установить сервер MCP из каталога")
+        _info("korra mcp serve                              Запустить Korra как сервер MCP")
+        _info("korra mcp add <имя> --url <адрес>           Добавить свой сервер MCP")
+        _info("korra mcp add <имя> --command <команда>      Добавить сервер stdio")
+        _info("korra mcp add <имя> --preset <шаблон>        Добавить сервер из шаблона")
+        _info("korra mcp remove <имя>                      Удалить сервер")
+        _info("korra mcp list                               Показать настроенные серверы")
+        _info("korra mcp test <имя>                        Проверить подключение")
+        _info("korra mcp configure <имя>                   Выбрать инструменты")
+        _info("korra mcp login <имя>                       Повторно пройти OAuth")
+        _info("korra mcp reauth <имя> | --all              Повторно войти на одном или всех OAuth-серверах")
         print()
