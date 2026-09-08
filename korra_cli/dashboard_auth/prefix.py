@@ -45,6 +45,14 @@ _warned_malformed_public_urls: set = set()
 _warned_malformed_prefixes: set = set()
 
 
+def has_unsafe_path_characters(value: str) -> bool:
+    """Detect characters WHATWG URL parsing may canonicalize across origins."""
+    return any(
+        char == "\\" or char.isspace() or not char.isprintable()
+        for char in value
+    )
+
+
 def _warn_if_malformed(source: str, raw: str) -> None:
     """Warn (once per distinct value) when a non-empty public-url value
     was rejected by :func:`_normalise_public_url`.
@@ -116,6 +124,7 @@ def normalise_prefix(raw: Optional[str]) -> str:
         "//" in p
         or ".." in p
         or any(c in p for c in _REJECT_CHARS)
+        or has_unsafe_path_characters(p)
     ):
         _warn_if_malformed_prefix(
             raw,
@@ -162,7 +171,10 @@ def _normalise_public_url(raw: Optional[str]) -> str:
     # parse — urlparse is permissive enough to accept some hostile
     # values (e.g. embedded newlines) and we want a hard "no" rather
     # than a soft "maybe".
-    if any(c in url for c in _REJECT_CHARS):
+    if (
+        any(c in url for c in _REJECT_CHARS)
+        or has_unsafe_path_characters(url)
+    ):
         return ""
     try:
         parsed = urllib.parse.urlparse(url)

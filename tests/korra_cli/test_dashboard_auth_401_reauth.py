@@ -381,6 +381,20 @@ class TestNextSameOriginValidation:
             == "%2Fsessions%3Fpage%3D2"
         )
 
+    @pytest.mark.parametrize(
+        "unsafe",
+        [r"/\\evil.example", "/\n/evil.example", "/\r/evil.example", "/\t/evil.example"],
+    )
+    def test_safe_next_validator_rejects_canonicalization_chars(self, unsafe):
+        from korra_cli.dashboard_auth.middleware import _safe_next_target
+
+        request = type(
+            "FakeRequest",
+            (),
+            {"url": type("URL", (), {"path": unsafe, "query": ""})()},
+        )()
+        assert _safe_next_target(request) == ""
+
 
     def test_safe_next_validator_does_not_reject_api_prefix_lookalikes(self):
         """Negative guard: ``/api-docs`` or ``/apis`` aren't ``/api/*``
@@ -575,6 +589,21 @@ class TestValidatePostLoginTarget:
                 "%2Fapi%2Fanalytics%2Fmodels%3Fdays%3D30"
             ) == ""
         )
+
+    @pytest.mark.parametrize(
+        "unsafe",
+        [
+            r"/\\evil.example",
+            "%2F%5Cevil.example",
+            "/%0A/evil.example",
+            "/%0D/evil.example",
+            "/%09/evil.example",
+        ],
+    )
+    def test_rejects_browser_canonicalization_open_redirects(self, unsafe):
+        from korra_cli.dashboard_auth.routes import _validate_post_login_target
+
+        assert _validate_post_login_target(unsafe) == ""
 
 
 

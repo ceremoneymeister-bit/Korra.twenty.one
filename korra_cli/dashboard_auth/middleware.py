@@ -38,6 +38,7 @@ from korra_cli.dashboard_auth.cookies import (
     set_sso_attempt_cookie,
 )
 from korra_cli.dashboard_auth.public_paths import PUBLIC_API_PATHS
+from korra_cli.dashboard_auth.prefix import has_unsafe_path_characters
 
 _log = logging.getLogger(__name__)
 
@@ -250,6 +251,8 @@ def _safe_next_target(request: Request) -> str:
     user lands at the dashboard root after re-auth.
     """
     path = request.url.path
+    if has_unsafe_path_characters(path):
+        return ""
     # Reject anything that doesn't start with "/" or starts with "//"
     # (protocol-relative URL — would open-redirect to an attacker host).
     if not path or not path.startswith("/") or path.startswith("//"):
