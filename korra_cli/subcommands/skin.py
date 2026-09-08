@@ -9,22 +9,22 @@ def build_skin_parser(subparsers, *, cmd_skin: Callable) -> None:
     """Attach the ``skin`` subcommand to ``subparsers``."""
     skin_parser = subparsers.add_parser(
         "skin",
-        help="List, switch, and tweak skins",
-        description="Manage Korra skins. `set` tweaks one color of the active skin in place.",
+        help='Просмотр, выбор и настройка тем оформления',
+        description='Управление темами Корры. set изменяет один цвет текущей темы.',
     )
     skin_subparsers = skin_parser.add_subparsers(dest="skin_command")
 
-    skin_subparsers.add_parser("list", help="List available skins")
+    skin_subparsers.add_parser("list", help='Показать доступные темы')
 
-    skin_use = skin_subparsers.add_parser("use", help="Switch the active skin")
-    skin_use.add_argument("name", help="Skin name")
+    skin_use = skin_subparsers.add_parser("use", help='Сменить текущую тему')
+    skin_use.add_argument("name", help='Название темы')
 
     # skin set — change ONE color of the active skin in place (bg untouched).
     skin_set = skin_subparsers.add_parser(
-        "set", help="Set one color of the active skin (e.g. `skin set ui_tool '#00FFFF'`)"
+        "set", help="Изменить один цвет текущей темы, например skin set ui_tool '#00FFFF'"
     )
-    skin_set.add_argument("key", help="Color key (e.g. ui_tool, ui_accent, background)")
-    skin_set.add_argument("value", help="Hex color (#rrggbb)")
-    skin_set.add_argument("--skin", help="Target a specific skin instead of the active one")
+    skin_set.add_argument("key", help='Ключ цвета, например ui_tool, ui_accent или background')
+    skin_set.add_argument("value", help='Цвет в формате #rrggbb')
+    skin_set.add_argument("--skin", help='Изменить указанную тему вместо текущей')
 
     skin_parser.set_defaults(func=cmd_skin)

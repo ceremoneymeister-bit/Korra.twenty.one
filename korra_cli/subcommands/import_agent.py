@@ -14,36 +14,32 @@ def build_import_agent_parser(subparsers, *, cmd_import_agent: Callable) -> None
     """Attach the ``import-agent`` subcommand to ``subparsers``."""
     parser = subparsers.add_parser(
         "import-agent",
-        help="Import a Claude Code or Codex CLI setup into Korra",
+        help='Перенести настройки Claude Code или Codex CLI в Корру',
         description=(
-            "One-command import of another coding agent's setup into Korra. "
-            "Maps CLAUDE.md/AGENTS.md instructions, permission allowlists, MCP "
-            "servers, skills, and memories into their Korra equivalents. "
-            "Always shows a preview before making changes. API keys and "
-            "credentials are never imported — run 'hermes setup' for those."
+            'Перенести инструкции CLAUDE.md/AGENTS.md, разрешения команд, серверы MCP, навыки и память из другого агента. Перед изменениями показывается план. Ключи API и данные входа не переносятся; настройте их через korra setup.'
         ),
     )
     parser.add_argument(
         "agent",
         nargs="?",
         choices=["claude-code", "codex"],
-        help="Which agent to import from (default: auto-detect ~/.claude or ~/.codex)",
+        help='Источник переноса; по умолчанию определяется по ~/.claude или ~/.codex',
     )
     parser.add_argument(
         "--source",
-        help="Path to the agent's config directory (default: ~/.claude or ~/.codex)",
+        help='Папка настроек исходного агента (по умолчанию ~/.claude или ~/.codex)',
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Preview only — stop after showing what would be imported",
+        help='Только показать план импорта без изменений',
     )
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="Overwrite existing Korra items on name conflicts (default: skip)",
+        help='Перезаписать элементы Корры с совпадающими именами; по умолчанию пропустить',
     )
     parser.add_argument(
-        "--yes", "-y", action="store_true", help="Skip confirmation prompts"
+        "--yes", "-y", action="store_true", help='Пропустить запросы подтверждения'
     )
     parser.set_defaults(func=cmd_import_agent)

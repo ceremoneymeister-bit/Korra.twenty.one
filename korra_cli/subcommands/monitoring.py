@@ -17,20 +17,16 @@ def build_monitoring_parser(subparsers, *, cmd_monitoring: Callable) -> None:
     """Attach the ``monitoring`` subcommand (with actions) to ``subparsers``."""
     p = subparsers.add_parser(
         "monitoring",
-        help="Inspect gateway monitoring (health & diagnostics export)",
+        help='Проверить мониторинг шлюза и выгрузку диагностики',
         description=(
-            "Gateway monitoring: service health metrics plus redacted "
-            "diagnostics, exported over OTLP to an operator-configured "
-            "endpoint. Content-free by construction — no prompts, messages, "
-            "tool args/results, or usage analytics. Configure under "
-            "monitoring.* in config.yaml."
+            'Мониторинг шлюза: показатели работоспособности и обезличенная диагностика через OTLP на адрес оператора. Без запросов, сообщений, аргументов и результатов инструментов или аналитики использования. Настройка: monitoring.* в config.yaml.'
         ),
     )
     sub = p.add_subparsers(dest="monitoring_action")
 
     sub.add_parser(
         "status",
-        help="Show monitoring settings, export state, and redaction posture",
+        help='Показать настройки мониторинга, состояние выгрузки и скрытия секретов',
     )
 
     p.set_defaults(func=cmd_monitoring)

@@ -16,23 +16,21 @@ def build_backup_parser(subparsers, *, cmd_backup: Callable) -> None:
     # =========================================================================
     backup_parser = subparsers.add_parser(
         "backup",
-        help="Back up Korra home directory to a zip file",
-        description="Create a zip archive of your entire Korra configuration, "
-        "skills, sessions, and data (excludes the hermes-agent codebase). "
-        "Use --quick for a fast snapshot of just critical state files.",
+        help='Сохранить папку данных Корры в ZIP-архив',
+        description='Создать ZIP-архив настроек, навыков, бесед и данных Корры без исходного кода. --quick — быстрый снимок только важных файлов состояния.',
     )
     backup_parser.add_argument(
         "-o",
         "--output",
-        help="Output path for the zip file (default: ~/hermes-backup-<timestamp>.zip)",
+        help='Путь к ZIP-архиву; по умолчанию — домашняя папка, имя с датой и временем',
     )
     backup_parser.add_argument(
         "-q",
         "--quick",
         action="store_true",
-        help="Quick snapshot: only critical state files (config, state.db, .env, auth, cron)",
+        help='Быстрый снимок: настройки, state.db, .env, учётные записи и расписание',
     )
     backup_parser.add_argument(
-        "-l", "--label", help="Label for the snapshot (only used with --quick)"
+        "-l", "--label", help='Метка снимка, только с --quick'
     )
     backup_parser.set_defaults(func=cmd_backup)

@@ -16,19 +16,17 @@ def build_doctor_parser(subparsers, *, cmd_doctor: Callable) -> None:
     # =========================================================================
     doctor_parser = subparsers.add_parser(
         "doctor",
-        help="Check configuration and dependencies",
-        description="Diagnose issues with Korra setup",
+        help='Проверить настройки и зависимости',
+        description='Найти проблемы в настройке Корры',
     )
     doctor_parser.add_argument(
-        "--fix", action="store_true", help="Attempt to fix issues automatically"
+        "--fix", action="store_true", help='Попробовать исправить проблемы автоматически'
     )
     doctor_parser.add_argument(
         "--live",
         action="store_true",
         help=(
-            "Opt-in: run one bounded, read-only real-call health probe per "
-            "configured tool backend (Firecrawl/FAL/browser/MCP/TTS/STT) "
-            "after the static checks. Makes real network calls."
+            'После обычных проверок выполнить по одному ограниченному пробному запросу к настроенным инструментам: Firecrawl, FAL, браузеру, MCP, синтезу и распознаванию речи. Использует настоящие сетевые запросы без изменения данных.'
         ),
     )
     doctor_parser.add_argument(
@@ -36,9 +34,7 @@ def build_doctor_parser(subparsers, *, cmd_doctor: Callable) -> None:
         metavar="ADVISORY_ID",
         default=None,
         help=(
-            "Acknowledge a security advisory by ID and exit. After ack, the "
-            "advisory will no longer trigger startup banners. Run `hermes "
-            "doctor` first to see active advisories and their IDs."
+            'Отметить предупреждение безопасности просмотренным по ID и выйти. Оно перестанет появляться при запуске. Список предупреждений и ID: korra doctor.'
         ),
     )
     doctor_parser.set_defaults(func=cmd_doctor)

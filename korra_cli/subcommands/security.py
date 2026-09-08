@@ -14,12 +14,9 @@ def build_security_parser(subparsers, *, cmd_security: Callable) -> None:
     # =========================================================================
     security_parser = subparsers.add_parser(
         "security",
-        help="Supply-chain audit (OSV.dev) for venv, plugins, and MCP servers",
+        help='Проверка уязвимостей окружения Python, плагинов и MCP через OSV.dev',
         description=(
-            "On-demand vulnerability scan against OSV.dev. Covers the Korra "
-            "venv (installed PyPI dists), Python deps declared by plugins under "
-            "~/.hermes/plugins/, and pinned npx/uvx MCP servers in config.yaml. "
-            "Does NOT scan globally-installed packages or editor/browser extensions."
+            'Проверить через OSV.dev пакеты Python окружения Корры, зависимости установленных плагинов и закреплённые npx/uvx-серверы MCP из config.yaml. Глобальные пакеты и расширения редакторов и браузеров не проверяются.'
         ),
     )
     security_subparsers = security_parser.add_subparsers(
@@ -29,34 +26,34 @@ def build_security_parser(subparsers, *, cmd_security: Callable) -> None:
 
     audit_parser = security_subparsers.add_parser(
         "audit",
-        help="Run a one-shot supply-chain audit",
-        description="Query OSV.dev for known vulnerabilities in installed components.",
+        help='Выполнить разовую проверку зависимостей на уязвимости',
+        description='Запросить OSV.dev об известных уязвимостях установленных компонентов',
     )
     audit_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit machine-readable JSON instead of human-readable text",
+        help='Вывести машиночитаемый JSON',
     )
     audit_parser.add_argument(
         "--fail-on",
         default="critical",
         choices=["low", "moderate", "high", "critical"],
-        help="Exit non-zero when any finding meets this severity (default: critical)",
+        help='Ненулевой код выхода при находках указанной тяжести; по умолчанию critical',
     )
     audit_parser.add_argument(
         "--skip-venv",
         action="store_true",
-        help="Skip scanning the Korra Python venv",
+        help='Не проверять окружение Python Корры',
     )
     audit_parser.add_argument(
         "--skip-plugins",
         action="store_true",
-        help="Skip scanning plugin requirements files",
+        help='Не проверять файлы зависимостей плагинов',
     )
     audit_parser.add_argument(
         "--skip-mcp",
         action="store_true",
-        help="Skip scanning pinned MCP servers in config.yaml",
+        help='Не проверять закреплённые серверы MCP из config.yaml',
     )
     audit_parser.set_defaults(func=cmd_security)
     security_parser.set_defaults(func=cmd_security)

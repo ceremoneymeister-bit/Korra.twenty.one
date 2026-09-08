@@ -15,66 +15,59 @@ def build_gui_parser(subparsers, *, cmd_gui: Callable) -> None:
     gui_parser = subparsers.add_parser(
         "desktop",
         aliases=["gui"],
-        help="Build and launch the native desktop app",
+        help='Собрать и запустить приложение для компьютера',
         description=(
-            "Launch the Korra Electron desktop app. By default this installs "
-            "workspace Node dependencies, builds the current OS's unpacked "
-            "Electron app, then launches that packaged artifact."
+            'Запустить приложение Korra на Electron. По умолчанию устанавливаются зависимости Node, собирается приложение для текущей системы и запускается готовая сборка.'
         ),
     )
     gui_parser.add_argument(
         "--source",
         action="store_true",
-        help="Launch via `electron .` against apps/desktop/dist instead of the packaged app",
+        help='Запустить electron . с apps/desktop/dist вместо готового пакета',
     )
     gui_parser.add_argument(
         "--build-only",
         action="store_true",
-        help="Build the desktop app but do not launch it (used by the installer's --update flow)",
+        help='Собрать приложение без запуска; используется установщиком при --update',
     )
     gui_parser.add_argument(
         "--fake-boot",
         action="store_true",
-        help="Enable deterministic desktop boot delays for validating startup UI",
+        help='Включить фиксированные задержки загрузки для проверки стартового интерфейса',
     )
     gui_parser.add_argument(
         "--ignore-existing",
         action="store_true",
-        help="Force Desktop to ignore any hermes CLI already on PATH during backend resolution",
+        help='При поиске сервера не использовать установленную команду из PATH',
     )
     gui_parser.add_argument(
         "--hermes-root",
-        help="Override the Hermes source root used by Desktop (sets HERMES_DESKTOP_HERMES_ROOT)",
+        help='Задать папку исходников для приложения через HERMES_DESKTOP_HERMES_ROOT',
     )
     gui_parser.add_argument(
         "--cwd",
-        help="Initial project directory for Desktop chat sessions (sets HERMES_DESKTOP_CWD)",
+        help='Начальная папка проекта для бесед приложения; задаёт HERMES_DESKTOP_CWD',
     )
     gui_parser.add_argument(
         "--skip-build",
         action="store_true",
-        help="Skip npm install/package and launch the existing unpacked app from apps/desktop/release",
+        help='Пропустить npm install и сборку, запустить готовое приложение из apps/desktop/release',
     )
     gui_parser.add_argument(
         "--force-build",
         action="store_true",
-        help="Force a full rebuild even if the content stamp matches",
+        help='Пересобрать полностью, даже если содержимое не изменилось',
     )
     gui_parser.add_argument(
         "--setup-tcc-identity",
         action="store_true",
         help=(
-            "macOS only: create/import a self-signed code-signing certificate "
-            "in the login keychain and point desktop.macos_signing_identity at "
-            "it, then re-sign the packaged app. Makes macOS TCC grants (Full "
-            "Disk Access, Accessibility, Files and Folders, microphone) survive "
-            "rebuilds with a certificate-anchored identity. Idempotent — safe "
-            "to re-run after updates."
+            'Только macOS: создать или импортировать самоподписанный сертификат в связку ключей, задать desktop.macos_signing_identity и переподписать приложение. Сохраняет разрешения на диск, управление, файлы и микрофон после пересборок. Повторный запуск безопасен.'
         ),
     )
     gui_parser.add_argument(
         "--identity",
         default="Hermes Local Signing",
-        help="Certificate name to create/use for --setup-tcc-identity (default: Hermes Local Signing)",
+        help='Имя сертификата для --setup-tcc-identity; по умолчанию штатное локальное имя подписи',
     )
     gui_parser.set_defaults(func=cmd_gui)

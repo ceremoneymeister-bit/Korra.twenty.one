@@ -17,62 +17,48 @@ def build_logs_parser(subparsers, *, cmd_logs: Callable) -> None:
     # =========================================================================
     logs_parser = subparsers.add_parser(
         "logs",
-        help="View and filter Korra log files",
-        description="View, tail, and filter agent.log / errors.log / gateway.log / gui.log / desktop.log",
+        help='Просмотр и фильтрация журналов Корры',
+        description='Читать и фильтровать agent.log, errors.log, gateway.log, gui.log и desktop.log',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""\
-Examples:
-    hermes logs                    Show last 50 lines of agent.log
-    hermes logs -f                 Follow agent.log in real time
-    hermes logs errors             Show last 50 lines of errors.log
-    hermes logs gateway -n 100     Show last 100 lines of gateway.log
-    hermes logs gui -f             Follow gui.log in real time
-    hermes logs desktop -f         Follow desktop.log (Electron app boot/backend)
-    hermes logs --level WARNING    Only show WARNING and above
-    hermes logs --session abc123   Filter by session ID
-    hermes logs --component tools  Only show tool-related lines
-    hermes logs --since 1h         Lines from the last hour
-    hermes logs --since 30m -f     Follow, starting from 30 min ago
-    hermes logs list               List available log files with sizes
-""",
+        epilog='Примеры: korra logs — последние 50 строк; korra logs -f — новые записи в реальном времени; korra logs errors — ошибки; korra logs gateway -n 100 — 100 строк шлюза; korra logs gui -f — журнал панели; korra logs desktop -f — журнал приложения; --level WARNING — предупреждения и ошибки; --session abc123 — фильтр беседы; --component tools — инструменты; --since 1h — за час; korra logs list — файлы и размеры.',
     )
     logs_parser.add_argument(
         "log_name",
         nargs="?",
         default="agent",
-        help="Log to view: agent (default), errors, gateway, gui, or 'list' to show available files",
+        help='Журнал: agent (по умолчанию), errors, gateway, gui; list — список файлов',
     )
     logs_parser.add_argument(
         "-n",
         "--lines",
         type=int,
         default=50,
-        help="Number of lines to show (default: 50)",
+        help='Число строк (по умолчанию 50)',
     )
     logs_parser.add_argument(
         "-f",
         "--follow",
         action="store_true",
-        help="Follow the log in real time (like tail -f)",
+        help='Читать новые записи в реальном времени, как tail -f',
     )
     logs_parser.add_argument(
         "--level",
         metavar="LEVEL",
-        help="Minimum log level to show (DEBUG, INFO, WARNING, ERROR)",
+        help='Минимальный уровень журнала: DEBUG, INFO, WARNING или ERROR',
     )
     logs_parser.add_argument(
         "--session",
         metavar="ID",
-        help="Filter lines containing this session ID substring",
+        help='Строки, содержащие указанную часть ID беседы',
     )
     logs_parser.add_argument(
         "--since",
         metavar="TIME",
-        help="Show lines since TIME ago (e.g. 1h, 30m, 2d)",
+        help='Записи за период, например 1h, 30m или 2d',
     )
     logs_parser.add_argument(
         "--component",
         metavar="NAME",
-        help="Filter by component: gateway, agent, tools, cli, cron, gui",
+        help='Фильтр по компоненту: gateway, agent, tools, cli, cron или gui',
     )
     logs_parser.set_defaults(func=cmd_logs)

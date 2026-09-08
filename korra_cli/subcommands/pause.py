@@ -48,23 +48,21 @@ def build_pause_parser(subparsers) -> None:
     """Attach the ``pause`` and ``resume`` subcommands to ``subparsers``."""
     pause_parser = subparsers.add_parser(
         "pause",
-        help="Emergency stop: pause cron/kanban dispatch and new gateway turns",
+        help='Экстренная пауза: остановить новые задачи расписания, доски и шлюза',
         description=(
-            "Engage the global emergency stop. Halts NEW work only — cron "
-            "dispatch, kanban dispatch, and new gateway turns — until "
-            "`hermes resume`. In-flight work is never killed."
+            'Приостановить новую работу расписания, доски и шлюза до команды korra resume. Уже выполняемые задачи продолжаются.'
         ),
     )
     pause_parser.add_argument(
         "--reason",
         default=None,
-        help="Optional reason stored in the sentinel and shown to users",
+        help='Необязательная причина, которая сохраняется и показывается пользователям',
     )
     pause_parser.set_defaults(func=cmd_pause)
 
     resume_parser = subparsers.add_parser(
         "resume",
-        help="Lift the emergency stop set by `hermes pause`",
-        description="Remove the ESTOP sentinel; dispatch resumes on the next tick.",
+        help='Снять экстренную паузу, включённую через korra pause',
+        description='Удалить метку ESTOP; новые задачи начнутся при следующей проверке',
     )
     resume_parser.set_defaults(func=cmd_resume)

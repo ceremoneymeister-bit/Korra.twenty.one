@@ -14,11 +14,9 @@ def build_hooks_parser(subparsers, *, cmd_hooks: Callable) -> None:
     # =========================================================================
     hooks_parser = subparsers.add_parser(
         "hooks",
-        help="Inspect and manage shell-script hooks",
+        help='Просмотр и настройка обработчиков shell',
         description=(
-            "Inspect shell-script hooks declared in ~/.hermes/config.yaml, "
-            "test them against synthetic payloads, and manage the first-use "
-            "consent allowlist at ~/.hermes/shell-hooks-allowlist.json."
+            'Просмотреть обработчики shell из config.yaml профиля, проверить их на тестовых данных и настроить разрешения первого запуска в shell-hooks-allowlist.json.'
         ),
     )
     hooks_subparsers = hooks_parser.add_subparsers(dest="hooks_action")
@@ -26,24 +24,23 @@ def build_hooks_parser(subparsers, *, cmd_hooks: Callable) -> None:
     hooks_subparsers.add_parser(
         "list",
         aliases=["ls"],
-        help="List configured hooks with matcher, timeout, and consent status",
+        help='Показать обработчики, условия, время ожидания и состояние разрешения',
     )
 
     _hk_test = hooks_subparsers.add_parser(
         "test",
-        help="Fire every hook matching <event> against a synthetic payload",
+        help='Выполнить все обработчики события <event> на тестовых данных',
     )
     _hk_test.add_argument(
         "event",
-        help="Hook event name (e.g. pre_tool_call, pre_llm_call, subagent_stop)",
+        help='Имя события, например pre_tool_call, pre_llm_call или subagent_stop',
     )
     _hk_test.add_argument(
         "--for-tool",
         dest="for_tool",
         default=None,
         help=(
-            "Only fire hooks whose matcher matches this tool name "
-            "(used for pre_tool_call / post_tool_call)"
+            'Запускать только обработчики, подходящие к этому инструменту; для pre_tool_call и post_tool_call'
         ),
     )
     _hk_test.add_argument(
@@ -51,26 +48,24 @@ def build_hooks_parser(subparsers, *, cmd_hooks: Callable) -> None:
         dest="payload_file",
         default=None,
         help=(
-            "Path to a JSON file whose contents are merged into the "
-            "synthetic payload before execution"
+            'Путь к JSON-файлу с дополнениями к тестовым данным перед запуском'
         ),
     )
 
     _hk_revoke = hooks_subparsers.add_parser(
         "revoke",
         aliases=["remove", "rm"],
-        help="Remove a command's allowlist entries (takes effect on next restart)",
+        help='Удалить разрешения команды; вступит в силу после перезапуска',
     )
     _hk_revoke.add_argument(
         "command",
-        help="The exact command string to revoke (as declared in config.yaml)",
+        help='Точная строка отзываемой команды из config.yaml',
     )
 
     hooks_subparsers.add_parser(
         "doctor",
         help=(
-            "Check each configured hook: exec bit, allowlist, mtime drift, "
-            "JSON validity, and synthetic run timing"
+            'Проверить обработчики: право выполнения, разрешение, изменение файла, корректность JSON и время пробного запуска'
         ),
     )
 

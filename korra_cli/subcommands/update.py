@@ -16,61 +16,54 @@ def build_update_parser(subparsers, *, cmd_update: Callable) -> None:
     # =========================================================================
     update_parser = subparsers.add_parser(
         "update",
-        help="Update Korra to the latest version",
-        description="Pull the latest changes from git and reinstall dependencies",
+        help='Обновить Корру до последней версии',
+        description='Получить последние изменения из Git и переустановить зависимости',
     )
     update_parser.add_argument(
         "--gateway",
         action="store_true",
         default=False,
-        help="Gateway mode: use file-based IPC for prompts instead of stdin (used internally by /update)",
+        help='Режим шлюза: запросы через файловый IPC вместо stdin; используется командой /update',
     )
     update_parser.add_argument(
         "--check",
         action="store_true",
         default=False,
-        help="Check whether an update is available without installing anything",
+        help='Проверить наличие обновления без установки',
     )
     update_parser.add_argument(
         "--plan",
         action="store_true",
         default=False,
         help=(
-            "Show the update plan and exit without changing anything: install "
-            "kind (git/docker/nix), every running Korra service across all "
-            "profiles with its supervisor and running code version, and how "
-            "each will be restarted. Read-only; safe on a live fleet."
+            'Показать план обновления без изменений: тип установки (git/docker/nix), службы всех профилей, их менеджеры процессов, версии кода и способы перезапуска. Только чтение, подходит для работающих установок.'
         ),
     )
     update_parser.add_argument(
         "--no-backup",
         action="store_true",
         default=False,
-        help="Skip ALL pre-update backups for this run (both the quick state snapshot and the full zip; overrides updates.pre_update_backup)",
+        help='Пропустить все резервные копии перед этим обновлением: быстрый снимок и полный ZIP; заменяет updates.pre_update_backup',
     )
     update_parser.add_argument(
         "--backup",
         action="store_true",
         default=False,
-        help="Force a FULL pre-update backup (quick state snapshot + HERMES_HOME zip) for this run, regardless of updates.pre_update_backup",
+        help='Обязательно создать быстрый снимок состояния и полный ZIP папки данных перед этим обновлением, независимо от updates.pre_update_backup',
     )
     update_parser.add_argument(
         "--yes",
         "-y",
         action="store_true",
         default=False,
-        help="Run without blocking on prompts: accepts the config-migration and stash-restore prompts, skips the fork-upstream prompt without adding a remote. API-key entry is skipped; run 'hermes config migrate' separately for those.",
+        help='Без запросов ввода: подтвердить перенос настроек и восстановление локальных правок; пропустить подключение upstream для форка. Ввод ключей API пропускается; для него выполните korra config migrate отдельно.',
     )
     update_parser.add_argument(
         "--keep-stash",
         action="store_true",
         default=False,
         help=(
-            "Do NOT re-apply local changes after the update. Uncommitted "
-            "changes are still stashed so the update can proceed, but they "
-            "stay parked in git stash instead of being restored onto the "
-            "updated code. Used by the desktop updater so local source edits "
-            "never silently ride along across updates."
+            'Не возвращать локальные правки после обновления. Несохранённые изменения помещаются в git stash и остаются там. Используется обновлением приложения, чтобы старые правки исходников не применялись незаметно.'
         ),
     )
     update_parser.add_argument(
@@ -78,10 +71,7 @@ def build_update_parser(subparsers, *, cmd_update: Callable) -> None:
         default=None,
         metavar="NAME",
         help=(
-            "Update against this branch instead of the default (main). "
-            "If the local checkout is on a different branch, hermes will "
-            "switch to the requested branch first (auto-stashing any "
-            "uncommitted changes)."
+            'Обновить указанную ветку вместо main. Если открыта другая ветка, Корра сначала сохранит несохранённые изменения в stash и переключится на нужную.'
         ),
     )
     update_parser.add_argument(
@@ -89,26 +79,19 @@ def build_update_parser(subparsers, *, cmd_update: Callable) -> None:
         action="store_true",
         default=False,
         help=(
-            "With updates.parked_branch_strategy: update_in_place configured, "
-            "override it for this run: switch to the update target and update "
-            "THERE instead of merging the target into the checked-out branch. "
-            "The branch is left exactly as it was — no merge commit is written "
-            "into its history. Use on long-lived feature branches where an "
-            "update-driven merge commit would pollute the branch. No effect "
-            "under the default strategy (switch), which already switches. "
-            "Still refuses to touch a dirty tree."
+            'При updates.parked_branch_strategy: update_in_place временно переключиться на целевую ветку и обновить её, не добавляя слияние в текущую ветку. При обычной стратегии switch ничего не меняет. Рабочая папка должна быть чистой.'
         ),
     )
     update_parser.add_argument(
         "--force",
         action="store_true",
         default=False,
-        help="Windows: proceed with the update even when another hermes.exe is detected. The concurrent process will likely cause WinError 32 warnings. Does NOT bypass the venv-process guard (see --force-venv).",
+        help='Windows: продолжить обновление при обнаружении другого процесса команды. Возможны предупреждения WinError 32. Проверку процессов окружения Python не отключает; см. --force-venv.',
     )
     update_parser.add_argument(
         "--force-venv",
         action="store_true",
         default=False,
-        help="Windows: mutate the venv even while other processes are running from its interpreter (desktop backend, gateway, terminals). Those processes keep native .pyd files locked, so the dependency sync will likely fail partway and strand the install half-updated. Use only if you know the detected holders are false positives.",
+        help='Windows: изменять окружение Python, даже если им пользуются приложение, шлюз или терминалы. Они могут блокировать .pyd и сорвать обновление зависимостей. Используйте только при ложном обнаружении занятых файлов.',
     )
     update_parser.set_defaults(func=cmd_update)

@@ -16,10 +16,8 @@ def build_setup_parser(subparsers, *, cmd_setup: Callable) -> None:
     # =========================================================================
     setup_parser = subparsers.add_parser(
         "setup",
-        help="Interactive setup wizard",
-        description="Configure Korra with an interactive wizard. "
-        "Run a specific section: "
-        "hermes setup model|tts|terminal|gateway|tools|telemetry|agent",
+        help='Мастер настройки',
+        description='Настроить Корру с помощью мастера. Отдельный раздел: korra setup model|tts|terminal|gateway|tools|telemetry|agent',
     )
     setup_parser.add_argument(
         "section",
@@ -34,34 +32,29 @@ def build_setup_parser(subparsers, *, cmd_setup: Callable) -> None:
             "agent",
         ],
         default=None,
-        help="Run a specific setup section instead of the full wizard",
+        help='Открыть выбранный раздел вместо полного мастера',
     )
     setup_parser.add_argument(
         "--non-interactive",
         action="store_true",
-        help="Non-interactive mode (use defaults/env vars)",
+        help='Без интерактивного ввода: использовать исходные значения и переменные среды',
     )
     setup_parser.add_argument(
-        "--reset", action="store_true", help="Reset configuration to defaults"
+        "--reset", action="store_true", help='Сбросить настройки к исходным значениям'
     )
     setup_parser.add_argument(
         "--reconfigure",
         action="store_true",
-        help="(Default on existing installs.) Re-run the full wizard, "
-        "showing current values as defaults. Kept for backwards "
-        "compatibility — a bare 'hermes setup' now does this.",
+        help='Повторить полный мастер с текущими значениями по умолчанию. Это обычное поведение korra setup на настроенной установке; параметр сохранён для совместимости.',
     )
     setup_parser.add_argument(
         "--quick",
         action="store_true",
-        help="On existing installs: only prompt for items that are missing "
-        "or unset, instead of running the full reconfigure wizard.",
+        help='На настроенной установке запрашивать только отсутствующие значения вместо полного мастера',
     )
     setup_parser.add_argument(
         "--portal",
         action="store_true",
-        help="One-shot Nous Portal setup: log in via OAuth, pick a Nous "
-        "model, set Nous as the inference provider, and opt into the Tool "
-        "Gateway. Skips the rest of the wizard.",
+        help='Быстрая настройка Nous: войти через OAuth, выбрать модель Nous, назначить провайдера Nous и подключить шлюз инструментов. Остальные разделы мастера пропускаются.',
     )
     setup_parser.set_defaults(func=cmd_setup)

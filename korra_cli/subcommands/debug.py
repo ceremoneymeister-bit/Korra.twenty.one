@@ -17,84 +17,63 @@ def build_debug_parser(subparsers, *, cmd_debug: Callable) -> None:
     # =========================================================================
     debug_parser = subparsers.add_parser(
         "debug",
-        help="Debug tools — upload logs and system info for support",
-        description="Debug utilities for Korra. Use 'hermes debug share' to "
-        "upload a debug report (system info + recent logs) to a paste "
-        "service and get a shareable URL.",
+        help='Диагностика: журналы и сведения о системе для поддержки',
+        description='Средства диагностики Корры. korra debug share загружает сведения о системе и последние записи журналов в сервис публикации текста и выдаёт ссылку для поддержки.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""\
-Examples:
-    hermes debug share              Upload debug report (asks for confirmation)
-    hermes debug share --yes        Skip confirmation (for scripts/CI)
-    hermes debug share --lines 500  Include more log lines
-    hermes debug share --expire 30  Keep paste for 30 days
-    hermes debug share --local      Print report locally (no upload)
-    hermes debug share --no-redact  Disable upload-time secret redaction
-    hermes debug share --nous       Upload to Nous-internal storage (private)
-    hermes debug delete <url>       Delete a previously uploaded paste
-""",
+        epilog='Примеры: korra debug share — загрузить отчёт с подтверждением; --yes — без подтверждения; --lines 500 — больше строк; --expire 30 — хранить 30 дней; --local — вывести локально; --no-redact — не скрывать секреты; --nous — закрытое хранилище Nous. Удаление: korra debug delete <url>.',
     )
     debug_sub = debug_parser.add_subparsers(dest="debug_command")
     share_parser = debug_sub.add_parser(
         "share",
-        help="Upload debug report to a paste service and print a shareable URL",
+        help='Загрузить диагностический отчёт и показать ссылку',
     )
     share_parser.add_argument(
         "--lines",
         type=int,
         default=200,
-        help="Number of log lines to include per log file (default: 200)",
+        help='Число строк из каждого журнала (по умолчанию 200)',
     )
     share_parser.add_argument(
         "--expire",
         type=int,
         default=7,
-        help="Paste expiry in days (default: 7)",
+        help='Срок хранения в днях (по умолчанию 7)',
     )
     share_parser.add_argument(
         "--local",
         action="store_true",
-        help="Print the report locally instead of uploading",
+        help='Вывести отчёт локально без загрузки',
     )
     share_parser.add_argument(
         "-y",
         "--yes",
         action="store_true",
         help=(
-            "Skip the confirmation prompt and upload immediately. Required "
-            "in non-interactive contexts (scripts/CI); without it, and with "
-            "no TTY on stdin, the command refuses rather than upload silently."
+            'Пропустить подтверждение и сразу загрузить отчёт. Обязательно для скриптов и CI без терминала; без этого параметра загрузка не выполняется.'
         ),
     )
     share_parser.add_argument(
         "--no-redact",
         action="store_true",
         help=(
-            "Disable upload-time secret redaction (default: redact). Logs "
-            "are normally run through agent.redact.redact_sensitive_text "
-            "with force=True before upload so credentials are not leaked "
-            "into the public paste service."
+            'Не скрывать секреты перед загрузкой. По умолчанию ключи и пароли принудительно скрываются, чтобы не попасть в публичную публикацию.'
         ),
     )
     share_parser.add_argument(
         "--nous",
         action="store_true",
         help=(
-            "Upload the debug bundle to Nous-internal storage (AWS S3) instead "
-            "of a public paste service. The bundle is private — viewable only "
-            "by Nous staff (and allowlisted Discord mods) via a Google-login-"
-            "gated viewer — and auto-deletes after 14 days. Still force-redacts "
-            "secrets unless --no-redact is also passed."
+            'Загрузить отчёт в закрытое хранилище Nous (AWS S3). Доступен только сотрудникам Nous и допущенным модераторам Discord через вход Google; удаляется через 14 дней. Секреты скрываются, кроме случая с --no-redact.'
         ),
     )
     delete_parser = debug_sub.add_parser(
         "delete",
-        help="Delete a paste uploaded by 'hermes debug share'",
+        help='Удалить отчёт, загруженный через korra debug share',
     )
     delete_parser.add_argument(
         "urls",
         nargs="*",
         default=[],
-        help="One or more paste URLs to delete (e.g. https://paste.rs/abc123)",
+        help='Один или несколько адресов публикаций для удаления, например https://paste.rs/abc123',
     )
     debug_parser.set_defaults(func=cmd_debug)

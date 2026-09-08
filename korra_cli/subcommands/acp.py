@@ -15,38 +15,36 @@ def build_acp_parser(subparsers, *, cmd_acp: Callable) -> None:
     """Attach the ``acp`` subcommand to ``subparsers``."""
     acp_parser = subparsers.add_parser(
         "acp",
-        help="Run Korra as an ACP (Agent Client Protocol) server",
-        description="Start Korra in ACP mode for editor integration (VS Code, Zed, JetBrains)",
+        help='Запустить Корру как сервер ACP (Agent Client Protocol)',
+        description='Запустить Корру в режиме ACP для подключения к VS Code, Zed или JetBrains',
     )
     add_accept_hooks_flag(acp_parser)
     acp_parser.add_argument(
         "--version",
         action="store_true",
         dest="acp_version",
-        help="Print Korra ACP version and exit",
+        help='Показать версию ACP Корры и выйти',
     )
     acp_parser.add_argument(
         "--check",
         action="store_true",
-        help="Verify ACP dependencies and adapter imports, then exit",
+        help='Проверить зависимости и загрузку адаптера ACP, затем выйти',
     )
     acp_parser.add_argument(
         "--setup",
         action="store_true",
-        help="Run interactive Korra provider/model setup for ACP terminal auth",
+        help='Открыть настройку провайдера и модели для входа через терминал ACP',
     )
     acp_parser.add_argument(
         "--setup-browser",
         action="store_true",
-        help="Install agent-browser + Playwright Chromium into ~/.hermes/node/ "
-             "for browser tool support (idempotent).",
+        help='Установить agent-browser и Playwright Chromium в папку node профиля для браузерных инструментов; повторный запуск безопасен.',
     )
     acp_parser.add_argument(
         "--yes",
         "-y",
         action="store_true",
         dest="assume_yes",
-        help="Accept all prompts (used by --setup-browser to skip the "
-             "~400 MB Chromium download confirmation).",
+        help='Подтвердить все запросы; с --setup-browser пропустить подтверждение загрузки Chromium размером около 400 МБ.',
     )
     acp_parser.set_defaults(func=cmd_acp)

@@ -18,47 +18,44 @@ def build_verify_parser(subparsers, *, cmd_verify: Callable) -> None:
     """Attach the ``verify`` subcommand to ``subparsers``."""
     verify_parser = subparsers.add_parser(
         "verify",
-        help="Detect a project's run recipe and smoke-test it",
+        help='Определить способ запуска проекта и проверить его работу',
         description=(
-            "Detect how the current project is built, tested, and started "
-            "(or load the saved manifest at .hermes/environment.json), then "
-            "run a verification pass: bootstrap -> build -> test -> start in "
-            "background -> poll readiness -> teardown."
+            'Определить команды сборки, тестирования и запуска проекта либо прочитать .hermes/environment.json. Выполнить подготовку, сборку, тесты, фоновый запуск, проверку готовности и завершение.'
         ),
     )
     verify_parser.add_argument(
         "path",
         nargs="?",
         default=None,
-        help="Project root to verify (default: current directory)",
+        help='Корень проверяемого проекта (по умолчанию текущая папка)',
     )
     verify_parser.add_argument(
         "--detect-only",
         action="store_true",
-        help="Only detect and print the recipe as JSON; run nothing",
+        help='Только определить и вывести команды в JSON, ничего не запускать',
     )
     verify_parser.add_argument(
         "--save",
         action="store_true",
-        help="Save the recipe as .hermes/environment.json in the project",
+        help='Сохранить команды в .hermes/environment.json проекта',
     )
     verify_parser.add_argument(
         "--skip-start",
         action="store_true",
-        help="Run command phases but skip starting the app / readiness poll",
+        help='Выполнить команды без запуска приложения и проверки готовности',
     )
     verify_parser.add_argument(
         "--phase",
         action="append",
         choices=["bootstrap", "build", "test", "start"],
         default=None,
-        help="Run only the given phase(s); repeatable",
+        help='Выполнить только указанные этапы; параметр можно повторять',
     )
     verify_parser.add_argument(
         "--port",
         type=int,
         default=None,
-        help="Override the port used for the readiness poll",
+        help='Задать порт для проверки готовности',
     )
     verify_parser.add_argument(
         "--timeout",
@@ -75,6 +72,6 @@ def build_verify_parser(subparsers, *, cmd_verify: Callable) -> None:
     verify_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit a machine-readable JSON result",
+        help='Вывести машиночитаемый результат JSON',
     )
     verify_parser.set_defaults(func=cmd_verify)

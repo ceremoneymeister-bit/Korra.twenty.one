@@ -16,53 +16,52 @@ def build_config_parser(subparsers, *, cmd_config: Callable) -> None:
     # =========================================================================
     config_parser = subparsers.add_parser(
         "config",
-        help="View and edit configuration",
-        description="Manage Korra configuration",
+        help='Просмотр и изменение настроек',
+        description='Управление настройками Корры',
     )
     config_subparsers = config_parser.add_subparsers(dest="config_command")
 
     # config show (default)
-    config_subparsers.add_parser("show", help="Show current configuration")
+    config_subparsers.add_parser("show", help='Показать текущие настройки')
 
     # config edit
-    config_subparsers.add_parser("edit", help="Open config file in editor")
+    config_subparsers.add_parser("edit", help='Открыть файл настроек в редакторе')
 
     # config get
     config_get = config_subparsers.add_parser(
-        "get", help="Print a resolved configuration value"
+        "get", help='Показать действующее значение настройки'
     )
-    config_get.add_argument("key", nargs="?", help="Configuration key (e.g., model)")
-    config_get.add_argument("--json", action="store_true", help="Print value as JSON")
+    config_get.add_argument("key", nargs="?", help='Ключ настройки, например model')
+    config_get.add_argument("--json", action="store_true", help='Вывести значение в JSON')
 
     # config set
-    config_set = config_subparsers.add_parser("set", help="Set a configuration value")
+    config_set = config_subparsers.add_parser("set", help='Изменить значение настройки')
     config_set.add_argument(
-        "key", nargs="?", help="Configuration key (e.g., model, terminal.backend)"
+        "key", nargs="?", help='Ключ настройки, например model или terminal.backend'
     )
-    config_set.add_argument("value", nargs="?", help="Value to set")
+    config_set.add_argument("value", nargs="?", help='Новое значение')
     config_set.add_argument(
         "--force",
         action="store_true",
-        help="Skip the unknown-key notice printed after writing a key the "
-        "running version doesn't recognize (the value is saved either way).",
+        help='Скрыть уведомление о неизвестном ключе после сохранения. Значение сохраняется в любом случае.',
     )
 
     # config unset
     config_unset = config_subparsers.add_parser(
-        "unset", help="Remove a configuration value"
+        "unset", help='Удалить значение настройки'
     )
-    config_unset.add_argument("key", nargs="?", help="Configuration key to remove")
+    config_unset.add_argument("key", nargs="?", help='Ключ удаляемой настройки')
 
     # config path
-    config_subparsers.add_parser("path", help="Print config file path")
+    config_subparsers.add_parser("path", help='Показать путь к файлу настроек')
 
     # config env-path
-    config_subparsers.add_parser("env-path", help="Print .env file path")
+    config_subparsers.add_parser("env-path", help='Показать путь к файлу .env')
 
     # config check
-    config_subparsers.add_parser("check", help="Check for missing/outdated config")
+    config_subparsers.add_parser("check", help='Проверить недостающие и устаревшие настройки')
 
     # config migrate
-    config_subparsers.add_parser("migrate", help="Update config with new options")
+    config_subparsers.add_parser("migrate", help='Добавить новые параметры в настройки')
 
     config_parser.set_defaults(func=cmd_config)

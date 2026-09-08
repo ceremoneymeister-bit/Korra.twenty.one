@@ -15,12 +15,9 @@ def build_approvals_parser(subparsers, *, cmd_approvals: Callable) -> None:
     """Attach the ``approvals`` subcommand to ``subparsers``."""
     approvals_parser = subparsers.add_parser(
         "approvals",
-        help="Approval-prompt tools (mine history into allowlist proposals)",
+        help='Настройка подтверждений: предложить разрешённые команды по истории решений',
         description=(
-            "Tools for the dangerous-command approval system. "
-            "`hermes approvals suggest` mines past approval decisions from "
-            "the session database and proposes command_allowlist entries so "
-            "repeatedly-approved commands stop prompting."
+            'Управление подтверждением опасных команд. `korra approvals suggest` анализирует прошлые решения и предлагает записи command_allowlist, чтобы не спрашивать повторно о привычных командах.'
         ),
     )
     approvals_subparsers = approvals_parser.add_subparsers(
@@ -30,77 +27,64 @@ def build_approvals_parser(subparsers, *, cmd_approvals: Callable) -> None:
 
     suggest_parser = approvals_subparsers.add_parser(
         "suggest",
-        help="Propose command_allowlist entries from past approvals",
+        help='Предложить записи command_allowlist по истории подтверждений',
         description=(
-            "Scan the session database for dangerous-classified commands "
-            "that ran with user approval, rank the recurring patterns, and "
-            "print a numbered allowlist proposal. Nothing is written unless "
-            "--apply is given. Destructive classes (recursive delete, sudo, "
-            "disk writes, credential edits, ...) are never proposed."
+            'Найти часто разрешаемые опасные команды в истории бесед и показать пронумерованные предложения. Запись настроек — только с --apply. Удаление папок, sudo, запись на диски и изменение ключей доступа никогда не предлагаются.'
         ),
     )
     suggest_parser.add_argument(
         "--apply",
         dest="apply_indices",
         metavar="N[,M...]",
-        help="Merge the numbered proposals (from a prior run) into "
-        "command_allowlist in config.yaml",
+        help='Добавить указанные номера предложений из предыдущего запуска в command_allowlist файла config.yaml',
     )
     suggest_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit machine-readable JSON instead of human-readable text",
+        help='Вывести машиночитаемый JSON',
     )
     suggest_parser.add_argument(
         "--days",
         type=int,
         default=90,
-        help="How far back to scan session history (default: 90; 0 = all)",
+        help='За сколько дней проверить историю (по умолчанию 90; 0 — за всё время)',
     )
     suggest_parser.add_argument(
         "--min-count",
         dest="min_count",
         type=int,
         default=2,
-        help="Minimum approval count for a pattern to be proposed (default: 2)",
+        help='Минимум подтверждений для предложения правила (по умолчанию 2)',
     )
     suggest_parser.add_argument(
         "--limit",
         type=int,
         default=20,
-        help="Maximum number of proposals to show (default: 20)",
+        help='Максимум предложений (по умолчанию 20)',
     )
     suggest_parser.add_argument(
         "--db",
-        help="Path to an alternate session database (default: ~/.hermes/state.db)",
+        help='Путь к другой базе бесед (по умолчанию state.db в папке профиля)',
     )
     suggest_parser.set_defaults(func=cmd_approvals)
 
     test_parser = approvals_subparsers.add_parser(
         "test",
-        help="Dry-run the approval verdict for a command (never executes it)",
+        help='Проверить решение системы подтверждений без выполнения команды',
         description=(
-            "Evaluate a command against the REAL runtime approval guards — "
-            "hardline blocklist, user approvals.deny rules, dangerous-pattern "
-            "detection, allowlist, yolo/off bypass — and print the verdict, "
-            "the matching rule, and the normalized-command trace, without "
-            "executing the command, prompting anyone, or persisting anything. "
-            "Exit codes: 0 allow, 2 ask-approval, 3 deny (hardline or user "
-            "deny rule). Tip: use `--` before the command so its own flags "
-            "aren't parsed: hermes approvals test -- rm -rf /tmp/x"
+            'Проверить команду по действующим правилам: обязательные запреты, approvals.deny, опасные шаблоны, разрешения и режим yolo/off. Показать решение, сработавшее правило и нормализованную команду без выполнения и сохранения. Коды выхода: 0 — разрешено, 2 — нужно подтверждение, 3 — запрещено. Перед командой укажите --, например: korra approvals test -- rm -rf /tmp/x'
         ),
     )
     test_parser.add_argument(
         "--env-type",
         dest="env_type",
         default="local",
-        help="Terminal backend type to evaluate against (default: local; "
-        "isolated container backends like docker skip the guards)",
+        help='Среда терминала для проверки (по умолчанию local; для изолированных контейнеров, например docker, эти проверки пропускаются)',
     )
     test_parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit machine-readable JSON instead of human-readable text",
+        help='Вывести машиночитаемый JSON',
     )
     test_parser.add_argument(
         "command_words",
@@ -108,7 +92,7 @@ def build_approvals_parser(subparsers, *, cmd_approvals: Callable) -> None:
         metavar="command",
         # NOTE: dest must NOT be "command" — main.py's startup path reads
         # args.command as the top-level subcommand name ("approvals").
-        help="The command to evaluate (prefix with -- to protect its flags)",
+        help='Проверяемая команда; добавьте перед ней --, чтобы сохранить её параметры',
     )
     test_parser.set_defaults(func=cmd_approvals)
 

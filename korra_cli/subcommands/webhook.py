@@ -16,68 +16,64 @@ def build_webhook_parser(subparsers, *, cmd_webhook: Callable) -> None:
     # =========================================================================
     webhook_parser = subparsers.add_parser(
         "webhook",
-        help="Manage dynamic webhook subscriptions",
-        description="Create, list, and remove webhook subscriptions for event-driven agent activation",
+        help='Управление подписками на вебхуки',
+        description='Создать, показать или удалить подписки вебхуков для запуска агента по событиям',
     )
     webhook_subparsers = webhook_parser.add_subparsers(dest="webhook_action")
 
     wh_sub = webhook_subparsers.add_parser(
-        "subscribe", aliases=["add"], help="Create a webhook subscription"
+        "subscribe", aliases=["add"], help='Создать подписку вебхука'
     )
-    wh_sub.add_argument("name", help="Route name (used in URL: /webhooks/<name>)")
+    wh_sub.add_argument("name", help='Имя маршрута для адреса /webhooks/<name>')
     wh_sub.add_argument(
-        "--prompt", default="", help="Prompt template with {dot.notation} payload refs"
+        "--prompt", default="", help='Шаблон запроса со ссылками на поля данных через {dot.notation}'
     )
     wh_sub.add_argument(
-        "--events", default="", help="Comma-separated event types to accept"
+        "--events", default="", help='Принимаемые типы событий через запятую'
     )
-    wh_sub.add_argument("--description", default="", help="What this subscription does")
+    wh_sub.add_argument("--description", default="", help='Назначение подписки')
     wh_sub.add_argument(
-        "--skills", default="", help="Comma-separated skill names to load"
+        "--skills", default="", help='Имена загружаемых навыков через запятую'
     )
     wh_sub.add_argument(
         "--deliver",
         default="log",
-        help="Delivery target: log, telegram, discord, slack, etc.",
+        help='Куда отправлять: log, telegram, discord, slack и другие',
     )
     wh_sub.add_argument(
         "--deliver-chat-id",
         default="",
-        help="Target chat ID for cross-platform delivery",
+        help='ID целевого чата для отправки в другую платформу',
     )
     wh_sub.add_argument(
-        "--secret", default="", help="HMAC secret (auto-generated if omitted)"
+        "--secret", default="", help='Секрет HMAC; без параметра создаётся автоматически'
     )
     wh_sub.add_argument(
         "--deliver-only",
         action="store_true",
-        help="Skip the agent — deliver the rendered prompt directly as the "
-        "message. Zero LLM cost. Requires --deliver to be a real target "
-        "(not 'log').",
+        help='Отправить готовый текст напрямую без агента и затрат модели. --deliver должен указывать реальный канал, а не log.',
     )
     wh_sub.add_argument(
         "--script",
         default="",
-        help="Filter/transform script under ~/.hermes/scripts/. The route "
-        "payload is passed as JSON on stdin; empty stdout, [SILENT], or a "
-        "nonzero exit code ignores the webhook.",
+        help='Скрипт фильтрации или преобразования из scripts/ профиля. Получает JSON через stdin. Пустой stdout, [SILENT] или ненулевой код выхода отменяют обработку вебхука.',
     )
 
     webhook_subparsers.add_parser(
-        "list", aliases=["ls"], help="List all dynamic subscriptions"
+        "list", aliases=["ls"], help='Показать все динамические подписки'
     )
 
     wh_rm = webhook_subparsers.add_parser(
-        "remove", aliases=["rm"], help="Remove a subscription"
+        "remove", aliases=["rm"], help='Удалить подписку'
     )
-    wh_rm.add_argument("name", help="Subscription name to remove")
+    wh_rm.add_argument("name", help='Имя удаляемой подписки')
 
     wh_test = webhook_subparsers.add_parser(
-        "test", help="Send a test POST to a webhook route"
+        "test", help='Отправить пробный POST на маршрут вебхука'
     )
-    wh_test.add_argument("name", help="Subscription name to test")
+    wh_test.add_argument("name", help='Имя проверяемой подписки')
     wh_test.add_argument(
-        "--payload", default="", help="JSON payload to send (default: test payload)"
+        "--payload", default="", help='Отправляемые данные JSON; по умолчанию тестовые'
     )
 
     webhook_parser.set_defaults(func=cmd_webhook)

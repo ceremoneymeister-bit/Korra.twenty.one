@@ -24,38 +24,30 @@ def _add_server_runtime_args(parser) -> None:
     browser-opening behavior and help framing differ.
     """
     parser.add_argument(
-        "--port", type=int, default=9119, help="Port (default 9119, 0 for auto-assign by OS)"
+        "--port", type=int, default=9119, help='Порт: по умолчанию 9119, 0 — выбрать автоматически'
     )
     parser.add_argument(
-        "--host", default="127.0.0.1", help="Host (default 127.0.0.1)"
+        "--host", default="127.0.0.1", help='Адрес сервера (по умолчанию 127.0.0.1)'
     )
     parser.add_argument(
         "--insecure",
         action="store_true",
         help=(
-            "DEPRECATED / NO-OP. Formerly bypassed auth on a non-loopback "
-            "bind. As of the June 2026 hardening it no longer disables "
-            "authentication — a public bind always requires an auth provider "
-            "(password or OAuth). Bind 127.0.0.1 + tunnel to keep it local."
+            'Устаревший параметр, ничего не делает. Ранее отключал вход при публичном адресе. После усиления защиты в июне 2026 года публичный адрес всегда требует пароль или OAuth. Для локального доступа используйте 127.0.0.1 и туннель.'
         ),
     )
     parser.add_argument(
         "--skip-build",
         action="store_true",
         help=(
-            "Skip the web UI build step and serve the existing dist directly. "
-            "Useful for non-interactive contexts (Windows Scheduled Tasks, CI) "
-            "where npm may not be available. Pre-build with: cd web && npm run build"
+            'Использовать готовую сборку веб-панели без пересборки. Для CI и фоновых задач, где npm может быть недоступен. Собрать заранее: cd web && npm run build'
         ),
     )
     parser.add_argument(
         "--isolated",
         action="store_true",
         help=(
-            "When launched from a named profile, run a dedicated server scoped "
-            "to that profile instead of routing to the machine-level server. "
-            "Default behavior is unified: profile launches attach to (or start) "
-            "ONE machine-level server and preselect the profile."
+            'Для именованного профиля запустить отдельный сервер этого профиля. По умолчанию все профили подключаются к одному серверу на компьютере с выбором нужного профиля.'
         ),
     )
     # Internal flag set by the unified-launch re-exec (cmd_dashboard) to
@@ -75,12 +67,12 @@ def _add_server_runtime_args(parser) -> None:
     parser.add_argument(
         "--stop",
         action="store_true",
-        help="Stop all running Korra web server processes and exit",
+        help='Остановить все процессы веб-сервера Корры и выйти',
     )
     parser.add_argument(
         "--status",
         action="store_true",
-        help="List running Korra web server processes and exit",
+        help='Показать процессы веб-сервера Корры и выйти',
     )
 
 
@@ -100,12 +92,12 @@ def build_dashboard_parser(
     # =========================================================================
     dashboard_parser = subparsers.add_parser(
         "dashboard",
-        help="Start the web UI dashboard",
-        description="Launch the Korra web dashboard for managing config, API keys, and sessions",
+        help='Запустить веб-панель',
+        description='Открыть веб-панель Корры для настроек, ключей API и бесед',
     )
     _add_server_runtime_args(dashboard_parser)
     dashboard_parser.add_argument(
-        "--no-open", action="store_true", help="Don't open browser automatically"
+        "--no-open", action="store_true", help='Не открывать браузер автоматически'
     )
     # Backward-compat shim: older Hermes desktop app shells (<= 0.15.x) spawn the
     # backend as `hermes dashboard --no-open --tui --host ... --port ...`. The
@@ -135,11 +127,9 @@ def build_dashboard_parser(
     # =========================================================================
     serve_parser = subparsers.add_parser(
         "serve",
-        help="Start the Korra backend server (headless; powers the desktop app and remote backends)",
+        help='Запустить сервер Корры без интерфейса для приложения и удалённых клиентов',
         description=(
-            "Run the Korra backend server — the JSON-RPC/WebSocket gateway the "
-            "desktop app and remote clients connect to. Headless: it never opens "
-            "a browser UI."
+            'Запустить сервер Корры: шлюз JSON-RPC/WebSocket для приложения и удалённых клиентов. Браузерный интерфейс не открывается.'
         ),
     )
     _add_server_runtime_args(serve_parser)
@@ -154,14 +144,14 @@ def build_dashboard_parser(
         dest="ssh_session_token_file",
         metavar="PATH",
         default=None,
-        help="Read a one-shot Desktop SSH session token from PATH",
+        help='Прочитать одноразовый токен SSH-сеанса приложения из PATH',
     )
     serve_parser.add_argument(
         "--ssh-owner-nonce",
         dest="ssh_owner_nonce",
         metavar="NONCE",
         default=None,
-        help="Identify a Desktop-owned SSH backend process",
+        help='Пометить процесс SSH-сервера как запущенный приложением',
     )
     # `headless_backend` marks the lean path: desktop/remote clients speak pure
     # JSON-RPC/WS, so `serve` skips the web UI build AND never serves the SPA
@@ -178,26 +168,22 @@ def build_dashboard_parser(
     )
     dashboard_register_parser = dashboard_subparsers.add_parser(
         "register",
-        help="Register a self-hosted dashboard with Nous Portal (writes the OAuth client ID to .env)",
+        help='Зарегистрировать свою веб-панель в портале Nous и сохранить ID клиента OAuth в .env',
         description=(
-            "Register this install as a self-hosted dashboard with your Nous "
-            "Portal account. Creates an OAuth client, writes "
-            "HERMES_DASHBOARD_OAUTH_CLIENT_ID into ~/.hermes/.env, and prints "
-            "how to engage the login gate. Requires being logged in (hermes setup)."
+            'Зарегистрировать эту веб-панель в вашей учётной записи Nous. Создать клиента OAuth, сохранить HERMES_DASHBOARD_OAUTH_CLIENT_ID в .env профиля и показать, как включить вход. Требуется предварительный вход через korra setup.'
         ),
     )
     dashboard_register_parser.add_argument(
         "--name",
         default=None,
-        help="Human-readable label for the dashboard (default: an auto-generated name)",
+        help='Понятное название веб-панели; по умолчанию создаётся автоматически',
     )
     dashboard_register_parser.add_argument(
         "--redirect-uri",
         dest="redirect_uri",
         default=None,
         help=(
-            "Optional public HTTPS OAuth redirect URI for the dashboard, e.g. "
-            "https://hermes.example.com/auth/callback. Omit for localhost-only use."
+            'Необязательный публичный HTTPS-адрес возврата OAuth, например https://korra.example.com/auth/callback. Для работы только на localhost не требуется.'
         ),
     )
     dashboard_register_parser.add_argument(
@@ -205,10 +191,7 @@ def build_dashboard_parser(
         dest="portal_url",
         default=None,
         help=(
-            "Override the Nous Portal base URL for registration (default: the "
-            "portal you logged into). The access token must be valid at this "
-            "portal. Also settable via HERMES_DASHBOARD_PORTAL_URL. Mainly for "
-            "testing against a staging/preview portal."
+            'Другой адрес портала Nous для регистрации; по умолчанию тот, где вы вошли. Токен должен действовать на этом портале. Также задаётся через HERMES_DASHBOARD_PORTAL_URL; в основном для тестовых порталов.'
         ),
     )
     dashboard_register_parser.set_defaults(func=cmd_dashboard_register)

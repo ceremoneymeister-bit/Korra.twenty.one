@@ -23,7 +23,6 @@ def add_accept_hooks_flag(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         default=argparse.SUPPRESS,
         help=(
-            "Auto-approve unseen shell hooks without a TTY prompt "
-            "(equivalent to HERMES_ACCEPT_HOOKS=1 / hooks_auto_accept: true)."
+            'Автоматически одобрять новые обработчики shell без запроса в терминале. Аналог HERMES_ACCEPT_HOOKS=1 или hooks_auto_accept: true.'
         ),
     )

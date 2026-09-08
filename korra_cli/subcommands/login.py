@@ -32,8 +32,7 @@ def build_login_parser(subparsers, *, cmd_login: Callable) -> None:
     login_parser = subparsers.add_parser(
         "login",
         description=(
-            "Deprecated. Use `hermes auth` to manage credentials, "
-            "`hermes model` to select a provider, or `hermes setup` for full setup."
+            'Устарело. Ключи и учётные записи: korra auth. Выбор провайдера: korra model. Полная настройка: korra setup.'
         ),
     )
     # No ``choices=`` on purpose — the handler is a deprecation notice that
@@ -43,36 +42,36 @@ def build_login_parser(subparsers, *, cmd_login: Callable) -> None:
     login_parser.add_argument(
         "--provider",
         default=None,
-        help="(deprecated) Provider name; ignored — see `hermes model`",
+        help='Устарело: имя провайдера игнорируется; используйте korra model',
     )
     login_parser.add_argument(
-        "--portal-url", help="Portal base URL (default: production portal)"
+        "--portal-url", help='Основной адрес портала (по умолчанию рабочий портал)'
     )
     login_parser.add_argument(
         "--inference-url",
-        help="Inference API base URL (default: production inference API)",
+        help='Основной адрес API моделей (по умолчанию рабочий API)',
     )
     login_parser.add_argument(
-        "--client-id", default=None, help="OAuth client id to use (default: hermes-cli)"
+        "--client-id", default=None, help='ID клиента OAuth; по умолчанию штатный ID клиента CLI'
     )
-    login_parser.add_argument("--scope", default=None, help="OAuth scope to request")
+    login_parser.add_argument("--scope", default=None, help='Запрашиваемые права OAuth')
     login_parser.add_argument(
         "--no-browser",
         action="store_true",
-        help="Do not attempt to open the browser automatically",
+        help='Не открывать браузер автоматически',
     )
     login_parser.add_argument(
         "--timeout",
         type=float,
         default=15.0,
-        help="HTTP request timeout in seconds (default: 15)",
+        help='Время ожидания HTTP-запроса в секундах (по умолчанию 15)',
     )
     login_parser.add_argument(
-        "--ca-bundle", help="Path to CA bundle PEM file for TLS verification"
+        "--ca-bundle", help='Путь к PEM-файлу сертификатов CA для проверки TLS'
     )
     login_parser.add_argument(
         "--insecure",
         action="store_true",
-        help="Disable TLS verification (testing only)",
+        help='Отключить проверку TLS; только для тестирования',
     )
     login_parser.set_defaults(func=cmd_login)

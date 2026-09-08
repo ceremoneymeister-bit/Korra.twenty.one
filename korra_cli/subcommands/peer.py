@@ -444,98 +444,83 @@ def build_peer_parser(subparsers) -> None:
     """Attach the ``peer`` subcommand to ``subparsers``."""
     parser = subparsers.add_parser(
         "peer",
-        help="Bot-to-bot DMs across machines (peer Korra gateways)",
+        help='Сообщения между ботами Корры на разных компьютерах',
         description=(
-            "Register other Korra gateways as peers and message their agents. "
-            "'hermes peer dm <peer>[/<agent>] \"...\"' delivers into the remote "
-            "agent's canonical Bot Chat over the peer's API server and prints "
-            "the reply — the cross-machine twin of 'hermes -p <bot> chat'. "
-            "The peer must run the api_server platform; its API_SERVER_KEY is "
-            "stored locally as a credential in ~/.hermes/.env."
+            'Подключить другие шлюзы Корры и писать их агентам. korra peer dm <peer>[/<agent>] отправляет сообщение в основной чат удалённого агента через API и показывает ответ. На удалённой стороне нужна платформа api_server; её API_SERVER_KEY сохраняется локально в .env профиля.'
         ),
         epilog=(
-            "Examples:\n"
-            "  hermes peer add spark --url http://spark.lan:8377 --key <API_SERVER_KEY>\n"
-            "  hermes peer list\n"
-            '  hermes peer dm spark "Message from 🤖 dixie (@dixie): disk status?"\n'
-            '  hermes peer dm spark/researcher "..."   # named profile on a multiplexed peer\n'
-            "  hermes peer run spark --idempotency-key ticket-123 < long-task.txt\n"
-            "  hermes peer status spark run_abc123\n"
-            "  hermes peer stop spark run_abc123\n"
-            "  hermes peer remove spark\n"
-            "\n"
-            "Exit codes: 0 ok, 1 delivery/peer error, 2 usage error."
+            'Примеры: korra peer add spark --url http://spark.lan:8377 --key <API_SERVER_KEY>; korra peer list; korra peer dm spark "Проверьте состояние диска"; korra peer dm spark/researcher "..."; korra peer run spark --idempotency-key ticket-123 < long-task.txt; korra peer status spark run_abc123; korra peer stop spark run_abc123; korra peer remove spark. Коды выхода: 0 — успех, 1 — ошибка доставки или шлюза, 2 — неверные аргументы.'
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     peer_sub = parser.add_subparsers(dest="peer_action")
 
-    add_p = peer_sub.add_parser("add", aliases=["set"], help="Register (or update) a peer gateway")
-    add_p.add_argument("name", help="Peer name (lowercase slug, e.g. spark, homelab)")
-    add_p.add_argument("--url", required=True, help="Peer gateway base URL, e.g. http://spark.lan:8377")
-    add_p.add_argument("--key", default="", help="The peer's API_SERVER_KEY (stored in ~/.hermes/.env)")
-    add_p.add_argument("--note", default="", help="Optional description")
+    add_p = peer_sub.add_parser("add", aliases=["set"], help='Добавить или обновить подключение удалённого шлюза')
+    add_p.add_argument("name", help='Имя шлюза строчными латинскими буквами, например spark или homelab')
+    add_p.add_argument("--url", required=True, help='Основной адрес шлюза, например http://spark.lan:8377')
+    add_p.add_argument("--key", default="", help='API_SERVER_KEY удалённого шлюза; сохраняется в .env профиля')
+    add_p.add_argument("--note", default="", help='Необязательное описание')
 
-    peer_sub.add_parser("list", aliases=["ls"], help="List registered peers")
+    peer_sub.add_parser("list", aliases=["ls"], help='Показать подключённые удалённые шлюзы')
 
-    rm_p = peer_sub.add_parser("remove", aliases=["rm"], help="Remove a peer")
-    rm_p.add_argument("name", help="Peer name")
+    rm_p = peer_sub.add_parser("remove", aliases=["rm"], help='Удалить подключение шлюза')
+    rm_p.add_argument("name", help='Имя шлюза')
 
     dm_p = peer_sub.add_parser(
         "dm",
-        help="Message an agent on a peer gateway and print its reply",
+        help='Отправить сообщение агенту удалённого шлюза и показать ответ',
     )
     dm_p.add_argument(
-        "target", help="<peer> or <peer>/<agent> (named profile on a multiplexed peer)"
+        "target", help='<peer> или <peer>/<agent> для именованного профиля удалённого шлюза'
     )
     dm_p.add_argument(
-        "message", nargs="?", default=None, help="Message text (or stdin)"
+        "message", nargs="?", default=None, help='Текст сообщения; также можно передать через stdin'
     )
     dm_p.add_argument(
-        "--json", action="store_true", default=False, help="Emit a JSON result"
+        "--json", action="store_true", default=False, help='Вывести результат в JSON'
     )
 
     run_p = peer_sub.add_parser(
         "run",
-        help="Start a long peer turn asynchronously and return its run ID",
+        help='Запустить долгую задачу удалённо в фоне и вернуть ID запуска',
     )
     run_p.add_argument(
-        "target", help="<peer> or <peer>/<agent> (named profile on a multiplexed peer)"
+        "target", help='<peer> или <peer>/<agent> для именованного профиля удалённого шлюза'
     )
     run_p.add_argument(
-        "message", nargs="?", default=None, help="Message text (or stdin)"
+        "message", nargs="?", default=None, help='Текст сообщения; также можно передать через stdin'
     )
     run_p.add_argument(
         "--idempotency-key",
         default=None,
-        help="Stable retry key (generated when omitted)",
+        help='Постоянный ключ повторных попыток; без параметра создаётся автоматически',
     )
     run_p.add_argument(
-        "--json", action="store_true", default=False, help="Emit a JSON result"
+        "--json", action="store_true", default=False, help='Вывести результат в JSON'
     )
 
     status_p = peer_sub.add_parser(
         "status",
-        help="Read the status and final output of an asynchronous peer run",
+        help='Показать состояние и итоговый ответ фонового удалённого запуска',
     )
     status_p.add_argument(
-        "target", help="<peer> or <peer>/<agent> (named profile on a multiplexed peer)"
+        "target", help='<peer> или <peer>/<agent> для именованного профиля удалённого шлюза'
     )
-    status_p.add_argument("run_id", help="Run ID returned by 'hermes peer run'")
+    status_p.add_argument("run_id", help='ID запуска из korra peer run')
     status_p.add_argument(
-        "--json", action="store_true", default=False, help="Emit a JSON result"
+        "--json", action="store_true", default=False, help='Вывести результат в JSON'
     )
 
     stop_p = peer_sub.add_parser(
         "stop",
-        help="Stop one asynchronous peer run without affecting another turn",
+        help='Остановить один фоновый удалённый запуск, не затрагивая остальные',
     )
     stop_p.add_argument(
-        "target", help="<peer> or <peer>/<agent> (named profile on a multiplexed peer)"
+        "target", help='<peer> или <peer>/<agent> для именованного профиля удалённого шлюза'
     )
-    stop_p.add_argument("run_id", help="Run ID returned by 'hermes peer run'")
+    stop_p.add_argument("run_id", help='ID запуска из korra peer run')
     stop_p.add_argument(
-        "--json", action="store_true", default=False, help="Emit a JSON result"
+        "--json", action="store_true", default=False, help='Вывести результат в JSON'
     )
 
     parser.set_defaults(func=cmd_peer)

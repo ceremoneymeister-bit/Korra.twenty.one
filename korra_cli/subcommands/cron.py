@@ -15,48 +15,42 @@ from korra_cli.subcommands._shared import add_accept_hooks_flag
 def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
     """Attach the ``cron`` subcommand (and its sub-actions) to ``subparsers``."""
     cron_parser = subparsers.add_parser(
-        "cron", help="Cron job management", description="Manage scheduled tasks"
+        "cron", help='Управление расписанием', description='Управление задачами по расписанию'
     )
     cron_subparsers = cron_parser.add_subparsers(dest="cron_command")
 
     # cron list
-    cron_list = cron_subparsers.add_parser("list", help="List scheduled jobs")
-    cron_list.add_argument("--all", action="store_true", help="Include disabled jobs")
+    cron_list = cron_subparsers.add_parser("list", help='Показать задачи по расписанию')
+    cron_list.add_argument("--all", action="store_true", help='Включить отключённые задачи')
 
     # cron create/add
     cron_create = cron_subparsers.add_parser(
-        "create", aliases=["add"], help="Create a scheduled job"
+        "create", aliases=["add"], help='Создать задачу по расписанию'
     )
     cron_create.add_argument(
-        "schedule", help="Schedule like '30m', 'every 2h', or '0 9 * * *'"
+        "schedule", help='Расписание, например 30m, every 2h или 0 9 * * *'
     )
     cron_create.add_argument(
-        "prompt", nargs="?", help="Optional self-contained prompt or task instruction"
+        "prompt", nargs="?", help='Необязательное полное описание задачи или запрос'
     )
-    cron_create.add_argument("--name", help="Optional human-friendly job name")
+    cron_create.add_argument("--name", help='Необязательное понятное название задачи')
     cron_create.add_argument(
         "--deliver",
         help=(
-            "Delivery target: origin, local, telegram, discord, signal, "
-            "platform:chat_id, or bot-chat[:profile] (inject output into a "
-            "local profile's canonical Bot Chat as a message the bot responds to)"
+            'Куда отправлять результат: origin, local, telegram, discord, signal, platform:chat_id или bot-chat[:profile]. Последний вариант отправляет результат в основной чат локального профиля как сообщение для ответа бота.'
         ),
     )
-    cron_create.add_argument("--repeat", type=int, help="Optional repeat count")
+    cron_create.add_argument("--repeat", type=int, help='Необязательное число повторов')
     cron_create.add_argument(
         "--skill",
         dest="skills",
         action="append",
-        help="Attach a skill. Repeat to add multiple skills.",
+        help='Прикрепить навык; повторите параметр для нескольких навыков',
     )
     cron_create.add_argument(
         "--script",
         help=(
-            "Path to a script under ~/.hermes/scripts/. Default mode: "
-            "script stdout is injected into the agent's prompt each run. "
-            "With --no-agent: the script IS the job and its stdout is "
-            "delivered verbatim. .sh/.bash files run via bash, everything "
-            "else via Python."
+            'Путь к скрипту в папке scripts/ профиля. Обычно stdout добавляется в запрос агента; с --no-agent скрипт сам выполняет задачу, а stdout отправляется напрямую. .sh/.bash запускаются через bash, остальные — через Python.'
         ),
     )
     cron_create.add_argument(
@@ -65,58 +59,43 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
         action="store_true",
         default=False,
         help=(
-            "Skip the LLM entirely — run --script on schedule and deliver "
-            "its stdout directly. Empty stdout = silent. Classic watchdog "
-            "pattern (memory alerts, disk alerts, CI pings)."
+            'Выполнять --script по расписанию без модели и отправлять stdout напрямую. Пустой вывод — без уведомления. Для мониторинга памяти, диска и CI.'
         ),
     )
     cron_create.add_argument(
         "--monitor-script",
         dest="monitor_script",
         help=(
-            "Monitor mode: path to a cheap source script under "
-            "~/.hermes/scripts/ that runs each tick BEFORE the agent. "
-            "Unchanged output (exact-bytes hash) suppresses the agent run "
-            "entirely; changed output injects a MONITOR CHANGE DETECTED "
-            "diff into the prompt. Script output must be stable (no "
-            "timestamps). Mutually exclusive with --monitor-url; "
-            "incompatible with --no-agent."
+            'Мониторинг: перед каждым запуском выполнять скрипт из scripts/ профиля. Если вывод не изменился побайтно, агент не запускается. При изменении в запрос добавляется разница с меткой MONITOR CHANGE DETECTED. Вывод должен быть стабильным, без временных меток. Несовместимо с --monitor-url и --no-agent.'
         ),
     )
     cron_create.add_argument(
         "--monitor-url",
         dest="monitor_url",
         help=(
-            "Monitor mode: http(s) URL fetched with a bounded GET each tick "
-            "instead of a script. Same hash-suppression semantics as "
-            "--monitor-script."
+            'Мониторинг: проверять HTTP(S)-адрес запросом GET с ограничением времени. При неизменном содержимом агент не запускается, как с --monitor-script.'
         ),
     )
     cron_create.add_argument(
         "--workdir",
-        help="Absolute path for the job to run from. Injects AGENTS.md / CLAUDE.md / .cursorrules from that directory and uses it as the cwd for terminal/file/code_exec tools. Omit to preserve old behaviour (no project context files).",
+        help='Абсолютный путь к рабочей папке задачи. Загружаются AGENTS.md, CLAUDE.md и .cursorrules из этой папки; она используется для терминала, файлов и code_exec. Без параметра инструкции проекта не загружаются.',
     )
     cron_create.add_argument(
         "--model",
         help=(
-            "Pin this job to a specific inference model (user-owned; the "
-            "agent's cronjob tool cannot set this). Omit to follow "
-            "cron.model / model.default from config.yaml."
+            'Закрепить модель за задачей. Настраивает только пользователь; инструмент cronjob этого не меняет. Без параметра используется cron.model или model.default из config.yaml.'
         ),
     )
     cron_create.add_argument(
         "--provider",
         dest="model_provider",
-        help="Inference provider paired with --model (e.g. 'openrouter', 'nous').",
+        help='Провайдер для --model, например openrouter или nous',
     )
     cron_create.add_argument(
         "--reasoning-effort",
         dest="reasoning_effort",
         help=(
-            "Pin this job's reasoning (thinking) effort: none, minimal, low, "
-            "medium, high, xhigh, max, or ultra. Overrides agent.reasoning_effort "
-            "and agent.reasoning_overrides for this job; unsupported levels are "
-            "clamped by the provider at request time. Omit to follow config."
+            'Глубина рассуждений задачи: none, minimal, low, medium, high, xhigh, max или ultra. Заменяет agent.reasoning_effort и agent.reasoning_overrides. Неподдерживаемый уровень ограничивает провайдер. Без параметра используются общие настройки.'
         ),
     )
     cron_create.add_argument(
@@ -126,52 +105,47 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
         const=True,
         default=None,
         help=(
-            "Each run wakes up with the job's own previous output injected "
-            "into its prompt, so it can dedupe against what was already "
-            "reported and continue where the last run left off (scouts, "
-            "monitors, incremental digests). First run is unchanged."
+            'Передавать результат предыдущего запуска в новый запрос, чтобы продолжать работу и не повторять уже сообщённое. На первый запуск не влияет.'
         ),
     )
 
     # cron edit
     cron_edit = cron_subparsers.add_parser(
-        "edit", help="Edit an existing scheduled job"
+        "edit", help='Изменить задачу по расписанию'
     )
-    cron_edit.add_argument("job_id", help="Job ID to edit")
-    cron_edit.add_argument("--schedule", help="New schedule")
-    cron_edit.add_argument("--prompt", help="New prompt/task instruction")
-    cron_edit.add_argument("--name", help="New job name")
-    cron_edit.add_argument("--deliver", help="New delivery target")
-    cron_edit.add_argument("--repeat", type=int, help="New repeat count")
+    cron_edit.add_argument("job_id", help='ID изменяемой задачи')
+    cron_edit.add_argument("--schedule", help='Новое расписание')
+    cron_edit.add_argument("--prompt", help='Новый запрос или описание задачи')
+    cron_edit.add_argument("--name", help='Новое название задачи')
+    cron_edit.add_argument("--deliver", help='Новое место доставки результата')
+    cron_edit.add_argument("--repeat", type=int, help='Новое число повторов')
     cron_edit.add_argument(
         "--skill",
         dest="skills",
         action="append",
-        help="Replace the job's skills with this set. Repeat to attach multiple skills.",
+        help='Заменить навыки задачи указанным набором; повторите параметр для нескольких навыков',
     )
     cron_edit.add_argument(
         "--add-skill",
         dest="add_skills",
         action="append",
-        help="Append a skill without replacing the existing list. Repeatable.",
+        help='Добавить навык к существующим; параметр можно повторять',
     )
     cron_edit.add_argument(
         "--remove-skill",
         dest="remove_skills",
         action="append",
-        help="Remove a specific attached skill. Repeatable.",
+        help='Удалить прикреплённый навык; параметр можно повторять',
     )
     cron_edit.add_argument(
         "--clear-skills",
         action="store_true",
-        help="Remove all attached skills from the job",
+        help='Удалить все навыки из задачи',
     )
     cron_edit.add_argument(
         "--script",
         help=(
-            "Path to a script under ~/.hermes/scripts/. Pass empty string to clear. "
-            "With --no-agent the script IS the job; otherwise its stdout is "
-            "injected into the agent's prompt each run."
+            'Путь к скрипту в scripts/ профиля; пустая строка удаляет привязку. С --no-agent скрипт выполняет задачу самостоятельно, иначе его stdout добавляется в запрос агента.'
         ),
     )
     cron_edit.add_argument(
@@ -181,8 +155,7 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
         const=True,
         default=None,
         help=(
-            "Enable no-agent mode on this job (requires --script or an "
-            "existing script on the job)."
+            'Выполнять задачу без агента; нужен --script или уже прикреплённый скрипт'
         ),
     )
     cron_edit.add_argument(
@@ -190,7 +163,7 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
         dest="no_agent",
         action="store_const",
         const=False,
-        help="Disable no-agent mode on this job (reverts to LLM-driven execution).",
+        help='Выключить режим без агента и вернуть выполнение с моделью',
     )
     cron_edit.add_argument(
         "--continuity",
@@ -199,8 +172,7 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
         const=True,
         default=None,
         help=(
-            "Turn on run-to-run continuity: each run sees the job's own "
-            "previous output (dedupe, continue where it left off)."
+            'Передавать результат предыдущего запуска для продолжения работы без повторов'
         ),
     )
     cron_edit.add_argument(
@@ -209,123 +181,117 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
         action="store_const",
         const=False,
         help=(
-            "Turn off run-to-run continuity (other context_from job refs "
-            "are preserved)."
+            'Не передавать собственный предыдущий результат; ссылки context_from на другие задачи сохраняются'
         ),
     )
     cron_edit.add_argument(
         "--monitor-script",
         dest="monitor_script",
         help=(
-            "Set/replace the monitor source script (see `hermes cron create "
-            "--monitor-script`). Pass empty string to clear."
+            'Задать скрипт мониторинга; см. korra cron create --monitor-script. Пустая строка удаляет привязку.'
         ),
     )
     cron_edit.add_argument(
         "--monitor-url",
         dest="monitor_url",
         help=(
-            "Set/replace the monitor source URL. Pass empty string to clear."
+            'Задать адрес мониторинга; пустая строка удаляет привязку'
         ),
     )
     cron_edit.add_argument(
         "--workdir",
-        help="Absolute path for the job to run from (injects AGENTS.md etc. and sets terminal cwd). Pass empty string to clear.",
+        help='Абсолютный путь к рабочей папке: загружает AGENTS.md и задаёт папку терминала. Пустая строка удаляет настройку.',
     )
     cron_edit.add_argument(
         "--model",
         help=(
-            "Pin this job to a specific inference model (user-owned; the "
-            "agent's cronjob tool cannot set this). Pass empty string to "
-            "clear the pin and follow cron.model / model.default."
+            'Закрепить модель за задачей; инструмент cronjob этого не меняет. Пустая строка возвращает выбор через cron.model или model.default.'
         ),
     )
     cron_edit.add_argument(
         "--provider",
         dest="model_provider",
-        help="Inference provider paired with --model. Pass empty string to clear.",
+        help='Провайдер для --model; пустая строка удаляет настройку',
     )
     cron_edit.add_argument(
         "--reasoning-effort",
         dest="reasoning_effort",
         help=(
-            "Pin this job's reasoning (thinking) effort: none, minimal, low, "
-            "medium, high, xhigh, max, or ultra. Pass empty string to clear "
-            "the pin and follow config resolution."
+            'Глубина рассуждений задачи: none, minimal, low, medium, high, xhigh, max или ultra. Пустая строка возвращает общие настройки.'
         ),
     )
 
     # lifecycle actions
-    cron_pause = cron_subparsers.add_parser("pause", help="Pause a scheduled job")
-    cron_pause.add_argument("job_id", help="Job ID to pause")
+    cron_pause = cron_subparsers.add_parser("pause", help='Приостановить задачу по расписанию')
+    cron_pause.add_argument("job_id", help='ID задачи для приостановки')
 
-    cron_resume = cron_subparsers.add_parser("resume", help="Resume a paused job")
-    cron_resume.add_argument("job_id", help="Job ID to resume")
-    cron_resume.add_argument("--at", dest="run_at", help="Re-arm at an ISO-8601 time")
-    cron_resume.add_argument("--run-now", action="store_true", help="Re-arm to run now")
+    cron_resume = cron_subparsers.add_parser("resume", help='Возобновить приостановленную задачу')
+    cron_resume.add_argument("job_id", help='ID задачи для возобновления')
+    cron_resume.add_argument("--at", dest="run_at", help='Назначить следующий запуск на время в формате ISO-8601')
+    cron_resume.add_argument("--run-now", action="store_true", help='Назначить следующий запуск на сейчас')
 
     cron_run = cron_subparsers.add_parser(
-        "run", help="Run a job on the next scheduler tick"
+        "run", help='Выполнить задачу при ближайшей проверке расписания'
     )
-    cron_run.add_argument("job_id", help="Job ID to trigger")
+    cron_run.add_argument("job_id", help='ID задачи для запуска')
     add_accept_hooks_flag(cron_run)
 
     cron_remove = cron_subparsers.add_parser(
-        "remove", aliases=["rm", "delete"], help="Remove a scheduled job"
+        "remove", aliases=["rm", "delete"], help='Удалить задачу по расписанию'
     )
-    cron_remove.add_argument("job_id", help="Job ID to remove")
+    cron_remove.add_argument("job_id", help='ID удаляемой задачи')
 
     # cron status
-    cron_subparsers.add_parser("status", help="Check if cron scheduler is running")
+    cron_subparsers.add_parser("status", help='Проверить, работает ли планировщик')
 
     cron_runs = cron_subparsers.add_parser(
-        "runs", aliases=["history"], help="Show durable execution attempts"
+        "runs", aliases=["history"], help='Показать сохранённую историю попыток выполнения'
     )
-    cron_runs.add_argument("job_id", nargs="?", help="Optional job ID filter")
-    cron_runs.add_argument("--limit", type=int, default=20, help="Rows to show (1-500)")
+    cron_runs.add_argument("job_id", nargs="?", help='Необязательный фильтр по ID задачи')
+    cron_runs.add_argument("--limit", type=int, default=20, help='Число строк (1–500)')
 
     # cron incidents — durable failure incidents (list/ack)
     cron_incidents = cron_subparsers.add_parser(
-        "incidents", help="List or acknowledge durable cron failure incidents"
+        "incidents", help='Показать или отметить просмотренными сохранённые сбои задач'
     )
     cron_incidents.add_argument(
         "--state",
         choices=["detected", "alerted", "closed"],
-        help="Filter incidents by lifecycle state",
+        help='Отфильтровать сбои по состоянию',
     )
     cron_incidents.add_argument(
         "incident_action",
         nargs="?",
         default="list",
         choices=["list", "ack"],
-        help="Action (default: list)",
+        help='Действие (по умолчанию list)',
     )
     cron_incidents.add_argument(
-        "incident_id", nargs="?", help="Incident ID to acknowledge (ack)"
+        "incident_id", nargs="?", help='ID сбоя для отметки о просмотре (ack)'
     )
 
     # cron notepad — per-job durable KV scratchpad (injected into the job
     # prompt each run; the running agent writes it via this CLI).
     cron_notepad = cron_subparsers.add_parser(
         "notepad",
-        help="Read/write a job's durable notepad (persistent KV across runs)",
+        help='Читать и изменять блокнот задачи: значения по ключам, сохраняемые между запусками',
     )
-    cron_notepad.add_argument("job_id", help="Job ID the notepad belongs to")
+    cron_notepad.add_argument("job_id", help='ID задачи, которой принадлежит блокнот')
     cron_notepad.add_argument(
         "notepad_action",
         nargs="?",
         default="list",
         choices=["get", "set", "delete", "list"],
-        help="Action (default: list)",
+        help='Действие (по умолчанию list)',
     )
-    cron_notepad.add_argument("key", nargs="?", help="Notepad key (get/set/delete)")
-    cron_notepad.add_argument("value", nargs="?", help="Value to store (set)")
+    cron_notepad.add_argument("key", nargs="?", help='Ключ блокнота для get/set/delete')
+    cron_notepad.add_argument("value", nargs="?", help='Сохраняемое значение (set)')
 
     # cron doctor
-    cron_subparsers.add_parser("doctor", help="Check scheduled jobs for common health issues")
+    cron_subparsers.add_parser("doctor", help='Проверить задачи по расписанию на типичные проблемы')
 
     # cron tick (mostly for debugging)
-    cron_tick = cron_subparsers.add_parser("tick", help="Run due jobs once and exit")
+    cron_tick = cron_subparsers.add_parser("tick", help='Выполнить готовые задачи один раз и выйти')
     add_accept_hooks_flag(cron_tick)
     add_accept_hooks_flag(cron_parser)
     cron_parser.set_defaults(func=cmd_cron)

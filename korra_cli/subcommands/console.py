@@ -9,10 +9,9 @@ def build_console_parser(subparsers, *, cmd_console: Callable) -> None:
     """Attach the safe Hermes Console REPL subcommand."""
     console_parser = subparsers.add_parser(
         "console",
-        help="Open the safe Korra command console",
+        help='Открыть безопасную консоль команд Корры',
         description=(
-            "Open a curated Korra command REPL. This is not a raw shell and "
-            "does not expose the full Korra CLI."
+            'Открыть консоль с выбранными командами Корры. Это ограниченный набор команд, а не системная оболочка.'
         ),
     )
     console_parser.set_defaults(func=cmd_console)

@@ -16,194 +16,185 @@ def build_profile_parser(subparsers, *, cmd_profile: Callable) -> None:
     # =========================================================================
     profile_parser = subparsers.add_parser(
         "profile",
-        help="Manage profiles — multiple isolated Korra instances",
+        help='Управление профилями: отдельные настройки и данные Корры',
     )
     profile_subparsers = profile_parser.add_subparsers(dest="profile_action")
 
-    profile_subparsers.add_parser("list", help="List all profiles")
+    profile_subparsers.add_parser("list", help='Показать все профили')
     profile_use = profile_subparsers.add_parser(
-        "use", help="Set sticky default profile"
+        "use", help='Назначить постоянный профиль по умолчанию'
     )
-    profile_use.add_argument("profile_name", help="Profile name (or 'default')")
+    profile_use.add_argument("profile_name", help='Имя профиля или default')
 
     profile_create = profile_subparsers.add_parser(
-        "create", help="Create a new profile"
+        "create", help='Создать профиль'
     )
     profile_create.add_argument(
-        "profile_name", help="Profile name (lowercase, alphanumeric)"
+        "profile_name", help='Имя профиля: строчные латинские буквы и цифры'
     )
     profile_create.add_argument(
         "--clone",
         action="store_true",
-        help="Copy config.yaml, .env, SOUL.md, and skills from active profile",
+        help='Скопировать config.yaml, .env, SOUL.md и навыки из текущего профиля',
     )
     profile_create.add_argument(
         "--clone-all",
         action="store_true",
-        help="Full copy of active profile (all state, excluding per-profile history)",
+        help='Полностью скопировать текущий профиль без его истории',
     )
     profile_create.add_argument(
         "--clone-from",
         metavar="SOURCE",
-        help="Source profile to clone from; implies --clone unless --clone-all is set",
+        help='Исходный профиль для копирования; включает --clone, если не указан --clone-all',
     )
     profile_create.add_argument(
-        "--no-alias", action="store_true", help="Skip wrapper script creation"
+        "--no-alias", action="store_true", help='Не создавать команду-обёртку'
     )
     profile_create.add_argument(
         "--no-skills",
         action="store_true",
-        help="Create an empty profile with no bundled skills (opts out of `hermes update` skill sync)",
+        help='Создать пустой профиль без встроенных навыков и их синхронизации при korra update',
     )
     profile_create.add_argument(
         "--description",
         default=None,
-        help="One- or two-sentence description of what this profile is good at. "
-             "Used by the kanban decomposer to route tasks based on role instead "
-             "of profile name alone. Skip and add later via `hermes profile describe`.",
+        help='Опишите назначение профиля в одном-двух предложениях. Диспетчер доски использует описание для распределения задач по ролям. Можно добавить позже через korra profile describe.',
     )
 
-    profile_delete = profile_subparsers.add_parser("delete", help="Delete a profile")
-    profile_delete.add_argument("profile_name", help="Profile to delete")
+    profile_delete = profile_subparsers.add_parser("delete", help='Удалить профиль')
+    profile_delete.add_argument("profile_name", help='Удаляемый профиль')
     profile_delete.add_argument(
-        "-y", "--yes", action="store_true", help="Skip confirmation prompt"
+        "-y", "--yes", action="store_true", help='Пропустить запрос подтверждения'
     )
 
     profile_describe = profile_subparsers.add_parser(
         "describe",
-        help="Read or set a profile's description (used by the kanban orchestrator)",
+        help='Показать или изменить описание профиля для диспетчера доски',
     )
     profile_describe.add_argument(
         "profile_name",
         nargs="?",
         default=None,
-        help="Profile to describe (omit + use --all --auto to sweep)",
+        help='Профиль для описания; для всех используйте --all --auto без имени',
     )
     profile_describe.add_argument(
         "--text",
         default=None,
-        help="Set description to this exact text (overwrites any existing description)",
+        help='Записать этот текст как описание, заменив прежнее',
     )
     profile_describe.add_argument(
         "--auto",
         action="store_true",
-        help="Auto-generate description via the auxiliary LLM "
-             "(uses auxiliary.profile_describer)",
+        help='Создать описание вспомогательной моделью из auxiliary.profile_describer',
     )
     profile_describe.add_argument(
         "--overwrite",
         action="store_true",
-        help="With --auto, replace user-authored descriptions too (default: only "
-             "fill in missing or previously-auto descriptions)",
+        help='С --auto заменять и пользовательские описания; по умолчанию заполняются только пустые или ранее созданные автоматически',
     )
     profile_describe.add_argument(
         "--all",
         dest="all_missing",
         action="store_true",
-        help="With --auto, run on every profile missing a description",
+        help='С --auto обработать все профили без описания',
     )
 
-    profile_show = profile_subparsers.add_parser("show", help="Show profile details")
-    profile_show.add_argument("profile_name", help="Profile to show")
+    profile_show = profile_subparsers.add_parser("show", help='Показать сведения о профиле')
+    profile_show.add_argument("profile_name", help='Профиль для просмотра')
 
     profile_alias = profile_subparsers.add_parser(
-        "alias", help="Manage wrapper scripts"
+        "alias", help='Управление командами-обёртками'
     )
-    profile_alias.add_argument("profile_name", help="Profile name")
+    profile_alias.add_argument("profile_name", help='Имя профиля')
     profile_alias.add_argument(
-        "--remove", action="store_true", help="Remove the wrapper script"
+        "--remove", action="store_true", help='Удалить команду-обёртку'
     )
     profile_alias.add_argument(
         "--name",
         dest="alias_name",
         metavar="NAME",
-        help="Custom alias name (default: profile name)",
+        help='Своё имя команды; по умолчанию имя профиля',
     )
 
     profile_rename = profile_subparsers.add_parser(
         "rename",
-        help="Rename a profile ('default': sets a display name; id unchanged)",
+        help='Переименовать профиль; для default меняется только отображаемое имя, ID сохраняется',
     )
-    profile_rename.add_argument("old_name", help="Current profile name")
+    profile_rename.add_argument("old_name", help='Текущее имя профиля')
     profile_rename.add_argument(
         "new_name",
-        help="New profile name (for 'default': a display name — the canonical id stays 'default')",
+        help='Новое имя; для default — отображаемое имя, внутренний ID остаётся default',
     )
 
     profile_export = profile_subparsers.add_parser(
-        "export", help="Export a profile to archive"
+        "export", help='Сохранить профиль в архив'
     )
-    profile_export.add_argument("profile_name", help="Profile to export")
+    profile_export.add_argument("profile_name", help='Профиль для экспорта')
     profile_export.add_argument(
-        "-o", "--output", default=None, help="Output file (default: <name>.tar.gz)"
+        "-o", "--output", default=None, help='Выходной файл (по умолчанию <name>.tar.gz)'
     )
 
     profile_import = profile_subparsers.add_parser(
-        "import", help="Import a profile from archive"
+        "import", help='Загрузить профиль из архива'
     )
-    profile_import.add_argument("archive", help="Path to .tar.gz archive")
+    profile_import.add_argument("archive", help='Путь к архиву .tar.gz')
     profile_import.add_argument(
         "--name",
         dest="import_name",
         metavar="NAME",
-        help="Profile name (default: inferred from archive)",
+        help='Имя профиля; по умолчанию определяется по архиву',
     )
 
     # ---------- Distribution subcommands (issue #20456) ----------
     profile_install = profile_subparsers.add_parser(
         "install",
-        help="Install a profile distribution from a git URL or local directory",
+        help='Установить готовый профиль по адресу Git или из локальной папки',
         description=(
-            "Install a Korra profile distribution. SOURCE can be a git URL "
-            "(github.com/user/repo, https://..., git@...) or a local "
-            "directory containing distribution.yaml at its root."
+            'Установить готовый профиль Корры. SOURCE — адрес Git (github.com/user/repo, https://... или git@...) либо локальная папка с distribution.yaml в корне.'
         ),
     )
     profile_install.add_argument(
         "source",
-        help="Distribution source (git URL or local directory)",
+        help='Источник профиля: адрес Git или локальная папка',
     )
     profile_install.add_argument(
         "--name", dest="install_name", metavar="NAME",
-        help="Override profile name (default: read from manifest)",
+        help='Своё имя профиля; по умолчанию из манифеста',
     )
     profile_install.add_argument(
         "--alias", action="store_true",
-        help="Create a shell wrapper alias for the installed profile",
+        help='Создать команду-обёртку для установленного профиля',
     )
     profile_install.add_argument(
         "--force", action="store_true",
-        help="Overwrite an existing profile of the same name (user data preserved)",
+        help='Заменить профиль с таким же именем, сохранив пользовательские данные',
     )
     profile_install.add_argument(
         "-y", "--yes", action="store_true",
-        help="Skip manifest preview confirmation",
+        help='Пропустить подтверждение после просмотра манифеста',
     )
 
     profile_update = profile_subparsers.add_parser(
         "update",
-        help="Re-pull a distribution and apply updates (user data preserved)",
+        help='Повторно получить готовый профиль и применить обновления, сохранив ваши данные',
         description=(
-            "Fetch the distribution from its recorded source and overwrite "
-            "distribution-owned files (SOUL.md, skills/, cron/, mcp.json). "
-            "User data (memories, sessions, auth, .env) is never touched. "
-            "config.yaml is preserved unless --force-config is passed."
+            'Получить обновление из сохранённого источника и заменить файлы поставки: SOUL.md, skills/, cron/, mcp.json. Память, беседы, данные входа и .env не затрагиваются. config.yaml сохраняется, кроме случая с --force-config.'
         ),
     )
-    profile_update.add_argument("profile_name", help="Profile to update")
+    profile_update.add_argument("profile_name", help='Обновляемый профиль')
     profile_update.add_argument(
         "--force-config", action="store_true",
-        help="Also overwrite config.yaml (normally preserved to keep user overrides)",
+        help='Также заменить config.yaml; обычно он сохраняется, чтобы не потерять ваши настройки',
     )
     profile_update.add_argument(
         "-y", "--yes", action="store_true",
-        help="Skip confirmation",
+        help='Пропустить подтверждение',
     )
 
     profile_info = profile_subparsers.add_parser(
         "info",
-        help="Show a profile's distribution manifest (version, requirements, source)",
+        help='Показать манифест профиля: версию, требования и источник',
     )
-    profile_info.add_argument("profile_name", help="Profile to inspect")
+    profile_info.add_argument("profile_name", help='Профиль для проверки')
 
     profile_parser.set_defaults(func=cmd_profile)

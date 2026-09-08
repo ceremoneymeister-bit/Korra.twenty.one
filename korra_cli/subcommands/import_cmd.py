@@ -16,16 +16,14 @@ def build_import_cmd_parser(subparsers, *, cmd_import: Callable) -> None:
     # =========================================================================
     import_parser = subparsers.add_parser(
         "import",
-        help="Restore a Korra backup from a zip file",
-        description="Extract a previously created Korra backup into your "
-        "Korra home directory, restoring configuration, skills, "
-        "sessions, and data",
+        help='Восстановить резервную копию Корры из ZIP',
+        description='Восстановить настройки, навыки, беседы и данные из резервного ZIP-архива в папку данных Корры',
     )
-    import_parser.add_argument("zipfile", help="Path to the backup zip file")
+    import_parser.add_argument("zipfile", help='Путь к резервному ZIP-архиву')
     import_parser.add_argument(
         "--force",
         "-f",
         action="store_true",
-        help="Overwrite existing files without confirmation",
+        help='Перезаписать существующие файлы без подтверждения',
     )
     import_parser.set_defaults(func=cmd_import)

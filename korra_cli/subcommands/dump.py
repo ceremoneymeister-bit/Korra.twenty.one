@@ -16,13 +16,12 @@ def build_dump_parser(subparsers, *, cmd_dump: Callable) -> None:
     # =========================================================================
     dump_parser = subparsers.add_parser(
         "dump",
-        help="Dump setup summary for support/debugging",
-        description="Output a compact, plain-text summary of your Korra setup "
-        "that can be copy-pasted into Discord/GitHub for support context",
+        help='Краткая сводка настроек для поддержки',
+        description='Вывести краткую текстовую сводку настроек Корры, которую можно передать в поддержку через Discord или GitHub',
     )
     dump_parser.add_argument(
         "--show-keys",
         action="store_true",
-        help="Show redacted API key prefixes (first/last 4 chars) instead of just set/not set",
+        help='Показать первые и последние 4 символа ключей API вместо отметки о наличии',
     )
     dump_parser.set_defaults(func=cmd_dump)
