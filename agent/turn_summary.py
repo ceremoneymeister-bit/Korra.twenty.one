@@ -225,23 +225,29 @@ def format_elapsed(seconds: float) -> str:
     if seconds < 0:
         seconds = 0.0
     if seconds < 60:
-        return f"{seconds:.1f}s"
+        return f"{seconds:.1f} с"
     minutes, rest = divmod(int(round(seconds)), 60)
-    return f"{minutes}m{rest:02d}s"
+    return f"{minutes} мин {rest:02d} с"
 
 
 def _pluralize(count: int, plural_noun: str) -> str:
-    """Return ``"1 file"`` / ``"3 files"`` from a plural noun form."""
-    if count == 1:
-        singular = plural_noun
-        if plural_noun.endswith("ies"):
-            singular = plural_noun[:-3] + "y"
-        elif plural_noun.endswith("ses"):
-            singular = plural_noun[:-2]
-        elif plural_noun.endswith("s"):
-            singular = plural_noun[:-1]
-        return f"1 {singular}"
-    return f"{count} {plural_noun}"
+    """Русская форма счётчика; внутренние ключи учёта остаются прежними."""
+    forms = {
+        "files": ("файл", "файла", "файлов"),
+        "pages": ("страница", "страницы", "страниц"),
+        "commands": ("команда", "команды", "команд"),
+        "scripts": ("скрипт", "скрипта", "скриптов"),
+        "paths": ("путь", "пути", "путей"),
+        "times": ("раз", "раза", "раз"),
+        "skills": ("навык", "навыка", "навыков"),
+        "task lists": ("список задач", "списка задач", "списков задач"),
+        "tasks": ("задача", "задачи", "задач"),
+        "memories": ("запись памяти", "записи памяти", "записей памяти"),
+        "tools": ("инструмент", "инструмента", "инструментов"),
+    }
+    one, few, many = forms.get(plural_noun, (plural_noun,) * 3)
+    ending = many if 11 <= count % 100 <= 14 else one if count % 10 == 1 else few if 2 <= count % 10 <= 4 else many
+    return f"{count} {ending}"
 
 
 def _ordered_verbs(tally: TurnTally) -> list[str]:
@@ -272,20 +278,27 @@ def format_turn_summary(
         parts = [_pluralize(count, plural) for plural, count in nouns.items() if count]
         if not parts:
             continue
-        segment = f"{verb} {', '.join(parts)}"
+        label = {
+            "edited": "изменено", "read": "прочитано", "ran": "выполнено",
+            "searched": "проверено", "searched the web": "поиск в интернете",
+            "searched sessions": "поиск в беседах", "browsed": "открыто",
+            "updated": "обновлено", "listed skills": "просмотр навыков",
+            "delegated": "поручено помощникам",
+        }.get(verb, verb)
+        segment = f"{label}: {', '.join(parts)}"
         if verb == _EDIT_VERB and tally.has_line_deltas:
             segment += f" +{tally.lines_added} -{tally.lines_removed}"
         segments.append(segment)
 
     if tally.other_tools:
-        segments.append(f"called {_pluralize(tally.other_tools, 'tools')}")
+        segments.append(f"вызвано: {_pluralize(tally.other_tools, 'tools')}")
 
     if not segments and tally.total_tools == 0 and elapsed_seconds < _MIN_TOOLLESS_SECONDS:
         return ""
 
     if max_segments > 0 and len(segments) > max_segments:
         hidden = len(segments) - max_segments
-        segments = segments[:max_segments] + [f"+{hidden} more"]
+        segments = segments[:max_segments] + [f"ещё {hidden}"]
 
     pieces = [format_elapsed(elapsed_seconds)] + segments
     return f"{SUMMARY_PREFIX} " + " · ".join(pieces)
@@ -304,7 +317,7 @@ def format_token_flow(output_tokens: Any, *, arrow: str = "↓") -> str:
     if count <= 0:
         return ""
     if count < 1000:
-        return f"{arrow} {count} tok"
+        return f"{arrow} {count} ток."
     if count < 1_000_000:
-        return f"{arrow} {count / 1000:.1f}k tok"
-    return f"{arrow} {count / 1_000_000:.1f}M tok"
+        return f"{arrow} {count / 1000:.1f} тыс. ток."
+    return f"{arrow} {count / 1_000_000:.1f} млн ток."

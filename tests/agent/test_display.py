@@ -33,7 +33,7 @@ def test_cute_tool_message_falls_back_when_renderer_raises(monkeypatch):
     monkeypatch.setattr(display_module, "_get_cute_tool_message", _boom)
 
     assert get_cute_tool_message("web_extract", {"urls": []}, 0.25) == (
-        "┊ ⚡ web_extra completed  0.2s"
+        "┊ ⚡ web_extra завершено  0.2 с"
     )
 
 
@@ -255,13 +255,13 @@ class TestBuildToolLabel:
     def test_web_search_uses_for_connector(self):
         from agent.display import build_tool_label
         label = build_tool_label("web_search", {"query": "weather in NYC"})
-        assert label == 'Searching the web for weather in NYC'
+        assert label == 'Ищет в интернете по запросу weather in NYC'
 
     def test_web_extract_reads_url(self):
         from agent.display import build_tool_label
         label = build_tool_label("web_extract", {"urls": ["https://example.com/page"]})
         assert label is not None
-        assert label.startswith("Reading ")
+        assert label.startswith("Читает ")
         assert "example.com/page" in label
 
 
@@ -281,7 +281,7 @@ class TestBuildToolLabel:
         label = build_tool_label("web_search", args)
         # With the feature off, must match the raw preview exactly
         assert label == build_tool_preview("web_search", args)
-        assert "Searching the web" not in (label or "")
+        assert "Ищет в интернете" not in (label or "")
 
 
 
@@ -293,8 +293,8 @@ class TestBuildStatusPhrase:
     def test_verb_only_when_args_none(self):
         # live_status: "verb" mode passes args=None to suppress previews.
         from agent.display import build_status_phrase
-        assert build_status_phrase("terminal", None) == "is running…"
-        assert build_status_phrase("read_file", None) == "is reading…"
+        assert build_status_phrase("terminal", None) == "выполняет…"
+        assert build_status_phrase("read_file", None) == "читает…"
 
 
 

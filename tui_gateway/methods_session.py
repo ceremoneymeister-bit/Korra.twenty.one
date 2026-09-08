@@ -2784,27 +2784,27 @@ def _(rid, params: dict) -> dict:
 
     mirror = _metadata_mirror(session)
     usage = _session_usage_snapshot(session)
-    provider = getattr(agent, "provider", None) or mirror.get("provider") or "unknown"
-    model = getattr(agent, "model", None) or mirror.get("model") or "(unknown)"
+    provider = getattr(agent, "provider", None) or mirror.get("provider") or "неизвестен"
+    model = getattr(agent, "model", None) or mirror.get("model") or "(неизвестна)"
     project = _project_info_for_cwd(_display_session_cwd(session))
     lines = [
-        "Hermes TUI Status",
+        "Состояние Корры в терминале",
         "",
-        f"Session ID: {key}",
-        f"Path: {display_hermes_home()}",
+        f"ID беседы: {key}",
+        f"Каталог: {display_hermes_home()}",
     ]
     if project:
-        lines.append(f"Project: {project['name']}")
+        lines.append(f"Проект: {project['name']}")
     title = (meta.get("title") or "").strip()
     if title:
-        lines.append(f"Title: {title}")
+        lines.append(f"Название: {title}")
     lines.extend(
         [
-            f"Model: {model} ({provider})",
-            f"Created: {created.strftime('%Y-%m-%d %H:%M')}",
-            f"Last Activity: {updated.strftime('%Y-%m-%d %H:%M')}",
-            f"Tokens: {int(usage.get('total') or 0):,}",
-            f"Agent Running: {'Yes' if session.get('running') else 'No'}",
+            f"Модель: {model} ({provider})",
+            f"Создана: {created.strftime('%Y-%m-%d %H:%M')}",
+            f"Последняя активность: {updated.strftime('%Y-%m-%d %H:%M')}",
+            f"Токены: {int(usage.get('total') or 0):,}",
+            f"Агент работает: {'Да' if session.get('running') else 'Нет'}",
         ]
     )
     return _ok(rid, {"output": "\n".join(lines)})

@@ -117,5 +117,5 @@ class TestGetCuteToolMessageFailureSuffix:
     def test_success_has_no_suffix(self):
         ok = json.dumps({"success": True, "data": "hi"})
         line = get_cute_tool_message("web_search", {"query": "hi"}, 0.2, result=ok)
-        assert "[" not in line.split("0.2s", 1)[1]
+        assert "[" not in line.split("0.2 с", 1)[1]
 

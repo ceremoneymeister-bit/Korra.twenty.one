@@ -3296,7 +3296,7 @@ async def chat_completions_proxy(
     t0 = _time.monotonic()
     api_key = os.environ.get("API_SERVER_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="API server key not configured")
+        raise HTTPException(status_code=500, detail="Не настроен ключ внутреннего API. Перезапустите контейнер или обратитесь к администратору.")
 
     body = await request.json()
     profile_name = (profile or "").strip()
@@ -3418,7 +3418,7 @@ def _chat_approval_upstream(
     """Собрать адрес и заголовки запроса к api_server для одного решения."""
     api_key = os.environ.get("API_SERVER_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="API server key not configured")
+        raise HTTPException(status_code=500, detail="Не настроен ключ внутреннего API. Перезапустите контейнер или обратитесь к администратору.")
     profile_name = (profile or "").strip()
     if profile_name and not _CHAT_PROFILE_RE.fullmatch(profile_name):
         raise HTTPException(status_code=400, detail="Некорректное имя профиля")
@@ -13990,7 +13990,7 @@ def _codex_full_login_worker(session_id: str) -> None:
         if code_resp is None:
             with _oauth_sessions_lock:
                 sess["status"] = "expired"
-                sess["error_message"] = "Device code expired before approval"
+                sess["error_message"] = "Время подтверждения входа истекло. Начните вход заново."
             return
 
         if sess.get("cancelled"):
@@ -15852,7 +15852,7 @@ async def approve_pairing(body: PairingApprove):
     if not by_request_id and store._is_locked_out(platform):
         raise HTTPException(
             status_code=429,
-            detail=f"Platform '{platform}' is locked out after too many failed approvals.",
+            detail=f"Слишком много неверных попыток подтверждения для {platform}. Подождите и повторите попытку.",
         )
     raise HTTPException(
         status_code=404,

@@ -24,12 +24,12 @@ from agent.turn_summary import (
 @pytest.mark.parametrize(
     "seconds,expected",
     [
-        (0.0, "0.0s"),
-        (12.44, "12.4s"),
-        (59.9, "59.9s"),
-        (60.0, "1m00s"),
-        (125.0, "2m05s"),
-        (-3.0, "0.0s"),
+        (0.0, "0.0 с"),
+        (12.44, "12.4 с"),
+        (59.9, "59.9 с"),
+        (60.0, "1 мин 00 с"),
+        (125.0, "2 мин 05 с"),
+        (-3.0, "0.0 с"),
     ],
 )
 def test_format_elapsed(seconds, expected):
@@ -50,16 +50,16 @@ def test_format_elapsed(seconds, expected):
 def test_pluralization_singular_and_plural():
     one = TurnTally(verbs={"read": {"files": 1}})
     many = TurnTally(verbs={"read": {"files": 3}})
-    assert format_turn_summary(1.0, one) == "⋯ 1.0s · read 1 file"
-    assert format_turn_summary(1.0, many) == "⋯ 1.0s · read 3 files"
+    assert format_turn_summary(1.0, one) == "⋯ 1.0 с · прочитано: 1 файл"
+    assert format_turn_summary(1.0, many) == "⋯ 1.0 с · прочитано: 3 файла"
 
 
 def test_pluralization_irregular_nouns():
     """The singulariser handles -ies / -ses without producing 'memorie'."""
     mem = TurnTally(verbs={"updated": {"memories": 1}})
-    assert format_turn_summary(1.0, mem) == "⋯ 1.0s · updated 1 memory"
+    assert format_turn_summary(1.0, mem) == "⋯ 1.0 с · обновлено: 1 запись памяти"
     times = TurnTally(verbs={"searched the web": {"times": 1}})
-    assert format_turn_summary(1.0, times) == "⋯ 1.0s · searched the web 1 time"
+    assert format_turn_summary(1.0, times) == "⋯ 1.0 с · поиск в интернете: 1 раз"
 
 
 
@@ -82,7 +82,7 @@ def test_long_tallies_truncate_to_more_tail():
         }
     )
     line = format_turn_summary(9.0, tally)
-    assert line == "⋯ 9.0s · edited 1 file · read 2 files · ran 3 commands · searched 4 paths · +2 more"
+    assert line == "⋯ 9.0 с · изменено: 1 файл · прочитано: 2 файла · выполнено: 3 команды · проверено: 4 пути · ещё 2"
     assert line.count("·") == 5
 
 
@@ -180,7 +180,7 @@ def test_gating_enabled_prints_summary(monkeypatch):
     stub = _make_cli()
     printed = _emit_and_capture(stub, monkeypatch)
     assert len(printed) == 1
-    assert "read 1 file" in printed[0]
+    assert "прочитано: 1 файл" in printed[0]
 
 
 
@@ -193,8 +193,8 @@ def test_gating_enabled_prints_summary(monkeypatch):
 
 def test_spinner_token_flow_appears_when_enabled():
     stub = _make_cli(agent=_StubAgent(session_output_tokens=1200))
-    assert stub._spinner_token_flow() == "↓ 1.2k tok"
-    assert "↓ 1.2k tok" in stub._render_spinner_text()
+    assert stub._spinner_token_flow() == "↓ 1.2 тыс. ток."
+    assert "↓ 1.2 тыс. ток." in stub._render_spinner_text()
 
 
 
@@ -218,7 +218,7 @@ def test_content_free_diff_reports_unknown_not_zero_zero():
     c.begin()
     c.record_tool("patch", result={"success": True, "diff": "@@ -1,3 +1,15 @@"})
     line = c.render(3.0)
-    assert "edited 1 file" in line
+    assert "изменено: 1 файл" in line
     assert "+0 -0" not in line
 
     real = TurnSummaryCollector()

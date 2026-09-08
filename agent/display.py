@@ -346,7 +346,7 @@ def summarize_shell_command(command: str) -> str:
         return core[0]
 
     count = len(core) - 1
-    return f"{core[0]} + {count} {'command' if count == 1 else 'commands'}"
+    return f"{core[0]} + ещё {count}"
 
 
 def _read_file_line_label(args: dict) -> str:
@@ -508,7 +508,7 @@ def build_tool_preview(tool_name: str, args: dict, max_len: int | None = None) -
         if data:
             parts.append(f'"{_oneline(str(data)[:20])}"')
         if timeout_val and action == "wait":
-            parts.append(f"{timeout_val}s")
+            parts.append(f"{timeout_val} с")
         parts = [p for p in parts if p]
         return " ".join(parts) if parts else None
 
@@ -516,11 +516,11 @@ def build_tool_preview(tool_name: str, args: dict, max_len: int | None = None) -
         todos_arg = args.get("todos")
         merge = args.get("merge", False)
         if todos_arg is None:
-            return "reading task list"
+            return 'читает список задач'
         elif merge:
-            return f"updating {len(todos_arg)} task(s)"
+            return f'обновляет задачи: {len(todos_arg)}'
         else:
-            return f"planning {len(todos_arg)} task(s)"
+            return f'планирует задачи: {len(todos_arg)}'
 
     if tool_name in {"terminal", "execute_code"}:
         key = "code" if tool_name == "execute_code" else "command"
@@ -541,7 +541,7 @@ def build_tool_preview(tool_name: str, args: dict, max_len: int | None = None) -
 
     if tool_name == "session_search":
         query = _oneline(args.get("query", ""))
-        return f"recall: \"{query[:25]}{'...' if len(query) > 25 else ''}\""
+        return f'''история: "{query[:25]}{('...' if len(query) > 25 else '')}"'''
 
     if tool_name == "memory":
         action = args.get("action", "")
@@ -550,10 +550,10 @@ def build_tool_preview(tool_name: str, args: dict, max_len: int | None = None) -
             content = _oneline(args.get("content", ""))
             return f"+{target}: \"{content[:25]}{'...' if len(content) > 25 else ''}\""
         elif action == "replace":
-            old = _oneline(args.get("old_text") or "") or "<missing old_text>"
+            old = _oneline(args.get("old_text") or "") or '<не указан исходный текст>'
             return f"~{target}: \"{old[:20]}\""
         elif action == "remove":
-            old = _oneline(args.get("old_text") or "") or "<missing old_text>"
+            old = _oneline(args.get("old_text") or "") or '<не указан исходный текст>'
             return f"-{target}: \"{old[:20]}\""
         return action
 
@@ -638,30 +638,30 @@ def prepare_tool_preview(
 # A trailing space-then-preview is appended by build_tool_label() when the
 # tool's argument preview is available (e.g. "Reading docs/api.md").
 _TOOL_VERBS: dict[str, str] = {
-    "web_search": "Searching the web",
-    "web_extract": "Reading",
-    "browser_navigate": "Browsing",
-    "browser_click": "Clicking",
-    "browser_type": "Typing",
-    "read_file": "Reading",
-    "write_file": "Writing",
-    "patch": "Editing",
-    "search_files": "Searching files",
-    "terminal": "Running",
-    "execute_code": "Running code",
-    "image_generate": "Generating image",
-    "video_generate": "Generating video",
-    "text_to_speech": "Generating speech",
-    "vision_analyze": "Looking at the image",
-    "session_search": "Searching past sessions",
-    "skill_view": "Reading skill",
-    "skills_list": "Listing skills",
-    "skill_manage": "Updating skill",
-    "delegate_task": "Delegating",
-    "cronjob": "Scheduling",
-    "clarify": "Asking",
-    "memory": "Updating memory",
-    "todo": "Updating tasks",
+    "web_search": 'Ищет в интернете',
+    "web_extract": 'Читает',
+    "browser_navigate": 'Открывает страницу',
+    "browser_click": 'Нажимает',
+    "browser_type": 'Вводит текст',
+    "read_file": 'Читает',
+    "write_file": 'Записывает',
+    "patch": 'Редактирует',
+    "search_files": 'Ищет в файлах',
+    "terminal": 'Выполняет',
+    "execute_code": 'Выполняет код',
+    "image_generate": 'Создаёт изображение',
+    "video_generate": 'Создаёт видео',
+    "text_to_speech": 'Озвучивает текст',
+    "vision_analyze": 'Изучает изображение',
+    "session_search": 'Ищет в прошлых беседах',
+    "skill_view": 'Читает навык',
+    "skills_list": 'Просматривает навыки',
+    "skill_manage": 'Обновляет навык',
+    "delegate_task": 'Поручает задачу помощнику',
+    "cronjob": 'Настраивает расписание',
+    "clarify": 'Задаёт вопрос',
+    "memory": 'Обновляет память',
+    "todo": 'Обновляет задачи',
 }
 
 # Verbs that read better without the raw argument preview appended.
@@ -706,7 +706,7 @@ def get_tool_verb(tool_name: str) -> str | None:
 
 def tool_verb_connector(tool_name: str) -> str:
     """Return the connector between a verb and its preview (" for " or " ")."""
-    return " for " if tool_name in _TOOL_VERBS_FOR_CONNECTOR else " "
+    return ' по запросу ' if tool_name in _TOOL_VERBS_FOR_CONNECTOR else " "
 
 
 def verb_drops_preview(tool_name: str) -> bool:
@@ -739,10 +739,10 @@ def build_status_phrase(tool_name: str, args: dict | None, max_len: int = 49) ->
 
     verb = _TOOL_VERBS.get(tool_name)
     if verb:
-        head = f"is {verb[0].lower()}{verb[1:]}"
+        head = f"{verb[0].lower()}{verb[1:]}"
     else:
         # Custom / plugin / MCP tools: generic but still informative.
-        head = f"is using {tool_name}"
+        head = f'использует {tool_name}'
 
     phrase = head
     if args and verb and tool_name not in _TOOL_VERBS_NO_PREVIEW:
@@ -783,7 +783,7 @@ def build_tool_label(tool_name: str, args: dict, max_len: int | None = None) -> 
     if not preview:
         return verb
     if tool_name in _TOOL_VERBS_FOR_CONNECTOR:
-        return f"{verb} for {preview}"
+        return f'{verb} по запросу {preview}'
     return f"{verb} {preview}"
 
 
@@ -1297,7 +1297,7 @@ class KawaiiSpinner:
             if is_tty:
                 self._write(f"  {final_message}", flush=True)
             else:
-                self._write(f"  [done] {final_message}{elapsed}", flush=True)
+                self._write(f'  [готово] {final_message}{elapsed}', flush=True)
 
     def __enter__(self):
         self.start()
@@ -1378,7 +1378,7 @@ def _detect_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str]
         return False, ""
     lower = result[:500].lower()
     if '"error"' in lower or '"failed"' in lower or result.startswith("Error"):
-        return True, " [error]"
+        return True, ' [ошибка]'
 
     return False, ""
 
@@ -1394,7 +1394,7 @@ def _get_cute_tool_message(
     Failed tool calls get a red prefix and an informational suffix.
     """
     args = redact_tool_args_for_display(tool_name, args) or args
-    dur = f"{duration:.1f}s"
+    dur = f"{duration:.1f} с"
     is_failure, failure_suffix = _detect_tool_failure(tool_name, result)
     skin_prefix = get_skin_tool_prefix()
 
@@ -1421,31 +1421,31 @@ def _get_cute_tool_message(
         return f"{line}{failure_suffix}"
 
     if tool_name == "web_search":
-        return _wrap(f"┊ 🔍 search    {_trunc(args.get('query', ''), 42)}  {dur}")
+        return _wrap(f"┊ 🔍 поиск     {_trunc(args.get('query', ''), 42)}  {dur}")
     if tool_name == "web_extract":
         urls = args.get("urls", [])
         if urls:
             url = _display_url(urls[0] if isinstance(urls, list) else urls)
             if not url:
-                return _wrap(f"┊ 📄 fetch     pages  {dur}")
+                return _wrap(f'┊ 📄 чтение    страниц  {dur}')
             domain = url.replace("https://", "").replace("http://", "").split("/")[0]
             extra = f" +{len(urls)-1}" if isinstance(urls, list) and len(urls) > 1 else ""
-            return _wrap(f"┊ 📄 fetch     {_trunc(domain, 35)}{extra}  {dur}")
-        return _wrap(f"┊ 📄 fetch     pages  {dur}")
+            return _wrap(f'┊ 📄 чтение    {_trunc(domain, 35)}{extra}  {dur}')
+        return _wrap(f'┊ 📄 чтение    страниц  {dur}')
     if tool_name == "terminal":
         return _wrap(f"┊ 💻 $         {_trunc(build_tool_preview(tool_name, args) or args.get('command', ''), 42)}  {dur}")
     if tool_name == "process":
         action = args.get("action", "?")
         sid = args.get("session_id", "")[:12]
-        labels = {"list": "ls processes", "poll": f"poll {sid}", "log": f"log {sid}",
-                  "wait": f"wait {sid}", "kill": f"kill {sid}", "write": f"write {sid}", "submit": f"submit {sid}"}
-        return _wrap(f"┊ ⚙️  proc      {labels.get(action, f'{action} {sid}')}  {dur}")
+        labels = {"list": 'список процессов', "poll": f'проверка {sid}', "log": f'журнал {sid}',
+                  "wait": f'ожидание {sid}', "kill": f'остановка {sid}', "write": f'запись {sid}', "submit": f'отправка {sid}'}
+        return _wrap(f"┊ ⚙️  процесс   {labels.get(action, f'{action} {sid}')}  {dur}")
     if tool_name == "read_file":
-        return _wrap(f"┊ 📖 read      {_trunc(build_tool_preview(tool_name, args) or args.get('path', ''), 42)}  {dur}")
+        return _wrap(f"┊ 📖 чтение    {_trunc(build_tool_preview(tool_name, args) or args.get('path', ''), 42)}  {dur}")
     if tool_name == "write_file":
-        return _wrap(f"┊ ✍️  write     {_path(args.get('path', ''))}  {dur}")
+        return _wrap(f"┊ ✍️  запись    {_path(args.get('path', ''))}  {dur}")
     if tool_name == "patch":
-        return _wrap(f"┊ 🔧 patch     {_path(args.get('path', ''))}  {dur}")
+        return _wrap(f"┊ 🔧 правка    {_path(args.get('path', ''))}  {dur}")
     if tool_name == "search_files":
         pattern = _trunc(args.get("pattern", ""), 35)
         target = args.get("target", "content")
@@ -1454,26 +1454,26 @@ def _get_cute_tool_message(
     if tool_name == "browser_navigate":
         url = args.get("url", "")
         domain = url.replace("https://", "").replace("http://", "").split("/")[0]
-        return _wrap(f"┊ 🌐 navigate  {_trunc(domain, 35)}  {dur}")
+        return _wrap(f'┊ 🌐 переход   {_trunc(domain, 35)}  {dur}')
     if tool_name == "browser_snapshot":
         mode = "full" if args.get("full") else "compact"
-        return _wrap(f"┊ 📸 snapshot  {mode}  {dur}")
+        return _wrap(f'┊ 📸 снимок    {mode}  {dur}')
     if tool_name == "browser_click":
-        return _wrap(f"┊ 👆 click     {args.get('ref', '?')}  {dur}")
+        return _wrap(f"┊ 👆 нажатие   {args.get('ref', '?')}  {dur}")
     if tool_name == "browser_type":
-        return _wrap(f"┊ ⌨️  type      \"{_trunc(args.get('text', ''), 30)}\"  {dur}")
+        return _wrap(f'''┊ ⌨️  ввод      "{_trunc(args.get('text', ''), 30)}"  {dur}''')
     if tool_name == "browser_scroll":
         d = args.get("direction", "down")
         arrow = {"down": "↓", "up": "↑", "right": "→", "left": "←"}.get(d, "↓")
-        return _wrap(f"┊ {arrow}  scroll    {d}  {dur}")
+        return _wrap(f'┊ {arrow}  прокрутка {d}  {dur}')
     if tool_name == "browser_back":
-        return _wrap(f"┊ ◀️  back      {dur}")
+        return _wrap(f'┊ ◀️  назад     {dur}')
     if tool_name == "browser_press":
-        return _wrap(f"┊ ⌨️  press     {args.get('key', '?')}  {dur}")
+        return _wrap(f"┊ ⌨️  клавиша   {args.get('key', '?')}  {dur}")
     if tool_name == "browser_get_images":
-        return _wrap(f"┊ 🖼️  images    extracting  {dur}")
+        return _wrap(f'┊ 🖼️  загрузка изображений  {dur}')
     if tool_name == "browser_vision":
-        return _wrap(f"┊ 👁️  vision    analyzing page  {dur}")
+        return _wrap(f'┊ 👁️  анализ страницы  {dur}')
     if tool_name == "todo":
         todos_arg = args.get("todos")
         merge = args.get("merge", False)
@@ -1491,82 +1491,82 @@ def _get_cute_tool_message(
                 pass
         if todos_arg is None:
             if total > 0:
-                return _wrap(f"┊ 📋 plan      {done}/{total} task(s)  {dur}")
-            return _wrap(f"┊ 📋 plan      reading tasks  {dur}")
+                return _wrap(f'┊ 📋 задачи    {done}/{total}  {dur}')
+            return _wrap(f'┊ 📋 задачи    чтение задач  {dur}')
         elif merge:
             if total > 0 and done > 0:
-                return _wrap(f"┊ 📋 plan      update {done}/{total} ✓  {dur}")
-            return _wrap(f"┊ 📋 plan      update {len(todos_arg)} task(s)  {dur}")
+                return _wrap(f'┊ 📋 задачи    обновление {done}/{total} ✓  {dur}')
+            return _wrap(f'┊ 📋 задачи    обновлено: {len(todos_arg)}  {dur}')
         else:
             if total > 0 and done > 0:
-                return _wrap(f"┊ 📋 plan      {done}/{total} task(s)  {dur}")
-            return _wrap(f"┊ 📋 plan      {len(todos_arg)} task(s)  {dur}")
+                return _wrap(f'┊ 📋 задачи    {done}/{total}  {dur}')
+            return _wrap(f'┊ 📋 задачи    всего: {len(todos_arg)}  {dur}')
     if tool_name == "session_search":
-        return _wrap(f"┊ 🔍 recall    \"{_trunc(args.get('query', ''), 35)}\"  {dur}")
+        return _wrap(f'''┊ 🔍 история   "{_trunc(args.get('query', ''), 35)}"  {dur}''')
     if tool_name == "memory":
         action = args.get("action", "?")
         target = args.get("target", "")
         if action == "add":
-            return _wrap(f"┊ 🧠 memory    +{target}: \"{_trunc(args.get('content', ''), 30)}\"  {dur}")
+            return _wrap(f'''┊ 🧠 память    +{target}: "{_trunc(args.get('content', ''), 30)}"  {dur}''')
         elif action == "replace":
             old = args.get("old_text") or ""
-            old = old if old else "<missing old_text>"
-            return _wrap(f"┊ 🧠 memory    ~{target}: \"{_trunc(old, 20)}\"  {dur}")
+            old = old if old else '<не указан исходный текст>'
+            return _wrap(f'┊ 🧠 память    ~{target}: "{_trunc(old, 20)}"  {dur}')
         elif action == "remove":
             old = args.get("old_text") or ""
-            old = old if old else "<missing old_text>"
-            return _wrap(f"┊ 🧠 memory    -{target}: \"{_trunc(old, 20)}\"  {dur}")
-        return _wrap(f"┊ 🧠 memory    {action}  {dur}")
+            old = old if old else '<не указан исходный текст>'
+            return _wrap(f'┊ 🧠 память    -{target}: "{_trunc(old, 20)}"  {dur}')
+        return _wrap(f'┊ 🧠 память    {action}  {dur}')
     if tool_name == "skills_list":
-        return _wrap(f"┊ 📚 skills    list {args.get('category', 'all')}  {dur}")
+        return _wrap(f"┊ 📚 список навыков {args.get('category', 'all')}  {dur}")
     if tool_name == "skill_view":
         label = args.get("name", "")
         file_path = args.get("file_path")
         if file_path:
             label = f"{label} → {file_path}" if label else str(file_path)
-        return _wrap(f"┊ 📚 skill     {_trunc(label, 44)}  {dur}")
+        return _wrap(f'┊ 📚 навык     {_trunc(label, 44)}  {dur}')
     if tool_name == "image_generate":
-        return _wrap(f"┊ 🎨 create    {_trunc(args.get('prompt', ''), 35)}  {dur}")
+        return _wrap(f"┊ 🎨 создание  {_trunc(args.get('prompt', ''), 35)}  {dur}")
     if tool_name == "text_to_speech":
-        return _wrap(f"┊ 🔊 speak     {_trunc(args.get('text', ''), 30)}  {dur}")
+        return _wrap(f"┊ 🔊 озвучка   {_trunc(args.get('text', ''), 30)}  {dur}")
     if tool_name == "vision_analyze":
-        return _wrap(f"┊ 👁️  vision    {_trunc(args.get('question', ''), 30)}  {dur}")
+        return _wrap(f"┊ 👁️  изображение {_trunc(args.get('question', ''), 30)}  {dur}")
     if tool_name == "send_message":
-        return _wrap(f"┊ 📨 send      {args.get('target', '?')}: \"{_trunc(args.get('message', ''), 25)}\"  {dur}")
+        return _wrap(f'''┊ 📨 отправка  {args.get('target', '?')}: "{_trunc(args.get('message', ''), 25)}"  {dur}''')
     if tool_name == "cronjob":
         action = args.get("action", "?")
         if action == "create":
             skills = args.get("skills") or ([] if not args.get("skill") else [args.get("skill")])
             label = args.get("name") or (skills[0] if skills else None) or args.get("prompt", "task")
-            return _wrap(f"┊ ⏰ cron      create {_trunc(label, 24)}  {dur}")
+            return _wrap(f'┊ ⏰ задача    создание {_trunc(label, 24)}  {dur}')
         if action == "list":
-            return _wrap(f"┊ ⏰ cron      listing  {dur}")
-        return _wrap(f"┊ ⏰ cron      {action} {args.get('job_id', '')}  {dur}")
+            return _wrap(f'┊ ⏰ задачи    список  {dur}')
+        return _wrap(f"┊ ⏰ задача    {action} {args.get('job_id', '')}  {dur}")
     if tool_name == "execute_code":
         code = args.get("code", "")
         first_line = code.strip().split("\n")[0] if code.strip() else ""
-        return _wrap(f"┊ 🐍 exec      {_trunc(first_line, 35)}  {dur}")
+        return _wrap(f'┊ 🐍 код       {_trunc(first_line, 35)}  {dur}')
     if tool_name == "browser_exec":
         label = _browser_exec_step_label(args)
         if label is not None:
             # Leading `# …` comment (the tool description asks for one):
             # surface it as the user-facing step label; the code itself stays
             # collapsed behind display.tool_preview_length.
-            return _wrap(f"┊ 🌐 browser   {label}  {dur}")
+            return _wrap(f'┊ 🌐 браузер   {label}  {dur}')
         code = " ".join(str(args.get("code", "") or "").split())
-        return _wrap(f"┊ 🌐 browser   {_trunc(code, 35)}  {dur}")
+        return _wrap(f'┊ 🌐 браузер   {_trunc(code, 35)}  {dur}')
     if tool_name == "delegate_task":
         _action = str(args.get("action") or "").strip().lower()
         if _action in ("list", "steer", "stop"):
             _sid = str(args.get("subagent_id") or "").strip()
-            return _wrap(f"┊ 🔀 delegate  {_trunc(f'{_action} {_sid}'.strip(), 35)}  {dur}")
+            return _wrap(f"┊ 🔀 помощник  {_trunc(f'{_action} {_sid}'.strip(), 35)}  {dur}")
         tasks = args.get("tasks")
         if tasks and isinstance(tasks, list):
             task_count, goals = _delegate_task_goal_parts(tasks, per_goal_len=30)
-            detail = " | ".join(goals) if goals else "parallel"
+            detail = " | ".join(goals) if goals else 'параллельно'
             count_label = task_count or len(tasks)
-            return _wrap(f"┊ 🔀 delegate  {count_label}x: {_trunc(detail, 35)}  {dur}")
-        return _wrap(f"┊ 🔀 delegate  {_trunc(args.get('goal', ''), 35)}  {dur}")
+            return _wrap(f'┊ 🔀 помощник  {count_label}x: {_trunc(detail, 35)}  {dur}')
+        return _wrap(f"┊ 🔀 помощник  {_trunc(args.get('goal', ''), 35)}  {dur}")
 
     preview = build_tool_preview(tool_name, args) or ""
     return _wrap(f"┊ ⚡ {tool_name[:9]:9} {_trunc(preview, 35)}  {dur}")
@@ -1581,8 +1581,8 @@ def get_cute_tool_message(
     except Exception as exc:  # noqa: BLE001 — display must never abort a turn
         logger.debug("Tool completion label failed for %s: %s", tool_name, exc)
         safe_name = tool_name[:9] if isinstance(tool_name, str) and tool_name else "tool"
-        safe_duration = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "done"
-        return f"┊ ⚡ {safe_name:9} completed  {safe_duration}"
+        safe_duration = f"{duration:.1f} с" if isinstance(duration, (int, float)) else 'готово'
+        return f'┊ ⚡ {safe_name:9} завершено  {safe_duration}'
 
 
 # =========================================================================

@@ -27,8 +27,8 @@ class TestTodoRead:
 
     def test_read_no_result(self):
         msg = get_cute_tool_message("todo", {}, 0.5)
-        assert "reading tasks" in msg
-        assert "0.5s" in msg
+        assert "чтение задач" in msg
+        assert "0.5 с" in msg
 
 
 
@@ -36,7 +36,7 @@ class TestTodoRead:
         """Edge case: empty todo list returns summary with total=0."""
         msg = get_cute_tool_message("todo", {}, 0.5,
                                     result=_todo_result(0, 0))
-        assert "reading tasks" in msg
+        assert "чтение задач" in msg
 
 
 
@@ -50,8 +50,8 @@ class TestTodoCreate:
                                     {"todos": [
                                         {"id": "a", "content": "x", "status": "pending"},
                                     ]}, 0.3)
-        assert "1 task(s)" in msg
-        assert "0.3s" in msg
+        assert "всего: 1" in msg
+        assert "0.3 с" in msg
         assert "/" not in msg  # no progress fraction
 
 
@@ -65,7 +65,7 @@ class TestTodoCreate:
                                     ]},
                                     0.3,
                                     result=_todo_result(2, 0))
-        assert "2 task(s)" in msg
+        assert "всего: 2" in msg
         assert "/" not in msg
 
 
@@ -77,7 +77,7 @@ class TestTodoUpdate:
         msg = get_cute_tool_message("todo",
                                     {"todos": [{"id": "a", "status": "completed"}],
                                      "merge": True}, 0.5)
-        assert "update 1 task(s)" in msg
+        assert "обновлено: 1" in msg
 
 
     def test_update_halfway(self):
@@ -101,7 +101,7 @@ class TestTodoUpdate:
                                      "merge": True},
                                     0.3,
                                     result=json.dumps({"summary": {"completed": 2}}))
-        assert "update 1 task(s)" in msg
+        assert "обновлено: 1" in msg
         assert "✓" not in msg
 
 
@@ -114,14 +114,14 @@ class TestTodoEdgeCases:
         msg = get_cute_tool_message("todo",
                                     {"todos": [{"id": "a", "content": "x", "status": "pending"}]},
                                     1.0)
-        assert "1 task(s)" in msg
+        assert "всего: 1" in msg
 
 
     def test_large_task_count(self):
         """Many tasks should not break formatting."""
         many = [{"id": str(i), "content": "x", "status": "pending"} for i in range(50)]
         msg = get_cute_tool_message("todo", {"todos": many}, 0.5)
-        assert "50 task(s)" in msg
+        assert "всего: 50" in msg
 
 
 
@@ -172,5 +172,5 @@ class TestWebExtractDisplay:
         """Empty urls list - shows 'pages' placeholder."""
         args = {"urls": []}
         msg = get_cute_tool_message("web_extract", args, 0.1)
-        assert "pages" in msg
+        assert "страниц" in msg
         assert "📄" in msg
