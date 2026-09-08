@@ -90,6 +90,55 @@ async def test_scope_reaches_executor_without_entering_payload_or_store(adapter,
 
 
 @pytest.mark.asyncio
+async def test_native_profile_discovers_mcp_off_loop_before_agent_snapshot(adapter, tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    import threading
+    from korra_constants import get_hermes_home, set_hermes_home_override, reset_hermes_home_override
+    from agent.secret_scope import set_secret_scope, reset_secret_scope
+
+    profile_home = tmp_path / "analysis"
+    profile_home.mkdir()
+    observed = []
+    loop_thread = threading.get_ident()
+    profile_key = "profile-api-test-key-1234567890"
+    profile_auth = {"Authorization": f"Bearer {profile_key}"}
+
+    @contextmanager
+    def profile_scope(profile):
+        assert profile == "analysis"
+        token = set_hermes_home_override(str(profile_home))
+        secret_token = set_secret_scope({"API_SERVER_KEY": profile_key})
+        try:
+            yield
+        finally:
+            reset_secret_scope(secret_token)
+            reset_hermes_home_override(token)
+
+    def discover():
+        observed.append(("discover", str(get_hermes_home()), threading.get_ident()))
+
+    def create(**kwargs):
+        observed.append(("create", str(get_hermes_home()), threading.get_ident()))
+        return make_agent(lambda **kw: {"final_response": "done"})
+
+    monkeypatch.setattr(adapter, "_resolve_request_profile", lambda request: request.match_info.get("profile"))
+    monkeypatch.setattr(adapter, "_profile_scope", profile_scope)
+    monkeypatch.setattr(adapter, "_create_agent", create)
+    monkeypatch.setattr("tools.mcp_tool.ensure_native_profile_mcp_tools", discover)
+    app = web.Application(middlewares=[adapter._make_profile_prefix_middleware()])
+    app.router.add_post("/p/{profile}/v1/runs", adapter._handle_runs)
+    app.router.add_get("/p/{profile}/v1/runs/{run_id}/events", adapter._handle_run_events)
+    async with TestClient(TestServer(app)) as client:
+        response = await client.post("/p/analysis/v1/runs", json={"input": "check source"}, headers=profile_auth)
+        assert response.status == 202
+        result = await response.json()
+        events = await client.get(f"/p/analysis/v1/runs/{result['run_id']}/events", headers=profile_auth)
+        assert "run.completed" in await asyncio.wait_for(events.text(), 10)
+    assert [item[:2] for item in observed] == [("discover", str(profile_home)), ("create", str(profile_home))]
+    assert observed[0][2] != loop_thread
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("scope", ["bad scope", "x" * 257, "mcs1/payload"])
 async def test_invalid_scope_is_rejected_before_run_creation(adapter, scope):
     async with TestClient(TestServer(app_for(adapter))) as client:

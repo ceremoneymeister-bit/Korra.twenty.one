@@ -820,6 +820,11 @@ async def _handle_runs(
                 )
                 return
             with self._profile_scope(request_profile):
+                # MCP connections and registrations are profile-owned. Native
+                # runs may be the first entry to a hidden profile; discover
+                # before its tool snapshot, off-loop with copied context.
+                from tools.mcp_tool import ensure_native_profile_mcp_tools
+                await asyncio.to_thread(ensure_native_profile_mcp_tools)
                 agent = self._create_agent(
                     ephemeral_system_prompt=ephemeral_system_prompt,
                     session_id=session_id,
