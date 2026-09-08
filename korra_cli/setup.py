@@ -187,19 +187,19 @@ def is_interactive_stdin() -> bool:
 def print_noninteractive_setup_guidance(reason: str | None = None) -> None:
     """Print guidance for headless/non-interactive setup flows."""
     print()
-    print(color("⚕ Korra Setup — Non-interactive mode", Colors.CYAN, Colors.BOLD))
+    print(color('⚕ Настройка Korra — без интерактивного мастера', Colors.CYAN, Colors.BOLD))
     print()
     if reason:
         print_info(reason)
-    print_info("The interactive wizard cannot be used here.")
+    print_info('Здесь нельзя открыть интерактивный мастер настройки.')
     print()
-    print_info("Configure Korra using environment variables or config commands:")
-    print_info("  hermes config set model.provider custom")
-    print_info("  hermes config set model.base_url http://localhost:8080/v1")
-    print_info("  hermes config set model.default your-model-name")
+    print_info('Настройте Korra командами:')
+    print_info('  korra config set model.provider custom')
+    print_info('  korra config set model.base_url http://localhost:8080/v1')
+    print_info('  korra config set model.default название-модели')
     print()
-    print_info("Or set OPENROUTER_API_KEY / OPENAI_API_KEY in your environment.")
-    print_info("Run 'hermes setup' in an interactive terminal to use the full wizard.")
+    print_info('Ключ OPENROUTER_API_KEY или OPENAI_API_KEY можно добавить в файл .env выбранного профиля.')
+    print_info('Чтобы открыть полный мастер, запустите `korra setup` в интерактивном терминале.')
     print()
 
 
@@ -337,7 +337,7 @@ def prompt_choice(question: str, choices: list, default: int = 0, description: s
     idx = _curses_prompt_choice(question, choices, default, description=description)
     if idx >= 0:
         if idx == default:
-            print_info("  Skipped (keeping current)")
+            print_info('  Пропущено. Текущее значение сохранено.')
             print()
             return default
         print()
@@ -382,11 +382,11 @@ def prompt_yes_no(question: str, default: bool = True) -> bool:
         default_index = 0 if default else 1
         return _curses_prompt_choice(
             question,
-            ["Yes", "No"],
+            ["Да", "Нет"],
             default_index,
         ) == 0
 
-    default_str = "Y/n" if default else "y/N"
+    default_str = "Да/нет" if default else "да/Нет"
 
     while True:
         try:
@@ -407,11 +407,11 @@ def prompt_yes_no(question: str, default: bool = True) -> bool:
 
         if not value:
             return default
-        if value in {"y", "yes"}:
+        if value in {"y", "yes", "д", "да"}:
             return True
-        if value in {"n", "no"}:
+        if value in {"n", "no", "н", "нет"}:
             return False
-        print_error("Please enter 'y' or 'n'")
+        print_error("Введите «да» или «нет» (можно y/n).")
 
 
 def prompt_checklist(title: str, items: list, pre_selected: list = None) -> list:
@@ -454,9 +454,9 @@ def _prompt_api_key(var: dict):
     print(color(f"  ─── {var.get('description', var['name'])} ───", Colors.CYAN))
     print()
     if tools_str:
-        print_info(f"  Enables: {tools_str}")
+        print_info(f'  Возможности: {tools_str}')
     if var.get("url"):
-        print_info(f"  Get your key at: {var['url']}")
+        print_info(f"  Получить ключ: {var['url']}")
     print()
 
     if var.get("password"):
@@ -466,9 +466,9 @@ def _prompt_api_key(var: dict):
 
     if value:
         save_env_value(var["name"], value)
-        print_success("  ✓ Saved")
+        print_success('  ✓ Сохранено')
     else:
-        print_warning("  Skipped (configure later with 'hermes setup')")
+        print_warning('  Пропущено. Можно настроить позже: `korra setup`.')
 
 
 def _print_setup_summary(config: dict, hermes_home):
@@ -487,14 +487,14 @@ def _print_setup_summary(config: dict, hermes_home):
         _provider_ready = False
     if not _provider_ready:
         print()
-        print_warning("No inference provider is configured — Korra cannot chat yet.")
-        print_info("  Finish this one step with either of:")
-        print_info("    hermes model            (pick any provider/model)")
-        print_info("    hermes setup --portal   (Nous Portal OAuth, no API key)")
+        print_warning('Сервис модели не настроен. Корра пока не может отвечать.')
+        print_info('  Завершите подключение одним из способов:')
+        print_info('    korra model            — выбрать провайдера и модель')
+        print_info('    korra setup --portal   — вход в Nous Portal без ключа API')
 
     # Tool availability summary
     print()
-    print_header("Tool Availability Summary")
+    print_header('Доступность инструментов')
 
     tool_status = []
     subscription_features = get_nous_subscription_features(config)
@@ -508,41 +508,40 @@ def _print_setup_summary(config: dict, hermes_home):
         _vision_backends = []
 
     if _vision_backends:
-        tool_status.append(("Vision (image analysis)", True, None))
+        tool_status.append(('Анализ изображений', True, None))
     else:
-        tool_status.append(("Vision (image analysis)", False, "run 'hermes setup' to configure"))
+        tool_status.append(('Анализ изображений', False, 'настроить: korra setup'))
 
 
     # Web tools (Exa, Parallel, Firecrawl, or Keenable)
     if subscription_features.web.managed_by_nous:
-        tool_status.append(("Web Search & Extract (Nous subscription)", True, None))
+        tool_status.append(('Поиск и чтение сайтов (подписка Nous)', True, None))
     elif subscription_features.web.available:
-        label = "Web Search & Extract"
+        label = 'Поиск и чтение сайтов'
         if subscription_features.web.current_provider:
-            label = f"Web Search & Extract ({subscription_features.web.current_provider})"
+            label = f'Поиск и чтение сайтов ({subscription_features.web.current_provider})'
         tool_status.append((label, True, None))
     else:
-        tool_status.append(("Web Search & Extract", False, "EXA_API_KEY, PARALLEL_API_KEY, FIRECRAWL_API_KEY/FIRECRAWL_API_URL, KEENABLE_API_KEY, or SEARXNG_URL"))
+        tool_status.append(('Поиск и чтение сайтов', False, 'EXA_API_KEY, PARALLEL_API_KEY, FIRECRAWL_API_KEY/FIRECRAWL_API_URL, KEENABLE_API_KEY или SEARXNG_URL'))
 
     # Browser tools (local Chromium, Camofox, Browserbase, Browser Use, or Firecrawl)
     browser_provider = subscription_features.browser.current_provider
     if subscription_features.browser.managed_by_nous:
-        tool_status.append(("Browser Automation (Nous Browser Use)", True, None))
+        tool_status.append(('Управление браузером (Nous Browser Use)', True, None))
     elif subscription_features.browser.available:
-        label = "Browser Automation"
+        label = 'Управление браузером'
         if browser_provider:
-            label = f"Browser Automation ({browser_provider})"
+            label = f'Управление браузером ({browser_provider})'
         tool_status.append((label, True, None))
     else:
-        missing_browser_hint = "npm install -g agent-browser, set CAMOFOX_URL, or configure Browser Use or Browserbase"
+        missing_browser_hint = 'выполните npm install -g agent-browser, укажите CAMOFOX_URL или настройте Browser Use / Browserbase'
         if browser_provider == "Browserbase":
             missing_browser_hint = (
-                "npm install -g agent-browser and set "
-                "BROWSERBASE_API_KEY/BROWSERBASE_PROJECT_ID"
+                'выполните npm install -g agent-browser и укажите BROWSERBASE_API_KEY/BROWSERBASE_PROJECT_ID'
             )
         elif browser_provider == "Browser Use":
             missing_browser_hint = (
-                "npm install -g agent-browser and set BROWSER_USE_API_KEY"
+                'выполните npm install -g agent-browser и укажите BROWSER_USE_API_KEY'
             )
         elif browser_provider == "Camofox":
             missing_browser_hint = "CAMOFOX_URL"
@@ -551,15 +550,15 @@ def _print_setup_summary(config: dict, hermes_home):
                 "npm install -g agent-browser && agent-browser install --with-deps"
             )
         tool_status.append(
-            ("Browser Automation", False, missing_browser_hint)
+            ('Управление браузером', False, missing_browser_hint)
         )
 
     # Image generation — FAL (direct or via Nous), or any plugin-registered
     # provider (OpenAI, etc.)
     if subscription_features.image_gen.managed_by_nous:
-        tool_status.append(("Image Generation (Nous subscription)", True, None))
+        tool_status.append(('Создание изображений (подписка Nous)', True, None))
     elif subscription_features.image_gen.available:
-        tool_status.append(("Image Generation", True, None))
+        tool_status.append(('Создание изображений', True, None))
     else:
         # Fall back to probing plugin-registered providers so OpenAI-only
         # setups don't show as "missing FAL_KEY".
@@ -581,15 +580,15 @@ def _print_setup_summary(config: dict, hermes_home):
         except Exception:
             pass
         if _img_backend:
-            tool_status.append((f"Image Generation ({_img_backend})", True, None))
+            tool_status.append((f'Создание изображений ({_img_backend})', True, None))
         else:
-            tool_status.append(("Image Generation", False, "FAL_KEY or OPENAI_API_KEY"))
+            tool_status.append(('Создание изображений', False, 'FAL_KEY или OPENAI_API_KEY'))
 
     # Video generation — opt-in via `hermes tools` → Video Generation.
     # Only show the row when a plugin reports available so we don't badger
     # users who don't care about video gen with a "missing" status line.
     if subscription_features.video_gen.managed_by_nous:
-        tool_status.append(("Video Generation (FAL via Nous subscription)", True, None))
+        tool_status.append(('Создание видео (FAL по подписке Nous)', True, None))
     else:
         try:
             from agent.video_gen_registry import list_providers as _list_video_providers
@@ -606,87 +605,87 @@ def _print_setup_summary(config: dict, hermes_home):
         except Exception:
             _video_backend = None
         if _video_backend:
-            tool_status.append((f"Video Generation ({_video_backend})", True, None))
+            tool_status.append((f'Создание видео ({_video_backend})', True, None))
 
     # TTS — show configured provider
     tts_provider = cfg_get(config, "tts", "provider", default="edge")
     if subscription_features.tts.managed_by_nous:
-        tool_status.append(("Text-to-Speech (OpenAI via Nous subscription)", True, None))
+        tool_status.append(('Озвучивание (OpenAI по подписке Nous)', True, None))
     elif tts_provider == "elevenlabs" and get_env_value("ELEVENLABS_API_KEY"):
-        tool_status.append(("Text-to-Speech (ElevenLabs)", True, None))
+        tool_status.append(('Озвучивание (ElevenLabs)', True, None))
     elif tts_provider == "openai" and (
         get_env_value("VOICE_TOOLS_OPENAI_KEY") or get_env_value("OPENAI_API_KEY")
     ):
-        tool_status.append(("Text-to-Speech (OpenAI)", True, None))
+        tool_status.append(('Озвучивание (OpenAI)', True, None))
     elif tts_provider == "minimax" and get_env_value("MINIMAX_API_KEY"):
-        tool_status.append(("Text-to-Speech (MiniMax)", True, None))
+        tool_status.append(('Озвучивание (MiniMax)', True, None))
     elif tts_provider == "mistral" and get_env_value("MISTRAL_API_KEY"):
-        tool_status.append(("Text-to-Speech (Mistral Voxtral)", True, None))
+        tool_status.append(('Озвучивание (Mistral Voxtral)', True, None))
     elif tts_provider == "gemini" and (get_env_value("GEMINI_API_KEY") or get_env_value("GOOGLE_API_KEY")):
-        tool_status.append(("Text-to-Speech (Google Gemini)", True, None))
+        tool_status.append(('Озвучивание (Google Gemini)', True, None))
     elif tts_provider == "neutts":
         try:
             neutts_ok = importlib.util.find_spec("neutts") is not None
         except Exception:
             neutts_ok = False
         if neutts_ok:
-            tool_status.append(("Text-to-Speech (NeuTTS local)", True, None))
+            tool_status.append(('Озвучивание (NeuTTS на этом компьютере)', True, None))
         else:
-            tool_status.append(("Text-to-Speech (NeuTTS — not installed)", False, "run 'hermes setup tts'"))
+            tool_status.append(('Озвучивание (NeuTTS не установлен)', False, 'настроить: korra setup tts'))
     elif tts_provider == "kittentts":
         try:
             kittentts_ok = importlib.util.find_spec("kittentts") is not None
         except Exception:
             kittentts_ok = False
         if kittentts_ok:
-            tool_status.append(("Text-to-Speech (KittenTTS local)", True, None))
+            tool_status.append(('Озвучивание (KittenTTS на этом компьютере)', True, None))
         else:
-            tool_status.append(("Text-to-Speech (KittenTTS — not installed)", False, "run 'hermes setup tts'"))
+            tool_status.append(('Озвучивание (KittenTTS не установлен)', False, 'настроить: korra setup tts'))
     else:
-        tool_status.append(("Text-to-Speech (Edge TTS)", True, None))
+        tool_status.append(('Озвучивание (Edge TTS)', True, None))
 
     # STT — show configured provider
     stt_provider = cfg_get(config, "stt", "provider", default="local") or "local"
     _stt_feature = subscription_features.features.get("stt")
     if _stt_feature is not None and _stt_feature.managed_by_nous:
-        tool_status.append(("Speech-to-Text (OpenAI via Nous subscription)", True, None))
+        tool_status.append(('Распознавание речи (OpenAI по подписке Nous)', True, None))
     elif stt_provider == "openai" and (
         get_env_value("VOICE_TOOLS_OPENAI_KEY") or get_env_value("OPENAI_API_KEY")
     ):
-        tool_status.append(("Speech-to-Text (OpenAI)", True, None))
+        tool_status.append(('Распознавание речи (OpenAI)', True, None))
     elif stt_provider == "groq" and get_env_value("GROQ_API_KEY"):
-        tool_status.append(("Speech-to-Text (Groq Whisper)", True, None))
+        tool_status.append(('Распознавание речи (Groq Whisper)', True, None))
     elif stt_provider == "elevenlabs" and get_env_value("ELEVENLABS_API_KEY"):
-        tool_status.append(("Speech-to-Text (ElevenLabs Scribe)", True, None))
+        tool_status.append(('Распознавание речи (ElevenLabs Scribe)', True, None))
     elif stt_provider == "xai":
-        tool_status.append(("Speech-to-Text (xAI)", True, None))
+        tool_status.append(('Распознавание речи (xAI)', True, None))
     elif stt_provider == "deepinfra" and get_env_value("DEEPINFRA_API_KEY"):
-        tool_status.append(("Speech-to-Text (DeepInfra)", True, None))
+        tool_status.append(('Распознавание речи (DeepInfra)', True, None))
     else:
         try:
             fw_ok = importlib.util.find_spec("faster_whisper") is not None
         except Exception:
             fw_ok = False
         if fw_ok:
-            tool_status.append(("Speech-to-Text (Local Whisper)", True, None))
+            tool_status.append(('Распознавание речи (Whisper на этом компьютере)', True, None))
         else:
             tool_status.append(
-                ("Speech-to-Text (Local Whisper — not installed)", False, "run 'hermes tools' → Speech-to-Text")
+                ('Распознавание речи (Whisper не установлен)', False, 'настроить: korra tools → «Распознавание речи»')
             )
 
     if subscription_features.modal.managed_by_nous:
-        tool_status.append(("Modal Execution (Nous subscription)", True, None))
+        tool_status.append(('Выполнение команд Modal (подписка Nous)', True, None))
     elif cfg_get(config, "terminal", "backend") == "modal":
         if subscription_features.modal.direct_override:
-            tool_status.append(("Modal Execution (direct Modal)", True, None))
+            tool_status.append(('Выполнение команд Modal (прямое подключение)', True, None))
         else:
-            tool_status.append(("Modal Execution", False, "run 'hermes setup terminal'"))
+            tool_status.append(('Выполнение команд Modal', False, 'настроить: korra setup terminal'))
     elif managed_nous_tools_enabled() and subscription_features.nous_auth_present:
-        tool_status.append(("Modal Execution (optional via Nous subscription)", True, None))
+        tool_status.append(('Выполнение команд Modal (можно подключить по подписке Nous)', True, None))
 
     # Home Assistant
     if get_env_value("HASS_TOKEN"):
-        tool_status.append(("Smart Home (Home Assistant)", True, None))
+        tool_status.append(('Умный дом (Home Assistant)', True, None))
 
     # Spotify (OAuth via hermes auth spotify — check auth.json, not env vars)
     try:
@@ -699,24 +698,24 @@ def _print_setup_summary(config: dict, hermes_home):
 
     # Skills Hub
     if get_env_value("GITHUB_TOKEN"):
-        tool_status.append(("Skills Hub (GitHub)", True, None))
+        tool_status.append(('Каталог навыков (GitHub)', True, None))
     else:
-        tool_status.append(("Skills Hub (GitHub)", False, "GITHUB_TOKEN"))
+        tool_status.append(('Каталог навыков (GitHub)', False, "GITHUB_TOKEN"))
 
     # Terminal (always available if system deps met)
-    tool_status.append(("Terminal/Commands", True, None))
+    tool_status.append(('Терминал и команды', True, None))
 
     # Task planning (always available, in-memory)
-    tool_status.append(("Task Planning (todo)", True, None))
+    tool_status.append(('Планирование задач', True, None))
 
     # Skills (always available -- bundled skills + user-created skills)
-    tool_status.append(("Skills (view, create, edit)", True, None))
+    tool_status.append(('Навыки: просмотр, создание, изменение', True, None))
 
     # Print status
     available_count = sum(1 for _, avail, _ in tool_status if avail)
     total_count = len(tool_status)
 
-    print_info(f"{available_count}/{total_count} tool categories available:")
+    print_info(f'Доступно категорий инструментов: {available_count}/{total_count}')
     print()
 
     for name, available, missing_var in tool_status:
@@ -724,7 +723,7 @@ def _print_setup_summary(config: dict, hermes_home):
             print(f"   {color('✓', Colors.GREEN)} {name}")
         else:
             print(
-                f"   {color('✗', Colors.RED)} {name} {color(f'(missing {missing_var})', Colors.DIM)}"
+                f"   {color('✗', Colors.RED)} {name} {color(f'(не хватает: {missing_var})', Colors.DIM)}"
             )
 
     print()
@@ -732,10 +731,10 @@ def _print_setup_summary(config: dict, hermes_home):
     disabled_tools = [(name, var) for name, avail, var in tool_status if not avail]
     if disabled_tools:
         print_warning(
-            "Some tools are disabled. Run 'hermes setup tools' to configure them,"
+            'Часть инструментов отключена. Настройте их командой `korra setup tools`'
         )
         from korra_constants import display_hermes_home as _dhh
-        print_warning(f"or edit {_dhh()}/.env directly to add the missing API keys.")
+        print_warning(f'или добавьте нужные ключи API в {_dhh()}/.env.')
         print()
 
     # Done banner
@@ -747,7 +746,7 @@ def _print_setup_summary(config: dict, hermes_home):
     )
     print(
         color(
-            "│              ✓ Setup Complete!                          │", Colors.GREEN
+            '│              ✓ Настройка завершена!                    │', Colors.GREEN
         )
     )
     print(
@@ -759,44 +758,44 @@ def _print_setup_summary(config: dict, hermes_home):
 
     # Show file locations prominently
     from korra_constants import display_hermes_home as _dhh
-    print(color(f"📁 All your files are in {_dhh()}/:", Colors.CYAN, Colors.BOLD))
+    print(color(f'📁 Все ваши файлы находятся в {_dhh()}/:', Colors.CYAN, Colors.BOLD))
     print()
-    print(f"   {color('Settings:', Colors.YELLOW)}  {get_config_path()}")
-    print(f"   {color('API Keys:', Colors.YELLOW)}  {get_env_path()}")
+    print(f"   {color('Настройки:', Colors.YELLOW)}  {get_config_path()}")
+    print(f"   {color('Ключи API:', Colors.YELLOW)}  {get_env_path()}")
     print(
-        f"   {color('Data:', Colors.YELLOW)}      {hermes_home}/cron/, sessions/, logs/"
+        f"   {color('Данные:', Colors.YELLOW)}      {hermes_home}/cron/, sessions/, logs/"
     )
     print()
 
     print(color("─" * 60, Colors.DIM))
     print()
-    print(color("📝 To edit your configuration:", Colors.CYAN, Colors.BOLD))
+    print(color('📝 Изменить настройки:', Colors.CYAN, Colors.BOLD))
     print()
-    print(f"   {color('hermes setup', Colors.GREEN)}          Re-run the full wizard")
-    print(f"   {color('hermes setup model', Colors.GREEN)}    Change model/provider")
-    print(f"   {color('hermes setup terminal', Colors.GREEN)} Change terminal backend")
-    print(f"   {color('hermes setup gateway', Colors.GREEN)}  Configure messaging")
-    print(f"   {color('hermes setup tools', Colors.GREEN)}    Configure tool providers")
+    print(f"   {color('korra setup', Colors.GREEN)}          Пройти мастер заново")
+    print(f"   {color('korra setup model', Colors.GREEN)}    Сменить модель или провайдера")
+    print(f"   {color('korra setup terminal', Colors.GREEN)} Выбрать среду выполнения команд")
+    print(f"   {color('korra setup gateway', Colors.GREEN)}  Подключить мессенджеры")
+    print(f"   {color('korra setup tools', Colors.GREEN)}    Настроить сервисы инструментов")
     print()
-    print(f"   {color('hermes config', Colors.GREEN)}         View current settings")
+    print(f"   {color('korra config', Colors.GREEN)}         Посмотреть настройки")
     print(
-        f"   {color('hermes config edit', Colors.GREEN)}    Open config in your editor"
+        f"   {color('korra config edit', Colors.GREEN)}    Открыть настройки в редакторе"
     )
-    print(f"   {color('hermes config set <key> <value>', Colors.GREEN)}")
-    print("                          Set a specific value")
+    print(f"   {color('korra config set <ключ> <значение>', Colors.GREEN)}")
+    print('                          Изменить отдельное значение')
     print()
-    print("   Or edit the files directly:")
+    print('   Также можно отредактировать файлы:')
     print(f"   {color(f'nano {get_config_path()}', Colors.DIM)}")
     print(f"   {color(f'nano {get_env_path()}', Colors.DIM)}")
     print()
 
     print(color("─" * 60, Colors.DIM))
     print()
-    print(color("🚀 Ready to go!", Colors.CYAN, Colors.BOLD))
+    print(color('🚀 Всё готово к работе!', Colors.CYAN, Colors.BOLD))
     print()
-    print(f"   {color('hermes', Colors.GREEN)}              Start chatting")
-    print(f"   {color('hermes gateway', Colors.GREEN)}      Start messaging gateway")
-    print(f"   {color('hermes doctor', Colors.GREEN)}       Check for issues")
+    print(f"   {color('korra', Colors.GREEN)}              Начать диалог")
+    print(f"   {color('korra gateway', Colors.GREEN)}      Запустить шлюз мессенджеров")
+    print(f"   {color('korra doctor', Colors.GREEN)}       Проверить неполадки")
     print()
 
 
@@ -805,21 +804,21 @@ def _prompt_container_resources(config: dict):
     terminal = config.setdefault("terminal", {})
 
     print()
-    print_info("Container Resource Settings:")
+    print_info('Ресурсы контейнера:')
 
     # Persistence
     current_persist = terminal.get("container_persistent", True)
-    persist_label = "yes" if current_persist else "no"
-    print_info("  Persistent filesystem keeps files between sessions.")
-    print_info("  Set to 'no' for ephemeral sandboxes that reset each time.")
+    persist_label = "да" if current_persist else "нет"
+    print_info('  Постоянное хранилище сохраняет файлы между диалогами.')
+    print_info("  Ответьте «нет», если файлы нужно удалять после каждого диалога.")
     persist_str = prompt(
-        "  Persist filesystem across sessions? (yes/no)", persist_label
+        '  Сохранять файлы между диалогами? (да/нет)', persist_label
     )
-    terminal["container_persistent"] = persist_str.lower() in {"yes", "true", "y", "1"}
+    terminal["container_persistent"] = persist_str.lower() in {"yes", "true", "y", "1", "д", "да"}
 
     # CPU
     current_cpu = terminal.get("container_cpu", 1)
-    cpu_str = prompt("  CPU cores", str(current_cpu))
+    cpu_str = prompt('  Ядра процессора', str(current_cpu))
     try:
         terminal["container_cpu"] = float(cpu_str)
     except ValueError:
@@ -827,7 +826,7 @@ def _prompt_container_resources(config: dict):
 
     # Memory
     current_mem = terminal.get("container_memory", 5120)
-    mem_str = prompt("  Memory in MB (5120 = 5GB)", str(current_mem))
+    mem_str = prompt('  Память в МБ (5120 = 5 ГБ)', str(current_mem))
     try:
         terminal["container_memory"] = int(mem_str)
     except ValueError:
@@ -835,7 +834,7 @@ def _prompt_container_resources(config: dict):
 
     # Disk
     current_disk = terminal.get("container_disk", 51200)
-    disk_str = prompt("  Disk in MB (51200 = 50GB)", str(current_disk))
+    disk_str = prompt('  Диск в МБ (51200 = 50 ГБ)', str(current_disk))
     try:
         terminal["container_disk"] = int(disk_str)
     except ValueError:
@@ -847,60 +846,60 @@ def _prompt_vercel_sandbox_settings(config: dict):
     terminal = config.setdefault("terminal", {})
 
     print()
-    print_info("Vercel Sandbox settings:")
-    print_info("  Filesystem persistence uses Vercel snapshots.")
-    print_info("  Snapshots restore files only; live processes do not continue after sandbox recreation.")
+    print_info('Настройки Vercel Sandbox:')
+    print_info('  Файлы сохраняются в снимках Vercel.')
+    print_info('  Снимки восстанавливают только файлы. Запущенные процессы после пересоздания среды не продолжаются.')
 
     from tools.terminal_tool import _SUPPORTED_VERCEL_RUNTIMES
 
     current_runtime = terminal.get("vercel_runtime") or "node24"
     supported_label = ", ".join(_SUPPORTED_VERCEL_RUNTIMES)
-    runtime = prompt(f"  Runtime ({supported_label})", current_runtime).strip() or current_runtime
+    runtime = prompt(f'  Среда ({supported_label})', current_runtime).strip() or current_runtime
     if runtime not in _SUPPORTED_VERCEL_RUNTIMES:
-        print_warning(f"Unsupported Vercel runtime '{runtime}', keeping {current_runtime}.")
+        print_warning(f"Среда Vercel '{runtime}' не поддерживается. Оставляю {current_runtime}.")
         runtime = current_runtime if current_runtime in _SUPPORTED_VERCEL_RUNTIMES else "node24"
     terminal["vercel_runtime"] = runtime
     save_env_value("TERMINAL_VERCEL_RUNTIME", runtime)
 
     current_persist = terminal.get("container_persistent", True)
-    persist_label = "yes" if current_persist else "no"
+    persist_label = "да" if current_persist else "нет"
     terminal["container_persistent"] = prompt(
-        "  Persist filesystem with snapshots? (yes/no)", persist_label
-    ).lower() in {"yes", "true", "y", "1"}
+        '  Сохранять файлы в снимках? (да/нет)', persist_label
+    ).lower() in {"yes", "true", "y", "1", "д", "да"}
 
     current_cpu = terminal.get("container_cpu", 1)
-    cpu_str = prompt("  CPU cores", str(current_cpu))
+    cpu_str = prompt('  Ядра процессора', str(current_cpu))
     try:
         terminal["container_cpu"] = float(cpu_str)
     except ValueError:
         pass
 
     current_mem = terminal.get("container_memory", 5120)
-    mem_str = prompt("  Memory in MB (5120 = 5GB)", str(current_mem))
+    mem_str = prompt('  Память в МБ (5120 = 5 ГБ)', str(current_mem))
     try:
         terminal["container_memory"] = int(mem_str)
     except ValueError:
         pass
 
     if terminal.get("container_disk", 51200) not in {0, 51200}:
-        print_warning("Vercel Sandbox does not support custom disk sizing; resetting container_disk to 51200.")
+        print_warning('Vercel Sandbox не позволяет менять размер диска. container_disk сброшен до 51200.')
     terminal["container_disk"] = 51200
 
     print()
-    print_info("Vercel authentication:")
-    print_info("  Use a long-lived Vercel access token plus project/team IDs.")
+    print_info('Вход в Vercel:')
+    print_info('  Укажите постоянный токен доступа Vercel, ID проекта и команды.')
     linked_project = _read_nearest_vercel_project()
     if linked_project:
-        print_info("  Found defaults in nearest .vercel/project.json.")
+        print_info('  Настройки найдены в ближайшем файле .vercel/project.json.')
 
     remove_env_value("VERCEL_OIDC_TOKEN")
-    token = prompt("    Vercel access token", get_env_value("VERCEL_TOKEN") or "", password=True)
+    token = prompt('    Токен доступа Vercel', get_env_value("VERCEL_TOKEN") or "", password=True)
     project = prompt(
-        "    Vercel project ID",
+        '    ID проекта Vercel',
         get_env_value("VERCEL_PROJECT_ID") or linked_project.get("projectId", ""),
     )
     team = prompt(
-        "    Vercel team ID",
+        '    ID команды Vercel',
         get_env_value("VERCEL_TEAM_ID") or linked_project.get("orgId", ""),
     )
     if token:
@@ -961,9 +960,9 @@ def setup_model_provider(config: dict, *, quick: bool = False):
     """
     from korra_cli.config import load_config, save_config
 
-    print_header("Inference Provider")
-    print_info("Choose how to connect to your main chat model.")
-    print_info(f"   Guide: {_DOCS_BASE}/integrations/providers")
+    print_header('Сервис модели')
+    print_info('Выберите, как подключить основную модель для диалогов.')
+    print_info(f'   Инструкция: {_DOCS_BASE}/integrations/providers')
     print()
 
     # Delegate to the shared hermes model flow — handles provider picker,
@@ -973,11 +972,11 @@ def setup_model_provider(config: dict, *, quick: bool = False):
         select_provider_and_model()
     except (SystemExit, KeyboardInterrupt):
         print()
-        print_info("Provider setup skipped.")
+        print_info('Настройка провайдера пропущена.')
     except Exception as exc:
         logger.debug("select_provider_and_model error during setup: %s", exc)
-        print_warning(f"Provider setup encountered an error: {exc}")
-        print_info("You can try again later with: hermes model")
+        print_warning(f'Ошибка настройки провайдера: {exc}')
+        print_info('Попробуйте позже: korra model')
 
     # Re-sync the wizard's config dict from what cmd_model saved to disk.
     # This is critical: cmd_model writes to disk via its own load/save cycle,
@@ -1018,15 +1017,15 @@ def _install_neutts_deps() -> bool:
     # Check espeak-ng
     if not _check_espeak_ng():
         print()
-        print_warning("NeuTTS requires espeak-ng for phonemization.")
+        print_warning('Для NeuTTS нужен espeak-ng — компонент обработки произношения.')
         if sys.platform == "darwin":
-            print_info("Install with: brew install espeak-ng")
+            print_info('Установка: brew install espeak-ng')
         elif sys.platform == "win32":
-            print_info("Install with: choco install espeak-ng")
+            print_info('Установка: choco install espeak-ng')
         else:
-            print_info("Install with: sudo apt install espeak-ng")
+            print_info('Установка: sudo apt install espeak-ng')
         print()
-        if prompt_yes_no("Install espeak-ng now?", True):
+        if prompt_yes_no('Установить espeak-ng сейчас?', True):
             try:
                 if sys.platform == "darwin":
                     subprocess.run(["brew", "install", "espeak-ng"], check=True)
@@ -1034,18 +1033,18 @@ def _install_neutts_deps() -> bool:
                     subprocess.run(["choco", "install", "espeak-ng", "-y"], check=True)
                 else:
                     subprocess.run(["sudo", "apt", "install", "-y", "espeak-ng"], check=True)
-                print_success("espeak-ng installed")
+                print_success('espeak-ng установлен')
             except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                print_warning(f"Could not install espeak-ng automatically: {e}")
-                print_info("Please install it manually and re-run setup.")
+                print_warning(f'Не удалось установить espeak-ng автоматически: {e}')
+                print_info('Установите его вручную и запустите настройку ещё раз.')
                 return False
         else:
-            print_warning("espeak-ng is required for NeuTTS. Install it manually before using NeuTTS.")
+            print_warning('espeak-ng нужен для NeuTTS. Установите его вручную перед использованием.')
 
     # Install neutts Python package
     print()
-    print_info("Installing neutts Python package...")
-    print_info("This will also download the TTS model (~300MB) on first use.")
+    print_info('Устанавливаю пакет Python neutts…')
+    print_info('При первом запуске также загрузится модель озвучивания (около 300 МБ).')
     print()
 
     # Route through the canonical uv → pip → ensurepip ladder so pip-less
@@ -1055,15 +1054,15 @@ def _install_neutts_deps() -> bool:
     try:
         result = _pip_install(["-U", "neutts[all]", "--quiet"], timeout=300)
     except Exception as e:
-        print_error(f"Failed to install neutts: {e}")
-        print_info("Try manually: uv pip install -U 'neutts[all]'")
+        print_error(f'Не удалось установить neutts: {e}')
+        print_info("Попробуйте вручную: uv pip install -U 'neutts[all]'")
         return False
     if result.returncode == 0:
-        print_success("neutts installed successfully")
+        print_success('neutts установлен')
         return True
     err = (result.stderr or "").strip()
-    print_error(f"Failed to install neutts: {err[:300] if err else 'install failed'}")
-    print_info("Try manually: uv pip install -U 'neutts[all]'")
+    print_error(f"Не удалось установить neutts: {(err[:300] if err else 'установка не удалась')}")
+    print_info("Попробуйте вручную: uv pip install -U 'neutts[all]'")
     return False
 
 
@@ -1075,7 +1074,7 @@ def _install_kittentts_deps() -> bool:
         "0.8.1/kittentts-0.8.1-py3-none-any.whl"
     )
     print()
-    print_info("Installing kittentts Python package (~25-80MB model downloaded on first use)...")
+    print_info('Устанавливаю пакет Python kittentts. При первом запуске загрузится модель размером около 25–80 МБ…')
     print()
 
     from korra_cli.tools_config import _pip_install
@@ -1083,15 +1082,15 @@ def _install_kittentts_deps() -> bool:
     try:
         result = _pip_install(["-U", wheel_url, "soundfile", "--quiet"], timeout=300)
     except Exception as e:
-        print_error(f"Failed to install kittentts: {e}")
-        print_info(f"Try manually: uv pip install -U '{wheel_url}' soundfile")
+        print_error(f'Не удалось установить kittentts: {e}')
+        print_info(f"Попробуйте вручную: uv pip install -U '{wheel_url}' soundfile")
         return False
     if result.returncode == 0:
-        print_success("kittentts installed successfully")
+        print_success('kittentts установлен')
         return True
     err = (result.stderr or "").strip()
-    print_error(f"Failed to install kittentts: {err[:300] if err else 'install failed'}")
-    print_info(f"Try manually: uv pip install -U '{wheel_url}' soundfile")
+    print_error(f"Не удалось установить kittentts: {(err[:300] if err else 'установка не удалась')}")
+    print_info(f"Попробуйте вручную: uv pip install -U '{wheel_url}' soundfile")
     return False
 
 
@@ -1127,12 +1126,12 @@ def _run_xai_oauth_login_from_setup() -> bool:
             unsuppress_credential_source,
         )
     except Exception as exc:
-        print_warning(f"xAI Grok OAuth helpers unavailable: {exc}")
+        print_warning(f'Компоненты входа xAI Grok OAuth недоступны: {exc}')
         return False
 
     open_browser = not _is_remote_session()
     print()
-    print_info("Signing in to xAI Grok OAuth (SuperGrok / Premium+)...")
+    print_info('Выполняю вход через xAI Grok OAuth (SuperGrok / Premium+)…')
     try:
         creds = _xai_oauth_device_code_login(open_browser=open_browser)
         _save_xai_oauth_tokens(
@@ -1148,7 +1147,7 @@ def _run_xai_oauth_login_from_setup() -> bool:
         unsuppress_credential_source("xai-oauth", "device_code")
         return True
     except Exception as exc:
-        print_warning(f"xAI Grok OAuth login failed: {exc}")
+        print_warning(f'Не удалось войти через xAI Grok OAuth: {exc}')
         return False
 
 
@@ -1172,32 +1171,32 @@ def _setup_tts_provider(config: dict):
     current_label = provider_labels.get(current_provider, current_provider)
 
     print()
-    print_header("Text-to-Speech Provider (optional)")
-    print_info(f"Current: {current_label}")
+    print_header('Озвучивание ответов (необязательно)')
+    print_info(f'Сейчас: {current_label}')
     print()
 
     choices = []
     providers = []
     if managed_nous_tools_enabled() and subscription_features.nous_auth_present:
-        choices.append("Nous Subscription (managed OpenAI TTS, billed to your subscription)")
+        choices.append('Подписка Nous: озвучивание OpenAI, оплата по подписке')
         providers.append("nous-openai")
     choices.extend(
         [
-            "Edge TTS (free, cloud-based, no setup needed)",
-            "ElevenLabs (premium quality, needs API key)",
-            "OpenAI TTS (good quality, needs API key)",
-            "xAI TTS (Grok voices — OAuth login or API key)",
-            "MiniMax TTS (high quality with voice cloning, needs API key)",
-            "Mistral Voxtral TTS (multilingual, native Opus, needs API key)",
-            "Google Gemini TTS (30 prebuilt voices, prompt-controllable, needs API key)",
-            "NeuTTS (local on-device, free, ~300MB model download)",
-            "KittenTTS (local on-device, free, lightweight ~25-80MB ONNX)",
+            'Edge TTS — бесплатно, в облаке, без настройки',
+            'ElevenLabs — высокое качество, нужен ключ API',
+            'OpenAI TTS — хорошее качество, нужен ключ API',
+            'xAI TTS — голоса Grok, вход через браузер или ключ API',
+            'MiniMax TTS — высокое качество, копирование голоса, нужен ключ API',
+            'Mistral Voxtral TTS — разные языки, формат Opus, нужен ключ API',
+            'Google Gemini TTS — 30 голосов, управление описанием, нужен ключ API',
+            'NeuTTS — бесплатно на вашем компьютере, загрузка около 300 МБ',
+            'KittenTTS — бесплатно на вашем компьютере, лёгкая модель 25–80 МБ',
         ]
     )
     providers.extend(["edge", "elevenlabs", "openai", "xai", "minimax", "mistral", "gemini", "neutts", "kittentts"])
-    choices.append(f"Keep current ({current_label})")
+    choices.append(f'Оставить текущее значение ({current_label})')
     keep_current_idx = len(choices) - 1
-    idx = prompt_choice("Select TTS provider:", choices, keep_current_idx)
+    idx = prompt_choice('Выберите сервис озвучивания:', choices, keep_current_idx)
 
     if idx == keep_current_idx:
         return
@@ -1206,10 +1205,10 @@ def _setup_tts_provider(config: dict):
     selected_via_nous = selected == "nous-openai"
     if selected == "nous-openai":
         selected = "openai"
-        print_info("OpenAI TTS will use the managed Nous gateway and bill to your subscription.")
+        print_info('OpenAI TTS будет работать через шлюз Nous. Оплата — по вашей подписке.')
         if get_env_value("VOICE_TOOLS_OPENAI_KEY") or get_env_value("OPENAI_API_KEY"):
             print_warning(
-                "Direct OpenAI credentials are still configured and may take precedence until removed from ~/.hermes/.env."
+                'Ключи прямого доступа OpenAI ещё настроены и могут иметь приоритет. При необходимости удалите их из .env выбранного профиля.'
             )
 
     if selected == "neutts":
@@ -1220,43 +1219,43 @@ def _setup_tts_provider(config: dict):
             already_installed = False
 
         if already_installed:
-            print_success("NeuTTS is already installed")
+            print_success('NeuTTS уже установлен')
         else:
             print()
-            print_info("NeuTTS requires:")
-            print_info("  • Python package: neutts (~50MB install + ~300MB model on first use)")
-            print_info("  • System package: espeak-ng (phonemizer)")
+            print_info('Для NeuTTS нужны:')
+            print_info('  • Пакет Python neutts (около 50 МБ; модель при первом запуске — около 300 МБ)')
+            print_info('  • Системный пакет espeak-ng для обработки произношения')
             print()
-            if prompt_yes_no("Install NeuTTS dependencies now?", True):
+            if prompt_yes_no('Установить компоненты NeuTTS сейчас?', True):
                 if not _install_neutts_deps():
-                    print_warning("NeuTTS installation incomplete. Falling back to Edge TTS.")
+                    print_warning('Установка NeuTTS не завершена. Использую Edge TTS.')
                     selected = "edge"
             else:
-                print_info("Skipping install. Set tts.provider to 'neutts' after installing manually.")
+                print_info('Установка пропущена. После ручной установки укажите tts.provider: neutts.')
                 selected = "edge"
 
     elif selected == "elevenlabs":
         existing = get_env_value("ELEVENLABS_API_KEY")
         if not existing:
             print()
-            api_key = prompt("ElevenLabs API key", password=True)
+            api_key = prompt('Ключ API ElevenLabs', password=True)
             if api_key:
                 save_env_value("ELEVENLABS_API_KEY", api_key)
-                print_success("ElevenLabs API key saved")
+                print_success('Ключ API ElevenLabs сохранён')
             else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
+                print_warning('Ключ API не указан. Использую Edge TTS.')
                 selected = "edge"
 
     elif selected == "openai" and not selected_via_nous:
         existing = get_env_value("VOICE_TOOLS_OPENAI_KEY") or get_env_value("OPENAI_API_KEY")
         if not existing:
             print()
-            api_key = prompt("OpenAI API key for TTS", password=True)
+            api_key = prompt('Ключ API OpenAI для озвучивания', password=True)
             if api_key:
                 save_env_value("VOICE_TOOLS_OPENAI_KEY", api_key)
-                print_success("OpenAI TTS API key saved")
+                print_success('Ключ API OpenAI TTS сохранён')
             else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
+                print_warning('Ключ API не указан. Использую Edge TTS.')
                 selected = "edge"
 
     elif selected == "xai":
@@ -1269,93 +1268,89 @@ def _setup_tts_provider(config: dict):
 
         if oauth_logged_in:
             print_success(
-                "xAI TTS will use your xAI Grok OAuth (SuperGrok / Premium+) "
-                "credentials"
+                'Для озвучивания xAI TTS будут использованы данные входа xAI Grok OAuth (SuperGrok / Premium+).'
             )
         elif existing_api_key:
-            print_success("xAI TTS will use your existing XAI_API_KEY")
+            print_success('Для xAI TTS будет использован существующий XAI_API_KEY.')
         else:
             print()
             choice_idx = prompt_choice(
-                "How do you want xAI TTS to authenticate?",
+                'Как войти в xAI для озвучивания?',
                 choices=[
-                    "Sign in with xAI Grok OAuth (SuperGrok / Premium+) — browser login",
-                    "Paste an xAI API key (console.x.ai)",
-                    "Skip → fallback to Edge TTS",
+                    'Войти в xAI Grok OAuth через браузер (SuperGrok / Premium+)',
+                    'Вставить ключ API xAI (console.x.ai)',
+                    'Пропустить и использовать Edge TTS',
                 ],
                 default=0,
             )
             if choice_idx == 0:
                 if _run_xai_oauth_login_from_setup():
                     print_success(
-                        "Logged in — xAI TTS will use these OAuth credentials"
+                        'Вход выполнен. xAI TTS будет использовать эти данные OAuth.'
                     )
                 else:
                     print_warning(
-                        "xAI Grok OAuth login did not complete. "
-                        "Falling back to Edge TTS."
+                        'Вход в xAI Grok OAuth не завершён. Использую Edge TTS.'
                     )
                     selected = "edge"
             elif choice_idx == 1:
-                api_key = prompt("xAI API key for TTS", password=True)
+                api_key = prompt('Ключ API xAI для озвучивания', password=True)
                 if api_key:
                     save_env_value("XAI_API_KEY", api_key)
-                    print_success("xAI TTS API key saved")
+                    print_success('Ключ API xAI TTS сохранён')
                 else:
                     from korra_constants import display_hermes_home as _dhh
                     print_warning(
-                        "No xAI API key provided for TTS. Configure XAI_API_KEY "
-                        f"via hermes setup model or {_dhh()}/.env to use xAI TTS. "
-                        "Falling back to Edge TTS."
+                        f'Ключ API для xAI TTS не указан. Настройте XAI_API_KEY через `korra setup model` или файл {_dhh()}/.env. Пока используется Edge TTS.'
                     )
                     selected = "edge"
             else:
-                print_warning("xAI TTS skipped. Falling back to Edge TTS.")
+                print_warning('Настройка xAI TTS пропущена. Использую Edge TTS.')
                 selected = "edge"
 
         if selected == "xai":
             print()
-            voice_id = prompt("xAI voice_id (Enter for 'eve', or paste a custom voice ID)")
+            voice_id = prompt("ID голоса xAI (Enter — 'eve'; можно указать ID своего голоса)")
             if voice_id and voice_id.strip():
                 config.setdefault("tts", {}).setdefault("xai", {})["voice_id"] = voice_id.strip()
-                print_success(f"xAI voice_id set to: {voice_id.strip()}")
+                print_success(f'ID голоса xAI: {voice_id.strip()}')
 
 
     elif selected == "minimax":
         existing = get_env_value("MINIMAX_API_KEY")
         if not existing:
             print()
-            api_key = prompt("MiniMax API key for TTS", password=True)
+            api_key = prompt('Ключ API MiniMax для озвучивания', password=True)
             if api_key:
                 save_env_value("MINIMAX_API_KEY", api_key)
-                print_success("MiniMax TTS API key saved")
+                print_success('Ключ API MiniMax TTS сохранён')
             else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
+                print_warning('Ключ API не указан. Использую Edge TTS.')
                 selected = "edge"
 
     elif selected == "mistral":
         existing = get_env_value("MISTRAL_API_KEY")
         if not existing:
             print()
-            api_key = prompt("Mistral API key for TTS", password=True)
+            api_key = prompt('Ключ API Mistral для озвучивания', password=True)
             if api_key:
                 save_env_value("MISTRAL_API_KEY", api_key)
-                print_success("Mistral TTS API key saved")
+                print_success('Ключ API Mistral TTS сохранён')
             else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
+                print_warning('Ключ API не указан. Использую Edge TTS.')
                 selected = "edge"
 
     elif selected == "gemini":
         existing = get_env_value("GEMINI_API_KEY") or get_env_value("GOOGLE_API_KEY")
         if not existing:
             print()
-            print_info("Get a free API key at https://aistudio.google.com/app/apikey")
-            api_key = prompt("Gemini API key for TTS", password=True)
+            print_info('Получить бесплатный ключ API: https://aistudio.google.com/app/apikey')
+            api_key = prompt('Ключ API Gemini для озвучивания', password=True)
             if api_key:
                 save_env_value("GEMINI_API_KEY", api_key)
-                print_success("Gemini TTS API key saved")
+                print_success('Ключ API Gemini TTS сохранён')
             else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
+                print_warning('Ключ API не указан. Использую Edge TTS.')
                 selected = "edge"
 
     elif selected == "kittentts":
@@ -1366,18 +1361,18 @@ def _setup_tts_provider(config: dict):
             already_installed = False
 
         if already_installed:
-            print_success("KittenTTS is already installed")
+            print_success('KittenTTS уже установлен')
         else:
             print()
-            print_info("KittenTTS is lightweight (~25-80MB, CPU-only, no API key required).")
-            print_info("Voices: Jasper, Bella, Luna, Bruno, Rosie, Hugo, Kiki, Leo")
+            print_info('KittenTTS — лёгкая локальная модель (около 25–80 МБ), работает на процессоре без ключа API.')
+            print_info('Голоса: Jasper, Bella, Luna, Bruno, Rosie, Hugo, Kiki, Leo')
             print()
-            if prompt_yes_no("Install KittenTTS now?", True):
+            if prompt_yes_no('Установить KittenTTS сейчас?', True):
                 if not _install_kittentts_deps():
-                    print_warning("KittenTTS installation incomplete. Falling back to Edge TTS.")
+                    print_warning('Установка KittenTTS не завершена. Использую Edge TTS.')
                     selected = "edge"
             else:
-                print_info("Skipping install. Set tts.provider to 'kittentts' after installing manually.")
+                print_info('Установка пропущена. После ручной установки укажите tts.provider: kittentts.')
                 selected = "edge"
 
     # Save the selection
@@ -1385,7 +1380,7 @@ def _setup_tts_provider(config: dict):
         config["tts"] = {}
     config["tts"]["provider"] = selected
     save_config(config)
-    print_success(f"TTS provider set to: {provider_labels.get(selected, selected)}")
+    print_success(f'Сервис озвучивания: {provider_labels.get(selected, selected)}')
 
 
 def setup_tts(config: dict):
@@ -1401,10 +1396,10 @@ def setup_tts(config: dict):
 def setup_terminal_backend(config: dict):
     """Configure the terminal execution backend."""
     import platform as _platform
-    print_header("Terminal Backend")
-    print_info("Choose where Korra runs shell commands and code.")
-    print_info("This affects tool execution, file access, and isolation.")
-    print_info(f"   Guide: {_DOCS_BASE}/user-guide/configuration#terminal-backend-configuration")
+    print_header('Среда выполнения команд')
+    print_info('Выберите, где Корра будет выполнять команды и код.')
+    print_info('Это определяет доступ к файлам и изоляцию выполняемых действий.')
+    print_info(f'   Инструкция: {_DOCS_BASE}/user-guide/configuration#terminal-backend-configuration')
     print()
 
     current_backend = cfg_get(config, "terminal", "backend", default="local")
@@ -1412,19 +1407,19 @@ def setup_terminal_backend(config: dict):
 
     # Build backend choices with descriptions
     terminal_choices = [
-        "Local - run directly on this machine (default)",
-        "Docker - isolated container with configurable resources",
-        "Modal - serverless cloud sandbox",
-        "SSH - run on a remote machine",
-        "Daytona - persistent cloud development environment",
-        "Vercel Sandbox - cloud microVM with snapshot filesystem persistence",
+        'Этот компьютер — выполнять команды здесь (по умолчанию)',
+        'Docker — изолированный контейнер с настройкой ресурсов',
+        'Modal — облачная среда без настройки сервера',
+        'SSH — выполнять команды на удалённом компьютере',
+        'Daytona — постоянная облачная среда разработки',
+        'Vercel Sandbox — облачная микровиртуальная машина со снимками файлов',
     ]
     idx_to_backend = {0: "local", 1: "docker", 2: "modal", 3: "ssh", 4: "daytona", 5: "vercel_sandbox"}
     backend_to_idx = {"local": 0, "docker": 1, "modal": 2, "ssh": 3, "daytona": 4, "vercel_sandbox": 5}
 
     next_idx = 6
     if is_linux:
-        terminal_choices.append("Singularity/Apptainer - HPC-friendly container")
+        terminal_choices.append('Singularity/Apptainer — контейнер для вычислительных кластеров')
         idx_to_backend[next_idx] = "singularity"
         backend_to_idx["singularity"] = next_idx
         next_idx += 1
@@ -1451,78 +1446,76 @@ def setup_terminal_backend(config: dict):
 
     # Add keep current option
     keep_current_idx = next_idx
-    terminal_choices.append(f"Keep current ({current_backend})")
+    terminal_choices.append(f'Оставить текущее значение ({current_backend})')
     idx_to_backend[keep_current_idx] = current_backend
 
     terminal_idx = prompt_choice(
-        "Select terminal backend:", terminal_choices, keep_current_idx
+        'Выберите среду выполнения:', terminal_choices, keep_current_idx
     )
 
     selected_backend = idx_to_backend.get(terminal_idx)
 
     if terminal_idx == keep_current_idx:
-        print_info(f"Keeping current backend: {current_backend}")
+        print_info(f'Текущая среда сохранена: {current_backend}')
         return
 
     config.setdefault("terminal", {})["backend"] = selected_backend
 
     if selected_backend == "local":
-        print_success("Terminal backend: Local")
-        print_info("Commands run directly on this machine.")
+        print_success('Среда выполнения: этот компьютер')
+        print_info('Команды выполняются прямо на этом компьютере.')
         # Gateway working directory defaults to home; sudo stays off. Both are
         # configurable later via `hermes setup terminal` / config.yaml.
         config["terminal"].setdefault("cwd", str(Path.home()))
 
     elif selected_backend == "docker":
-        print_success("Terminal backend: Docker")
+        print_success('Среда выполнения: Docker')
 
         # Check if Docker is available
         docker_bin = shutil.which("docker")
         if not docker_bin:
-            print_warning("Docker not found in PATH!")
-            print_info("Install Docker: https://docs.docker.com/get-docker/")
+            print_warning('Docker не найден в PATH.')
+            print_info('Установка Docker: https://docs.docker.com/get-docker/')
         else:
-            print_info(f"Docker found: {docker_bin}")
+            print_info(f'Найден Docker: {docker_bin}')
 
         # Image and resource limits use defaults; tune via `hermes setup terminal`.
         config["terminal"].setdefault(
             "docker_image", "nikolaik/python-nodejs:python3.11-nodejs20"
         )
         print()
-        print_info("Docker sandboxes can be protected with the egress credential firewall.")
+        print_info('Изолированные среды Docker можно защитить сетевым фильтром ключей доступа.')
         print_info(
-            "It routes sandbox traffic through iron-proxy so containers receive "
-            "proxy tokens instead of real API keys."
+            'Он направляет трафик через iron-proxy: контейнеры получают токены прокси вместо настоящих ключей API.'
         )
         print_info(
-            "   Docker only for now; Modal, SSH, Daytona, and Singularity are not wired yet."
+            '   Пока доступно только для Docker. Modal, SSH, Daytona и Singularity ещё не поддерживаются.'
         )
-        if prompt_yes_no("  Enable egress firewall for Docker sandboxes?", False):
+        if prompt_yes_no('  Включить сетевую защиту ключей для Docker?', False):
             proxy_cfg = config.setdefault("proxy", {})
             proxy_cfg["enabled"] = True
             proxy_cfg.setdefault("enforce_on_docker", True)
-            print_success("Egress firewall enabled in config")
+            print_success('Сетевая защита ключей включена в настройках')
             print_info(
-                "Run `hermes egress setup` then `hermes egress start` to mint "
-                "tokens and launch the proxy."
+                'Выполните `korra egress setup`, затем `korra egress start`, чтобы создать токены и запустить прокси.'
             )
         else:
             print_info(
-                "Skipping egress firewall. You can enable it later with `hermes egress setup`."
+                'Сетевая защита ключей пропущена. Включить позже: `korra egress setup`.'
             )
 
     elif selected_backend == "singularity":
-        print_success("Terminal backend: Singularity/Apptainer")
+        print_success('Среда выполнения: Singularity/Apptainer')
 
         # Check if singularity/apptainer is available
         sing_bin = shutil.which("apptainer") or shutil.which("singularity")
         if not sing_bin:
-            print_warning("Singularity/Apptainer not found in PATH!")
+            print_warning('Singularity/Apptainer не найден в PATH.')
             print_info(
-                "Install: https://apptainer.org/docs/admin/main/installation.html"
+                'Установка: https://apptainer.org/docs/admin/main/installation.html'
             )
         else:
-            print_info(f"Found: {sing_bin}")
+            print_info(f'Найдено: {sing_bin}')
 
         # Image and resource limits use defaults; tune via `hermes setup terminal`.
         config["terminal"].setdefault(
@@ -1531,8 +1524,8 @@ def setup_terminal_backend(config: dict):
         )
 
     elif selected_backend == "modal":
-        print_success("Terminal backend: Modal")
-        print_info("Serverless cloud sandboxes. Each session gets its own container.")
+        print_success('Среда выполнения: Modal')
+        print_info('Облачная среда без настройки сервера. Каждый диалог получает свой контейнер.')
         from tools.managed_tool_gateway import is_managed_tool_gateway_ready
         from tools.tool_backend_helpers import normalize_modal_mode
 
@@ -1546,8 +1539,8 @@ def setup_terminal_backend(config: dict):
         use_managed_modal = False
         if managed_modal_available:
             modal_choices = [
-                "Use my Nous subscription",
-                "Use my own Modal account",
+                'Использовать подписку Nous',
+                'Использовать мой аккаунт Modal',
             ]
             if modal_mode == "managed":
                 default_modal_idx = 0
@@ -1556,7 +1549,7 @@ def setup_terminal_backend(config: dict):
             else:
                 default_modal_idx = 1 if get_env_value("MODAL_TOKEN_ID") else 0
             modal_mode_idx = prompt_choice(
-                "Select how Modal execution should be billed:",
+                'Как оплачивать выполнение команд в Modal?',
                 modal_choices,
                 default_modal_idx,
             )
@@ -1564,86 +1557,86 @@ def setup_terminal_backend(config: dict):
 
         if use_managed_modal:
             config["terminal"]["modal_mode"] = "managed"
-            print_info("Modal execution will use the managed Nous gateway and bill to your subscription.")
+            print_info('Modal будет работать через шлюз Nous. Оплата — по вашей подписке.')
             if get_env_value("MODAL_TOKEN_ID") or get_env_value("MODAL_TOKEN_SECRET"):
                 print_info(
-                    "Direct Modal credentials are still configured, but this backend is pinned to managed mode."
+                    'Ключи прямого доступа Modal ещё сохранены, но эта среда настроена на работу через управляемый шлюз.'
                 )
         else:
             config["terminal"]["modal_mode"] = "direct"
-            print_info("Requires a Modal account: https://modal.com")
+            print_info('Нужен аккаунт Modal: https://modal.com')
 
             # Check if modal SDK is installed
             try:
                 __import__("modal")
             except ImportError:
-                print_info("Installing modal SDK...")
+                print_info('Устанавливаю пакет Modal…')
                 from korra_cli.tools_config import _pip_install
 
                 result = _pip_install(["modal"])
                 if result.returncode == 0:
-                    print_success("modal SDK installed")
+                    print_success('Пакет Modal установлен')
                 else:
-                    print_warning("Install failed — run manually: uv pip install modal")
+                    print_warning('Установка не удалась. Выполните вручную: uv pip install modal')
 
             # Modal token
             print()
-            print_info("Modal authentication:")
-            print_info("  Get your token at: https://modal.com/settings")
+            print_info('Вход в Modal:')
+            print_info('  Получить токен: https://modal.com/settings')
             existing_token = get_env_value("MODAL_TOKEN_ID")
             if existing_token:
-                print_info("  Modal token: already configured")
-                if prompt_yes_no("  Update Modal credentials?", False):
-                    token_id = prompt("    Modal Token ID", password=True)
-                    token_secret = prompt("    Modal Token Secret", password=True)
+                print_info('  Токен Modal уже настроен')
+                if prompt_yes_no('  Обновить данные входа Modal?', False):
+                    token_id = prompt('    ID токена Modal', password=True)
+                    token_secret = prompt('    Секрет токена Modal', password=True)
                     if token_id:
                         save_env_value("MODAL_TOKEN_ID", token_id)
                     if token_secret:
                         save_env_value("MODAL_TOKEN_SECRET", token_secret)
             else:
-                token_id = prompt("    Modal Token ID", password=True)
-                token_secret = prompt("    Modal Token Secret", password=True)
+                token_id = prompt('    ID токена Modal', password=True)
+                token_secret = prompt('    Секрет токена Modal', password=True)
                 if token_id:
                     save_env_value("MODAL_TOKEN_ID", token_id)
                 if token_secret:
                     save_env_value("MODAL_TOKEN_SECRET", token_secret)
 
     elif selected_backend == "daytona":
-        print_success("Terminal backend: Daytona")
-        print_info("Persistent cloud development environments.")
-        print_info("Each session gets a dedicated sandbox with filesystem persistence.")
-        print_info("Sign up at: https://daytona.io")
+        print_success('Среда выполнения: Daytona')
+        print_info('Постоянная облачная среда разработки.')
+        print_info('Каждый диалог получает отдельную среду с сохранением файлов.')
+        print_info('Регистрация: https://daytona.io')
 
         # Check if daytona SDK is installed
         try:
             __import__("daytona")
         except ImportError:
-            print_info("Installing daytona SDK...")
+            print_info('Устанавливаю пакет Daytona…')
             from korra_cli.tools_config import _pip_install
 
             result = _pip_install(["daytona"])
             if result.returncode == 0:
-                print_success("daytona SDK installed")
+                print_success('Пакет Daytona установлен')
             else:
-                print_warning("Install failed — run manually: uv pip install daytona")
+                print_warning('Установка не удалась. Выполните вручную: uv pip install daytona')
                 if result.stderr:
-                    print_info(f"  Error: {result.stderr.strip().splitlines()[-1]}")
+                    print_info(f'  Ошибка: {result.stderr.strip().splitlines()[-1]}')
 
         # Daytona API key
         print()
         existing_key = get_env_value("DAYTONA_API_KEY")
         if existing_key:
-            print_info("  Daytona API key: already configured")
-            if prompt_yes_no("  Update API key?", False):
-                api_key = prompt("    Daytona API key", password=True)
+            print_info('  Ключ API Daytona уже настроен')
+            if prompt_yes_no('  Обновить ключ API?', False):
+                api_key = prompt('    Ключ API Daytona', password=True)
                 if api_key:
                     save_env_value("DAYTONA_API_KEY", api_key)
-                    print_success("    Updated")
+                    print_success('    Обновлено')
         else:
-            api_key = prompt("    Daytona API key", password=True)
+            api_key = prompt('    Ключ API Daytona', password=True)
             if api_key:
                 save_env_value("DAYTONA_API_KEY", api_key)
-                print_success("    Configured")
+                print_success('    Настроено')
 
         # Image and resource limits use defaults; tune via `hermes setup terminal`.
         config["terminal"].setdefault(
@@ -1651,14 +1644,14 @@ def setup_terminal_backend(config: dict):
         )
 
     elif selected_backend == "vercel_sandbox":
-        print_success("Terminal backend: Vercel Sandbox")
-        print_info("Cloud microVM sandboxes with snapshot-backed filesystem persistence.")
-        print_info("Requires the optional SDK: pip install 'hermes-agent[vercel]'")
+        print_success('Среда выполнения: Vercel Sandbox')
+        print_info('Облачные микровиртуальные машины с сохранением файлов в снимках.')
+        print_info("Нужен дополнительный пакет: pip install 'hermes-agent[vercel]'")
 
         try:
             __import__("vercel")
         except ImportError:
-            print_info("Installing vercel SDK...")
+            print_info('Устанавливаю пакет Vercel…')
             import subprocess
 
             # Managed uv first: $HERMES_HOME/bin is never on PATH, so a bare
@@ -1682,11 +1675,11 @@ def setup_terminal_backend(config: dict):
                     text=True,
                 )
             if result.returncode == 0:
-                print_success("vercel SDK installed")
+                print_success('Пакет Vercel установлен')
             else:
-                print_warning("Install failed — run manually: pip install 'hermes-agent[vercel]'")
+                print_warning("Установка не удалась. Выполните вручную: pip install 'hermes-agent[vercel]'")
                 if result.stderr:
-                    print_info(f"  Error: {result.stderr.strip().splitlines()[-1]}")
+                    print_info(f'  Ошибка: {result.stderr.strip().splitlines()[-1]}')
 
         _prompt_vercel_sandbox_settings(config)
 
@@ -1695,45 +1688,45 @@ def setup_terminal_backend(config: dict):
             from agent.terminal_env_registry import get_provider
 
             _provider = get_provider(selected_backend)
-            print_success(f"Terminal backend: {_provider.display_name}")
+            print_success(f'Среда выполнения: {_provider.display_name}')
             for _line in _provider.setup_instructions():
                 print_info(_line)
             _provider.post_setup()
         except Exception as exc:
-            print_warning(f"Backend plugin setup hook failed: {exc}")
+            print_warning(f'Ошибка настройки расширения среды: {exc}')
 
     elif selected_backend == "ssh":
-        print_success("Terminal backend: SSH")
-        print_info("Run commands on a remote machine via SSH.")
+        print_success('Среда выполнения: SSH')
+        print_info('Команды выполняются на удалённом компьютере через SSH.')
 
         # SSH host
         current_host = get_env_value("TERMINAL_SSH_HOST") or ""
-        host = prompt("  SSH host (hostname or IP)", current_host)
+        host = prompt('  Сервер SSH (имя или IP-адрес)', current_host)
         if host:
             save_env_value("TERMINAL_SSH_HOST", host)
 
         # SSH user
         current_user = get_env_value("TERMINAL_SSH_USER") or ""
-        user = prompt("  SSH user", current_user or os.getenv("USER", ""))
+        user = prompt('  Пользователь SSH', current_user or os.getenv("USER", ""))
         if user:
             save_env_value("TERMINAL_SSH_USER", user)
 
         # SSH port
         current_port = get_env_value("TERMINAL_SSH_PORT") or "22"
-        port = prompt("  SSH port", current_port)
+        port = prompt('  Порт SSH', current_port)
         if port and port != "22":
             save_env_value("TERMINAL_SSH_PORT", port)
 
         # SSH key
         current_key = get_env_value("TERMINAL_SSH_KEY") or ""
         default_key = str(Path.home() / ".ssh" / "id_rsa")
-        ssh_key = prompt("  SSH private key path", current_key or default_key)
+        ssh_key = prompt('  Путь к закрытому ключу SSH', current_key or default_key)
         if ssh_key:
             save_env_value("TERMINAL_SSH_KEY", ssh_key)
 
         # Test connection
-        if host and prompt_yes_no("  Test SSH connection?", True):
-            print_info("  Testing connection...")
+        if host and prompt_yes_no('  Проверить подключение SSH?', True):
+            print_info('  Проверяю подключение…')
             import subprocess
 
             ssh_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
@@ -1745,10 +1738,10 @@ def setup_terminal_backend(config: dict):
             ssh_cmd.append("echo ok")
             result = subprocess.run(ssh_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
             if result.returncode == 0:
-                print_success("  SSH connection successful!")
+                print_success('  Подключение SSH установлено!')
             else:
-                print_warning(f"  SSH connection failed: {result.stderr.strip()}")
-                print_info("  Check your SSH key and host settings.")
+                print_warning(f'  Не удалось подключиться по SSH: {result.stderr.strip()}')
+                print_info('  Проверьте сервер SSH и ключ доступа.')
 
     # Sync terminal backend to .env so terminal_tool picks it up directly.
     # config.yaml is the source of truth, but terminal_tool reads TERMINAL_ENV.
@@ -1759,7 +1752,7 @@ def setup_terminal_backend(config: dict):
         save_env_value("TERMINAL_VERCEL_RUNTIME", config["terminal"].get("vercel_runtime", "node24"))
     save_config(config)
     print()
-    print_success(f"Terminal backend set to: {selected_backend}")
+    print_success(f'Среда выполнения: {selected_backend}')
 
 
 # =============================================================================
@@ -1787,19 +1780,19 @@ def _apply_default_agent_settings(config: dict):
     config.setdefault("session_reset", {})["mode"] = "none"
 
     save_config(config)
-    print_success("Applied recommended defaults:")
-    print_info("  Max iterations: 150")
-    print_info("  Tool progress: all")
-    print_info("  Compression threshold: 0.50")
-    print_info("  Session reset: never (use /reset or compression)")
-    print_info("  Run `hermes setup agent` later to customize.")
+    print_success('Применены рекомендуемые настройки:')
+    print_info('  Максимум действий: 150')
+    print_info('  Показ действий: all')
+    print_info('  Порог сжатия истории: 0.50')
+    print_info('  Автосброс диалога: отключён (используйте /reset или сжатие)')
+    print_info('  Изменить позже: `korra setup agent`.')
 
 
 def setup_agent_settings(config: dict):
     """Configure agent behavior: iterations, progress display, compression, session reset."""
 
-    print_header("Agent Settings")
-    print_info(f"   Guide: {_DOCS_BASE}/user-guide/configuration")
+    print_header('Настройки агента')
+    print_info(f'   Инструкция: {_DOCS_BASE}/user-guide/configuration')
     print()
 
     # ── Max Iterations ──
@@ -1807,13 +1800,13 @@ def setup_agent_settings(config: dict):
     # entry is still around (from pre-PR#18413 setups), prefer the
     # config value so we don't surface a stale number to the user.
     current_max = str(cfg_get(config, "agent", "max_turns", default=90))
-    print_info("Maximum tool-calling iterations per conversation.")
-    print_info("Higher = more complex tasks, but costs more tokens.")
+    print_info('Максимальное число обращений к инструментам за диалог.')
+    print_info('Чем больше лимит, тем сложнее могут быть задачи и тем выше расход токенов.')
     print_info(
-        f"Press Enter to keep {current_max}. Use 90 for most tasks or 150+ for open exploration."
+        f'Нажмите Enter, чтобы оставить {current_max}. Для обычных задач подходит 90, для длительного исследования — 150 и больше.'
     )
 
-    max_iter_str = prompt("Max iterations", current_max)
+    max_iter_str = prompt('Максимум действий', current_max)
     try:
         max_iter = int(max_iter_str)
         if max_iter > 0:
@@ -1824,42 +1817,42 @@ def setup_agent_settings(config: dict):
             config.setdefault("agent", {})["max_turns"] = max_iter
             config.pop("max_turns", None)
             remove_env_value("HERMES_MAX_ITERATIONS")
-            print_success(f"Max iterations set to {max_iter}")
+            print_success(f'Максимум действий: {max_iter}')
     except ValueError:
-        print_warning("Invalid number, keeping current value")
+        print_warning('Некорректное число. Текущее значение сохранено.')
 
     # ── Tool Progress Display ──
     print_info("")
-    print_info("Tool Progress Display")
-    print_info("Controls how much tool activity is shown (CLI and messaging).")
-    print_info("  off     — Silent, just the final response")
-    print_info("  new     — Show tool name only when it changes (less noise)")
-    print_info("  all     — Show every tool call with a short preview")
-    print_info("  verbose — Full args, results, and debug logs")
-    print_info("  log     — Silent in chat; write every tool call to ~/.hermes/logs/tool_calls.log (gateway only)")
+    print_info('Показ действий инструментов')
+    print_info('Сколько подробностей показывать в терминале и мессенджерах.')
+    print_info('  off     — только итоговый ответ')
+    print_info('  new     — название инструмента, только когда он меняется')
+    print_info('  all     — каждое действие с кратким описанием')
+    print_info('  verbose — полные параметры, результаты и отладочные сообщения')
+    print_info('  log     — без сообщений в чате; все действия записываются в logs/tool_calls.log выбранного профиля (только шлюз)')
 
     current_mode = cfg_get(config, "display", "tool_progress", default="all")
-    mode = prompt("Tool progress mode", current_mode)
+    mode = prompt('Режим показа действий', current_mode)
     if mode.lower() in {"off", "new", "all", "verbose", "log"}:
         if "display" not in config:
             config["display"] = {}
         config["display"]["tool_progress"] = mode.lower()
         save_config(config)
-        print_success(f"Tool progress set to: {mode.lower()}")
+        print_success(f'Режим показа действий: {mode.lower()}')
     else:
-        print_warning(f"Unknown mode '{mode}', keeping '{current_mode}'")
+        print_warning(f"Неизвестный режим '{mode}'. Оставляю '{current_mode}'.")
 
     # ── Context Compression ──
-    print_header("Context Compression")
-    print_info("Automatically summarizes old messages when context gets too long.")
+    print_header('Сжатие истории')
+    print_info('Длинная история автоматически заменяется кратким содержанием.')
     print_info(
-        "Higher threshold = compress later (use more context). Lower = compress sooner."
+        'Чем выше порог, тем позже сжимается история. Низкий порог запускает сжатие раньше.'
     )
 
     config.setdefault("compression", {})["enabled"] = True
 
     current_threshold = cfg_get(config, "compression", "threshold", default=0.50)
-    threshold_str = prompt("Compression threshold (0.5-0.95)", str(current_threshold))
+    threshold_str = prompt('Порог сжатия (0.5–0.95)', str(current_threshold))
     try:
         threshold = float(threshold_str)
         if 0.5 <= threshold <= 0.95:
@@ -1868,37 +1861,37 @@ def setup_agent_settings(config: dict):
         pass
 
     print_success(
-        f"Context compression threshold set to {config['compression'].get('threshold', 0.50)}"
+        f"Порог сжатия истории: {config['compression'].get('threshold', 0.5)}"
     )
 
     # ── Session Reset Policy ──
-    print_header("Session Reset Policy")
+    print_header('Автоматический сброс диалогов')
     print_info(
-        "Messaging sessions (Telegram, Discord, etc.) accumulate context over time."
+        'История переписки в Telegram, Discord и других мессенджерах со временем растёт.'
     )
     print_info(
-        "Each message adds to the conversation history, which means growing API costs."
-    )
-    print_info("")
-    print_info(
-        "To manage this, sessions can automatically reset after a period of inactivity"
-    )
-    print_info(
-        "or at a fixed time each day. When a reset happens, the agent saves important"
-    )
-    print_info(
-        "things to its persistent memory first — but the conversation context is cleared."
+        'С каждым сообщением увеличивается объём истории и расходы на сервис модели.'
     )
     print_info("")
-    print_info("You can also manually reset anytime by typing /reset in chat.")
+    print_info(
+        'Диалоги можно автоматически сбрасывать после простоя'
+    )
+    print_info(
+        'или ежедневно в указанное время. Перед сбросом Корра сохраняет важное'
+    )
+    print_info(
+        'в постоянную память, а историю текущего диалога очищает.'
+    )
+    print_info("")
+    print_info('В любой момент можно сбросить диалог командой /reset.')
     print_info("")
 
     reset_choices = [
-        "Inactivity + daily reset (reset whichever comes first)",
-        "Inactivity only (reset after N minutes of no messages)",
-        "Daily only (reset at a fixed hour each day)",
-        "Never auto-reset (recommended - context lives until /reset or context compression)",
-        "Keep current settings",
+        'После простоя или ежедневно — что наступит раньше',
+        'Только после простоя — через указанное число минут без сообщений',
+        'Ежедневно — в указанное время',
+        'Не сбрасывать автоматически (рекомендуется) — только /reset или сжатие',
+        'Сохранить текущие настройки',
     ]
 
     current_policy = config.get("session_reset", {})
@@ -1908,20 +1901,20 @@ def setup_agent_settings(config: dict):
 
     default_reset = {"both": 0, "idle": 1, "daily": 2, "none": 3}.get(current_mode, 3)
 
-    reset_idx = prompt_choice("Session reset mode:", reset_choices, default_reset)
+    reset_idx = prompt_choice('Когда сбрасывать диалог:', reset_choices, default_reset)
 
     config.setdefault("session_reset", {})
 
     if reset_idx == 0:  # Both
         config["session_reset"]["mode"] = "both"
-        idle_str = prompt("  Inactivity timeout (minutes)", str(current_idle))
+        idle_str = prompt('  Сбрасывать после простоя (минуты)', str(current_idle))
         try:
             idle_val = int(idle_str)
             if idle_val > 0:
                 config["session_reset"]["idle_minutes"] = idle_val
         except ValueError:
             pass
-        hour_str = prompt("  Daily reset hour (0-23, local time)", str(current_hour))
+        hour_str = prompt('  Час ежедневного сброса (0–23, местное время)', str(current_hour))
         try:
             hour_val = int(hour_str)
             if 0 <= hour_val <= 23:
@@ -1929,11 +1922,11 @@ def setup_agent_settings(config: dict):
         except ValueError:
             pass
         print_success(
-            f"Sessions reset after {config['session_reset'].get('idle_minutes', 1440)} min idle or daily at {config['session_reset'].get('at_hour', 4)}:00"
+            f"Диалог сбрасывается после {config['session_reset'].get('idle_minutes', 1440)} мин бездействия или ежедневно в {config['session_reset'].get('at_hour', 4)}:00."
         )
     elif reset_idx == 1:  # Idle only
         config["session_reset"]["mode"] = "idle"
-        idle_str = prompt("  Inactivity timeout (minutes)", str(current_idle))
+        idle_str = prompt('  Сбрасывать после простоя (минуты)', str(current_idle))
         try:
             idle_val = int(idle_str)
             if idle_val > 0:
@@ -1941,11 +1934,11 @@ def setup_agent_settings(config: dict):
         except ValueError:
             pass
         print_success(
-            f"Sessions reset after {config['session_reset'].get('idle_minutes', 1440)} min of inactivity"
+            f"Диалог сбрасывается после {config['session_reset'].get('idle_minutes', 1440)} мин бездействия."
         )
     elif reset_idx == 2:  # Daily only
         config["session_reset"]["mode"] = "daily"
-        hour_str = prompt("  Daily reset hour (0-23, local time)", str(current_hour))
+        hour_str = prompt('  Час ежедневного сброса (0–23, местное время)', str(current_hour))
         try:
             hour_val = int(hour_str)
             if 0 <= hour_val <= 23:
@@ -1953,15 +1946,15 @@ def setup_agent_settings(config: dict):
         except ValueError:
             pass
         print_success(
-            f"Sessions reset daily at {config['session_reset'].get('at_hour', 4)}:00"
+            f"Диалог сбрасывается ежедневно в {config['session_reset'].get('at_hour', 4)}:00."
         )
     elif reset_idx == 3:  # None
         config["session_reset"]["mode"] = "none"
         print_info(
-            "Sessions will never auto-reset. Context is managed only by compression."
+            'Автосброс диалогов отключён. История будет управляться только сжатием.'
         )
         print_warning(
-            "Long conversations will grow in cost. Use /reset manually when needed."
+            'Длинные диалоги увеличивают расходы. При необходимости используйте /reset.'
         )
     # else: keep current (idx == 4)
 
@@ -2010,15 +2003,14 @@ def _setup_telegram_auto() -> str | None:
 
 
 def _prompt_telegram_bot_token() -> str | None:
-    print_info("Create a bot via @BotFather on Telegram")
+    print_info('Создайте бота через @BotFather в Telegram.')
     while True:
-        token = prompt("Telegram bot token", password=True)
+        token = prompt('Токен бота Telegram', password=True)
         if not token:
             return None
         if not _is_valid_telegram_bot_token(token):
             print_error(
-                "Invalid token format. Expected: <numeric_id>:<alphanumeric_hash> "
-                "(e.g., 123456789:ABCdefGHI-jklMNOpqrSTUvwxYZ)"
+                'Некорректный токен. Нужен формат <числовой_ID>:<секрет>, например 123456789:ABCdefGHI-jklMNOpqrSTUvwxYZ.'
             )
             continue
         return token
@@ -2029,30 +2021,30 @@ def _setup_telegram():
     print_header("Telegram")
     existing = get_env_value("TELEGRAM_BOT_TOKEN")
     if existing:
-        print_info("Telegram: already configured")
-        if not prompt_yes_no("Reconfigure Telegram?", False):
+        print_info('Telegram уже настроен')
+        if not prompt_yes_no('Настроить Telegram заново?', False):
             # Check missing allowlist on existing config
             if not get_env_value("TELEGRAM_ALLOWED_USERS"):
-                print_info("⚠️  Telegram has no user allowlist - anyone can use your bot!")
-                if prompt_yes_no("Add allowed users now?", True):
-                    print_info("   To find your Telegram user ID: message @userinfobot")
-                    allowed_users = prompt("Allowed user IDs (comma-separated)")
+                print_info('⚠️ У Telegram-бота нет списка доступа. Им может пользоваться любой.')
+                if prompt_yes_no('Добавить разрешённых пользователей сейчас?', True):
+                    print_info('   Чтобы узнать ваш ID Telegram, напишите @userinfobot.')
+                    allowed_users = prompt('Разрешённые ID пользователей через запятую')
                     if allowed_users:
                         save_env_value("TELEGRAM_ALLOWED_USERS", allowed_users.replace(" ", ""))
-                        print_success("Telegram allowlist configured")
+                        print_success('Список доступа Telegram настроен')
             return
 
-    print_info("How would you like to create your Telegram bot?")
+    print_info('Как создать бота Telegram?')
     print()
-    print_info("  [1] Automatic (recommended)")
-    print_info("      Scan a QR code → confirm in Telegram → done.")
-    print_info("      No token copy-paste needed.")
+    print_info('  [1] Автоматически (рекомендуется)')
+    print_info('      Отсканируйте QR-код и подтвердите действие в Telegram.')
+    print_info('      Копировать токен не потребуется.')
     print()
-    print_info("  [2] Manual")
-    print_info("      Create a bot via @BotFather yourself and paste the token.")
+    print_info('  [2] Вручную')
+    print_info('      Создайте бота через @BotFather и вставьте его токен.')
     print()
 
-    choice = prompt("Choice [1/2]", default="1")
+    choice = prompt('Ваш выбор [1/2]', default="1")
     token = None
     setup_result = None
 
@@ -2061,14 +2053,14 @@ def _setup_telegram():
         if setup_result:
             token = setup_result.token
             if not _is_valid_telegram_bot_token(token):
-                print_error("Automatic setup returned an invalid Telegram bot token.")
+                print_error('Автоматическая настройка вернула некорректный токен бота Telegram.')
                 token = None
                 setup_result = None
         else:
             token = None
         if not token:
             print()
-            print_info("Falling back to manual setup...")
+            print_info('Перехожу к ручной настройке…')
             print()
 
     if not token:
@@ -2077,21 +2069,21 @@ def _setup_telegram():
         return
 
     save_env_value("TELEGRAM_BOT_TOKEN", token)
-    print_success("Telegram token saved")
+    print_success('Токен Telegram сохранён')
 
     print()
-    print_info("🔒 Security: Restrict who can use your bot")
-    print_info("   To find your Telegram user ID:")
-    print_info("   1. Message @userinfobot on Telegram")
-    print_info("   2. It will reply with your numeric ID (e.g., 123456789)")
+    print_info('🔒 Доступ: выберите, кто сможет пользоваться ботом.')
+    print_info('   Как узнать ваш ID пользователя Telegram:')
+    print_info('   1. Напишите боту @userinfobot в Telegram.')
+    print_info('   2. Он пришлёт ваш числовой ID, например 123456789.')
     print()
 
     detected_user_id = getattr(setup_result, "owner_user_id", None)
     if detected_user_id:
         detected_id = str(detected_user_id)
-        print_success(f"Detected your Telegram user ID: {detected_id}")
-        if prompt_yes_no("Allow this Telegram account to use the bot?", True):
-            extra = prompt("Additional allowed user IDs (comma-separated, optional)")
+        print_success(f'Ваш ID пользователя Telegram: {detected_id}')
+        if prompt_yes_no('Разрешить этому аккаунту Telegram пользоваться ботом?', True):
+            extra = prompt('Дополнительные разрешённые ID пользователей через запятую (необязательно)')
             ids = [detected_id]
             for uid in extra.replace(" ", "").split(","):
                 if uid and uid not in ids:
@@ -2099,37 +2091,37 @@ def _setup_telegram():
             allowed_users = ",".join(ids)
         else:
             allowed_users = prompt(
-                "Allowed user IDs (comma-separated, leave empty for open access)"
+                'Разрешённые ID пользователей через запятую (пусто — доступ для всех)'
             )
     else:
         allowed_users = prompt(
-            "Allowed user IDs (comma-separated, leave empty for open access)"
+            'Разрешённые ID пользователей через запятую (пусто — доступ для всех)'
         )
 
     if allowed_users:
         allowed_users = allowed_users.replace(" ", "")
         save_env_value("TELEGRAM_ALLOWED_USERS", allowed_users)
-        print_success("Telegram allowlist configured - only listed users can use the bot")
+        print_success('Доступ к Telegram-боту разрешён только указанным пользователям')
     else:
-        print_info("⚠️  No allowlist set - anyone who finds your bot can use it!")
+        print_info('⚠️ Список доступа не задан. Ботом сможет пользоваться любой, кто его найдёт.')
 
     print()
-    print_info("📬 Home Channel: where Korra delivers cron job results,")
-    print_info("   cross-platform messages, and notifications.")
-    print_info("   For Telegram DMs, this is your user ID (same as above).")
+    print_info('📬 Основной чат: сюда Корра отправляет результаты задач по расписанию,')
+    print_info('   сообщения с других платформ и уведомления.')
+    print_info('   Для личной переписки Telegram это ваш ID пользователя (см. выше).')
 
     first_user_id = allowed_users.split(",")[0].strip() if allowed_users else ""
     if first_user_id:
-        if prompt_yes_no(f"Use your user ID ({first_user_id}) as the home channel?", True):
+        if prompt_yes_no(f'Использовать ваш ID ({first_user_id}) как основной чат?', True):
             save_env_value("TELEGRAM_HOME_CHANNEL", first_user_id)
-            print_success(f"Telegram home channel set to {first_user_id}")
+            print_success(f'Основной чат Telegram: {first_user_id}')
         else:
-            home_channel = prompt("Home channel ID (or leave empty to set later with /set-home in Telegram)")
+            home_channel = prompt('ID основного чата (можно настроить позже командой /set-home в Telegram)')
             if home_channel:
                 save_env_value("TELEGRAM_HOME_CHANNEL", home_channel)
     else:
-        print_info("   You can also set this later by typing /set-home in your Telegram chat.")
-        home_channel = prompt("Home channel ID (leave empty to set later)")
+        print_info('   Можно настроить позже командой /set-home в чате Telegram.')
+        home_channel = prompt('ID основного чата (можно оставить пустым и настроить позже)')
         if home_channel:
             save_env_value("TELEGRAM_HOME_CHANNEL", home_channel)
 
@@ -2148,64 +2140,64 @@ def _setup_bluebubbles():
     print_header("BlueBubbles (iMessage)")
     existing = get_env_value("BLUEBUBBLES_SERVER_URL")
     if existing:
-        print_info("BlueBubbles: already configured")
-        if not prompt_yes_no("Reconfigure BlueBubbles?", False):
+        print_info('BlueBubbles уже настроен')
+        if not prompt_yes_no('Настроить BlueBubbles заново?', False):
             return
 
-    print_info("Connects Korra to iMessage via BlueBubbles — a free, open-source")
-    print_info("macOS server that bridges iMessage to any device.")
-    print_info("   Requires a Mac running BlueBubbles Server v1.0.0+")
-    print_info("   Download: https://bluebubbles.app/")
+    print_info('BlueBubbles подключает Корру к iMessage. Это бесплатный сервер')
+    print_info('для macOS с открытым кодом, который позволяет пользоваться iMessage на других устройствах.')
+    print_info('   Нужен Mac с BlueBubbles Server версии 1.0.0 или новее.')
+    print_info('   Скачать: https://bluebubbles.app/')
     print()
-    print_info("In BlueBubbles Server → Settings → API, note your Server URL and Password.")
+    print_info('В BlueBubbles Server откройте Settings → API и найдите адрес сервера и пароль.')
     print()
 
-    server_url = prompt("BlueBubbles server URL (e.g. http://192.168.1.10:1234)")
+    server_url = prompt('Адрес сервера BlueBubbles, например http://192.168.1.10:1234')
     if not server_url:
-        print_warning("Server URL is required — skipping BlueBubbles setup")
+        print_warning('Без адреса сервера настроить BlueBubbles нельзя. Настройка пропущена.')
         return
     save_env_value("BLUEBUBBLES_SERVER_URL", server_url.rstrip("/"))
 
-    password = prompt("BlueBubbles server password", password=True)
+    password = prompt('Пароль сервера BlueBubbles', password=True)
     if not password:
-        print_warning("Password is required — skipping BlueBubbles setup")
+        print_warning('Без пароля настроить BlueBubbles нельзя. Настройка пропущена.')
         return
     save_env_value("BLUEBUBBLES_PASSWORD", password)
-    print_success("BlueBubbles credentials saved")
+    print_success('Данные подключения BlueBubbles сохранены')
 
     print()
-    print_info("🔒 Security: Restrict who can message your bot")
-    print_info("   Use iMessage addresses: email (user@icloud.com) or phone (+15551234567)")
+    print_info('🔒 Доступ: выберите, кто сможет писать боту.')
+    print_info('   Укажите адреса iMessage: почту (user@icloud.com) или телефон (+15551234567).')
     print()
-    allowed_users = prompt("Allowed iMessage addresses (comma-separated, leave empty for open access)")
+    allowed_users = prompt('Разрешённые адреса iMessage через запятую (пусто — доступ для всех)')
     if allowed_users:
         save_env_value("BLUEBUBBLES_ALLOWED_USERS", allowed_users.replace(" ", ""))
-        print_success("BlueBubbles allowlist configured")
+        print_success('Список доступа BlueBubbles настроен')
     else:
-        print_info("⚠️  No allowlist set — anyone who can iMessage you can use the bot!")
+        print_info('⚠️ Список доступа не задан. Любой, кто напишет вам в iMessage, сможет пользоваться ботом.')
 
     print()
-    print_info("📬 Home Channel: phone or email for cron job delivery and notifications.")
-    print_info("   You can also set this later with /set-home in your iMessage chat.")
-    home_channel = prompt("Home channel address (leave empty to set later)")
+    print_info('📬 Основной чат: телефон или почта для результатов задач и уведомлений.')
+    print_info('   Можно настроить позже командой /set-home в чате iMessage.')
+    home_channel = prompt('Адрес основного чата (можно оставить пустым и настроить позже)')
     if home_channel:
         save_env_value("BLUEBUBBLES_HOME_CHANNEL", home_channel)
 
     print()
-    print_info("Advanced settings (defaults are fine for most setups):")
-    if prompt_yes_no("Configure webhook listener settings?", False):
-        webhook_port = prompt("Webhook listener port (default: 8645)")
+    print_info('Дополнительные настройки (обычно подходят значения по умолчанию):')
+    if prompt_yes_no('Настроить приём вебхуков?', False):
+        webhook_port = prompt('Порт приёма вебхуков (по умолчанию 8645)')
         if webhook_port:
             try:
                 save_env_value("BLUEBUBBLES_WEBHOOK_PORT", str(int(webhook_port)))
-                print_success(f"Webhook port set to {webhook_port}")
+                print_success(f'Порт вебхуков: {webhook_port}')
             except ValueError:
-                print_warning("Invalid port number, using default 8645")
+                print_warning('Некорректный порт. Использую 8645.')
 
     print()
-    print_info("Requires the BlueBubbles Private API helper for typing indicators,")
-    print_info("read receipts, and tapback reactions. Basic messaging works without it.")
-    print_info("   Install: https://docs.bluebubbles.app/helper-bundle/installation")
+    print_info('Для индикатора набора, уведомлений о прочтении и реакций')
+    print_info('нужен помощник BlueBubbles Private API. Обычная переписка работает без него.')
+    print_info('   Установка: https://docs.bluebubbles.app/helper-bundle/installation')
 
 
 def _setup_qqbot():
@@ -2216,58 +2208,72 @@ def _setup_qqbot():
 
 def _setup_webhooks():
     """Configure webhook integration."""
-    print_header("Webhooks")
+    print_header('Вебхуки')
     existing = get_env_value("WEBHOOK_ENABLED")
     if existing:
-        print_info("Webhooks: already configured")
-        if not prompt_yes_no("Reconfigure webhooks?", False):
+        print_info('Вебхуки уже настроены')
+        if not prompt_yes_no('Настроить вебхуки заново?', False):
             return
 
     print()
-    print_warning("⚠  Webhook and SMS platforms require exposing gateway ports to the")
-    print_warning("   internet. For security, run the gateway in a sandboxed environment")
-    print_warning("   (Docker, VM, etc.) to limit blast radius from prompt injection.")
+    print_warning('⚠  Для вебхуков и SMS нужен доступ к портам шлюза')
+    print_warning('   из интернета. Запускайте шлюз в изолированной среде')
+    print_warning('   (например, Docker или виртуальной машине), чтобы ограничить доступ при вредоносных инструкциях.')
     print()
-    print_info("   Full guide: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/")
+    print_info('   Инструкция: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/')
     print()
 
-    port = prompt("Webhook port (default 8644)")
+    port = prompt('Порт вебхуков (по умолчанию 8644)')
     if port:
         try:
             save_env_value("WEBHOOK_PORT", str(int(port)))
-            print_success(f"Webhook port set to {port}")
+            print_success(f'Порт вебхуков: {port}')
         except ValueError:
-            print_warning("Invalid port number, using default 8644")
+            print_warning('Некорректный порт. Использую 8644.')
 
-    secret = prompt("Global HMAC secret (shared across all routes)", password=True)
+    secret = prompt('Общий секрет HMAC для всех маршрутов', password=True)
     if secret:
         save_env_value("WEBHOOK_SECRET", secret)
-        print_success("Webhook secret saved")
+        print_success('Секрет вебхуков сохранён')
     else:
-        print_warning("No secret set — you must configure per-route secrets in config.yaml")
+        print_warning('Секрет не задан. Укажите отдельные секреты маршрутов в config.yaml.')
 
     save_env_value("WEBHOOK_ENABLED", "true")
     print()
-    print_success("Webhooks enabled! Next steps:")
+    print_success('Вебхуки включены. Следующие шаги:')
     from korra_constants import display_hermes_home as _dhh
-    print_info(f"   1. Define webhook routes in {_dhh()}/config.yaml")
-    print_info("   2. Point your service (GitHub, GitLab, etc.) at:")
-    print_info("      http://your-server:8644/webhooks/<route-name>")
+    print_info(f'   1. Опишите маршруты вебхуков в {_dhh()}/config.yaml.')
+    print_info('   2. Укажите в сервисе (GitHub, GitLab и т. д.) адрес:')
+    print_info('      http://ваш-сервер:8644/webhooks/<имя-маршрута>')
     print()
-    print_info("   Route configuration guide:")
+    print_info('   Настройка маршрутов:')
     print_info("   https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks/#configuring-routes")
     print()
-    print_info("   Open config in your editor:  hermes config edit")
-    print_info("   Open config in your editor:  hermes config edit")
+    print_info('   Открыть настройки в редакторе: korra config edit')
+    print_info('   Открыть настройки в редакторе: korra config edit')
+
+
+def _setup_platform_status_label(status: str) -> str:
+    """Translate display status while setup decisions retain canonical markers."""
+    labels = {
+        "configured": "настроено",
+        "not configured": "не настроено",
+        "partially configured": "настроено частично",
+        "configured + paired": "настроено и подключено",
+        "enabled, not paired": "включено, требуется подключение",
+        "configured + E2EE": "настроено, шифрование включено",
+        "plugin disabled": "плагин отключён",
+    }
+    return labels.get(status, status)
 
 
 def setup_gateway(config: dict):
     """Configure messaging platform integrations."""
     from korra_cli.gateway import _all_platforms, _platform_status, _configure_platform
 
-    print_header("Messaging Platforms")
-    print_info("Connect to messaging platforms to chat with Korra from anywhere.")
-    print_info("Toggle with Space, confirm with Enter.")
+    print_header('Мессенджеры')
+    print_info('Подключите мессенджеры, чтобы общаться с Коррой откуда угодно.')
+    print_info('Пробел — выбрать, Enter — подтвердить.')
     print()
 
     platforms = _all_platforms()
@@ -2277,14 +2283,14 @@ def setup_gateway(config: dict):
     pre_selected = []
     for i, plat in enumerate(platforms):
         status = _platform_status(plat)
-        items.append(f"{plat['emoji']} {plat['label']}  ({status})")
+        items.append(f"{plat['emoji']} {plat['label']}  ({_setup_platform_status_label(status)})")
         if status == "configured":
             pre_selected.append(i)
 
-    selected = prompt_checklist("Select platforms to configure:", items, pre_selected)
+    selected = prompt_checklist('Выберите платформы для настройки:', items, pre_selected)
 
     if not selected:
-        print_info("No platforms selected. Run 'hermes setup gateway' later to configure.")
+        print_info('Платформы не выбраны. Настроить их позже: `korra setup gateway`.')
     else:
         for idx in selected:
             _configure_platform(platforms[idx])
@@ -2307,7 +2313,7 @@ def setup_gateway(config: dict):
     if any_messaging:
         print()
         print_info("━" * 50)
-        print_success("Messaging platforms configured!")
+        print_success('Мессенджеры настроены!')
 
         # Check if any home channels are missing
         missing_home = []
@@ -2330,13 +2336,13 @@ def setup_gateway(config: dict):
 
         if missing_home:
             print()
-            print_warning(f"No home channel set for: {', '.join(missing_home)}")
-            print_info("   Without a home channel, cron jobs and cross-platform")
-            print_info("   messages can't be delivered to those platforms.")
-            print_info("   Set one later with /set-home in your chat, or:")
+            print_warning(f"Основной чат не настроен для: {', '.join(missing_home)}")
+            print_info('   Без него результаты задач по расписанию и сообщения')
+            print_info('   с других платформ не будут доставлены в эти мессенджеры.')
+            print_info('   Настроить позже: /set-home в чате или команда:')
             for plat in missing_home:
                 print_info(
-                    f"     hermes config set {plat.upper()}_HOME_CHANNEL <channel_id>"
+                    f'     korra config set {plat.upper()}_HOME_CHANNEL <ID_чата>'
                 )
 
     # ── Gateway Service Setup ──
@@ -2372,7 +2378,7 @@ def setup_gateway(config: dict):
         if supports_systemd and _system_scope_wizard_would_need_root():
             _print_system_scope_remediation("restart")
         elif any_messaging and prompt_yes_no(
-            "  Restart the gateway to pick up changes?", True
+            '  Перезапустить шлюз, чтобы применить изменения?', True
         ):
             try:
                 if supports_systemd:
@@ -2383,7 +2389,7 @@ def setup_gateway(config: dict):
                     from korra_cli import gateway_windows
                     gateway_windows.restart()
             except UserSystemdUnavailableError as e:
-                print_error("  Restart failed — user systemd not reachable:")
+                print_error('  Не удалось перезапустить: пользовательская служба systemd недоступна.')
                 for line in str(e).splitlines():
                     print(f"  {line}")
             except SystemScopeRequiresRootError as e:
@@ -2391,10 +2397,10 @@ def setup_gateway(config: dict):
                 # caught this, but a race (unit file appearing mid-run)
                 # could still land here. Previously this exited the
                 # whole wizard via sys.exit(1).
-                print_error(f"  Restart failed: {e}")
+                print_error(f'  Не удалось перезапустить: {e}')
                 _print_system_scope_remediation("restart")
             except Exception as e:
-                print_error(f"  Restart failed: {e}")
+                print_error(f'  Не удалось перезапустить: {e}')
     else:
         # Not running: install (if needed) and start, no questions asked.
         ensure_gateway_service(context="setup")
@@ -2429,9 +2435,9 @@ def setup_tools(config: dict, first_install: bool = False):
 
 def setup_telemetry(config: dict):
     """Configure the local, privacy-safe shared-metrics subscriber."""
-    print_header("Shared Metrics")
-    print_info("Shared metrics contain only bounded counters and histograms.")
-    print_info("Packages stay under this Korra profile and are not uploaded.")
+    print_header('Локальные метрики')
+    print_info('Метрики содержат только счётчики и сводные показатели.')
+    print_info('Данные остаются в этом профиле Korra и никуда не отправляются.')
 
     telemetry = config.get("telemetry")
     if not isinstance(telemetry, dict):
@@ -2444,13 +2450,13 @@ def setup_telemetry(config: dict):
 
     current = shared_metrics.get("enabled") is True
     shared_metrics["enabled"] = prompt_yes_no(
-        "Enable local shared metrics?",
+        'Включить локальные метрики?',
         default=current,
     )
     if shared_metrics["enabled"]:
-        print_success("Local shared metrics enabled.")
+        print_success('Локальные метрики включены.')
     else:
-        print_info("Local shared metrics disabled.")
+        print_info('Локальные метрики отключены.')
 
 
 # =============================================================================
@@ -2540,16 +2546,16 @@ def _get_section_config_summary(config: dict, section_key: str) -> Optional[str]
         if isinstance(model, str) and model.strip():
             return model.strip()
         if isinstance(model, dict):
-            return str(model.get("default") or model.get("model") or "configured")
-        return "configured"
+            return str(model.get("default") or model.get("model") or "настроено")
+        return "настроено"
 
     elif section_key == "terminal":
         backend = cfg_get(config, "terminal", "backend", default="local")
-        return f"backend: {backend}"
+        return f'среда: {backend}'
 
     elif section_key == "agent":
         max_turns = cfg_get(config, "agent", "max_turns", default=90)
-        return f"max turns: {max_turns}"
+        return f'максимум запросов: {max_turns}'
 
     elif section_key == "gateway":
         from korra_cli.gateway import _all_platforms, _platform_status
@@ -2569,9 +2575,9 @@ def _get_section_config_summary(config: dict, section_key: str) -> Optional[str]
     elif section_key == "tools":
         tools = []
         if get_env_value("ELEVENLABS_API_KEY"):
-            tools.append("TTS/ElevenLabs")
+            tools.append('Озвучивание ElevenLabs')
         if get_env_value("BROWSERBASE_API_KEY"):
-            tools.append("Browser")
+            tools.append('Браузер')
         if get_env_value("FIRECRAWL_API_KEY"):
             tools.append("Firecrawl")
         if tools:
@@ -2593,7 +2599,7 @@ def _skip_configured_section(
         return False
     print()
     print_success(f"  {label}: {summary}")
-    return not prompt_yes_no(f"  Reconfigure {label.lower()}?", default=False)
+    return not prompt_yes_no(f'  Настроить {label.lower()} заново?', default=False)
 
 
 # =============================================================================
@@ -2642,15 +2648,15 @@ def _load_openclaw_migration_module():
 # Config values may have different semantics between OpenClaw and Hermes.
 # Instruction/context files (.md) can contain incompatible setup procedures.
 _HIGH_IMPACT_KIND_KEYWORDS = {
-    "gateway": "⚠ Gateway/messaging — this will configure Korra to use your OpenClaw messaging channels",
-    "telegram": "⚠ Telegram — this will point Korra at your OpenClaw Telegram bot",
-    "slack": "⚠ Slack — this will point Korra at your OpenClaw Slack workspace",
-    "discord": "⚠ Discord — this will point Korra at your OpenClaw Discord bot",
-    "whatsapp": "⚠ WhatsApp — this will point Korra at your OpenClaw WhatsApp connection",
-    "config": "⚠ Config values — OpenClaw settings may not map 1:1 to Korra equivalents",
-    "soul": "⚠ Instruction file — may contain OpenClaw-specific setup/restart procedures",
-    "memory": "⚠ Memory/context file — may reference OpenClaw-specific infrastructure",
-    "context": "⚠ Context file — may contain OpenClaw-specific instructions",
+    "gateway": '⚠ Мессенджеры: Korra подключится к каналам OpenClaw.',
+    "telegram": '⚠ Telegram: Korra подключится к боту OpenClaw.',
+    "slack": '⚠ Slack: Korra подключится к рабочему пространству OpenClaw.',
+    "discord": '⚠ Discord: Korra подключится к боту OpenClaw.',
+    "whatsapp": '⚠ WhatsApp: Korra подключится к аккаунту OpenClaw.',
+    "config": '⚠ Параметры OpenClaw могут отличаться по смыслу от настроек Korra.',
+    "soul": '⚠ Файл инструкций может содержать команды настройки и перезапуска для OpenClaw.',
+    "memory": '⚠ Файл памяти или контекста может ссылаться на инфраструктуру OpenClaw.',
+    "context": '⚠ Файл контекста может содержать инструкции для OpenClaw.',
 }
 
 
@@ -2662,7 +2668,7 @@ def _print_migration_preview(report: dict):
     """
     items = report.get("items", [])
     if not items:
-        print_info("Nothing to migrate.")
+        print_info('Нечего переносить.')
         return
 
     migrated_items = [i for i in items if i.get("status") == "migrated"]
@@ -2672,7 +2678,7 @@ def _print_migration_preview(report: dict):
     warnings_shown = set()
 
     if migrated_items:
-        print(color("  Would import:", Colors.GREEN))
+        print(color('  Будет импортировано:', Colors.GREEN))
         for item in migrated_items:
             kind = item.get("kind", "unknown")
             dest = item.get("destination", "")
@@ -2691,15 +2697,15 @@ def _print_migration_preview(report: dict):
         print()
 
     if conflict_items:
-        print(color("  Would overwrite (conflicts with existing Korra config):", Colors.YELLOW))
+        print(color('  Будет заменено (уже есть в настройках Korra):', Colors.YELLOW))
         for item in conflict_items:
             kind = item.get("kind", "unknown")
-            reason = item.get("reason", "already exists")
+            reason = item.get("reason", 'уже существует')
             print(f"      {kind:<22s}  {reason}")
         print()
 
     if skipped_items:
-        print(color("  Would skip:", Colors.DIM))
+        print(color('  Будет пропущено:', Colors.DIM))
         for item in skipped_items:
             kind = item.get("kind", "unknown")
             reason = item.get("reason", "")
@@ -2708,13 +2714,13 @@ def _print_migration_preview(report: dict):
 
     # Print collected warnings
     if warnings_shown:
-        print(color("  ── Warnings ──", Colors.YELLOW))
+        print(color('  ── Предупреждения ──', Colors.YELLOW))
         for warning in sorted(warnings_shown):
             print(color(f"    {warning}", Colors.YELLOW))
         print()
-        print(color("  Note: OpenClaw config values may have different semantics in Korra.", Colors.YELLOW))
-        print(color("  For example, OpenClaw's tool_call_execution: \"auto\" ≠ Korra's yolo mode.", Colors.YELLOW))
-        print(color("  Instruction files (.md) from OpenClaw may contain incompatible procedures.", Colors.YELLOW))
+        print(color('  Параметры OpenClaw могут иметь другое значение в Korra.', Colors.YELLOW))
+        print(color('  Например, tool_call_execution: "auto" в OpenClaw не равен режиму yolo в Korra.', Colors.YELLOW))
+        print(color('  Файлы инструкций .md из OpenClaw могут содержать несовместимые указания.', Colors.YELLOW))
         print()
 
 
@@ -2734,14 +2740,14 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
         return False
 
     print()
-    print_header("OpenClaw Installation Detected")
-    print_info(f"Found OpenClaw data at {openclaw_dir}")
-    print_info("Korra can preview what would be imported before making any changes.")
+    print_header('Найдена установка OpenClaw')
+    print_info(f'Данные OpenClaw: {openclaw_dir}')
+    print_info('Перед переносом Корра покажет, что будет импортировано.')
     print()
 
-    if not prompt_yes_no("Would you like to see what can be imported?", default=True):
+    if not prompt_yes_no('Показать, что можно перенести?', default=True):
         print_info(
-            "Skipping migration. You can run it later with: hermes claw migrate --dry-run"
+            'Перенос пропущен. Предпросмотр позже: korra claw migrate --dry-run'
         )
         return False
 
@@ -2754,10 +2760,10 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
     try:
         mod = _load_openclaw_migration_module()
         if mod is None:
-            print_warning("Could not load migration script.")
+            print_warning('Не удалось загрузить скрипт переноса.')
             return False
     except Exception as e:
-        print_warning(f"Could not load migration script: {e}")
+        print_warning(f'Не удалось загрузить скрипт переноса: {e}')
         logger.debug("OpenClaw migration module load error", exc_info=True)
         return False
 
@@ -2777,7 +2783,7 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
         )
         preview_report = dry_migrator.migrate()
     except Exception as e:
-        print_warning(f"Migration preview failed: {e}")
+        print_warning(f'Не удалось подготовить предпросмотр переноса: {e}')
         logger.debug("OpenClaw migration preview error", exc_info=True)
         return False
 
@@ -2787,22 +2793,22 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
 
     if preview_count == 0:
         print()
-        print_info("Nothing to import from OpenClaw.")
+        print_info('В OpenClaw нет данных для переноса.')
         return False
 
     print()
-    print_header(f"Migration Preview — {preview_count} item(s) would be imported")
-    print_info("No changes have been made yet. Review the list below:")
+    print_header(f'Предпросмотр переноса: элементов к импорту — {preview_count}')
+    print_info('Изменения пока не внесены. Проверьте список:')
     print()
     _print_migration_preview(preview_report)
 
     # ── Phase 2: Confirm and execute ──
-    if not prompt_yes_no("Proceed with migration?", default=False):
+    if not prompt_yes_no('Начать перенос?', default=False):
         print_info(
-            "Migration cancelled. You can run it later with: hermes claw migrate"
+            'Перенос отменён. Запустить позже: korra claw migrate'
         )
         print_info(
-            "Use --dry-run to preview again, or --preset minimal for a lighter import."
+            'Повторный предпросмотр: --dry-run. Облегчённый перенос: --preset minimal.'
         )
         return False
 
@@ -2822,7 +2828,7 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
         )
         report = migrator.migrate()
     except Exception as e:
-        print_warning(f"Migration failed: {e}")
+        print_warning(f'Не удалось перенести данные: {e}')
         logger.debug("OpenClaw migration error", exc_info=True)
         return False
 
@@ -2835,19 +2841,19 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
 
     print()
     if migrated:
-        print_success(f"Imported {migrated} item(s) from OpenClaw.")
+        print_success(f'Из OpenClaw импортировано элементов: {migrated}.')
     if conflicts:
-        print_info(f"Skipped {conflicts} item(s) that already exist in Korra (use hermes claw migrate --overwrite to force).")
+        print_info(f'Уже существуют в Korra и пропущены: {conflicts}. Чтобы заменить их: korra claw migrate --overwrite.')
     if skipped:
-        print_info(f"Skipped {skipped} item(s) (not found or unchanged).")
+        print_info(f'Пропущено элементов: {skipped} (не найдены или не изменились).')
     if errors:
-        print_warning(f"{errors} item(s) had errors — check the migration report.")
+        print_warning(f'Элементов с ошибками: {errors}. Проверьте отчёт о переносе.')
 
     output_dir = report.get("output_dir")
     if output_dir:
-        print_info(f"Full report saved to: {output_dir}")
+        print_info(f'Полный отчёт сохранён: {output_dir}')
 
-    print_success("Migration complete! Continuing with setup...")
+    print_success('Перенос завершён. Продолжаем настройку…')
     return True
 
 
@@ -2856,13 +2862,13 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
 # =============================================================================
 
 SETUP_SECTIONS = [
-    ("model", "Model & Provider", setup_model_provider),
-    ("tts", "Text-to-Speech", setup_tts),
-    ("terminal", "Terminal Backend", setup_terminal_backend),
-    ("gateway", "Messaging Platforms (Gateway)", setup_gateway),
-    ("tools", "Tools", setup_tools),
-    ("telemetry", "Shared Metrics", setup_telemetry),
-    ("agent", "Agent Settings", setup_agent_settings),
+    ("model", 'Провайдер и модель', setup_model_provider),
+    ("tts", 'Озвучивание', setup_tts),
+    ("terminal", 'Среда выполнения команд', setup_terminal_backend),
+    ("gateway", 'Мессенджеры (шлюз)', setup_gateway),
+    ("tools", 'Инструменты', setup_tools),
+    ("telemetry", 'Локальные метрики', setup_telemetry),
+    ("agent", 'Настройки агента', setup_agent_settings),
 ]
 
 
@@ -2892,7 +2898,7 @@ def _run_portal_one_shot(config: dict) -> None:
             Colors.MAGENTA,
         )
     )
-    print(color("│     ⚕ Korra Setup — Nous Portal (one-shot)              │", Colors.MAGENTA))
+    print(color('│     ⚕ Настройка Korra — Nous Portal                    │', Colors.MAGENTA))
     print(
         color(
             "└─────────────────────────────────────────────────────────┘",
@@ -2900,11 +2906,11 @@ def _run_portal_one_shot(config: dict) -> None:
         )
     )
     print()
-    print_info("  One subscription, 300+ models, plus the Tool Gateway:")
-    print_info("    web search, image generation, TTS, browser automation")
-    print_info("    — all routed through your Nous Portal sub.")
+    print_info('  Одна подписка: более 300 моделей и сервисы инструментов —')
+    print_info('    поиск в интернете, изображения, озвучивание и управление браузером.')
+    print_info('    Всё оплачивается вашей подпиской Nous Portal.')
     print()
-    print_info("  Sign up: https://portal.nousresearch.com/manage-subscription")
+    print_info('  Регистрация: https://portal.nousresearch.com/manage-subscription')
     print()
 
     # _model_flow_nous handles BOTH the logged-out path (device-code OAuth,
@@ -2923,14 +2929,14 @@ def _run_portal_one_shot(config: dict) -> None:
         # SystemExit there would otherwise escape and kill the whole CLI.
         # Treat all of these as a graceful cancel/abort for the portal flow.
         print()
-        print_info("  Setup cancelled.")
-        print_info("  You can retry later with `hermes portal`.")
+        print_info('  Настройка отменена.')
+        print_info('  Повторить позже: `korra portal`.')
         return
     except Exception as exc:
         logger.debug("_model_flow_nous error during `hermes portal`: %s", exc)
         print()
-        print_error(f"  Nous Portal setup encountered an error: {exc}")
-        print_info("  You can retry later with `hermes portal`.")
+        print_error(f'  Ошибка настройки Nous Portal: {exc}')
+        print_info('  Повторить позже: `korra portal`.')
         return
 
     # Re-sync the in-memory config from disk — _model_flow_nous (and the
@@ -2945,9 +2951,9 @@ def _run_portal_one_shot(config: dict) -> None:
         pass
 
     print()
-    print_success("Portal setup complete.")
-    print_info("  Run `hermes portal info` to inspect routing.")
-    print_info("  Run `hermes` to start chatting.")
+    print_success('Nous Portal настроен.')
+    print_info('  Проверить подключение: `korra portal info`.')
+    print_info('  Начать диалог: `korra`.')
 
 
 @contextmanager
@@ -2974,7 +2980,7 @@ def run_setup_wizard(args):
             return _run_setup_wizard_impl(args)
         except _SetupCancelled:
             print()
-            print_info("Setup cancelled. Remaining sections were not changed.")
+            print_info('Настройка отменена. Остальные разделы не изменены.')
             return None
 
 
@@ -3025,9 +3031,9 @@ def _run_setup_steps(
                 previous_label = steps[previous_index][0]
                 print()
                 if previous_index == section_index:
-                    print_info(f"Returning to the previous choice in {label}...")
+                    print_info(f'Возврат к предыдущему выбору в разделе {label}…')
                 else:
-                    print_info(f"Returning to {previous_label}...")
+                    print_info(f'Возврат к разделу {previous_label}…')
                 section_index = previous_index
                 continue
             if state is not None:
@@ -3048,7 +3054,7 @@ def run_setup_action_with_navigation(
     label: str,
     action: Callable[[], None],
     *,
-    cancelled_message: str = "Setup cancelled.",
+    cancelled_message: str = 'Настройка отменена.',
 ) -> None:
     """Run a setup-style menu flow with Escape and nested Left navigation.
 
@@ -3087,7 +3093,7 @@ def _run_setup_wizard_impl(args):
     reset_requested = bool(getattr(args, "reset", False))
     if reset_requested:
         save_config(copy.deepcopy(DEFAULT_CONFIG))
-        print_success("Configuration reset to defaults.")
+        print_success('Восстановлены настройки по умолчанию.')
 
     reconfigure_requested = bool(getattr(args, "reconfigure", False))
     quick_requested = bool(getattr(args, "quick", False))
@@ -3117,7 +3123,7 @@ def _run_setup_wizard_impl(args):
 
     if non_interactive:
         print_noninteractive_setup_guidance(
-            "Running in a non-interactive environment (no TTY detected)."
+            'Интерактивный терминал недоступен.'
         )
         return
 
@@ -3138,7 +3144,7 @@ def _run_setup_wizard_impl(args):
                         Colors.MAGENTA,
                     )
                 )
-                print(color(f"│     ⚕ Korra Setup — {label:<35s} │", Colors.MAGENTA))
+                print(color(f'│     ⚕ Настройка Korra — {label:<35s} │', Colors.MAGENTA))
                 print(
                     color(
                         "└─────────────────────────────────────────────────────────┘",
@@ -3150,11 +3156,11 @@ def _run_setup_wizard_impl(args):
                 )
                 save_config(config)
                 print()
-                print_success(f"{label} configuration complete!")
+                print_success(f'Раздел {label} настроен!')
                 return
 
-        print_error(f"Unknown setup section: {section}")
-        print_info(f"Available sections: {', '.join(k for k, _, _ in SETUP_SECTIONS)}")
+        print_error(f'Неизвестный раздел настройки: {section}')
+        print_info(f"Доступные разделы: {', '.join((k for k, _, _ in SETUP_SECTIONS))}")
         return
 
     # Check if this is an existing installation with a provider configured
@@ -3176,7 +3182,7 @@ def _run_setup_wizard_impl(args):
     )
     print(
         color(
-            "│             ⚕ Korra Setup Wizard                       │", Colors.MAGENTA
+            '│             ⚕ Мастер настройки Korra                  │', Colors.MAGENTA
         )
     )
     print(
@@ -3187,12 +3193,12 @@ def _run_setup_wizard_impl(args):
     )
     print(
         color(
-            "│  Let's configure your Korra installation.              │", Colors.MAGENTA
+            '│  Давайте настроим вашу Korra.                          │', Colors.MAGENTA
         )
     )
     print(
         color(
-            "│  Press Ctrl+C at any time to exit.                     │", Colors.MAGENTA
+            '│  Для выхода в любой момент нажмите Ctrl+C.             │', Colors.MAGENTA
         )
     )
     print(
@@ -3212,18 +3218,18 @@ def _run_setup_wizard_impl(args):
         # or when a required API key got cleared).
         if quick_requested:
             _run_setup_steps(
-                [("Quick Setup", lambda: _run_quick_setup(config, hermes_home))]
+                [('Быстрая настройка', lambda: _run_quick_setup(config, hermes_home))]
             )
             return
 
         print()
-        print_header("Reconfigure")
-        print_success("You already have Korra configured.")
-        print_info("Running the full wizard — each prompt shows your current value.")
-        print_info("Press Enter to keep it, or type a new value to change it.")
+        print_header('Повторная настройка')
+        print_success('Korra уже настроена.')
+        print_info('Открываю полный мастер. В каждом пункте показано текущее значение.')
+        print_info('Нажмите Enter, чтобы сохранить его, или введите новое.')
         print_info("")
-        print_info("Tip: jump straight to a section with 'hermes setup model|terminal|")
-        print_info("     gateway|tools|agent', or fill only missing items with --quick.")
+        print_info('Подсказка: сразу открыть раздел — `korra setup model|terminal|')
+        print_info('     gateway|tools|agent`; заполнить только недостающее — `korra setup --quick`.')
         # Fall through to the "Full Setup — run all sections" block below.
         # --reconfigure is now the default on existing installs; the flag
         # is preserved for backwards compatibility but is a no-op here.
@@ -3234,7 +3240,7 @@ def _run_setup_wizard_impl(args):
         # --reconfigure / --quick on a fresh install are meaningless — fall
         # through to the normal first-time flow.
         if reconfigure_requested or quick_requested:
-            print_info("No existing configuration found — running first-time setup.")
+            print_info('Настройки пока не найдены. Запускаю первоначальную настройку.')
             print()
 
         # Offer OpenClaw migration before configuration begins
@@ -3243,11 +3249,11 @@ def _run_setup_wizard_impl(args):
             config = load_config()
 
         setup_mode = prompt_choice(
-            "How would you like to set up Korra?",
+            'Как настроить Korra?',
             [
-                "Quick Setup (Nous Portal) — free OAuth login, no API keys, model + tools (recommended)",
-                "Full setup — configure every provider, tool & option yourself (bring your own keys)",
-                "Blank Slate — everything off except the bare minimum; opt in to each capability",
+                'Быстрая настройка Nous Portal — вход через браузер без ключей API, модель и инструменты (рекомендуется)',
+                'Полная настройка — выбрать провайдеров, инструменты и параметры, использовать свои ключи',
+                'Минимальная настройка — только необходимое, остальные возможности включаются отдельно',
             ],
             0,
         )
@@ -3256,7 +3262,7 @@ def _run_setup_wizard_impl(args):
             _run_setup_steps(
                 [
                     (
-                        "Quick Setup",
+                        'Быстрая настройка',
                         lambda: _run_first_time_quick_setup(
                             config, hermes_home, is_existing
                         ),
@@ -3268,7 +3274,7 @@ def _run_setup_wizard_impl(args):
             _run_setup_steps(
                 [
                     (
-                        "Blank Slate",
+                        'Минимальная настройка',
                         lambda: _run_blank_slate_setup(
                             config, hermes_home, is_existing
                         ),
@@ -3278,19 +3284,19 @@ def _run_setup_wizard_impl(args):
             return
 
     # ── Full Setup — run all sections ──
-    print_header("Configuration Location")
-    print_info(f"Config file:  {get_config_path()}")
-    print_info(f"Secrets file: {get_env_path()}")
-    print_info(f"Data folder:  {hermes_home}")
-    print_info(f"Install dir:  {PROJECT_ROOT}")
+    print_header('Где хранятся настройки')
+    print_info(f'Файл настроек: {get_config_path()}')
+    print_info(f'Файл секретов: {get_env_path()}')
+    print_info(f'Папка данных:  {hermes_home}')
+    print_info(f'Папка установки: {PROJECT_ROOT}')
     print()
-    print_info("You can edit these files directly or use 'hermes config edit'")
+    print_info('Файлы можно изменить вручную или командой `korra config edit`.')
 
     if migration_ran:
         print()
-        print_info("Settings were imported from OpenClaw.")
-        print_info("Each section below will show what was imported — press Enter to keep,")
-        print_info("or choose to reconfigure if needed.")
+        print_info('Настройки импортированы из OpenClaw.')
+        print_info('В каждом разделе показаны перенесённые значения. Enter — сохранить,')
+        print_info('либо выберите повторную настройку.')
 
     # Section 3: Agent Settings — no longer prompted. First installs get the
     # recommended defaults silently; existing installs keep whatever they have.
@@ -3301,21 +3307,21 @@ def _run_setup_wizard_impl(args):
     def _model_step() -> None:
         if not (
             migration_ran
-            and _skip_configured_section(config, "model", "Model & Provider")
+            and _skip_configured_section(config, "model", 'Провайдер и модель')
         ):
             setup_model_provider(config)
 
     def _terminal_step() -> None:
         if not (
             migration_ran
-            and _skip_configured_section(config, "terminal", "Terminal Backend")
+            and _skip_configured_section(config, "terminal", 'Среда выполнения команд')
         ):
             setup_terminal_backend(config)
 
     def _gateway_step() -> None:
         if not (
             migration_ran
-            and _skip_configured_section(config, "gateway", "Messaging Platforms")
+            and _skip_configured_section(config, "gateway", 'Мессенджеры')
         ):
             setup_gateway(config)
             return
@@ -3329,24 +3335,24 @@ def _run_setup_wizard_impl(args):
     def _tools_step() -> None:
         if not (
             migration_ran
-            and _skip_configured_section(config, "tools", "Tools")
+            and _skip_configured_section(config, "tools", 'Инструменты')
         ):
             setup_tools(config, first_install=not is_existing)
 
     _run_setup_steps(
         [
-            ("Model & Provider", _model_step),
-            ("Terminal Backend", _terminal_step),
-            ("Messaging Platforms", _gateway_step),
-            ("Tools", _tools_step),
+            ('Провайдер и модель', _model_step),
+            ('Среда выполнения команд', _terminal_step),
+            ('Мессенджеры', _gateway_step),
+            ('Инструменты', _tools_step),
         ]
     )
 
     # Save and show summary
     save_config(config)
     if _backup_path and _backup_path.exists():
-        print_info(f"Previous config backed up to: {_backup_path}")
-        print_info("If setup changed a value you customized, restore it with:")
+        print_info(f'Предыдущие настройки сохранены: {_backup_path}')
+        print_info('Если изменились ваши настройки, восстановите их командой:')
         print_info(f"  cp {_backup_path} {config_path}")
     _print_setup_summary(config, hermes_home)
 
@@ -3368,20 +3374,20 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
     # Nous model picker). Provider is set to "nous" by the login/model save.
     print()
     print_header("Nous Portal")
-    print_info("One subscription, 300+ models, plus the Tool Gateway:")
-    print_info("  web search, image generation, TTS, browser automation.")
-    print_info("Sign up: https://portal.nousresearch.com/manage-subscription")
+    print_info('Одна подписка: более 300 моделей и сервисы инструментов —')
+    print_info('  поиск в интернете, изображения, озвучивание и управление браузером.')
+    print_info('Регистрация: https://portal.nousresearch.com/manage-subscription')
     print()
     try:
         from korra_cli.main import _model_flow_nous
         _model_flow_nous(config)
     except (KeyboardInterrupt, EOFError):
         print()
-        print_info("Nous Portal setup cancelled.")
+        print_info('Настройка Nous Portal отменена.')
     except Exception as exc:
         logger.debug("_model_flow_nous error during quick setup: %s", exc)
-        print_warning(f"Nous Portal setup encountered an error: {exc}")
-        print_info("You can try again later with: hermes model")
+        print_warning(f'Ошибка настройки Nous Portal: {exc}')
+        print_info('Попробуйте позже: korra model')
 
     # Re-sync the wizard's config dict from disk — _model_flow_nous (and the
     # underlying login/model save) write via their own load/save cycle, and the
@@ -3401,10 +3407,10 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
     # Step 4: Offer messaging gateway setup
     print()
     gateway_choice = prompt_choice(
-        "Connect a messaging platform? (Telegram, Discord, etc.)",
+        'Подключить мессенджер (Telegram, Discord и т. д.)?',
         [
-            "Set up messaging now (recommended)",
-            "Skip — set up later with 'hermes setup gateway'",
+            'Настроить мессенджеры сейчас (рекомендуется)',
+            'Пропустить. Настроить позже: `korra setup gateway`.',
         ],
         0,
     )
@@ -3420,11 +3426,11 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
         ensure_gateway_service(context="setup")
 
     print()
-    print_success("Setup complete! You're ready to go.")
+    print_success('Настройка завершена. Можно начинать работу.')
     print()
-    print_info("  Configure all settings:    hermes setup")
+    print_info('  Все настройки: korra setup')
     if gateway_choice != 0:
-        print_info("  Connect Telegram/Discord:  hermes setup gateway")
+        print_info('  Подключить Telegram/Discord: korra setup gateway')
     _print_macos_fda_tip()
     print()
 
@@ -3450,12 +3456,12 @@ def _print_macos_fda_tip() -> None:
     except OSError:
         return  # indeterminate — don't nag
     print()
-    print_info("  macOS tip: silence ALL folder permission prompts with one switch —")
-    print_info("  System Settings → Privacy & Security → Full Disk Access → enable")
-    print_info("  your terminal (and Hermes.app if you use Desktop), or run:")
+    print_info('  Подсказка для macOS: чтобы убрать запросы доступа к папкам,')
+    print_info('  откройте «Системные настройки» → «Конфиденциальность и безопасность» → «Полный доступ к диску».')
+    print_info('  Разрешите доступ вашему терминалу и настольному приложению Korra. Открыть этот раздел командой:')
     print_info("    open \"x-apple.systempreferences:com.apple.preference"
                ".security?Privacy_AllFiles\"")
-    print_info("  The grant is permanent — it survives every Korra update.")
+    print_info('  Разрешение сохраняется после обновления Korra.')
 
 
 def _blank_slate_minimal_toolsets(config: dict):
@@ -3554,25 +3560,25 @@ def _run_blank_slate_setup(config: dict, hermes_home, is_existing: bool):
     """
 
     print()
-    print_header("Blank Slate Setup")
-    print_info("Everything starts OFF. First we force-enable only what's required")
-    print_info("to run an agent, then you choose whether to stop there or walk")
-    print_info("through enabling more — opting in to exactly what you want.")
+    print_header('Минимальная настройка')
+    print_info('По умолчанию всё отключено. Сначала включим только необходимое')
+    print_info('для работы агента, затем вы решите, завершить настройку')
+    print_info('или подключить дополнительные возможности.')
     print_info("")
-    print_info("Forced on: Provider & Model, File Operations, Terminal, Vision, Skills.")
-    print_info("Everything else (web, browser, code exec, memory,")
-    print_info("delegation, cron, plugins, MCP, …) starts disabled. The")
-    print_info("essential `hermes-agent` skill is always kept so the agent")
-    print_info("can help you drive and configure Korra itself.")
+    print_info('Обязательно включены: модель, работа с файлами, терминал, анализ изображений и навыки.')
+    print_info('Остальное — интернет, браузер, выполнение кода, память,')
+    print_info('помощники, расписание, плагины, MCP — пока отключено.')
+    print_info('Базовый навык управления Коррой сохраняется,')
+    print_info('чтобы агент помогал вам пользоваться системой и настраивать её.')
     print()
 
     # ── Step 1: Provider & Model (REQUIRED — the agent cannot run without it) ──
-    print_header("Step 1 — Provider & Model (required)")
+    print_header('Шаг 1 — провайдер и модель (обязательно)')
     setup_model_provider(config)
     save_config(config)
 
     # ── Step 2: Terminal backend (where commands run — a core decision) ──
-    print_header("Step 2 — Terminal Backend")
+    print_header('Шаг 2 — среда выполнения команд')
     setup_terminal_backend(config)
 
     # ── Step 3: Lock in the minimal toolset + minimized config knobs ──
@@ -3580,18 +3586,18 @@ def _run_blank_slate_setup(config: dict, hermes_home, is_existing: bool):
     _blank_slate_minimize_config(config)
     save_config(config)
     print()
-    print_success("Minimal baseline applied:")
-    print_info("  Toolsets: file, terminal, vision, skills (everything else off)")
-    print_info("  Compression, memory, checkpoints, smart routing: off")
+    print_success('Применён минимальный набор:')
+    print_info('  Инструменты: файлы, терминал, изображения, навыки. Остальные отключены.')
+    print_info('  Сжатие, память, контрольные точки и выбор модели: отключены.')
 
     # ── The fork: stop here, or walk through enabling things ──
     print()
-    print_header("How far do you want to go?")
+    print_header('Продолжить настройку?')
     path = prompt_choice(
-        "Your minimal agent is ready. What next?",
+        'Минимальный агент готов. Что дальше?',
         [
-            "Start with everything disabled — finish now (most minimal)",
-            "Walk through all configurations — opt in to tools, skills, plugins, MCP",
+            'Завершить сейчас с минимальным набором',
+            'Пройти все разделы: инструменты, навыки, плагины, MCP',
         ],
         0,
     )
@@ -3608,13 +3614,13 @@ def _run_blank_slate_setup(config: dict, hermes_home, is_existing: bool):
         except Exception as exc:
             logger.debug("blank-slate skill opt-out error: %s", exc)
         print()
-        print_success("Blank Slate setup complete — minimal agent ready.")
-        print_info("Enable anything later, on demand:")
-        print_info("  Enable tools:        hermes tools")
-        print_info("  Seed skills:         hermes skills opt-in --sync")
-        print_info("  Add MCP servers:     hermes mcp add")
-        print_info("  Enable plugins:      hermes plugins")
-        print_info("  Tune agent settings: hermes setup agent")
+        print_success('Минимальная настройка завершена. Агент готов.')
+        print_info('Остальное можно включить позже:')
+        print_info('  Инструменты: korra tools')
+        print_info('  Навыки: korra skills opt-in --sync')
+        print_info('  Серверы MCP: korra mcp add')
+        print_info('  Плагины: korra plugins')
+        print_info('  Настройки агента: korra setup agent')
         print()
         _print_setup_summary(config, hermes_home)
         return
@@ -3629,10 +3635,10 @@ def _blank_slate_walkthrough(config: dict, hermes_home):
 
     # ── Bundled skills — default to NONE, offer to seed all ──
     print()
-    print_header("Bundled Skills")
-    print_info("Blank Slate ships with NO bundled skills by default.")
+    print_header('Встроенные навыки')
+    print_info('При минимальной настройке дополнительные встроенные навыки не устанавливаются.')
     seed_skills = prompt_yes_no(
-        "Seed the full bundled skill catalog? (No = start with zero skills)",
+        'Добавить полный каталог встроенных навыков? (Нет — оставить минимальный набор)',
         default=False,
     )
     try:
@@ -3642,27 +3648,27 @@ def _blank_slate_walkthrough(config: dict, hermes_home):
             set_bundled_skills_opt_out(False)
             result = sync_skills(quiet=True)
             copied = len(result.get("copied", [])) if isinstance(result, dict) else 0
-            print_success(f"Seeded {copied} bundled skills.")
+            print_success(f'Добавлено встроенных навыков: {copied}.')
         else:
             set_bundled_skills_opt_out(True)
             # Essential skills (the `hermes-agent` operating manual) are
             # still seeded even for an opted-out profile.
             sync_skills(quiet=True)
-            print_info("No skills seeded (except the essential `hermes-agent`")
-            print_info("skill). A .no-bundled-skills marker keeps future")
-            print_info("`hermes update` runs from re-injecting them. Opt back in any")
-            print_info("time with `hermes skills opt-in --sync`.")
+            print_info('Дополнительные навыки не добавлены. Базовый навык управления Коррой')
+            print_info('сохранён. Маркер .no-bundled-skills защищает от установки')
+            print_info('навыков при обновлениях `korra update`. Чтобы вернуть полный каталог,')
+            print_info('выполните `korra skills opt-in --sync`.')
     except Exception as exc:
         logger.debug("blank-slate skill handling error: %s", exc)
-        print_warning(f"Skill setup step encountered an error: {exc}")
+        print_warning(f'Ошибка настройки навыков: {exc}')
 
     # ── Walk through enabling additional tools ──
     print()
-    print_header("Tools")
-    print_info("Pick exactly which additional toolsets to turn on.")
-    print_info("(file and terminal are already on; leave the rest off if you want")
-    print_info(" the most minimal agent.)")
-    if prompt_yes_no("Open the tool selector to enable more tools?", default=False):
+    print_header('Инструменты')
+    print_info('Выберите дополнительные инструменты.')
+    print_info('Работа с файлами и терминал уже включены. Остальное')
+    print_info('можно оставить отключённым.')
+    if prompt_yes_no('Открыть выбор дополнительных инструментов?', default=False):
         try:
             from korra_cli.tools_config import tools_command
             tools_command(first_install=False, config=config)
@@ -3672,39 +3678,39 @@ def _blank_slate_walkthrough(config: dict, hermes_home):
             config.update(_refreshed)
         except Exception as exc:
             logger.debug("blank-slate tools_command error: %s", exc)
-            print_warning(f"Tool selector encountered an error: {exc}")
+            print_warning(f'Ошибка выбора инструментов: {exc}')
     else:
-        print_info("Keeping the minimal toolset. Add tools later with `hermes tools`.")
+        print_info('Сохранён минимальный набор инструментов. Добавить инструменты: `korra tools`.')
 
     # ── Built-in plugins (off unless chosen) ──
     print()
-    print_header("Plugins")
-    if prompt_yes_no("Review and enable built-in plugins now?", default=False):
-        print_info("Manage plugins with `hermes plugins list` / `hermes plugins install`.")
+    print_header('Плагины')
+    if prompt_yes_no('Выбрать и включить встроенные плагины сейчас?', default=False):
+        print_info('Управление плагинами: `korra plugins list` / `korra plugins install`.')
     else:
-        print_info("No plugins enabled. Add later with `hermes plugins`.")
+        print_info('Плагины не включены. Добавить позже: `korra plugins`.')
 
     # ── MCP servers (off unless chosen) ──
     print()
-    print_header("MCP Servers")
-    if prompt_yes_no("Add an MCP server now?", default=False):
-        print_info("Add servers with `hermes mcp add <name> --url ... | --command ...`.")
+    print_header('Серверы MCP')
+    if prompt_yes_no('Добавить сервер MCP сейчас?', default=False):
+        print_info('Добавить сервер: `korra mcp add <имя> --url ... | --command ...`.')
     else:
-        print_info("No MCP servers configured. Add later with `hermes mcp add`.")
+        print_info('Серверы MCP не настроены. Добавить позже: `korra mcp add`.')
 
     # ── Optional messaging gateway ──
     print()
-    if prompt_yes_no("Connect a messaging platform (Telegram, Discord, …)?", default=False):
+    if prompt_yes_no('Подключить мессенджер (Telegram, Discord и т. д.)?', default=False):
         setup_gateway(config)
 
     save_config(config)
 
     print()
-    print_success("Blank Slate setup complete — minimal agent ready.")
-    print_info("  Enable more tools:   hermes tools")
-    print_info("  Seed skills:         hermes skills opt-in --sync")
-    print_info("  Add MCP servers:     hermes mcp add")
-    print_info("  Tune agent settings: hermes setup agent")
+    print_success('Минимальная настройка завершена. Агент готов.')
+    print_info('  Подключить инструменты: korra tools')
+    print_info('  Добавить навыки: korra skills opt-in --sync')
+    print_info('  Добавить сервер MCP: korra mcp add')
+    print_info('  Настроить агента: korra setup agent')
     print()
 
     _print_setup_summary(config, hermes_home)
@@ -3719,7 +3725,7 @@ def _run_quick_setup(config: dict, hermes_home):
     )
 
     print()
-    print_header("Quick Setup — Missing Items Only")
+    print_header('Быстрая настройка — только недостающие параметры')
 
     # Check what's missing
     missing_required = [
@@ -3739,16 +3745,16 @@ def _run_quick_setup(config: dict, hermes_home):
     )
 
     if not has_anything_missing:
-        print_success("Everything is configured! Nothing to do.")
+        print_success('Всё настроено. Дополнительных действий не требуется.')
         print()
-        print_info("Run 'hermes setup' and choose 'Full Setup' to reconfigure,")
-        print_info("or pick a specific section from the menu.")
+        print_info('Чтобы настроить заново, запустите `korra setup` и выберите полную настройку')
+        print_info('или отдельный раздел меню.')
         return
 
     # Handle missing required env vars
     if missing_required:
         print()
-        print_info(f"{len(missing_required)} required setting(s) missing:")
+        print_info(f'Не заполнено обязательных настроек: {len(missing_required)}.')
         for var in missing_required:
             print(f"     • {var['name']}")
         print()
@@ -3758,7 +3764,7 @@ def _run_quick_setup(config: dict, hermes_home):
             print(color(f"  {var['name']}", Colors.CYAN))
             print_info(f"  {var.get('description', '')}")
             if var.get("url"):
-                print_info(f"  Get key at: {var['url']}")
+                print_info(f"  Получить ключ: {var['url']}")
 
             if var.get("password"):
                 value = prompt(f"  {var.get('prompt', var['name'])}", password=True)
@@ -3767,9 +3773,9 @@ def _run_quick_setup(config: dict, hermes_home):
 
             if value:
                 save_env_value(var["name"], value)
-                print_success(f"  Saved {var['name']}")
+                print_success(f"  Сохранено: {var['name']}")
             else:
-                print_warning(f"  Skipped {var['name']}")
+                print_warning(f"  Пропущено: {var['name']}")
 
     # Split missing optional vars by category
     missing_tools = [v for v in missing_optional if v.get("category") == "tool"]
@@ -3782,7 +3788,7 @@ def _run_quick_setup(config: dict, hermes_home):
     # ── Tool API keys (checklist) ──
     if missing_tools:
         print()
-        print_header("Tool API Keys")
+        print_header('Ключи API инструментов')
 
         checklist_labels = []
         for var in missing_tools:
@@ -3791,7 +3797,7 @@ def _run_quick_setup(config: dict, hermes_home):
             checklist_labels.append(f"{var.get('description', var['name'])}{tools_str}")
 
         selected_indices = prompt_checklist(
-            "Which tools would you like to configure?",
+            'Какие инструменты настроить?',
             checklist_labels,
         )
 
@@ -3802,9 +3808,9 @@ def _run_quick_setup(config: dict, hermes_home):
     # ── Messaging platforms (checklist then prompt for selected) ──
     if missing_messaging:
         print()
-        print_header("Messaging Platforms")
-        print_info("Connect Korra to messaging apps to chat from anywhere.")
-        print_info("You can configure these later with 'hermes setup gateway'.")
+        print_header('Мессенджеры')
+        print_info('Подключите мессенджеры, чтобы общаться с Коррой откуда угодно.')
+        print_info('Можно настроить позже: `korra setup gateway`.')
 
         # Group by platform (preserving order)
         platform_order = []
@@ -3833,7 +3839,7 @@ def _run_quick_setup(config: dict, hermes_home):
         ]
 
         selected_indices = prompt_checklist(
-            "Which platforms would you like to set up?",
+            'Какие платформы подключить?',
             platform_labels,
         )
 
@@ -3854,19 +3860,19 @@ def _run_quick_setup(config: dict, hermes_home):
                     value = prompt(f"  {var.get('prompt', var['name'])}")
                 if value:
                     save_env_value(var["name"], value)
-                    print_success("  ✓ Saved")
+                    print_success('  ✓ Сохранено')
                 else:
-                    print_warning("  Skipped")
+                    print_warning('  Пропущено')
                 print()
 
     # Handle missing config fields
     if missing_config:
         print()
         print_info(
-            f"Adding {len(missing_config)} new config option(s) with defaults..."
+            f'Добавляю новые параметры со значениями по умолчанию: {len(missing_config)}…'
         )
         for field in missing_config:
-            print_success(f"  Added {field['key']} = {field['default']}")
+            print_success(f"  Добавлено: {field['key']} = {field['default']}")
 
         # Update config version
         config["_config_version"] = latest_ver

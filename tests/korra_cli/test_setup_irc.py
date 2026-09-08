@@ -177,7 +177,7 @@ class TestIRCGatewaySetupFreshInstall:
 
             # Find the platform-selection prompt
             platform_prompt = next(
-                (c for c in checklist_calls if "platform" in c["question"].lower()),
+                (c for c in checklist_calls if "платформ" in c["question"].lower()),
                 None,
             )
             assert platform_prompt is not None, \
@@ -185,7 +185,7 @@ class TestIRCGatewaySetupFreshInstall:
             choices_text = "\n".join(platform_prompt["choices"])
             assert "IRC" in choices_text
             assert "💬" in choices_text
-            assert "not configured" in choices_text.lower()
+            assert "не настроено" in choices_text.lower()
         finally:
             _unregister_irc_platform()
 
@@ -223,6 +223,6 @@ class TestIRCGatewaySetupFreshInstall:
             setup_mod.setup_gateway({})
 
             out = capsys.readouterr().out
-            assert "Messaging platforms configured!" in out
+            assert "Мессенджеры настроены!" in out
         finally:
             _unregister_irc_platform()

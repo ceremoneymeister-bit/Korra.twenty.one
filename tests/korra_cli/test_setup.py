@@ -136,9 +136,9 @@ def test_modal_setup_persists_direct_mode_when_user_chooses_their_own_account(tm
     config = load_config()
 
     def fake_prompt_choice(question, choices, default=0):
-        if question == "Select terminal backend:":
+        if question == "Выберите среду выполнения:":
             return 2
-        if question == "Select how Modal execution should be billed:":
+        if question == "Как оплачивать выполнение команд в Modal?":
             return 1
         raise AssertionError(f"Unexpected prompt_choice call: {question}")
 
@@ -181,7 +181,7 @@ def test_vercel_setup_configures_access_token_auth(tmp_path, monkeypatch):
     config = load_config()
 
     def fake_prompt_choice(question, choices, default=0):
-        if question == "Select terminal backend:":
+        if question == "Выберите среду выполнения:":
             return 5
         raise AssertionError(f"Unexpected prompt_choice call: {question}")
 
@@ -222,7 +222,7 @@ def test_vercel_setup_prefills_project_and_team_from_link_file(tmp_path, monkeyp
     config["terminal"]["container_disk"] = 999
 
     def fake_prompt_choice(question, choices, default=0):
-        if question == "Select terminal backend:":
+        if question == "Выберите среду выполнения:":
             return 5
         raise AssertionError(f"Unexpected prompt_choice call: {question}")
 
@@ -248,5 +248,5 @@ def test_vercel_setup_prefills_project_and_team_from_link_file(tmp_path, monkeyp
     assert os.environ["VERCEL_TOKEN"] == "token"
     assert os.environ["VERCEL_PROJECT_ID"] == "linked-project"
     assert os.environ["VERCEL_TEAM_ID"] == "linked-team"
-    assert defaults["    Vercel project ID"] == "linked-project"
-    assert defaults["    Vercel team ID"] == "linked-team"
+    assert defaults["    ID проекта Vercel"] == "linked-project"
+    assert defaults["    ID команды Vercel"] == "linked-team"

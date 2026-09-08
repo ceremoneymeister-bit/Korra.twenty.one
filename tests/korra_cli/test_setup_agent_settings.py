@@ -30,7 +30,7 @@ def test_setup_agent_settings_uses_displayed_max_iterations_value(tmp_path, monk
     setup_agent_settings(config)
 
     out = capsys.readouterr().out
-    assert "Press Enter to keep 60." in out
+    assert "Нажмите Enter, чтобы оставить 60." in out
     assert "Default is 90" not in out
 
 
@@ -72,7 +72,7 @@ def test_setup_agent_settings_prefers_config_over_stale_env(tmp_path, monkeypatc
 
     out = capsys.readouterr().out
     # Config value wins
-    assert "Press Enter to keep 500." in out
-    assert "Press Enter to keep 60." not in out
+    assert "Нажмите Enter, чтобы оставить 500." in out
+    assert "Нажмите Enter, чтобы оставить 60." not in out
     # And the stale .env entry gets cleaned up
     assert "HERMES_MAX_ITERATIONS" in removed_keys

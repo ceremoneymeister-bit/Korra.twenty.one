@@ -60,7 +60,7 @@ def test_setup_yes_no_uses_navigable_menu(monkeypatch):
     finally:
         setup_mod._SETUP_NAVIGATION.reset(token)
 
-    assert calls == [("Enable it?", ["Yes", "No"], 0)]
+    assert calls == [("Enable it?", ["Да", "Нет"], 0)]
 
 
 def test_setup_steps_move_to_previous_section_or_restart_current_section():
@@ -217,3 +217,10 @@ def test_prompt_choice_uses_curses_helper(monkeypatch):
     idx = setup_mod.prompt_choice("Pick one", ["a", "b", "c"], default=0)
 
     assert idx == 1
+
+
+@pytest.mark.parametrize("answer, expected", [("да", True), ("Д", True), ("нет", False), ("Н", False), ("yes", True), ("n", False)])
+def test_setup_yes_no_accepts_russian_and_legacy_answers(monkeypatch, answer, expected):
+    monkeypatch.setattr(setup_mod, "is_noninteractive", lambda: False)
+    monkeypatch.setattr("builtins.input", lambda *_args: answer)
+    assert setup_mod.prompt_yes_no("Продолжить?", default=not expected) is expected
