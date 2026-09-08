@@ -1721,7 +1721,7 @@ class TestProviderEnabledRuntimeGate:
         cfg_mod._cached_config = None  # type: ignore[attr-defined]
 
         from korra_cli.runtime_provider import resolve_runtime_provider
-        with pytest.raises(ValueError, match="disabled"):
+        with pytest.raises(ValueError, match="отключён"):
             resolve_runtime_provider(requested="my-fork")
 
 

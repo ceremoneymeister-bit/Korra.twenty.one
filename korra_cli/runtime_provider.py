@@ -1971,7 +1971,7 @@ def resolve_runtime_provider(
         token, base_url = get_vertex_config()
         if not token or not base_url:
             raise AuthError(
-                "Не удалось получить доступ к Vertex AI. Здесь используется OAuth2: укажите JSON-файл сервисной учётной записи через GOOGLE_APPLICATION_CREDENTIALS (или VERTEX_CREDENTIALS_PATH) в .env профиля Korra либо выполните 'gcloud auth application-default login'. Если проект и регион GCP не указаны в файле доступа, задайте их в разделе vertex файла config.yaml. Поддержку Vertex можно установить через `korra setup`."
+                "Не удалось получить доступ к Vertex AI. Здесь используется OAuth2; постоянный API-ключ не подходит: укажите JSON-файл сервисной учётной записи через GOOGLE_APPLICATION_CREDENTIALS (или VERTEX_CREDENTIALS_PATH) в .env профиля Korra либо выполните 'gcloud auth application-default login'. Если проект и регион GCP не указаны в файле доступа, задайте их в разделе vertex файла config.yaml. Поддержку Vertex можно установить через `korra setup`."
             )
         return {
             "provider": "vertex",

@@ -88,7 +88,7 @@ def test_prompt_model_selection_uses_line_editor_for_custom_model(monkeypatch):
     monkeypatch.setattr(
         "korra_cli.cli_output.line_input",
         lambda prompt_text: (
-            "vendor/edited-model" if prompt_text == "Enter model name: " else ""
+            "vendor/edited-model" if prompt_text == "Введите название модели: " else ""
         ),
     )
 
@@ -105,7 +105,7 @@ def test_prompt_model_selection_fallback_uses_line_editor_for_custom_model(
     monkeypatch.setattr(
         "korra_cli.cli_output.line_input",
         lambda prompt_text: (
-            "vendor/edited-model" if prompt_text == "Enter model name: " else ""
+            "vendor/edited-model" if prompt_text == "Введите название модели: " else ""
         ),
     )
 

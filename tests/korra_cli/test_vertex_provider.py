@@ -26,7 +26,7 @@ def test_resolve_runtime_provider_raises_autherror_when_unresolved(monkeypatch):
         rp.resolve_runtime_provider(requested="vertex")
     msg = str(exc.value)
     assert "OAuth2" in msg
-    assert "not a static API key" in msg
+    assert "постоянный API-ключ не подходит" in msg
 
 
 def test_vertex_registered_in_provider_registry():
