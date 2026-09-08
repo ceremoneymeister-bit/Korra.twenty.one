@@ -335,7 +335,7 @@ def normalize_profile_name(name: str) -> str:
         name = str(name)
     stripped = name.strip()
     if not stripped:
-        raise ValueError("profile name cannot be empty")
+        raise ValueError('имя профиля не может быть пустым')
     if stripped.casefold() == "default":
         return "default"
     return stripped.lower()
@@ -360,14 +360,11 @@ def validate_profile_name(name: str) -> None:
         return  # special alias for ~/.hermes
     if not _PROFILE_ID_RE.match(name):
         raise ValueError(
-            f"Invalid profile name {name!r}. Must match "
-            f"[a-z0-9][a-z0-9_-]{{0,63}}"
+            f'Неверное имя профиля {name!r}. Допустимый формат: [a-z0-9][a-z0-9_-]{{0,63}}'
         )
     if name in _RESERVED_NAMES:
         raise ValueError(
-            f"Profile name {name!r} is reserved — it collides with either "
-            f"the Korra installation itself or a common system binary.  "
-            f"Pick a different name."
+            f'Имя профиля {name!r} занято системой Korra или системной командой. Выберите другое имя.'
         )
 
 
@@ -382,8 +379,7 @@ def validate_alias_name(name: str) -> None:
     """
     if not _PROFILE_ID_RE.match(name):
         raise ValueError(
-            f"Invalid alias name {name!r}. Must match "
-            f"[a-z0-9][a-z0-9_-]{{0,63}}"
+            f'Неверное имя короткой команды {name!r}. Допустимый формат: [a-z0-9][a-z0-9_-]{{0,63}}'
         )
 
 
@@ -471,9 +467,9 @@ def check_alias_collision(name: str) -> Optional[str]:
     except ValueError as exc:
         return str(exc)
     if canon in _RESERVED_NAMES:
-        return f"'{canon}' is a reserved name"
+        return f"Имя '{canon}' зарезервировано"
     if canon in _HERMES_SUBCOMMANDS:
-        return f"'{canon}' conflicts with a hermes subcommand"
+        return f"Имя '{canon}' совпадает с подкомандой Korra"
 
     # Check existing commands in PATH
     wrapper_dir = _get_wrapper_dir()
@@ -494,7 +490,7 @@ def check_alias_collision(name: str) -> Optional[str]:
                         return None  # it's our wrapper, safe to overwrite
                 except Exception:
                     pass
-            return f"'{canon}' conflicts with an existing command ({existing_path})"
+            return f"Имя '{canon}' совпадает с существующей командой ({existing_path})"
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
 
@@ -526,7 +522,7 @@ def create_wrapper_script(name: str, target: Optional[str] = None) -> Optional[P
     try:
         wrapper_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        print(f"⚠ Could not create {wrapper_dir}: {e}")
+        print(f'⚠ Не удалось создать {wrapper_dir}: {e}')
         return None
 
     is_windows = sys.platform == "win32"
@@ -536,7 +532,7 @@ def create_wrapper_script(name: str, target: Optional[str] = None) -> Optional[P
             wrapper_path.write_text(f"@echo off\r\nhermes -p {profile} %*\r\n", encoding="utf-8")
             return wrapper_path
         except OSError as e:
-            print(f"⚠ Could not create wrapper at {wrapper_path}: {e}")
+            print(f'⚠ Не удалось создать команду запуска {wrapper_path}: {e}')
             return None
     else:
         wrapper_path = wrapper_dir / canon
@@ -546,7 +542,7 @@ def create_wrapper_script(name: str, target: Optional[str] = None) -> Optional[P
             wrapper_path.chmod(wrapper_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
             return wrapper_path
         except OSError as e:
-            print(f"⚠ Could not create wrapper at {wrapper_path}: {e}")
+            print(f'⚠ Не удалось создать команду запуска {wrapper_path}: {e}')
             return None
 
 
@@ -969,9 +965,9 @@ def _seed_runtime_credentials(profile_dir: Path, source_dir: Path) -> None:
                     selected[key] = value
 
         lines = [
-            "# Per-profile secrets for this Korra profile.",
-            "# Runtime credentials below were copied at profile creation.",
-            "# Channel and unrelated tool credentials remain isolated.",
+            '# Секреты этого профиля Korra.',
+            '# Данные входа ниже скопированы при создании профиля.',
+            '# Ключи мессенджеров и остальных инструментов остаются изолированными.',
         ]
         lines.extend(
             f"{key}={_quote_env_value(value)}" for key, value in selected.items()
@@ -985,9 +981,7 @@ def _seed_runtime_credentials(profile_dir: Path, source_dir: Path) -> None:
         # Preserve the isolation contract with a credential-free placeholder.
         try:
             env_path.write_text(
-                "# Per-profile secrets for this Korra profile.\n"
-                "# API keys and tokens set here override the shell environment.\n"
-                "# Behavioral settings belong in config.yaml, not here.\n",
+                '# Секреты этого профиля Korra.\n# Ключи и токены из этого файла имеют приоритет над переменными оболочки.\n# Настройки поведения задавайте в config.yaml.\n',
                 encoding="utf-8",
             )
             os.chmod(str(env_path), 0o600)
@@ -1218,7 +1212,7 @@ def write_profile_meta(
     Profile directory itself must exist.
     """
     if not profile_dir.is_dir():
-        raise FileNotFoundError(f"profile directory does not exist: {profile_dir}")
+        raise FileNotFoundError(f'папка профиля не существует: {profile_dir}')
     import yaml
     path = _profile_yaml_path(profile_dir)
     existing: dict = {}
@@ -1270,10 +1264,10 @@ def set_profile_display_name(profile_name: str, display_name: str) -> str:
     validate_profile_name(canon)
     profile_dir = get_profile_dir(canon)
     if not profile_dir.is_dir():
-        raise FileNotFoundError(f"Profile '{canon}' does not exist.")
+        raise FileNotFoundError(f"Профиль '{canon}' не существует.")
     cleaned = (display_name or "").strip()
     if len(cleaned) > 64:
-        raise ValueError(f"Display name too long ({len(cleaned)} chars, max 64).")
+        raise ValueError(f'Название слишком длинное: {len(cleaned)} символов, допустимо не больше 64.')
     write_profile_meta(profile_dir, display_name=cleaned)
     return cleaned
 
@@ -1475,8 +1469,7 @@ def create_profile(
     """
     if no_skills and (clone_from is not None or clone_config or clone_all):
         raise ValueError(
-            "--no-skills is mutually exclusive with --clone / --clone-from / --clone-all "
-            "(cloning explicitly copies skills from the source profile)."
+            '--no-skills нельзя сочетать с --clone, --clone-from или --clone-all: копирование профиля включает его навыки.'
         )
     canon = normalize_profile_name(name)
     validate_profile_name(canon)
@@ -1485,7 +1478,7 @@ def create_profile(
 
     if canon == "default":
         raise ValueError(
-            "Cannot create a profile named 'default' — it is the built-in profile (~/.hermes)."
+            "Нельзя создать профиль 'default': это встроенный основной профиль Korra."
         )
 
     profile_dir = get_profile_dir(canon)
@@ -1493,10 +1486,10 @@ def create_profile(
         # Empty shells left by post-delete mkdir may be replaced. Identity
         # files mean the leftover is not a shell — fail closed, no rmtree.
         if (profile_dir / "config.yaml").exists() or (profile_dir / ".env").exists():
-            raise FileExistsError(f"Profile '{canon}' already exists at {profile_dir}")
+            raise FileExistsError(f"Профиль '{canon}' уже существует: {profile_dir}")
         shutil.rmtree(profile_dir)
     if profile_dir.exists():
-        raise FileExistsError(f"Profile '{canon}' already exists at {profile_dir}")
+        raise FileExistsError(f"Профиль '{canon}' уже существует: {profile_dir}")
     clear_named_profile_deleted(profile_dir)
 
     # Resolve clone source
@@ -1513,7 +1506,7 @@ def create_profile(
             source_dir = get_profile_dir(clone_from)
         if not source_dir.is_dir():
             raise FileNotFoundError(
-                f"Source profile '{clone_from or 'active'}' does not exist at {source_dir}"
+                f"Исходный профиль '{clone_from or 'текущий'}' не найден: {source_dir}"
             )
 
     if clone_all and source_dir:
@@ -1586,9 +1579,7 @@ def create_profile(
     elif not env_path.exists():
         try:
             env_path.write_text(
-                "# Per-profile secrets for this Korra profile.\n"
-                "# API keys and tokens set here override the shell environment.\n"
-                "# Behavioral settings belong in config.yaml, not here.\n",
+                '# Секреты этого профиля Korra.\n# Ключи и токены из этого файла имеют приоритет над переменными оболочки.\n# Настройки поведения задавайте в config.yaml.\n',
                 encoding="utf-8",
             )
             os.chmod(str(env_path), 0o600)
@@ -1629,9 +1620,7 @@ def create_profile(
     if no_skills:
         try:
             (profile_dir / NO_BUNDLED_SKILLS_MARKER).write_text(
-                "This profile opted out of bundled-skill seeding "
-                "(`hermes profile create --no-skills`).\n"
-                "Delete this file to re-enable sync on the next `hermes update`.\n",
+                'Для этого профиля отключена установка встроенных навыков (`korra profile create --no-skills`).\nЧтобы вернуть синхронизацию при следующем `korra update`, удалите этот файл.\n',
                 encoding="utf-8",
             )
         except OSError:
@@ -1701,17 +1690,17 @@ def seed_profile_skills(profile_dir: Path, quiet: bool = False) -> Optional[dict
         if result.returncode == 0 and result.stdout.strip():
             return json.loads(result.stdout.strip())
         if not quiet:
-            print(f"⚠ Skill seeding returned exit code {result.returncode}")
+            print(f'⚠ Установка навыков завершилась с кодом {result.returncode}')
             if result.stderr.strip():
                 print(f"  {result.stderr.strip()[:200]}")
         return None
     except subprocess.TimeoutExpired:
         if not quiet:
-            print("⚠ Skill seeding timed out (60s)")
+            print('⚠ Установка навыков не завершилась за 60 с')
         return None
     except Exception as e:
         if not quiet:
-            print(f"⚠ Skill seeding failed: {e}")
+            print(f'⚠ Не удалось установить навыки: {e}')
         return None
 
 
@@ -1755,16 +1744,14 @@ def backfill_profile_envs(quiet: bool = False) -> List[str]:
                 shutil.copy2(default_env, env_path)
             else:
                 env_path.write_text(
-                    "# Per-profile secrets for this Korra profile.\n"
-                    "# API keys and tokens set here override the shell environment.\n"
-                    "# Behavioral settings belong in config.yaml, not here.\n",
+                    '# Секреты этого профиля Korra.\n# Ключи и токены из этого файла имеют приоритет над переменными оболочки.\n# Настройки поведения задавайте в config.yaml.\n',
                     encoding="utf-8",
                 )
             os.chmod(str(env_path), 0o600)
             backfilled.append(entry.name)
         except OSError as e:
             if not quiet:
-                print(f"⚠ Could not seed .env for profile '{entry.name}': {e}")
+                print(f"⚠ Не удалось подготовить .env для профиля '{entry.name}': {e}")
 
     return backfilled
 
@@ -1956,7 +1943,7 @@ def _stop_profile_backends(canon: str, profile_dir: Path) -> None:
             except (ProcessLookupError, PermissionError, OSError):
                 pass
 
-    print(f"✓ Stopped {len(pids)} profile backend process(es)")
+    print(f'✓ Остановлено процессов профиля: {len(pids)}')
 
 
 def _rmtree_with_retry(profile_dir: Path, onexc_handler) -> None:
@@ -2002,13 +1989,12 @@ def delete_profile(name: str, yes: bool = False) -> Path:
 
     if canon == "default":
         raise ValueError(
-            "Cannot delete the default profile (~/.hermes).\n"
-            "To remove everything, use: hermes uninstall"
+            'Нельзя удалить основной профиль Korra.\nДля полного удаления используйте: korra uninstall'
         )
 
     profile_dir = get_profile_dir(canon)
     if not profile_dir.is_dir():
-        raise FileNotFoundError(f"Profile '{canon}' does not exist.")
+        raise FileNotFoundError(f"Профиль '{canon}' не существует.")
 
     # Show what will be deleted
     model, provider = _read_config_model(profile_dir)
@@ -2016,43 +2002,43 @@ def delete_profile(name: str, yes: bool = False) -> Path:
     skill_count = _count_skills(profile_dir)
     dist_name, dist_version, dist_source = _read_distribution_meta(profile_dir)
 
-    print(f"\nProfile: {canon}")
-    print(f"Path:    {profile_dir}")
+    print(f'\nПрофиль: {canon}')
+    print(f'Папка:   {profile_dir}')
     if model:
-        print(f"Model:   {model}" + (f" ({provider})" if provider else ""))
+        print(f'Модель:  {model}' + (f" ({provider})" if provider else ""))
     if skill_count:
-        print(f"Skills:  {skill_count}")
+        print(f'Навыки:  {skill_count}')
     if dist_name:
-        print(f"Distribution: {dist_name}@{dist_version or '?'}")
+        print(f"Дистрибутив: {dist_name}@{dist_version or '?'}")
         if dist_source:
-            print(f"Installed from: {dist_source}")
+            print(f'Источник установки: {dist_source}')
 
     items = [
-        "All config, API keys, memories, sessions, skills, cron jobs",
+        'Все настройки, ключи, память, беседы, навыки и задачи по расписанию',
     ]
 
     # Check for service
     wrapper_path = _get_wrapper_dir() / canon
     has_wrapper = wrapper_path.exists()
     if has_wrapper:
-        items.append(f"Command alias ({wrapper_path})")
+        items.append(f'Короткая команда запуска ({wrapper_path})')
 
-    print("\nThis will permanently delete:")
+    print('\nБудет удалено безвозвратно:')
     for item in items:
         print(f"  • {item}")
     if gw_running:
-        print("  ⚠ Gateway is running — it will be stopped.")
+        print('  ⚠ Шлюз работает и будет остановлен.')
 
     # Confirmation
     if not yes:
         print()
         try:
-            confirm = input(f"Type '{canon}' to confirm: ").strip()
+            confirm = input(f"Для подтверждения введите '{canon}': ").strip()
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print('\nОтменено.')
             return profile_dir
         if confirm != canon:
-            print("Cancelled.")
+            print('Отменено.')
             return profile_dir
 
     # 1. Disable service (prevents auto-restart)
@@ -2089,14 +2075,14 @@ def delete_profile(name: str, yes: bool = False) -> Path:
 
         _released = _MemoryStore.release_all_under(profile_dir)
         if _released:
-            print(f"✓ Released {_released} memory-store connection(s) held by this process")
+            print(f'✓ Закрыто подключений к хранилищу памяти: {_released}')
     except Exception:
         pass  # best-effort: never block the delete on the release path
 
     # 3. Remove wrapper script
     if has_wrapper:
         if remove_wrapper_script(canon):
-            print(f"✓ Removed {wrapper_path}")
+            print(f'✓ Удалено: {wrapper_path}')
 
     # 4. Remove profile directory
     remove_error: Exception | None = None
@@ -2139,9 +2125,9 @@ def delete_profile(name: str, yes: bool = False) -> Path:
                 raise
 
         _rmtree_with_retry(profile_dir, _make_writable)
-        print(f"✓ Removed {profile_dir}")
+        print(f'✓ Удалено: {profile_dir}')
     except Exception as e:
-        print(f"⚠ Could not remove {profile_dir}: {e}")
+        print(f'⚠ Не удалось удалить {profile_dir}: {e}')
         remove_error = e
 
     # 5. Clear active_profile if it pointed to this profile
@@ -2149,14 +2135,14 @@ def delete_profile(name: str, yes: bool = False) -> Path:
         active = get_active_profile()
         if active == canon:
             set_active_profile("default")
-            print("✓ Active profile reset to default")
+            print('✓ Активным снова выбран основной профиль')
     except Exception:
         pass
 
     if remove_error is not None:
-        raise RuntimeError(f"Could not remove profile directory {profile_dir}: {remove_error}") from remove_error
+        raise RuntimeError(f'Не удалось удалить папку профиля {profile_dir}: {remove_error}') from remove_error
 
-    print(f"\nProfile '{canon}' deleted.")
+    print(f"\nПрофиль '{canon}' удалён.")
     return profile_dir
 
 
@@ -2217,7 +2203,7 @@ def _maybe_register_gateway_service(profile_name: str) -> None:
         pass
     except Exception as exc:
         # Don't fail profile create over a supervision-tree hiccup.
-        print(f"⚠ Could not register s6 gateway service: {exc}")
+        print(f'⚠ Не удалось зарегистрировать службу шлюза s6: {exc}')
 
 
 def _maybe_unregister_gateway_service(profile_name: str) -> None:
@@ -2244,7 +2230,7 @@ def _maybe_unregister_gateway_service(profile_name: str) -> None:
     try:
         mgr.unregister_profile_gateway(profile_name)
     except Exception as exc:
-        print(f"⚠ Could not unregister s6 gateway service: {exc}")
+        print(f'⚠ Не удалось убрать регистрацию службы шлюза s6: {exc}')
 
 
 def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
@@ -2275,7 +2261,7 @@ def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
                     ["systemctl", "--user", "daemon-reload"],
                     capture_output=True, check=False, timeout=10,
                 )
-                print(f"✓ Service {svc_name} removed")
+                print(f'✓ Служба {svc_name} удалена')
 
         elif _platform.system() == "Darwin":
             plist_path = get_launchd_plist_path()
@@ -2285,9 +2271,9 @@ def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
                     capture_output=True, check=False, timeout=10,
                 )
                 plist_path.unlink(missing_ok=True)
-                print("✓ Launchd service removed")
+                print('✓ Служба launchd удалена')
     except Exception as e:
-        print(f"⚠ Service cleanup: {e}")
+        print(f'⚠ Ошибка удаления службы: {e}')
     finally:
         if old_home is not None:
             korra_env_set(os.environ, "KORRA_HOME", old_home)
@@ -2325,18 +2311,18 @@ def _stop_gateway_process(profile_dir: Path) -> None:
         for _ in range(20):
             _time.sleep(0.5)
             if not _pid_exists(pid):
-                print(f"✓ Gateway stopped (PID {pid})")
+                print(f'✓ Шлюз остановлен (PID {pid})')
                 return
         # Force kill
         try:
             _terminate_pid(pid, force=True, expected_start_time=expected_start_time)
         except (ProcessLookupError, OSError):
             pass
-        print(f"✓ Gateway force-stopped (PID {pid})")
+        print(f'✓ Шлюз остановлен принудительно (PID {pid})')
     except (ProcessLookupError, PermissionError):
-        print("✓ Gateway already stopped")
+        print('✓ Шлюз уже остановлен')
     except Exception as e:
-        print(f"⚠ Could not stop gateway: {e}")
+        print(f'⚠ Не удалось остановить шлюз: {e}')
 
 
 # ---------------------------------------------------------------------------
@@ -2367,8 +2353,7 @@ def set_active_profile(name: str) -> None:
     validate_profile_name(canon)
     if canon != "default" and not profile_exists(canon):
         raise FileNotFoundError(
-            f"Profile '{canon}' does not exist. "
-            f"Create it with: hermes profile create {canon}"
+            f"Профиль '{canon}' не существует. Создать: korra profile create {canon}"
         )
 
     path = _get_active_profile_path()
@@ -2542,7 +2527,7 @@ def export_profile(name: str, output_path: str, extra_files: Optional[Dict[str, 
     validate_profile_name(canon)
     profile_dir = get_profile_dir(canon)
     if not profile_dir.is_dir():
-        raise FileNotFoundError(f"Profile '{canon}' does not exist.")
+        raise FileNotFoundError(f"Профиль '{canon}' не существует.")
 
     output = Path(output_path)
     # Archive base name without extension (.tar.gz appended by the writer).
@@ -2598,19 +2583,18 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
 
     archive = Path(archive_path)
     if not archive.exists():
-        raise FileNotFoundError(f"Archive not found: {archive}")
+        raise FileNotFoundError(f'Архив не найден: {archive}')
 
     top_dirs = archive_root_dirs(archive)
     archive_root = top_dirs.pop() if len(top_dirs) == 1 else None
     inferred_name = name or archive_root
     if not inferred_name:
         raise ValueError(
-            "Cannot determine profile name from archive. "
-            "Specify it explicitly: hermes profile import <archive> --name <name>"
+            'Не удалось определить имя профиля из архива. Укажите его: korra profile import <архив> --name <имя>'
         )
     if archive_root is None:
         raise ValueError(
-            "Profile archive must contain exactly one top-level directory."
+            'В архиве профиля должна быть ровно одна корневая папка.'
         )
 
     # Archives exported from the default profile have "default/" as top-level
@@ -2620,13 +2604,12 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
     validate_profile_name(canon)
     if canon == "default":
         raise ValueError(
-            "Cannot import as 'default' — that is the built-in root profile (~/.hermes). "
-            "Specify a different name: hermes profile import <archive> --name <name>"
+            "Нельзя импортировать в 'default': это основной профиль Korra. Выберите другое имя: korra profile import <архив> --name <имя>"
         )
 
     profile_dir = get_profile_dir(canon)
     if profile_dir.exists():
-        raise FileExistsError(f"Profile '{canon}' already exists at {profile_dir}")
+        raise FileExistsError(f"Профиль '{canon}' уже существует: {profile_dir}")
 
     profiles_root = _get_profiles_root()
     profiles_root.mkdir(parents=True, exist_ok=True)
@@ -2638,7 +2621,7 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
         extracted = staging_root / archive_root
         if not extracted.is_dir():
             raise ValueError(
-                f"Profile archive root is missing or invalid: {archive_root}"
+                f'Корневая папка архива отсутствует или некорректна: {archive_root}'
             )
 
         final_source = extracted
@@ -2690,7 +2673,7 @@ def _migrate_honcho_profile_host(old_name: str, new_name: str, new_dir: Path) ->
             continue
 
         if new_host in hosts:
-            print(f"⚠ Honcho host block not migrated: {new_host} already exists in {path}")
+            print(f'⚠ Настройки Honcho не перенесены: {new_host} уже есть в {path}')
             continue
 
         block = hosts[source_host]
@@ -2712,7 +2695,7 @@ def _migrate_honcho_profile_host(old_name: str, new_name: str, new_dir: Path) ->
                 pass
             continue
 
-        print(f"✓ Honcho host updated: {source_host} → {new_host}")
+        print(f'✓ Подключение Honcho обновлено: {source_host} → {new_host}')
 
 
 def rename_profile(old_name: str, new_name: str) -> Path:
@@ -2730,24 +2713,24 @@ def rename_profile(old_name: str, new_name: str) -> Path:
 
     if old_canon == "default":
         if not (new_name or "").strip():
-            raise ValueError("Display name cannot be empty.")
+            raise ValueError('Отображаемое название не может быть пустым.')
         cleaned = set_profile_display_name("default", new_name)
-        print(f"✓ Display name set: {cleaned} (canonical id remains 'default')")
+        print(f"✓ Название изменено: {cleaned}. Внутренний ID остаётся 'default'.")
         return _get_default_hermes_home()
 
     new_canon = normalize_profile_name(new_name)
     validate_profile_name(new_canon)
 
     if new_canon == "default":
-        raise ValueError("Cannot rename to 'default' — it is reserved.")
+        raise ValueError("Нельзя переименовать в 'default': это зарезервированное имя.")
 
     old_dir = get_profile_dir(old_canon)
     new_dir = get_profile_dir(new_canon)
 
     if not old_dir.is_dir():
-        raise FileNotFoundError(f"Profile '{old_canon}' does not exist.")
+        raise FileNotFoundError(f"Профиль '{old_canon}' не существует.")
     if new_dir.exists():
-        raise FileExistsError(f"Profile '{new_canon}' already exists.")
+        raise FileExistsError(f"Профиль '{new_canon}' уже существует.")
 
     # 1. Stop gateway if running
     if _check_gateway_running(old_dir):
@@ -2756,7 +2739,7 @@ def rename_profile(old_name: str, new_name: str) -> Path:
 
     # 2. Rename directory
     old_dir.rename(new_dir)
-    print(f"✓ Renamed {old_dir.name} → {new_dir.name}")
+    print(f'✓ Переименовано: {old_dir.name} → {new_dir.name}')
 
     # 3. Update profile-scoped Honcho host blocks, preserving aiPeer identity
     _migrate_honcho_profile_host(old_canon, new_canon, new_dir)
@@ -2766,15 +2749,15 @@ def rename_profile(old_name: str, new_name: str) -> Path:
     collision = check_alias_collision(new_canon)
     if not collision:
         create_wrapper_script(new_canon)
-        print(f"✓ Alias updated: {new_canon}")
+        print(f'✓ Короткая команда обновлена: {new_canon}')
     else:
-        print(f"⚠ Cannot create alias '{new_canon}' — {collision}")
+        print(f"⚠ Нельзя создать короткую команду '{new_canon}': {collision}")
 
     # 5. Update active_profile if it pointed to old name
     try:
         if get_active_profile() == old_canon:
             set_active_profile(new_canon)
-            print(f"✓ Active profile updated: {new_canon}")
+            print(f'✓ Активный профиль обновлён: {new_canon}')
     except Exception:
         pass
 
@@ -2815,8 +2798,7 @@ def resolve_profile_env(profile_name: str) -> str:
 
     if not profile_dir.is_dir() or named_profile_is_deleted(profile_dir):
         raise FileNotFoundError(
-            f"Profile '{canon}' does not exist. "
-            f"Create it with: hermes profile create {canon}"
+            f"Профиль '{canon}' не существует. Создать: korra profile create {canon}"
         )
 
     return str(profile_dir)

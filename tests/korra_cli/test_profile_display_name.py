@@ -76,7 +76,7 @@ class TestRenameDefault:
         assert rename_profile("default", "Harumesu") == profile_env
         assert profile_env.is_dir()  # directory untouched
         assert read_profile_meta(profile_env)["display_name"] == "Harumesu"
-        assert "canonical id remains 'default'" in capsys.readouterr().out
+        assert "Внутренний ID остаётся 'default'" in capsys.readouterr().out
 
     def test_reflected_in_list_profiles(self, profile_env):
         rename_profile("default", "Harumesu")
@@ -94,7 +94,7 @@ class TestRenameDefault:
 
     def test_rename_to_default_still_reserved(self, profile_env):
         create_profile("worker", no_alias=True)
-        with pytest.raises(ValueError, match="reserved"):
+        with pytest.raises(ValueError, match="зарезервированное"):
             rename_profile("worker", "default")
 
     def test_named_rename_still_real_and_keeps_display_name(

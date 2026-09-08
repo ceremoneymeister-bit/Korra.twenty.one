@@ -60,8 +60,8 @@ def test_sessions_export_md_writes_single_session(monkeypatch, tmp_path, capsys)
         "exported": "20260706_123456_abcd1234",
         "closed": True,
     }
-    assert "Exported 1 session" in output
-    assert "1 message" in output
+    assert "Одна беседа экспортирована" in output
+    assert "сообщений: 1" in output
     assert str(files[0]) in output
 
 

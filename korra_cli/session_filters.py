@@ -63,9 +63,7 @@ def parse_point_in_time(value: str, flag: str) -> float:
         dt = datetime.fromisoformat(s)
     except ValueError:
         raise ValueError(
-            f"Invalid value for {flag}: '{value}'. Use a duration like '5h', "
-            f"'30m', '2d', '1w', a bare number of days, or an ISO timestamp "
-            f"like '2026-07-05' or '2026-07-05 14:30'."
+            f"Неверное значение {flag}: '{value}'. Укажите срок вида '5h', '30m', '2d', '1w', число дней или дату ISO, например '2026-07-05' или '2026-07-05 14:30'."
         ) from None
     if dt.tzinfo is None:
         return dt.timestamp()
@@ -134,9 +132,7 @@ def build_prune_filters(args: Any) -> Dict[str, Any]:
         and started_after >= started_before
     ):
         raise ValueError(
-            "Empty start-time window: the --after bound "
-            f"({format_epoch(started_after)}) is not earlier than the "
-            f"--before bound ({format_epoch(started_before)})."
+            f"Пустой диапазон начала беседы: --after ({format_epoch(started_after)}) должен быть раньше --before ({format_epoch(started_before)})."
         )
     if (
         last_active_before is not None
@@ -144,9 +140,7 @@ def build_prune_filters(args: Any) -> Dict[str, Any]:
         and last_active_after >= last_active_before
     ):
         raise ValueError(
-            "Empty activity window: the --newer-than bound "
-            f"({format_epoch(last_active_after)}) is not earlier than the "
-            f"--older-than bound ({format_epoch(last_active_before)})."
+            f"Пустой диапазон активности: --newer-than ({format_epoch(last_active_after)}) должен быть раньше --older-than ({format_epoch(last_active_before)})."
         )
 
     filters: Dict[str, Any] = {
@@ -185,50 +179,50 @@ def describe_filters(filters: Dict[str, Any]) -> str:
     parts = []
     if filters.get("last_active_before") is not None:
         parts.append(
-            f"last active before {format_epoch(filters['last_active_before'])}"
+            f"активность до {format_epoch(filters['last_active_before'])}"
         )
     if filters.get("last_active_after") is not None:
         parts.append(
-            f"last active after {format_epoch(filters['last_active_after'])}"
+            f"активность после {format_epoch(filters['last_active_after'])}"
         )
     if filters.get("started_before") is not None:
-        parts.append(f"started before {format_epoch(filters['started_before'])}")
+        parts.append(f"начало до {format_epoch(filters['started_before'])}")
     if filters.get("started_after") is not None:
-        parts.append(f"started after {format_epoch(filters['started_after'])}")
+        parts.append(f"начало после {format_epoch(filters['started_after'])}")
     if filters.get("source"):
-        parts.append(f"source '{filters['source']}'")
+        parts.append(f"источник '{filters['source']}'")
     if filters.get("title_like"):
-        parts.append(f"title contains '{filters['title_like']}'")
+        parts.append(f"название содержит '{filters['title_like']}'")
     if filters.get("end_reason"):
-        parts.append(f"end reason '{filters['end_reason']}'")
+        parts.append(f"причина завершения '{filters['end_reason']}'")
     if filters.get("cwd_prefix"):
-        parts.append(f"cwd under '{filters['cwd_prefix']}'")
+        parts.append(f"папка внутри '{filters['cwd_prefix']}'")
     if filters.get("min_messages") is not None:
-        parts.append(f">= {filters['min_messages']} messages")
+        parts.append(f"сообщений >= {filters['min_messages']}")
     if filters.get("max_messages") is not None:
-        parts.append(f"<= {filters['max_messages']} messages")
+        parts.append(f"сообщений <= {filters['max_messages']}")
     if filters.get("model_like"):
-        parts.append(f"model contains '{filters['model_like']}'")
+        parts.append(f"модель содержит '{filters['model_like']}'")
     if filters.get("provider"):
-        parts.append(f"provider '{filters['provider']}'")
+        parts.append(f"провайдер '{filters['provider']}'")
     if filters.get("user_id"):
-        parts.append(f"user '{filters['user_id']}'")
+        parts.append(f"пользователь '{filters['user_id']}'")
     if filters.get("chat_id"):
-        parts.append(f"chat '{filters['chat_id']}'")
+        parts.append(f"чат '{filters['chat_id']}'")
     if filters.get("chat_type"):
-        parts.append(f"chat type '{filters['chat_type']}'")
+        parts.append(f"тип чата '{filters['chat_type']}'")
     if filters.get("branch_like"):
-        parts.append(f"git branch contains '{filters['branch_like']}'")
+        parts.append(f"ветка Git содержит '{filters['branch_like']}'")
     if filters.get("min_tokens") is not None:
-        parts.append(f">= {filters['min_tokens']} tokens")
+        parts.append(f"токенов >= {filters['min_tokens']}")
     if filters.get("max_tokens") is not None:
-        parts.append(f"<= {filters['max_tokens']} tokens")
+        parts.append(f"токенов <= {filters['max_tokens']}")
     if filters.get("min_cost") is not None:
         parts.append(f">= ${filters['min_cost']}")
     if filters.get("max_cost") is not None:
         parts.append(f"<= ${filters['max_cost']}")
     if filters.get("min_tool_calls") is not None:
-        parts.append(f">= {filters['min_tool_calls']} tool calls")
+        parts.append(f"вызовов инструментов >= {filters['min_tool_calls']}")
     if filters.get("max_tool_calls") is not None:
-        parts.append(f"<= {filters['max_tool_calls']} tool calls")
-    return ", ".join(parts) if parts else "no filters (all ended sessions)"
+        parts.append(f"вызовов инструментов <= {filters['max_tool_calls']}")
+    return ", ".join(parts) if parts else "без фильтров (все завершённые беседы)"

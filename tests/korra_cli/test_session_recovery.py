@@ -546,8 +546,8 @@ def test_cli_allow_partial_salvages_rows_across_a_corrupt_leaf(
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Partial recovery output verified" in result.stdout
-    assert "active session database was not changed" in result.stdout
+    assert "Проверена частично восстановленная база" in result.stdout
+    assert "Текущая база бесед не изменена" in result.stdout
     assert _sha256(source) == source_hash
 
     report_path = output.with_name(output.name + ".recovery.json")

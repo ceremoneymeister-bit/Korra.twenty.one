@@ -390,7 +390,7 @@ class TestDeleteProfile:
         with patch("korra_cli.profiles._cleanup_gateway_service"), \
              patch("korra_cli.profiles.time.sleep"), \
              patch("korra_cli.profiles.shutil.rmtree", side_effect=PermissionError("locked")):
-            with pytest.raises(RuntimeError, match="Could not remove profile directory"):
+            with pytest.raises(RuntimeError, match="Не удалось удалить папку профиля"):
                 delete_profile("coder", yes=True)
 
         assert profile_dir.is_dir()
@@ -682,7 +682,7 @@ class TestAliasCollision:
         with patch("subprocess.run") as mock_run:
             result = check_alias_collision("../../.bashrc")
         assert result is not None
-        assert "invalid alias name" in result.lower()
+        assert "неверное имя короткой команды" in result.lower()
         mock_run.assert_not_called()
 
 
@@ -732,14 +732,14 @@ class TestWrapperScriptSecurity:
     def test_create_wrapper_rejects_traversal(self, profile_env):
         sentinel = profile_env / ".bashrc"
         sentinel.write_text("keep", encoding="utf-8")
-        with pytest.raises(ValueError, match="Invalid alias name"):
+        with pytest.raises(ValueError, match="Неверное имя короткой команды"):
             create_wrapper_script("../../.bashrc", target="coder")
         # The traversal target was not touched.
         assert sentinel.read_text(encoding="utf-8") == "keep"
 
     def test_create_wrapper_rejects_absolute_path(self, profile_env, tmp_path):
         target = tmp_path / "abs-wrapper"
-        with pytest.raises(ValueError, match="Invalid alias name"):
+        with pytest.raises(ValueError, match="Неверное имя короткой команды"):
             create_wrapper_script(str(target))
         assert not target.exists()
 

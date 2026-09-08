@@ -36,7 +36,7 @@ def test_sessions_delete_accepts_unique_id_prefix(monkeypatch, capsys):
         "deleted": "20260315_092437_c9a6ff",
         "closed": True,
     }
-    assert "Deleted session '20260315_092437_c9a6ff'." in output
+    assert "Беседа '20260315_092437_c9a6ff' удалена." in output
 
 
 def _run_prune(monkeypatch, capsys, argv_tail, candidates=None, skipped_open=0):
@@ -109,9 +109,9 @@ def test_sessions_prune_preview_shows_oldest_newest(monkeypatch, capsys):
     from korra_cli.session_filters import format_epoch
 
     _filters, out = _run_prune(monkeypatch, capsys, ["--source", "cron"])
-    assert "2 session(s) match" in out
-    assert f"oldest activity {format_epoch(1_600_000_050.0)}" in out
-    assert f"newest activity {format_epoch(1_700_000_050.0)}" in out
+    assert "Найдено бесед: 2" in out
+    assert f"активность с {format_epoch(1_600_000_050.0)}" in out
+    assert f"по {format_epoch(1_700_000_050.0)}" in out
 
 
 def test_sessions_prune_surfaces_matching_open_sessions(monkeypatch, capsys):
@@ -123,7 +123,7 @@ def test_sessions_prune_surfaces_matching_open_sessions(monkeypatch, capsys):
         skipped_open=2,
     )
 
-    assert "2 open sessions also match these filters" in out
-    assert "prune only deletes ended sessions" in out
-    assert "hermes sessions delete <id>" in out
-    assert "No sessions match" in out
+    assert "Открытые беседы (2) также подходят под фильтр" in out
+    assert "prune удаляет только завершённые" in out
+    assert "korra sessions delete <ID>" in out
+    assert "Нет бесед по выбранным условиям" in out

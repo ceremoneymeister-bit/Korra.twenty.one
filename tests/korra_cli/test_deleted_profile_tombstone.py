@@ -113,9 +113,9 @@ class TestDeletedProfileTombstone:
         profile_dir.mkdir(parents=True)
 
         assert profile_exists("worker") is False
-        with pytest.raises(FileNotFoundError, match="does not exist"):
+        with pytest.raises(FileNotFoundError, match="не существует"):
             set_active_profile("worker")
-        with pytest.raises(FileNotFoundError, match="does not exist"):
+        with pytest.raises(FileNotFoundError, match="не существует"):
             resolve_profile_env("worker")
 
     def test_backfill_skips_tombstoned_directory(self, profile_env):
@@ -151,7 +151,7 @@ class TestDeletedProfileTombstone:
         leftover_path = profile_dir / leftover
         leftover_path.write_text("keep-me\n", encoding="utf-8")
 
-        with pytest.raises(FileExistsError, match="already exists"):
+        with pytest.raises(FileExistsError, match="уже существует"):
             create_profile("worker", no_alias=True, no_skills=True)
 
         assert leftover_path.read_text(encoding="utf-8") == "keep-me\n"
