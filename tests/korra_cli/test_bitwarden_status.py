@@ -54,9 +54,9 @@ def test_status_surfaces_failed_token_validation(monkeypatch, capsys):
     assert secrets_cli.cmd_status(Namespace()) == 0
 
     out = capsys.readouterr().out
-    assert "Token in env" in out
-    assert "Token validation" in out
-    assert "failed" in out
+    assert "Токен в окружении" in out
+    assert "Проверка токена" in out
+    assert "ошибка" in out
     assert "Doesn't contain a decryption key" in out
     assert "wrong or revoked" in out
     assert seen == {
@@ -86,9 +86,9 @@ def test_status_warns_when_token_does_not_look_like_bsm_token(monkeypatch, capsy
     assert secrets_cli.cmd_status(Namespace()) == 0
 
     out = capsys.readouterr().out
-    assert "Token validation" in out
-    assert "passed" in out
-    assert "doesn't start with '0.'" in out
+    assert "Проверка токена" in out
+    assert "пройдено" in out
+    assert "не начинается с '0.'" in out
 
 
 def test_status_marks_validation_as_not_checked_without_bws_binary(monkeypatch, capsys):
@@ -105,6 +105,6 @@ def test_status_marks_validation_as_not_checked_without_bws_binary(monkeypatch, 
     assert secrets_cli.cmd_status(Namespace()) == 0
 
     out = capsys.readouterr().out
-    assert "Token validation" in out
-    assert "not checked" in out
-    assert "bws not installed" in out
+    assert "Проверка токена" in out
+    assert "не проверен" in out
+    assert "bws не установлен" in out

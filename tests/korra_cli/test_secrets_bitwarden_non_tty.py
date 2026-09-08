@@ -42,12 +42,12 @@ class TestCmdSetupNonTtyGuard:
         ))
         assert result == 1
         captured = capsys.readouterr()
-        # The "Missing:" line should list --access-token only
-        assert "Missing:" in captured.out
+        # В строке «Не указаны» должен быть только --access-token.
+        assert "Не указаны:" in captured.out
         assert "--access-token" in captured.out
         # The usage example contains --server-url and --project-id, so check
         # the missing line specifically: it should NOT list them as missing
-        missing_line = [l for l in captured.out.split("\n") if "Missing:" in l][0]
+        missing_line = [l for l in captured.out.split("\n") if "Не указаны:" in l][0]
         assert "--access-token" in missing_line
         assert "--server-url" not in missing_line
         assert "--project-id" not in missing_line
@@ -77,5 +77,4 @@ class TestCmdSetupNonTtyGuard:
             project_id="aaaa-bbbb",
         ))
         assert result == 0
-
 

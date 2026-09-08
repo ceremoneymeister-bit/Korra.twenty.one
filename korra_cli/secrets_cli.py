@@ -155,29 +155,29 @@ def cmd_setup(args: argparse.Namespace) -> int:
     console = Console()
     console.print(
         Panel.fit(
-            "[bold]Bitwarden Secrets Manager setup[/bold]\n\n"
-            "Need an access token? In the Bitwarden web app:\n"
+            "[bold]Настройка Bitwarden Secrets Manager[/bold]\n\n"
+            "Токен доступа создаётся в приложении Bitwarden:\n"
             "  Secrets Manager → Machine accounts → [your account] →\n"
             "  Access tokens → Create access token\n\n"
-            "Copy the token (starts with [cyan]0.[/cyan]…) — it cannot be retrieved later.",
+            "Скопируйте токен, начинающийся с [cyan]0.[/cyan]… Позже его нельзя будет посмотреть.",
             border_style="cyan",
         )
     )
 
     # ------------------------------------------------------------------ binary
     console.print()
-    console.print("[bold]Step 1[/bold]  Install the bws CLI")
+    console.print("[bold]Шаг 1[/bold]  Установка bws CLI")
     try:
         binary = bw.find_bws(install_if_missing=False)
         if binary is None:
-            console.print("  No bws on PATH — downloading…")
+            console.print("  bws не найден в PATH; загружаю…")
             binary = bw.install_bws()
         version = _bws_version(binary)
         console.print(f"  [green]✓[/green] {binary}  ({version})")
     except Exception as exc:  # noqa: BLE001
-        console.print(f"  [red]✗ Could not install bws: {exc}[/red]")
+        console.print(f"  [red]✗ Не удалось установить bws: {exc}[/red]")
         console.print(
-            "  Manual install: "
+            "  Установить вручную: "
             "https://github.com/bitwarden/sdk-sm/releases"
         )
         return 1
@@ -195,10 +195,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
             missing.append("--project-id")
         if missing:
             console.print(
-                f"  [red]Non-interactive mode (no TTY) requires all setup flags.[/red]\n"
-                f"  Missing: {', '.join(missing)}\n\n"
-                "  Usage:\n"
-                "    hermes secrets bitwarden setup \\\n"
+                f"  [red]Для запуска без TTY укажите все параметры настройки.[/red]\n"
+                f"  Не указаны: {', '.join(missing)}\n\n"
+                "  Использование:\n"
+                "    korra secrets bitwarden setup \\\n"
                 "      --access-token '0.xxx' \\\n"
                 "      --server-url 'https://vault.bitwarden.com' \\\n"
                 "      --project-id 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'"
@@ -207,7 +207,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     # ------------------------------------------------------------------- token
     console.print()
-    console.print("[bold]Step 2[/bold]  Provide your access token")
+    console.print("[bold]Шаг 2[/bold]  Токен доступа")
     cfg = load_config()
     secrets_cfg = (cfg.setdefault("secrets", {})
                      .setdefault("bitwarden", {}))
@@ -215,31 +215,31 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     token = (args.access_token or "").strip()
     if not token:
-        token = masked_secret_prompt(f"  Paste access token ({token_env}): ").strip()
+        token = masked_secret_prompt(f"  Вставьте токен доступа ({token_env}): ").strip()
     if not token:
-        console.print("  [red]Empty token, aborting.[/red]")
+        console.print("  [red]Токен пуст. Настройка отменена.[/red]")
         return 1
     if not token.startswith("0."):
         console.print(
-            "  [yellow]Warning: token doesn't start with '0.' — usually that means "
-            "you pasted something other than a BSM access token.  Continuing anyway.[/yellow]"
+            "  [yellow]Внимание: токен не начинается с '0.'. Возможно, это не токен BSM; "
+            "продолжаю по вашему выбору.[/yellow]"
         )
 
     save_env_value(token_env, token)
     os.environ[token_env] = token  # so the test fetch below sees it
-    console.print(f"  [green]✓[/green] stored in {get_env_path()} as {token_env}")
+    console.print(f"  [green]✓[/green] сохранён в {get_env_path()} как {token_env}")
 
     # ------------------------------------------------------------------ region
     console.print()
-    console.print("[bold]Step 3[/bold]  Pick a Bitwarden region")
+    console.print("[bold]Шаг 3[/bold]  Регион Bitwarden")
     server_url = _resolve_server_url(args, secrets_cfg, console)
     if server_url is None:
         return 1
     if server_url:
-        console.print(f"  [green]✓[/green] using {server_url}")
+        console.print(f"  [green]✓[/green] используется {server_url}")
     else:
         console.print(
-            "  [green]✓[/green] using bws default "
+            "  [green]✓[/green] используются настройки bws по умолчанию "
             "(US Cloud, https://vault.bitwarden.com)"
         )
 
@@ -248,45 +248,45 @@ def cmd_setup(args: argparse.Namespace) -> int:
         project_id = args.project_id.strip()
     else:
         console.print()
-        console.print("[bold]Step 4[/bold]  Pick a project")
+        console.print("[bold]Шаг 4[/bold]  Выбор проекта")
         project_id = ""
         projects = _list_projects(binary, token, console, server_url=server_url)
         if projects is None:
             return 1
         if not projects:
-            console.print("  [yellow]No projects visible to this machine account.[/yellow]")
+            console.print("  [yellow]Этому машинному аккаунту не доступны проекты.[/yellow]")
             console.print(
-                "  In the Bitwarden web app, open the machine account → Projects tab "
-                "and grant it access to at least one project."
+                "  В приложении Bitwarden откройте машинный аккаунт → Projects и "
+                "дайте ему доступ хотя бы к одному проекту."
             )
             return 1
 
         table = Table(show_header=True, header_style="bold")
         table.add_column("#", style="cyan", width=4)
-        table.add_column("Name")
+        table.add_column("Название")
         table.add_column("ID", style="dim")
         for i, p in enumerate(projects, 1):
             table.add_row(str(i), p.get("name", "?"), p.get("id", "?"))
         console.print(table)
 
         while True:
-            choice = console.input(f"  Select project [1-{len(projects)}]: ").strip()
+            choice = console.input(f"  Выберите проект [1-{len(projects)}]: ").strip()
             if not choice:
                 continue
             try:
                 idx = int(choice)
             except ValueError:
-                console.print("  [red]Enter a number.[/red]")
+                console.print("  [red]Введите номер.[/red]")
                 continue
             if 1 <= idx <= len(projects):
                 project_id = projects[idx - 1]["id"]
                 break
-            console.print(f"  [red]Out of range — pick 1-{len(projects)}.[/red]")
+            console.print(f"  [red]Выберите номер от 1 до {len(projects)}.[/red]")
 
     # ------------------------------------------------------------------- test
     console.print()
     step_num = 5 if not (args.project_id and args.project_id.strip()) else 4
-    console.print(f"[bold]Step {step_num}[/bold]  Test fetch")
+    console.print(f"[bold]Шаг {step_num}[/bold]  Проверка загрузки")
     try:
         secrets, warnings = bw.fetch_bitwarden_secrets(
             access_token=token,
@@ -296,26 +296,26 @@ def cmd_setup(args: argparse.Namespace) -> int:
             server_url=server_url,
         )
     except Exception as exc:  # noqa: BLE001
-        console.print(f"  [red]✗ Fetch failed: {exc}[/red]")
+        console.print(f"  [red]✗ Не удалось загрузить секреты: {exc}[/red]")
         return 1
 
     if not secrets:
-        console.print("  [yellow]Fetch succeeded but the project has no secrets.[/yellow]")
+        console.print("  [yellow]Загрузка прошла успешно, но в проекте нет секретов.[/yellow]")
     else:
         table = Table(show_header=True, header_style="bold")
-        table.add_column("Name", style="cyan")
-        table.add_column("Status")
+        table.add_column("Название", style="cyan")
+        table.add_column("Состояние")
         for key in sorted(secrets):
             if key == token_env:
-                status = "[dim]bootstrap token — never overrides itself[/dim]"
+                status = "[dim]служебный токен; сам себя не заменяет[/dim]"
             elif os.environ.get(key):
-                status = "[yellow]already set in env (will be overwritten)[/yellow]"
+                status = "[yellow]уже задан в окружении; будет заменён[/yellow]"
             else:
-                status = "[green]new[/green]"
+                status = "[green]новый[/green]"
             table.add_row(key, status)
         console.print(table)
     for w in warnings:
-        console.print(f"  [yellow]warning:[/yellow] {w}")
+        console.print(f"  [yellow]предупреждение:[/yellow] {w}")
 
     # ------------------------------------------------------------------- save
     secrets_cfg["enabled"] = True
@@ -329,13 +329,13 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     console.print()
     console.print(
-        "[green]✓ Bitwarden Secrets Manager is enabled.[/green]  "
-        "Secrets will be pulled at the start of every Korra process."
+        "[green]✓ Bitwarden Secrets Manager включён.[/green] "
+        "Секреты будут загружаться при запуске каждого процесса Korra."
     )
     console.print(
-        "  Status:  [cyan]hermes secrets bitwarden status[/cyan]\n"
-        "  Refresh: [cyan]hermes secrets bitwarden sync[/cyan]\n"
-        "  Disable: [cyan]hermes secrets bitwarden disable[/cyan]"
+        "  Состояние: [cyan]korra secrets bitwarden status[/cyan]\n"
+        "  Обновить:   [cyan]korra secrets bitwarden sync[/cyan]\n"
+        "  Выключить:  [cyan]korra secrets bitwarden disable[/cyan]"
     )
     return 0
 
@@ -363,39 +363,39 @@ def cmd_status(args: argparse.Namespace) -> int:
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("", style="bold")
     table.add_column("")
-    table.add_row("Enabled",         _yn(enabled))
-    table.add_row("Token env var",   token_env)
-    table.add_row("Token in env",    _yn(token_set))
-    table.add_row("Token validation", token_validation)
-    table.add_row("Project ID",      project_id or "[dim](unset)[/dim]")
+    table.add_row("Включено",          _yn(enabled))
+    table.add_row("Переменная токена", token_env)
+    table.add_row("Токен в окружении", _yn(token_set))
+    table.add_row("Проверка токена",    token_validation)
+    table.add_row("ID проекта",         project_id or "[dim](не задан)[/dim]")
     table.add_row(
-        "Server URL",
-        server_url or "[dim]default (US Cloud, https://vault.bitwarden.com)[/dim]",
+        "Адрес сервера",
+        server_url or "[dim]по умолчанию: US Cloud, https://vault.bitwarden.com[/dim]",
     )
-    table.add_row("Override existing", _yn(bool(bw_cfg.get("override_existing", False))))
-    table.add_row("Cache TTL (s)",   str(bw_cfg.get("cache_ttl_seconds", 300)))
-    table.add_row("Auto-install",    _yn(bool(bw_cfg.get("auto_install", True))))
+    table.add_row("Заменять существующие", _yn(bool(bw_cfg.get("override_existing", False))))
+    table.add_row("Время кеша, с", str(bw_cfg.get("cache_ttl_seconds", 300)))
+    table.add_row("Автоустановка", _yn(bool(bw_cfg.get("auto_install", True))))
 
     if binary:
         table.add_row("bws binary",  f"{binary} ({_bws_version(binary)})")
     else:
-        table.add_row("bws binary",  "[yellow]not installed[/yellow]")
+        table.add_row("Программа bws", "[yellow]не установлена[/yellow]")
 
     console.print(Panel(table, title="Bitwarden Secrets Manager", border_style="cyan"))
     for message in validation_messages:
         console.print(message)
 
     if not enabled:
-        console.print("\n  Run [cyan]hermes secrets bitwarden setup[/cyan] to enable.")
+        console.print("\n  Для включения выполните [cyan]korra secrets bitwarden setup[/cyan].")
         return 0
     if not token_set:
         console.print(
-            f"\n  [yellow]Enabled but {token_env} is not set — Korra will skip BSM "
-            "and warn on next startup.[/yellow]"
+            f"\n  [yellow]Интеграция включена, но {token_env} не задана. "
+            "Korra пропустит BSM и предупредит при следующем запуске.[/yellow]"
         )
     if not project_id:
         console.print(
-            "\n  [yellow]Enabled but no project_id — nothing to fetch.[/yellow]"
+            "\n  [yellow]Интеграция включена, но project_id не задан; загружать нечего.[/yellow]"
         )
     return 0
 
@@ -418,50 +418,47 @@ def cmd_token(args: argparse.Namespace) -> int:
     if not token:
         if not sys.stdin.isatty():
             console.print(
-                "[red]No TTY — pass the token with --access-token.[/red]"
+                "[red]Нет интерактивного терминала; передайте токен через --access-token.[/red]"
             )
             return 1
         console.print(
-            "Create a new token in the Bitwarden web app:\n"
+            "Создайте новый токен в приложении Bitwarden:\n"
             "  Secrets Manager → Machine accounts → [your account] → "
             "Access tokens → Create access token\n"
         )
-        token = masked_secret_prompt(f"Paste new access token ({token_env}): ").strip()
+        token = masked_secret_prompt(f"Вставьте новый токен доступа ({token_env}): ").strip()
     if not token:
-        console.print("[red]Empty token, aborting.[/red]")
+        console.print("[red]Токен пуст; отменено.[/red]")
         return 1
     if not token.startswith("0."):
         console.print(
-            "[yellow]Warning: token doesn't start with '0.' — usually that means "
-            "you pasted something other than a BSM access token.[/yellow]"
+            "[yellow]Внимание: токен не начинается с '0.'. Возможно, это не токен доступа BSM.[/yellow]"
         )
 
     if not args.no_verify:
         binary = bw.find_bws(install_if_missing=True)
         if binary is None:
             console.print(
-                "[red]bws binary not available — cannot verify.  "
-                "Re-run with --no-verify to store anyway.[/red]"
+                "[red]Программа bws недоступна; проверить токен нельзя. "
+                "Чтобы всё равно сохранить его, повторите с --no-verify.[/red]"
             )
             return 1
-        console.print("Verifying against Bitwarden…")
+        console.print("Проверяю токен в Bitwarden…")
         projects = _list_projects(binary, token, console, server_url=server_url)
         if projects is None:
             console.print(
-                "[red]✗ New token was rejected — nothing was changed.[/red]"
+                "[red]✗ Новый токен отклонён; изменения не внесены.[/red]"
             )
             return 1
         console.print(
-            f"[green]✓ Token accepted[/green] "
-            f"({len(projects)} project{'s' if len(projects) != 1 else ''} visible)."
+            f"[green]✓ Токен принят[/green]; доступно проектов: {len(projects)}."
         )
         project_id = str(bw_cfg.get("project_id", "") or "")
         if project_id and projects and project_id not in {p["id"] for p in projects}:
             console.print(
-                f"[yellow]Warning: configured project {project_id} is not visible "
-                "to this machine account.  Grant it access in the Bitwarden web "
-                "app or re-run `hermes secrets bitwarden setup` to pick a "
-                "different project.[/yellow]"
+                f"[yellow]Внимание: проект {project_id} недоступен этому машинному аккаунту. "
+                "Выдайте доступ в Bitwarden или повторите `korra secrets bitwarden setup` "
+                "и выберите другой проект.[/yellow]"
             )
 
     save_env_value(token_env, token)
@@ -470,14 +467,13 @@ def cmd_token(args: argparse.Namespace) -> int:
     # them so the next startup fetches fresh with the new credential.
     bw.clear_caches()
     console.print(
-        f"[green]✓[/green] stored in {get_env_path()} as {token_env}.  "
-        "Takes effect on the next Korra invocation."
+        f"[green]✓[/green] Сохранено в {get_env_path()} как {token_env}. "
+        "Изменение применится при следующем запуске Korra."
     )
     if not bw_cfg.get("enabled"):
         console.print(
-            "[yellow]Note: the Bitwarden integration is currently disabled — "
-            "run `hermes secrets bitwarden setup` (or set "
-            "secrets.bitwarden.enabled: true) to turn it on.[/yellow]"
+            "[yellow]Bitwarden сейчас выключен. Выполните `korra secrets bitwarden setup` "
+            "или задайте secrets.bitwarden.enabled: true.[/yellow]"
         )
     return 0
 
@@ -489,20 +485,20 @@ def cmd_sync(args: argparse.Namespace) -> int:
     bw_cfg = (cfg.get("secrets") or {}).get("bitwarden") or {}
     if not bw_cfg.get("enabled"):
         console.print(
-            "[yellow]Bitwarden integration is disabled.  Run "
-            "`hermes secrets bitwarden setup` first.[/yellow]"
+            "[yellow]Интеграция Bitwarden выключена. Сначала выполните "
+            "`korra secrets bitwarden setup`.[/yellow]"
         )
         return 1
 
     token_env = bw_cfg.get("access_token_env", "BWS_ACCESS_TOKEN")
     token = os.environ.get(token_env, "").strip()
     if not token:
-        console.print(f"[red]{token_env} is not set.[/red]")
+        console.print(f"[red]Переменная {token_env} не задана.[/red]")
         return 1
 
     project_id = bw_cfg.get("project_id", "")
     if not project_id:
-        console.print("[red]No project_id configured.[/red]")
+        console.print("[red]project_id не настроен.[/red]")
         return 1
 
     server_url = str(bw_cfg.get("server_url", "") or "").strip()
@@ -515,45 +511,44 @@ def cmd_sync(args: argparse.Namespace) -> int:
             server_url=server_url,
         )
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Fetch failed: {exc}[/red]")
+        console.print(f"[red]Не удалось загрузить секреты: {exc}[/red]")
         return 1
 
     if not secrets:
-        console.print("[yellow]No secrets in project.[/yellow]")
+        console.print("[yellow]В проекте нет секретов.[/yellow]")
         return 0
 
     override = bool(bw_cfg.get("override_existing", False)) or args.apply
     table = Table(show_header=True, header_style="bold")
-    table.add_column("Name", style="cyan")
-    table.add_column("Action")
+    table.add_column("Название", style="cyan")
+    table.add_column("Действие")
     applied = 0
     for key in sorted(secrets):
         if key == token_env:
-            table.add_row(key, "[dim]skip (bootstrap token)[/dim]")
+            table.add_row(key, "[dim]пропустить: служебный токен[/dim]")
             continue
         already = bool(os.environ.get(key))
         if already and not override:
-            table.add_row(key, "[dim]skip (already set)[/dim]")
+            table.add_row(key, "[dim]пропустить: уже задан[/dim]")
             continue
         if args.apply:
             os.environ[key] = secrets[key]
             applied += 1
-            table.add_row(key, "[green]exported[/green]" + (" (overrode)" if already else ""))
+            table.add_row(key, "[green]добавлен[/green]" + (" (заменён)" if already else ""))
         else:
-            table.add_row(key, "[green]would export[/green]" + (" (overrides)" if already else ""))
+            table.add_row(key, "[green]будет добавлен[/green]" + (" (заменит существующий)" if already else ""))
 
     console.print(table)
     for w in warnings:
-        console.print(f"[yellow]warning:[/yellow] {w}")
+        console.print(f"[yellow]предупреждение:[/yellow] {w}")
 
     if not args.apply:
         console.print(
-            "\n  This was a dry-run — secrets are picked up automatically on the "
-            "next [cyan]hermes[/cyan] invocation.  Re-run with [cyan]--apply[/cyan] "
-            "to export into the current shell instead."
+            "\n  Это была проверка. Секреты автоматически загрузятся при следующем "
+            "запуске [cyan]korra[/cyan]. Для текущего процесса повторите с [cyan]--apply[/cyan]."
         )
     else:
-        console.print(f"\n  [green]Exported {applied} secret(s) into current process.[/green]")
+        console.print(f"\n  [green]В текущий процесс добавлено секретов: {applied}.[/green]")
     return 0
 
 
@@ -565,10 +560,9 @@ def cmd_disable(args: argparse.Namespace) -> int:
     bw_cfg["enabled"] = False
     save_config(cfg)
     console.print(
-        "[green]Disabled.[/green]  Bitwarden secrets will NOT be pulled on the next "
-        "Korra invocation.\n"
-        "  Your access token is left in .env — remove it manually if you also want "
-        "to revoke the credential."
+        "[green]Выключено.[/green] При следующем запуске Korra секреты Bitwarden "
+        "загружаться не будут.\n  Токен доступа оставлен в .env; удалите его вручную, "
+        "если хотите также отозвать учётные данные."
     )
     return 0
 
@@ -581,7 +575,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         console.print(f"[green]✓[/green] {path}  ({_bws_version(path)})")
         return 0
     except Exception as exc:  # noqa: BLE001
-        console.print(f"[red]Install failed: {exc}[/red]")
+        console.print(f"[red]Ошибка установки: {exc}[/red]")
         return 1
 
 
@@ -591,7 +585,7 @@ def cmd_install(args: argparse.Namespace) -> int:
 
 
 def _yn(b: bool) -> str:
-    return "[green]yes[/green]" if b else "[dim]no[/dim]"
+    return "[green]да[/green]" if b else "[dim]нет[/dim]"
 
 
 def _bws_version(binary: Path) -> str:
@@ -606,7 +600,7 @@ def _bws_version(binary: Path) -> str:
             return (res.stdout or res.stderr).strip().splitlines()[0]
     except (OSError, subprocess.TimeoutExpired):
         pass
-    return "version unknown"
+    return "версия неизвестна"
 
 
 def _token_validation_status(
@@ -617,17 +611,16 @@ def _token_validation_status(
     server_url: str = "",
 ) -> tuple[str, list[str]]:
     if not enabled:
-        return "[dim]not checked[/dim] (integration disabled)", []
+        return "[dim]не проверен[/dim] (интеграция выключена)", []
     if not token:
-        return "[dim]not checked[/dim] (token missing)", []
+        return "[dim]не проверен[/dim] (токен отсутствует)", []
     if binary is None:
-        return "[dim]not checked[/dim] (bws not installed)", []
+        return "[dim]не проверен[/dim] (bws не установлен)", []
 
     messages: list[str] = []
     if not token.startswith("0."):
         messages.append(
-            "  [yellow]Warning: token doesn't start with '0.' — usually that means "
-            "you pasted something other than a BSM access token.  Continuing anyway.[/yellow]"
+            "  [yellow]Внимание: токен не начинается с '0.'. Возможно, это не токен BSM.[/yellow]"
         )
 
     capture = io.StringIO()
@@ -637,8 +630,8 @@ def _token_validation_status(
         details = probe_console.export_text(styles=False).strip()
         if details:
             messages.extend(line.rstrip() for line in details.splitlines())
-        return "[red]failed[/red]", messages
-    return "[green]passed[/green]", messages
+        return "[red]ошибка[/red]", messages
+    return "[green]пройдено[/green]", messages
 
 
 def _list_projects(
@@ -662,32 +655,31 @@ def _list_projects(
             timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        console.print(f"  [red]Couldn't list projects: {exc}[/red]")
+        console.print(f"  [red]Не удалось получить список проектов: {exc}[/red]")
         return None
 
     if res.returncode != 0:
         err = (res.stderr or res.stdout).strip()[:300]
-        console.print(f"  [red]bws project list failed: {err}[/red]")
+        console.print(f"  [red]Команда bws project list завершилась с ошибкой: {err}[/red]")
         lowered = err.lower()
         if "invalid_client" in lowered or "400 bad request" in lowered:
             console.print(
-                "  [yellow]'invalid_client' from the US identity endpoint usually "
-                "means the token is for a different Bitwarden region.  Re-run "
-                "[cyan]hermes secrets bitwarden setup[/cyan] and pick EU or "
-                "self-hosted at the region prompt, or set [cyan]secrets.bitwarden."
-                "server_url[/cyan] in config.yaml.[/yellow]"
+                "  [yellow]Ответ 'invalid_client' от американского сервера обычно означает, "
+                "что токен выпущен для другого региона Bitwarden. Повторите "
+                "[cyan]korra secrets bitwarden setup[/cyan] и выберите EU или свой сервер, "
+                "либо задайте [cyan]secrets.bitwarden.server_url[/cyan] в config.yaml.[/yellow]"
             )
         elif "authorization" in lowered or "invalid" in lowered:
             console.print(
-                "  [yellow]This usually means the access token is wrong or revoked. "
-                "Double-check it in the Bitwarden web app.[/yellow]"
+                "  [yellow]Возможно, токен доступа неверен или отозван. "
+                "Проверьте его в приложении Bitwarden.[/yellow]"
             )
         return None
 
     try:
         data = json.loads(res.stdout or "[]")
     except json.JSONDecodeError as exc:
-        console.print(f"  [red]bws returned non-JSON: {exc}[/red]")
+        console.print(f"  [red]bws вернул данные не в формате JSON: {exc}[/red]")
         return None
     if not isinstance(data, list):
         return []
@@ -727,56 +719,56 @@ def _resolve_server_url(
     env_url = os.environ.get("BWS_SERVER_URL", "").strip()
     if env_url:
         console.print(
-            f"  Detected [cyan]BWS_SERVER_URL[/cyan]={env_url} in your shell — using it."
+            f"  В оболочке задано [cyan]BWS_SERVER_URL[/cyan]={env_url}; использую это значение."
         )
         return env_url
 
     existing = str(secrets_cfg.get("server_url", "") or "").strip()
     if existing:
         console.print(
-            f"  Existing config: [cyan]{existing}[/cyan]. "
-            "Press Enter to keep, or pick a different option below."
+            f"  Текущая настройка: [cyan]{existing}[/cyan]. "
+            "Нажмите Enter, чтобы сохранить её, или выберите другой вариант."
         )
 
     table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
     table.add_column("#", style="cyan", width=4)
-    table.add_column("Region / endpoint")
+    table.add_column("Регион или адрес")
     for i, (label, _url) in enumerate(_REGION_PRESETS, 1):
         table.add_row(str(i), label)
-    table.add_row(str(len(_REGION_PRESETS) + 1), "Self-hosted / custom URL")
+    table.add_row(str(len(_REGION_PRESETS) + 1), "Собственный сервер или адрес")
     console.print(table)
 
     custom_idx = len(_REGION_PRESETS) + 1
     while True:
-        prompt = f"  Select region [1-{custom_idx}]"
+        prompt = f"  Выберите регион [1-{custom_idx}]"
         if existing:
-            prompt += " (Enter to keep current)"
+            prompt += " (Enter — сохранить текущий)"
         prompt += ": "
         choice = console.input(prompt).strip()
         if not choice:
             if existing:
                 return existing
-            console.print("  [red]Enter a number.[/red]")
+            console.print("  [red]Введите номер.[/red]")
             continue
         try:
             idx = int(choice)
         except ValueError:
-            console.print("  [red]Enter a number.[/red]")
+            console.print("  [red]Введите номер.[/red]")
             continue
         if 1 <= idx <= len(_REGION_PRESETS):
             return _REGION_PRESETS[idx - 1][1]
         if idx == custom_idx:
             custom = console.input(
-                "  Enter your Bitwarden server URL "
-                "(e.g. https://vault.example.com): "
+                "  Введите адрес сервера Bitwarden, например "
+                "https://vault.example.com: "
             ).strip()
             if not custom:
-                console.print("  [red]Empty URL, aborting.[/red]")
+                console.print("  [red]Адрес пуст; отменено.[/red]")
                 return None
             if not custom.startswith(("http://", "https://")):
                 console.print(
-                    "  [yellow]Warning: URL doesn't start with http:// or "
-                    "https:// — bws may reject it.[/yellow]"
+                    "  [yellow]Внимание: адрес не начинается с http:// или https://; "
+                    "bws может его отклонить.[/yellow]"
                 )
             return custom
-        console.print(f"  [red]Out of range — pick 1-{custom_idx}.[/red]")
+        console.print(f"  [red]Выберите номер от 1 до {custom_idx}.[/red]")
