@@ -46,7 +46,7 @@ class TestHooksList:
     def test_empty_config(self, tmp_path):
         with patch("korra_cli.config.load_config", return_value={}):
             out = _run(SimpleNamespace(hooks_action="list"))
-        assert "No shell hooks or outbound webhooks configured" in out
+        assert "не настроены shell-хуки или исходящие вебхуки" in out
 
     def test_shows_configured_and_consent_status(self, tmp_path):
         script = _hook_script(
@@ -71,8 +71,8 @@ class TestHooksList:
 
         assert "[pre_tool_call]" in out
         assert "[on_session_start]" in out
-        assert "✓ allowed" in out
-        assert "✗ not allowlisted" in out
+        assert "✓ разрешён" in out
+        assert "✗ не разрешён" in out
         assert str(script) in out
 
 
@@ -145,7 +145,8 @@ class TestHooksRevoke:
         shell_hooks._record_approval("on_session_start", str(script))
 
         out = _run(SimpleNamespace(hooks_action="revoke", command=str(script)))
-        assert "Removed 1" in out
+        assert "Удалено разрешений" in out
+        assert out.rstrip().endswith("до перезапуска.")
         assert shell_hooks.allowlist_entry_for(
             "on_session_start", str(script),
         ) is None
@@ -178,7 +179,7 @@ class TestHooksDoctor:
         cfg = {"hooks": {"on_session_start": [{"command": str(script)}]}}
         with patch("korra_cli.config.load_config", return_value=cfg):
             out = _run(SimpleNamespace(hooks_action="doctor"))
-        assert "modified since approval" in out
+        assert "сценарий изменён после подтверждения" in out
 
 
     def test_unallowlisted_script_is_not_executed(self, tmp_path):
@@ -201,5 +202,5 @@ class TestHooksDoctor:
             "doctor executed an un-allowlisted script — "
             "M4 gate regressed"
         )
-        assert "not allowlisted" in out.lower()
-        assert "skipped JSON smoke test" in out
+        assert "не разрешён" in out.lower()
+        assert "проверка JSON пропущена" in out

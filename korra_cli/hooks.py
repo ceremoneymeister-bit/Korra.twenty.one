@@ -28,8 +28,8 @@ def hooks_command(args) -> None:
     sub = getattr(args, "hooks_action", None)
 
     if not sub:
-        print("Usage: hermes hooks {list|test|revoke|doctor}")
-        print("Run 'hermes hooks --help' for details.")
+        print("Использование: korra hooks {list|test|revoke|doctor}")
+        print("Подробности: `korra hooks --help`.")
         return
 
     if sub in {"list", "ls"}:
@@ -41,7 +41,7 @@ def hooks_command(args) -> None:
     elif sub == "doctor":
         _cmd_doctor(args)
     else:
-        print(f"Unknown hooks subcommand: {sub}")
+        print(f"Неизвестная подкоманда hooks: {sub}")
 
 
 # ---------------------------------------------------------------------------
@@ -57,14 +57,14 @@ def _cmd_list(_args) -> None:
     outbound = outbound_webhooks.iter_configured_targets(cfg)
 
     if not specs and not outbound:
-        print("No shell hooks or outbound webhooks configured in ~/.hermes/config.yaml.")
+        print("В config.yaml не настроены shell-хуки или исходящие вебхуки.")
         # Korra: docs-сайт удалён вместе с website/ — не отправляем
         # пользователя к несуществующему файлу.
-        print("See `hermes hooks --help` for the config schema and examples.")
+        print("Схема и примеры: `korra hooks --help`.")
         return
 
     if not specs:
-        print("No shell hooks configured in ~/.hermes/config.yaml.")
+        print("В config.yaml не настроены shell-хуки.")
     else:
         by_event: Dict[str, List] = {}
         for spec in specs:
@@ -77,13 +77,13 @@ def _cmd_list(_args) -> None:
             if isinstance(e, dict)
         }
 
-        print(f"Configured shell hooks ({len(specs)} total):\n")
+        print(f"Настроенные shell-хуки; всего {len(specs)}:\n")
 
         for event in sorted(by_event.keys()):
             print(f"  [{event}]")
             for spec in by_event[event]:
                 is_approved = (spec.event, spec.command) in approved
-                status = "✓ allowed" if is_approved else "✗ not allowlisted"
+                status = "✓ разрешён" if is_approved else "✗ не разрешён"
                 matcher_part = f" matcher={spec.matcher!r}" if spec.matcher else ""
                 print(
                     f"    - {spec.command}{matcher_part} "
@@ -98,21 +98,21 @@ def _cmd_list(_args) -> None:
                         mtime_at = entry.get("script_mtime_at_approval")
                         if mtime_now and mtime_at and mtime_now > mtime_at:
                             print(
-                                f"      ⚠ script modified since approval "
-                                f"(was {mtime_at}, now {mtime_now}) — "
-                                f"run `hermes hooks doctor` to re-validate"
+                                f"      ⚠ сценарий изменён после подтверждения "
+                                f"(было {mtime_at}, стало {mtime_now}); "
+                                f"повторите проверку: `korra hooks doctor`"
                             )
             print()
 
     if outbound:
-        print(f"Configured outbound webhooks ({len(outbound)} total):\n")
+        print(f"Настроенные исходящие вебхуки; всего {len(outbound)}:\n")
         for target in outbound:
-            signed = "signed" if target.secret else "UNSIGNED"
+            signed = "подписан" if target.secret else "БЕЗ ПОДПИСИ"
             matcher_part = f" matcher={target.matcher!r}" if target.matcher else ""
             print(f"  - {target.label}")
-            print(f"      url:     {target.url}")
+            print(f"      адрес:   {target.url}")
             print(
-                f"      events:  {', '.join(target.events)}{matcher_part} "
+                f"      события:  {', '.join(target.events)}{matcher_part} "
                 f"(timeout={target.timeout}s, {signed})"
             )
         print()
@@ -245,8 +245,8 @@ def _cmd_test(args) -> None:
 
     event = args.event
     if event not in VALID_HOOKS:
-        print(f"Unknown event: {event!r}")
-        print(f"Valid events: {', '.join(sorted(VALID_HOOKS))}")
+        print(f"Неизвестное событие: {event!r}")
+        print(f"Допустимые события: {', '.join(sorted(VALID_HOOKS))}")
         return
 
     # Synthetic kwargs in the same shape invoke_hook() would pass.  Merged
@@ -262,9 +262,9 @@ def _cmd_test(args) -> None:
             if isinstance(custom, dict):
                 payload.update(custom)
             else:
-                print(f"Warning: {args.payload_file} is not a JSON object; ignoring")
+                print(f"Внимание: {args.payload_file} не содержит объект JSON; файл пропущен.")
         except Exception as exc:
-            print(f"Error reading payload file: {exc}")
+            print(f"Не удалось прочитать файл данных: {exc}")
             return
 
     specs = shell_hooks.iter_configured_hooks(load_config())
@@ -278,12 +278,12 @@ def _cmd_test(args) -> None:
         ]
 
     if not specs:
-        print(f"No shell hooks configured for event: {event}")
+        print(f"Для события {event} shell-хуки не настроены.")
         if getattr(args, "for_tool", None):
-            print(f"(with matcher filter --for-tool={args.for_tool})")
+            print(f"(с фильтром --for-tool={args.for_tool})")
         return
 
-    print(f"Firing {len(specs)} hook(s) for event '{event}':\n")
+    print(f"Запускаю хуки для события '{event}'; количество: {len(specs)}:\n")
     for spec in specs:
         print(f"  → {spec.command}")
         result = shell_hooks.run_once(spec, payload)
@@ -293,15 +293,15 @@ def _cmd_test(args) -> None:
 
 def _print_run_result(result: Dict[str, Any]) -> None:
     if result.get("error"):
-        print(f"      ✗ error: {result['error']}")
+        print(f"      ✗ ошибка: {result['error']}")
         return
     if result.get("timed_out"):
-        print(f"      ✗ timed out after {result['elapsed_seconds']}s")
+        print(f"      ✗ время ожидания истекло через {result['elapsed_seconds']} с")
         return
 
     rc = result.get("returncode")
     elapsed = result.get("elapsed_seconds", 0)
-    print(f"      exit={rc}  elapsed={elapsed}s")
+    print(f"      код={rc}  время={elapsed} с")
 
     stdout = (result.get("stdout") or "").strip()
     stderr = (result.get("stderr") or "").strip()
@@ -312,9 +312,9 @@ def _print_run_result(result: Dict[str, Any]) -> None:
 
     parsed = result.get("parsed")
     if parsed:
-        print(f"      parsed (Hermes wire shape): {json.dumps(parsed)}")
+        print(f"      разобрано (формат протокола): {json.dumps(parsed)}")
     else:
-        print("      parsed: <none — hook contributed nothing to the dispatcher>")
+        print("      разобрано: <пусто; хук ничего не передал диспетчеру>")
 
 
 def _truncate(s: str, n: int) -> str:
@@ -330,12 +330,12 @@ def _cmd_revoke(args) -> None:
 
     removed = shell_hooks.revoke(args.command)
     if removed == 0:
-        print(f"No allowlist entry found for command: {args.command}")
+        print(f"Команда не найдена в списке разрешённых: {args.command}")
         return
-    print(f"Removed {removed} allowlist entry/entries for: {args.command}")
+    print(f"Удалено разрешений для команды {args.command}: {removed}")
     print(
-        "Note: currently running CLI / gateway processes keep their "
-        "already-registered callbacks until they restart."
+        "Примечание: работающие процессы CLI и шлюза сохранят уже зарегистрированные "
+        "обработчики до перезапуска."
     )
 
 
@@ -350,10 +350,10 @@ def _cmd_doctor(_args) -> None:
     specs = shell_hooks.iter_configured_hooks(load_config())
 
     if not specs:
-        print("No shell hooks configured — nothing to check.")
+        print("Shell-хуки не настроены; проверять нечего.")
         return
 
-    print(f"Checking {len(specs)} configured shell hook(s)...\n")
+    print(f"Проверяю настроенные shell-хуки; количество: {len(specs)}…\n")
 
     problems = 0
     for spec in specs:
@@ -362,9 +362,9 @@ def _cmd_doctor(_args) -> None:
         print()
 
     if problems:
-        print(f"{problems} issue(s) found.  Fix before relying on these hooks.")
+        print(f"Найдено проблем: {problems}. Исправьте их перед использованием хуков.")
     else:
-        print("All shell hooks look healthy.")
+        print("Все shell-хуки исправны.")
 
 
 def _doctor_one(spec, shell_hooks) -> int:
@@ -372,20 +372,20 @@ def _doctor_one(spec, shell_hooks) -> int:
 
     # 1. Script exists and is executable
     if shell_hooks.script_is_executable(spec.command):
-        print("      ✓ script exists and is executable")
+        print("      ✓ сценарий существует и разрешён к запуску")
     else:
         problems += 1
-        print("      ✗ script missing or not executable "
-              "(chmod +x the file, or fix the path)")
+        print("      ✗ сценарий отсутствует или не разрешён к запуску "
+              "(исправьте путь или выполните chmod +x)")
 
     # 2. Allowlist status
     entry = shell_hooks.allowlist_entry_for(spec.event, spec.command)
     if entry:
-        print(f"      ✓ allowlisted (approved {entry.get('approved_at', '?')})")
+        print(f"      ✓ разрешён; подтверждено {entry.get('approved_at', '?')}")
     else:
         problems += 1
-        print("      ✗ not allowlisted — hook will NOT fire at runtime "
-              "(run with --accept-hooks once, or confirm at the TTY prompt)")
+        print("      ✗ не разрешён; хук не будет запускаться "
+              "(один раз укажите --accept-hooks или подтвердите в терминале)")
 
     # 3. Mtime drift
     if entry and entry.get("script_mtime_at_approval"):
@@ -393,11 +393,11 @@ def _doctor_one(spec, shell_hooks) -> int:
         mtime_at = entry["script_mtime_at_approval"]
         if mtime_now and mtime_at and mtime_now > mtime_at:
             problems += 1
-            print(f"      ⚠ script modified since approval "
-                  f"(was {mtime_at}, now {mtime_now}) — review changes, "
-                  f"then `hermes hooks revoke` + re-approve to refresh")
+            print(f"      ⚠ сценарий изменён после подтверждения "
+                  f"(было {mtime_at}, стало {mtime_now}); проверьте изменения, "
+                  f"затем выполните `korra hooks revoke` и подтвердите снова")
         elif mtime_now and mtime_at and mtime_now == mtime_at:
-            print("      ✓ script unchanged since approval")
+            print("      ✓ сценарий не менялся после подтверждения")
 
     # 4. Produces valid JSON for a synthetic payload — only when the entry
     # is already allowlisted.  Otherwise `hermes hooks doctor` would execute
@@ -405,19 +405,19 @@ def _doctor_one(spec, shell_hooks) -> int:
     # reviewed them, which directly contradicts the documented workflow
     # ("spot newly-added hooks *before they register*").
     if not entry:
-        print("      ℹ skipped JSON smoke test — not allowlisted yet. "
-              "Approve the hook first (via TTY prompt or --accept-hooks), "
-              "then re-run `hermes hooks doctor`.")
+        print("      ℹ проверка JSON пропущена: хук ещё не разрешён. "
+              "Подтвердите его в терминале или через --accept-hooks, затем "
+              "повторите `korra hooks doctor`.")
     elif shell_hooks.script_is_executable(spec.command):
         payload = _DEFAULT_PAYLOADS.get(spec.event, {"extra": {}})
         result = shell_hooks.run_once(spec, payload)
         if result.get("timed_out"):
             problems += 1
-            print(f"      ✗ timed out after {result['elapsed_seconds']}s "
-                  f"on synthetic payload (timeout={spec.timeout}s)")
+            print(f"      ✗ время ожидания истекло через {result['elapsed_seconds']} с "
+                  f"на тестовых данных; лимит {spec.timeout} с")
         elif result.get("error"):
             problems += 1
-            print(f"      ✗ execution error: {result['error']}")
+            print(f"      ✗ ошибка запуска: {result['error']}")
         else:
             rc = result.get("returncode")
             elapsed = result.get("elapsed_seconds", 0)
@@ -425,14 +425,14 @@ def _doctor_one(spec, shell_hooks) -> int:
             if stdout:
                 try:
                     json.loads(stdout)
-                    print(f"      ✓ produced valid JSON on synthetic payload "
-                          f"(exit={rc}, {elapsed}s)")
+                    print(f"      ✓ на тестовых данных получен корректный JSON "
+                          f"(код={rc}, {elapsed} с)")
                 except json.JSONDecodeError:
                     problems += 1
-                    print(f"      ✗ stdout was not valid JSON (exit={rc}, "
-                          f"{elapsed}s): {_truncate(stdout, 120)}")
+                    print(f"      ✗ stdout не содержит корректный JSON (код={rc}, "
+                          f"{elapsed} с): {_truncate(stdout, 120)}")
             else:
-                print(f"      ✓ ran clean with empty stdout "
-                      f"(exit={rc}, {elapsed}s) — hook is observer-only")
+                print(f"      ✓ запуск завершён без stdout "
+                      f"(код={rc}, {elapsed} с); хук только наблюдает")
 
     return problems
