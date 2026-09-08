@@ -328,5 +328,5 @@ def maybe_run_live_checks(args, issues: List[str]):
     try:
         return run_live_checks(issues)
     except Exception as exc:  # catch-all: doctor must survive
-        check_warn("Live backend probes crashed", f"({exc})")
+        check_warn("Проверка работающих компонентов завершилась с ошибкой", f"({exc})")
         return None

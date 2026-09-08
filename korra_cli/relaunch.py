@@ -195,9 +195,9 @@ def relaunch(
             # cryptic.  Common causes: ``hermes`` not on PATH yet (install
             # hasn't propagated User PATH into this shell) or a stale shim.
             print(
-                f"\nHermes relaunch failed: {exc}\n"
-                f"Command: {' '.join(new_argv)}\n"
-                f"Fix: open a new terminal so PATH picks up, then re-run hermes.",
+                f"\nНе удалось перезапустить Korra: {exc}\n"
+                f"Команда: {' '.join(new_argv)}\n"
+                "Откройте новый терминал, чтобы обновился PATH, и снова запустите korra.",
                 file=sys.stderr,
             )
             sys.exit(1)

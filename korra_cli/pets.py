@@ -391,16 +391,16 @@ def print_pet_gallery(*, limit: int = 20) -> None:
     try:
         entries = fetch_manifest()
     except ManifestError as exc:
-        print(f"(._.) Couldn't reach the petdex gallery: {exc}")
+        print(f"(._.) Не удалось открыть галерею petdex: {exc}")
         return
 
     installed = {p.slug for p in store.installed_pets()}
     shown = entries[:limit] if limit > 0 else entries
-    print(f"(^o^)/ petdex gallery — first {len(shown)} of {len(entries)}:")
+    print(f"(^o^)/ Галерея petdex: показано {len(shown)} из {len(entries)}:")
     for entry in shown:
         mark = "●" if entry.slug in installed else "○"
         print(f"  {mark} {entry.slug:<24} {entry.display_name}")
-    print("  /pet <slug> to adopt · /pet to toggle")
+    print("  Выбрать: /pet <код> · включить или выключить: /pet")
 
 
 def _clear_active_if(slug: str) -> bool:

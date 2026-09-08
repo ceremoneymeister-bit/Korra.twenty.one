@@ -22,13 +22,13 @@ def cmd_pause(args: argparse.Namespace) -> int:
     already = is_engaged()
     path = engage(reason=reason)
     state = get_state() or {}
-    verb = "Still paused" if already else "Korra paused"
-    detail = f" — reason: {state['reason']}" if state.get("reason") else ""
+    verb = "Пауза уже включена" if already else "Korra приостановлена"
+    detail = f" — причина: {state['reason']}" if state.get("reason") else ""
     print(f"⏸️  {verb}{detail}")
-    print(f"    sentinel: {path}")
+    print(f"    файл паузы: {path}")
     print(
-        "    Cron dispatch, kanban dispatch, and new gateway turns are on hold.\n"
-        "    In-flight work keeps running. Run `hermes resume` to lift the pause."
+        "    Новые задачи расписания, доски и шлюза приостановлены.\n"
+        "    Уже начатая работа продолжается. Снять паузу: `korra resume`."
     )
     return 0
 
@@ -38,9 +38,9 @@ def cmd_resume(args: argparse.Namespace) -> int:
     from agent.estop import disengage, sentinel_path
 
     if disengage():
-        print("▶️  Korra resumed — dispatch picks up on the next tick.")
+        print("▶️ Korra продолжила работу; новые задачи запустятся при следующей проверке.")
     else:
-        print(f"Korra is not paused (no sentinel at {sentinel_path()}).")
+        print(f"Korra не приостановлена; файла паузы нет: {sentinel_path()}.")
     return 0
 
 

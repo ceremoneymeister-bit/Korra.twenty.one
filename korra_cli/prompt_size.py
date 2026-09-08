@@ -369,7 +369,7 @@ def cmd_prompt_size(args: Any) -> None:
     try:
         data = compute_prompt_breakdown(platform)
     except Exception as e:
-        print(f"Could not compute prompt-size breakdown: {e}")
+        print(f"Не удалось рассчитать состав промпта: {e}")
         return
     if as_json:
         print(json.dumps(data, ensure_ascii=False, indent=2))

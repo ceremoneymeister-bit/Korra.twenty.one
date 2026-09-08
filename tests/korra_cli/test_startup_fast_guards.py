@@ -81,7 +81,7 @@ def test_fast_version_parity_off_termux(tmp_path):
     result = _run_version({"HERMES_HOME": str(home), "TERMUX_VERSION": ""})
     assert result.returncode == 0, result.stderr
     out = result.stdout
-    for field in ("Korra v", "Install directory:", "Python:", "OpenAI SDK:"):
+    for field in ("Korra v", "Папка установки:", "Python:", "OpenAI SDK:"):
         assert field in out, f"fast --version output missing {field!r}:\n{out}"
 
 
@@ -103,4 +103,4 @@ def test_fast_version_reports_install_method_stamp(tmp_path):
     (home / ".install_method").write_text("git\n", encoding="utf-8")
     result = _run_version({"HERMES_HOME": str(home), "TERMUX_VERSION": ""})
     assert result.returncode == 0, result.stderr
-    assert "Install method: git" in result.stdout
+    assert "Способ установки: git" in result.stdout

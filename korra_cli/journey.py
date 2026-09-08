@@ -255,8 +255,8 @@ def _cmd_show(args: argparse.Namespace) -> int:
 
     if not payload.get("nodes"):
         console.print(
-            "[grey62]No learning yet — use Korra a while and your learned skills and "
-            "memories will start mapping out here.[/grey62]"
+            "[grey62]Данных обучения пока нет. Пользуйтесь Korra, и здесь появится "
+            "карта освоенных навыков и воспоминаний.[/grey62]"
         )
         return 0
 
@@ -299,7 +299,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     console = _console(color=not bool(getattr(args, "no_color", False)), force=bool(getattr(args, "force_color", False)))
     nodes = sorted(_build_payload().get("nodes", []), key=lambda n: n.get("timestamp") or 0)
     if not nodes:
-        console.print("[grey62]No learning yet.[/grey62]")
+        console.print("[grey62]Данных обучения пока нет.[/grey62]")
         return 0
     for node in nodes:
         glyph = "◆" if node.get("kind") == "memory" else "●"
@@ -359,7 +359,7 @@ def _open_in_editor(initial: str, *, suffix: str) -> Optional[str]:
         with open(path, encoding="utf-8") as fh:
             return fh.read()
     except OSError as exc:
-        print(f"  editor failed: {exc}")
+        print(f"  Не удалось открыть редактор: {exc}")
         return None
     finally:
         try:

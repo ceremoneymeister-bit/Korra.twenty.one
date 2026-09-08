@@ -204,7 +204,7 @@ def print_fast_version_info(*, check_updates: bool = True) -> None:
 
         print(f"Korra v{__version__} ({__release_date__})")
 
-    print(f"Install directory: {project_root_str()}")
+    print(f"Папка установки: {project_root_str()}")
 
     # Install method: authoritative resolver first (code-scoped stamp →
     # managed → nix → git → pip; also self-heals poisoned shared-home
@@ -219,12 +219,12 @@ def print_fast_version_info(*, check_updates: bool = True) -> None:
     except Exception:
         install_method = read_install_method()
     if install_method:
-        print(f"Install method: {install_method}")
+        print(f"Способ установки: {install_method}")
 
     print(f"Python: {sys.version.split()[0]}")
 
     openai_version = read_openai_version()
-    print(f"OpenAI SDK: {openai_version}" if openai_version else "OpenAI SDK: Not installed")
+    print(f"OpenAI SDK: {openai_version}" if openai_version else "OpenAI SDK: не установлен")
 
     if not check_updates:
         return
@@ -238,15 +238,14 @@ def print_fast_version_info(*, check_updates: bool = True) -> None:
 
         behind = check_for_updates()
         if behind == UPDATE_AVAILABLE_NO_COUNT:
-            print(f"Update available — run '{recommended_update_command()}'")
+            print(f"Доступно обновление; выполните `{recommended_update_command()}`")
         elif behind and behind > 0:
-            commits_word = "commit" if behind == 1 else "commits"
             print(
-                f"Update available: {behind} {commits_word} behind — "
-                f"run '{recommended_update_command()}'"
+                f"Доступно обновление; новых коммитов: {behind}. "
+                f"Выполните `{recommended_update_command()}`"
             )
         elif behind == 0:
-            print("Up to date")
+            print("Установлена актуальная версия")
     except Exception:
         pass
 

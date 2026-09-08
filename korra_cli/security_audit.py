@@ -546,8 +546,8 @@ def cmd_security_audit(args: argparse.Namespace) -> int:
     fail_on = (getattr(args, "fail_on", None) or "critical").upper()
     if fail_on not in SEVERITY_ORDER:
         print(
-            f"unknown --fail-on value: {fail_on.lower()} "
-            f"(choose from: low, moderate, high, critical)",
+            f"неизвестное значение --fail-on: {fail_on.lower()} "
+            "(допустимы low, moderate, high, critical)",
             file=sys.stderr,
         )
         return 2
@@ -573,7 +573,7 @@ def cmd_security_audit(args: argparse.Namespace) -> int:
             components=components,
         )
     except RuntimeError as exc:
-        print(f"audit failed: {exc}", file=sys.stderr)
+        print(f"Проверка безопасности завершилась с ошибкой: {exc}", file=sys.stderr)
         return 2
 
     if output_json:

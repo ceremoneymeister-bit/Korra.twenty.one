@@ -2364,11 +2364,11 @@ def _run_post_setup(post_setup_key: str):
             return
 
         idx = prompt_choice(
-            "    How do you want xAI to authenticate?",
+            "    Как выполнить вход в xAI?",
             choices=[
-                "Sign in with xAI Grok OAuth (SuperGrok / Premium+) — browser login",
-                "Paste an xAI API key (console.x.ai)",
-                "Skip — configure later via `hermes auth add xai-oauth`",
+                "Войти через xAI Grok OAuth (SuperGrok / Premium+) в браузере",
+                "Вставить ключ API xAI с console.x.ai",
+                "Пропустить; настроить позже: `korra auth add xai-oauth`",
             ],
             default=0,
         )
