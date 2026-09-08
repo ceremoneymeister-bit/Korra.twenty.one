@@ -99,6 +99,7 @@ const SystemPage = lazy(() => import("@/pages/SystemPage"));
 const ChatPage = lazy(() => import("@/pages/ChatPage"));
 const BubbleChatPage = lazy(() => import("@/pages/BubbleChatPage"));
 const AgentWorkbenchPage = lazy(() => import("@/pages/AgentWorkbenchPage"));
+const UpdatesPage = lazy(() => import("@/pages/UpdatesPage"));
 const UiKitPage = lazy(() => import("@/pages/UiKitPage"));
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { KorraBrand } from "@/components/KorraBrand";
@@ -226,6 +227,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/docs": DocsPage,
   "/help": ClientHelpPage,
   "/help/:article": ClientHelpPage,
+  "/updates": UpdatesPage,
   "/ui-kit": UiKitPage,
 };
 
@@ -267,6 +269,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
   { path: "/logs", labelKey: "logs", label: "Журналы", icon: FileText },
   { path: "/cron", labelKey: "cron", label: "Расписание", icon: Clock },
   { path: "/help", label: "Помощь", icon: BookOpen },
+  { path: "/updates", label: "Обновления", icon: Download },
   { path: "/skills", labelKey: "skills", label: "Навыки", icon: Package },
   { path: "/plugins", labelKey: "plugins", label: "Плагины", icon: Puzzle },
   { path: "/mcp", label: "MCP", icon: Plug },

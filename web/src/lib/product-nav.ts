@@ -37,11 +37,18 @@ const PRODUCT_NAV_LABELS: Record<ProductUiMode, Record<string, string>> = {
  * постоянно. Группа общая для обоих продуктов: ключи и модель заводит тот же
  * человек, независимо от того, что он купил.
  */
-export const CLIENT_SETTINGS_PATHS = ["/env", "/models", "/logs", "/help"];
+export const CLIENT_SETTINGS_PATHS = [
+  "/env",
+  "/models",
+  "/updates",
+  "/logs",
+  "/help",
+];
 
 export const CLIENT_SETTINGS_LABELS: Record<string, string> = {
   "/env": "Ключи и доступы",
   "/models": "Модель",
+  "/updates": "Обновления",
   "/logs": "Журналы",
   "/help": "Помощь",
 };

@@ -17254,6 +17254,11 @@ def _clear_skills_prompt_cache() -> None:
 from korra_cli.web_routers import tools as _tools_routes  # noqa: E402
 
 app.include_router(_tools_routes.router)
+# Раздел «Обновления»: что стоит, что доступно и просьба обновиться. Сам
+# ничего не запускает — обновление исполняет хост, см. модуль.
+from korra_cli.web_routers import updates as _updates_routes  # noqa: E402
+
+app.include_router(_updates_routes.router)
 from korra_cli.web_routers.tools import (  # noqa: E402,F401 — legacy re-exports; tests call these via web_server.<name>
     get_toolsets,
     toggle_toolset,

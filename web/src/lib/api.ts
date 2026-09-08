@@ -616,6 +616,18 @@ function appendSessionFilters(url: string, options: SessionQueryOptions): string
 export const api = {
   buildWsUrl,
   getStatus: () => fetchJSON<StatusResponse>("/api/status"),
+
+  /** Раздел «Обновления»: что стоит, что доступно, ход операции. */
+  getUpdatesState: () => fetchJSON<UpdatesState>("/api/updates/state"),
+  /** Просьба обновиться. Контейнер не трогает — её исполняет кабинет. */
+  requestUpdate: (releaseId: string) =>
+    fetchJSON<{ ok: boolean; release_id: string }>("/api/updates/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ release_id: releaseId }),
+    }),
+  cancelUpdateRequest: () =>
+    fetchJSON<{ ok: boolean }>("/api/updates/request", { method: "DELETE" }),
   /** Статус самой панели (шлюз владельца) — вне области профиля раздела:
    *  явный пустой profile= отключает подстановку, иначе выбор в чипе
    *  «Секретарь» зажигал ложное «Корра сейчас недоступна» (QA 03.09). */
@@ -2139,6 +2151,76 @@ export interface HookCreate {
   matcher?: string;
   timeout?: number;
   approve?: boolean;
+}
+
+/** Пункт заметок к выпуску: короткий заголовок и пояснение к нему. */
+export interface ReleaseNoteItem {
+  title: string;
+  detail: string;
+}
+
+export interface ReleaseNoteSection {
+  heading: string;
+  items: ReleaseNoteItem[];
+}
+
+/** Выпуск — установленный или доступный. */
+export interface ReleaseNote {
+  release_id: string;
+  title: string;
+  published_at: string;
+  summary: string;
+  sections: ReleaseNoteSection[];
+  /** Только у установленного: версия движка и ревизия сборки. */
+  version?: string;
+  revision?: string;
+  image?: string;
+  /** Сколько длится пауза при переключении, человеческими словами. */
+  pause?: string;
+  announced_at?: number | null;
+  self_service?: boolean;
+}
+
+/** Шаг обновления так, как его видит владелец. */
+export interface UpdateStep {
+  key: string;
+  title: string;
+  detail: string;
+}
+
+export type UpdateStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "rolled_back"
+  | "rollback_failed";
+
+export interface UpdateProgress {
+  status: UpdateStatus;
+  /** Ключ текущего шага из ``steps``. */
+  step: string;
+  phase: string;
+  release_id: string;
+  message: string;
+  error: string;
+  started_at: number | null;
+  updated_at: number | null;
+  final: boolean;
+  /** Установленный выпуск уже совпал с целью операции. */
+  installed_target: boolean;
+}
+
+export interface UpdatesState {
+  installed: ReleaseNote;
+  available: ReleaseNote | null;
+  up_to_date: boolean;
+  /** Обновлением управляет хост: панель себя не перезапускает. */
+  managed_externally: boolean;
+  request: { release_id: string; requested_at: number; stale: boolean } | null;
+  progress: UpdateProgress | null;
+  steps: UpdateStep[];
+  checked_at: number;
 }
 
 export interface UpdateCheckResponse {

@@ -17,6 +17,7 @@ const ADMIN_NAV: NavEntry[] = [
   { path: "/logs", labelKey: "logs", label: "Logs" },
   { path: "/cron", labelKey: "cron", label: "Cron" },
   { path: "/help", label: "Help" },
+  { path: "/updates", label: "Updates" },
   { path: "/skills", labelKey: "skills", label: "Skills" },
   { path: "/plugins", labelKey: "plugins", label: "Plugins" },
   { path: "/mcp", label: "MCP" },
@@ -46,9 +47,14 @@ describe("secondary navigation", () => {
     expect(selectProductSettingsNav(ADMIN_NAV).map((item) => item.path)).toEqual([
       "/env",
       "/models",
+      "/updates",
       "/logs",
       "/help",
     ]);
+    // Подпись продукта, а не админской панели: пункт называется по-русски.
+    expect(
+      selectProductSettingsNav(ADMIN_NAV).find((item) => item.path === "/updates")?.label,
+    ).toBe("Обновления");
     expect(selectServiceNav(ADMIN_NAV).map((item) => item.path)).toEqual([
       "/skills",
       "/plugins",

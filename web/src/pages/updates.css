@@ -1,0 +1,83 @@
+/* Раздел «Обновления» живёт в принятой палитре панели: свои цвета не заводим,
+   рельеф берём из шкалы глубины (UI_PALETTE.md), рамок и обводок нет. */
+.korra-updates { width: 100%; max-width: 900px; margin: 0 auto; padding-bottom: 4rem; color: var(--neo-text-primary); font-family: var(--theme-font-sans); font-size: 0.9375rem; line-height: 1.65; overflow-wrap: anywhere; }
+.korra-updates > section { margin-top: 2rem; }
+.korra-updates h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.22; font-weight: 650; letter-spacing: -0.035em; }
+.korra-updates h3 { font-size: 1.1rem; line-height: 1.4; font-weight: 650; letter-spacing: -0.02em; }
+.korra-updates h4 { font-size: 0.9375rem; font-weight: 650; line-height: 1.45; }
+.korra-updates p { margin: 0; }
+.korra-updates button { border: 0; outline: 0; font: inherit; cursor: pointer; }
+.korra-updates button:disabled { cursor: default; }
+.korra-updates svg { flex-shrink: 0; }
+
+.upd-eyebrow { display: flex; align-items: center; gap: 0.6rem; font-size: 0.8125rem; color: var(--neo-text-secondary); }
+.upd-muted { color: var(--neo-text-secondary); }
+.upd-small { font-size: 0.8125rem; line-height: 1.55; }
+
+/* ── Карточка состояния ─────────────────────────────────────────────────── */
+.upd-card { padding: 1.75rem; background: var(--neo-surface); border-radius: var(--neo-radius-card); box-shadow: var(--neo-depth-3); }
+.upd-card + .upd-card { margin-top: 2rem; }
+.upd-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap; }
+.upd-card-head > div:first-child { min-width: 0; flex: 1; }
+.upd-card h2 { margin-top: 0.6rem; }
+.upd-card h2 + p { margin-top: 0.75rem; color: var(--neo-text-secondary); }
+
+.upd-badge { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.85rem; border-radius: var(--neo-radius-round); font-size: 0.8125rem; font-weight: 550; background: var(--neo-surface); box-shadow: var(--neo-depth-1); }
+.upd-badge[data-tone='ready'] { background: var(--neo-accent); color: var(--neo-accent-foreground); box-shadow: none; }
+.upd-badge[data-tone='working'] { box-shadow: var(--neo-inset-compact); }
+
+.upd-facts { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; margin-top: 1.25rem; font-size: 0.8125rem; color: var(--neo-text-secondary); }
+.upd-facts b { font-weight: 600; color: var(--neo-text-primary); }
+
+/* ── Действие ───────────────────────────────────────────────────────────── */
+.upd-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-top: 1.75rem; }
+.upd-button { display: inline-flex; align-items: center; gap: 0.65rem; min-height: 52px; padding: 0.85rem 1.6rem; border-radius: var(--neo-radius-control); background: var(--neo-surface); box-shadow: var(--neo-depth-2); font-weight: 600; color: var(--neo-text-primary); transition: box-shadow var(--neo-duration-state) var(--neo-ease-out); }
+.upd-button:hover:not(:disabled), .upd-button:focus-visible { box-shadow: var(--neo-inset); }
+.upd-button[data-primary] { background: var(--neo-accent); color: var(--neo-accent-foreground); box-shadow: none; }
+.upd-button[data-primary]:hover:not(:disabled) { box-shadow: var(--neo-inset-compact); }
+.upd-button:disabled { color: var(--neo-text-secondary); box-shadow: var(--neo-inset-compact); background: var(--neo-surface); }
+.upd-actions > p { flex: 1; min-width: 200px; }
+
+/* ── Что нового ─────────────────────────────────────────────────────────── */
+.upd-notes { margin-top: 1.75rem; }
+.upd-notes-group + .upd-notes-group { margin-top: 1.5rem; }
+.upd-notes-group > p { font-size: 0.8125rem; color: var(--neo-text-secondary); margin-bottom: 0.75rem; }
+.upd-notes ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.9rem; }
+.upd-notes li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 0.85rem; align-items: start; }
+.upd-notes li > svg { margin-top: 0.25rem; color: var(--neo-text-secondary); }
+.upd-notes li p { margin-top: 0.25rem; font-size: 0.875rem; color: var(--neo-text-secondary); }
+.upd-more { display: inline-flex; align-items: center; gap: 0.5rem; min-height: 44px; margin-top: 1rem; padding: 0.5rem 0.9rem; border-radius: var(--neo-radius-control); background: transparent; font-size: 0.8125rem; color: var(--neo-text-secondary); }
+.upd-more:hover { background: var(--neo-surface); box-shadow: var(--neo-inset-compact); }
+
+/* ── Ход обновления ─────────────────────────────────────────────────────── */
+.upd-steps { list-style: none; padding: 0; margin: 1.5rem 0 0; display: grid; gap: 1.1rem; }
+.upd-steps li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 1rem; align-items: start; }
+.upd-step-mark { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: var(--neo-surface); box-shadow: var(--neo-depth-1); font-size: 0.8125rem; font-weight: 650; color: var(--neo-text-secondary); }
+.upd-steps li[data-state='done'] .upd-step-mark { background: var(--neo-accent); color: var(--neo-accent-foreground); box-shadow: none; }
+.upd-steps li[data-state='active'] .upd-step-mark { box-shadow: var(--neo-inset); color: var(--neo-text-primary); }
+.upd-steps li[data-state='pending'] { color: var(--neo-text-secondary); }
+.upd-steps li p { font-size: 0.875rem; color: var(--neo-text-secondary); margin-top: 0.2rem; }
+.upd-steps li[data-state='active'] h4 { display: flex; align-items: center; gap: 0.6rem; }
+
+/* Точки ожидания: лайм разрешён заливками, поэтому индикатор — заливка. */
+.upd-pulse { display: inline-grid; grid-auto-flow: column; gap: 4px; }
+.upd-pulse i { width: 5px; height: 5px; border-radius: 50%; background: var(--neo-accent); animation: upd-pulse 1.1s infinite ease-in-out; }
+.upd-pulse i:nth-child(2) { animation-delay: 0.18s; }
+.upd-pulse i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes upd-pulse { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .upd-pulse i { animation: none; opacity: 0.7; } }
+
+/* ── Сообщения ──────────────────────────────────────────────────────────── */
+.upd-note { display: flex; gap: 0.85rem; padding: 1.1rem 1.3rem; margin-top: 1.5rem; border-radius: var(--neo-radius-control); background: var(--neo-surface); box-shadow: var(--neo-inset-compact); font-size: 0.875rem; }
+.upd-note[data-tone='error'] { box-shadow: var(--neo-error); }
+.upd-note strong { display: block; margin-bottom: 0.25rem; }
+.upd-note p { color: var(--neo-text-secondary); }
+
+.upd-skeleton { height: 172px; border-radius: var(--neo-radius-card); background: var(--neo-surface); box-shadow: var(--neo-inset-compact); }
+
+@media (max-width: 720px) {
+  .korra-updates { padding-bottom: 3rem; }
+  .upd-card { padding: 1.35rem; }
+  .upd-card-head { gap: 0.85rem; }
+  .upd-actions .upd-button { width: 100%; justify-content: center; }
+}

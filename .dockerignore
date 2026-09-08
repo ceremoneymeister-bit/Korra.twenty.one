@@ -58,6 +58,10 @@ htmlcov/
 
 # Documentation
 *.md
+# Кроме заметок к выпуску: панель показывает по ним владельцу, какой выпуск у
+# него стоит и что в нём было (раздел «Обновления»). Без файла в образе
+# установка не может рассказать о себе, не спрашивая никого снаружи.
+!RELEASE_NOTES.md
 
 # Runtime data (bind-mounted at /opt/data; must not leak into build context)
 data/
