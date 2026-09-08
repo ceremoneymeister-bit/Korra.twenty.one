@@ -876,15 +876,30 @@ def build_mcp(
 
 
 def main() -> None:
+    import argparse
+    from pathlib import Path
     from .config import Settings
     from .packs2 import PipelinePackStore
     from .securefs import SecureRoot
     from .service2 import PipelineService
     from .service3 import WorkflowService
 
+    parser = argparse.ArgumentParser(prog="metal-calc-mcp")
+    parser.add_argument("--intake-only", action="store_true")
+    parser.add_argument("--session-db", type=Path)
+    args = parser.parse_args()
     settings = Settings.from_env()
     role = read_role_from_env()
     profile = read_profile_from_env(role)
+    if args.intake_only:
+        if role != "front":
+            raise RuntimeError("--intake-only requires the front role")
+        from .intake_handoffs import IntakeHandoffs
+        from .intake_mcp import build_mcp as build_intake_mcp
+        build_intake_mcp(IntakeHandoffs(settings.orders_root, session_db=args.session_db)).run(transport="stdio")
+        return
+    if args.session_db is not None:
+        raise RuntimeError("--session-db requires --intake-only")
     service = MetalCalcService(settings)
     packs = PipelinePackStore(SecureRoot(settings.rates_root, writable=False))
     pipeline = PipelineService(service.registry, packs)

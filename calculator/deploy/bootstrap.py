@@ -52,7 +52,9 @@ def main():
         "METAL_CALC_IMAGE_DIGEST": "${METAL_CALC_IMAGE_DIGEST}",
         "METAL_CALC_SCOPE_SECRET": "${METAL_CALC_SCOPE_SECRET}",
     }
-    server = {"command": "/opt/metal-calc/bin/metal-calc-mcp", "args": [],
+    # Lists in managed policy replace profile lists. Leave args profile-owned
+    # so the receiver's narrow mode survives the policy merge.
+    server = {"command": "/opt/metal-calc/bin/metal-calc-mcp",
               "env": env, "timeout": 180, "connect_timeout": 30,
               "supports_parallel_tool_calls": False,
               "tools": {"resources": False, "prompts": False}}
@@ -93,6 +95,13 @@ def main():
                 tool: {"hermes_session_context": "request_scope"} for tool in SCOPED
             }
         else:
+            cfg["mcp_servers"]["metal_calc"]["args"] = [
+                "--intake-only", "--session-db", "/opt/data/state.db",
+            ]
+            cfg["mcp_servers"]["metal_calc"]["context_arguments"] = {
+                tool: {"session_id": "session_id"}
+                for tool in ("intake_context", "intake_sources", "intake_observation")
+            }
             cfg["gateway"] = {
                 "multiplex_profiles": True,
                 "multiplex_profile_allowlist": [profile for profile in ROLES if profile != "default"],

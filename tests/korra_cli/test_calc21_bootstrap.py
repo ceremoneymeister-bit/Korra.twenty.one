@@ -26,7 +26,15 @@ def test_bootstrap_role_config_and_native_multiplex_reconcile(tmp_path, monkeypa
     names = set(bootstrap.ROLES) - {"default"}
     assert root_config["gateway"]["multiplex_profiles"] is True
     assert set(root_config["gateway"]["multiplex_profile_allowlist"]) == names
-    assert "context_arguments" not in root_config["mcp_servers"]["metal_calc"]
+    receiver = root_config["mcp_servers"]["metal_calc"]
+    assert receiver["args"] == ["--intake-only", "--session-db", "/opt/data/state.db"]
+    assert receiver["context_arguments"] == {
+        tool: {"session_id": "session_id"}
+        for tool in ("intake_context", "intake_sources", "intake_observation")
+    }
+    policy = yaml.safe_load((root / "policy/config.yaml").read_text())
+    assert "args" not in policy["mcp_servers"]["metal_calc"]
+    assert policy["platform_toolsets"]["api_server"] == ["metal_calc"]
     for name in names:
         profile = data / "profiles" / name
         assert json.loads((profile / "gateway_state.json").read_text())["gateway_state"] == "stopped"

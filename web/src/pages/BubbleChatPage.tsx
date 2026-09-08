@@ -1205,6 +1205,17 @@ export interface BubbleChatPageProps {
   /** Счётчик команд «Новый чат» из вкладки агента. Изменение значения
    *  сбрасывает только этот постоянно смонтированный экземпляр чата. */
   newChatRequest?: number;
+  /** Session selected by the owner of a multi-chat workbench. `refreshKey`
+   * reloads the same durable session after an external run finishes. */
+  sessionRequest?: { sessionId: string; refreshKey: number } | null;
+  /** Locks composition before the bound session is known (initial lookup). */
+  composeLocked?: boolean;
+  /** Session-scoped server guard. It remains effective if the intake banner is
+   * dismissed and unlocks other sessions selected in the same chat pane. */
+  sessionGuard?: { sessionId: string; locked: boolean } | null;
+  /** User explicitly selected a session (its id) or started a new chat
+   * (`null`). The owner can preserve guards for known intake sessions. */
+  onConversationChange?: (sessionId: string | null) => void;
 }
 
 export default function BubbleChatPage({
@@ -1213,6 +1224,10 @@ export default function BubbleChatPage({
   draft: draftFromOwner,
   onDraftConsumed,
   newChatRequest = 0,
+  sessionRequest = null,
+  composeLocked = false,
+  sessionGuard = null,
+  onConversationChange,
   active,
 }: BubbleChatPageProps = {}) {
   // Live SSE state from useChatStream. Sends POST to /api/chat/completions
@@ -1260,6 +1275,19 @@ export default function BubbleChatPage({
     handledNewChatRequestRef.current = newChatRequest;
     reset();
   }, [newChatRequest, reset]);
+
+  const handledSessionRequestRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sessionRequest) {
+      handledSessionRequestRef.current = null;
+      return;
+    }
+    if (isStreaming) return;
+    const requestKey = `${sessionRequest.sessionId}:${sessionRequest.refreshKey}`;
+    if (handledSessionRequestRef.current === requestKey) return;
+    handledSessionRequestRef.current = requestKey;
+    void loadSession(sessionRequest.sessionId);
+  }, [isStreaming, loadSession, sessionRequest]);
 
   const handleDecision = useCallback<ArtifactDecisionHandler>(
     async (kind, item) => {
@@ -1377,14 +1405,16 @@ export default function BubbleChatPage({
 
   const handleSelect = useCallback(
     (id: string) => {
+      onConversationChange?.(id);
       void loadSession(id);
     },
-    [loadSession],
+    [loadSession, onConversationChange],
   );
 
   const handleNewChat = useCallback(() => {
+    onConversationChange?.(null);
     reset();
-  }, [reset]);
+  }, [onConversationChange, reset]);
 
   // Решение по опасной команде уходит отдельным маршрутом, а не сообщением в
   // чат: ход агента заблокирован внутри вызова инструмента и новую реплику
@@ -1475,7 +1505,12 @@ export default function BubbleChatPage({
           // composer also swaps the Send button for Stop, but a stray
           // Enter would still call submit() and bypass the swap. Pair
           // with the ref-guard in useChatStream.send (Codex review #7).
-          disabled={isStreaming}
+          disabled={
+            isStreaming ||
+            composeLocked ||
+            Boolean(sessionRequest && sessionRequest.sessionId !== sessionId) ||
+            Boolean(sessionGuard?.locked && sessionGuard.sessionId === sessionId)
+          }
         />
       </section>
     </div>

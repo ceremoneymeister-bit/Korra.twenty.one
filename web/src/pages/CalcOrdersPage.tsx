@@ -32,8 +32,10 @@ import {
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { ProductButton } from "@/components/ProductButton";
 import { fetchJSON } from "@/lib/api";
+import { createIntakeHandoff } from "@/lib/calc-intake-handoff";
 import { $folderUpload } from "@/store/calc-folder-upload";
 import { cn } from "@/lib/utils";
+import { productUiMode } from "@/lib/dashboard-flags";
 import {
   STAGE_AGENTS,
   STAGE_ORDER,
@@ -1189,7 +1191,32 @@ function WorkflowRoute({ order }: { order: OrderCard }) {
 }
 
 function SourceFiles({ order }: { order: OrderCard }) {
+  const navigate = useNavigate();
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const handoffBusyRef = useRef(false);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
   const files = order.detail?.source_files ?? [];
+  const handoff = useCallback(async () => {
+    if (handoffBusyRef.current) return;
+    handoffBusyRef.current = true;
+    setHandoffBusy(true);
+    setHandoffError(null);
+    try {
+      const record = await createIntakeHandoff(order.order_id);
+      navigate(
+        `/agents?agent=default&intake=${encodeURIComponent(record.handoff_id)}`,
+      );
+    } catch (cause) {
+      setHandoffError(
+        cause instanceof Error
+          ? cause.message
+          : "Не удалось передать заказ приёмщику.",
+      );
+    } finally {
+      handoffBusyRef.current = false;
+      setHandoffBusy(false);
+    }
+  }, [navigate, order.order_id]);
   if (order.kind === "draft") {
     const formats = { PDF: 0, Excel: 0, другие: 0 };
     for (const file of files) {
@@ -1201,9 +1228,21 @@ function SourceFiles({ order }: { order: OrderCard }) {
     return <section aria-label="Документы заказа" className="space-y-4">
       <div className="space-y-2 text-sm text-text-secondary">
         <p>Файлов: {order.file_count ?? files.length}{files.length > 0 && ` · ${Object.entries(formats).filter(([, count]) => count > 0).map(([format, count]) => `${format}: ${count}`).join(" · ")}`}</p>
-        <p>Автоматический разбор документов и расчёт для этого черновика пока недоступны.</p>
+        <p>Приёмщик получит этот комплект и сохранённые результаты подготовки. Состав и готовность к расчёту сотрудник подтверждает отдельно.</p>
       </div>
-      <Link to={`/files?order=${encodeURIComponent(order.order_id)}`} className="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm font-semibold hover:bg-muted/40 focus-visible:outline focus-visible:outline-primary">Открыть документы</Link>
+      <div className="flex flex-wrap gap-2">
+        {productUiMode() === "calc" && (
+          <ProductButton disabled={handoffBusy} onClick={() => void handoff()}>
+            {handoffBusy ? <><Spinner /> Передаём…</> : "Передать приёмщику"}
+          </ProductButton>
+        )}
+        <Link to={`/files?order=${encodeURIComponent(order.order_id)}`} className="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm font-semibold hover:bg-muted/40 focus-visible:outline focus-visible:outline-primary">Открыть документы</Link>
+      </div>
+      {handoffError && (
+        <p role="alert" className="text-sm text-destructive">
+          {handoffError} Нажмите «Передать приёмщику», чтобы повторить.
+        </p>
+      )}
     </section>;
   }
   if (order.folder_name) return <section className="space-y-3 border-t border-border pt-4">

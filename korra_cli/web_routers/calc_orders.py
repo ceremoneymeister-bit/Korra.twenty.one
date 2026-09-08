@@ -40,12 +40,14 @@ from korra_cli.web_deps import late
 from korra_cli.web_routers.calc_rates import _run_admin
 from korra_cli.web_routers import calc_files
 from korra_cli.web_routers import calc_documents
+from korra_cli.web_routers import calc_intake
 
 _log = logging.getLogger("korra_cli.web_server")
 
 router = APIRouter()
 router.include_router(calc_files.router)
 router.include_router(calc_documents.router)
+router.include_router(calc_intake.router)
 
 # Late-bound: тесты подменяют их на web_server, и прямой импорт разошёлся бы
 # с подменой.

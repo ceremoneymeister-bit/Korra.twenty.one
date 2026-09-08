@@ -116,6 +116,35 @@ class DocumentJobs:
             self._manifest_cache[order_id] = cached
         return cached[1] == job["manifest_digest"]
 
+    def _snapshot(self, con, order_id: str) -> dict:
+        """Freeze receipt metadata only; never open sources or enqueue work."""
+        validate_id(order_id, field="order_id")
+        state = con.execute("SELECT state_json FROM orders WHERE order_id=?", (order_id,)).fetchone()
+        if state is None:
+            raise NotFound("Заказ не найден")
+        manifest = source_manifest(json.loads(state[0]))
+        digest = digest_json(manifest)
+        prior = con.execute("SELECT * FROM document_snapshots WHERE order_id=? "
+                            "ORDER BY document_set_revision DESC LIMIT 1", (order_id,)).fetchone()
+        if prior and prior["manifest_digest"] == digest:
+            return dict(prior)
+        revision = prior["document_set_revision"] + 1 if prior else 1
+        snapshot_id = "snap_" + digest_json([order_id, revision, digest])[:40]
+        con.execute("INSERT INTO document_snapshots VALUES(?,?,?,?,?,?,?)",
+                    (snapshot_id, order_id, revision, digest, canonical_json(manifest),
+                     canonical_json(snapshot_sources(order_id, manifest)), self.clock()))
+        con.execute("UPDATE document_jobs SET status='stale',lease_until=NULL "
+                    "WHERE snapshot_id IN (SELECT snapshot_id FROM document_snapshots "
+                    "WHERE order_id=? AND snapshot_id<>?)", (order_id, snapshot_id))
+        return dict(con.execute("SELECT * FROM document_snapshots WHERE snapshot_id=?",
+                                (snapshot_id,)).fetchone())
+
+    def snapshot(self, order_id: str) -> dict:
+        with self._db() as con:
+            snapshot = self._snapshot(con, order_id)
+            return {key: snapshot[key] for key in ("snapshot_id", "order_id",
+                    "document_set_revision", "manifest_digest")}
+
     def start(self, order_id: str, *, reader_version: str, command="inspect", options=None,
               source_id=None) -> dict:
         validate_id(order_id, field="order_id")
@@ -127,25 +156,9 @@ class DocumentJobs:
                   "source_id": source_id, "schema_version": 1}
         fingerprint = digest_json(recipe)
         with self._db() as con:
-            state = con.execute("SELECT state_json FROM orders WHERE order_id=?", (order_id,)).fetchone()
-            if state is None:
-                raise NotFound("Заказ не найден")
-            manifest = source_manifest(json.loads(state[0]))
-            digest = digest_json(manifest)
-            prior = con.execute("SELECT * FROM document_snapshots WHERE order_id=? "
-                                "ORDER BY document_set_revision DESC LIMIT 1", (order_id,)).fetchone()
-            if prior and prior["manifest_digest"] == digest:
-                snapshot_id = prior["snapshot_id"]
-            else:
-                revision = prior["document_set_revision"] + 1 if prior else 1
-                snapshot_id = "snap_" + digest_json([order_id, revision, digest])[:40]
-                con.execute("INSERT INTO document_snapshots VALUES(?,?,?,?,?,?,?)",
-                            (snapshot_id, order_id, revision, digest, canonical_json(manifest),
-                             canonical_json(snapshot_sources(order_id, manifest)), self.clock()))
-                con.execute("UPDATE document_jobs SET status='stale',lease_until=NULL "
-                            "WHERE snapshot_id IN (SELECT snapshot_id FROM document_snapshots "
-                            "WHERE order_id=? AND snapshot_id<>?)", (order_id, snapshot_id))
-            sources = snapshot_sources(order_id, manifest)
+            snapshot = self._snapshot(con, order_id)
+            snapshot_id = snapshot["snapshot_id"]
+            sources = json.loads(snapshot["sources_json"])
             if source_id:
                 sources = [source for source in sources if source["source_id"] == source_id]
                 if not sources:

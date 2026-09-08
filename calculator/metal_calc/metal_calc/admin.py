@@ -50,6 +50,8 @@ def main() -> None:
 
     from . import document_admin
     document_admin.register(subparsers)
+    from . import intake_admin
+    intake_admin.register(subparsers)
 
     subparsers.add_parser("folder-upload-create")
     subparsers.add_parser("folder-list")
@@ -145,6 +147,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    if args.command.startswith("intake-"):
+        intake_admin.run(args, _emit)
+        return
 
     if args.command.startswith("document-"):
         document_admin.run(args, _read_stdin_json, _emit)

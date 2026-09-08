@@ -26,6 +26,7 @@ import {
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Check,
@@ -34,6 +35,7 @@ import {
   EyeOff,
   FileText,
   MessageSquarePlus,
+  Loader2,
   MoreVertical,
   Package,
   Pencil,
@@ -55,6 +57,11 @@ import { cn } from "@/lib/utils";
 import { agentSettingsHref, MAIN_AGENT_TAB } from "@/lib/agent-tabs";
 import { useAgentTabs } from "@/hooks/useAgentTabs";
 import { productUiMode } from "@/lib/dashboard-flags";
+import {
+  getIntakeHandoff,
+  intakeHandoffIsTerminal,
+  type IntakeHandoff,
+} from "@/lib/calc-intake-handoff";
 
 /* ------------------------------------------------------------------ */
 /*  AgentWorkbenchPage (default export)                                */
@@ -64,6 +71,15 @@ import { productUiMode } from "@/lib/dashboard-flags";
 const TAB_MENU_WIDTH = 250;
 /** Отступ от края экрана, чтобы меню не липло к рамке окна. */
 const TAB_MENU_VIEWPORT_MARGIN = 12;
+const INTAKE_POLL_MS = 1_500;
+
+interface IntakeView {
+  id: string;
+  record: IntakeHandoff | null;
+  loading: boolean;
+  error: string | null;
+  sessionRefreshKey: number;
+}
 
 /**
  * Левый край меню под кнопкой, которая его открыла.
@@ -82,6 +98,104 @@ function tabMenuLeft(trigger: DOMRect): number {
   return Math.max(
     TAB_MENU_VIEWPORT_MARGIN,
     Math.min(preferred, Math.max(TAB_MENU_VIEWPORT_MARGIN, maxLeft)),
+  );
+}
+
+function IntakeBanner({
+  view,
+  deferred,
+  onRetry,
+  onDismiss,
+  onOpenOrder,
+}: {
+  view: IntakeView;
+  deferred: boolean;
+  onRetry: () => void;
+  onDismiss?: () => void;
+  onOpenOrder: (orderId: string) => void;
+}) {
+  const record = view.record;
+  const blocked = record ? (record.chat_blocked ?? record.initial_run_active) : true;
+  let message = "Проверяем передачу заказа…";
+  if (record?.status === "prepared") {
+    message = "Приёмщик готовит связанный чат и фиксирует комплект документов.";
+  } else if (record?.status === "connecting" || record?.status === "running") {
+    message = "Приёмщик принимает заказ и фиксирует комплект документов.";
+  } else if (record?.status === "received") {
+    message = record.initial_run_active
+      ? "Приёмщик завершает приём и сохраняет ответ в связанном чате."
+      : "Заказ передан. В чате — ответ приёмщика и вопросы по комплекту.";
+  } else if (record?.status === "needs_attention") {
+    message = record.session_created === false
+      ? "Чат приёмщика не создан. Откройте заказ и повторите передачу; запуск начнётся после успешного создания чата."
+      : blocked
+        ? "Доставка пока не подтверждена. Чат сохранён; повторная отправка требует проверки."
+        : "Приём не завершён. Новый запуск автоматически не создавался; связанный чат можно продолжить вручную.";
+  } else if (record?.status === "stale") {
+    message = "Комплект документов изменился. Откройте заказ и передайте актуальную версию.";
+  }
+  if (deferred) {
+    message = "В этом чате уже идёт ответ. Заказ откроется здесь после его завершения; текущий ответ сохранится.";
+  }
+
+  return (
+    <aside
+      aria-label="Передача заказа приёмщику"
+      className="mx-1 mb-2 flex shrink-0 flex-wrap items-start gap-3 rounded-xl border border-primary/25 bg-primary/[0.06] px-4 py-3 text-sm"
+    >
+      {view.loading ? (
+        <Loader2 aria-hidden className="mt-0.5 size-4 shrink-0 animate-spin text-primary" />
+      ) : view.error || record?.status === "needs_attention" || record?.status === "stale" ? (
+        <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+      ) : (
+        <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-primary" />
+      )}
+      <div className="min-w-0 flex-1 space-y-1">
+        <p className="font-semibold">
+          {record?.order_name || "Передача заказа приёмщику"}
+        </p>
+        <p className="text-text-secondary">
+          {view.error
+            ? `${view.error} Пока статус неизвестен, поле ввода заблокировано.`
+            : message}
+        </p>
+        {record?.error_code && (
+          <p className="font-mono text-xs text-text-secondary">
+            Код: {record.error_code}
+          </p>
+        )}
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-1">
+        {view.error && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="min-h-9 rounded-lg px-3 font-semibold text-primary hover:bg-primary/10"
+          >
+            Повторить
+          </button>
+        )}
+        {record && (
+          <button
+            type="button"
+            onClick={() => onOpenOrder(record.order_id)}
+            className="min-h-9 rounded-lg px-3 font-semibold text-primary hover:bg-primary/10"
+          >
+            Открыть заказ
+          </button>
+        )}
+        {onDismiss && (
+          <button
+            type="button"
+            aria-label="Закрыть передачу заказа"
+            onClick={onDismiss}
+            className="flex size-9 items-center justify-center rounded-lg text-text-secondary hover:bg-muted/50 hover:text-foreground"
+          >
+            <X aria-hidden className="size-4" />
+          </button>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -181,6 +295,87 @@ export default function AgentWorkbenchPage() {
   // экране и вернулся сюда — вкладка должна быть уже здесь, а не через
   // полминуты опроса.
   const onAgentsRoute = (pathname.replace(/\/$/, "") || "/") === "/agents";
+  const requestedIntakeId = managedCalculator && onAgentsRoute
+    ? searchParams.get("intake")?.trim() || null
+    : null;
+  const [trackedIntakeId, setTrackedIntakeId] = useState<string | null>(null);
+  const [intakeDismissed, setIntakeDismissed] = useState(false);
+  const [intakeView, setIntakeView] = useState<IntakeView | null>(null);
+  const [intakeRetry, setIntakeRetry] = useState(0);
+
+  useEffect(() => {
+    if (!requestedIntakeId) return;
+    setTrackedIntakeId(requestedIntakeId);
+    setIntakeDismissed(false);
+  }, [requestedIntakeId]);
+
+  useEffect(() => {
+    if (!trackedIntakeId) {
+      setIntakeView(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    setIntakeView((previous) => previous?.id === trackedIntakeId
+      ? { ...previous, loading: previous.record === null, error: null }
+      : {
+          id: trackedIntakeId,
+          record: null,
+          loading: true,
+          error: null,
+          sessionRefreshKey: 0,
+        });
+
+    const poll = async () => {
+      try {
+        const record = await getIntakeHandoff(trackedIntakeId);
+        if (cancelled) return;
+        setIntakeView((previous) => {
+          if (previous?.id !== trackedIntakeId) return previous;
+          const finishedSinceLastRead = Boolean(
+            previous.record &&
+            previous.record.initial_run_active &&
+            !record.initial_run_active,
+          );
+          const reachedTerminal = Boolean(
+            previous.record &&
+            !intakeHandoffIsTerminal(previous.record.status) &&
+            intakeHandoffIsTerminal(record.status),
+          );
+          return {
+            ...previous,
+            record,
+            loading: false,
+            error: null,
+            sessionRefreshKey:
+              previous.sessionRefreshKey + (finishedSinceLastRead || reachedTerminal ? 1 : 0),
+          };
+        });
+        const chatBlocked = record.chat_blocked ?? record.initial_run_active;
+        const receiptStillFinishing =
+          record.status === "received" &&
+          (record.initial_run_active || chatBlocked);
+        if (!intakeHandoffIsTerminal(record.status) || receiptStillFinishing) {
+          timer = setTimeout(() => void poll(), INTAKE_POLL_MS);
+        }
+      } catch (cause) {
+        if (cancelled) return;
+        setIntakeView((previous) => previous?.id === trackedIntakeId
+          ? {
+              ...previous,
+              loading: false,
+              error: ownerFacingError(cause, "Не удалось проверить передачу заказа."),
+            }
+          : previous);
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [trackedIntakeId, intakeRetry]);
+
   useEffect(() => {
     if (onAgentsRoute) void refresh();
   }, [onAgentsRoute, refresh]);
@@ -228,6 +423,35 @@ export default function AgentWorkbenchPage() {
       return next;
     });
   }, []);
+
+  const dismissIntake = useCallback(() => {
+    setIntakeDismissed(true);
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete("intake");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const handleConversationChange = useCallback((sessionId: string | null) => {
+    const intakeMatch = sessionId?.match(/^intake_[0-9a-f]{40}$/i);
+    if (intakeMatch) {
+      const id = intakeMatch[0].toLowerCase();
+      setTrackedIntakeId(id);
+      setIntakeDismissed(false);
+      setIntakeView((previous) => previous?.id === id
+        ? previous
+        : {
+            id,
+            record: null,
+            loading: true,
+            error: null,
+            sessionRefreshKey: 0,
+          });
+      return;
+    }
+    dismissIntake();
+  }, [dismissIntake]);
 
   // Стабильная ссылка + выход без записи, когда значение не изменилось. Колбэк
   // зовётся из эффекта дочернего чата, и новый объект состояния на каждый
@@ -282,6 +506,7 @@ export default function AgentWorkbenchPage() {
   );
 
   const startNewChat = useCallback((profile: string) => {
+    if (profile === MAIN_AGENT_TAB.profile) dismissIntake();
     setActiveId(profile);
     setNewChatByProfile((previous) => ({
       ...previous,
@@ -289,7 +514,7 @@ export default function AgentWorkbenchPage() {
     }));
     setOpenMenu(null);
     setRenamingProfile(null);
-  }, []);
+  }, [dismissIntake]);
 
   /**
    * После переименования сказать, что роль агента имя не сменила.
@@ -418,6 +643,29 @@ export default function AgentWorkbenchPage() {
   // Скрытые чаты тоже остаются смонтированы: «скрыть вкладку» — настройка
   // полосы, а не команда оборвать ответ или забыть открытый разговор.
   const mountedTabs = [...tabs, ...hiddenTabs];
+  const rootStreaming = streamingByProfile[MAIN_AGENT_TAB.profile] === true;
+  const intakeComposeLocked = Boolean(
+    intakeView &&
+    !intakeDismissed &&
+    (!intakeView.record || intakeView.record.session_created === false),
+  );
+  const intakeSessionRequest =
+    intakeView?.record &&
+    intakeView.record.session_created !== false &&
+    !intakeDismissed
+    ? {
+        sessionId: intakeView.record.session_id,
+        refreshKey: intakeView.sessionRefreshKey,
+      }
+    : null;
+  const intakeSessionGuard =
+    intakeView?.record && intakeView.record.session_created !== false
+    ? {
+        sessionId: intakeView.record.session_id,
+        locked:
+          intakeView.record.chat_blocked ?? intakeView.record.initial_run_active,
+      }
+    : null;
 
   return (
     // Ту же полную высоту, что и у одиночного чата, даёт обёртка в App.tsx
@@ -758,6 +1006,22 @@ export default function AgentWorkbenchPage() {
             style={{ display: tab.profile === activeId ? undefined : "none" }}
             className="flex min-h-0 flex-1 flex-col"
           >
+            {tab.profile === MAIN_AGENT_TAB.profile && intakeView && !intakeDismissed && (
+              <IntakeBanner
+                view={intakeView}
+                deferred={rootStreaming}
+                onRetry={() => setIntakeRetry((value) => value + 1)}
+                onDismiss={
+                  intakeView.record &&
+                  !(intakeView.record.chat_blocked ?? intakeView.record.initial_run_active)
+                    ? dismissIntake
+                    : undefined
+                }
+                onOpenOrder={(orderId) =>
+                  navigate(`/orders?order=${encodeURIComponent(orderId)}`)
+                }
+              />
+            )}
             <BubbleChatPage
               agentProfile={tab.profile}
               active={tab.profile === activeId}
@@ -765,6 +1029,24 @@ export default function AgentWorkbenchPage() {
               draft={draftByProfile[tab.profile] ?? null}
               onDraftConsumed={() => clearDraft(tab.profile)}
               newChatRequest={newChatByProfile[tab.profile] ?? 0}
+              sessionRequest={
+                tab.profile === MAIN_AGENT_TAB.profile
+                  ? intakeSessionRequest
+                  : null
+              }
+              composeLocked={
+                tab.profile === MAIN_AGENT_TAB.profile && intakeComposeLocked
+              }
+              sessionGuard={
+                tab.profile === MAIN_AGENT_TAB.profile
+                  ? intakeSessionGuard
+                  : null
+              }
+              onConversationChange={
+                managedCalculator && tab.profile === MAIN_AGENT_TAB.profile
+                  ? handleConversationChange
+                  : undefined
+              }
             />
           </div>
         ))}
