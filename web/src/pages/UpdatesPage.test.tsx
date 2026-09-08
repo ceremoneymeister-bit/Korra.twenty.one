@@ -11,7 +11,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PageHeaderContext } from '@/contexts/page-header-context';
-import type { UpdatesState } from '@/lib/api';
+import type { ReleaseNote, UpdatesState } from '@/lib/api';
 import UpdatesPage from './UpdatesPage';
 
 const calls = vi.hoisted(() => ({
@@ -48,6 +48,8 @@ const AVAILABLE = {
   published_at: '08.09.2026',
   summary: 'Появился раздел «Обновления».',
   pause: 'около минуты',
+  // Право нажать кнопку кабинет выдаёт поимённо и присылает в карточке.
+  self_service: true,
   sections: [{
     heading: 'Что нового',
     items: [
@@ -165,6 +167,44 @@ describe('доступный выпуск', () => {
     await click(button('Обновить'));
     expect(container.textContent).toContain('Выпуск изменился');
     expect(button('Обновить')).not.toBeNull();
+  });
+});
+
+describe('обновление разрешено не всем', () => {
+  it('без права показывает выпуск, но не кнопку', async () => {
+    // Право нажимать выдаёт кабинет поимённо. Кнопка без права обещала бы
+    // обновление, которого не будет: просьба легла бы на диск и осталась там.
+    calls.getUpdatesState.mockResolvedValue(state({
+      available: { ...AVAILABLE, self_service: false },
+      up_to_date: false,
+    }));
+    await render();
+    expect(container.textContent).toContain('Доступен новый выпуск');
+    expect(container.textContent).toContain('Раздел «Обновления»');
+    expect(container.textContent).toContain('Этот выпуск установит наш оператор');
+    expect(button('Обновить')).toBeNull();
+    expect(calls.requestUpdate).not.toHaveBeenCalled();
+  });
+
+  it('считает отсутствие поля отсутствием права', async () => {
+    // Старый или чужой кабинет поля не пришлёт: молчание не выдаёт права.
+    const withoutTheField: ReleaseNote = { ...AVAILABLE };
+    delete withoutTheField.self_service;
+    calls.getUpdatesState.mockResolvedValue(state({ available: withoutTheField, up_to_date: false }));
+    await render();
+    expect(button('Обновить')).toBeNull();
+    expect(container.textContent).toContain('Обновит оператор');
+  });
+
+  it('отзыв права убирает кнопку у уже отправленной просьбы', async () => {
+    calls.getUpdatesState.mockResolvedValue(state({
+      available: { ...AVAILABLE, self_service: false },
+      up_to_date: false,
+      request: { release_id: AVAILABLE.release_id, requested_at: 1, stale: false },
+    }));
+    await render();
+    expect(container.textContent).not.toContain('Запрос отправлен');
+    expect(button('Отменить запрос')).toBeNull();
   });
 });
 

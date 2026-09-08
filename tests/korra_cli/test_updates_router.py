@@ -42,6 +42,8 @@ RELEASE = {
     "summary": "Одно предложение.",
     "sections": [{"heading": "Что нового", "items": [{"title": "Пункт", "detail": "Пояснение"}]}],
     "pause": "около минуты",
+    # Право нажать «Обновить» кабинет выдаёт поимённо и присылает в карточке.
+    "self_service": True,
 }
 
 
@@ -114,6 +116,33 @@ def test_request_is_saved_and_visible(home, client, auth):
     saved = json.loads((home / "update-center" / "request.json").read_text(encoding="utf-8"))
     assert saved["release_id"] == "K21-2026.09.09" and saved["source"] == "panel"
     assert state(client, auth)["request"]["release_id"] == "K21-2026.09.09"
+
+
+def test_request_without_the_self_service_right_is_refused(home, client, auth):
+    """Право нажимать кнопку выдаётся поимённо в кабинете. Нет права — просьбу
+    исполнять некому, и принимать её нельзя: владелец увидит «Запрос
+    отправлен», а обновление не начнётся никогда."""
+    without = {key: value for key, value in RELEASE.items() if key != "self_service"}
+    announce(client, auth, release=without)
+    body = state(client, auth)
+    # Выпуск и «что нового» владелец видит в любом случае — нет только кнопки.
+    assert body["available"]["release_id"] == "K21-2026.09.09"
+    assert body["available"]["self_service"] is False
+    response = client.post("/api/updates/request", headers=auth, json={})
+    assert response.status_code == 403
+    assert "оператор" in response.json()["detail"]
+    assert not (home / "update-center" / "request.json").exists()
+
+
+def test_revoked_right_stops_accepting_requests(home, client, auth):
+    """Кабинет присылает фактическое право на каждом обходе. Отзыв приезжает
+    новой карточкой и обязан закрыть кнопку, а не остаться в старой."""
+    announce(client, auth, release=RELEASE)
+    assert client.post("/api/updates/request", headers=auth, json={}).status_code == 200
+    announce(client, auth, release={**RELEASE, "self_service": False}, clear_request=True)
+    assert state(client, auth)["available"]["self_service"] is False
+    assert state(client, auth)["request"] is None
+    assert client.post("/api/updates/request", headers=auth, json={}).status_code == 403
 
 
 def test_request_without_available_release_is_refused(home, client, auth):

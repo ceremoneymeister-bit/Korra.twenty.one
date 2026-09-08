@@ -350,6 +350,9 @@ export default function UpdatesPage() {
 
   const { installed, available, progress, request: pending, steps } = state;
   const active = Boolean(progress && !progress.final);
+  // Право нажать кнопку выдаёт кабинет поимённо и может отозвать. Нет права —
+  // выпуск и «что нового» видны, а обновление делает оператор.
+  const selfService = available?.self_service === true;
   // Операция «доехала»: цель установлена, либо это откат — он по смыслу
   // возвращает НЕ целевой выпуск, и шаги обновления после него уже не нужны.
   const finished =
@@ -366,11 +369,22 @@ export default function UpdatesPage() {
           release={available}
           eyebrow="Доступен новый выпуск"
           icon={<Download size={17} aria-hidden />}
-          badge={pending && !pending.stale ? "Запрос отправлен" : "Можно обновиться"}
-          badgeTone={pending && !pending.stale ? "working" : "ready"}
+          badge={
+            !selfService ? "Обновит оператор" : pending && !pending.stale ? "Запрос отправлен" : "Можно обновиться"
+          }
+          badgeTone={!selfService ? undefined : pending && !pending.stale ? "working" : "ready"}
         >
           <div className="upd-actions">
-            {pending && !pending.stale ? (
+            {/* Кнопку показываем только там, где кабинету разрешено исполнить
+                нажатие. Без права она обещала бы обновление, которого не
+                будет: просьба ушла бы на диск и осталась там лежать. */}
+            {!selfService ? (
+              <p className="upd-small upd-muted">
+                <Info size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 6 }} />
+                Этот выпуск установит наш оператор — обновление по кнопке для вашей установки не
+                включено. Мы уже знаем о выпуске; напишите нам, если хотите обновиться прямо сейчас.
+              </p>
+            ) : pending && !pending.stale ? (
               <>
                 <button type="button" className="upd-button" onClick={cancel} disabled={busy}>
                   <RotateCcw size={18} aria-hidden />

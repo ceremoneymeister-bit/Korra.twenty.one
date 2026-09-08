@@ -253,6 +253,9 @@ def _available() -> Optional[dict[str, Any]]:
         "sections": _clean_sections(raw.get("sections")),
         "pause": _clean_text(raw.get("pause"), 80) or "около минуты",
         "announced_at": raw.get("announced_at") if isinstance(raw.get("announced_at"), (int, float)) else None,
+        # Право нажать «Обновить» выдаёт кабинет и только поимённо. Нет поля —
+        # нет права: выпуск владелец увидит, а обновит установку оператор.
+        # Иначе кнопка обещала бы то, чего кабинет не исполнит.
         "self_service": bool(raw.get("self_service")),
     }
 
@@ -386,6 +389,15 @@ async def updates_request(body: RequestBody, request: Request) -> dict[str, Any]
     available = _available()
     if not available:
         raise HTTPException(409, "Обновление сейчас недоступно. Попробуйте позже.")
+    if not available["self_service"]:
+        # Кнопку в этом случае экран и не показывает, но скрытая кнопка —
+        # не проверка: карточка приходит снаружи, а просьбу, которую никто
+        # не исполнит, лучше не принимать, чем принять и промолчать.
+        raise HTTPException(
+            403,
+            "Эту установку обновляет наш оператор. Мы уже знаем о новом выпуске; "
+            "напишите нам, если хотите обновиться прямо сейчас.",
+        )
     release_id = body.release_id or available["release_id"]
     if release_id != available["release_id"]:
         raise HTTPException(409, "Выпуск изменился. Обновите страницу и попробуйте снова.")
