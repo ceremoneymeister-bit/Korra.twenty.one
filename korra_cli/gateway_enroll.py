@@ -138,24 +138,24 @@ def _post_enroll(
             pass
         if exc.code == 401:
             raise RuntimeError(
-                "Connector rejected the caller identity (401). Your Nous Portal "
-                "token could not be verified — try `hermes auth add nous` and retry."
+                "Коннектор отклонил данные входа (401). Не удалось проверить токен "
+                "Nous Portal — выполните `korra auth add nous` и повторите попытку."
             ) from exc
         if exc.code == 403:
             raise RuntimeError(
                 detail
-                or "Enrollment token invalid, expired, already used, or tenant mismatch (403)."
+                or "Токен подключения недействителен, истёк, уже использован или относится к другому клиенту (403)."
             ) from exc
         raise RuntimeError(
-            f"Connector returned HTTP {exc.code}" + (f": {detail}" if detail else "")
+            f"Коннектор вернул ошибку HTTP {exc.code}" + (f": {detail}" if detail else "")
         ) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(
-            f"Could not reach the connector at {connector_base_url}: {exc.reason}"
+            f"Не удалось связаться с коннектором по адресу {connector_base_url}: {exc.reason}"
         ) from exc
 
     if not isinstance(payload, dict) or not payload.get("secret"):
-        raise RuntimeError("Connector returned an unexpected response (no secret).")
+        raise RuntimeError("Коннектор вернул неожиданный ответ: нет секрета подключения.")
     return payload
 
 
@@ -170,26 +170,26 @@ def cmd_gateway_enroll(args) -> None:
     # write anyway.
     if is_managed():
         print(
-            "✗ `hermes gateway enroll` is not available in a managed/hosted install.\n"
-            "  The relay gateway secret is provisioned by the hosting platform."
+            "✗ Команда `korra gateway enroll` недоступна в управляемой установке.\n"
+            "  Секрет шлюза ретрансляции выдаёт платформа размещения."
         )
         sys.exit(1)
 
     enrollment_token = (getattr(args, "token", None) or os.environ.get("GATEWAY_RELAY_ENROLL_TOKEN", "")).strip()
     if not enrollment_token:
         print(
-            "✗ No enrollment token. Pass --token <token> (or set "
-            "GATEWAY_RELAY_ENROLL_TOKEN).\n"
-            "  The connector mints this single-use token when your tenant's route "
-            "is provisioned; it is delivered with your gateway config."
+            "✗ Нет токена подключения. Передайте --token <токен> или задайте "
+            "GATEWAY_RELAY_ENROLL_TOKEN.\n"
+            "  Одноразовый токен создаётся коннектором при настройке маршрута "
+            "клиента и приходит вместе с настройками шлюза."
         )
         sys.exit(1)
 
     connector_base_url = _resolve_connector_url(getattr(args, "connector_url", None))
     if not connector_base_url:
         print(
-            "✗ No connector URL. Pass --connector-url <url> (or set GATEWAY_RELAY_URL "
-            "/ gateway.relay_url in config.yaml)."
+            "✗ Нет адреса коннектора. Передайте --connector-url <адрес> или задайте "
+            "GATEWAY_RELAY_URL / gateway.relay_url в config.yaml."
         )
         sys.exit(1)
 
@@ -202,13 +202,13 @@ def cmd_gateway_enroll(args) -> None:
         access_token = _resolve_identity_token()
     except AuthError as exc:
         if getattr(exc, "relogin_required", False):
-            print("✗ You're not logged into Nous Portal.")
-            print("  Run `hermes setup` (or `hermes auth add nous`) first, then retry.")
+            print("✗ Вы не вошли в Nous Portal.")
+            print("  Сначала выполните `korra setup` или `korra auth add nous`, затем повторите попытку.")
         else:
-            print(f"✗ Could not resolve a Nous Portal access token: {exc}")
+            print(f"✗ Не удалось получить токен доступа Nous Portal: {exc}")
         sys.exit(1)
     except Exception as exc:
-        print(f"✗ Could not resolve a caller-identity token: {exc}")
+        print(f"✗ Не удалось получить токен для подтверждения клиента: {exc}")
         sys.exit(1)
 
     # 2-3. Redeem the enrollment token at the connector.
@@ -220,7 +220,7 @@ def cmd_gateway_enroll(args) -> None:
             gateway_id=gateway_id,
         )
     except RuntimeError as exc:
-        print(f"✗ Enrollment failed: {exc}")
+        print(f"✗ Не удалось подключить шлюз: {exc}")
         sys.exit(1)
 
     secret = str(result.get("secret") or "")
@@ -255,17 +255,17 @@ def cmd_gateway_enroll(args) -> None:
         try:
             save_env_value(key, value)
         except Exception as exc:
-            print(f"✗ Failed to write {key} to .env: {exc}")
+            print(f"✗ Не удалось записать {key} в .env: {exc}")
             sys.exit(1)
 
     from korra_cli.config import get_env_path
 
-    print(f'✓ Enrolled gateway "{resolved_gateway_id}"' + (f" for tenant {tenant}" if tenant else ""))
+    print(f'✓ Шлюз «{resolved_gateway_id}» подключён' + (f" для клиента {tenant}" if tenant else ""))
     print()
-    print(f"  Wrote to {get_env_path()}:")
+    print(f"  Настройки записаны в {get_env_path()}:")
     print(f"    GATEWAY_RELAY_ID={resolved_gateway_id}")
-    print("    GATEWAY_RELAY_SECRET=<hidden>")
-    print("    GATEWAY_RELAY_DELIVERY_KEY=<hidden>")
+    print("    GATEWAY_RELAY_SECRET=<скрыто>")
+    print("    GATEWAY_RELAY_DELIVERY_KEY=<скрыто>")
     if explicit_url:
         print(f"    GATEWAY_RELAY_URL={explicit_url.rstrip('/')}")
     if explicit_wake_url:
@@ -285,9 +285,9 @@ def cmd_gateway_enroll(args) -> None:
         warned_secondary = _warn_if_secondary_multiplex_profile()
     if not warned_secondary:
         print(
-            "  The gateway now authenticates its relay WS upgrade with the per-gateway\n"
-            "  secret and verifies signed inbound deliveries with the tenant delivery\n"
-            "  key. Restart the gateway to pick up the new env."
+            "  Теперь шлюз использует личный секрет для подключения к ретранслятору\n"
+            "  и ключ клиента для проверки входящих сообщений. Перезапустите шлюз,\n"
+            "  чтобы применить новые переменные окружения."
         )
 
 
@@ -337,13 +337,12 @@ def _warn_if_secondary_multiplex_profile() -> bool:
                 return False
 
         print(
-            "  ⚠ This profile is a SECONDARY profile of a multiplexed gateway.\n"
-            "    GATEWAY_RELAY_URL / GATEWAY_RELAY_WAKE_URL are process-level\n"
-            "    deployment settings: the gateway reads them from the process\n"
-            "    environment (or the default profile's .env), not from this\n"
-            "    profile's .env. Set them in the environment the gateway process\n"
-            "    is launched with, or enroll from the default profile. The\n"
-            "    relay credentials written above are valid either way."
+            "  ⚠ Это дополнительный профиль шлюза с несколькими профилями.\n"
+            "    GATEWAY_RELAY_URL и GATEWAY_RELAY_WAKE_URL относятся ко всему\n"
+            "    процессу: шлюз читает их из окружения процесса или .env основного\n"
+            "    профиля, а не из .env этого профиля. Задайте их в окружении запуска\n"
+            "    шлюза либо подключите основной профиль. Записанные выше данные\n"
+            "    доступа к ретранслятору в любом случае действительны."
         )
         return True
     except Exception:

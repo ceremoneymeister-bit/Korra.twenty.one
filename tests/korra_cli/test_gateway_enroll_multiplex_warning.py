@@ -53,7 +53,7 @@ def test_fires_for_secondary_when_default_root_has_multiplex_on(topology, monkey
     fired, out = _run()
 
     assert fired is True
-    assert "SECONDARY profile" in out
+    assert "дополнительный профиль" in out
 
 
 def test_silent_when_multiplex_off_in_default_root(topology, monkeypatch):
