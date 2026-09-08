@@ -46,22 +46,22 @@ class TestUpdateCompleteMessage:
         _write_pyproject(fake_root, "0.20.0")
         assert (
             update_cmd._update_complete_message("0.19.4")
-            == "✓ Update complete! (v0.19.4 → v0.20.0)"
+            == "✓ Обновление завершено! (v0.19.4 → v0.20.0)"
         )
 
     def test_same_version_reports_single_version(self, fake_root):
         _write_pyproject(fake_root, "0.20.0")
         assert (
             update_cmd._update_complete_message("0.20.0")
-            == "✓ Update complete! (v0.20.0)"
+            == "✓ Обновление завершено! (v0.20.0)"
         )
 
     def test_unknown_pre_version_still_shows_current(self, fake_root):
         _write_pyproject(fake_root, "0.20.0")
         assert (
             update_cmd._update_complete_message(None)
-            == "✓ Update complete! (v0.20.0)"
+            == "✓ Обновление завершено! (v0.20.0)"
         )
 
     def test_unknown_post_version_falls_back_to_plain(self, fake_root):
-        assert update_cmd._update_complete_message("0.19.4") == "✓ Update complete!"
+        assert update_cmd._update_complete_message("0.19.4") == "✓ Обновление завершено!"

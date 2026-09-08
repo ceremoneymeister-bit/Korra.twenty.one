@@ -132,8 +132,8 @@ def test_update_success_when_head_moves(monkeypatch, tmp_path, capsys):
     hermes_main.cmd_update(args)  # completes normally (no SystemExit)
 
     out = capsys.readouterr().out
-    assert "✓ Code updated!" in out
-    assert "Code did not move" not in out
+    assert '✓ Код обновлён!' in out
+    assert 'Версия кода не изменилась' not in out
 
 
 def test_update_fails_loudly_when_head_pinned(monkeypatch, tmp_path, capsys):
@@ -147,6 +147,6 @@ def test_update_fails_loudly_when_head_pinned(monkeypatch, tmp_path, capsys):
 
     assert exc_info.value.code == 1
     out = capsys.readouterr().out
-    assert "Code did not move" in out
-    assert "✓ Code updated!" not in out
+    assert 'Версия кода не изменилась' in out
+    assert '✓ Код обновлён!' not in out
     assert "checkout main" in out

@@ -227,7 +227,7 @@ def test_untracked_enumeration_failure_is_visible(monkeypatch, tmp_path, capsys)
     monkeypatch.setattr(update_cmd.subprocess, "run", lambda *_a, **_kw: Result())
 
     assert update_cmd._git_untracked_paths(["git"], tmp_path) is None
-    assert "Could not enumerate untracked files" in capsys.readouterr().out
+    assert 'Не удалось перечислить файлы вне Git' in capsys.readouterr().out
 
 
 def test_import_guard_is_non_fatal_when_probe_cannot_run(monkeypatch, tmp_path):
@@ -251,7 +251,7 @@ def test_hint_fires_for_first_party_import_error():
     hint = partial_update_hint(exc)
 
     assert hint, "expected recovery guidance for a first-party ImportError"
-    assert any("hermes update" in line for line in hint)
+    assert any('korra update' in line for line in hint)
 
 
 @pytest.mark.parametrize(

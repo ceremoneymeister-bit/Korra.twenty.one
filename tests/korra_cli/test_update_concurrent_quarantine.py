@@ -258,8 +258,8 @@ def test_pause_windows_gateways_for_update_stops_profile_and_unmapped_pids(
     assert marker["stopper_pid"] == os.getpid()
 
     captured = capsys.readouterr().out
-    assert "Paused gateway profile(s): work" in captured
-    assert "without profile mapping" in captured
+    assert 'Приостановлены профили шлюза: work' in captured
+    assert 'без привязки к профилю' in captured
     # An unmapped PID whose argv we captured is respawnable, so we must NOT
     # tell the user to restart it manually.
     assert "Restart manually after update" not in captured
@@ -409,7 +409,7 @@ def test_pause_windows_gateway_service_surfaces_rollback_start_failure(
         raising=False,
     )
 
-    with pytest.raises(RuntimeError, match="rollback failures: HermesGateway"):
+    with pytest.raises(RuntimeError, match="ошибки восстановления: HermesGateway"):
         cli_main._pause_windows_gateways_for_update()
 
 
@@ -778,7 +778,7 @@ def test_plain_update_refuses_to_tree_kill_its_gateway_ancestor(
     output = capsys.readouterr().out
     assert "taskkill /T" in output
     assert "`/update`" in output
-    assert "separate terminal" in output
+    assert 'отдельном терминале' in output
 
 
 def test_gateway_handoff_keeps_leftover_gateway_recovery(monkeypatch, capsys):

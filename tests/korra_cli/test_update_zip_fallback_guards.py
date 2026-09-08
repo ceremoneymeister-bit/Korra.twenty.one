@@ -37,7 +37,7 @@ def test_uv_pip_install_is_a_dependency_failure_not_git():
     assert update_cmd._called_process_error_is_git(exc) is False
     assert update_cmd._called_process_error_is_python_dep_install(exc) is True
     assert update_cmd._format_update_failure_stage(exc) == (
-        "Python dependency install failed"
+        "Не удалось установить зависимости Python"
     )
 
 
@@ -51,7 +51,7 @@ def test_ensurepip_is_a_dependency_failure():
     exc = _cpe([r"C:\venv\Scripts\python.exe", "-m", "ensurepip", "--upgrade"])
     assert update_cmd._called_process_error_is_python_dep_install(exc) is True
     assert update_cmd._format_update_failure_stage(exc) == (
-        "Python dependency install failed"
+        "Не удалось установить зависимости Python"
     )
 
 
@@ -59,7 +59,7 @@ def test_git_pull_is_classified_as_git():
     exc = _cpe(["git", "-c", "windows.appendAtomically=false", "pull"], returncode=1)
     assert update_cmd._called_process_error_is_git(exc) is True
     assert update_cmd._called_process_error_is_python_dep_install(exc) is False
-    assert update_cmd._format_update_failure_stage(exc) == "Git update failed"
+    assert update_cmd._format_update_failure_stage(exc) == "Не удалось обновить код через Git"
 
 
 def test_git_exe_path_is_still_git():
@@ -69,7 +69,7 @@ def test_git_exe_path_is_still_git():
 
 def test_unknown_command_gets_generic_stage():
     exc = _cpe(["npm", "install"], returncode=1)
-    assert update_cmd._format_update_failure_stage(exc) == "Update step failed"
+    assert update_cmd._format_update_failure_stage(exc) == "Не удалось выполнить этап обновления"
 
 
 def test_windows_dep_failure_does_not_zip_fallback(monkeypatch):
@@ -95,7 +95,7 @@ def test_error_tail_prints_last_lines(capsys):
     exc = _cpe(["uv", "pip", "install"], stderr=stderr)
     update_cmd._print_called_process_error_tail(exc)
     out = capsys.readouterr().out
-    assert "Last output:" in out
+    assert 'Последний вывод:' in out
     assert "line-19" in out
     assert "line-0" not in out
     assert "line-7" not in out
@@ -128,7 +128,7 @@ def test_zip_overlay_blocked_on_modified_file(tmp_path, monkeypatch):
     )
     reason = update_cmd._zip_overlay_block_reason(tmp_path)
     assert reason is not None
-    assert "uncommitted" in reason
+    assert 'без коммита' in reason
 
 
 def test_zip_overlay_blocked_on_untracked_file(tmp_path, monkeypatch):
@@ -136,7 +136,7 @@ def test_zip_overlay_blocked_on_untracked_file(tmp_path, monkeypatch):
     monkeypatch.setattr(update_cmd.subprocess, "run", _porcelain_run("?? notes.md\n"))
     reason = update_cmd._zip_overlay_block_reason(tmp_path)
     assert reason is not None
-    assert "untracked" in reason
+    assert 'вне Git' in reason
 
 
 def test_zip_overlay_blocked_when_git_status_fails(tmp_path, monkeypatch):
@@ -148,7 +148,7 @@ def test_zip_overlay_blocked_when_git_status_fails(tmp_path, monkeypatch):
     )
     reason = update_cmd._zip_overlay_block_reason(tmp_path)
     assert reason is not None
-    assert "could not check" in reason
+    assert 'не удалось проверить' in reason
 
 
 def test_zip_overlay_allowed_on_clean_git_checkout(tmp_path, monkeypatch):
@@ -186,7 +186,7 @@ def test_update_via_zip_aborts_before_download_when_dirty(
     assert local.read_text(encoding="utf-8") == "local work\n"
     assert (untracked_dir / "wip.py").read_text(encoding="utf-8") == "print('wip')\n"
     out = capsys.readouterr().out
-    assert "ZIP fallback refused" in out
+    assert 'Резервное обновление из ZIP отменено' in out
     assert "Downloading latest version" not in out
 
 
@@ -258,7 +258,7 @@ def test_zip_overlay_blocked_on_ignored_user_file(tmp_path, monkeypatch):
     )
     reason = update_cmd._zip_overlay_block_reason(tmp_path)
     assert reason is not None
-    assert "uncommitted" in reason or "untracked" in reason
+    assert 'без коммита' in reason or 'вне Git' in reason
 
 
 def test_zip_overlay_flag_is_valid_against_real_git(tmp_path):

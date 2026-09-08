@@ -320,5 +320,5 @@ class TestIncompleteFleetWarningIsPlatformCorrect:
         _warn_incomplete_gateway_fleet_restart(["hermes-gateway.service"])
 
         out = capsys.readouterr().out
-        assert "systemctl --user restart <unit>" in out
+        assert 'systemctl --user restart <служба>' in out
         assert "launchctl" not in out

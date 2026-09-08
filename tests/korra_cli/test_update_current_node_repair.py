@@ -25,10 +25,10 @@ def test_current_checkout_repairs_failed_node_deps(capsys):
 
     m.return_value._build_web_ui.assert_not_called()
     completion.assert_called_once()
-    assert "could not be repaired" in completion.call_args[0][0]
+    assert "исправить зависимости Node.js не удалось" in completion.call_args[0][0]
     out = capsys.readouterr().out
-    assert "Node.js refresh failed for: ui-tui, web workspaces" in out
-    assert "Fix npm and re-run `hermes update`." in out
+    assert 'Не удалось обновить зависимости Node.js для: ui-tui, web workspaces' in out
+    assert "Исправьте npm и повторите `korra update`." in out
 
 
 def test_current_checkout_healthy_node_deps_reports_up_to_date():
@@ -41,4 +41,4 @@ def test_current_checkout_healthy_node_deps_reports_up_to_date():
 
     # The refresh pairs with the web build like every other call site.
     m.return_value._build_web_ui.assert_called_once()
-    completion.assert_called_once_with("✓ Already up to date!")
+    completion.assert_called_once_with("✓ Установлена актуальная версия!")

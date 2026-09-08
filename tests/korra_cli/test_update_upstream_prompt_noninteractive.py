@@ -57,7 +57,7 @@ class TestUpstreamPromptNonInteractive:
         fork_without_upstream.stdin_input.assert_not_called()
         fork_without_upstream.add_remote.assert_not_called()
         fork_without_upstream.mark_skip.assert_not_called()
-        assert "Skipping upstream setup" in capsys.readouterr().out
+        assert 'Настройка исходного репозитория пропущена' in capsys.readouterr().out
 
     @pytest.mark.parametrize(
         "stdin_tty,stdout_tty", [(False, False), (False, True), (True, False)]
@@ -75,7 +75,7 @@ class TestUpstreamPromptNonInteractive:
         fork_without_upstream.stdin_input.assert_not_called()
         fork_without_upstream.add_remote.assert_not_called()
         fork_without_upstream.mark_skip.assert_not_called()
-        assert "Skipping upstream setup" in capsys.readouterr().out
+        assert 'Настройка исходного репозитория пропущена' in capsys.readouterr().out
 
     def test_gateway_prompt_routes_through_input_fn(self, fork_without_upstream):
         prompts = []
@@ -90,7 +90,7 @@ class TestUpstreamPromptNonInteractive:
                 ["git"], fork_without_upstream.cwd, input_fn=gw_input
             )
 
-        assert prompts == [("Add official repo as 'upstream' remote? [y/N]", "n")]
+        assert prompts == [("Добавить официальный репозиторий как upstream? [y — да / N — нет]", "n")]
         fork_without_upstream.stdin_input.assert_not_called()
         fork_without_upstream.add_remote.assert_not_called()
         fork_without_upstream.mark_skip.assert_called_once_with()

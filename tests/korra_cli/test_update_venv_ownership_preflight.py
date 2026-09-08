@@ -76,9 +76,9 @@ def test_foreign_owned_refuses_with_chown_hint(tmp_path, monkeypatch, capsys):
     assert exc.value.code == 1
     out = capsys.readouterr().out
     assert hermes_bin in out
-    assert "owner uid 0" in out
+    assert 'UID владельца: 0' in out
     assert f"sudo chown -R $(id -un): {tmp_path}" in out
-    assert "Nothing in the venv was modified." in out
+    assert 'Среда Python не изменена.' in out
 
 
 def test_limit_caps_reported_paths(tmp_path, monkeypatch):

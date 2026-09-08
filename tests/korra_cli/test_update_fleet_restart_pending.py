@@ -274,7 +274,7 @@ def test_run_pending_restart_true_when_no_gateways(monkeypatch, capsys):
     monkeypatch.setattr(hermes_main, "_purge_stale_hermes_modules", lambda: None)
 
     assert update_cmd._run_pending_fleet_restart() is True
-    assert "nothing to restart" in capsys.readouterr().out
+    assert 'Перезапуск не требуется' in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +302,7 @@ def test_marker_written_after_pull_cleared_after_successful_restart(
     assert wrote == [True], "marker must exist immediately after HEAD advances"
     assert not update_cmd._fleet_restart_pending_marker_path().exists()
     out = capsys.readouterr().out
-    assert "✓ Code updated!" in out
+    assert '✓ Код обновлён!' in out
 
 
 def test_interrupt_between_pull_and_restart_leaves_marker(
@@ -344,7 +344,7 @@ def test_already_up_to_date_runs_pending_restart_when_marker_present(
     assert seen["ran"] is True
     assert not update_cmd._fleet_restart_pending_marker_path().exists()
     out = capsys.readouterr().out
-    assert "did not restart running gateways" in out
+    assert 'не перезапустило шлюзы' in out
 
 
 def test_already_up_to_date_runs_pending_restart_when_receipt_skewed(
@@ -390,7 +390,7 @@ def test_already_up_to_date_runs_pending_restart_when_receipt_skewed(
 
     assert seen["ran"] is True
     out = capsys.readouterr().out
-    assert "did not restart running gateways" in out
+    assert 'не перезапустило шлюзы' in out
 
 
 def test_already_up_to_date_skips_restart_when_nothing_pending(
@@ -409,15 +409,15 @@ def test_already_up_to_date_skips_restart_when_nothing_pending(
     hermes_main.cmd_update(args)
 
     assert seen["ran"] is False
-    assert "did not restart running gateways" not in capsys.readouterr().out
+    assert 'не перезапустило шлюзы' not in capsys.readouterr().out
 
 
 def test_startup_warn_prints_when_marker_present(capsys):
     update_cmd._write_fleet_restart_pending_marker()
     update_cmd._warn_pending_fleet_restart_on_startup()
     err = capsys.readouterr().err
-    assert "did not restart running gateways" in err
-    assert "hermes gateway restart" in err
+    assert 'не перезапустило шлюзы' in err
+    assert 'korra gateway restart' in err
 
 
 def test_startup_warn_silent_when_nothing_pending(capsys):

@@ -182,10 +182,10 @@ def test_skip_warning_names_branch_behind_count_and_commands(repo_pair, capsys):
         GIT, repo_pair, "old-feature", "main", "dirty"
     )
     out = capsys.readouterr().out
-    assert "CODE UPDATE SKIPPED" in out
+    assert 'ОБНОВЛЕНИЕ КОДА ПРОПУЩЕНО' in out
     assert "old-feature" in out
-    assert "2 commit(s) BEHIND" in out
-    assert f"git -C {repo_pair} checkout main && hermes update" in out
+    assert 'Не хватает коммитов: 2' in out
+    assert f"git -C {repo_pair} checkout main && korra update" in out
 
 
 def test_skip_warning_dirty_reason(repo_pair, capsys):
@@ -193,17 +193,17 @@ def test_skip_warning_dirty_reason(repo_pair, capsys):
         GIT, repo_pair, "old-feature", "main", "dirty"
     )
     out = capsys.readouterr().out
-    assert "uncommitted changes" in out
+    assert 'изменения без коммита' in out
 
 
 def test_kept_notice_names_branch_count_and_recovery(capsys):
     update_cmd._print_parked_branch_kept_notice("old-feature", "main", "3")
     out = capsys.readouterr().out
-    assert "parked on 'old-feature'" in out
-    assert "3 commit(s) not merged into origin/main" in out
-    assert "safe on 'old-feature'" in out
+    assert "В ветке 'old-feature'" in out
+    assert 'коммиты (3), не вошедшие в origin/main' in out
+    assert "сохранены в ветке 'old-feature'" in out
     assert "git checkout old-feature" in out
-    assert "CODE UPDATE SKIPPED" not in out
+    assert 'ОБНОВЛЕНИЕ КОДА ПРОПУЩЕНО' not in out
 
 
 # ---------------------------------------------------------------------------
@@ -231,10 +231,10 @@ def test_print_update_completion_carries_branch_and_sha(
     repo_pair, monkeypatch, capsys
 ):
     monkeypatch.setattr(hermes_main, "PROJECT_ROOT", repo_pair)
-    update_cmd._print_update_completion("✓ Update complete!")
+    update_cmd._print_update_completion("✓ Обновление завершено!")
     out = capsys.readouterr().out
     short = _git(repo_pair, "rev-parse", "--short", "HEAD").stdout.strip()
-    assert f"✓ Update complete! [old-feature @ {short}]" in out
+    assert f"✓ Обновление завершено! [old-feature @ {short}]" in out
 
 
 # ---------------------------------------------------------------------------
@@ -285,11 +285,11 @@ def test_update_skips_and_warns_on_dirty_parked_branch(
 
     assert exc_info.value.code == 1
     out = capsys.readouterr().out
-    assert "CODE UPDATE SKIPPED" in out
+    assert 'ОБНОВЛЕНИЕ КОДА ПРОПУЩЕНО' in out
     assert "old-feature" in out
-    assert "code update SKIPPED" in out
-    assert "✓ Code updated!" not in out
-    assert "✓ Update complete!" not in out
+    assert 'обновление кода ПРОПУЩЕНО' in out
+    assert '✓ Код обновлён!' not in out
+    assert '✓ Обновление завершено!' not in out
     # Branch untouched.
     branch = _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
     assert branch == "old-feature"
@@ -326,10 +326,10 @@ def test_update_switches_unmerged_parked_branch_with_kept_notice(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "1 commit(s) not merged into origin/main" in out
-    assert "safe on 'old-feature'" in out
-    assert "CODE UPDATE SKIPPED" not in out
-    assert "updating it in place" not in out
+    assert 'коммиты (1), не вошедшие в origin/main' in out
+    assert "сохранены в ветке 'old-feature'" in out
+    assert 'ОБНОВЛЕНИЕ КОДА ПРОПУЩЕНО' not in out
+    assert 'без переключения' not in out
     # Ends on main, fast-forwarded.
     assert (
         _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -380,8 +380,8 @@ def test_update_updates_unmerged_branch_in_place_when_configured(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "updating it in place" in out
-    assert "CODE UPDATE SKIPPED" not in out
+    assert 'без переключения' in out
+    assert 'ОБНОВЛЕНИЕ КОДА ПРОПУЩЕНО' not in out
     # The checkout never moved.
     assert (
         _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -438,9 +438,9 @@ def test_switch_branch_flag_overrides_in_place_strategy(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "1 commit(s) not merged into origin/main" in out
-    assert "updating it in place" not in out
-    assert "CODE UPDATE SKIPPED" not in out
+    assert 'коммиты (1), не вошедшие в origin/main' in out
+    assert 'без переключения' not in out
+    assert 'ОБНОВЛЕНИЕ КОДА ПРОПУЩЕНО' not in out
     # Checkout moved to the target and picked up its code...
     assert (
         _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -488,7 +488,7 @@ def test_unmerged_branch_still_updates_in_place_without_the_flag(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "updating it in place" in out
+    assert 'без переключения' in out
     assert "--switch-branch" not in out
     assert (
         _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -519,10 +519,10 @@ def test_update_auto_switches_clean_merged_parked_branch(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "parked on 'old-feature'" in out
-    assert "fully merged" in out
-    assert "switching back to main" in out
-    assert "CODE UPDATE SKIPPED" not in out
+    assert "Коммиты ветки 'old-feature'" in out
+    assert 'уже объединены' in out
+    assert 'Возвращаюсь на main' in out
+    assert 'ОБНОВЛЕНИЕ КОДА ПРОПУЩЕНО' not in out
     # The checkout ends up ON main, fast-forwarded to origin/main.
     assert (
         _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -575,7 +575,7 @@ def test_update_up_to_date_path_does_not_repark_merged_branch(
         hermes_main.cmd_update(args)
 
     out = capsys.readouterr().out
-    assert "switched back to main" in out
+    assert 'возврат на main' in out
     # The regression: old code ran `git checkout old-feature` here.
     assert (
         _git(clone, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
@@ -603,7 +603,7 @@ def test_update_on_main_fast_path_unchanged(repo_pair, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert "parked on" not in out
-    assert "CODE UPDATE SKIPPED" not in out
+    assert 'ОБНОВЛЕНИЕ КОДА ПРОПУЩЕНО' not in out
     assert (
         _git(repo_pair, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
         == "main"

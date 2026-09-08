@@ -91,15 +91,15 @@ class TestAbortedRestartWarning:
         )
         out = capsys.readouterr().out
 
-        assert "Update incomplete" in out
+        assert 'Обновление не завершено' in out
         assert "is_trivial_prompt" in out
         assert "4321" in out
-        assert "hermes gateway restart" in out
+        assert 'korra gateway restart' in out
 
     def test_warns_even_when_surviving_pids_are_unknown(self, capsys):
         _warn_gateway_restart_phase_aborted(RuntimeError("systemctl exploded"), None)
         out = capsys.readouterr().out
 
-        assert "Update incomplete" in out
+        assert 'Обновление не завершено' in out
         assert "systemctl exploded" in out
-        assert "hermes gateway restart" in out
+        assert 'korra gateway restart' in out

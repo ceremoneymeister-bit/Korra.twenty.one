@@ -99,7 +99,7 @@ class TestUpdateYesConfigMigration:
         assert kwargs.get("interactive") is False
 
         out = capsys.readouterr().out
-        assert "--yes: auto-applying config migration" in out
+        assert 'Указан --yes. Перенос настроек выполняется автоматически' in out
         # The "Would you like to configure them now?" prompt text never appears.
         assert "Would you like to configure them now?" not in out
 
@@ -145,7 +145,7 @@ class TestUpdateYesConfigMigration:
             # The user was actually prompted.
             assert mock_input.called
             prompts = [c.args[0] if c.args else "" for c in mock_input.call_args_list]
-            assert any("configure them now" in p for p in prompts)
+            assert any('Настроить эти параметры сейчас' in p for p in prompts)
 
 
 class TestUpdateYesStashRestore:
@@ -198,7 +198,7 @@ class TestUnicodeDecodeErrorInUpdatePrompts:
             cmd_update(args)  # must not raise
 
         out = capsys.readouterr().out
-        assert "hermes config migrate" in out
+        assert 'korra config migrate' in out
         mock_migrate.assert_not_called()
 
     def test_stash_restore_unicode_decode_error_falls_through_to_skip(self, tmp_path, capsys):
@@ -214,7 +214,7 @@ class TestUnicodeDecodeErrorInUpdatePrompts:
 
         assert result is False
         out = capsys.readouterr().out
-        assert "Skipped restoring local changes" in out
+        assert 'Восстановление локальных изменений пропущено' in out
         assert "git stash apply stash@{0}" in out
 
     def test_stash_restore_eof_error_still_falls_through_to_skip(self, tmp_path):

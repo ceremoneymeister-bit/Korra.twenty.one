@@ -78,8 +78,8 @@ def test_emit_hint_for_missing_resolve_turn_limit():
     assert emit_partial_update_hint(exc, file=buf) is True
     text = buf.getvalue()
     assert "resolve_turn_limit" in text
-    assert "hermes update" in text
-    assert "partially-updated" in text
+    assert "korra update" in text
+    assert "обновление завершилось частично" in text
 
 
 def test_emit_hint_for_missing_split_model_config_default():
@@ -87,7 +87,7 @@ def test_emit_hint_for_missing_split_model_config_default():
     assert partial_update_hint(exc)
     buf = io.StringIO()
     assert emit_partial_update_hint(exc, file=buf) is True
-    assert "hermes update" in buf.getvalue()
+    assert "korra update" in buf.getvalue()
 
 
 def test_emit_hint_stays_silent_for_third_party_import_error():
@@ -116,8 +116,8 @@ def test_cmd_chat_prints_update_hint_when_config_helper_is_missing(
     assert excinfo.value.code == 1
     err = capsys.readouterr().err
     assert name in err
-    assert "hermes update" in err
-    assert "partially-updated" in err
+    assert "korra update" in err
+    assert "обновление завершилось частично" in err
 
 
 def test_cmd_chat_still_reraises_unrelated_import_errors(main_mod, monkeypatch):

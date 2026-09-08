@@ -40,7 +40,7 @@ def _run_cold_start(monkeypatch, capsys, *, surviving_pids):
 
 
 def test_cold_start_raises_when_process_does_not_survive(monkeypatch, capsys):
-    with pytest.raises(RuntimeError, match="did not become ready"):
+    with pytest.raises(RuntimeError, match="не стал готов к работе"):
         _run_cold_start(monkeypatch, capsys, surviving_pids=[])
 
     assert "✓ Starting Windows gateway after update" not in capsys.readouterr().out
@@ -49,4 +49,4 @@ def test_cold_start_raises_when_process_does_not_survive(monkeypatch, capsys):
 def test_cold_start_reports_success_when_process_survives(monkeypatch, capsys):
     out = _run_cold_start(monkeypatch, capsys, surviving_pids=[4242])
 
-    assert "✓ Gateway started via cold-start after update" in out
+    assert '✓ После обновления шлюз запущен заново' in out

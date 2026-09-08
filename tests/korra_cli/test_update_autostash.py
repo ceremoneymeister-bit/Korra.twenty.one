@@ -191,7 +191,7 @@ def test_cmd_update_skips_stash_restore_when_reset_fails(monkeypatch, tmp_path, 
     assert len(restore_calls) == 0
 
     out = capsys.readouterr().out
-    assert "preserved in stash" in out
+    assert 'сохранены в stash' in out
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +309,7 @@ def test_update_keep_stash_failure_path_still_preserves(monkeypatch, tmp_path, c
     assert restore_calls == []
     assert park_calls == []
     assert discard_calls == []
-    assert "preserved in stash" in capsys.readouterr().out
+    assert 'сохранены в stash' in capsys.readouterr().out
 
 
 def test_update_parser_accepts_keep_stash():
@@ -478,8 +478,8 @@ def test_restore_rejects_invalid_python_and_keeps_clean_updated_tree(
     assert git("status", "--porcelain").stdout == ""
     assert git("stash", "list").stdout.strip()
     output = capsys.readouterr().out
-    assert "made the Korra agent unexecutable" in output
-    assert "gateway was not restarted" in output
+    assert 'Корра перестала запускаться' in output
+    assert 'Шлюз не перезапущен' in output
     assert f"git stash apply {stash_ref}" in output
 
 
@@ -524,7 +524,7 @@ def test_restore_rejects_new_import_time_failure_and_preserves_stash(
     output = capsys.readouterr().out
     assert "agent import consumer" in output
     assert "restored local failure" in output
-    assert "gateway was not restarted" in output
+    assert 'Шлюз не перезапущен' in output
 
 
 def test_restore_allows_preexisting_import_time_failure(monkeypatch, tmp_path):
@@ -608,7 +608,7 @@ def test_restore_rejects_later_failure_masked_by_preexisting_failure(
     output = capsys.readouterr().out
     assert "agent import second" in output
     assert "restored later failure" in output
-    assert "gateway was not restarted" in output
+    assert 'Шлюз не перезапущен' in output
 
 
 def test_restore_rejects_system_exit_masked_by_preexisting_failure(
@@ -655,7 +655,7 @@ def test_restore_rejects_system_exit_masked_by_preexisting_failure(
     output = capsys.readouterr().out
     assert "agent import second" in output
     assert "restored exit" in output
-    assert "gateway was not restarted" in output
+    assert 'Шлюз не перезапущен' in output
 
 
 def test_restore_rejects_probe_termination(monkeypatch, tmp_path, capsys):
@@ -697,7 +697,7 @@ def test_restore_rejects_probe_termination(monkeypatch, tmp_path, capsys):
     output = capsys.readouterr().out
     assert "critical-module probe" in output
     assert "exit code 7" in output
-    assert "gateway was not restarted" in output
+    assert 'Шлюз не перезапущен' in output
 
 
 def test_restore_stays_parked_when_untracked_baseline_is_unknown(
@@ -714,7 +714,7 @@ def test_restore_stays_parked_when_untracked_baseline_is_unknown(
 
     assert restored is False
     output = capsys.readouterr().out
-    assert "cleanup baseline is unknown" in output
+    assert 'неизвестно исходное состояние для очистки' in output
     assert "git stash apply stash@{0}" in output
 
 
@@ -732,7 +732,7 @@ def test_reject_does_not_claim_cleanup_when_git_state_is_unknown(
         )
 
     output = capsys.readouterr().out
-    assert "could not be fully restored automatically" in output
+    assert 'Не удалось полностью восстановить' in output
     assert "The clean updated tree has been restored" not in output
 
 
@@ -776,7 +776,7 @@ def test_restore_rejects_unknown_restored_python_paths(
     assert git("stash", "list").stdout.strip()
     output = capsys.readouterr().out
     assert "restored Python source discovery" in output
-    assert "gateway was not restarted" in output
+    assert 'Шлюз не перезапущен' in output
 
 
 def test_gateway_restore_prompt_defaults_to_keep_stash(tmp_path, capsys):
@@ -791,5 +791,5 @@ def test_gateway_restore_prompt_defaults_to_keep_stash(tmp_path, capsys):
     )
 
     assert restored is False
-    assert prompts == [("Restore local changes now? [y/N]", "n")]
-    assert "still preserved in git stash" in capsys.readouterr().out
+    assert prompts == [("Восстановить локальные изменения сейчас? [y/N]", "n")]
+    assert 'сохранены в git stash' in capsys.readouterr().out

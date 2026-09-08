@@ -645,7 +645,7 @@ class TestIncompleteWarningMentionsLaunchctl:
     def test_launchd_labels_get_launchctl_hint(self, capsys):
         _warn_incomplete_gateway_fleet_restart(["ai.hermes.gateway-merit-ops"])
         out = capsys.readouterr().out
-        assert "Update incomplete" in out
+        assert 'Обновление не завершено' in out
         assert "launchctl kickstart -k" in out
 
     def test_systemd_units_keep_systemctl_hint(self, capsys):

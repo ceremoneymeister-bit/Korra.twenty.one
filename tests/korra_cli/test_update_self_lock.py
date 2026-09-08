@@ -208,7 +208,7 @@ def test_abort_helper_defers_and_exits_2(capsys):
     assert marker_writes == ["written"]
     out = capsys.readouterr().out
     assert "cryptography (_rust.pyd)" in out
-    assert "deferred" in out
+    assert 'отложена' in out
 
 
 def test_abort_helper_resumes_paused_gateways_before_exit():
@@ -245,7 +245,7 @@ def test_pre_fetch_flow_has_no_self_lock_preflight():
     import inspect
 
     src = inspect.getsource(update_cmd._cmd_update_impl)
-    fetch_idx = src.index("Fetching updates")
+    fetch_idx = src.index("Получаю обновления")
     pre_fetch = src[:fetch_idx]
     assert "_detect_self_loaded_native_modules()" not in pre_fetch
     assert "_m()._abort_dependency_sync_if_self_locked" not in pre_fetch
@@ -258,7 +258,7 @@ def test_zip_update_guards_dependency_sync():
     import inspect
 
     src = inspect.getsource(update_cmd._update_via_zip)
-    swap_idx = src.index("Updating Python dependencies")
+    swap_idx = src.index("Обновляю зависимости Python")
     assert "_abort_dependency_sync_if_self_locked" in src[:swap_idx]
 
 

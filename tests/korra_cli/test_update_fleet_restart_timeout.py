@@ -175,8 +175,8 @@ class TestIncompleteFleetRestartWarning:
             ["hermes-gateway-xiaomo5", "hermes-gateway-xiaomo6", "hermes-gateway-xiaomo5"]
         )
         out = capsys.readouterr().out
-        assert "Update incomplete" in out
+        assert 'Обновление не завершено' in out
         assert out.count("hermes-gateway-xiaomo5") == 1
         assert "hermes-gateway-xiaomo6" in out
-        assert "pre-update code" in out
+        assert 'старый код' in out
 

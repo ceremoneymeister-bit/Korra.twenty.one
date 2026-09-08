@@ -21,8 +21,8 @@ import korra_cli.main as main_mod
 import korra_cli.update_cmd as update_mod
 
 
-_COUNT_RE = re.compile(r"user-modified \(kept\)")
-_HINT_RE = re.compile(r"hermes skills list-modified")
+_COUNT_RE = re.compile(r"Изменённые вами навыки сохранены:")
+_HINT_RE = re.compile(r"korra skills list-modified")
 
 
 def _source_lines() -> list[str]:

@@ -34,11 +34,11 @@ def test_repair_node_deps_runs_config_migration_on_version_bump(capsys):
 
     m.return_value._build_web_ui.assert_called_once()
     mock_migrate.assert_called_once_with(interactive=False, quiet=True)
-    completion.assert_called_once_with("✓ Already up to date!")
+    completion.assert_called_once_with("✓ Установлена актуальная версия!")
     out = capsys.readouterr().out
-    assert "Checking configuration for new options..." in out
-    assert "Updating config format (v37 → v38)…" in out
-    assert "Config format updated" in out
+    assert 'Проверяю новые параметры настройки…' in out
+    assert "Обновляю формат настроек: v37 → v38…" in out
+    assert 'Формат настроек обновлён' in out
 
 
 def test_repair_node_deps_up_to_date_config(capsys):
@@ -57,10 +57,10 @@ def test_repair_node_deps_up_to_date_config(capsys):
 
     m.return_value._build_web_ui.assert_called_once()
     mock_migrate.assert_not_called()
-    completion.assert_called_once_with("✓ Already up to date!")
+    completion.assert_called_once_with("✓ Установлена актуальная версия!")
     out = capsys.readouterr().out
-    assert "Checking configuration for new options..." in out
-    assert "Configuration is up to date" in out
+    assert 'Проверяю новые параметры настройки…' in out
+    assert 'Настройки соответствуют текущей версии' in out
 
 
 def test_check_and_apply_config_migration_interactive_prompt():

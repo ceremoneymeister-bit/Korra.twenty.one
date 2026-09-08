@@ -198,7 +198,7 @@ def test_refusal_writes_marker_and_exits_2(monkeypatch, capsys):
     assert wrote == [1]
     out = capsys.readouterr().out
     assert "hermes.exe" in out
-    assert "deferred" in out
+    assert 'отложена' in out
 
 
 def test_shim_error_type_resolves_real_class():

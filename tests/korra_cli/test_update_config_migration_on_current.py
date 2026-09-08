@@ -55,21 +55,21 @@ def test_migrates_when_config_behind():
     """Version bump on the repair path must be applied silently."""
     out, calls = _run(current=37, latest=38)
     assert "v37 → v38" in out
-    assert "Config format updated" in out
+    assert 'Формат настроек обновлён' in out
     assert calls == [(False, True)]  # non-interactive, quiet
 
 
 def test_noop_when_config_current():
     """No migration when the config version is already current."""
     out, calls = _run(current=38, latest=38)
-    assert "Configuration is up to date" in out
+    assert 'Настройки соответствуют текущей версии' in out
     assert calls == []
 
 
 def test_noop_when_config_ahead():
     """No migration when local config is newer than the code's default."""
     out, calls = _run(current=39, latest=38)
-    assert "Configuration is up to date" in out
+    assert 'Настройки соответствуют текущей версии' in out
     assert calls == []
 
 
@@ -118,5 +118,5 @@ def test_check_failure_does_not_break_repair_path():
             # Should not raise and should not attempt migration.
             update_cmd._check_and_apply_config_migration()
         out = buf.getvalue()
-        assert "Could not check config version" in out
+        assert 'Не удалось проверить версию настроек' in out
         mig.assert_not_called()

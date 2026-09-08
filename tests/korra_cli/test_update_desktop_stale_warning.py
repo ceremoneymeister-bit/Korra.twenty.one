@@ -72,9 +72,9 @@ def test_failed_rebuild_returns_false_and_keeps_the_retry_hint(desktop_env, caps
     assert _run(desktop_dir) is False
     assert calls["builds"] == 2
     out = capsys.readouterr().out
-    assert "Desktop build failed" in out
+    assert 'Не удалось собрать настольное приложение' in out
     assert "stage-native-deps" in out
-    assert "Update complete" not in out
+    assert 'Обновление завершено' not in out
 
 
 def test_successful_rebuild_returns_true(desktop_env, monkeypatch, capsys):
@@ -87,7 +87,7 @@ def test_successful_rebuild_returns_true(desktop_env, monkeypatch, capsys):
     )
     assert _run(desktop_dir) is True
     assert len(builds) == 1
-    assert "Desktop app up to date" in capsys.readouterr().out
+    assert 'Настольное приложение обновлено' in capsys.readouterr().out
 
 
 def test_up_to_date_desktop_returns_true_without_spawning(desktop_env):
@@ -127,15 +127,15 @@ def test_summary_omits_success_banner_when_desktop_rebuild_failed(capsys):
         pre_update_version="0.20.1",
     )
     out = capsys.readouterr().out
-    assert "Update complete" not in out
-    assert "partially complete" in out
-    assert "desktop app was not rebuilt" in out
-    assert "hermes desktop" in out
+    assert 'Обновление завершено' not in out
+    assert 'выполнено частично' in out
+    assert "настольное приложение не пересобрано" in out
+    assert 'korra desktop' in out
 
 
 def test_summary_keeps_success_banner_when_desktop_ok(capsys, monkeypatch):
     monkeypatch.setattr(
-        update_cmd, "_update_complete_message", lambda _v: "✓ Update complete! (v0.20.2)"
+        update_cmd, "_update_complete_message", lambda _v: "✓ Обновление завершено! (v0.20.2)"
     )
     monkeypatch.setattr(update_cmd, "_branch_head_suffix", lambda *a, **k: "")
     _print_update_summary(
@@ -144,8 +144,8 @@ def test_summary_keeps_success_banner_when_desktop_ok(capsys, monkeypatch):
         pre_update_version="0.20.1",
     )
     out = capsys.readouterr().out
-    assert "✓ Update complete!" in out
-    assert "partially complete" not in out
+    assert '✓ Обновление завершено!' in out
+    assert 'выполнено частично' not in out
 
 
 def test_summary_combines_node_and_desktop_failures(capsys):
@@ -155,9 +155,9 @@ def test_summary_combines_node_and_desktop_failures(capsys):
         pre_update_version="0.20.1",
     )
     out = capsys.readouterr().out
-    assert "Update complete" not in out
+    assert 'Обновление завершено' not in out
     assert "dashboard" in out
-    assert "desktop app was not rebuilt" in out
+    assert "настольное приложение не пересобрано" in out
 
 
 def test_gateway_exit_code_file_tracks_desktop_rebuild(tmp_path, monkeypatch):
