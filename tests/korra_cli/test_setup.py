@@ -119,7 +119,7 @@ def test_select_provider_and_model_warns_if_named_custom_provider_disappears(
     select_provider_and_model()
 
     out = capsys.readouterr().out
-    assert "selected saved custom provider is no longer available" in out
+    assert "Выбранный сохранённый провайдер больше недоступен" in out
 
 
 

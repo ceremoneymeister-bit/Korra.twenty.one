@@ -306,7 +306,7 @@ class TestSystemdLingerStatus:
     def test_reports_termux_as_not_supported(self, monkeypatch):
         monkeypatch.setattr(gateway, "is_termux", lambda: True)
 
-        assert gateway.get_systemd_linger_status() == (None, "not supported in Termux")
+        assert gateway.get_systemd_linger_status() == (None, "не поддерживается в Termux")
 
 
 class TestContainerSystemdSupport:
@@ -397,7 +397,7 @@ def test_systemd_install_checks_linger_status(monkeypatch, tmp_path, capsys):
         ["systemctl", "--user", "enable", gateway.get_service_name()],
     ]
     assert helper_calls == [True]
-    assert "User service installed and enabled" in out
+    assert 'Служба пользователя: установлена, автозапуск включён' in out
 
 
 

@@ -71,6 +71,7 @@ from korra_cli.setup import (
     prompt,
     prompt_choice,
     prompt_yes_no,
+    _setup_platform_status_label,
 )
 from korra_cli.colors import Colors, color
 
@@ -671,7 +672,7 @@ def _escalate_wedged_gateway(
         return True
     try:
         terminate_pid(pid, force=True, expected_start_time=expected_start_time)
-        print(f"⚠ Gateway PID {pid} unresponsive to SIGTERM; sent SIGKILL")
+        print(f'⚠ Шлюз с PID {pid} не ответил на SIGTERM и остановлен принудительно (SIGKILL).')
     except (ProcessLookupError, PermissionError, OSError):
         pass
     return _wait_for_pid_exit(pid, max(float(kill_wait), 0.0))
@@ -1639,7 +1640,7 @@ def _wait_for_systemd_service_restart(
     import time
 
     svc = get_service_name()
-    scope_label = _service_scope_label(system).capitalize()
+    scope_label = _service_scope_display(system)
     if timeout is None:
         timeout = _systemd_restart_wait_timeout(system=system)
     deadline = time.monotonic() + timeout
@@ -1681,19 +1682,19 @@ def _wait_for_systemd_service_restart(
                     runtime_state = _gateway_runtime_status_for_pid(new_pid)
                 gateway_state = (runtime_state or {}).get("gateway_state")
                 if gateway_state == "running":
-                    print(f"✓ {scope_label} service restarted (PID {new_pid})")
+                    print(f'✓ Служба {scope_label} перезапущена (PID {new_pid}).')
                     return True
                 if gateway_state == "startup_failed":
                     reason = (runtime_state or {}).get(
                         "exit_reason"
-                    ) or "startup failed"
+                    ) or 'запуск не удался'
                     print(
-                        f"⚠ {scope_label} service process restarted (PID {new_pid}), but gateway startup failed: {reason}"
+                        f'⚠ Процесс службы {scope_label} перезапущен (PID {new_pid}), но шлюз не запустился: {reason}'
                     )
                     return False
                 if not printed_runtime_wait:
                     print(
-                        f"⏳ {scope_label} service process started (PID {new_pid}); waiting for gateway runtime..."
+                        f'⏳ Процесс службы {scope_label} запущен (PID {new_pid}). Жду готовности шлюза…'
                     )
                     printed_runtime_wait = True
 
@@ -1708,9 +1709,7 @@ def _wait_for_systemd_service_restart(
         time.sleep(2)
 
     print(
-        f"⚠ {scope_label} service did not become active within {int(timeout)}s.\n"
-        f"  Check status: {'sudo ' if system else ''}hermes gateway status\n"
-        f"  Check logs:   journalctl {'--user ' if not system else ''}-u {svc} -l --since '2 min ago'"
+        f"⚠ Служба {scope_label} не запустилась за {int(timeout)} с.\n  Проверить состояние: {('sudo ' if system else '')}korra gateway status\n  Посмотреть журнал: journalctl {('--user ' if not system else '')}-u {svc} -l --since '2 min ago'"
     )
     return False
 
@@ -1763,17 +1762,17 @@ def _systemd_service_is_start_limited(system: bool = False) -> bool:
 
 def _print_systemd_start_limit_wait(system: bool = False) -> None:
     svc = get_service_name()
-    scope_label = _service_scope_label(system).capitalize()
+    scope_label = _service_scope_display(system)
     scope_flag = " --system" if system else ""
     systemctl_prefix = "systemctl " if system else "systemctl --user "
     journal_prefix = "journalctl " if system else "journalctl --user "
-    print(f"⏳ {scope_label} service is temporarily rate-limited by systemd.")
-    print("  systemd is refusing another immediate start after repeated exits.")
+    print(f'⏳ systemd временно ограничил запуски службы {scope_label}.')
+    print('  После повторных остановок systemd не разрешает немедленный запуск.')
     print(
-        f"  Wait for the start-limit window to expire, then run: {'sudo ' if system else ''}hermes gateway restart{scope_flag}"
+        f"  Дождитесь снятия ограничения, затем выполните: {('sudo ' if system else '')}korra gateway restart{scope_flag}"
     )
-    print(f"  Or clear the failed state manually: {systemctl_prefix}reset-failed {svc}")
-    print(f"  Check logs: {journal_prefix}-u {svc} -l --since '5 min ago'")
+    print(f'  Или вручную сбросьте состояние ошибки: {systemctl_prefix}reset-failed {svc}')
+    print(f"  Посмотреть журнал: {journal_prefix}-u {svc} -l --since '5 min ago'")
 
 
 def _recover_pending_systemd_restart(
@@ -1799,7 +1798,7 @@ def _recover_pending_systemd_restart(
     result = props.get("Result", "")
 
     if active_state == "activating" and sub_state == "auto-restart":
-        print("⏳ Service restart already pending — waiting for systemd relaunch...")
+        print('⏳ Перезапуск уже запланирован. Жду повторного запуска через systemd…')
         return _wait_for_systemd_service_restart(
             system=system,
             previous_pid=previous_pid,
@@ -1810,9 +1809,9 @@ def _recover_pending_systemd_restart(
         or result == "exit-code"
     ):
         svc = get_service_name()
-        scope_label = _service_scope_label(system).capitalize()
+        scope_label = _service_scope_display(system)
         print(
-            f"↻ Clearing failed state for pending {scope_label.lower()} service restart..."
+            f'↻ Сбрасываю состояние ошибки службы {scope_label.lower()} перед перезапуском…'
         )
         _run_systemctl(
             ["reset-failed", svc],
@@ -2057,19 +2056,18 @@ def _print_gateway_process_mismatch(snapshot: GatewayRuntimeSnapshot) -> None:
     # from a genuinely manual foreground/tmux/nohup run.
     if _launchd_unsupported_marker_exists():
         print(
-            "⚠ Gateway is running as a detached fallback process — "
-            "launchd cannot supervise it"
+            '⚠ Шлюз работает как отдельный фоновый процесс без управления launchd.'
         )
-        print(f"  PID(s): {_format_gateway_pids(snapshot.gateway_pids, limit=None)}")
-        print("  Auto-start at login and auto-restart on crash are NOT available.")
-        print("  Stop it with: hermes gateway stop")
+        print(f'  PID: {_format_gateway_pids(snapshot.gateway_pids, limit=None)}')
+        print('  Автозапуск при входе и перезапуск при сбоях недоступны.')
+        print('  Остановить: korra gateway stop')
     else:
         print(
-            "⚠ Gateway process is running for this profile, but the service is not active"
+            '⚠ Процесс шлюза этого профиля запущен, но служба неактивна.'
         )
-        print(f"  PID(s): {_format_gateway_pids(snapshot.gateway_pids, limit=None)}")
-        print("  This is usually a manual foreground/tmux/nohup run, so `hermes gateway`")
-        print("  can refuse to start another copy until this process stops.")
+        print(f'  PID: {_format_gateway_pids(snapshot.gateway_pids, limit=None)}')
+        print('  Вероятно, шлюз запущен вручную, через tmux или nohup. Команда `korra gateway`')
+        print('  может отказаться запускать второй экземпляр, пока работает первый.')
 
 
 def _print_other_profiles_gateway_status() -> None:
@@ -2090,7 +2088,7 @@ def _print_other_profiles_gateway_status() -> None:
             return
 
         print()
-        print("Other profiles:")
+        print('Другие профили:')
         for proc in other_processes:
             print(f"  ✓ {proc.profile:<16s} — PID {proc.pid}")
     except Exception:
@@ -2107,22 +2105,22 @@ def _gateway_list() -> None:
     try:
         from korra_cli.profiles import list_profiles, get_active_profile_name
     except Exception:
-        print("Unable to list profiles.")
+        print('Не удалось получить список профилей.')
         return
 
     profiles = list_profiles()
     if not profiles:
-        print("No profiles found.")
+        print('Профили не найдены.')
         return
 
     current = get_active_profile_name()
 
-    print("Gateways:")
+    print('Шлюзы:')
     for prof in profiles:
         marker = "✓" if prof.gateway_running else "✗"
         label = prof.name
         if prof.name == current:
-            label += " (current)"
+            label += " (текущий)"
         parts = [f"  {marker} {label:<24s}"]
         if prof.gateway_running:
             try:
@@ -2134,7 +2132,7 @@ def _gateway_list() -> None:
             except Exception:
                 pass
         else:
-            parts.append("not running")
+            parts.append('не запущен')
         print(" — ".join(parts))
 
 
@@ -2174,10 +2172,10 @@ def kill_gateway_processes(
             # Process already gone
             pass
         except PermissionError:
-            print(f"⚠ Permission denied to kill PID {pid}")
+            print(f'⚠ Нет прав завершить процесс с PID {pid}.')
 
         except OSError as exc:
-            print(f"Failed to kill PID {pid}: {exc}")
+            print(f'Не удалось завершить процесс с PID {pid}: {exc}')
     return killed
 
 
@@ -2392,7 +2390,7 @@ def _reap_unsupervised_gateway_orphans(extra_exclude: set | None = None) -> bool
         except ProcessLookupError:
             continue
         except PermissionError:
-            print(f"⚠ Permission denied to kill orphaned gateway PID {pid}")
+            print(f'⚠ Нет прав завершить отдельный процесс шлюза с PID {pid}.')
             continue
         reaped = True
 
@@ -2520,7 +2518,7 @@ def stop_profile_gateway() -> bool:
     except ProcessLookupError:
         pass  # Already gone
     except PermissionError:
-        print(f"⚠ Permission denied to kill PID {pid}")
+        print(f'⚠ Нет прав завершить процесс с PID {pid}.')
         return False
 
     # Wait briefly for it to exit. On Windows, os.kill(pid, 0) is NOT
@@ -2744,7 +2742,7 @@ def _windows_gateway_breakaway_state() -> bool | None:
 # =============================================================================
 
 _SERVICE_BASE = "hermes-gateway"
-SERVICE_DESCRIPTION = "Hermes Agent Gateway - Messaging Platform Integration"
+SERVICE_DESCRIPTION = 'Шлюз Korra — мессенджеры и задачи по расписанию'
 
 
 def _profile_suffix() -> str:
@@ -3004,10 +3002,9 @@ def _preflight_user_systemd(*, auto_enable_linger: bool = True) -> None:
         # Linger is on but socket still missing — unusual; fall through to error.
         _raise_user_systemd_unavailable(
             username,
-            reason="User systemd control sockets are missing even though linger is enabled.",
+            reason='Фоновая работа после выхода включена, но управляющие сокеты пользовательского systemd отсутствуют.',
             fix_hint=(
-                f"  systemctl start user@{os.getuid()}.service\n"  # windows-footgun: ok — POSIX systemd helper, never invoked on Windows
-                "  (may require sudo; try again after the command succeeds)"
+                f'  systemctl start user@{os.getuid()}.service\n  Может потребоваться sudo. После успешного выполнения повторите попытку.'
             ),
         )
 
@@ -3023,21 +3020,20 @@ def _preflight_user_systemd(*, auto_enable_linger: bool = True) -> None:
         except Exception as exc:
             _raise_user_systemd_unavailable(
                 username,
-                reason=f"loginctl enable-linger failed ({exc}).",
+                reason=f'Не удалось включить фоновую работу после выхода ({exc}).',
                 fix_hint=f"  sudo loginctl enable-linger {username}",
             )
         else:
             if result.returncode == 0:
                 if _wait_for_user_dbus_socket(timeout=5.0):
-                    print(f"✓ Enabled linger for {username} — user D-Bus now available")
+                    print(f'✓ Фоновая работа после выхода включена для {username}. Пользовательский D-Bus доступен.')
                     return
                 # enable-linger succeeded but the socket never appeared.
                 _raise_user_systemd_unavailable(
                     username,
-                    reason="Linger was enabled, but the user D-Bus socket did not appear.",
+                    reason='Фоновая работа после выхода включена, но сокет пользовательского D-Bus не появился.',
                     fix_hint=(
-                        "  Log out and log back in, then re-run the command.\n"
-                        f"  Or reboot and run: systemctl --user start {get_service_name()}"
+                        f'  Выйдите из системы, войдите снова и повторите команду.\n  Либо перезагрузите компьютер и выполните: systemctl --user start {get_service_name()}'
                     ),
                 )
             detail = (
@@ -3045,15 +3041,14 @@ def _preflight_user_systemd(*, auto_enable_linger: bool = True) -> None:
             ).strip()
             _raise_user_systemd_unavailable(
                 username,
-                reason=f"loginctl enable-linger was denied: {detail}",
+                reason=f'Включение фоновой работы после выхода запрещено: {detail}',
                 fix_hint=f"  sudo loginctl enable-linger {username}",
             )
 
     _raise_user_systemd_unavailable(
         username,
         reason=(
-            "User D-Bus session is not available "
-            f"({linger_detail or 'linger disabled'})."
+            f"Пользовательский сеанс D-Bus недоступен ({linger_detail or 'linger disabled'})."
         ),
         fix_hint=f"  sudo loginctl enable-linger {username}",
     )
@@ -3099,7 +3094,19 @@ def _run_systemctl(
     try:
         return subprocess.run(_systemctl_cmd(system) + args, **kwargs)
     except FileNotFoundError:
-        raise RuntimeError("systemctl is not available on this system") from None
+        raise RuntimeError('systemctl недоступен в этой системе') from None
+
+
+def _service_scope_display(system: bool = False) -> str:
+    """Human label; _service_scope_label remains the routing marker."""
+    return "системы" if system else "пользователя"
+
+
+def _gateway_action_display(action: str) -> str:
+    return {
+        "start": "запуск", "stop": "остановка", "shutdown": "выключение",
+        "restart": "перезапуск", "install": "установка", "uninstall": "удаление",
+    }.get(action, action)
 
 
 def _service_scope_label(system: bool = False) -> str:
@@ -3204,14 +3211,14 @@ def print_legacy_unit_warning() -> None:
     legacy = _find_legacy_hermes_units()
     if not legacy:
         return
-    print_warning("Legacy Korra gateway unit(s) detected from an older install:")
+    print_warning('Найдены службы шлюза Korra от прежней установки:')
     for name, path, is_system in legacy:
         scope = "system" if is_system else "user"
-        print_info(f"    {path}  ({scope} scope)")
-    print_info("  These run alongside the current hermes-gateway service and")
-    print_info("  cause SIGTERM flap loops — both try to use the same bot token.")
-    print_info("  Remove them with:")
-    print_info("    hermes gateway migrate-legacy")
+        print_info(f'    {path}  (область: {scope})')
+    print_info('  Они работают одновременно с текущей службой шлюза')
+    print_info('  и мешают ей: обе пытаются использовать один токен бота.')
+    print_info('  Удалить старые службы:')
+    print_info('    korra gateway migrate-legacy')
 
 
 def remove_legacy_hermes_units(
@@ -3236,25 +3243,25 @@ def remove_legacy_hermes_units(
     """
     legacy = _find_legacy_hermes_units()
     if not legacy:
-        print("No legacy Korra gateway units found.")
+        print('Устаревшие службы шлюза Korra не найдены.')
         return 0, []
 
     user_units = [(n, p) for n, p, is_sys in legacy if not is_sys]
     system_units = [(n, p) for n, p, is_sys in legacy if is_sys]
 
     print()
-    print("Legacy Korra gateway unit(s) found:")
+    print('Найдены устаревшие службы шлюза Korra:')
     for name, path, is_system in legacy:
         scope = "system" if is_system else "user"
-        print(f"  {path}  ({scope} scope)")
+        print(f'  {path}  (область: {scope})')
     print()
 
     if dry_run:
-        print("(dry-run — nothing removed)")
+        print('Предпросмотр: ничего не удалено.')
         return 0, [p for _, p, _ in legacy]
 
-    if interactive and not prompt_yes_no("Remove these legacy units?", True):
-        print("Skipped. Run again with: hermes gateway migrate-legacy")
+    if interactive and not prompt_yes_no('Удалить эти устаревшие службы?', True):
+        print('Пропущено. Повторить: korra gateway migrate-legacy')
         return 0, [p for _, p, _ in legacy]
 
     removed = 0
@@ -3266,10 +3273,10 @@ def remove_legacy_hermes_units(
             _run_systemctl(["stop", name], system=False, check=False, timeout=90)
             _run_systemctl(["disable", name], system=False, check=False, timeout=30)
             path.unlink(missing_ok=True)
-            print(f"  ✓ Removed {path}")
+            print(f'  ✓ Удалено: {path}')
             removed += 1
         except (OSError, RuntimeError) as e:
-            print(f"  ⚠ Could not remove {path}: {e}")
+            print(f'  ⚠ Не удалось удалить {path}: {e}')
             remaining.append(path)
 
     if user_units:
@@ -3282,8 +3289,8 @@ def remove_legacy_hermes_units(
     if system_units:
         if os.geteuid() != 0:  # windows-footgun: ok — Linux systemd removal path, guarded by `if system == "Linux"` / systemd-only branch
             print()
-            print_warning("System-scope legacy units require root to remove.")
-            print_info("  Re-run with: sudo hermes gateway migrate-legacy")
+            print_warning('Для удаления старых системных служб нужны права администратора.')
+            print_info('  Повторите: sudo korra gateway migrate-legacy')
             for _, path in system_units:
                 remaining.append(path)
         else:
@@ -3294,10 +3301,10 @@ def remove_legacy_hermes_units(
                         ["disable", name], system=True, check=False, timeout=30
                     )
                     path.unlink(missing_ok=True)
-                    print(f"  ✓ Removed {path}")
+                    print(f'  ✓ Удалено: {path}')
                     removed += 1
                 except (OSError, RuntimeError) as e:
-                    print(f"  ⚠ Could not remove {path}: {e}")
+                    print(f'  ⚠ Не удалось удалить {path}: {e}')
                     remaining.append(path)
 
             try:
@@ -3308,10 +3315,10 @@ def remove_legacy_hermes_units(
     print()
     if remaining:
         print_warning(
-            f"{len(remaining)} legacy unit(s) still present — see messages above."
+            f'Остались устаревшие службы: {len(remaining)}. Подробности выше.'
         )
     else:
-        print_success(f"Removed {removed} legacy unit(s).")
+        print_success(f'Удалено устаревших служб: {removed}.')
 
     return removed, remaining
 
@@ -3323,21 +3330,21 @@ def print_systemd_scope_conflict_warning() -> None:
 
     rendered_scopes = " + ".join(scopes)
     print_warning(
-        f"Both user and system gateway services are installed ({rendered_scopes})."
+        f'Установлены и пользовательская, и системная службы шлюза ({rendered_scopes}).'
     )
-    print_info("  This is confusing and can make start/stop/status behavior ambiguous.")
+    print_info('  Из-за этого запуск, остановка и проверка состояния могут работать непредсказуемо.')
     print_info(
-        "  Default gateway commands target the user service unless you pass --system."
+        '  Без --system команды шлюза управляют пользовательской службой.'
     )
-    print_info("  Keep one of these:")
-    print_info("    hermes gateway uninstall")
-    print_info("    sudo hermes gateway uninstall --system")
+    print_info('  Оставьте одну службу, удалив другую:')
+    print_info('    korra gateway uninstall')
+    print_info('    sudo korra gateway uninstall --system')
 
 
 def _require_root_for_system_service(action: str) -> None:
     if os.geteuid() != 0:  # windows-footgun: ok — POSIX systemd helper, never invoked on Windows
         raise SystemScopeRequiresRootError(
-            f"System gateway {action} requires root. Re-run with sudo.",
+            f'Для действия «{_gateway_action_display(action)}» системной службы нужны права администратора. Повторите с sudo.',
             action,
         )
 
@@ -3356,22 +3363,22 @@ def _system_service_identity(run_as_user: str | None = None) -> tuple[str, str, 
     ).strip()
     if not username:
         raise ValueError(
-            "Could not determine which user the gateway service should run as"
+            'Не удалось определить пользователя для запуска службы шлюза.'
         )
     if username == "root" and not run_as_user:
         raise ValueError(
-            "Refusing to install the gateway system service as root; pass --run-as-user root to override (e.g. in LXC containers)"
+            'Системная служба не будет установлена от root. Если это необходимо, например в LXC, укажите --run-as-user root.'
         )
     if username == "root":
-        print_warning("Installing gateway service to run as root.")
+        print_warning('Служба шлюза будет работать от root.')
         print_info(
-            "  This is fine for LXC/container environments but not recommended on bare-metal hosts."
+            '  Это допустимо в контейнерах и LXC, но не рекомендуется на обычном компьютере.'
         )
 
     try:
         user_info = pwd.getpwnam(username)
     except KeyError as e:
-        raise ValueError(f"Unknown user: {username}") from e
+        raise ValueError(f'Неизвестный пользователь: {username}') from e
 
     group_name = grp.getgrgid(user_info.pw_gid).gr_name
     return username, group_name, user_info.pw_dir
@@ -3404,26 +3411,25 @@ def prompt_linux_gateway_install_scope() -> str | None:
     is_root = os.geteuid() == 0  # windows-footgun: ok — Linux systemd install wizard, never invoked on Windows
     if not is_root:
         choice = prompt_choice(
-            "  Choose how the gateway should run in the background:",
+            '  Как запускать шлюз в фоне?',
             [
-                "User service (no sudo; best for laptops/dev boxes; may need linger after logout)",
-                "Skip service install for now",
+                'Пользовательская служба — без sudo, подходит для личного компьютера; для работы после выхода может понадобиться linger',
+                'Пока не устанавливать службу',
             ],
             default=0,
         )
         if choice == 0:
             print_info(
-                "  Tip: for a boot-time system service, re-run setup as root "
-                "(e.g. from a root shell or `sudo -i`)."
+                '  Подсказка: для службы с запуском при загрузке откройте настройку от root, например из терминала root или через `sudo -i`.'
             )
         return {0: "user", 1: None}[choice]
 
     choice = prompt_choice(
-        "  Choose how the gateway should run in the background:",
+        '  Как запускать шлюз в фоне?',
         [
-            "User service (no sudo; best for laptops/dev boxes; may need linger after logout)",
-            "System service (starts on boot; runs as your chosen user)",
-            "Skip service install for now",
+            'Пользовательская служба — без sudo, подходит для личного компьютера; для работы после выхода может понадобиться linger',
+            'Системная служба — запускается при загрузке от выбранного пользователя',
+            'Пока не устанавливать службу',
         ],
         default=0,
     )
@@ -3442,20 +3448,19 @@ def install_linux_gateway_from_setup(force: bool = False, enable_on_startup: boo
             # only offers "system" to root sessions. Defensive guard for any
             # direct caller — we do NOT print a self-elevation recipe.
             print_warning(
-                "  System service install requires root. Re-run setup from a "
-                "root shell, or install a user service instead: hermes gateway install"
+                '  Для установки системной службы нужны права root. Запустите настройку от root или установите пользовательскую службу: korra gateway install.'
             )
             return scope, False
 
         if not run_as_user:
             while True:
                 run_as_user = prompt(
-                    "  Run the system gateway service as which user?", default=""
+                    '  От какого пользователя запускать системную службу шлюза?', default=""
                 )
                 run_as_user = (run_as_user or "").strip()
                 if run_as_user:
                     break
-                print_error("  Enter a username.")
+                print_error('  Укажите имя пользователя.')
 
         systemd_install(force=force, system=True, run_as_user=run_as_user, enable_on_startup=enable_on_startup)
         return scope, True
@@ -3488,17 +3493,17 @@ def ensure_gateway_service(context: str = "setup") -> bool:
 
     if is_container():
         # Containers use restart policies, not service managers.
-        print_info("Start the gateway to bring your bots online:")
-        print_info("   hermes gateway run          # Run as container main process")
+        print_info('Запустите шлюз, чтобы подключить ботов:')
+        print_info('   korra gateway run          # Основной процесс контейнера')
         print_info("")
-        print_info("For automatic restarts, use a Docker restart policy:")
+        print_info('Для автоматического перезапуска задайте политику Docker:')
         print_info("   docker run --restart unless-stopped ...")
         return False
 
     supports_systemd = supports_systemd_services()
     if not (supports_systemd or is_macos() or is_windows()):
-        print_info("  No supported service manager found on this host.")
-        print_info("  Run the gateway in the foreground with: hermes gateway")
+        print_info('  На этом компьютере не найден поддерживаемый диспетчер служб.')
+        print_info('  Запустить шлюз в терминале: korra gateway')
         return False
 
     try:
@@ -3511,7 +3516,7 @@ def ensure_gateway_service(context: str = "setup") -> bool:
                 # Don't pile a fresh install onto a conflicted state.
                 print_systemd_scope_conflict_warning()
                 return False
-            print_info("  Installing the gateway background service ...")
+            print_info('  Устанавливаю фоновую службу шлюза…')
             if supports_systemd:
                 systemd_install(force=False, non_interactive=True)
             elif is_macos():
@@ -3521,7 +3526,7 @@ def ensure_gateway_service(context: str = "setup") -> bool:
 
                 # Registers the Scheduled Task AND starts it.
                 gateway_windows.install(force=False)
-                print_success("  Gateway service installed and started.")
+                print_success('  Служба шлюза установлена и запущена.')
                 return True
 
         if supports_systemd:
@@ -3532,23 +3537,23 @@ def ensure_gateway_service(context: str = "setup") -> bool:
             from korra_cli import gateway_windows
 
             gateway_windows.start()
-        print_success("  Gateway service running (cron jobs + messaging platforms).")
+        print_success('  Служба шлюза работает: мессенджеры и задачи по расписанию.')
         return True
     except UserSystemdUnavailableError as e:
-        print_warning("  Could not reach user systemd to start the gateway service:")
+        print_warning('  Не удалось связаться с пользовательской службой systemd для запуска шлюза:')
         for line in str(e).splitlines():
             print_info(f"  {line}")
     except SystemScopeRequiresRootError as e:
-        print_warning(f"  Gateway service needs root for this scope: {e}")
+        print_warning(f'  Для этой службы шлюза нужны права root: {e}')
         _print_system_scope_remediation("start")
     except SystemExit:
         # Some install/start paths sys.exit() on hard failures (e.g. temp-HOME
         # guard). A background-service failure must never abort setup/import.
-        print_warning("  Gateway service install did not complete.")
-        print_info("  You can retry manually: hermes gateway install")
+        print_warning('  Установка службы шлюза не завершена.')
+        print_info('  Повторить вручную: korra gateway install')
     except Exception as e:
-        print_warning(f"  Gateway service install failed: {e}")
-        print_info("  You can retry manually: hermes gateway install")
+        print_warning(f'  Не удалось установить службу шлюза: {e}')
+        print_info('  Повторить вручную: korra gateway install')
     return False
 
 
@@ -3561,12 +3566,12 @@ def get_systemd_linger_status() -> tuple[bool | None, str]:
         (None, detail) when the status could not be determined.
     """
     if is_termux():
-        return None, "not supported in Termux"
+        return None, 'не поддерживается в Termux'
     if not is_linux():
-        return None, "not supported on this platform"
+        return None, 'не поддерживается на этой платформе'
 
     if not shutil.which("loginctl"):
-        return None, "loginctl not found"
+        return None, 'loginctl не найден'
 
     username = os.getenv("USER") or os.getenv("LOGNAME")
     if not username:
@@ -3575,7 +3580,7 @@ def get_systemd_linger_status() -> tuple[bool | None, str]:
 
             username = pwd.getpwuid(os.getuid()).pw_name  # windows-footgun: ok — POSIX loginctl helper, never invoked on Windows
         except Exception:
-            return None, "could not determine current user"
+            return None, 'не удалось определить текущего пользователя'
 
     try:
         result = subprocess.run(
@@ -3590,7 +3595,7 @@ def get_systemd_linger_status() -> tuple[bool | None, str]:
 
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or f"exit {result.returncode}").strip()
-        return None, detail or "loginctl query failed"
+        return None, detail or 'запрос loginctl не выполнен'
 
     value = (result.stdout or "").strip().lower()
     if value in {"yes", "true", "1"}:
@@ -3599,20 +3604,20 @@ def get_systemd_linger_status() -> tuple[bool | None, str]:
         return False, ""
 
     rendered = value or "<empty>"
-    return None, f"unexpected loginctl output: {rendered}"
+    return None, f'неожиданный ответ loginctl: {rendered}'
 
 
 def print_systemd_linger_guidance() -> None:
     """Print the current linger status and the fix when it is disabled."""
     linger_enabled, linger_detail = get_systemd_linger_status()
     if linger_enabled is True:
-        print("✓ Systemd linger is enabled (service survives logout)")
+        print('✓ Фоновая работа systemd включена: служба продолжит работу после выхода.')
     elif linger_enabled is False:
-        print("⚠ Systemd linger is disabled (gateway may stop when you log out)")
-        print("  Run: sudo loginctl enable-linger $USER")
+        print('⚠ Фоновая работа systemd после выхода отключена. Шлюз может остановиться при выходе.')
+        print('  Выполните: sudo loginctl enable-linger $USER')
     else:
-        print(f"⚠ Could not verify systemd linger ({linger_detail})")
-        print("  If you want the gateway user service to survive logout, run:")
+        print(f'⚠ Не удалось проверить фоновую работу systemd ({linger_detail}).')
+        print('  Чтобы пользовательская служба шлюза работала после выхода, выполните:')
         print("  sudo loginctl enable-linger $USER")
 
 
@@ -4271,12 +4276,10 @@ def _refuse_temp_home_service_write(definition: str, kind: str) -> bool:
     if temp_home is None:
         return False
     print(
-        f"✗ Refusing to write the gateway {kind}: HERMES_HOME resolves to a "
-        f"temporary directory ({temp_home})."
+        f'✗ Не записываю {kind} шлюза: HERMES_HOME указывает на временную папку ({temp_home}).'
     )
     print(
-        "  This usually means a test/E2E environment exported HERMES_HOME. "
-        "Unset it (or run from a clean shell) and retry."
+        '  Обычно это переменная HERMES_HOME от тестового окружения. Уберите её или откройте новый терминал и повторите попытку.'
     )
     return True
 
@@ -4327,21 +4330,21 @@ def refresh_systemd_unit_if_needed(system: bool = False) -> bool:
     unit_path.write_text(new_unit, encoding="utf-8")
     _run_systemctl(["daemon-reload"], system=system, check=True, timeout=30)
     print(
-        f"↻ Updated gateway {_service_scope_label(system)} service definition to match the current Korra install"
+        f'↻ Описание службы шлюза {_service_scope_display(system)} обновлено для текущей установки Korra'
     )
     return True
 
 
 def _print_linger_enable_warning(username: str, detail: str | None = None) -> None:
     print()
-    print("⚠ Linger not enabled — gateway may stop when you close this terminal.")
+    print('⚠ Фоновая работа после выхода не включена: шлюз может остановиться, когда вы закроете терминал.')
     if detail:
-        print(f"  Auto-enable failed: {detail}")
+        print(f'  Не удалось включить автоматически: {detail}')
     print()
-    print("  On headless servers (VPS, cloud instances) run:")
+    print('  На сервере без графического интерфейса выполните:')
     print(f"    sudo loginctl enable-linger {username}")
     print()
-    print("  Then restart the gateway:")
+    print('  Затем перезапустите шлюз:')
     print(f"    systemctl --user restart {get_service_name()}.service")
     print()
 
@@ -4356,19 +4359,19 @@ def _ensure_linger_enabled() -> None:
     username = getpass.getuser()
     linger_file = Path(f"/var/lib/systemd/linger/{username}")
     if linger_file.exists():
-        print("✓ Systemd linger is enabled (service survives logout)")
+        print('✓ Фоновая работа systemd включена: служба продолжит работу после выхода.')
         return
 
     linger_enabled, linger_detail = get_systemd_linger_status()
     if linger_enabled is True:
-        print("✓ Systemd linger is enabled (service survives logout)")
+        print('✓ Фоновая работа systemd включена: служба продолжит работу после выхода.')
         return
 
     if not shutil.which("loginctl"):
-        _print_linger_enable_warning(username, linger_detail or "loginctl not found")
+        _print_linger_enable_warning(username, linger_detail or 'loginctl не найден')
         return
 
-    print("Enabling linger so the gateway survives SSH logout...")
+    print('Включаю фоновую работу после выхода из SSH…')
     try:
         result = subprocess.run(
             ["loginctl", "enable-linger", username],
@@ -4382,7 +4385,7 @@ def _ensure_linger_enabled() -> None:
         return
 
     if result.returncode == 0:
-        print("✓ Linger enabled — gateway will persist after logout")
+        print('✓ Фоновая работа после выхода включена.')
         return
 
     detail = (result.stderr or result.stdout or f"exit {result.returncode}").strip()
@@ -4420,10 +4423,10 @@ def _print_system_scope_remediation(action: str) -> None:
     """
     svc = get_service_name()
     print_warning(
-        f"Gateway is installed as a system-wide service — " f"{action} requires root."
+        f'Шлюз установлен как системная служба. Для действия «{_gateway_action_display(action)}» нужны права администратора.'
     )
-    print_info("  Options:")
-    print_info(f"    1. {action.capitalize()} it this time:")
+    print_info('  Варианты:')
+    print_info(f'    1. Выполнить действие «{_gateway_action_display(action)}» сейчас:')
     if action == "start":
         print_info(f"         sudo systemctl start {svc}")
     elif action == "stop":
@@ -4432,10 +4435,10 @@ def _print_system_scope_remediation(action: str) -> None:
         print_info(f"         sudo systemctl restart {svc}")
     else:
         print_info(f"         sudo systemctl {action} {svc}")
-    print_info("    2. Switch to a per-user service (recommended for personal use):")
-    print_info("         sudo hermes gateway uninstall --system")
-    print_info("         hermes gateway install")
-    print_info("         hermes gateway start")
+    print_info('    2. Перейти на пользовательскую службу (рекомендуется для личного использования):')
+    print_info('         sudo korra gateway uninstall --system')
+    print_info('         korra gateway install')
+    print_info('         korra gateway start')
 
 
 def _get_restart_drain_timeout() -> float:
@@ -4503,7 +4506,7 @@ def systemd_install(
         print()
         print_legacy_unit_warning()
         print()
-        if non_interactive or prompt_yes_no("Remove the legacy unit(s) before installing?", True):
+        if non_interactive or prompt_yes_no('Удалить старые службы перед установкой?', True):
             remove_legacy_hermes_units(interactive=False)
             print()
 
@@ -4522,22 +4525,22 @@ def systemd_install(
     if unit_path.exists() and not force:
         if not systemd_unit_is_current(system=system):
             print(
-                f"↻ Repairing outdated {_service_scope_label(system)} systemd service at: {unit_path}"
+                f'↻ Обновляю устаревшее описание службы systemd {_service_scope_display(system)}: {unit_path}'
             )
             refresh_systemd_unit_if_needed(system=system)
             if enable_on_startup:
                 _run_systemctl(["enable", get_service_name()], system=system, check=True, timeout=30)
-            print(f"✓ {_service_scope_label(system).capitalize()} service definition updated")
+            print(f'✓ Описание службы {_service_scope_display(system)} обновлено')
             return
-        print(f"Service already installed at: {unit_path}")
-        print("Use --force to reinstall")
+        print(f'Служба уже установлена: {unit_path}')
+        print('Чтобы переустановить, добавьте --force.')
         return
 
     unit_path.parent.mkdir(parents=True, exist_ok=True)
     new_unit = generate_systemd_unit(system=system, run_as_user=run_as_user)
     if _refuse_temp_home_service_write(new_unit, "systemd unit"):
         return
-    print(f"Installing {_service_scope_label(system)} systemd service to: {unit_path}")
+    print(f'Устанавливаю службу systemd {_service_scope_display(system)}: {unit_path}')
     unit_path.write_text(new_unit, encoding="utf-8")
 
     _run_systemctl(["daemon-reload"], system=system, check=True, timeout=30)
@@ -4545,25 +4548,25 @@ def systemd_install(
         _run_systemctl(["enable", get_service_name()], system=system, check=True, timeout=30)
 
     print()
-    enable_label = "installed and enabled" if enable_on_startup else "installed"
-    print(f"✓ {_service_scope_label(system).capitalize()} service {enable_label}!")
+    enable_label = 'установлена, автозапуск включён' if enable_on_startup else "установлена"
+    print(f'✓ Служба {_service_scope_display(system)}: {enable_label}.')
     print()
-    print("Next steps:")
+    print('Следующие шаги:')
     print(
-        f"  {'sudo ' if system else ''}hermes gateway start{scope_flag}              # Start the service"
+        f"  {('sudo ' if system else '')}korra gateway start{scope_flag}              # Запустить службу"
     )
     print(
-        f"  {'sudo ' if system else ''}hermes gateway status{scope_flag}             # Check status"
+        f"  {('sudo ' if system else '')}korra gateway status{scope_flag}             # Проверить состояние"
     )
     print(
-        f"  {'journalctl' if system else 'journalctl --user'} -u {get_service_name()} -f  # View logs"
+        f"  {('journalctl' if system else 'journalctl --user')} -u {get_service_name()} -f  # Посмотреть журнал"
     )
     print()
 
     if system:
         configured_user = _read_systemd_user_from_unit(unit_path)
         if configured_user:
-            print(f"Configured to run as: {configured_user}")
+            print(f'Запуск от пользователя: {configured_user}')
     else:
         _ensure_linger_enabled()
 
@@ -4584,18 +4587,18 @@ def systemd_uninstall(system: bool = False):
     unit_path = get_systemd_unit_path(system=system)
     if unit_path.exists():
         unit_path.unlink()
-        print(f"✓ Removed {unit_path}")
+        print(f'✓ Удалено: {unit_path}')
 
     _run_systemctl(["daemon-reload"], system=system, check=True, timeout=30)
-    print(f"✓ {_service_scope_label(system).capitalize()} service uninstalled")
+    print(f'✓ Служба {_service_scope_display(system)} удалена')
 
 
 def _require_service_installed(action: str, system: bool = False) -> None:
     unit_path = get_systemd_unit_path(system=system)
     if not unit_path.exists():
         scope_flag = " --system" if system else ""
-        print("✗ Gateway service is not installed")
-        print(f"  Run: {'sudo ' if system else ''}hermes gateway install{scope_flag}")
+        print('✗ Служба шлюза не установлена.')
+        print(f"  Выполните: {('sudo ' if system else '')}korra gateway install{scope_flag}")
         sys.exit(1)
 
 
@@ -4614,7 +4617,7 @@ def systemd_start(system: bool = False):
     # guaranteed to exist here by _require_service_installed, so the gate runs.
     refresh_systemd_unit_if_needed(system=system)
     _run_systemctl(["start", get_service_name()], system=system, check=True, timeout=30)
-    print(f"✓ {_service_scope_label(system).capitalize()} service started")
+    print(f'✓ Служба {_service_scope_display(system)} запущена')
 
 
 def systemd_stop(system: bool = False):
@@ -4636,13 +4639,12 @@ def systemd_stop(system: bool = False):
             ["stop", get_service_name()], system=system, check=True, timeout=90
         )
     except subprocess.TimeoutExpired:
-        label = _service_scope_label(system)
+        label = _service_scope_display(system)
         print(
-            f"Gateway {label} service is still stopping after 90s; "
-            "check `hermes gateway status` or logs for final shutdown state."
+            f'Служба шлюза {label} не остановилась за 90 с. Проверьте `korra gateway status` или журнал.'
         )
         return
-    print(f"✓ {_service_scope_label(system).capitalize()} service stopped")
+    print(f'✓ Служба {_service_scope_display(system)} остановлена')
 
 
 def systemd_restart(system: bool = False):
@@ -4669,8 +4671,7 @@ def systemd_restart(system: bool = False):
         # heartbeat) never takes this path — its in-flight work, including
         # the #86684 cron drain floor, keeps the full graceful budget.
         print(
-            f"⚠ Gateway PID {pid} event loop is unresponsive — "
-            "skipping graceful drain and forcing a bounded stop..."
+            f'⚠ Шлюз с PID {pid} не отвечает. Перехожу к принудительной остановке с ограничением времени…'
         )
         _escalate_wedged_gateway(pid)
         svc = get_service_name()
@@ -4679,12 +4680,11 @@ def systemd_restart(system: bool = False):
         _wait_for_systemd_service_restart(system=system, previous_pid=pid)
         return
     if pid is not None:
-        scope_label = _service_scope_label(system).capitalize()
+        scope_label = _service_scope_display(system)
         svc = get_service_name()
         wait_budget = _get_restart_exit_wait_budget()
         print(
-            f"⏳ {scope_label} service restarting gracefully (PID {pid}) — "
-            f"waiting up to {wait_budget:.0f}s for in-flight turns + drain..."
+            f'⏳ Служба {scope_label} перезапускается (PID {pid}). Жду до {wait_budget:.0f} с завершения текущих задач…'
         )
         service_action = "restart"
         if _graceful_restart_via_sigusr1(pid, wait_budget):
@@ -4717,16 +4717,14 @@ def systemd_restart(system: bool = False):
                 return
 
             print(
-                "⚠ Systemd did not relaunch the gateway after its graceful exit; "
-                "starting the inactive service..."
+                '⚠ systemd не запустил шлюз после завершения. Запускаю неактивную службу…'
             )
             # ``start`` is intentionally idempotent: if a replacement appears
             # after the snapshot, this must not stop that new generation.
             service_action = "start"
         else:
             print(
-                f"⚠ Graceful restart did not complete within {int(wait_budget)}s; "
-                "forcing a service restart..."
+                f'⚠ Перезапуск не завершился за {int(wait_budget)} с. Перезапускаю службу принудительно…'
             )
 
         _run_systemctl(
@@ -4747,10 +4745,9 @@ def systemd_restart(system: bool = False):
                 return
             raise
         except subprocess.TimeoutExpired:
-            label = _service_scope_label(system)
+            label = _service_scope_display(system)
             print(
-                f"Gateway {label} service is still restarting after 90s; "
-                "check `hermes gateway status` or logs for final state."
+                f'Служба шлюза {label} перезапускается более 90 с. Проверьте `korra gateway status` или журнал.'
             )
             return
         _wait_for_systemd_service_restart(system=system, previous_pid=pid)
@@ -4777,10 +4774,9 @@ def systemd_restart(system: bool = False):
             return
         raise
     except subprocess.TimeoutExpired:
-        label = _service_scope_label(system)
+        label = _service_scope_display(system)
         print(
-            f"Gateway {label} service is still restarting after 90s; "
-            "check `hermes gateway status` or logs for final state."
+            f'Служба шлюза {label} перезапускается более 90 с. Проверьте `korra gateway status` или журнал.'
         )
         return
     _wait_for_systemd_service_restart(system=system, previous_pid=pid)
@@ -4792,8 +4788,8 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
     scope_flag = " --system" if system else ""
 
     if not unit_path.exists():
-        print("✗ Gateway service is not installed")
-        print(f"  Run: {'sudo ' if system else ''}hermes gateway install{scope_flag}")
+        print('✗ Служба шлюза не установлена.')
+        print(f"  Выполните: {('sudo ' if system else '')}korra gateway install{scope_flag}")
         return
 
     if has_conflicting_systemd_units():
@@ -4805,9 +4801,9 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
         print()
 
     if not systemd_unit_is_current(system=system):
-        print("⚠ Installed gateway service definition is outdated")
+        print('⚠ Описание установленной службы устарело.')
         print(
-            f"  Run: {'sudo ' if system else ''}hermes gateway restart{scope_flag}  # auto-refreshes the unit"
+            f"  Выполните: {('sudo ' if system else '')}korra gateway restart{scope_flag}  # Обновит описание службы"
         )
         print()
 
@@ -4834,22 +4830,22 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
 
     if status == "active":
         print(
-            f"✓ {_service_scope_label(system).capitalize()} gateway service is running"
+            f'✓ Служба шлюза {_service_scope_display(system)} работает.'
         )
     else:
         print(
-            f"✗ {_service_scope_label(system).capitalize()} gateway service is stopped"
+            f'✗ Служба шлюза {_service_scope_display(system)} остановлена.'
         )
-        print(f"  Run: {'sudo ' if system else ''}hermes gateway start{scope_flag}")
+        print(f"  Выполните: {('sudo ' if system else '')}korra gateway start{scope_flag}")
 
     configured_user = _read_systemd_user_from_unit(unit_path) if system else None
     if configured_user:
-        print(f"Configured to run as: {configured_user}")
+        print(f'Запуск от пользователя: {configured_user}')
 
     runtime_lines = _runtime_health_lines()
     if runtime_lines:
         print()
-        print("Recent gateway health:")
+        print('Последнее состояние шлюза:')
         for line in runtime_lines:
             print(f"  {line}")
 
@@ -4859,40 +4855,40 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
     exec_main_status = unit_props.get("ExecMainStatus", "")
     result_code = unit_props.get("Result", "")
     if active_state == "activating" and sub_state == "auto-restart":
-        print("  ⏳ Restart pending: systemd is waiting to relaunch the gateway")
+        print('  ⏳ Перезапуск ожидается: systemd готовится запустить шлюз.')
     elif _systemd_unit_is_start_limited(unit_props):
-        print("  ⏳ Restart pending: systemd is temporarily rate-limiting starts")
+        print('  ⏳ Перезапуск ожидается: systemd временно ограничил запуски.')
         print(
-            f"  Run after the start-limit window expires: {'sudo ' if system else ''}hermes gateway restart{scope_flag}"
+            f"  После снятия ограничения выполните: {('sudo ' if system else '')}korra gateway restart{scope_flag}"
         )
         print(
-            f"  Or clear it manually: systemctl {'--user ' if not system else ''}reset-failed {get_service_name()}"
+            f"  Или сбросьте ошибку вручную: systemctl {('--user ' if not system else '')}reset-failed {get_service_name()}"
         )
     elif active_state == "failed" and exec_main_status == str(
         GATEWAY_SERVICE_RESTART_EXIT_CODE
     ):
-        print("  ⚠ Planned restart is stuck in systemd failed state (exit 75)")
+        print('  ⚠ Плановый перезапуск остановился: служба systemd в состоянии ошибки, код 75.')
         print(
-            f"  Run: systemctl {'--user ' if not system else ''}reset-failed {get_service_name()} && {'sudo ' if system else ''}hermes gateway start{scope_flag}"
+            f"  Выполните: systemctl {('--user ' if not system else '')}reset-failed {get_service_name()} && {('sudo ' if system else '')}korra gateway start{scope_flag}"
         )
     elif active_state == "failed" and result_code:
-        print(f"  ⚠ Systemd unit result: {result_code}")
+        print(f'  ⚠ Результат службы systemd: {result_code}')
 
     if system:
-        print("✓ System service starts at boot without requiring systemd linger")
+        print('✓ Системная служба запускается при загрузке. Настройка linger не требуется.')
     elif deep:
         print_systemd_linger_guidance()
     else:
         linger_enabled, _ = get_systemd_linger_status()
         if linger_enabled is True:
-            print("✓ Systemd linger is enabled (service survives logout)")
+            print('✓ Фоновая работа systemd включена: служба продолжит работу после выхода.')
         elif linger_enabled is False:
-            print("⚠ Systemd linger is disabled (gateway may stop when you log out)")
-            print("  Run: sudo loginctl enable-linger $USER")
+            print('⚠ Фоновая работа systemd после выхода отключена. Шлюз может остановиться при выходе.')
+            print('  Выполните: sudo loginctl enable-linger $USER')
 
     if deep:
         print()
-        print("Recent logs:")
+        print('Последние записи журнала:')
         log_cmd = _journalctl_cmd(system) + [
             "-u",
             get_service_name(),
@@ -5306,17 +5302,16 @@ def _launchd_fallback_to_detached(reason: str, *, exit_on_failure: bool = True) 
     from korra_constants import display_hermes_home as _dhh
 
     _write_launchd_unsupported_marker()
-    print(f"⚠ launchd cannot manage the gateway on this macOS version ({reason}).")
+    print(f'⚠ launchd не может управлять шлюзом в этой версии macOS ({reason}).')
     if _spawn_detached_gateway():
-        print("✓ Started gateway as a background process instead")
-        print("  It will NOT auto-start at login or auto-restart on crash.")
-        print(f"  Logs: {_dhh()}/logs/gateway.log")
-        print("  Stop it with: hermes gateway stop")
+        print('✓ Вместо службы шлюз запущен отдельным фоновым процессом.')
+        print('  Он не будет запускаться при входе или восстанавливаться после сбоев.')
+        print(f'  Журнал: {_dhh()}/logs/gateway.log')
+        print('  Остановить: korra gateway stop')
         return True
-    print_error("Failed to start the gateway as a background process.")
+    print_error('Не удалось запустить шлюз в фоне.')
     print(
-        f"  Try manually: nohup hermes gateway run --replace "
-        f"> {_dhh()}/logs/gateway.log 2>&1 &"
+        f'  Попробуйте вручную: nohup korra gateway run --replace > {_dhh()}/logs/gateway.log 2>&1 &'
     )
     if exit_on_failure:
         sys.exit(1)
@@ -5618,8 +5613,7 @@ def refresh_launchd_plist_if_needed() -> bool:
             )
         else:
             print(
-                "↻ Updated gateway launchd service definition; reload deferred to "
-                "a transient launchd job (survives the bootout of this process)"
+                '↻ Описание службы launchd обновлено. Перезапуск выполнит отдельная задача launchd, которая продолжит работать после остановки этого процесса.'
             )
             return True
 
@@ -5666,7 +5660,7 @@ def refresh_launchd_plist_if_needed() -> bool:
             _launchd_reload_log_path(),
         )
     print(
-        "↻ Updated gateway launchd service definition to match the current Korra install"
+        '↻ Описание службы launchd обновлено для текущей установки Korra'
     )
     return True
 
@@ -5676,19 +5670,19 @@ def launchd_install(force: bool = False):
 
     if plist_path.exists() and not force:
         if not launchd_plist_is_current():
-            print(f"↻ Repairing outdated launchd service at: {plist_path}")
+            print(f'↻ Обновляю устаревшую службу launchd: {plist_path}')
             refresh_launchd_plist_if_needed()
-            print("✓ Service definition updated")
+            print('✓ Описание службы обновлено')
             return
-        print(f"Service already installed at: {plist_path}")
-        print("Use --force to reinstall")
+        print(f'Служба уже установлена: {plist_path}')
+        print('Чтобы переустановить, добавьте --force.')
         return
 
     plist_path.parent.mkdir(parents=True, exist_ok=True)
     new_plist = generate_launchd_plist()
     if _refuse_temp_home_service_write(new_plist, "launchd plist"):
         return
-    print(f"Installing launchd service to: {plist_path}")
+    print(f'Устанавливаю службу launchd: {plist_path}')
     plist_path.write_text(new_plist, encoding="utf-8")
 
     try:
@@ -5702,14 +5696,14 @@ def launchd_install(force: bool = False):
         return
 
     print()
-    print("✓ Service installed and loaded!")
+    print('✓ Служба установлена и запущена!')
     _clear_launchd_unsupported_marker()
     print()
-    print("Next steps:")
-    print("  hermes gateway status             # Check status")
+    print('Следующие шаги:')
+    print('  korra gateway status             # Проверить состояние')
     from korra_constants import display_hermes_home as _dhh
 
-    print(f"  tail -f {_dhh()}/logs/gateway.log  # View logs")
+    print(f'  tail -f {_dhh()}/logs/gateway.log  # Посмотреть журнал')
 
 
 def launchd_uninstall():
@@ -5723,9 +5717,9 @@ def launchd_uninstall():
 
     if plist_path.exists():
         plist_path.unlink()
-        print(f"✓ Removed {plist_path}")
+        print(f'✓ Удалено: {plist_path}')
 
-    print("✓ Service uninstalled")
+    print('✓ Служба удалена')
 
 
 def launchd_start():
@@ -5737,7 +5731,7 @@ def launchd_start():
         new_plist = generate_launchd_plist()
         if _refuse_temp_home_service_write(new_plist, "launchd plist"):
             sys.exit(1)
-        print("↻ launchd plist missing; regenerating service definition")
+        print('↻ Файл launchd отсутствует. Восстанавливаю описание службы…')
         plist_path.parent.mkdir(parents=True, exist_ok=True)
         plist_path.write_text(new_plist, encoding="utf-8")
         try:
@@ -5752,7 +5746,7 @@ def launchd_start():
                 raise
             _launchd_fallback_to_detached(f"launchctl exit {e.returncode}")
             return
-        print("✓ Service started")
+        print('✓ Служба запущена')
         _clear_launchd_unsupported_marker()
         return
 
@@ -5767,7 +5761,7 @@ def launchd_start():
         if not _launchd_error_indicates_unloaded(e):
             raise
         # Job not loaded in this domain — re-bootstrap the plist and retry.
-        print("↻ launchd job was unloaded; reloading service definition")
+        print('↻ Задача launchd выгружена. Загружаю описание службы заново…')
         try:
             _launchctl_bootstrap(_launchd_domain(), plist_path, label, timeout=30)
             subprocess.run(
@@ -5782,7 +5776,7 @@ def launchd_start():
                 raise
             _launchd_fallback_to_detached(f"launchctl exit {e2.returncode}")
             return
-    print("✓ Service started")
+    print('✓ Служба запущена')
     _clear_launchd_unsupported_marker()
 
 
@@ -5814,7 +5808,7 @@ def launchd_stop():
         else:
             raise
     _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
-    print("✓ Service stopped")
+    print('✓ Служба остановлена')
 
 
 def _wait_for_gateway_exit(
@@ -5856,7 +5850,7 @@ def _wait_for_gateway_exit(
                     force=True,
                     expected_start_time=get_process_start_time(pid),
                 )
-                print(f"⚠ Gateway PID {pid} did not exit gracefully; sent SIGKILL")
+                print(f'⚠ Шлюз с PID {pid} не завершился сам и остановлен принудительно (SIGKILL).')
             except (ProcessLookupError, PermissionError, OSError):
                 return True  # Already gone or we can't touch it.
             force_sent = True
@@ -5867,7 +5861,7 @@ def _wait_for_gateway_exit(
     remaining_pid = get_running_pid()
     if remaining_pid is not None:
         print(
-            f"⚠ Gateway PID {remaining_pid} still running after {timeout}s — restart may fail"
+            f'⚠ Шлюз с PID {remaining_pid} всё ещё работает через {timeout} с. Перезапуск может не удаться.'
         )
         return False
     return True
@@ -5919,7 +5913,7 @@ def launchd_restart():
     try:
         pid = get_running_pid()
         if pid is not None and _request_gateway_self_restart(pid):
-            print("✓ Service restart requested")
+            print('✓ Запрошен перезапуск службы')
             _clear_launchd_unsupported_marker()
             return
         if pid is not None and probe_gateway_loop_liveness(pid) == GATEWAY_LOOP_WEDGED:
@@ -5931,8 +5925,7 @@ def launchd_restart():
             # busy-but-alive gateway — a fresh heartbeat keeps the drain path
             # (and the #86684 cron drain floor) fully intact.
             print(
-                f"⚠ Gateway PID {pid} event loop is unresponsive — "
-                "skipping drain and forcing a bounded stop..."
+                f'⚠ Шлюз с PID {pid} не отвечает. Перехожу к принудительной остановке с ограничением времени…'
             )
             _escalate_wedged_gateway(pid)
             pid = None
@@ -5960,8 +5953,7 @@ def launchd_restart():
             # reads as "update stuck" (#44515).
             wait_budget = _get_restart_exit_wait_budget()
             print(
-                f"→ Stopping gateway (PID {pid}) — draining in-flight runs "
-                f"(up to {wait_budget:.0f}s)..."
+                f'→ Останавливаю шлюз (PID {pid}). Жду завершения текущих задач до {wait_budget:.0f} с…'
             )
             if _graceful_restart_via_sigusr1(pid, wait_budget):
                 # The gateway exited with the planned-restart code. When
@@ -5977,19 +5969,18 @@ def launchd_restart():
                 if _wait_for_launchd_service_pid(
                     label, pid, timeout=15.0, domain=domain
                 ):
-                    print("✓ Service restart requested")
+                    print('✓ Запрошен перезапуск службы')
                     _clear_launchd_unsupported_marker()
                     return
                 print(
-                    "⚠ launchd did not revive the gateway after its graceful "
-                    "exit — forcing restart"
+                    '⚠ launchd не восстановил шлюз после завершения. Перезапускаю принудительно…'
                 )
             else:
                 print(
-                    f"⚠ Gateway drain timed out after {wait_budget:.0f}s — forcing launchd restart"
+                    f'⚠ Время завершения задач истекло ({wait_budget:.0f} с). Перезапускаю через launchd принудительно…'
                 )
         subprocess.run(["launchctl", "kickstart", "-k", target], check=True, timeout=90)
-        print("✓ Service restarted")
+        print('✓ Служба перезапущена')
         _clear_launchd_unsupported_marker()
     except subprocess.CalledProcessError as e:
         if not _launchd_error_indicates_unloaded(e):
@@ -6001,7 +5992,7 @@ def launchd_restart():
                 return
             raise
         # Job not loaded — bootstrap and start fresh
-        print("↻ launchd job was unloaded; reloading")
+        print('↻ Задача launchd выгружена. Загружаю заново…')
         plist_path = get_launchd_plist_path()
         try:
             # Restart is the one path where the job is almost always still
@@ -6025,7 +6016,7 @@ def launchd_restart():
                 raise
             _launchd_fallback_to_detached(f"launchctl exit {e2.returncode}")
             return
-        print("✓ Service restarted")
+        print('✓ Служба перезапущена')
         _clear_launchd_unsupported_marker()
 
 
@@ -6113,46 +6104,46 @@ def launchd_status(deep: bool = False):
     launchd_unsupported = _launchd_unsupported_marker_exists()
 
     # ── Report ──
-    print(f"Launchd plist: {plist_path}")
+    print(f'Файл службы launchd: {plist_path}')
     if launchd_plist_is_current():
-        print("✓ Service definition matches the current Korra install")
+        print('✓ Описание службы соответствует текущей установке Korra.')
     else:
-        print("⚠ Service definition is stale relative to the current Korra install")
-        print("  Run: hermes gateway start")
+        print('⚠ Описание службы устарело относительно текущей установки Korra.')
+        print('  Выполните: korra gateway start')
 
     if service_listed:
         if launchd_pid is not None:
-            print(f"✓ Gateway is supervised by launchd (PID {launchd_pid})")
-            print("  Auto-start at login and auto-restart on crash are available.")
+            print(f'✓ Шлюз работает под управлением launchd (PID {launchd_pid}).')
+            print('  Автозапуск при входе и восстановление после сбоев доступны.')
             if launchd_unsupported:
-                print("  (launchd domain was previously unavailable but is now working)")
+                print('  Ранее launchd был недоступен, теперь работает.')
         elif launchd_unsupported:
-            print("⚠ Gateway service is registered but launchd is not supervising it")
-            print("  launchd cannot manage the gateway on this macOS version.")
+            print('⚠ Служба зарегистрирована, но launchd не управляет шлюзом.')
+            print('  В этой версии macOS launchd не может управлять шлюзом.')
             if fallback_pid:
-                print(f"✓ Detached fallback process is running (PID {fallback_pid})")
-                print("  Cron jobs will fire. Stop with: hermes gateway stop")
+                print(f'✓ Отдельный фоновый процесс работает (PID {fallback_pid}).')
+                print('  Задачи по расписанию будут выполняться. Остановить: korra gateway stop')
             else:
-                print("✗ No fallback process is running")
-                print("  Run: hermes gateway start")
-            print("  ⚠ Auto-start at login and auto-restart on crash are NOT available.")
+                print('✗ Отдельный фоновый процесс не запущен.')
+                print('  Выполните: korra gateway start')
+            print('  ⚠ Автозапуск при входе и восстановление после сбоев недоступны.')
         else:
-            print("✓ Gateway service is registered with launchd")
+            print('✓ Служба шлюза зарегистрирована в launchd.')
             print(list_output)
             if fallback_pid:
-                print(f"  Detached gateway process is running (PID {fallback_pid})")
+                print(f'  Работает отдельный процесс шлюза (PID {fallback_pid}).')
     else:
-        print("✗ Gateway service is not loaded")
-        print("  Service definition exists locally but launchd has not loaded it.")
-        print("  Run: hermes gateway start")
+        print('✗ Служба шлюза не загружена.')
+        print('  Описание службы есть на диске, но launchd его не загрузил.')
+        print('  Выполните: korra gateway start')
         if fallback_pid:
-            print(f"  Note: a detached gateway process is running (PID {fallback_pid})")
+            print(f'  Примечание: работает отдельный процесс шлюза (PID {fallback_pid}).')
 
     if deep:
         log_file = get_hermes_home() / "logs" / "gateway.log"
         if log_file.exists():
             print()
-            print("Recent logs:")
+            print('Последние записи журнала:')
             subprocess.run(["tail", "-20", str(log_file)], timeout=10)
 
 
@@ -6289,21 +6280,17 @@ def _guard_named_profile_under_multiplexer(force: bool = False) -> None:
         return
 
     print_error(
-        f"The default gateway is running as a profile multiplexer and already "
-        f"serves profile '{suffix}'."
+        f'Общий шлюз уже обслуживает профиль «{suffix}» вместе с другими профилями.'
     )
     print(
-        "  When gateway.multiplex_profiles is on, the default gateway is the\n"
-        "  single inbound process for every profile. Starting a separate\n"
-        "  gateway for this profile would double-bind its platforms (two\n"
-        "  pollers on one bot token, port conflicts).\n"
+        '  При включённом gateway.multiplex_profiles один шлюз обслуживает\n  все профили. Отдельный шлюз этого профиля создаст конфликт\n  токенов ботов и портов.\n'
     )
-    print("  Manage the multiplexer instead (from the default profile):")
+    print('  Управляйте общим шлюзом из основного профиля:')
     print()
-    print("    hermes gateway restart")
+    print('    korra gateway restart')
     print()
-    print("  Pass --force to start a separate profile gateway anyway (not")
-    print("  recommended while the multiplexer is running).")
+    print('  Чтобы всё равно запустить отдельный шлюз, добавьте --force.')
+    print('  Пока общий шлюз работает, делать это не рекомендуется.')
     # EX_CONFIG, not a generic failure. This refusal is decided entirely by
     # configuration (multiplex_profiles plus the allowlist), so it is permanent:
     # no number of retries can change the answer. Exiting 1 made it look
@@ -6340,20 +6327,16 @@ def _guard_supervised_gateway_conflict(force: bool = False) -> None:
         return
 
     print_error(
-        f"A gateway is already running under {snapshot.manager} for this profile."
+        f'Шлюз этого профиля уже работает под управлением {snapshot.manager}.'
     )
     print(
-        "  Starting another one from a shell leaves an orphan dispatcher that\n"
-        "  escapes the service, survives restarts, and writes to the same kanban\n"
-        "  DB concurrently — which can corrupt it. Restart the supervised gateway\n"
-        "  instead:"
+        '  Дополнительный запуск из терминала создаст независимый процесс,\n  который переживёт перезапуск службы и будет одновременно менять\n  базу задач. Это может повредить данные. Перезапустите службу:\n'
     )
     print()
-    print("    hermes gateway restart")
+    print('    korra gateway restart')
     print()
     print(
-        "  Pass --force to start a foreground gateway anyway (not recommended\n"
-        "  while the service is running)."
+        '  Чтобы всё равно запустить шлюз в терминале, добавьте --force.\n  Пока служба работает, делать это не рекомендуется.'
     )
     sys.exit(1)
 
@@ -6400,11 +6383,11 @@ def _guard_existing_gateway_process_conflict(replace: bool = False) -> None:
         return
 
     print_error(
-        f"Another gateway instance is already running (PID {pid})."
+        f'Другой экземпляр шлюза уже запущен (PID {pid}).'
     )
-    print("  Use 'hermes gateway restart' to replace it,")
-    print("  or 'hermes gateway stop' first.")
-    print("  Or use 'hermes gateway run --replace' to auto-replace.")
+    print('  Перезапустить: korra gateway restart.')
+    print('  Сначала остановить: korra gateway stop.')
+    print('  Или заменить автоматически: korra gateway run --replace.')
     sys.exit(1)
 
 
@@ -6418,19 +6401,16 @@ def _guard_official_docker_root_gateway() -> None:
         return
 
     print_error(
-        "Refusing to run the Korra gateway as root inside the official Docker image."
+        'Запуск шлюза Korra от root внутри официального образа Docker запрещён.'
     )
     print(
-        "  The image entrypoint normally drops privileges to the 'hermes' user. "
-        "If you override entrypoint in Docker Compose, include "
-        "/opt/hermes/docker/entrypoint.sh before the Korra command."
+        '  Стартовый скрипт образа переключается на служебного пользователя. Если меняете entrypoint в Docker Compose, добавьте /opt/hermes/docker/entrypoint.sh перед командой Korra.'
     )
     print(
-        "  Running the gateway as root can leave root-owned files in "
-        "$HERMES_HOME and break later non-root dashboard/gateway runs."
+        '  При запуске от root файлы в $HERMES_HOME могут стать недоступны панели и шлюзу, работающим без root.'
     )
     print(
-        "  Set HERMES_ALLOW_ROOT_GATEWAY=1 only if you intentionally accept this risk."
+        '  HERMES_ALLOW_ROOT_GATEWAY=1 разрешает запуск от root, если вы осознанно выбрали этот режим.'
     )
     sys.exit(1)
 
@@ -6516,10 +6496,10 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
     from gateway.run import start_gateway
 
     print("┌─────────────────────────────────────────────────────────┐")
-    print("│           ⚕ Korra Gateway Starting...                  │")
+    print('│           ⚕ Запуск шлюза Korra…                         │')
     print("├─────────────────────────────────────────────────────────┤")
-    print("│  Messaging platforms + cron scheduler                    │")
-    print("│  Press Ctrl+C to stop                                   │")
+    print('│  Мессенджеры и задачи по расписанию                      │')
+    print('│  Для остановки нажмите Ctrl+C                            │')
     print("└─────────────────────────────────────────────────────────┘")
     print()
 
@@ -6661,7 +6641,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
             "asyncio.run.KeyboardInterrupt",
             traceback=_traceback.format_exc(),
         )
-        print("\nGateway stopped.")
+        print('\nШлюз остановлен.')
         _hard_exit_after_gateway_teardown(0)
         return  # unreachable in production (os._exit); guard for test stubs
     except SystemExit as e:
@@ -6719,46 +6699,46 @@ _PLATFORMS = [
         "emoji": "💬",
         "token_var": "MATTERMOST_TOKEN",
         "setup_instructions": [
-            "1. In Mattermost: Integrations → Bot Accounts → Add Bot Account",
-            "   (System Console → Integrations → Bot Accounts must be enabled)",
-            "2. Give it a username (e.g. hermes) and copy the bot token",
-            "3. Works with any self-hosted Mattermost instance — enter your server URL",
-            "4. To find your user ID: click your avatar (top-left) → Profile",
-            "   Your user ID is displayed there — click it to copy.",
-            "   ⚠ This is NOT your username — it's a 26-character alphanumeric ID.",
-            "5. To get a channel ID: click the channel name → View Info → copy the ID",
+            '1. В Mattermost откройте Integrations → Bot Accounts → Add Bot Account.',
+            '   В System Console → Integrations должны быть разрешены Bot Accounts.',
+            '2. Задайте имя, например korra, и скопируйте токен бота.',
+            '3. Подходит ваш собственный сервер Mattermost. Укажите его адрес.',
+            '4. Чтобы узнать ваш ID, нажмите на аватар слева вверху и откройте Profile.',
+            '   Нажмите на показанный ID, чтобы скопировать его.',
+            '   ⚠ Нужен ID из 26 букв и цифр, а не имя пользователя.',
+            '5. ID канала: нажмите на его имя → View Info и скопируйте ID.',
         ],
         "vars": [
             {
                 "name": "MATTERMOST_URL",
-                "prompt": "Server URL (e.g. https://mm.example.com)",
+                "prompt": 'Адрес сервера, например https://mm.example.com',
                 "password": False,
-                "help": "Your Mattermost server URL. Works with any self-hosted instance.",
+                "help": 'Адрес вашего сервера Mattermost.',
             },
             {
                 "name": "MATTERMOST_TOKEN",
-                "prompt": "Bot token",
+                "prompt": 'Токен бота',
                 "password": True,
-                "help": "Paste the bot token from step 2 above.",
+                "help": 'Вставьте токен бота из шага 2.',
             },
             {
                 "name": "MATTERMOST_ALLOWED_USERS",
-                "prompt": "Allowed user IDs (comma-separated)",
+                "prompt": 'ID разрешённых пользователей через запятую',
                 "password": False,
                 "is_allowlist": True,
-                "help": "Your Mattermost user ID from step 4 above.",
+                "help": 'Ваш ID пользователя Mattermost из шага 4.',
             },
             {
                 "name": "MATTERMOST_HOME_CHANNEL",
-                "prompt": "Home channel ID (for cron/notification delivery, or empty to set later with /set-home)",
+                "prompt": 'ID основного чата для задач и уведомлений; можно настроить позже через /set-home',
                 "password": False,
-                "help": "Channel ID where Korra delivers cron results and notifications.",
+                "help": 'ID чата для результатов задач по расписанию и уведомлений Корры.',
             },
             {
                 "name": "MATTERMOST_REPLY_MODE",
-                "prompt": "Reply mode — 'off' for flat messages, 'thread' for threaded replies (default: off)",
+                "prompt": 'Режим ответов: off — в общий чат, thread — в ветку сообщения; по умолчанию off',
                 "password": False,
-                "help": "off = flat channel messages, thread = replies nest under your message.",
+                "help": 'off — обычные сообщения в чате; thread — ответы в ветке вашего сообщения.',
             },
         ],
     },
@@ -6786,41 +6766,41 @@ _PLATFORMS = [
         "emoji": "💬",
         "token_var": "BLUEBUBBLES_SERVER_URL",
         "setup_instructions": [
-            "1. Install BlueBubbles on a Mac that will act as your iMessage server:",
+            '1. Установите BlueBubbles на Mac, который будет сервером iMessage:',
             "   https://bluebubbles.app/",
-            "2. Complete the BlueBubbles setup wizard — sign in with your Apple ID",
-            "3. In BlueBubbles Settings → API, note the Server URL and password",
-            "4. The server URL is typically http://<your-mac-ip>:1234",
-            "5. Korra connects via the BlueBubbles REST API and receives",
-            "   incoming messages via a local webhook",
-            "6. To authorize users, use DM pairing: hermes pairing generate bluebubbles",
-            "   Share the code — the user sends it via iMessage to get approved",
+            '2. Пройдите мастер BlueBubbles и войдите с Apple ID.',
+            '3. В BlueBubbles Settings → API найдите адрес сервера и пароль.',
+            '4. Обычно адрес сервера: http://<IP-вашего-Mac>:1234.',
+            '5. Корра подключается через API BlueBubbles и получает',
+            '   сообщения через локальный вебхук.',
+            '6. Для подключения пользователей создайте код: korra pairing generate bluebubbles.',
+            '   Пользователь отправит этот код в iMessage и получит доступ.',
         ],
         "vars": [
             {
                 "name": "BLUEBUBBLES_SERVER_URL",
-                "prompt": "BlueBubbles server URL (e.g. http://192.168.1.10:1234)",
+                "prompt": 'Адрес сервера BlueBubbles, например http://192.168.1.10:1234',
                 "password": False,
-                "help": "The URL shown in BlueBubbles Settings → API.",
+                "help": 'Адрес из BlueBubbles Settings → API.',
             },
             {
                 "name": "BLUEBUBBLES_PASSWORD",
-                "prompt": "BlueBubbles server password",
+                "prompt": 'Пароль сервера BlueBubbles',
                 "password": True,
-                "help": "The password shown in BlueBubbles Settings → API.",
+                "help": 'Пароль из BlueBubbles Settings → API.',
             },
             {
                 "name": "BLUEBUBBLES_ALLOWED_USERS",
-                "prompt": "Pre-authorized phone numbers or iMessage IDs (comma-separated, or leave empty for DM pairing)",
+                "prompt": 'Разрешённые телефоны или ID iMessage через запятую; пусто — подключение по коду',
                 "password": False,
                 "is_allowlist": True,
-                "help": "Optional — pre-authorize specific users. Leave empty to use DM pairing instead (recommended).",
+                "help": 'Необязательно. Можно заранее разрешить доступ отдельным пользователям или оставить подключение по коду (рекомендуется).',
             },
             {
                 "name": "BLUEBUBBLES_HOME_CHANNEL",
-                "prompt": "Home channel (phone number or iMessage ID for cron/notifications, or empty)",
+                "prompt": 'Основной чат: телефон или ID iMessage для задач и уведомлений; можно оставить пустым',
                 "password": False,
-                "help": "Phone number or Apple ID to deliver cron results and notifications to.",
+                "help": 'Телефон или Apple ID для результатов задач и уведомлений.',
             },
         ],
     },
@@ -6830,36 +6810,36 @@ _PLATFORMS = [
         "emoji": "🐧",
         "token_var": "QQ_APP_ID",
         "setup_instructions": [
-            "1. Register a QQ Bot application at q.qq.com",
-            "2. Note your App ID and App Secret from the application page",
-            "3. Enable the required intents (C2C, Group, Guild messages)",
-            "4. Configure sandbox or publish the bot",
+            '1. Зарегистрируйте приложение QQ Bot на q.qq.com.',
+            '2. На странице приложения найдите App ID и App Secret.',
+            '3. Разрешите нужные типы сообщений: C2C, Group и Guild.',
+            '4. Настройте тестовый режим или опубликуйте бота.',
         ],
         "vars": [
             {
                 "name": "QQ_APP_ID",
-                "prompt": "QQ Bot App ID",
+                "prompt": 'ID приложения QQ Bot (App ID)',
                 "password": False,
-                "help": "Your QQ Bot App ID from q.qq.com.",
+                "help": 'App ID вашего бота с q.qq.com.',
             },
             {
                 "name": "QQ_CLIENT_SECRET",
-                "prompt": "QQ Bot App Secret",
+                "prompt": 'Секрет приложения QQ Bot (App Secret)',
                 "password": True,
-                "help": "Your QQ Bot App Secret from q.qq.com.",
+                "help": 'App Secret вашего бота с q.qq.com.',
             },
             {
                 "name": "QQ_ALLOWED_USERS",
-                "prompt": "Allowed user OpenIDs (comma-separated, leave empty for open access)",
+                "prompt": 'OpenID разрешённых пользователей через запятую; пусто — доступ для всех',
                 "password": False,
                 "is_allowlist": True,
-                "help": "Optional — restrict DM access to specific user OpenIDs.",
+                "help": 'Необязательно. Ограничивает личные сообщения указанными OpenID.',
             },
             {
                 "name": "QQBOT_HOME_CHANNEL",
-                "prompt": "Home channel (user/group OpenID for cron delivery, or empty)",
+                "prompt": 'Основной чат: OpenID пользователя или группы для задач; можно оставить пустым',
                 "password": False,
-                "help": "OpenID to deliver cron results and notifications to.",
+                "help": 'OpenID для результатов задач и уведомлений.',
             },
         ],
     },
@@ -6869,23 +6849,23 @@ _PLATFORMS = [
         "emoji": "💎",
         "token_var": "YUANBAO_APP_ID",
         "setup_instructions": [
-            "1. Download the Yuanbao app from https://yuanbao.tencent.com/",
-            "2. In the app, go to PAI → My Bot and create a new bot",
-            "3. After the bot is created, copy the App ID and App Secret",
-            "4. Enter them below and Korra will connect automatically over WebSocket",
+            '1. Скачайте Yuanbao: https://yuanbao.tencent.com/.',
+            '2. В приложении откройте PAI → My Bot и создайте бота.',
+            '3. Скопируйте App ID и App Secret созданного бота.',
+            '4. Введите данные ниже. Корра подключится автоматически через WebSocket.',
         ],
         "vars": [
             {
                 "name": "YUANBAO_APP_ID",
-                "prompt": "App ID",
+                "prompt": 'ID приложения (App ID)',
                 "password": False,
-                "help": "The App ID from your Yuanbao IM Bot credentials.",
+                "help": 'App ID вашего бота Yuanbao.',
             },
             {
                 "name": "YUANBAO_APP_SECRET",
-                "prompt": "App Secret",
+                "prompt": 'Секрет приложения (App Secret)',
                 "password": True,
-                "help": "The App Secret (used for HMAC signing) from your Yuanbao IM Bot.",
+                "help": 'App Secret вашего бота Yuanbao для подписания запросов HMAC.',
             },
         ],
     },
@@ -7061,7 +7041,7 @@ def _runtime_health_lines() -> list[str]:
 
     for platform, pdata in platforms.items():
         if pdata.get("state") == "fatal":
-            message = pdata.get("error_message") or "unknown error"
+            message = pdata.get("error_message") or "неизвестная ошибка"
             lines.append(f"⚠ {platform}: {message}")
 
     # A persisted snapshot that still claims liveness can outlive an
@@ -7075,21 +7055,20 @@ def _runtime_health_lines() -> list[str]:
         and not runtime_status_pid_is_live(state)
     ):
         lines.append(
-            f"⚠ Stale gateway_state.json: recorded state '{gateway_state}' but the "
-            "recorded process is gone (likely an ungraceful shutdown)"
+            f"⚠ Состояние gateway_state.json устарело: записано '{gateway_state}', но процесс уже не работает. Возможно, произошла неожиданная остановка."
         )
         return lines
 
     if gateway_state == "startup_failed" and exit_reason:
-        lines.append(f"⚠ Last startup issue: {exit_reason}")
+        lines.append(f'⚠ Последняя ошибка запуска: {exit_reason}')
     elif gateway_state == "draining":
         action = "restart" if restart_requested else "shutdown"
         from gateway.status import parse_active_agents
 
         count = parse_active_agents(active_agents)
-        lines.append(f"⏳ Gateway draining for {action} ({count} active agent(s))")
+        lines.append(f'⏳ Шлюз завершает задачи перед действием «{_gateway_action_display(action)}». Активных агентов: {count}.')
     elif gateway_state == "stopped" and exit_reason:
-        lines.append(f"⚠ Last shutdown reason: {exit_reason}")
+        lines.append(f'⚠ Причина последней остановки: {exit_reason}')
 
     return lines
 
@@ -7109,7 +7088,7 @@ def _setup_standard_platform(platform: dict):
     token_var = platform["token_var"]
 
     print()
-    print(color(f"  ─── {emoji} {label} Setup ───", Colors.CYAN))
+    print(color(f'  ─── Настройка {emoji} {label} ───', Colors.CYAN))
 
     # Show step-by-step setup instructions if this platform has them
     instructions = platform.get("setup_instructions")
@@ -7121,18 +7100,18 @@ def _setup_standard_platform(platform: dict):
     existing_token = get_env_value(token_var)
     if existing_token:
         print()
-        print_success(f"{label} is already configured.")
-        if not prompt_yes_no(f"  Reconfigure {label}?", False):
+        print_success(f'{label} уже настроен.')
+        if not prompt_yes_no(f'  Настроить {label} заново?', False):
             return
 
     auto_token_saved = False
     auto_owner_user_id = None
     if platform.get("key") == "telegram":
         print()
-        print_info("  Telegram can be configured automatically with a managed bot:")
-        print_info("  [1] Automatic (scan QR → confirm in Telegram → done)")
-        print_info("  [2] Manual BotFather token")
-        choice = prompt("  Choice [1/2]", default="1")
+        print_info('  Telegram можно подключить автоматически:')
+        print_info('  [1] Автоматически: отсканировать QR-код и подтвердить в Telegram')
+        print_info('  [2] Вручную: токен из BotFather')
+        choice = prompt('  Выбор [1/2]', default="1")
         if choice.strip() == "1":
             try:
                 from korra_cli.telegram_managed_bot import (
@@ -7140,19 +7119,19 @@ def _setup_standard_platform(platform: dict):
                     is_valid_telegram_bot_token,
                 )
             except ImportError:
-                print_warning("  Automatic setup is unavailable in this install.")
+                print_warning('  Автоматическая настройка недоступна в этой установке.')
             else:
                 result = auto_setup_telegram_bot_result()
                 if result and is_valid_telegram_bot_token(result.token):
                     save_env_value(token_var, result.token)
-                    print_success("  Saved TELEGRAM_BOT_TOKEN")
+                    print_success('  TELEGRAM_BOT_TOKEN сохранён.')
                     auto_token_saved = True
                     auto_owner_user_id = result.owner_user_id
                 else:
                     if result:
-                        print_warning("  Automatic setup returned an invalid Telegram token.")
+                        print_warning('  Автоматическая настройка вернула некорректный токен Telegram.')
                     print()
-                    print_info("  Falling back to manual setup...")
+                    print_info('  Перехожу к ручной настройке…')
 
     allowed_val_set = None  # Track if user set an allowlist (for home channel offer)
 
@@ -7176,20 +7155,20 @@ def _setup_standard_platform(platform: dict):
         print_info(f"  {var['help']}")
         existing = get_env_value(var["name"])
         if existing and var["name"] != token_var:
-            print_info(f"  Current: {existing}")
+            print_info(f'  Сейчас: {existing}')
 
         if auto_token_saved and var["name"] == token_var:
-            print_info("  Token saved by automatic setup.")
+            print_info('  Токен сохранён при автоматической настройке.')
             continue
 
         # Allowlist fields get special handling for the deny-by-default security model
         if var.get("is_allowlist"):
             if "TELEGRAM" in var["name"] and auto_owner_user_id:
                 detected_id = str(auto_owner_user_id)
-                print_success(f"  Detected your Telegram user ID: {detected_id}")
-                if prompt_yes_no("  Allow this Telegram account to use the bot?", True):
+                print_success(f'  Ваш ID Telegram: {detected_id}')
+                if prompt_yes_no('  Разрешить этому аккаунту Telegram пользоваться ботом?', True):
                     extra = prompt(
-                        "  Additional allowed user IDs (comma-separated, optional)",
+                        '  Дополнительные разрешённые ID пользователей через запятую (необязательно)',
                         password=False,
                     )
                     ids = [detected_id]
@@ -7198,13 +7177,13 @@ def _setup_standard_platform(platform: dict):
                             ids.append(uid)
                     cleaned = ",".join(ids)
                     save_env_value(var["name"], cleaned)
-                    print_success("  Saved — only these users can interact with the bot.")
+                    print_success('  Сохранено. Бот доступен только указанным пользователям.')
                     allowed_val_set = cleaned
                     continue
 
-            print_info("  The gateway DENIES all users by default for security.")
-            print_info("  Enter user IDs to create an allowlist, or leave empty")
-            print_info("  and you'll be asked about open access next.")
+            print_info('  По умолчанию шлюз никому не разрешает доступ.')
+            print_info('  Укажите ID пользователей в списке доступа или оставьте поле пустым.')
+            print_info('  Далее можно будет включить доступ для всех.')
             value = prompt(f"  {var['prompt']}", password=False)
             if value:
                 cleaned = value.replace(" ", "")
@@ -7221,7 +7200,7 @@ def _setup_standard_platform(platform: dict):
                             parts.append(uid)
                     cleaned = ",".join(parts)
                 save_env_value(var["name"], cleaned)
-                print_success("  Saved — only these users can interact with the bot.")
+                print_success('  Сохранено. Бот доступен только указанным пользователям.')
                 allowed_val_set = cleaned
             else:
                 # No allowlist — ask about open access vs DM pairing
@@ -7229,20 +7208,20 @@ def _setup_standard_platform(platform: dict):
                 is_email = platform.get("key") == "email"
                 if is_email:
                     access_choices = [
-                        "Enable open access (any email sender can message the bot)",
-                        "Use DM pairing (unknown email senders receive a pairing code)",
-                        "Keep unknown senders silent",
+                        'Разрешить всем отправителям писать боту по почте',
+                        'Подключать по коду — незнакомый отправитель получит код доступа',
+                        'Игнорировать неизвестных отправителей',
                     ]
                     default_access_idx = 2
                 else:
                     access_choices = [
-                        "Enable open access (anyone can message the bot)",
-                        "Use DM pairing (unknown users request access, you approve with 'hermes pairing approve')",
-                        "Skip for now (bot will deny all users until configured)",
+                        'Разрешить всем писать боту',
+                        'Подключать по коду — пользователь запрашивает доступ, вы разрешаете через `korra pairing approve`',
+                        'Пропустить — до настройки бот не будет отвечать никому',
                     ]
                     default_access_idx = 1
                 access_idx = prompt_choice(
-                    "  How should unauthorized users be handled?",
+                    '  Что делать с сообщениями пользователей без доступа?',
                     access_choices,
                     default_access_idx,
                 )
@@ -7251,33 +7230,33 @@ def _setup_standard_platform(platform: dict):
                         save_env_value("EMAIL_ALLOW_ALL_USERS", "true")
                     else:
                         save_env_value("GATEWAY_ALLOW_ALL_USERS", "true")
-                    print_warning("  Open access enabled — anyone can use your bot!")
+                    print_warning('  Доступ открыт. Ботом может пользоваться любой.')
                 elif access_idx == 1:
                     if is_email:
                         _set_platform_unauthorized_dm_behavior("email", "pair")
                     print_success(
-                        "  DM pairing mode — users will receive a code to request access."
+                        '  Подключение по коду: пользователь получит код для запроса доступа.'
                     )
                     print_info(
-                        "  Approve with: hermes pairing approve <platform> <code>"
+                        '  Разрешить доступ: korra pairing approve <платформа> <код>'
                     )
                 elif is_email:
-                    print_success("  Unknown email senders will be ignored.")
+                    print_success('  Сообщения неизвестных отправителей почты будут проигнорированы.')
                 else:
                     print_info(
-                        "  Skipped — configure later with 'hermes gateway setup'"
+                        '  Пропущено. Настроить позже: `korra gateway setup`.'
                     )
             continue
 
         value = prompt(f"  {var['prompt']}", password=var.get("password", False))
         if value:
             save_env_value(var["name"], value)
-            print_success(f"  Saved {var['name']}")
+            print_success(f"  Сохранено: {var['name']}")
         elif var["name"] == token_var:
-            print_warning(f"  Skipped — {label} won't work without this.")
+            print_warning(f'  Пропущено: без этого {label} не будет работать.')
             return
         else:
-            print_info("  Skipped (can configure later)")
+            print_info('  Пропущено. Можно настроить позже.')
 
     # If an allowlist was set and home channel wasn't, offer to reuse
     # the first user ID (common for Telegram DMs).
@@ -7286,13 +7265,13 @@ def _setup_standard_platform(platform: dict):
     if allowed_val_set and not home_val and label == "Telegram":
         first_id = allowed_val_set.split(",")[0].strip()
         if first_id and prompt_yes_no(
-            f"  Use your user ID ({first_id}) as the home channel?", True
+            f'  Использовать ваш ID ({first_id}) как основной чат?', True
         ):
             save_env_value(home_var, first_id)
-            print_success(f"  Home channel set to {first_id}")
+            print_success(f'  Основной чат: {first_id}')
 
     print()
-    print_success(f"{emoji} {label} configured!")
+    print_success(f'{emoji} {label} настроен!')
 
 
 # _setup_whatsapp and _setup_dingtalk moved into their plugins:
@@ -7380,40 +7359,40 @@ def _is_service_running() -> bool:
 def _setup_weixin():
     """Interactive setup for Weixin / WeChat personal accounts."""
     print()
-    print(color("  ─── 💬 Weixin / WeChat Setup ───", Colors.CYAN))
+    print(color('  ─── Настройка 💬 Weixin / WeChat ───', Colors.CYAN))
     print()
-    print_info("  1. Korra will open Tencent iLink QR login in this terminal.")
-    print_info("  2. Use WeChat to scan and confirm the QR code.")
+    print_info('  1. Korra откроет вход по QR-коду Tencent iLink в этом терминале.')
+    print_info('  2. Отсканируйте QR-код в WeChat и подтвердите вход.')
     print_info(
-        "  3. Korra will store the returned account_id/token in ~/.hermes/.env."
+        '  3. Korra сохранит полученные account_id и токен в .env выбранного профиля.'
     )
     print_info(
-        "  4. This adapter supports native text, image, video, and document delivery."
+        '  4. Поддерживаются текст, изображения, видео и документы.'
     )
 
     existing_account = get_env_value("WEIXIN_ACCOUNT_ID")
     existing_token = get_env_value("WEIXIN_TOKEN")
     if existing_account and existing_token:
         print()
-        print_success("Weixin is already configured.")
-        if not prompt_yes_no("  Reconfigure Weixin?", False):
+        print_success('Weixin уже настроен.')
+        if not prompt_yes_no('  Настроить Weixin заново?', False):
             return
 
     try:
         from gateway.platforms.weixin import check_weixin_requirements, qr_login
     except Exception as exc:
-        print_error(f"  Weixin adapter import failed: {exc}")
-        print_info("  Install gateway dependencies first, then retry.")
+        print_error(f'  Не удалось загрузить подключение Weixin: {exc}')
+        print_info('  Сначала установите компоненты шлюза, затем повторите попытку.')
         return
 
     if not check_weixin_requirements():
-        print_error("  Missing dependencies: Weixin needs aiohttp and cryptography.")
-        print_info("  Install them, then rerun `hermes gateway setup`.")
+        print_error('  Не хватает компонентов: Weixin нужны aiohttp и cryptography.')
+        print_info('  Установите их и повторите `korra gateway setup`.')
         return
 
     print()
-    if not prompt_yes_no("  Start QR login now?", True):
-        print_info("  Cancelled.")
+    if not prompt_yes_no('  Начать вход по QR-коду?', True):
+        print_info('  Отменено.')
         return
 
     import asyncio
@@ -7422,14 +7401,14 @@ def _setup_weixin():
         credentials = asyncio.run(qr_login(str(get_hermes_home())))
     except KeyboardInterrupt:
         print()
-        print_warning("  Weixin setup cancelled.")
+        print_warning('  Настройка Weixin отменена.')
         return
     except Exception as exc:
-        print_error(f"  QR login failed: {exc}")
+        print_error(f'  Не удалось войти по QR-коду: {exc}')
         return
 
     if not credentials:
-        print_warning("  QR login did not complete.")
+        print_warning('  Вход по QR-коду не завершён.')
         return
 
     account_id = credentials.get("account_id", "")
@@ -7448,100 +7427,100 @@ def _setup_weixin():
 
     print()
     access_choices = [
-        "Use DM pairing approval (recommended)",
-        "Allow all direct messages",
-        "Only allow listed user IDs",
-        "Disable direct messages",
+        'Подключение по коду с вашим разрешением (рекомендуется)',
+        'Разрешить все личные сообщения',
+        'Разрешить только указанным ID пользователей',
+        'Отключить личные сообщения',
     ]
     access_idx = prompt_choice(
-        "  How should direct messages be authorized?", access_choices, 0
+        '  Кому разрешить писать боту в личные сообщения?', access_choices, 0
     )
     if access_idx == 0:
         save_env_value("WEIXIN_DM_POLICY", "pairing")
         save_env_value("WEIXIN_ALLOW_ALL_USERS", "false")
         save_env_value("WEIXIN_ALLOWED_USERS", "")
-        print_success("  DM pairing enabled.")
+        print_success('  Подключение к личным сообщениям по коду включено.')
         print_info(
-            "  Unknown DM users can request access and you approve them with `hermes pairing approve`."
+            '  Незнакомые пользователи могут запросить доступ. Разрешить его: `korra pairing approve`.'
         )
     elif access_idx == 1:
         save_env_value("WEIXIN_DM_POLICY", "open")
         save_env_value("WEIXIN_ALLOW_ALL_USERS", "true")
         save_env_value("WEIXIN_ALLOWED_USERS", "")
-        print_warning("  Open DM access enabled for Weixin.")
+        print_warning('  Личные сообщения Weixin доступны всем.')
     elif access_idx == 2:
         default_allow = user_id or ""
         allowlist = prompt(
-            "  Allowed Weixin user IDs (comma-separated)", default_allow, password=False
+            '  Разрешённые ID пользователей Weixin через запятую', default_allow, password=False
         ).replace(" ", "")
         save_env_value("WEIXIN_DM_POLICY", "allowlist")
         save_env_value("WEIXIN_ALLOW_ALL_USERS", "false")
         save_env_value("WEIXIN_ALLOWED_USERS", allowlist)
-        print_success("  Weixin allowlist saved.")
+        print_success('  Список доступа Weixin сохранён.')
     else:
         save_env_value("WEIXIN_DM_POLICY", "disabled")
         save_env_value("WEIXIN_ALLOW_ALL_USERS", "false")
         save_env_value("WEIXIN_ALLOWED_USERS", "")
-        print_warning("  Direct messages disabled.")
+        print_warning('  Личные сообщения отключены.')
 
     print()
     print_info(
-        "  Note: QR login connects an iLink bot identity (e.g. ...@im.bot), not a"
+        '  Вход по QR-коду подключает бота iLink (например, ...@im.bot),'
     )
     print_info(
-        "  scriptable personal WeChat account. Ordinary WeChat groups typically cannot"
+        '  а не личный аккаунт WeChat. Обычные группы WeChat обычно'
     )
     print_info(
-        "  invite an @im.bot identity, and iLink does not deliver ordinary-group events"
+        '  не позволяют пригласить бота @im.bot, а iLink не передаёт'
     )
     print_info(
-        "  to most bot accounts. The settings below only apply when iLink actually"
+        '  большинству ботов события из групп. Настройки ниже работают,'
     )
     print_info(
-        "  delivers group events for your account type — otherwise DM remains the only"
+        '  только если iLink поддерживает группы для вашего типа аккаунта.'
     )
-    print_info("  working channel regardless of this choice.")
+    print_info('  Иначе будут доступны только личные сообщения.')
     group_choices = [
-        "Disable group chats (recommended)",
-        "Allow all group chats",
-        "Only allow listed group chat IDs",
+        'Отключить групповые чаты (рекомендуется)',
+        'Разрешить все групповые чаты',
+        'Разрешить только указанные ID групп',
     ]
-    group_idx = prompt_choice("  How should group chats be handled?", group_choices, 0)
+    group_idx = prompt_choice('  Как обрабатывать групповые чаты?', group_choices, 0)
     if group_idx == 0:
         save_env_value("WEIXIN_GROUP_POLICY", "disabled")
         save_env_value("WEIXIN_GROUP_ALLOWED_USERS", "")
-        print_info("  Group chats disabled.")
+        print_info('  Групповые чаты отключены.')
     elif group_idx == 1:
         save_env_value("WEIXIN_GROUP_POLICY", "open")
         save_env_value("WEIXIN_GROUP_ALLOWED_USERS", "")
         print_warning(
-            "  All group chats enabled (only takes effect if iLink delivers group events)."
+            '  Все групповые чаты разрешены. Это работает, только если iLink передаёт события групп.'
         )
     else:
         allow_groups = prompt(
-            "  Allowed group chat IDs (comma-separated, not member user IDs)",
+            '  ID разрешённых групповых чатов через запятую (не ID участников)',
             "",
             password=False,
         ).replace(" ", "")
         save_env_value("WEIXIN_GROUP_POLICY", "allowlist")
         save_env_value("WEIXIN_GROUP_ALLOWED_USERS", allow_groups)
         print_success(
-            "  Group allowlist saved (only takes effect if iLink delivers group events)."
+            '  Список разрешённых групп сохранён. Это работает, только если iLink передаёт события групп.'
         )
 
     if user_id:
         print()
         if prompt_yes_no(
-            f"  Use your Weixin user ID ({user_id}) as the home channel?", True
+            f'  Использовать ваш ID Weixin ({user_id}) как основной чат?', True
         ):
             save_env_value("WEIXIN_HOME_CHANNEL", user_id)
-            print_success(f"  Home channel set to {user_id}")
+            print_success(f'  Основной чат: {user_id}')
 
     print()
-    print_success("Weixin configured!")
-    print_info(f"  Account ID: {account_id}")
+    print_success('Weixin настроен!')
+    print_info(f'  ID аккаунта: {account_id}')
     if user_id:
-        print_info(f"  User ID: {user_id}")
+        print_info(f'  ID пользователя: {user_id}')
 
 
 # _setup_feishu moved to plugins/platforms/feishu/adapter.py::interactive_setup
@@ -7551,24 +7530,24 @@ def _setup_weixin():
 def _setup_qqbot():
     """Interactive setup for QQ Bot — scan-to-configure or manual credentials."""
     print()
-    print(color("  ─── 🐧 QQ Bot Setup ───", Colors.CYAN))
+    print(color('  ─── Настройка 🐧 QQ Bot ───', Colors.CYAN))
 
     existing_app_id = get_env_value("QQ_APP_ID")
     existing_secret = get_env_value("QQ_CLIENT_SECRET")
     if existing_app_id and existing_secret:
         print()
-        print_success("QQ Bot is already configured.")
-        if not prompt_yes_no("  Reconfigure QQ Bot?", False):
+        print_success('QQ Bot уже настроен.')
+        if not prompt_yes_no('  Настроить QQ Bot заново?', False):
             return
 
     # ── Choose setup method ──
     print()
     method_choices = [
-        "Scan QR code to add bot automatically (recommended)",
-        "Enter existing App ID and App Secret manually",
+        'Подключить бота по QR-коду (рекомендуется)',
+        'Ввести App ID и App Secret вручную',
     ]
     method_idx = prompt_choice(
-        "  How would you like to set up QQ Bot?", method_choices, 0
+        '  Как подключить QQ Bot?', method_choices, 0
     )
 
     credentials = None
@@ -7581,24 +7560,24 @@ def _setup_qqbot():
             credentials = qr_register()
         except KeyboardInterrupt:
             print()
-            print_warning("  QQ Bot setup cancelled.")
+            print_warning('  Настройка QQ Bot отменена.')
             return
         if not credentials:
-            print_info("  QR setup did not complete. Continuing with manual input.")
+            print_info('  Настройка по QR-коду не завершена. Перехожу к ручному вводу.')
 
     # ── Manual credential input ──
     if not credentials:
         print()
-        print_info("  Go to https://q.qq.com to register a QQ Bot application.")
-        print_info("  Note your App ID and App Secret from the application page.")
+        print_info('  Зарегистрируйте приложение QQ Bot на https://q.qq.com.')
+        print_info('  На странице приложения найдите App ID и App Secret.')
         print()
-        app_id = prompt("  App ID", password=False)
+        app_id = prompt('  ID приложения (App ID)', password=False)
         if not app_id:
-            print_warning("  Skipped — QQ Bot won't work without an App ID.")
+            print_warning('  Пропущено: для QQ Bot нужен ID приложения.')
             return
-        app_secret = prompt("  App Secret", password=True)
+        app_secret = prompt('  Секрет приложения (App Secret)', password=True)
         if not app_secret:
-            print_warning("  Skipped — QQ Bot won't work without an App Secret.")
+            print_warning('  Пропущено: для QQ Bot нужен секрет приложения.')
             return
         credentials = {
             "app_id": app_id.strip(),
@@ -7615,63 +7594,63 @@ def _setup_qqbot():
     # ── DM security policy ──
     print()
     access_choices = [
-        "Use DM pairing approval (recommended)",
-        "Allow all direct messages",
-        "Only allow listed user OpenIDs",
+        'Подключение по коду с вашим разрешением (рекомендуется)',
+        'Разрешить все личные сообщения',
+        'Разрешить только указанные OpenID пользователей',
     ]
     access_idx = prompt_choice(
-        "  How should direct messages be authorized?", access_choices, 0
+        '  Кому разрешить писать боту в личные сообщения?', access_choices, 0
     )
     if access_idx == 0:
         save_env_value("QQ_ALLOW_ALL_USERS", "false")
         if user_openid:
             print()
             if prompt_yes_no(
-                f"  Add yourself ({user_openid}) to the allow list?", True
+                f'  Добавить вас ({user_openid}) в список доступа?', True
             ):
                 save_env_value("QQ_ALLOWED_USERS", user_openid)
-                print_success(f"  Allow list set to {user_openid}")
+                print_success(f'  В список доступа добавлено: {user_openid}')
             else:
                 save_env_value("QQ_ALLOWED_USERS", "")
         else:
             save_env_value("QQ_ALLOWED_USERS", "")
-        print_success("  DM pairing enabled.")
+        print_success('  Подключение к личным сообщениям по коду включено.')
         print_info(
-            "  Unknown users can request access; approve with `hermes pairing approve`."
+            '  Незнакомые пользователи могут запросить доступ. Разрешить его: `korra pairing approve`.'
         )
     elif access_idx == 1:
         save_env_value("QQ_ALLOW_ALL_USERS", "true")
         save_env_value("QQ_ALLOWED_USERS", "")
-        print_warning("  Open DM access enabled for QQ Bot.")
+        print_warning('  Личные сообщения QQ Bot доступны всем.')
     else:
         default_allow = user_openid or ""
         allowlist = prompt(
-            "  Allowed user OpenIDs (comma-separated)", default_allow, password=False
+            '  OpenID разрешённых пользователей через запятую', default_allow, password=False
         ).replace(" ", "")
         save_env_value("QQ_ALLOW_ALL_USERS", "false")
         save_env_value("QQ_ALLOWED_USERS", allowlist)
-        print_success("  Allowlist saved.")
+        print_success('  Список доступа сохранён.')
 
     # ── Home channel ──
     if user_openid:
         print()
         if prompt_yes_no(
-            f"  Use your QQ user ID ({user_openid}) as the home channel?", True
+            f'  Использовать ваш ID QQ ({user_openid}) как основной чат?', True
         ):
             save_env_value("QQBOT_HOME_CHANNEL", user_openid)
-            print_success(f"  Home channel set to {user_openid}")
+            print_success(f'  Основной чат: {user_openid}')
     else:
         print()
         home_channel = prompt(
-            "  Home channel OpenID (for cron/notifications, or empty)", password=False
+            '  OpenID основного чата для задач и уведомлений (можно оставить пустым)', password=False
         )
         if home_channel:
             save_env_value("QQBOT_HOME_CHANNEL", home_channel.strip())
-            print_success(f"  Home channel set to {home_channel.strip()}")
+            print_success(f'  Основной чат: {home_channel.strip()}')
 
     print()
-    print_success("🐧 QQ Bot configured!")
-    print_info(f"  App ID: {credentials['app_id']}")
+    print_success('🐧 QQ Bot настроен!')
+    print_info(f"  ID приложения: {credentials['app_id']}")
 
 
 def _setup_signal():
@@ -7679,61 +7658,61 @@ def _setup_signal():
     import shutil
 
     print()
-    print(color("  ─── 📡 Signal Setup ───", Colors.CYAN))
+    print(color('  ─── Настройка 📡 Signal ───', Colors.CYAN))
 
     existing_url = get_env_value("SIGNAL_HTTP_URL")
     existing_account = get_env_value("SIGNAL_ACCOUNT")
     if existing_url and existing_account:
         print()
-        print_success("Signal is already configured.")
-        if not prompt_yes_no("  Reconfigure Signal?", False):
+        print_success('Signal уже настроен.')
+        if not prompt_yes_no('  Настроить Signal заново?', False):
             return
 
     # Check if signal-cli is available
     print()
     if shutil.which("signal-cli"):
-        print_success("signal-cli found on PATH.")
+        print_success('signal-cli найден в PATH.')
     else:
-        print_warning("signal-cli not found on PATH.")
-        print_info("  Signal requires signal-cli running as an HTTP daemon.")
-        print_info("  Install options:")
+        print_warning('signal-cli не найден в PATH.')
+        print_info('  Для Signal нужна работающая HTTP-служба signal-cli.')
+        print_info('  Варианты установки:')
         print_info(
-            "    Linux:  download from https://github.com/AsamK/signal-cli/releases"
+            '    Linux: скачать с https://github.com/AsamK/signal-cli/releases'
         )
         print_info("    macOS:  brew install signal-cli")
         print_info("    Docker: bbernhard/signal-cli-rest-api")
         print()
-        print_info("  After installing, link your account and start the daemon:")
-        print_info('    signal-cli link -n "HermesAgent"')
-        print_info("    signal-cli --account +YOURNUMBER daemon --http 127.0.0.1:8080")
+        print_info('  После установки подключите аккаунт и запустите службу:')
+        print_info('    signal-cli link -n "Korra"')
+        print_info('    signal-cli --account +ВАШ_ТЕЛЕФОН daemon --http 127.0.0.1:8080')
         print()
 
     # HTTP URL
     print()
-    print_info("  Enter the URL where signal-cli HTTP daemon is running.")
+    print_info('  Укажите адрес запущенной HTTP-службы signal-cli.')
     default_url = existing_url or "http://127.0.0.1:8080"
     try:
-        url = line_input(f"  HTTP URL [{default_url}]: ").strip() or default_url
+        url = line_input(f'  HTTP-адрес [{default_url}]: ').strip() or default_url
     except (EOFError, KeyboardInterrupt):
-        print("\n  Setup cancelled.")
+        print('\n  Настройка отменена.')
         return
 
     # Test connectivity
-    print_info("  Testing connection...")
+    print_info('  Проверяю подключение…')
     try:
         import httpx
 
         resp = httpx.get(f"{url.rstrip('/')}/api/v1/check", timeout=10.0)
         if resp.status_code == 200:
-            print_success("  signal-cli daemon is reachable!")
+            print_success('  Служба signal-cli доступна!')
         else:
-            print_warning(f"  signal-cli responded with status {resp.status_code}.")
-            if not prompt_yes_no("  Continue anyway?", False):
+            print_warning(f'  signal-cli вернул код состояния {resp.status_code}.')
+            if not prompt_yes_no('  Продолжить?', False):
                 return
     except Exception as e:
-        print_warning(f"  Could not reach signal-cli at {url}: {e}")
+        print_warning(f'  signal-cli недоступен по адресу {url}: {e}')
         if not prompt_yes_no(
-            "  Save this URL anyway? (you can start signal-cli later)", True
+            '  Сохранить адрес? signal-cli можно запустить позже.', True
         ):
             return
 
@@ -7741,37 +7720,37 @@ def _setup_signal():
 
     # Account phone number
     print()
-    print_info("  Enter your Signal account phone number in E.164 format.")
-    print_info("  Example: +15551234567")
+    print_info('  Укажите телефон вашего аккаунта Signal в международном формате E.164.')
+    print_info('  Например: +15551234567')
     default_account = existing_account or ""
     try:
         account = line_input(
-            f"  Account number{f' [{default_account}]' if default_account else ''}: "
+            f"  Телефон аккаунта{(f' [{default_account}]' if default_account else '')}: "
         ).strip()
         if not account:
             account = default_account
     except (EOFError, KeyboardInterrupt):
-        print("\n  Setup cancelled.")
+        print('\n  Настройка отменена.')
         return
 
     if not account:
-        print_error("  Account number is required.")
+        print_error('  Укажите номер телефона аккаунта.')
         return
 
     save_env_value("SIGNAL_ACCOUNT", account)
 
     # Allowed users
     print()
-    print_info("  The gateway DENIES all users by default for security.")
-    print_info("  Enter phone numbers or UUIDs of allowed users (comma-separated).")
+    print_info('  По умолчанию шлюз никому не разрешает доступ.')
+    print_info('  Введите телефоны или UUID разрешённых пользователей через запятую.')
     existing_allowed = get_env_value("SIGNAL_ALLOWED_USERS") or ""
     default_allowed = existing_allowed or account
     try:
         allowed = (
-            line_input(f"  Allowed users [{default_allowed}]: ").strip() or default_allowed
+            line_input(f'  Разрешённые пользователи [{default_allowed}]: ').strip() or default_allowed
         )
     except (EOFError, KeyboardInterrupt):
-        print("\n  Setup cancelled.")
+        print('\n  Настройка отменена.')
         return
 
     save_env_value("SIGNAL_ALLOWED_USERS", allowed)
@@ -7779,29 +7758,29 @@ def _setup_signal():
     # Group messaging
     print()
     if prompt_yes_no(
-        "  Enable group messaging? (disabled by default for security)", False
+        '  Разрешить групповые сообщения? По умолчанию они отключены.', False
     ):
         print()
-        print_info("  Enter group IDs to allow, or * for all groups.")
+        print_info('  Укажите ID разрешённых групп или * для всех групп.')
         existing_groups = get_env_value("SIGNAL_GROUP_ALLOWED_USERS") or ""
         try:
             groups = (
-                line_input(f"  Group IDs [{existing_groups or '*'}]: ").strip()
+                line_input(f"  ID групп [{existing_groups or '*'}]: ").strip()
                 or existing_groups
                 or "*"
             )
         except (EOFError, KeyboardInterrupt):
-            print("\n  Setup cancelled.")
+            print('\n  Настройка отменена.')
             return
         save_env_value("SIGNAL_GROUP_ALLOWED_USERS", groups)
 
     print()
-    print_success("Signal configured!")
-    print_info(f"  URL: {url}")
-    print_info(f"  Account: {account}")
-    print_info("  DM auth: via SIGNAL_ALLOWED_USERS + DM pairing")
+    print_success('Signal настроен!')
+    print_info(f'  Адрес: {url}')
+    print_info(f'  Аккаунт: {account}')
+    print_info('  Доступ к личным сообщениям: SIGNAL_ALLOWED_USERS и коды подключения')
     print_info(
-        f"  Groups: {'enabled' if get_env_value('SIGNAL_GROUP_ALLOWED_USERS') else 'disabled'}"
+        f"  Группы: {('включены' if get_env_value('SIGNAL_GROUP_ALLOWED_USERS') else 'отключены')}"
     )
 
 
@@ -7875,13 +7854,13 @@ def _configure_platform(platform: dict) -> None:
     label = platform.get("label", platform["key"])
     emoji = platform.get("emoji", "🔌")
     print()
-    print(color(f"  ─── {emoji} {label} Setup ───", Colors.CYAN))
+    print(color(f'  ─── Настройка {emoji} {label} ───', Colors.CYAN))
     required = entry.required_env if entry else []
     if required:
-        print_info(f"  Set these env vars in ~/.hermes/.env: {', '.join(required)}")
+        print_info(f"  Добавьте ключи в .env выбранного профиля: {', '.join(required)}")
     else:
         print_info(
-            f"  Configure {label} in config.yaml under gateway.platforms.{platform['key']}"
+            f"  Настройте {label} в config.yaml, раздел gateway.platforms.{platform['key']}"
         )
     if platform.get("install_hint"):
         print_info(f"  {platform['install_hint']}")
@@ -7902,7 +7881,7 @@ def gateway_setup():
     )
     print(
         color(
-            "│             ⚕ Gateway Setup                            │", Colors.MAGENTA
+            '│             ⚕ Настройка шлюза                           │', Colors.MAGENTA
         )
     )
     print(
@@ -7913,13 +7892,13 @@ def gateway_setup():
     )
     print(
         color(
-            "│  Configure messaging platforms and the gateway service. │",
+            '│  Подключение мессенджеров и службы шлюза                 │',
             Colors.MAGENTA,
         )
     )
     print(
         color(
-            "│  Press Ctrl+C at any time to exit.                     │", Colors.MAGENTA
+            '│  Для выхода в любой момент нажмите Ctrl+C.              │', Colors.MAGENTA
         )
     )
     print(
@@ -7943,47 +7922,47 @@ def gateway_setup():
         print()
 
     if service_installed and service_running:
-        print_success("Gateway service is installed and running.")
+        print_success('Служба шлюза установлена и работает.')
     elif service_installed:
-        print_warning("Gateway service is installed but not running.")
+        print_warning('Служба шлюза установлена, но не запущена.')
         if supports_systemd_services() and _system_scope_wizard_would_need_root():
             _print_system_scope_remediation("start")
-        elif prompt_yes_no("  Start it now?", True):
+        elif prompt_yes_no('  Запустить сейчас?', True):
             try:
                 if supports_systemd_services():
                     systemd_start()
                 elif is_macos():
                     launchd_start()
             except UserSystemdUnavailableError as e:
-                print_error("  Failed to start — user systemd not reachable:")
+                print_error('  Запуск не удался: пользовательская служба systemd недоступна.')
                 for line in str(e).splitlines():
                     print(f"  {line}")
             except SystemScopeRequiresRootError as e:
                 # Defense in depth: the pre-check above should have caught
                 # this, but handle the race/edge case gracefully instead of
                 # letting the exception escape the wizard.
-                print_error(f"  Failed to start: {e}")
+                print_error(f'  Не удалось запустить: {e}')
                 _print_system_scope_remediation("start")
             except subprocess.CalledProcessError as e:
-                print_error(f"  Failed to start: {e}")
+                print_error(f'  Не удалось запустить: {e}')
     else:
-        print_info("Gateway service is not installed yet.")
-        print_info("You'll be offered to install it after configuring platforms.")
+        print_info('Служба шлюза пока не установлена.')
+        print_info('Установка будет предложена после подключения платформ.')
 
     # ── Platform configuration loop ──
     while True:
         print()
-        print_header("Messaging Platforms")
+        print_header('Мессенджеры')
 
         platforms = _all_platforms()
 
         menu_items = [
-            f"{p['emoji']} {p['label']}  ({_platform_status(p)})" for p in platforms
+            f"{p['emoji']} {p['label']}  ({_setup_platform_status_label(_platform_status(p))})" for p in platforms
         ]
         menu_items.append("Done")
 
         choice = prompt_choice(
-            "Select a platform to configure:", menu_items, len(menu_items) - 1
+            'Выберите платформу для настройки:', menu_items, len(menu_items) - 1
         )
         if choice == len(platforms):
             break
@@ -8014,7 +7993,7 @@ def gateway_setup():
         if service_running:
             if supports_systemd_services() and _system_scope_wizard_would_need_root():
                 _print_system_scope_remediation("restart")
-            elif prompt_yes_no("  Restart the gateway to pick up changes?", True):
+            elif prompt_yes_no('  Перезапустить шлюз, чтобы применить изменения?', True):
                 try:
                     if supports_systemd_services():
                         systemd_restart()
@@ -8026,20 +8005,20 @@ def gateway_setup():
                         gateway_windows.restart()
                     else:
                         stop_profile_gateway()
-                        print_info("Start manually: hermes gateway")
+                        print_info('Запустить вручную: korra gateway')
                 except UserSystemdUnavailableError as e:
-                    print_error("  Restart failed — user systemd not reachable:")
+                    print_error('  Перезапуск не удался: пользовательская служба systemd недоступна.')
                     for line in str(e).splitlines():
                         print(f"  {line}")
                 except SystemScopeRequiresRootError as e:
-                    print_error(f"  Restart failed: {e}")
+                    print_error(f'  Не удалось перезапустить: {e}')
                     _print_system_scope_remediation("restart")
                 except subprocess.CalledProcessError as e:
-                    print_error(f"  Restart failed: {e}")
+                    print_error(f'  Не удалось перезапустить: {e}')
         elif service_installed:
             if supports_systemd_services() and _system_scope_wizard_would_need_root():
                 _print_system_scope_remediation("start")
-            elif prompt_yes_no("  Start the gateway service?", True):
+            elif prompt_yes_no('  Запустить службу шлюза?', True):
                 try:
                     if supports_systemd_services():
                         systemd_start()
@@ -8050,14 +8029,14 @@ def gateway_setup():
 
                         gateway_windows.start()
                 except UserSystemdUnavailableError as e:
-                    print_error("  Start failed — user systemd not reachable:")
+                    print_error('  Запуск не удался: пользовательская служба systemd недоступна.')
                     for line in str(e).splitlines():
                         print(f"  {line}")
                 except SystemScopeRequiresRootError as e:
-                    print_error(f"  Start failed: {e}")
+                    print_error(f'  Не удалось запустить: {e}')
                     _print_system_scope_remediation("start")
                 except subprocess.CalledProcessError as e:
-                    print_error(f"  Start failed: {e}")
+                    print_error(f'  Не удалось запустить: {e}')
         else:
             print()
             if supports_systemd_services() or is_macos() or is_windows():
@@ -8066,11 +8045,11 @@ def gateway_setup():
                 elif is_macos():
                     platform_name = "launchd"
                 else:
-                    platform_name = "Scheduled Task"
-                wsl_note = " (note: services may not survive WSL restarts)" if is_wsl() else ""
-                start_now = prompt_yes_no("  Start the gateway now?", True)
+                    platform_name = 'задача Windows'
+                wsl_note = ' (службы могут не пережить перезапуск WSL)' if is_wsl() else ""
+                start_now = prompt_yes_no('  Запустить шлюз сейчас?', True)
                 start_on_login = prompt_yes_no(
-                    f"  Start the gateway automatically on login/boot as a {platform_name} service?{wsl_note}",
+                    f'  Запускать шлюз автоматически при входе или загрузке как службу {platform_name}?{wsl_note}',
                     True,
                 )
                 if start_now or start_on_login:
@@ -8102,46 +8081,46 @@ def gateway_setup():
                                     gateway_windows.start()
                             except UserSystemdUnavailableError as e:
                                 print_error(
-                                    "  Start failed — user systemd not reachable:"
+                                    '  Запуск не удался: пользовательская служба systemd недоступна.'
                                 )
                                 for line in str(e).splitlines():
                                     print(f"  {line}")
                             except subprocess.CalledProcessError as e:
-                                print_error(f"  Start failed: {e}")
+                                print_error(f'  Не удалось запустить: {e}')
                     except subprocess.CalledProcessError as e:
-                        print_error(f"  Install failed: {e}")
-                        print_info("  You can try manually: hermes gateway install")
+                        print_error(f'  Не удалось установить: {e}')
+                        print_info('  Попробуйте вручную: korra gateway install')
                 else:
-                    print_info("  Skipped start and auto-start setup.")
-                    print_info("  You can install later: hermes gateway install")
+                    print_info('  Запуск и автозапуск пропущены.')
+                    print_info('  Установить позже: korra gateway install')
                     if supports_systemd_services():
                         print_info(
-                            "  Or as a boot-time service: sudo hermes gateway install --system"
+                            '  Системная служба с запуском при загрузке: sudo korra gateway install --system'
                         )
-                    print_info("  Or run in foreground:  hermes gateway run")
+                    print_info('  Или запустить в терминале: korra gateway run')
             elif is_wsl():
-                print_info("  WSL detected but systemd is not running.")
-                print_info("  Run in foreground: hermes gateway run")
+                print_info('  Обнаружен WSL, но systemd не работает.')
+                print_info('  Запустить в терминале: korra gateway run')
                 print_info(
-                    "  For persistence:   tmux new -s hermes 'hermes gateway run'"
+                    "  Оставить в фоне: tmux new -s korra 'korra gateway run'"
                 )
                 print_info(
-                    "  To enable systemd: add systemd=true to /etc/wsl.conf, then 'wsl --shutdown'"
+                    '  Чтобы включить systemd, добавьте systemd=true в /etc/wsl.conf, затем выполните `wsl --shutdown`.'
                 )
             elif is_termux():
                 from korra_constants import display_hermes_home as _dhh
 
-                print_info("  Termux does not use systemd/launchd services.")
-                print_info("  Run in foreground: hermes gateway run")
+                print_info('  В Termux нет служб systemd/launchd.')
+                print_info('  Запустить в терминале: korra gateway run')
                 print_info(
-                    f"  Or start it manually in the background (best effort): nohup hermes gateway run >{_dhh()}/logs/gateway.log 2>&1 &"
+                    f'  Или запустите вручную в фоне: nohup korra gateway run >{_dhh()}/logs/gateway.log 2>&1 &'
                 )
             else:
-                print_info("  Service install not supported on this platform.")
-                print_info("  Run in foreground: hermes gateway run")
+                print_info('  Эта платформа не поддерживает установку службы.')
+                print_info('  Запустить в терминале: korra gateway run')
     else:
         print()
-        print_info("No platforms configured. Run 'hermes gateway setup' when ready.")
+        print_info('Платформы не настроены. Подключить их: `korra gateway setup`.')
 
     print()
 
@@ -8233,7 +8212,7 @@ def _dispatch_all_via_service_manager_if_s6(action: str) -> bool:
     mgr = get_service_manager()
     profiles = mgr.list_profile_gateways()
     if not profiles:
-        print("✗ No profile gateways registered under s6")
+        print('✗ В s6 нет зарегистрированных шлюзов профилей.')
         return True
     fn = mgr.stop if action == "stop" else mgr.restart
     errors: list[tuple[str, Exception]] = []
@@ -8244,11 +8223,11 @@ def _dispatch_all_via_service_manager_if_s6(action: str) -> bool:
         except Exception as exc:  # noqa: BLE001 — report and continue
             errors.append((profile, exc))
     succeeded = len(profiles) - len(errors)
-    verb = "stopped" if action == "stop" else "restarted"
+    verb = "остановлено" if action == "stop" else "перезапущено"
     if succeeded:
-        print(f"✓ {verb.capitalize()} {succeeded} profile gateway(s) under s6")
+        print(f'✓ {verb.capitalize()} {succeeded} шлюзов профилей под управлением s6.')
     for profile, exc in errors:
-        print(f"✗ Could not {action} gateway-{profile}: {exc}")
+        print(f'✗ Действие «{_gateway_action_display(action)}» для gateway-{profile} не выполнено: {exc}')
     return True
 
 
@@ -8260,7 +8239,7 @@ def gateway_command(args):
     except UserSystemdUnavailableError as e:
         # Clean, actionable message instead of a traceback when the user D-Bus
         # session is unreachable (fresh SSH shell, no linger, container, etc.).
-        print_error("User systemd not reachable:")
+        print_error('Пользовательская служба systemd недоступна:')
         for line in str(e).splitlines():
             print(f"  {line}")
         sys.exit(1)
@@ -8324,12 +8303,7 @@ def _maybe_redirect_run_to_s6_supervision(args) -> bool:
     # so the user sees a clear sequence: this banner first, then the
     # gateway's own stdout/stderr from the supervisor.
     print(
-        "→ gateway is now running under s6 supervision (auto-restart on crash,\n"
-        "  dashboard supervised alongside if HERMES_DASHBOARD is set).\n"
-        "  This is the recommended setup for the s6 container image — the\n"
-        "  gateway will keep running even if it crashes.\n"
-        "  Use `--no-supervise` (or HERMES_GATEWAY_NO_SUPERVISE=1) to opt out\n"
-        "  and get the pre-s6 foreground behavior instead.",
+        '→ Шлюз запущен под управлением s6 с перезапуском при сбоях.\n  Панель также управляется s6, если задан HERMES_DASHBOARD.\n  Это рекомендуемый режим для образа s6: шлюз автоматически\n  восстановится после ошибки.\n  Чтобы запустить обычный процесс в терминале, добавьте --no-supervise\n  или HERMES_GATEWAY_NO_SUPERVISE=1.',
         file=sys.stderr,
         flush=True,
     )
@@ -8357,8 +8331,7 @@ def _maybe_redirect_run_to_s6_supervision(args) -> bool:
         # process. ENOENT (no `sleep` on PATH) and any other exec error
         # land here.
         print(
-            "→ `sleep` is unavailable; keeping the s6 CMD process alive "
-            "in-process until the container is stopped.",
+            '→ Команда sleep недоступна. Основной процесс s6 останется активным до остановки контейнера.',
             file=sys.stderr,
             flush=True,
         )
@@ -8418,19 +8391,19 @@ def _gateway_command_inner(args):
         system = getattr(args, "system", False)
         run_as_user = getattr(args, "run_as_user", None)
         if is_termux():
-            print("Gateway service installation is not supported on Termux.")
-            print("Run manually: hermes gateway")
+            print('Termux не поддерживает установку службы шлюза.')
+            print('Запустить вручную: korra gateway')
             sys.exit(1)
         if supports_systemd_services():
             if is_wsl():
                 print_warning(
-                    "WSL detected — systemd services may not survive WSL restarts."
+                    'Обнаружен WSL. Службы systemd могут не пережить его перезапуск.'
                 )
                 print_info(
-                    "  Consider running in foreground instead: hermes gateway run"
+                    '  Можно запустить в терминале: korra gateway run'
                 )
                 print_info(
-                    "  Or use tmux/screen for persistence: tmux new -s hermes 'hermes gateway run'"
+                    "  Или оставить в tmux/screen: tmux new -s korra 'korra gateway run'"
                 )
                 print()
             # Honor CLI flags (--start-now / --no-start-now, --start-on-login /
@@ -8441,7 +8414,7 @@ def _gateway_command_inner(args):
             if _sn is not None:
                 start_now = _sn
             elif not non_interactive:
-                start_now = prompt_yes_no("Start the gateway now after installing the service?", True)
+                start_now = prompt_yes_no('Запустить шлюз после установки службы?', True)
             else:
                 start_now = True
 
@@ -8449,7 +8422,7 @@ def _gateway_command_inner(args):
             if _sol is not None:
                 start_on_login = _sol
             elif not non_interactive:
-                start_on_login = prompt_yes_no("Start the gateway automatically on login/boot with systemd?", True)
+                start_on_login = prompt_yes_no('Запускать шлюз при входе или загрузке через systemd?', True)
             else:
                 start_on_login = True
             systemd_install(
@@ -8473,20 +8446,20 @@ def _gateway_command_inner(args):
                 elevated_handoff=getattr(args, 'elevated_handoff', False),
             )
         elif is_wsl():
-            print("WSL detected but systemd is not running.")
+            print('Обнаружен WSL, но systemd не работает.')
             print(
-                "Either enable systemd (add systemd=true to /etc/wsl.conf and restart WSL)"
+                'Включите systemd: добавьте systemd=true в /etc/wsl.conf и перезапустите WSL.'
             )
-            print("or run the gateway in foreground mode:")
+            print('Либо запустите шлюз в терминале:')
             print()
             print(
-                "  hermes gateway run                              # direct foreground"
+                '  korra gateway run                              # В этом терминале'
             )
             print(
-                "  tmux new -s hermes 'hermes gateway run'         # persistent via tmux"
+                "  tmux new -s korra 'korra gateway run'           # В постоянной сессии tmux"
             )
             print(
-                "  nohup hermes gateway run > ~/.hermes/logs/gateway.log 2>&1 &  # background"
+                '  nohup korra gateway run > ~/.hermes/logs/gateway.log 2>&1 &  # В фоне'
             )
             sys.exit(1)
         elif is_container():
@@ -8495,31 +8468,31 @@ def _gateway_command_inner(args):
             # at every container boot). `install` is therefore informational.
             from korra_cli.service_manager import detect_service_manager
             if detect_service_manager() == "s6":
-                print("Per-profile gateways are auto-registered when you create a profile.")
+                print('Шлюз профиля регистрируется автоматически при создании профиля.')
                 print()
-                print("  hermes profile create <name>     # creates the s6 service slot")
-                print("  hermes -p <name> gateway start   # bring it up via s6")
-                print("  hermes status                    # see currently-supervised gateways")
+                print('  korra profile create <имя>     # Создать профиль и службу s6')
+                print('  korra -p <имя> gateway start   # Запустить через s6')
+                print('  korra status                   # Посмотреть работающие шлюзы')
                 return
             # Fallback for pre-s6 containers or other container runtimes
             # we haven't taught about supervision (Podman without our
             # /init, k8s plain runs, etc.) — the historical guidance still
             # applies.
-            print("Service installation is not needed inside a Docker container.")
+            print('В контейнере Docker не требуется устанавливать службу.')
             print(
-                "The container runtime is your service manager — use Docker restart policies instead:"
+                'Контейнером управляет Docker. Используйте его политику перезапуска:'
             )
             print()
             print(
-                "  docker run --restart unless-stopped ...   # auto-restart on crash/reboot"
+                '  docker run --restart unless-stopped ...   # Восстанавливать после сбоя или перезагрузки'
             )
-            print("  docker restart <container>                # manual restart")
+            print('  docker restart <контейнер>                # Перезапустить вручную')
             print()
-            print("To run the gateway: hermes gateway run")
+            print('Запустить шлюз: korra gateway run')
             sys.exit(0)
         else:
-            print("Service installation not supported on this platform.")
-            print("Run manually: hermes gateway run")
+            print('Эта платформа не поддерживает установку службы.')
+            print('Запустить вручную: korra gateway run')
             sys.exit(1)
 
     elif subcmd == "uninstall":
@@ -8531,9 +8504,7 @@ def _gateway_command_inner(args):
 
         if _is_supervised_gateway_process():
             print_error(
-                "Refusing to uninstall the gateway from inside the gateway process.\n"
-                "This command was blocked to prevent the gateway from terminating itself.\n"
-                "Use `hermes gateway uninstall` from a shell outside the running gateway."
+                'Шлюз не может удалить собственную службу из работающего процесса.\nВыполните `korra gateway uninstall` в отдельном терминале вне шлюза.'
             )
             sys.exit(1)
 
@@ -8543,9 +8514,9 @@ def _gateway_command_inner(args):
         system = getattr(args, "system", False)
         if is_termux():
             print(
-                "Gateway service uninstall is not supported on Termux because there is no managed service to remove."
+                'В Termux нет управляемой службы шлюза, поэтому удалять нечего.'
             )
-            print("Stop manual runs with: hermes gateway stop")
+            print('Остановить ручной запуск: korra gateway stop')
             sys.exit(1)
         if supports_systemd_services():
             systemd_uninstall(system=system)
@@ -8558,19 +8529,19 @@ def _gateway_command_inner(args):
         elif is_container():
             from korra_cli.service_manager import detect_service_manager
             if detect_service_manager() == "s6":
-                print("Per-profile gateways are auto-unregistered when you delete the profile.")
+                print('Шлюз профиля удаляется автоматически при удалении профиля.')
                 print()
-                print("  hermes profile delete <name>     # tears down the s6 service slot")
-                print("  hermes -p <name> gateway stop    # stop without deleting the profile")
+                print('  korra profile delete <имя>     # Удалить профиль и службу s6')
+                print('  korra -p <имя> gateway stop    # Остановить без удаления профиля')
                 return
-            print("Service uninstall is not applicable inside a Docker container.")
-            print("To stop the gateway, stop or remove the container:")
+            print('В контейнере Docker отдельной службы для удаления нет.')
+            print('Чтобы остановить шлюз, остановите или удалите контейнер:')
             print()
-            print("  docker stop <container>")
-            print("  docker rm <container>")
+            print('  docker stop <контейнер>')
+            print('  docker rm <контейнер>')
             sys.exit(0)
         else:
-            print("Not supported on this platform.")
+            print('Не поддерживается на этой платформе.')
             sys.exit(1)
 
     elif subcmd == "start":
@@ -8590,15 +8561,15 @@ def _gateway_command_inner(args):
             killed = kill_gateway_processes(all_profiles=True)
             if killed:
                 print(
-                    f"✓ Killed {killed} stale gateway process(es) across all profiles"
+                    f'✓ Завершено оставшихся процессов шлюза во всех профилях: {killed}.'
                 )
                 _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
 
         if is_termux():
             print(
-                "Gateway service start is not supported on Termux because there is no system service manager."
+                'В Termux нет системного диспетчера служб. Запуск службы шлюза недоступен.'
             )
-            print("Run manually: hermes gateway")
+            print('Запустить вручную: korra gateway')
             sys.exit(1)
         if supports_systemd_services():
             systemd_start(system=system)
@@ -8609,21 +8580,21 @@ def _gateway_command_inner(args):
 
             gateway_windows.start()
         elif is_wsl():
-            print("WSL detected but systemd is not available.")
-            print("Run the gateway in foreground mode instead:")
+            print('Обнаружен WSL, но systemd недоступен.')
+            print('Запустите шлюз в терминале:')
             print()
             print(
-                "  hermes gateway run                              # direct foreground"
+                '  korra gateway run                              # В этом терминале'
             )
             print(
-                "  tmux new -s hermes 'hermes gateway run'         # persistent via tmux"
+                "  tmux new -s korra 'korra gateway run'           # В постоянной сессии tmux"
             )
             print(
-                "  nohup hermes gateway run > ~/.hermes/logs/gateway.log 2>&1 &  # background"
+                '  nohup korra gateway run > ~/.hermes/logs/gateway.log 2>&1 &  # В фоне'
             )
             print()
             print(
-                "To enable systemd: add systemd=true to /etc/wsl.conf and run 'wsl --shutdown' from PowerShell."
+                'Чтобы включить systemd, добавьте systemd=true в /etc/wsl.conf и выполните `wsl --shutdown` из PowerShell.'
             )
             sys.exit(1)
         elif is_container():
@@ -8632,16 +8603,16 @@ def _gateway_command_inner(args):
             # container runtimes that don't ship our /init get the
             # historical guidance: the gateway is the container's main
             # process, so use docker lifecycle commands.
-            print("Service start is not applicable inside a Docker container.")
-            print("The gateway runs as the container's main process.")
+            print('В контейнере Docker не требуется запускать отдельную службу.')
+            print('Шлюз работает как основной процесс контейнера.')
             print()
-            print("  docker start <container>     # start a stopped container")
-            print("  docker restart <container>   # restart a running container")
+            print('  docker start <контейнер>     # Запустить остановленный контейнер')
+            print('  docker restart <контейнер>   # Перезапустить работающий контейнер')
             print()
-            print("Or run the gateway directly: hermes gateway run")
+            print('Или запустите шлюз напрямую: korra gateway run')
             sys.exit(0)
         else:
-            print("Not supported on this platform.")
+            print('Не поддерживается на этой платформе.')
             sys.exit(1)
 
     elif subcmd == "stop":
@@ -8655,9 +8626,7 @@ def _gateway_command_inner(args):
 
         if _is_supervised_gateway_process():
             print_error(
-                "Refusing to stop the gateway from inside the gateway process.\n"
-                "This command was blocked to prevent restart loops.\n"
-                "Use `hermes gateway stop` from a shell outside the running gateway."
+                'Шлюз не может остановить сам себя: это может вызвать цикл перезапусков.\nВыполните `korra gateway stop` в отдельном терминале вне шлюза.'
             )
             sys.exit(1)
 
@@ -8703,9 +8672,9 @@ def _gateway_command_inner(args):
             killed = kill_gateway_processes(all_profiles=True)
             total = killed + (1 if service_available else 0)
             if total:
-                print(f"✓ Stopped {total} gateway process(es) across all profiles")
+                print(f'✓ Остановлено процессов шлюза во всех профилях: {total}.')
             else:
-                print("✗ No gateway processes found")
+                print('✗ Процессы шлюза не найдены.')
         else:
             # Default: stop only the current profile's gateway
             service_available = False
@@ -8737,11 +8706,11 @@ def _gateway_command_inner(args):
             if not service_available:
                 # No systemd/launchd/schtasks service — use profile-scoped PID file
                 if stop_profile_gateway():
-                    print("✓ Stopped gateway for this profile")
+                    print('✓ Шлюз этого профиля остановлен')
                 else:
-                    print("✗ No gateway running for this profile")
+                    print('✗ Шлюз этого профиля не запущен')
             else:
-                print(f"✓ Stopped {get_service_name()} service")
+                print(f'✓ Служба {get_service_name()} остановлена')
 
     elif subcmd == "restart":
         # Defense: refuse self-targeting gateway restart from inside the gateway.
@@ -8754,9 +8723,7 @@ def _gateway_command_inner(args):
 
         if _is_supervised_gateway_process():
             print_error(
-                "Refusing to restart the gateway from inside the gateway process.\n"
-                "This command was blocked to prevent restart loops.\n"
-                "Use `hermes gateway restart` from a shell outside the running gateway."
+                'Шлюз не может перезапустить сам себя этим способом: это может вызвать цикл перезапусков.\nВыполните `korra gateway restart` в отдельном терминале вне шлюза.'
             )
             sys.exit(1)
 
@@ -8806,11 +8773,11 @@ def _gateway_command_inner(args):
             killed = kill_gateway_processes(all_profiles=True)
             total = killed + (1 if service_stopped else 0)
             if total:
-                print(f"✓ Stopped {total} gateway process(es) across all profiles")
+                print(f'✓ Остановлено процессов шлюза во всех профилях: {total}.')
             _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
 
             # Start the current profile's service fresh
-            print("Starting gateway...")
+            print('Запускаю шлюз…')
             if supports_systemd_services() and (
                 get_systemd_unit_path(system=False).exists()
                 or get_systemd_unit_path(system=True).exists()
@@ -8876,35 +8843,35 @@ def _gateway_command_inner(args):
                     _username = getpass.getuser()
                     print()
                     print(
-                        "⚠ Cannot restart gateway as a service — linger is not enabled."
+                        '⚠ Нельзя перезапустить шлюз как службу: фоновая работа после выхода не включена.'
                     )
                     print(
-                        "  The gateway user service requires linger to function on headless servers."
+                        '  На сервере без графического интерфейса пользовательской службе нужен режим linger.'
                     )
                     print()
-                    print(f"  Run:  sudo loginctl enable-linger {_username}")
+                    print(f'  Выполните: sudo loginctl enable-linger {_username}')
                     print()
-                    print("  Then restart the gateway:")
-                    print("    hermes gateway restart")
+                    print('  Затем перезапустите шлюз:')
+                    print('    korra gateway restart')
                     return
 
             if service_configured:
                 print()
-                print("✗ Gateway service restart failed.")
+                print('✗ Не удалось перезапустить службу шлюза.')
                 print(
-                    "  The service definition exists, but the service manager did not recover it."
+                    '  Описание службы существует, но диспетчер служб не смог её восстановить.'
                 )
-                print("  Fix the service, then retry: hermes gateway start")
+                print('  Исправьте службу и повторите: korra gateway start')
                 sys.exit(1)
 
             # Manual restart: stop only this profile's gateway
             if stop_profile_gateway():
-                print("✓ Stopped gateway for this profile")
+                print('✓ Шлюз этого профиля остановлен')
 
             _wait_for_gateway_exit(timeout=10.0, force_after=5.0)
 
             # Start fresh
-            print("Starting gateway...")
+            print('Запускаю шлюз…')
             run_gateway(verbose=0)
 
     elif subcmd == "status":
@@ -8937,65 +8904,65 @@ def _gateway_command_inner(args):
             # Check for manually running processes
             pids = list(snapshot.gateway_pids)
             if pids:
-                print(f"✓ Gateway is running (PID: {', '.join(map(str, pids))})")
-                print("  (Running manually, not as a system service)")
+                print(f"✓ Шлюз работает (PID: {', '.join(map(str, pids))}).")
+                print('  Запущен вручную, без системной службы.')
                 runtime_lines = _runtime_health_lines()
                 if runtime_lines:
                     print()
-                    print("Recent gateway health:")
+                    print('Последнее состояние шлюза:')
                     for line in runtime_lines:
                         print(f"  {line}")
                 print()
                 if is_termux():
-                    print("Termux note:")
-                    print("  Android may stop background jobs when Termux is suspended")
+                    print('Примечание для Termux:')
+                    print('  Android может останавливать фоновые задачи, когда Termux приостановлен.')
                 elif is_wsl():
-                    print("WSL note:")
+                    print('Примечание для WSL:')
                     print(
-                        "  The gateway is running in foreground/manual mode (recommended for WSL)."
+                        '  Шлюз запущен вручную в терминале. Этот режим рекомендуется для WSL.'
                     )
                     print(
-                        "  Use tmux or screen for persistence across terminal closes."
+                        '  Чтобы работа продолжалась после закрытия терминала, используйте tmux или screen.'
                     )
                 elif is_windows():
                     print(
-                        "To install as a Windows Scheduled Task (auto-start on login):"
+                        'Установить как задачу Windows с запуском при входе:'
                     )
-                    print("  hermes gateway install")
+                    print('  korra gateway install')
                 else:
-                    print("To install as a service:")
-                    print("  hermes gateway install")
-                    print("  sudo hermes gateway install --system")
+                    print('Установить как службу:')
+                    print('  korra gateway install')
+                    print('  sudo korra gateway install --system')
             else:
-                print("✗ Gateway is not running")
+                print('✗ Шлюз не запущен')
                 runtime_lines = _runtime_health_lines()
                 if runtime_lines:
                     print()
-                    print("Recent gateway health:")
+                    print('Последнее состояние шлюза:')
                     for line in runtime_lines:
                         print(f"  {line}")
                 print()
-                print("To start:")
-                print("  hermes gateway run      # Run in foreground")
+                print('Чтобы запустить:')
+                print('  korra gateway run      # Запустить в этом терминале')
                 if is_termux():
                     print(
-                        "  nohup hermes gateway run > ~/.hermes/logs/gateway.log 2>&1 &  # Best-effort background start"
+                        '  nohup korra gateway run > ~/.hermes/logs/gateway.log 2>&1 &  # Запустить вручную в фоне'
                     )
                 elif is_wsl():
                     print(
-                        "  tmux new -s hermes 'hermes gateway run'         # persistent via tmux"
+                        "  tmux new -s korra 'korra gateway run'           # В постоянной сессии tmux"
                     )
                     print(
-                        "  nohup hermes gateway run > ~/.hermes/logs/gateway.log 2>&1 &  # background"
+                        '  nohup korra gateway run > ~/.hermes/logs/gateway.log 2>&1 &  # В фоне'
                     )
                 elif is_windows():
                     print(
-                        "  hermes gateway install  # Install as Windows Scheduled Task (auto-start on login)"
+                        '  korra gateway install  # Установить задачу Windows с запуском при входе'
                     )
                 else:
-                    print("  hermes gateway install  # Install as user service")
+                    print('  korra gateway install  # Установить пользовательскую службу')
                     print(
-                        "  sudo hermes gateway install --system  # Install as boot-time system service"
+                        '  sudo korra gateway install --system  # Системная служба с запуском при загрузке'
                     )
 
         # Show other profiles' gateway status for multi-profile awareness
@@ -9011,6 +8978,6 @@ def _gateway_command_inner(args):
         dry_run = getattr(args, "dry_run", False)
         yes = getattr(args, "yes", False)
         if not supports_systemd_services() and not is_macos():
-            print("Legacy unit migration only applies to systemd-based Linux hosts.")
+            print('Перенос старых служб доступен только в Linux с systemd.')
             return
         remove_legacy_hermes_units(interactive=not yes, dry_run=dry_run)

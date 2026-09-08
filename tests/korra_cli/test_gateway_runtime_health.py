@@ -8,7 +8,7 @@ def _iso_age(seconds_ago: float) -> str:
     return (datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)).isoformat()
 
 
-_STALE_LINE_PREFIX = "⚠ Stale gateway_state.json:"
+_STALE_LINE_PREFIX = "⚠ Состояние gateway_state.json устарело:"
 
 
 def _stale_lines(lines):
@@ -37,10 +37,10 @@ def test_runtime_health_lines_flags_stale_running_with_dead_pid(monkeypatch):
 
     stale = _stale_lines(lines)
     assert len(stale) == 1, lines
-    assert "recorded state 'running'" in stale[0]
-    assert "recorded process is gone" in stale[0]
+    assert "записано 'running'" in stale[0]
+    assert "процесс уже не работает" in stale[0]
     # The misleading live-state summary must be suppressed.
-    assert not any("draining" in ln.lower() for ln in lines), lines
+    assert not any("завершает задачи" in ln.lower() for ln in lines), lines
 
 
 def test_runtime_health_lines_include_fatal_platform_and_startup_reason(monkeypatch):
@@ -61,7 +61,7 @@ def test_runtime_health_lines_include_fatal_platform_and_startup_reason(monkeypa
     lines = _runtime_health_lines()
 
     assert "⚠ telegram: another poller is active" in lines
-    assert "⚠ Last startup issue: telegram conflict" in lines
+    assert '⚠ Последняя ошибка запуска: telegram conflict' in lines
 
 
 def test_runtime_status_running_pid_validates_live_gateway_record(monkeypatch):

@@ -73,8 +73,8 @@ def test_dispatch_all_handles_partial_failure(
     assert ("stop", "gateway-assistant") in rec.calls
     assert ("stop", "gateway-writer") not in rec.calls
     out = capsys.readouterr().out
-    assert "Stopped 2 profile gateway(s)" in out
-    assert "Could not stop gateway-writer" in out
+    assert 'Остановлено 2 шлюзов профилей' in out
+    assert '«остановка» для gateway-writer не выполнено' in out
     assert "supervise FIFO permission denied" in out
 
 
@@ -149,7 +149,7 @@ def test_redirect_falls_back_when_sleep_missing(
     # Fell back to the in-process heartbeat instead of crashing.
     assert block_calls == [True]
     err = capsys.readouterr().err
-    assert "`sleep` is unavailable" in err
+    assert 'Команда sleep недоступна' in err
 
 
 

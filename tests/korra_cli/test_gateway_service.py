@@ -83,8 +83,8 @@ class TestSystemdServiceRefresh:
         gateway_cli.systemd_restart()
 
         output = capsys.readouterr().out
-        assert "still restarting after 90s" in output
-        assert "hermes gateway status" in output
+        assert 'перезапускается более 90 с' in output
+        assert 'korra gateway status' in output
 
 
     def test_refresh_refuses_to_bake_pytest_tmpdir_into_real_user_unit(
@@ -175,8 +175,8 @@ class TestRequireServiceInstalled:
 
         assert exc_info.value.code == 1
         out = capsys.readouterr().out
-        assert "not installed" in out
-        assert "hermes gateway install" in out
+        assert 'не установлена' in out
+        assert 'korra gateway install' in out
 
     def test_passes_when_unit_exists(self, tmp_path, monkeypatch):
         unit_path = tmp_path / "hermes-gateway.service"
@@ -698,10 +698,10 @@ class TestLaunchdServiceRecovery:
         gateway_cli.launchd_status()
 
         out = capsys.readouterr().out
-        assert "cannot manage the gateway on this macos version" in out.lower()
-        assert "Detached fallback process is running" in out
+        assert 'в этой версии macos launchd не может управлять шлюзом' in out.lower()
+        assert 'Отдельный фоновый процесс работает' in out
         assert "PID 88888" in out
-        assert "NOT available" in out
+        assert "недоступны" in out
 
 
 class TestLaunchdDomainDetection:
@@ -836,7 +836,7 @@ class TestGatewaySystemServiceRouting:
         assert ("graceful", 654, 27.0) in calls
         assert ("wait", False, 654) in calls
         out = capsys.readouterr().out.lower()
-        assert "restarting gracefully" in out
+        assert 'перезапускается' in out
         assert "21627" not in out  # must use the mocked budget, not live defaults
         assert "27" in out
 
@@ -874,7 +874,7 @@ class TestGatewaySystemServiceRouting:
         gateway_cli.systemd_restart()
 
         assert [call[0][0] for call in calls] == ["reset-failed", "start"]
-        assert "did not relaunch" in capsys.readouterr().out
+        assert 'не запустил шлюз' in capsys.readouterr().out
 
     def test_systemd_restart_does_not_force_an_unready_replacement(self, monkeypatch):
         calls = []
@@ -1064,7 +1064,7 @@ class TestGatewaySystemServiceRouting:
         # The success message must follow an observed replacement PID.
         assert ("observe", "ai.hermes.gateway", 654, "gui/501") in calls
         out = capsys.readouterr().out
-        assert "up to 27s" in out
+        assert 'до 27 с' in out
         assert "up to 0s" not in out
 
     def test_launchd_restart_forces_kickstart_when_no_replacement_appears(
@@ -1112,8 +1112,8 @@ class TestGatewaySystemServiceRouting:
         # No replacement observed → must escalate to kickstart -k.
         assert any(call[0] == "kickstart" for call in calls)
         out = capsys.readouterr().out
-        assert "did not revive" in out
-        assert "✓ Service restarted" in out
+        assert 'не восстановил шлюз' in out
+        assert '✓ Служба перезапущена' in out
 
 
 
@@ -1497,7 +1497,7 @@ class TestSystemServiceIdentityRootHandling:
         monkeypatch.setenv("USER", "root")
         monkeypatch.setenv("LOGNAME", "root")
 
-        with pytest.raises(ValueError, match="pass --run-as-user root to override"):
+        with pytest.raises(ValueError, match="укажите --run-as-user root"):
             gateway_cli._system_service_identity(run_as_user=None)
 
     def test_explicit_root_is_allowed(self, monkeypatch):
@@ -1628,7 +1628,7 @@ class TestPreflightUserSystemd:
         # Should not raise.
         gateway_cli._preflight_user_systemd()
         out = capsys.readouterr().out
-        assert "Enabled linger" in out
+        assert 'Фоновая работа после выхода включена' in out
 
 
 class TestProfileArg:
@@ -1772,7 +1772,7 @@ class TestDockerAwareGateway:
 
         monkeypatch.setattr(gateway_cli.subprocess, "run", fake_run)
 
-        with pytest.raises(RuntimeError, match="systemctl is not available"):
+        with pytest.raises(RuntimeError, match="systemctl недоступен"):
             gateway_cli._run_systemctl(["start", "hermes-gateway"])
 
     def test_run_systemctl_passes_through_on_success(self, monkeypatch):
@@ -1896,9 +1896,9 @@ class TestLegacyHermesUnitDetection:
         gateway_cli.print_legacy_unit_warning()
         out = capsys.readouterr().out
 
-        assert "Legacy" in out
+        assert 'прежней установки' in out
         assert "hermes.service" in out
-        assert "hermes gateway migrate-legacy" in out
+        assert 'korra gateway migrate-legacy' in out
 
 
 
@@ -2056,7 +2056,7 @@ class TestGatewayStatusParser:
         gateway_cli.gateway_command(args)
 
         out = capsys.readouterr().out
-        assert "only applies to systemd" in out
+        assert 'только в Linux с systemd' in out
 
 
 class TestSystemdInstallOffersLegacyRemoval:
@@ -2203,12 +2203,12 @@ class TestSystemScopeRequiresRootError:
         with pytest.raises(gateway_cli.SystemScopeRequiresRootError) as excinfo:
             gateway_cli._require_root_for_system_service("start")
 
-        assert excinfo.value.args[0] == "System gateway start requires root. Re-run with sudo."
+        assert excinfo.value.args[0] == "Для действия «запуск» системной службы нужны права администратора. Повторите с sudo."
         assert excinfo.value.args[1] == "start"
         # str(e) renders only the message, not the tuple repr, so that
         # wizard format strings like f"Failed: {e}" print cleanly.
-        assert str(excinfo.value) == "System gateway start requires root. Re-run with sudo."
-        assert f"Failed: {excinfo.value}" == "Failed: System gateway start requires root. Re-run with sudo."
+        assert str(excinfo.value) == "Для действия «запуск» системной службы нужны права администратора. Повторите с sudo."
+        assert f"Failed: {excinfo.value}" == "Failed: Для действия «запуск» системной службы нужны права администратора. Повторите с sudo."
 
 
     def test_error_is_runtime_error_subclass(self):
@@ -2270,11 +2270,11 @@ class TestSystemScopeRemediationOutput:
         gateway_cli._print_system_scope_remediation("start")
         out = capsys.readouterr().out
 
-        assert "system-wide service" in out
-        assert "start requires root" in out
+        assert 'системная служба' in out
+        assert '«запуск» нужны права администратора' in out
         assert "sudo systemctl start hermes-gateway" in out
-        assert "sudo hermes gateway uninstall --system" in out
-        assert "hermes gateway install" in out
+        assert "sudo korra gateway uninstall --system" in out
+        assert 'korra gateway install' in out
 
 
 class TestGatewayCommandCatchesSystemScopeError:
@@ -2308,7 +2308,7 @@ class TestGatewayCommandCatchesSystemScopeError:
         assert excinfo.value.code == 1
         out = capsys.readouterr().out
         # Renders the message, NOT the ``('msg', 'action')`` tuple repr
-        assert "System gateway start requires root. Re-run with sudo." in out
+        assert 'Для действия «запуск» системной службы нужны права администратора. Повторите с sudo.' in out
         assert "('" not in out  # no tuple repr leaking through
 
 

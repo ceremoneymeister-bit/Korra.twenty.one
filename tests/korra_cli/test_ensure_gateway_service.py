@@ -29,13 +29,13 @@ class TestEnsureGatewayService:
         assert gateway_mod.ensure_gateway_service() is False
         assert not called
         out = capsys.readouterr().out
-        assert "restart policy" in out
+        assert 'политику Docker' in out
 
     def test_no_service_manager_is_noop(self, monkeypatch, capsys):
         _patch_host(monkeypatch, systemd=False)
         assert gateway_mod.ensure_gateway_service() is False
         out = capsys.readouterr().out
-        assert "hermes gateway" in out
+        assert 'korra gateway' in out
 
     def test_already_running_short_circuits(self, monkeypatch):
         _patch_host(monkeypatch)
@@ -119,7 +119,7 @@ class TestEnsureGatewayService:
 
         assert gateway_mod.ensure_gateway_service() is False
         out = capsys.readouterr().out
-        assert "hermes gateway install" in out
+        assert 'korra gateway install' in out
 
     def test_never_raises_on_sys_exit(self, monkeypatch, capsys):
         """Install paths that sys.exit() must not abort setup/import."""
@@ -135,7 +135,7 @@ class TestEnsureGatewayService:
 
         assert gateway_mod.ensure_gateway_service() is False
         out = capsys.readouterr().out
-        assert "hermes gateway install" in out
+        assert 'korra gateway install' in out
 
     def test_user_systemd_unreachable_reports_remediation(self, monkeypatch, capsys):
         _patch_host(monkeypatch)

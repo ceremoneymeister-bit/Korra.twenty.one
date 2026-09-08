@@ -61,7 +61,7 @@ _FALLBACK_PATTERNS = re.compile(
 _ACCESS_DENIED_PATTERN = re.compile(r"(access is denied|acceso denegado)", re.IGNORECASE)
 
 _TASK_NAME_DEFAULT = "Hermes_Gateway"
-_TASK_DESCRIPTION = "Hermes Agent Gateway - Messaging Platform Integration"
+_TASK_DESCRIPTION = 'Шлюз Korra — мессенджеры и задачи по расписанию'
 _TASK_LOGON_DELAY = "PT30S"
 _TASK_RESTART_INTERVAL = "PT1M"
 _TASK_RESTART_COUNT = 999
@@ -239,10 +239,10 @@ def _launch_elevated_gateway_command(command: str, extra_args: list[str] | None 
             0,  # SW_HIDE: the child's console exists but is never shown.
         )
     except Exception as exc:
-        print(f"⚠ Could not launch elevated gateway {command} prompt: {exc}")
+        print(f'⚠ Не удалось открыть запрос прав администратора для действия «{command}»: {exc}')
         return False
     if result <= 32:
-        print(f"⚠ Elevated gateway {command} prompt was not started (ShellExecuteW={result})")
+        print(f'⚠ Не удалось открыть запрос прав администратора для действия «{command}» (ShellExecuteW={result}).')
         return False
     return True
 
@@ -699,7 +699,7 @@ def _install_scheduled_task(task_name: str, script_path: Path) -> tuple[bool, st
         for argv in variants:
             code, out, err = _exec_schtasks(argv)
             if code == 0:
-                return (True, f"Created Scheduled Task {task_name!r}")
+                return (True, f'Создана задача Windows: {task_name!r}')
             last_code, last_err = code, (err or out or "")
     finally:
         try:
@@ -1027,10 +1027,10 @@ def _prompt_install_choices(
     from korra_cli.setup import prompt_yes_no
 
     if start_now is None:
-        start_now = prompt_yes_no("Start the gateway now after install?", True)
+        start_now = prompt_yes_no('Запустить шлюз после установки?', True)
     if start_on_login is None:
         start_on_login = prompt_yes_no(
-            "Start the gateway automatically on Windows login with a Scheduled Task?",
+            'Запускать шлюз при входе в Windows через планировщик задач?',
             True,
         )
     return start_now, start_on_login
@@ -1038,10 +1038,10 @@ def _prompt_install_choices(
 
 def _install_startup_fallback(script_path: Path, start_now: bool, detail: str) -> None:
     """Install the Startup-folder fallback and optionally start once."""
-    print(f"↻ Scheduled Task install blocked ({detail.splitlines()[0]}) — using Startup folder fallback")
+    print(f'↻ Установка задачи Windows заблокирована ({detail.splitlines()[0]}). Использую папку автозагрузки.')
     entry = _install_startup_entry(script_path)
-    print(f"✓ Installed Windows login item: {entry}")
-    print(f"  Task script: {script_path}")
+    print(f'✓ Добавлен автозапуск Windows: {entry}')
+    print(f'  Скрипт задачи: {script_path}')
 
     # Re-running `hermes -p <profile> gateway install` must be safe.
     # Startup-folder fallback only installs login persistence. Starting is
@@ -1051,15 +1051,15 @@ def _install_startup_fallback(script_path: Path, start_now: bool, detail: str) -
 
     running_pids = list(find_gateway_pids())
     if running_pids:
-        print(f"✓ Gateway already running (PID: {', '.join(map(str, running_pids))})")
+        print(f"✓ Шлюз уже работает (PID: {', '.join(map(str, running_pids))}).")
     elif start_now:
         pid = _spawn_detached()
-        _report_gateway_start(f"direct spawn (PID {pid})")
+        _report_gateway_start(f'прямой запуск (PID {pid})')
     else:
         profile_arg = _profile_arg()
-        start_cmd = f"hermes {profile_arg} gateway start" if profile_arg else "hermes gateway start"
-        print("ℹ Startup fallback installed; gateway not started now.")
-        print(f"  Start manually with: {start_cmd}")
+        start_cmd = f'korra {profile_arg} gateway start' if profile_arg else 'korra gateway start'
+        print('ℹ Автозапуск через папку настроен. Сейчас шлюз не запущен.')
+        print(f'  Запустить вручную: {start_cmd}')
     _print_next_steps()
 
 
@@ -1080,17 +1080,17 @@ def install(
     start_now, start_on_login = _prompt_install_choices(start_now, start_on_login)
 
     if not start_on_login:
-        print("ℹ Skipped Windows login auto-start install.")
+        print('ℹ Установка автозапуска Windows пропущена.')
         if start_now:
             running_pids = _gateway_pids()
             if running_pids:
-                print(f"✓ Gateway already running (PID: {', '.join(map(str, running_pids))})")
+                print(f"✓ Шлюз уже работает (PID: {', '.join(map(str, running_pids))}).")
             else:
                 pid = _spawn_detached()
-                _report_gateway_start(f"direct spawn (PID {pid})")
+                _report_gateway_start(f'прямой запуск (PID {pid})')
         else:
-            print("ℹ Gateway not started and no auto-start service installed.")
-            print("  Run later with: hermes gateway start")
+            print('ℹ Шлюз не запущен, автозапуск не установлен.')
+            print('  Запустить позже: korra gateway start')
         return
 
     task_name = get_task_name()
@@ -1103,37 +1103,37 @@ def install(
     if not _is_running_as_admin() and not elevated_handoff:
         from korra_cli.setup import prompt_yes_no
 
-        print("↻ Scheduled Task install may need administrator approval on this Windows account.")
-        print("  UAC is Windows' admin approval prompt; it is needed to create/update the Scheduled Task.")
-        if prompt_yes_no("  Open the UAC prompt now?", False):
+        print('↻ Для создания задачи в этом аккаунте Windows может потребоваться разрешение администратора.')
+        print('  Windows покажет запрос прав UAC. Они нужны для создания или обновления задачи.')
+        if prompt_yes_no('  Открыть запрос прав UAC сейчас?', False):
             if _launch_elevated_install(force=force, start_now=start_now, start_on_login=start_on_login):
-                print("✓ Launched elevated Korra gateway install prompt.")
+                print('✓ Открыт запрос прав администратора для установки шлюза Korra.')
                 if start_now:
-                    print("  Approve the Windows UAC prompt; the elevated install will start the gateway afterwards.")
+                    print('  Подтвердите права Windows. После установки шлюз запустится автоматически.')
                 else:
-                    print("  Approve the Windows UAC prompt, then run: hermes gateway status")
+                    print('  Подтвердите права Windows, затем выполните: korra gateway status')
                 return
-            print("⚠ Falling back to Startup folder because elevation was unavailable or cancelled.")
+            print('⚠ Повышение прав недоступно или отменено. Использую папку автозагрузки.')
         else:
-            print("  Skipped elevation. Falling back to Startup folder.")
-        _install_startup_fallback(script_path, start_now, "administrator approval was not used")
+            print('  Повышение прав пропущено. Использую папку автозагрузки.')
+        _install_startup_fallback(script_path, start_now, 'разрешение администратора не получено')
         return
 
     ok, detail = _install_scheduled_task(task_name, script_path)
     if ok:
         print(f"✓ {detail}")
-        print(f"  Task script: {script_path}")
-        print("ℹ Gateway auto-start installed for Windows login.")
+        print(f'  Скрипт задачи: {script_path}')
+        print('ℹ Автозапуск шлюза при входе в Windows настроен.')
         if start_now:
             running_pids = _gateway_pids()
             if running_pids:
-                print(f"✓ Gateway already running (PID: {', '.join(map(str, running_pids))})")
+                print(f"✓ Шлюз уже работает (PID: {', '.join(map(str, running_pids))}).")
             else:
                 pid = _spawn_detached()
-                _report_gateway_start(f"direct spawn (PID {pid})")
+                _report_gateway_start(f'прямой запуск (PID {pid})')
         else:
-            print("ℹ Gateway not started now.")
-            print("  Start manually with: hermes gateway start")
+            print('ℹ Сейчас шлюз не запущен.')
+            print('  Запустить вручную: korra gateway start')
         _print_next_steps()
         return
 
@@ -1144,26 +1144,26 @@ def install(
     if _is_access_denied(detail) and not _is_running_as_admin():
         from korra_cli.setup import prompt_yes_no
 
-        print(f"↻ Scheduled Task install needs administrator approval ({detail.splitlines()[0]})")
-        print("  UAC is Windows' admin approval prompt; it is needed to create/update the Scheduled Task.")
-        if prompt_yes_no("  Open the UAC prompt now?", False):
+        print(f'↻ Для установки задачи нужны права администратора ({detail.splitlines()[0]}).')
+        print('  Windows покажет запрос прав UAC. Они нужны для создания или обновления задачи.')
+        if prompt_yes_no('  Открыть запрос прав UAC сейчас?', False):
             if _launch_elevated_install(force=force, start_now=start_now, start_on_login=start_on_login):
-                print("✓ Launched elevated Korra gateway install prompt.")
+                print('✓ Открыт запрос прав администратора для установки шлюза Korra.')
                 if start_now:
-                    print("  Approve the Windows UAC prompt; the elevated install will start the gateway afterwards.")
+                    print('  Подтвердите права Windows. После установки шлюз запустится автоматически.')
                 else:
-                    print("  Approve the Windows UAC prompt, then run: hermes gateway status")
+                    print('  Подтвердите права Windows, затем выполните: korra gateway status')
                 return
-            print("⚠ Falling back to Startup folder because elevation was unavailable or cancelled.")
+            print('⚠ Повышение прав недоступно или отменено. Использую папку автозагрузки.')
         else:
-            print("  Skipped elevation. Falling back to Startup folder.")
+            print('  Повышение прав пропущено. Использую папку автозагрузки.')
 
     # schtasks create didn't work. See if it's a "fall back to startup" case.
     if _should_fall_back(1, detail):
-        print(f"↻ Scheduled Task install blocked ({detail.splitlines()[0]}) — using Startup folder fallback")
+        print(f'↻ Установка задачи Windows заблокирована ({detail.splitlines()[0]}). Использую папку автозагрузки.')
         entry = _install_startup_entry(script_path)
-        print(f"✓ Installed Windows login item: {entry}")
-        print(f"  Task script: {script_path}")
+        print(f'✓ Добавлен автозапуск Windows: {entry}')
+        print(f'  Скрипт задачи: {script_path}')
 
         # Re-running `hermes -p <profile> gateway install` must be safe.
         # Startup-folder fallback only installs login persistence. Starting is
@@ -1173,20 +1173,20 @@ def install(
 
         running_pids = list(find_gateway_pids())
         if running_pids:
-            print(f"✓ Gateway already running (PID: {', '.join(map(str, running_pids))})")
+            print(f"✓ Шлюз уже работает (PID: {', '.join(map(str, running_pids))}).")
         elif start_now:
             pid = _spawn_detached()
-            _report_gateway_start(f"direct spawn (PID {pid})")
+            _report_gateway_start(f'прямой запуск (PID {pid})')
         else:
             profile_arg = _profile_arg()
-            start_cmd = f"hermes {profile_arg} gateway start" if profile_arg else "hermes gateway start"
-            print("ℹ Startup fallback installed; gateway not started now.")
-            print(f"  Start manually with: {start_cmd}")
+            start_cmd = f'korra {profile_arg} gateway start' if profile_arg else 'korra gateway start'
+            print('ℹ Автозапуск через папку настроен. Сейчас шлюз не запущен.')
+            print(f'  Запустить вручную: {start_cmd}')
         _print_next_steps()
         return
 
     # Unknown schtasks error — surface it and bail.
-    raise RuntimeError(f"Windows gateway install failed: {detail}")
+    raise RuntimeError(f'Не удалось установить шлюз Windows: {detail}')
 
 
 def _wait_for_gateway_ready(timeout_s: float = 6.0, interval_s: float = 0.4) -> list[int]:
@@ -1209,10 +1209,10 @@ def _wait_for_gateway_ready(timeout_s: float = 6.0, interval_s: float = 0.4) -> 
 def _report_gateway_start(via: str) -> None:
     pids = _wait_for_gateway_ready()
     if pids:
-        print(f"✓ Gateway started via {via} (PID: {', '.join(map(str, pids))})")
+        print(f"✓ Шлюз запущен через {via} (PID: {', '.join(map(str, pids))}).")
     else:
-        print(f"⚠ Launched gateway via {via}, but no process detected after 6s.")
-        print("  Check the log for startup errors:")
+        print(f'⚠ Шлюз запущен через {via}, но процесс не обнаружен за 6 с.')
+        print('  Проверьте ошибки запуска в журналах:')
         from korra_cli.config import get_hermes_home
         print(f"    type {Path(get_hermes_home())}\\logs\\gateway.log")
         print(f"    type {Path(get_hermes_home())}\\logs\\gateway-stdio.log")
@@ -1223,9 +1223,9 @@ def _print_next_steps() -> None:
 
     hermes_home = Path(get_hermes_home())
     print()
-    print("Next steps:")
-    print("  hermes gateway status                      # Check status")
-    print(f"  type {hermes_home}\\logs\\gateway.log       # View logs")
+    print('Следующие шаги:')
+    print('  korra gateway status                      # Проверить состояние')
+    print(f'  type {hermes_home}\\logs\\gateway.log       # Посмотреть журнал')
 
 
 def uninstall() -> None:
@@ -1243,37 +1243,37 @@ def uninstall() -> None:
         detail = err.strip()
         if code == 0:
             scheduled_task_removed = True
-            print(f"✓ Removed Scheduled Task {task_name!r}")
+            print(f'✓ Задача Windows удалена: {task_name!r}')
         elif _is_access_denied(detail) and not _is_running_as_admin():
             from korra_cli.setup import prompt_yes_no
 
-            print(f"↻ Scheduled Task uninstall needs administrator approval ({detail or 'access denied'})")
-            print("  UAC is Windows' admin approval prompt; it is needed to remove the Scheduled Task.")
-            if prompt_yes_no("  Open the UAC prompt now?", False):
+            print(f"↻ Для удаления задачи нужны права администратора ({detail or 'нет доступа'}).")
+            print('  Windows покажет запрос прав UAC. Они нужны для удаления задачи.')
+            if prompt_yes_no('  Открыть запрос прав UAC сейчас?', False):
                 if _launch_elevated_uninstall():
-                    print("✓ Launched elevated Korra gateway uninstall prompt.")
-                    print("  Approve the Windows UAC prompt, then run: hermes gateway status")
+                    print('✓ Открыт запрос прав администратора для удаления шлюза Korra.')
+                    print('  Подтвердите права Windows, затем выполните: korra gateway status')
                     return
-                print("⚠ Elevated uninstall prompt was unavailable or cancelled.")
+                print('⚠ Запрос прав для удаления недоступен или отменён.')
             else:
-                print("  Skipped elevation. Scheduled Task was not removed.")
+                print('  Повышение прав пропущено. Задача не удалена.')
         else:
-            print(f"⚠ schtasks /Delete returned code {code}: {detail}")
+            print(f'⚠ Команда schtasks /Delete вернула код {code}: {detail}')
 
     for path, label in [
-        (startup_entry, "Windows login item"),
-        (legacy_startup_entry, "legacy Windows login item"),
-        (script_path, "Task script"),
-        (vbs_script_path, "Task launcher"),
+        (startup_entry, 'запись автозапуска Windows'),
+        (legacy_startup_entry, 'устаревшая запись автозапуска Windows'),
+        (script_path, 'скрипт задачи'),
+        (vbs_script_path, 'средство запуска задачи'),
     ]:
         try:
             path.unlink()
-            print(f"✓ Removed {label}: {path}")
+            print(f'✓ Удалено {label}: {path}')
         except FileNotFoundError:
             pass
 
     if is_task_registered() and not scheduled_task_removed:
-        print(f"⚠ Scheduled Task still registered: {task_name}")
+        print(f'⚠ Задача Windows всё ещё зарегистрирована: {task_name}')
 
 
 # ---------------------------------------------------------------------------
@@ -1351,7 +1351,7 @@ def _print_deep_probes() -> None:
     diag_path = home / "logs" / "gateway-exit-diag.log"
 
     print()
-    print("Deep probes:")
+    print('Подробная диагностика:')
 
     def _mark(ok: bool) -> str:
         return "PASS" if ok else "FAIL"
@@ -1363,11 +1363,11 @@ def _print_deep_probes() -> None:
         try:
             data = json.loads(pid_path.read_text(encoding="utf-8"))
             pid_value = int(data.get("pid")) if data.get("pid") is not None else None
-            print(f"  [1] {_mark(True):4s}  PID file present: {pid_path} (pid={pid_value})")
+            print(f'  [1] {_mark(True):4s}  Файл PID найден: {pid_path} (PID={pid_value})')
         except Exception as exc:
-            print(f"  [1] {_mark(False):4s}  PID file present but unreadable: {exc}")
+            print(f'  [1] {_mark(False):4s}  Файл PID есть, но не читается: {exc}')
     else:
-        print(f"  [1] {_mark(False):4s}  PID file missing: {pid_path}")
+        print(f'  [1] {_mark(False):4s}  Файл PID отсутствует: {pid_path}')
 
     # [2] Lock file present + held
     lock_held = False
@@ -1377,11 +1377,11 @@ def _print_deep_probes() -> None:
             from gateway.status import is_gateway_runtime_lock_active
 
             lock_held = is_gateway_runtime_lock_active(lock_path)
-            print(f"  [2] {_mark(lock_held):4s}  Lock file held by a live process: {lock_path}")
+            print(f'  [2] {_mark(lock_held):4s}  Блокировку удерживает работающий процесс: {lock_path}')
         except Exception as exc:
-            print(f"  [2] {_mark(False):4s}  Could not probe lock: {exc}")
+            print(f'  [2] {_mark(False):4s}  Не удалось проверить блокировку: {exc}')
     else:
-        print(f"  [2] {_mark(False):4s}  Lock file missing: {lock_path}")
+        print(f'  [2] {_mark(False):4s}  Файл блокировки отсутствует: {lock_path}')
 
     # [3] get_running_pid()
     running_pid: int | None = None
@@ -1389,9 +1389,9 @@ def _print_deep_probes() -> None:
         from gateway.status import get_running_pid
 
         running_pid = get_running_pid(cleanup_stale=False)
-        print(f"  [3] {_mark(running_pid is not None):4s}  get_running_pid() => {running_pid}")
+        print(f'  [3] {_mark(running_pid is not None):4s}  get_running_pid() → {running_pid}')
     except Exception as exc:
-        print(f"  [3] {_mark(False):4s}  get_running_pid() raised: {exc!r}")
+        print(f'  [3] {_mark(False):4s}  Ошибка get_running_pid(): {exc!r}')
 
     # [4] _pid_exists() on the probed PID
     candidate_pid = running_pid if running_pid is not None else pid_value
@@ -1400,11 +1400,11 @@ def _print_deep_probes() -> None:
             from gateway.status import _pid_exists
 
             alive = bool(_pid_exists(candidate_pid))
-            print(f"  [4] {_mark(alive):4s}  _pid_exists({candidate_pid}) => {alive}")
+            print(f'  [4] {_mark(alive):4s}  _pid_exists({candidate_pid}) → {alive}')
         except Exception as exc:
-            print(f"  [4] {_mark(False):4s}  _pid_exists raised: {exc!r}")
+            print(f'  [4] {_mark(False):4s}  Ошибка _pid_exists: {exc!r}')
     else:
-        print(f"  [4] {_mark(False):4s}  No candidate PID to verify")
+        print(f'  [4] {_mark(False):4s}  Нет PID для проверки')
 
     # [5] runtime status file
     if state_path.exists():
@@ -1422,11 +1422,11 @@ def _print_deep_probes() -> None:
                 except Exception:
                     pass
             ok = gateway_state == "running"
-            print(f"  [5] {_mark(ok):4s}  gateway_state.json state={gateway_state!r}{age_str}")
+            print(f'  [5] {_mark(ok):4s}  gateway_state.json: состояние={gateway_state!r}{age_str}')
         except Exception as exc:
-            print(f"  [5] {_mark(False):4s}  gateway_state.json present but unreadable: {exc}")
+            print(f'  [5] {_mark(False):4s}  gateway_state.json есть, но не читается: {exc}')
     else:
-        print(f"  [5] {_mark(False):4s}  gateway_state.json missing: {state_path}")
+        print(f'  [5] {_mark(False):4s}  Файл gateway_state.json отсутствует: {state_path}')
 
     # [6] Last lifecycle event from the exit-diag log
     if diag_path.exists():
@@ -1445,15 +1445,15 @@ def _print_deep_probes() -> None:
                     pid = event.get("pid", "?")
                     ts = event.get("ts", "?")
                     healthy = tag in ("gateway.start",)
-                    print(f"  [6] {_mark(healthy):4s}  Last lifecycle event: tag={tag} pid={pid} ts={ts}")
+                    print(f'  [6] {_mark(healthy):4s}  Последнее событие: тип={tag}, PID={pid}, время={ts}')
                 except Exception:
-                    print(f"  [6] {_mark(False):4s}  Last lifecycle line not JSON: {last_event[:120]}")
+                    print(f'  [6] {_mark(False):4s}  Последняя строка журнала не в формате JSON: {last_event[:120]}')
             else:
-                print(f"  [6] {_mark(False):4s}  exit-diag log empty: {diag_path}")
+                print(f'  [6] {_mark(False):4s}  Журнал завершения пуст: {diag_path}')
         except Exception as exc:
-            print(f"  [6] {_mark(False):4s}  exit-diag log unreadable: {exc}")
+            print(f'  [6] {_mark(False):4s}  Журнал завершения не читается: {exc}')
     else:
-        print(f"  [6] {_mark(False):4s}  exit-diag log missing: {diag_path}")
+        print(f'  [6] {_mark(False):4s}  Журнал завершения отсутствует: {diag_path}')
 
 
 def status(deep: bool = False) -> None:
@@ -1465,38 +1465,45 @@ def status(deep: bool = False) -> None:
     pids = _gateway_pids()
 
     if task_installed:
-        print(f"✓ Scheduled Task registered: {task_name}")
+        print(f'✓ Задача Windows зарегистрирована: {task_name}')
         info = query_task_status()
         if info:
             for key in ("status", "last run time", "last run result"):
                 if key in info:
-                    print(f"  {key.title()}: {info[key]}")
+                    label = {
+                        "status": "Состояние", "last run time": "Последний запуск",
+                        "last run result": "Результат последнего запуска",
+                    }[key]
+                    value = info[key]
+                    if key == "status":
+                        value = {"Ready": "готова", "Running": "работает", "Disabled": "отключена", "Unknown": "неизвестно"}.get(value, value)
+                    print(f"  {label}: {value}")
     elif startup_installed:
         entry = get_startup_entry_path()
         if not entry.exists():
             entry = _legacy_startup_entry_path()
-        print(f"✓ Windows login item installed: {entry}")
+        print(f'✓ Автозапуск Windows установлен: {entry}')
     else:
-        print("✗ Gateway service not installed")
+        print('✗ Служба шлюза не установлена')
 
     if pids:
-        print(f"✓ Gateway process running (PID: {', '.join(map(str, pids))})")
+        print(f"✓ Процесс шлюза работает (PID: {', '.join(map(str, pids))}).")
     else:
-        print("✗ No gateway process detected")
+        print('✗ Процесс шлюза не найден')
 
     if deep:
         print()
-        print(f"  Task name:        {task_name}")
-        print(f"  Task script:      {get_task_script_path()}")
-        print(f"  Startup entry:    {get_startup_entry_path()}")
+        print(f'  Имя задачи:       {task_name}')
+        print(f'  Скрипт задачи:    {get_task_script_path()}')
+        print(f'  Запись автозапуска: {get_startup_entry_path()}')
         # Surface the per-probe truth so the user can see *which* signal
         # is lying when the high-level summary disagrees with reality.
         _print_deep_probes()
 
     if not task_installed and not startup_installed and not pids:
         print()
-        print("To install:")
-        print("  hermes gateway install")
+        print('Чтобы установить:')
+        print('  korra gateway install')
 
 
 def start() -> None:
@@ -1504,7 +1511,7 @@ def start() -> None:
     _assert_windows()
     running_pids = _gateway_pids()
     if running_pids:
-        print(f"✓ Gateway already running (PID: {', '.join(map(str, running_pids))})")
+        print(f"✓ Шлюз уже работает (PID: {', '.join(map(str, running_pids))}).")
         return
 
     task_installed = is_task_registered()
@@ -1513,23 +1520,23 @@ def start() -> None:
     if not task_installed and not startup_installed:
         from korra_cli.setup import prompt_yes_no
 
-        print("✗ Gateway service is not installed")
-        if not prompt_yes_no("  Install it now so the gateway starts on login?", True):
-            print("  Run: hermes gateway install")
+        print('✗ Служба шлюза не установлена')
+        if not prompt_yes_no('  Установить сейчас, чтобы шлюз запускался при входе?', True):
+            print('  Выполните: korra gateway install')
             return
         install(force=False)
         task_installed = is_task_registered()
         startup_installed = is_startup_entry_installed()
         if not task_installed and not startup_installed:
-            print("⚠ Gateway install did not complete in this process.")
-            print("  If a UAC prompt opened, approve it, then run: hermes gateway start")
+            print('⚠ Установка шлюза в этом процессе не завершена.')
+            print('  Если открыт запрос прав Windows, подтвердите его и выполните: korra gateway start')
             return
 
     # Manual starts use the same console-less direct spawn path as restart()
     # and install --start-now. Scheduled Task / Startup entries are only login
     # persistence mechanisms.
     pid = _spawn_detached()
-    _report_gateway_start(f"direct spawn (PID {pid})")
+    _report_gateway_start(f'прямой запуск (PID {pid})')
 
 
 def _drain_gateway_pid(pid: int, drain_timeout: float) -> bool:
@@ -1607,9 +1614,9 @@ def _force_terminate_known_gateway_pids(pids: list[int]) -> int:
         except ProcessLookupError:
             continue
         except PermissionError:
-            print(f"⚠ Permission denied to kill PID {pid}")
+            print(f'⚠ Нет прав завершить процесс с PID {pid}.')
         except OSError as exc:
-            print(f"Failed to kill PID {pid}: {exc}")
+            print(f'Не удалось завершить процесс с PID {pid}: {exc}')
     return killed
 
 
@@ -1657,7 +1664,7 @@ def stop() -> None:
         if code == 0:
             stopped_any = True
         elif "not running" not in (err or "").lower():
-            print(f"⚠ schtasks /End returned code {code}: {err.strip()}")
+            print(f'⚠ Команда schtasks /End вернула код {code}: {err.strip()}')
 
     # Phase 3: hard-kill any still-known gateway processes. Avoid the generic
     # process sweep here: Windows direct-spawn starts are profile-scoped, and a
@@ -1666,14 +1673,14 @@ def stop() -> None:
     killed = _force_terminate_known_gateway_pids(stop_pids)
     if killed:
         stopped_any = True
-        print(f"✓ Killed {killed} gateway process(es)")
+        print(f'✓ Завершено процессов шлюза: {killed}')
     if stopped_any:
         if drained:
-            print("✓ Gateway stopped (drained cleanly)")
+            print('✓ Шлюз остановлен после завершения задач')
         else:
-            print("✓ Gateway stopped")
+            print('✓ Шлюз остановлен')
     else:
-        print("✗ No gateway was running")
+        print('✗ Шлюз не был запущен')
 
 
 def _wait_for_gateway_absent(timeout_s: float = 30.0, interval_s: float = 0.5) -> bool:
@@ -1709,12 +1716,11 @@ def restart() -> None:
     stop()
 
     if not _wait_for_gateway_absent(timeout_s=30.0):
-        print("⚠ Gateway still present after stop; forcing termination before restart...")
+        print('⚠ После остановки шлюз всё ещё работает. Завершаю принудительно перед перезапуском…')
         _force_terminate_known_gateway_pids(_collect_gateway_stop_pids())
         if not _wait_for_gateway_absent(timeout_s=10.0):
             raise RuntimeError(
-                "Gateway process still detected after force kill; refusing to "
-                "start a duplicate. Investigate stray PIDs before retrying."
+                'После принудительной остановки процесс шлюза всё ещё обнаружен. Второй экземпляр не запущен. Проверьте оставшиеся процессы перед повторной попыткой.'
             )
 
     # Give Windows a moment to release the listening port.
@@ -1723,6 +1729,5 @@ def restart() -> None:
 
     if not _wait_for_gateway_ready(timeout_s=15.0):
         raise RuntimeError(
-            "Gateway restart did not produce a running gateway process. "
-            "Check logs/gateway.log and run `hermes gateway status`."
+            'После перезапуска процесс шлюза не появился. Проверьте logs/gateway.log и выполните `korra gateway status`.'
         )
