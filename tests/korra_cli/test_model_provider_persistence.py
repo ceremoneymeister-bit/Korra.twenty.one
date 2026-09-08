@@ -175,7 +175,7 @@ class TestZaiEndpointPicker:
         model = load_config()["model"]
         assert model["base_url"] != "not-a-url"
         captured = capsys.readouterr()
-        assert "Invalid URL" in captured.out
+        assert "Неверный адрес" in captured.out
 
 
     def test_current_endpoint_is_default_choice(self, config_home, monkeypatch):

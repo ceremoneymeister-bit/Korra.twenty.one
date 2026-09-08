@@ -945,7 +945,7 @@ class TestLocalOllamaModelDiscovery:
         finally:
             server.shutdown()
 
-        assert menu_items == ["qwen3:1.7b", "llama3.2:1b", "Cancel"]
+        assert menu_items == ["qwen3:1.7b", "llama3.2:1b", "Отмена"]
         assert "/api/tags" in _FakeOllamaTagsHandler.paths_seen
         assert "/v1/models" not in _FakeOllamaTagsHandler.paths_seen
 
@@ -978,7 +978,7 @@ class TestLocalOllamaModelDiscovery:
         finally:
             server.shutdown()
 
-        assert menu_items == ["curated-only", "Cancel"]
+        assert menu_items == ["curated-only", "Отмена"]
         assert "/api/tags" not in _FakeOllamaTagsHandler.paths_seen
         assert "/v1/models" not in _FakeOllamaTagsHandler.paths_seen
 

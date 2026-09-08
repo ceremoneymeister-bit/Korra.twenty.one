@@ -145,9 +145,9 @@ def _prompt_auth_credentials_choice(title: str) -> str:
     numbered prompt when curses is unavailable (piped stdin, non-TTY).
     """
     choices = [
-        "Use existing credentials",
-        "Reauthenticate (new OAuth login)",
-        "Cancel",
+        'Использовать сохранённый вход',
+        'Войти заново через OAuth',
+        'Отмена',
     ]
     try:
         from korra_cli.setup import _curses_prompt_choice
@@ -165,7 +165,7 @@ def _prompt_auth_credentials_choice(title: str) -> str:
         print(f"  {marker} {i}. {label}")
     print()
     try:
-        choice = input("  Choice [1/2/3]: ").strip()
+        choice = input('  Выберите [1/2/3]: ').strip()
     except (KeyboardInterrupt, EOFError):
         choice = "1"
 
@@ -199,7 +199,7 @@ def _model_flow_openrouter(config, current_model=""):
     )
     existing_key, existing_source = _existing_api_key_for_model_flow("openrouter", pconfig)
     if not existing_key:
-        print("Get one at: https://openrouter.ai/keys")
+        print('Получить ключ: https://openrouter.ai/keys')
         print()
     _resolved, abort = _prompt_api_key(
         pconfig,
@@ -242,19 +242,19 @@ def _model_flow_openrouter(config, current_model=""):
         clear_model_endpoint_credentials(model, clear_api_mode=False)
         save_config(cfg)
         deactivate_provider()
-        print(f"Default model set to: {selected} (via OpenRouter)")
+        print(f'Основная модель: {selected}; через OpenRouter')
     else:
-        print("No change.")
+        print('Без изменений.')
 
 
 def _print_moa_preset(name: str, preset: dict) -> None:
     """Print the full reference-models + aggregator breakdown for a preset."""
-    print(f"  Preset: {name}")
-    print("  Reference models:")
+    print(f'  Набор: {name}')
+    print('  Модели-участники:')
     for idx, slot in enumerate(preset.get("reference_models") or [], start=1):
         print(f"    {idx}. {slot.get('provider')}:{slot.get('model')}")
     agg = preset.get("aggregator") or {}
-    print(f"  Aggregator:  {agg.get('provider')}:{agg.get('model')}")
+    print(f"  Итоговая модель: {agg.get('provider')}:{agg.get('model')}")
 
 
 def _model_flow_ai_gateway(config, current_model=""):
@@ -275,9 +275,9 @@ def _model_flow_ai_gateway(config, current_model=""):
     existing_key = get_env_value("AI_GATEWAY_API_KEY") or ""
     if not existing_key:
         print(
-            "Create API key here: https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway&title=AI+Gateway"
+            'Создать ключ API: https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway&title=AI+Gateway'
         )
-        print("Add a payment method to get $5 in free credits.")
+        print('Добавьте способ оплаты, чтобы получить 5 долларов пробного баланса.')
         print()
     _resolved, abort = _prompt_api_key(pconfig, existing_key, provider_id="ai-gateway")
     if abort:
@@ -306,9 +306,9 @@ def _model_flow_ai_gateway(config, current_model=""):
         model["api_mode"] = "chat_completions"
         save_config(cfg)
         deactivate_provider()
-        print(f"Default model set to: {selected} (via Vercel AI Gateway)")
+        print(f'Основная модель: {selected}; через Vercel AI Gateway')
     else:
-        print("No change.")
+        print('Без изменений.')
 
 
 def _model_flow_moa(config, current_model=""):
@@ -326,7 +326,7 @@ def _model_flow_moa(config, current_model=""):
     moa = normalize_moa_config(config.get("moa") if isinstance(config, dict) else {})
     presets = moa.get("presets") or {}
     if not presets:
-        print("No MoA presets configured. Run `hermes moa configure <name>` first.")
+        print('Наборы MoA не настроены. Сначала выполните korra moa configure <name>.')
         return
 
     names = list(presets.keys())
@@ -340,23 +340,23 @@ def _model_flow_moa(config, current_model=""):
         agg_label = f"{agg.get('provider')}:{agg.get('model')}" if agg else ""
         ref_count = len(presets[n].get("reference_models") or [])
         suffix = "  ← default" if n == default_name else ""
-        rows.append(f"{n}  (agg {agg_label}, {ref_count} refs){suffix}")
+        rows.append(f'{n} (итоговая модель {agg_label}, участников {ref_count}){suffix}')
 
     default_idx = names.index(default_name) if default_name in names else 0
 
     try:
         from korra_cli.setup import _curses_prompt_choice
 
-        idx = _curses_prompt_choice("Select a Mixture of Agents preset:", rows, default_idx)
+        idx = _curses_prompt_choice('Выберите набор моделей MoA:', rows, default_idx)
     except Exception:
-        print("Select a Mixture of Agents preset:")
+        print('Выберите набор моделей MoA:')
         for i, row in enumerate(rows, 1):
             marker = "→" if (i - 1) == default_idx else " "
             print(f"  {marker} {i}. {row}")
         try:
-            raw = input(f"  Choice [1-{len(rows)}]: ").strip()
+            raw = input(f'  Выберите [1–{len(rows)}]: ').strip()
         except (KeyboardInterrupt, EOFError):
-            print("No change.")
+            print('Без изменений.')
             return
         if not raw:
             idx = default_idx
@@ -364,11 +364,11 @@ def _model_flow_moa(config, current_model=""):
             try:
                 idx = max(0, min(len(rows) - 1, int(raw) - 1))
             except ValueError:
-                print("No change.")
+                print('Без изменений.')
                 return
 
     if idx is None or idx < 0:
-        print("No change.")
+        print('Без изменений.')
         return
 
     selected_name = names[idx]
@@ -392,7 +392,7 @@ def _model_flow_moa(config, current_model=""):
     deactivate_provider()
 
     print()
-    print(f"Default model set to: {selected_name} (via Mixture of Agents)")
+    print(f'Основная модель: {selected_name}; через несколько агентов MoA')
     _print_moa_preset(selected_name, preset)
 
 
@@ -419,7 +419,7 @@ def _model_flow_nous(config, current_model="", args=None):
 
     state = get_provider_auth_state("nous")
     if not state or not state.get("access_token"):
-        print("Not logged into Nous Portal. Starting login...")
+        print('Вход Nous не выполнен. Открываем вход…')
         print()
         try:
             mock_args = argparse.Namespace(
@@ -440,10 +440,10 @@ def _model_flow_nous(config, current_model="", args=None):
             except Exception:
                 pass
         except SystemExit:
-            print("Login cancelled or failed.")
+            print('Вход отменён или не удался.')
             return
         except Exception as exc:
-            print(f"Login failed: {exc}")
+            print(f'Не удалось войти: {exc}')
             return
         # login_nous already handles model selection + config update
         return
@@ -462,7 +462,7 @@ def _model_flow_nous(config, current_model="", args=None):
 
     model_ids = get_curated_nous_model_ids()
     if not model_ids:
-        print("No curated models available for Nous Portal.")
+        print('Рекомендованные модели Nous недоступны.')
         return
 
     # Verify credentials are still valid (catches expired sessions early)
@@ -472,8 +472,8 @@ def _model_flow_nous(config, current_model="", args=None):
         relogin = isinstance(exc, AuthError) and exc.relogin_required
         msg = format_auth_error(exc) if isinstance(exc, AuthError) else str(exc)
         if relogin:
-            print(f"Session expired: {msg}")
-            print("Re-authenticating with Nous Portal...\n")
+            print(f'Срок входа истёк: {msg}')
+            print('Повторяем вход Nous…')
             try:
                 mock_args = argparse.Namespace(
                     portal_url=None,
@@ -487,9 +487,9 @@ def _model_flow_nous(config, current_model="", args=None):
                 )
                 _login_nous(mock_args, PROVIDER_REGISTRY["nous"])
             except Exception as login_exc:
-                print(f"Re-login failed: {login_exc}")
+                print(f'Повторный вход не удался: {login_exc}')
             return
-        print(f"Could not verify credentials: {msg}")
+        print(f'Не удалось проверить данные входа: {msg}')
         return
 
     # Fetch live pricing (non-blocking — returns empty dict on failure)
@@ -542,7 +542,7 @@ def _model_flow_nous(config, current_model="", args=None):
             unavailable_message = (
                 format_nous_portal_entitlement_message(
                     _account_info,
-                    capability="paid Nous models",
+                    capability='платные модели Nous',
                 )
                 or ""
             )
@@ -560,20 +560,20 @@ def _model_flow_nous(config, current_model="", args=None):
         )
 
     if not model_ids and not unavailable_models:
-        print("No models available for Nous Portal after filtering.")
+        print('После фильтрации доступных моделей Nous не осталось.')
         return
 
     if free_tier and not model_ids:
-        print("No free models currently available.")
+        print('Бесплатные модели сейчас недоступны.')
         if unavailable_models:
             from korra_cli.auth import DEFAULT_NOUS_PORTAL_URL
 
             _url = (_nous_portal_url or DEFAULT_NOUS_PORTAL_URL).rstrip("/")
-            print(unavailable_message or f"Upgrade at {_url} to access paid models.")
+            print(unavailable_message or f'Для доступа к платным моделям смените тариф: {_url}')
         return
 
     print(
-        f'Showing {len(model_ids)} curated models — use "Enter custom model name" for others.'
+        f'Показано рекомендованных моделей: {len(model_ids)}. Для остальных выберите «Ввести имя модели».'
     )
 
     selected = _prompt_model_selection(
@@ -615,11 +615,11 @@ def _model_flow_nous(config, current_model="", args=None):
             save_env_value("OPENAI_BASE_URL", "")
             save_env_value("OPENAI_API_KEY", "")
         save_config(config)
-        print(f"Default model set to: {selected} (via Nous Portal)")
+        print(f'Основная модель: {selected}; через Nous Portal')
         # Offer Tool Gateway enablement for paid subscribers
         prompt_enable_tool_gateway(config)
     else:
-        print("No change.")
+        print('Без изменений.')
 
 def _model_flow_openai_codex(config, current_model=""):
     """OpenAI Codex provider: ensure logged in, then pick model."""
@@ -636,12 +636,12 @@ def _model_flow_openai_codex(config, current_model=""):
 
     status = get_codex_auth_status()
     if status.get("logged_in"):
-        print("  OpenAI Codex credentials: ✓")
+        print('  Вход OpenAI Codex: ✓')
         print()
-        choice = _prompt_auth_credentials_choice("OpenAI Codex credentials:")
+        choice = _prompt_auth_credentials_choice('Вход OpenAI Codex:')
 
         if choice == "reauth":
-            print("Starting a fresh OpenAI Codex login...")
+            print('Открываем повторный вход OpenAI Codex…')
             print()
             try:
                 mock_args = argparse.Namespace()
@@ -651,28 +651,28 @@ def _model_flow_openai_codex(config, current_model=""):
                     force_new_login=True,
                 )
             except SystemExit:
-                print("Login cancelled or failed.")
+                print('Вход отменён или не удался.')
                 return
             except Exception as exc:
-                print(f"Login failed: {exc}")
+                print(f'Не удалось войти: {exc}')
                 return
             status = get_codex_auth_status()
             if not status.get("logged_in"):
-                print("Login failed.")
+                print('Не удалось войти.')
                 return
         elif choice == "cancel":
             return
     else:
-        print("Not logged into OpenAI Codex. Starting login...")
+        print('Вход OpenAI Codex не выполнен. Открываем вход…')
         print()
         try:
             mock_args = argparse.Namespace()
             _login_openai_codex(mock_args, PROVIDER_REGISTRY["openai-codex"])
         except SystemExit:
-            print("Login cancelled or failed.")
+            print('Вход отменён или не удался.')
             return
         except Exception as exc:
-            print(f"Login failed: {exc}")
+            print(f'Не удалось войти: {exc}')
             return
 
     _codex_token = None
@@ -705,9 +705,9 @@ def _model_flow_openai_codex(config, current_model=""):
     if selected:
         _save_model_choice(selected)
         _update_config_for_provider("openai-codex", DEFAULT_CODEX_BASE_URL)
-        print(f"Default model set to: {selected} (via OpenAI Codex)")
+        print(f'Основная модель: {selected}; через OpenAI Codex')
     else:
-        print("No change.")
+        print('Без изменений.')
 
 def _model_flow_xai_oauth(_config, current_model="", *, args=None):
     """xAI Grok OAuth (SuperGrok / Premium+) provider: ensure logged in, then pick model."""
@@ -725,14 +725,14 @@ def _model_flow_xai_oauth(_config, current_model="", *, args=None):
 
     status = get_xai_oauth_auth_status()
     if status.get("logged_in"):
-        print("  xAI Grok OAuth (SuperGrok / Premium+) credentials: ✓")
+        print('  Вход xAI Grok OAuth (SuperGrok / Premium+): ✓')
         print()
         choice = _prompt_auth_credentials_choice(
-            "xAI Grok OAuth (SuperGrok / Premium+) credentials:"
+            'Вход xAI Grok OAuth (SuperGrok / Premium+):'
         )
 
         if choice == "reauth":
-            print("Starting a fresh xAI OAuth login...")
+            print('Открываем повторный вход xAI OAuth…')
             print()
             try:
                 mock_args = argparse.Namespace(
@@ -745,15 +745,15 @@ def _model_flow_xai_oauth(_config, current_model="", *, args=None):
                     force_new_login=True,
                 )
             except SystemExit:
-                print("Login cancelled or failed.")
+                print('Вход отменён или не удался.')
                 return
             except Exception as exc:
-                print(f"Login failed: {exc}")
+                print(f'Не удалось войти: {exc}')
                 return
         elif choice == "cancel":
             return
     else:
-        print("Not logged into xAI Grok OAuth (SuperGrok / Premium+). Starting login...")
+        print('Вход xAI Grok OAuth не выполнен. Открываем вход SuperGrok / Premium+…')
         print()
         try:
             mock_args = argparse.Namespace(
@@ -762,10 +762,10 @@ def _model_flow_xai_oauth(_config, current_model="", *, args=None):
             )
             _login_xai_oauth(mock_args, PROVIDER_REGISTRY["xai-oauth"])
         except SystemExit:
-            print("Login cancelled or failed.")
+            print('Вход отменён или не удался.')
             return
         except Exception as exc:
-            print(f"Login failed: {exc}")
+            print(f'Не удалось войти: {exc}')
             return
 
     # Resolve a usable base URL.  ``resolve_xai_oauth_runtime_credentials``
@@ -786,9 +786,9 @@ def _model_flow_xai_oauth(_config, current_model="", *, args=None):
     if selected:
         _save_model_choice(selected)
         _update_config_for_provider("xai-oauth", base_url)
-        print(f"Default model set to: {selected} (via xAI Grok OAuth — SuperGrok / Premium+)")
+        print(f'Основная модель: {selected}; через xAI Grok OAuth, SuperGrok / Premium+')
     else:
-        print("No change.")
+        print('Без изменений.')
 
 def _model_flow_qwen_oauth(_config, current_model=""):
     """Qwen OAuth provider: reuse local Qwen CLI login, then pick model."""
@@ -805,13 +805,13 @@ def _model_flow_qwen_oauth(_config, current_model=""):
 
     status = get_qwen_auth_status()
     if not status.get("logged_in"):
-        print("Not logged into Qwen CLI OAuth.")
-        print("Run: qwen auth qwen-oauth")
+        print('Вход Qwen CLI OAuth не выполнен.')
+        print('Выполните: qwen auth qwen-oauth')
         auth_file = status.get("auth_file")
         if auth_file:
-            print(f"Expected credentials file: {auth_file}")
+            print(f'Ожидаемый файл данных входа: {auth_file}')
         if status.get("error"):
-            print(f"Error: {status.get('error')}")
+            print(f"Ошибка: {status.get('error')}")
         return
 
     # Try live model discovery, fall back to curated list.
@@ -834,9 +834,9 @@ def _model_flow_qwen_oauth(_config, current_model=""):
     if selected:
         _save_model_choice(selected)
         _update_config_for_provider("qwen-oauth", DEFAULT_QWEN_BASE_URL)
-        print(f"Default model set to: {selected} (via Qwen OAuth)")
+        print(f'Основная модель: {selected}; через Qwen OAuth')
     else:
-        print("No change.")
+        print('Без изменений.')
 
 def _model_flow_minimax_oauth(config, current_model="", args=None):
     """MiniMax OAuth provider: ensure logged in, then pick model."""
@@ -854,7 +854,7 @@ def _model_flow_minimax_oauth(config, current_model="", args=None):
 
     state = get_provider_auth_state("minimax-oauth")
     if not state or not state.get("access_token"):
-        print("Not logged into MiniMax. Starting OAuth login...")
+        print('Вход MiniMax не выполнен. Открываем вход OAuth…')
         print()
         try:
             mock_args = argparse.Namespace(
@@ -864,10 +864,10 @@ def _model_flow_minimax_oauth(config, current_model="", args=None):
             )
             _login_minimax_oauth(mock_args, PROVIDER_REGISTRY["minimax-oauth"])
         except SystemExit:
-            print("Login cancelled or failed.")
+            print('Вход отменён или не удался.')
             return
         except Exception as exc:
-            print(f"Login failed: {exc}")
+            print(f'Не удалось войти: {exc}')
             return
 
     try:
@@ -889,7 +889,7 @@ def _model_flow_minimax_oauth(config, current_model="", args=None):
         return
     _save_model_choice(selected)
     _update_config_for_provider("minimax-oauth", creds["base_url"])
-    print(f"\u2713 Using MiniMax model: {selected}")
+    print(f'✓ Используется модель MiniMax: {selected}')
 
 
 def _model_flow_custom(config):
@@ -912,32 +912,32 @@ def _model_flow_custom(config):
     current_url = get_env_value("OPENAI_BASE_URL") or ""
     current_key = get_env_value("OPENAI_API_KEY") or ""
 
-    print("Custom OpenAI-compatible endpoint configuration:")
+    print('Настройка своего сервера с API OpenAI:')
     if current_url:
-        print(f"  Current URL: {current_url}")
+        print(f'  Текущий адрес: {current_url}')
     if current_key:
-        print(f"  Current key: {current_key[:8]}...")
+        print(f'  Текущий ключ: {current_key[:8]}…')
     print()
 
     try:
         base_url = line_input(
-            f"API base URL [{current_url or 'e.g. https://api.example.com/v1'}]: "
+            f"Основной адрес API [{current_url or 'например https://api.example.com/v1'}]: "
         ).strip()
         api_key = masked_secret_prompt(
-            f"API key [{current_key[:8] + '...' if current_key else 'optional'}]: "
+            f"Ключ API [{(current_key[:8] + '...' if current_key else 'необязательно')}]: "
         ).strip()
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelled.")
+        print('Отменено.')
         return
 
     if not base_url and not current_url:
-        print("No URL provided. Cancelled.")
+        print('Адрес не указан. Отменено.')
         return
 
     # Validate URL format
     effective_url = base_url or current_url
     if not effective_url.startswith(("http://", "https://")):
-        print(f"Invalid URL: {effective_url} (must start with http:// or https://)")
+        print(f'Неверный адрес: {effective_url}. Он должен начинаться с http:// или https://.')
         return
 
     effective_key = api_key or current_key
@@ -952,18 +952,18 @@ def _model_flow_custom(config):
     )
     if _looks_local and not _url_lower.endswith("/v1"):
         print()
-        print("  Hint: Did you mean to add /v1 at the end?")
-        print("  Most local model servers (Ollama, vLLM, llama.cpp) require it.")
+        print('  Возможно, в конце адреса нужен /v1.')
+        print('  Он требуется большинству локальных серверов: Ollama, vLLM, llama.cpp.')
         print(f"  e.g. {effective_url.rstrip('/')}/v1")
         try:
-            _add_v1 = input("  Add /v1? [Y/n]: ").strip().lower()
+            _add_v1 = input('  Добавить /v1? [Y/n]: ').strip().lower()
         except (KeyboardInterrupt, EOFError):
             _add_v1 = "n"
         if _add_v1 in {"", "y", "yes"}:
             effective_url = effective_url.rstrip("/") + "/v1"
             if base_url:
                 base_url = effective_url
-            print(f"  Updated URL: {effective_url}")
+            print(f'  Обновлённый адрес: {effective_url}')
         print()
 
     from korra_cli.models import probe_api_models
@@ -971,30 +971,27 @@ def _model_flow_custom(config):
     probe = probe_api_models(effective_key, effective_url)
     if probe.get("used_fallback") and probe.get("resolved_base_url"):
         print(
-            f"Warning: endpoint verification worked at {probe['resolved_base_url']}/models, "
-            f"not the exact URL you entered. Saving the working base URL instead."
+            f"Проверка прошла по адресу {probe['resolved_base_url']}/models, а не по введённому. Сохраняем рабочий основной адрес."
         )
         effective_url = probe["resolved_base_url"]
         if base_url:
             base_url = effective_url
     elif probe.get("models") is not None:
         print(
-            f"Verified endpoint via {probe.get('probed_url')} "
-            f"({len(probe.get('models') or [])} model(s) visible)"
+            f"Сервер проверен через {probe.get('probed_url')}; доступно моделей: {len(probe.get('models') or [])}"
         )
     else:
         print(
-            f"Warning: could not verify this endpoint via {probe.get('probed_url')}. "
-            f"Korra will still save it."
+            f"Не удалось проверить сервер через {probe.get('probed_url')}. Корра всё равно сохранит настройку."
         )
         if probe.get("suggested_base_url"):
             suggested = probe["suggested_base_url"]
             if suggested.endswith("/v1"):
                 print(
-                    f"  If this server expects /v1 in the path, try base URL: {suggested}"
+                    f'  Если серверу нужен /v1 в пути, попробуйте основной адрес: {suggested}'
                 )
             else:
-                print(f"  If /v1 should not be in the base URL, try: {suggested}")
+                print(f'  Если /v1 не нужен в основном адресе, попробуйте: {suggested}')
 
     # Prompt for API compatibility mode explicitly so codex-compatible custom
     # providers don't silently fall back to chat_completions.
@@ -1007,44 +1004,44 @@ def _model_flow_custom(config):
         current_api_mode=current_api_mode,
     )
     if api_mode:
-        print(f"  API mode: {api_mode}")
+        print(f'  Режим API: {api_mode}')
     else:
-        print("  API mode: auto-detect")
+        print('  Режим API: автоматический выбор')
 
     # Select model — use probe results when available, fall back to manual input
     model_name = ""
     detected_models = probe.get("models") or []
     try:
         if len(detected_models) == 1:
-            print(f"  Detected model: {detected_models[0]}")
-            confirm = input("  Use this model? [Y/n]: ").strip().lower()
+            print(f'  Найдена модель: {detected_models[0]}')
+            confirm = input('  Использовать эту модель? [Y/n]: ').strip().lower()
             if confirm in {"", "y", "yes"}:
                 model_name = detected_models[0]
             else:
-                model_name = line_input("Model name (e.g. gpt-4, llama-3-70b): ").strip()
+                model_name = line_input('Имя модели, например gpt-4 или llama-3-70b: ').strip()
         elif len(detected_models) > 1:
-            print("  Available models:")
+            print('  Доступные модели:')
             for i, m in enumerate(detected_models, 1):
                 print(f"    {i}. {m}")
             pick = input(
-                f"  Select model [1-{len(detected_models)}] or type name: "
+                f'  Выберите модель [1–{len(detected_models)}] или введите имя: '
             ).strip()
             if pick.isdigit() and 1 <= int(pick) <= len(detected_models):
                 model_name = detected_models[int(pick) - 1]
             elif pick:
                 model_name = pick
         else:
-            model_name = line_input("Model name (e.g. gpt-4, llama-3-70b): ").strip()
+            model_name = line_input('Имя модели, например gpt-4 или llama-3-70b: ').strip()
 
         context_length_str = line_input(
-            "Context length in tokens [leave blank for auto-detect]: "
+            'Размер контекста в токенах; пусто — определить автоматически: '
         ).strip()
 
         # Prompt for a display name — shown in the provider menu on future runs
         default_name = _auto_provider_name(effective_url)
-        display_name = line_input(f"Display name [{default_name}]: ").strip() or default_name
+        display_name = line_input(f'Отображаемое имя [{default_name}]: ').strip() or default_name
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelled.")
+        print('Отменено.')
         return
 
     context_length = None
@@ -1058,7 +1055,7 @@ def _model_flow_custom(config):
             if context_length <= 0:
                 context_length = None
         except ValueError:
-            print(f"Invalid context length: {context_length_str} — will auto-detect.")
+            print(f'Неверный размер контекста: {context_length_str}. Определим автоматически.')
             context_length = None
 
     # The key goes to .env and config.yaml only references it (#69449). Keyed
@@ -1071,7 +1068,7 @@ def _model_flow_custom(config):
             _identity = f"{_identity}_{_parsed.port}"
         custom_key_env = custom_endpoint_key_env(_identity)
         save_env_value(custom_key_env, effective_key)
-        print(f"  API key saved to .env as {custom_key_env}")
+        print(f'  Ключ API сохранён в .env как {custom_key_env}')
 
     if model_name:
         _save_model_choice(model_name)
@@ -1099,7 +1096,7 @@ def _model_flow_custom(config):
         # the stale values from its own config dict (#4172).
         config["model"] = dict(model)
 
-        print(f"Default model set to: {model_name} (via {effective_url})")
+        print(f'Основная модель: {model_name}; провайдер {effective_url}')
     else:
         if base_url or api_key:
             deactivate_provider()
@@ -1117,7 +1114,7 @@ def _model_flow_custom(config):
         else:
             _caller_model.pop("api_mode", None)
         config["model"] = _caller_model
-        print("Endpoint saved. Use `/model` in chat or `hermes model` to set a model.")
+        print('Сервер сохранён. Выберите модель через /model в чате или korra model.')
 
     # Auto-save to custom_providers so it appears in the menu next time
     _save_custom_provider(
@@ -1194,67 +1191,66 @@ def _model_flow_azure_foundry(config, current_model=""):
     current_api_key = get_env_value("AZURE_FOUNDRY_API_KEY") or ""
 
     print()
-    print("Azure Foundry Configuration")
+    print('Настройка Azure Foundry')
     print("=" * 50)
     print()
-    print("Azure Foundry can host models with either OpenAI-style or")
-    print("Anthropic-style API endpoints.  Korra will probe your")
-    print("endpoint to auto-detect the transport and the deployed")
-    print("models when possible.")
+    print('Azure Foundry поддерживает модели с API OpenAI')
+    print('и Anthropic. Корра проверит адрес сервера,')
+    print('по возможности определит формат API')
+    print('и доступные модели.')
     print()
 
     if current_base_url:
-        print(f"  Current endpoint:  {current_base_url}")
+        print(f'  Текущий адрес:    {current_base_url}')
     if current_api_mode:
         _lbl = (
             "OpenAI-style"
             if current_api_mode == "chat_completions"
             else "Anthropic-style"
         )
-        print(f"  Current API mode:  {_lbl}")
+        print(f'  Текущий режим API: {_lbl}')
     if current_auth_mode == "entra_id":
-        print("  Current auth mode: Microsoft Entra ID (keyless)")
+        print('  Текущий вход: Microsoft Entra ID, без ключа')
     elif current_api_key:
-        print(f"  Current auth mode: API key ({current_api_key[:8]}...)")
+        print(f'  Текущий вход: ключ API ({current_api_key[:8]}…)')
     print()
 
     # ── Step 1: endpoint URL ─────────────────────────────────────────
     try:
         _placeholder = (
             current_base_url
-            or "e.g. https://<resource>.openai.azure.com/openai/v1 "
-              "or https://<resource>.services.ai.azure.com/anthropic"
+            or 'например https://<resource>.openai.azure.com/openai/v1 или https://<resource>.services.ai.azure.com/anthropic'
         )
         base_url = line_input(
-            f"API endpoint URL [{_placeholder}]: "
+            f'Адрес сервера API [{_placeholder}]: '
         ).strip()
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelled.")
+        print('Отменено.')
         return
 
     effective_url = (base_url or current_base_url).rstrip("/")
     if not effective_url:
-        print("No endpoint URL provided. Cancelled.")
+        print('Адрес сервера не указан. Отменено.')
         return
     if not effective_url.startswith(("http://", "https://")):
-        print(f"Invalid URL: {effective_url} (must start with http:// or https://)")
+        print(f'Неверный адрес: {effective_url}. Он должен начинаться с http:// или https://.')
         return
 
     # ── Step 2: authentication mode ──────────────────────────────────
     print()
-    print("Authentication:")
-    print("  1. API key                  (AZURE_FOUNDRY_API_KEY in .env)")
-    print("  2. Microsoft Entra ID       (managed identity / workload identity / az login)")
-    print("     Recommended by Microsoft. Works for both OpenAI-style and Anthropic-style endpoints.")
-    print("     Requires the 'Azure AI User' role on the Foundry resource.")
+    print('Вход:')
+    print('  1. Ключ API: AZURE_FOUNDRY_API_KEY в .env')
+    print('  2. Microsoft Entra ID: управляемая учётная запись или az login')
+    print('     Рекомендуется Microsoft. Работает с API OpenAI и Anthropic.')
+    print('     Нужна роль Azure AI User на ресурсе Foundry.')
     try:
         _auth_default = "2" if current_auth_mode == "entra_id" else "1"
         auth_choice = (
-            input(f"Authentication mode [1/2] ({_auth_default}): ").strip()
+            input(f'Способ входа [1/2] ({_auth_default}): ').strip()
             or _auth_default
         )
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelled.")
+        print('Отменено.')
         return
     use_entra = auth_choice == "2"
     auth_mode_label = "entra_id" if use_entra else "api_key"
@@ -1276,19 +1272,17 @@ def _model_flow_azure_foundry(config, current_model=""):
             )
         except ImportError as exc:
             print()
-            print(f"⚠ Could not import azure-identity adapter: {exc}")
-            print("  Falling back to API key auth.")
+            print(f'⚠ Не удалось загрузить адаптер azure-identity: {exc}')
+            print('  Используется вход по ключу API.')
             use_entra = False
             auth_mode_label = "api_key"
 
     if use_entra:
         print()
         if not has_azure_identity_installed():
-            print("◐ The 'azure-identity' package is not installed yet.")
+            print('◐ Пакет azure-identity ещё не установлен.')
             print(
-                "  Korra will install it now (the preflight below "
-                "triggers the lazy-install). To skip lazy installs, "
-                "run:  pip install azure-identity"
+                '  Корра установит его при проверке ниже. Можно установить заранее: pip install azure-identity.'
             )
 
         # Preserve only the optional scope override. Identity selection
@@ -1302,30 +1296,29 @@ def _model_flow_azure_foundry(config, current_model=""):
             entra_overrides["scope"] = _persisted_scope_override
 
         print()
-        print("◐ Probing Microsoft Entra ID credential chain (up to 10s)...")
+        print('◐ Проверяем данные входа Microsoft Entra ID, до 10 секунд…')
         _config = EntraIdentityConfig(
             scope=entra_scope,
         )
         info = describe_active_credential(config=_config, timeout_seconds=10.0)
         if info.get("ok"):
             env_sources = info.get("env_sources") or []
-            tag = ", ".join(env_sources) if env_sources else "default chain"
-            print(f"✓ Entra ID token acquired ({tag}, scope={entra_scope})")
+            tag = ", ".join(env_sources) if env_sources else 'стандартная цепочка входа'
+            print(f'✓ Получен токен Entra ID: {tag}, права {entra_scope}')
         else:
-            err = info.get("error") or "credential chain exhausted"
+            err = info.get("error") or 'подходящих данных входа не найдено'
             hint = info.get("hint") or (
-                "Run `az login`, attach a managed identity to this VM, or "
-                "set AZURE_TENANT_ID/AZURE_CLIENT_ID/AZURE_CLIENT_SECRET."
+                'Выполните az login, подключите управляемую учётную запись к виртуальной машине либо задайте AZURE_TENANT_ID, AZURE_CLIENT_ID и AZURE_CLIENT_SECRET.'
             )
             print(f"⚠ {err}")
-            print(f"  Hint: {hint}")
+            print(f'  Подсказка: {hint}')
             try:
-                ans = input("Save Entra config anyway and validate later? [Y/n]: ").strip().lower()
+                ans = input('Сохранить настройки Entra и проверить позже? [Y/n]: ').strip().lower()
             except (KeyboardInterrupt, EOFError):
-                print("\nCancelled.")
+                print('Отменено.')
                 return
             if ans and ans not in ("y", "yes"):
-                print("Cancelled.")
+                print('Отменено.')
                 return
 
         # Build the token provider for the detection probe (best-effort —
@@ -1334,7 +1327,7 @@ def _model_flow_azure_foundry(config, current_model=""):
         try:
             token_provider = build_token_provider(config=_config)
         except Exception as exc:
-            print(f"⚠ Could not build token provider for probing: {exc}")
+            print(f'⚠ Не удалось подготовить токен для проверки: {exc}')
             token_provider = None
     else:
         print()
@@ -1342,20 +1335,20 @@ def _model_flow_azure_foundry(config, current_model=""):
 
         try:
             api_key = masked_secret_prompt(
-                f"API key [{current_api_key[:8] + '...' if current_api_key else 'required'}]: "
+                f"Ключ API [{(current_api_key[:8] + '...' if current_api_key else 'обязательно')}]: "
             ).strip()
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print('Отменено.')
             return
 
         effective_key = api_key or current_api_key
         if not effective_key:
-            print("No API key provided. Cancelled.")
+            print('Ключ API не указан. Отменено.')
             return
 
     # ── Step 4: auto-detect transport + models ───────────────────────
     print()
-    print("◐ Probing endpoint to auto-detect transport and models...")
+    print('◐ Проверяем сервер, определяем формат API и модели…')
     detection = azure_detect.detect(
         effective_url,
         api_key=effective_key,
@@ -1369,29 +1362,29 @@ def _model_flow_azure_foundry(config, current_model=""):
         mode_label = (
             "OpenAI-style" if api_mode == "chat_completions" else "Anthropic-style"
         )
-        print(f"✓ Detected API transport: {mode_label}")
+        print(f'✓ Определён формат API: {mode_label}')
         if detection.reason:
             print(f"    ({detection.reason})")
         if discovered_models:
             print(
-                f"✓ Found {len(discovered_models)} deployed model(s) on this endpoint"
+                f'✓ На сервере найдено развёрнутых моделей: {len(discovered_models)}'
             )
     else:
-        print(f"⚠ Auto-detection incomplete: {detection.reason}")
+        print(f'⚠ Автоматическое определение не завершено: {detection.reason}')
         print()
-        print("Select the API format your Azure Foundry endpoint uses:")
-        print("  1. OpenAI-style  (POST /v1/chat/completions)")
-        print("     For: GPT models, Llama, Mistral, and most open models")
-        print("  2. Anthropic-style  (POST /v1/messages)")
-        print("     For: Claude models deployed via Anthropic API format")
+        print('Выберите формат API вашего сервера Azure Foundry:')
+        print('  1. OpenAI: POST /v1/chat/completions')
+        print('     Для GPT, Llama, Mistral и большинства открытых моделей')
+        print('  2. Anthropic: POST /v1/messages')
+        print('     Для моделей Claude, развёрнутых с API Anthropic')
         try:
             default_choice = "2" if current_api_mode == "anthropic_messages" else "1"
             mode_choice = (
-                input(f"API format [1/2] ({default_choice}): ").strip()
+                input(f'Формат API [1/2] ({default_choice}): ').strip()
                 or default_choice
             )
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print('Отменено.')
             return
         api_mode = "anthropic_messages" if mode_choice == "2" else "chat_completions"
 
@@ -1399,20 +1392,20 @@ def _model_flow_azure_foundry(config, current_model=""):
     print()
     effective_model = ""
     if discovered_models:
-        print("Available models on this endpoint:")
+        print('Доступные модели этого сервера:')
         for i, mid in enumerate(discovered_models[:30], start=1):
             print(f"  {i:>2}. {mid}")
         if len(discovered_models) > 30:
             print(
-                f"  ... and {len(discovered_models) - 30} more (type name manually if not shown)"
+                f'  … и ещё {len(discovered_models) - 30}. Если нужной нет в списке, введите имя вручную.'
             )
         print()
         try:
             pick = input(
-                f"Pick by number, or type a deployment name [{current_model or discovered_models[0]}]: "
+                f'Выберите номер или введите имя развёрнутой модели [{current_model or discovered_models[0]}]: '
             ).strip()
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print('Отменено.')
             return
         if not pick:
             effective_model = current_model or discovered_models[0]
@@ -1423,15 +1416,15 @@ def _model_flow_azure_foundry(config, current_model=""):
     else:
         try:
             model_name = line_input(
-                f"Model / deployment name [{current_model or 'e.g. gpt-5.4, claude-sonnet-4-6'}]: "
+                f"Имя модели или развёртывания [{current_model or 'например gpt-5.4 или claude-sonnet-4-6'}]: "
             ).strip()
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print('Отменено.')
             return
         effective_model = model_name or current_model
 
     if not effective_model:
-        print("No model name provided. Cancelled.")
+        print('Имя модели не указано. Отменено.')
         return
 
     # ── Step 6: context-length lookup ────────────────────────────────
@@ -1489,18 +1482,18 @@ def _model_flow_azure_foundry(config, current_model=""):
 
     mode_label = "OpenAI-style" if api_mode == "chat_completions" else "Anthropic-style"
     auth_label = (
-        "Microsoft Entra ID (keyless)" if use_entra else "API key"
+        'Microsoft Entra ID без ключа' if use_entra else 'Ключ API'
     )
     print()
-    print("✓ Azure Foundry configured:")
-    print(f"    Endpoint:       {effective_url}")
-    print(f"    API mode:       {mode_label}")
-    print(f"    Auth:           {auth_label}")
-    print(f"    Model:          {effective_model}")
+    print('✓ Azure Foundry настроен:')
+    print(f'    Адрес:          {effective_url}')
+    print(f'    Режим API:      {mode_label}')
+    print(f'    Вход:           {auth_label}')
+    print(f'    Модель:         {effective_model}')
     if ctx_len:
-        print(f"    Context length: {ctx_len:,} tokens")
+        print(f'    Размер контекста: {ctx_len:,} токенов')
     else:
-        print("    Context length: not auto-detected (will fall back at runtime)")
+        print('    Размер контекста не определён; будет выбран при запуске')
     print()
 
 def _model_flow_named_custom(config, provider_info):
@@ -1575,10 +1568,10 @@ def _model_flow_named_custom(config, provider_info):
             if model_id:
                 configured_models.append(model_id)
 
-    print(f"  Provider: {name}")
-    print(f"  URL:      {base_url}")
+    print(f'  Провайдер: {name}')
+    print(f'  Адрес:     {base_url}')
     if saved_model:
-        print(f"  Current:  {saved_model}")
+        print(f'  Сейчас:  {saved_model}')
     print()
 
     if not discover:
@@ -1587,11 +1580,10 @@ def _model_flow_named_custom(config, provider_info):
         # choice, but it is not an endpoint catalog.
         models = configured_models or ([saved_model] if saved_model else [])
         print(
-            "Using configured models (discover_models: false): "
-            f"{len(models)}"
+            f'Используются модели из настроек (discover_models: false): {len(models)}'
         )
     else:
-        print("Fetching available models...")
+        print('Получаем доступные модели…')
         fetch_kwargs = {"timeout": 8.0}
         if api_mode:
             fetch_kwargs["api_mode"] = api_mode
@@ -1675,15 +1667,15 @@ def _model_flow_named_custom(config, provider_info):
         if saved_model and saved_model in models:
             default_idx = models.index(saved_model)
 
-        print(f"Found {len(models)} model(s):\n")
+        print(f'Найдено моделей: {len(models)}')
         try:
             from korra_cli.curses_ui import curses_radiolist
 
             menu_items = [
-                f"{m} (current)" if m == saved_model else m for m in models
-            ] + ["Cancel"]
+                f'{m} (текущая)' if m == saved_model else m for m in models
+            ] + ['Отмена']
             idx = curses_radiolist(
-                f"Select model from {name}:",
+                f'Выберите модель {name}:',
                 menu_items,
                 selected=default_idx,
                 cancel_returns=-1,
@@ -1691,44 +1683,44 @@ def _model_flow_named_custom(config, provider_info):
             )
             print()
             if idx < 0 or idx >= len(models):
-                print("Cancelled.")
+                print('Отменено.')
                 return
             model_name = models[idx]
         except (ImportError, NotImplementedError, OSError, subprocess.SubprocessError):
             for i, m in enumerate(models, 1):
                 suffix = " (current)" if m == saved_model else ""
                 print(f"  {i}. {m}{suffix}")
-            print(f"  {len(models) + 1}. Cancel")
+            print(f'  {len(models) + 1}. Отмена')
             print()
             try:
-                val = input(f"Choice [1-{len(models) + 1}]: ").strip()
+                val = input(f'Выберите [1–{len(models) + 1}]: ').strip()
                 if not val:
-                    print("Cancelled.")
+                    print('Отменено.')
                     return
                 idx = int(val) - 1
                 if idx < 0 or idx >= len(models):
-                    print("Cancelled.")
+                    print('Отменено.')
                     return
                 model_name = models[idx]
             except (ValueError, KeyboardInterrupt, EOFError):
-                print("\nCancelled.")
+                print('Отменено.')
                 return
     elif saved_model and not native_catalog_empty:
-        print("Could not fetch models from endpoint.")
+        print('Не удалось получить модели сервера.')
         try:
-            model_name = line_input(f"Model name [{saved_model}]: ").strip() or saved_model
+            model_name = line_input(f'Имя модели [{saved_model}]: ').strip() or saved_model
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print('Отменено.')
             return
     else:
-        print("Could not fetch models from endpoint. Enter model name manually.")
+        print('Не удалось получить модели сервера. Введите имя модели вручную.')
         try:
-            model_name = line_input("Model name: ").strip()
+            model_name = line_input('Имя модели: ').strip()
         except (KeyboardInterrupt, EOFError):
-            print("\nCancelled.")
+            print('Отменено.')
             return
         if not model_name:
-            print("No model specified. Cancelled.")
+            print('Модель не указана. Отменено.')
             return
 
     # Activate and save the model to the custom_providers entry
@@ -1794,8 +1786,8 @@ def _model_flow_named_custom(config, provider_info):
         # Save model name to the custom_providers entry for next time
         _save_custom_provider(base_url, config_api_key, model_name, api_mode=api_mode)
 
-    print(f"\n✅ Model set to: {model_name}")
-    print(f"   Provider: {name} ({base_url})")
+    print(f'✅ Выбрана модель: {model_name}')
+    print(f'   Провайдер: {name} ({base_url})')
 
 def _model_flow_copilot(config, current_model=""):
     """GitHub Copilot flow using env vars, gh CLI, or OAuth device code."""
@@ -1825,23 +1817,23 @@ def _model_flow_copilot(config, current_model=""):
     source = creds.get("source", "")
 
     if not api_key:
-        print("No GitHub token configured for GitHub Copilot.")
+        print('Токен GitHub для Copilot не настроен.')
         print()
-        print("  Supported token types:")
+        print('  Поддерживаемые токены:')
         print(
-            "    → OAuth token (gho_*)          via `copilot login` or device code flow"
+            '    → OAuth (gho_*): через copilot login или вход по коду устройства'
         )
-        print("    → Fine-grained PAT (github_pat_*)  with Copilot Requests permission")
-        print("    → GitHub App token (ghu_*)     via environment variable")
-        print("    ✗ Classic PAT (ghp_*)          NOT supported by Copilot API")
+        print('    → Персональный токен с точными правами (github_pat_*): право Copilot Requests')
+        print('    → Токен приложения GitHub (ghu_*): через переменную среды')
+        print('    ✗ Классический PAT (ghp_*) не поддерживается API Copilot')
         print()
-        print("  Options:")
-        print("    1. Login with GitHub (OAuth device code flow)")
-        print("    2. Enter a token manually")
-        print("    3. Cancel")
+        print('  Варианты:')
+        print('    1. Войти через GitHub по коду устройства')
+        print('    2. Ввести токен вручную')
+        print('    3. Отмена')
         print()
         try:
-            choice = input("  Choice [1-3]: ").strip()
+            choice = input('  Выберите [1–3]: ').strip()
         except (KeyboardInterrupt, EOFError):
             print()
             return
@@ -1853,24 +1845,24 @@ def _model_flow_copilot(config, current_model=""):
                 token = copilot_device_code_login()
                 if token:
                     save_env_value("COPILOT_GITHUB_TOKEN", token)
-                    print("  Copilot token saved.")
+                    print('  Токен Copilot сохранён.')
                     print()
                 else:
-                    print("  Login cancelled or failed.")
+                    print('  Вход отменён или не удался.')
                     return
             except Exception as exc:
-                print(f"  Login failed: {exc}")
+                print(f'  Не удалось войти: {exc}')
                 return
         elif choice == "2":
             from korra_cli.secret_prompt import masked_secret_prompt
 
             try:
-                new_key = masked_secret_prompt("  Token (COPILOT_GITHUB_TOKEN): ").strip()
+                new_key = masked_secret_prompt('  Токен COPILOT_GITHUB_TOKEN: ').strip()
             except (KeyboardInterrupt, EOFError):
                 print()
                 return
             if not new_key:
-                print("  Cancelled.")
+                print('  Отменено.')
                 return
             # Validate token type
             try:
@@ -1883,10 +1875,10 @@ def _model_flow_copilot(config, current_model=""):
             except ImportError:
                 pass
             save_env_value("COPILOT_GITHUB_TOKEN", new_key)
-            print("  Token saved.")
+            print('  Токен сохранён.')
             print()
         else:
-            print("  Cancelled.")
+            print('  Отменено.')
             return
 
         creds = resolve_api_key_provider_credentials(provider_id)
@@ -1896,11 +1888,11 @@ def _model_flow_copilot(config, current_model=""):
         if source in {"GITHUB_TOKEN", "GH_TOKEN"}:
             from korra_cli.env_loader import format_secret_source_suffix
             bw_suffix = format_secret_source_suffix(source)
-            print(f"  GitHub token: {api_key[:8]}... ✓ ({source}{bw_suffix})")
+            print(f'  Токен GitHub: {api_key[:8]}… ✓ ({source}{bw_suffix})')
         elif source == "gh auth token":
-            print("  GitHub token: ✓ (from `gh auth token`)")
+            print('  Токен GitHub: ✓; получен через gh auth token')
         else:
-            print("  GitHub token: ✓")
+            print('  Токен GitHub: ✓')
         print()
 
     effective_base = pconfig.inference_base_url
@@ -1921,14 +1913,14 @@ def _model_flow_copilot(config, current_model=""):
     )
     if live_models:
         model_list = [model_id for model_id in live_models if model_id]
-        print(f"  Found {len(model_list)} model(s) from GitHub Copilot")
+        print(f'  Получено моделей GitHub Copilot: {len(model_list)}')
     else:
         model_list = _PROVIDER_MODELS.get(provider_id, [])
         if model_list:
             print(
-                "  ⚠ Could not auto-detect models from GitHub Copilot — showing defaults."
+                '  ⚠ Не удалось получить модели GitHub Copilot. Показываем исходный список.'
             )
-            print('    Use "Enter custom model name" if you do not see your model.')
+            print('    Если вашей модели нет, выберите «Ввести имя модели».')
 
     if model_list:
         selected = _prompt_model_selection(
@@ -1940,7 +1932,7 @@ def _model_flow_copilot(config, current_model=""):
         )
     else:
         try:
-            selected = line_input("Model name: ").strip()
+            selected = line_input('Имя модели: ').strip()
         except (KeyboardInterrupt, EOFError):
             selected = None
 
@@ -1962,7 +1954,7 @@ def _model_flow_copilot(config, current_model=""):
         )
         selected_effort = None
         if reasoning_efforts:
-            print(f"  {selected} supports reasoning controls.")
+            print(f'  Для {selected} можно настроить рассуждения.')
             selected_effort = _prompt_reasoning_effort_selection(
                 reasoning_efforts, current_effort=current_effort
             )
@@ -1987,14 +1979,14 @@ def _model_flow_copilot(config, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"Default model set to: {selected} (via {pconfig.name})")
+        print(f'Основная модель: {selected}; провайдер {pconfig.name}')
         if reasoning_efforts:
             if selected_effort == "none":
-                print("Reasoning disabled for this model.")
+                print('Рассуждения для этой модели отключены.')
             elif selected_effort:
-                print(f"Reasoning effort set to: {selected_effort}")
+                print(f'Глубина рассуждений: {selected_effort}')
     else:
-        print("No change.")
+        print('Без изменений.')
 
 def _model_flow_copilot_acp(config, current_model=""):
     """GitHub Copilot ACP flow using the local Copilot CLI."""
@@ -2025,11 +2017,11 @@ def _model_flow_copilot_acp(config, current_model=""):
     )
     effective_base = status.get("base_url") or pconfig.inference_base_url
 
-    print("  GitHub Copilot ACP delegates Korra turns to `copilot --acp`.")
-    print("  Korra currently starts its own ACP subprocess for each request.")
-    print("  Korra uses your selected model as a hint for the Copilot ACP session.")
-    print(f"  Command: {resolved_command}")
-    print(f"  Backend marker: {effective_base}")
+    print('  GitHub Copilot ACP передаёт запросы Корры в copilot --acp.')
+    print('  Для каждого запроса Корра запускает отдельный процесс ACP.')
+    print('  Выбранная модель передаётся Copilot ACP как предпочтение.')
+    print(f'  Команда: {resolved_command}')
+    print(f'  Идентификатор среды: {effective_base}')
     print()
 
     try:
@@ -2037,7 +2029,7 @@ def _model_flow_copilot_acp(config, current_model=""):
     except Exception as exc:
         print(f"  ⚠ {exc}")
         print(
-            "  Set HERMES_COPILOT_ACP_COMMAND or COPILOT_CLI_PATH if Copilot CLI is installed elsewhere."
+            '  Если Copilot CLI установлен в другой папке, укажите HERMES_COPILOT_ACP_COMMAND или COPILOT_CLI_PATH.'
         )
         return
 
@@ -2062,14 +2054,14 @@ def _model_flow_copilot_acp(config, current_model=""):
 
     if catalog:
         model_list = [item.get("id", "") for item in catalog if item.get("id")]
-        print(f"  Found {len(model_list)} model(s) from GitHub Copilot")
+        print(f'  Получено моделей GitHub Copilot: {len(model_list)}')
     else:
         model_list = _PROVIDER_MODELS.get("copilot", [])
         if model_list:
             print(
-                "  ⚠ Could not auto-detect models from GitHub Copilot — showing defaults."
+                '  ⚠ Не удалось получить модели GitHub Copilot. Показываем исходный список.'
             )
-            print('    Use "Enter custom model name" if you do not see your model.')
+            print('    Если вашей модели нет, выберите «Ввести имя модели».')
 
     if model_list:
         selected = _prompt_model_selection(
@@ -2081,12 +2073,12 @@ def _model_flow_copilot_acp(config, current_model=""):
         )
     else:
         try:
-            selected = line_input("Model name: ").strip()
+            selected = line_input('Имя модели: ').strip()
         except (KeyboardInterrupt, EOFError):
             selected = None
 
     if not selected:
-        print("No change.")
+        print('Без изменений.')
         return
 
     selected = (
@@ -2111,7 +2103,7 @@ def _model_flow_copilot_acp(config, current_model=""):
     save_config(cfg)
     deactivate_provider()
 
-    print(f"Default model set to: {selected} (via {pconfig.name})")
+    print(f'Основная модель: {selected}; провайдер {pconfig.name}')
 
 def _model_flow_kimi(config, current_model=""):
     """Kimi / Moonshot model selection with automatic endpoint routing.
@@ -2157,10 +2149,10 @@ def _model_flow_kimi(config, current_model=""):
     is_coding_plan = existing_key.startswith("sk-kimi-")
     if is_coding_plan:
         effective_base = KIMI_CODE_BASE_URL
-        print(f"  Detected Kimi Coding Plan key → {effective_base}")
+        print(f'  Найден ключ Kimi Coding Plan → {effective_base}')
     else:
         effective_base = pconfig.inference_base_url
-        print(f"  Using Moonshot endpoint → {effective_base}")
+        print(f'  Используется сервер Moonshot → {effective_base}')
     # Clear any manual base URL override so auto-detection works at runtime
     if base_url_env and get_env_value(base_url_env):
         save_env_value(base_url_env, "")
@@ -2179,7 +2171,7 @@ def _model_flow_kimi(config, current_model=""):
         )
     else:
         try:
-            selected = line_input("Enter model name: ").strip()
+            selected = line_input('Введите имя модели: ').strip()
         except (KeyboardInterrupt, EOFError):
             selected = None
 
@@ -2200,9 +2192,9 @@ def _model_flow_kimi(config, current_model=""):
         deactivate_provider()
 
         endpoint_label = "Kimi Coding" if is_coding_plan else "Moonshot"
-        print(f"Default model set to: {selected} (via {endpoint_label})")
+        print(f'Основная модель: {selected}; провайдер {endpoint_label}')
     else:
-        print("No change.")
+        print('Без изменений.')
 
 def _model_flow_stepfun(config, current_model=""):
     """StepFun Step Plan flow with region-specific endpoints."""
@@ -2248,21 +2240,21 @@ def _model_flow_stepfun(config, current_model=""):
     region_choices = [
         (
             "international",
-            f"International ({_stepfun_base_url_for_region('international')})",
+            f"Международный сервер ({_stepfun_base_url_for_region('international')})",
         ),
-        ("china", f"China ({_stepfun_base_url_for_region('china')})"),
+        ("china", f"Сервер в Китае ({_stepfun_base_url_for_region('china')})"),
     ]
     ordered_regions = []
     for region_key, label in region_choices:
         if region_key == current_region:
-            ordered_regions.insert(0, (region_key, f"{label}  ← currently active"))
+            ordered_regions.insert(0, (region_key, f'{label}  ← используется сейчас'))
         else:
             ordered_regions.append((region_key, label))
-    ordered_regions.append(("cancel", "Cancel"))
+    ordered_regions.append(("cancel", 'Отмена'))
 
     region_idx = _prompt_provider_choice([label for _, label in ordered_regions])
     if region_idx is None or ordered_regions[region_idx][0] == "cancel":
-        print("No change.")
+        print('Без изменений.')
         return
 
     selected_region = ordered_regions[region_idx][0]
@@ -2273,13 +2265,12 @@ def _model_flow_stepfun(config, current_model=""):
     live_models = fetch_api_models(existing_key, effective_base)
     if live_models:
         model_list = live_models
-        print(f"  Found {len(model_list)} model(s) from {pconfig.name} API")
+        print(f'  Получено моделей из API {pconfig.name}: {len(model_list)}')
     else:
         model_list = _PROVIDER_MODELS.get(provider_id, [])
         if model_list:
             print(
-                f"  Could not auto-detect models from {pconfig.name} API — "
-                "showing Step Plan fallback catalog."
+                f'  Не удалось получить модели через API {pconfig.name}. Показываем резервный каталог Step Plan.'
             )
 
     if model_list:
@@ -2292,7 +2283,7 @@ def _model_flow_stepfun(config, current_model=""):
         )
     else:
         try:
-            selected = line_input("Model name: ").strip()
+            selected = line_input('Имя модели: ').strip()
         except (KeyboardInterrupt, EOFError):
             selected = None
 
@@ -2312,9 +2303,9 @@ def _model_flow_stepfun(config, current_model=""):
         deactivate_provider()
 
         config["model"] = dict(model)
-        print(f"Default model set to: {selected} (via {pconfig.name})")
+        print(f'Основная модель: {selected}; провайдер {pconfig.name}')
     else:
-        print("No change.")
+        print('Без изменений.')
 
 def _model_flow_bedrock_api_key(config, region, current_model=""):
     """Bedrock API Key mode — uses the OpenAI-compatible bedrock-mantle endpoint.
@@ -2352,28 +2343,28 @@ def _model_flow_bedrock_api_key(config, region, current_model=""):
         source_suffix = format_secret_source_suffix(
             existing_source or "AWS_BEARER_TOKEN_BEDROCK"
         )
-        print(f"  Bedrock API Key: {existing_key[:12]}... ✓{source_suffix}")
+        print(f'  Ключ API Bedrock: {existing_key[:12]}… ✓{source_suffix}')
     else:
-        print(f"  Endpoint: {mantle_base_url}")
+        print(f'  Адрес: {mantle_base_url}')
         print()
         from korra_cli.secret_prompt import masked_secret_prompt
 
         try:
-            api_key = masked_secret_prompt("  Bedrock API Key: ").strip()
+            api_key = masked_secret_prompt('  Ключ API Bedrock: ').strip()
         except (KeyboardInterrupt, EOFError):
             print()
             return
         if not api_key:
-            print("  Cancelled.")
+            print('  Отменено.')
             return
         save_env_value("AWS_BEARER_TOKEN_BEDROCK", api_key)
         existing_key = api_key
-        print("  ✓ API key saved.")
+        print('  ✓ Ключ API сохранён.')
     print()
 
     # Model selection — use static list (mantle doesn't need boto3 for discovery)
     model_list = _PROVIDER_MODELS.get("bedrock", [])
-    print(f"  Showing {len(model_list)} curated models")
+    print(f'  Показано рекомендованных моделей: {len(model_list)}')
 
     if model_list:
         selected = _prompt_model_selection(
@@ -2385,7 +2376,7 @@ def _model_flow_bedrock_api_key(config, region, current_model=""):
         )
     else:
         try:
-            selected = line_input("  Model ID: ").strip()
+            selected = line_input('  ID модели: ').strip()
         except (KeyboardInterrupt, EOFError):
             selected = None
 
@@ -2428,10 +2419,10 @@ def _model_flow_bedrock_api_key(config, region, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"  Default model set to: {selected} (via Bedrock API Key, {region})")
-        print(f"  Endpoint: {mantle_base_url}")
+        print(f'  Основная модель: {selected}; через ключ API Bedrock, {region}')
+        print(f'  Адрес: {mantle_base_url}')
     else:
-        print("  No change.")
+        print('  Без изменений.')
 
 def _model_flow_bedrock(config, current_model=""):
     """AWS Bedrock provider: verify credentials, pick region, discover models.
@@ -2457,43 +2448,43 @@ def _model_flow_bedrock(config, current_model=""):
             discover_bedrock_models,
         )
     except ImportError:
-        print("  ✗ boto3 is not installed. Install it with:")
+        print('  ✗ boto3 не установлен. Установите его:')
         print("    pip install boto3")
         print()
         return
 
     if not has_aws_credentials():
-        print("  ⚠ No AWS credentials detected via environment variables.")
-        print("  Bedrock will use boto3's default credential chain (IMDS, SSO, etc.)")
+        print('  ⚠ Данные входа AWS в переменных среды не найдены.')
+        print('  Bedrock использует стандартный поиск данных входа boto3: IMDS, SSO и другие.')
         print()
 
     auth_var = resolve_aws_auth_env_var()
     if auth_var:
-        print(f"  AWS credentials: {auth_var} ✓")
+        print(f'  Вход AWS: {auth_var} ✓')
     else:
-        print("  AWS credentials: boto3 default chain (instance role / SSO)")
+        print('  Вход AWS: стандартная цепочка boto3, роль сервера или SSO')
     print()
 
     # 2. Region selection
     current_region = resolve_bedrock_region()
     try:
-        region_input = line_input(f"  AWS Region [{current_region}]: ").strip()
+        region_input = line_input(f'  Регион AWS [{current_region}]: ').strip()
     except (KeyboardInterrupt, EOFError):
         print()
         return
     region = region_input or current_region
 
     # 2b. Authentication mode
-    print("  Choose authentication method:")
+    print('  Выберите способ входа:')
     print()
-    print("    1. IAM credential chain (recommended)")
-    print("       Works with EC2 instance roles, SSO, env vars, aws configure")
-    print("    2. Bedrock API Key")
-    print("       Enter your Bedrock API Key directly — also supports")
-    print("       team scenarios where an admin distributes keys")
+    print('    1. Стандартная цепочка учётных данных IAM — рекомендуется')
+    print('       Роли EC2, единый вход, переменные среды или aws configure')
+    print('    2. Ключ API Bedrock')
+    print('       Введите ключ API Bedrock напрямую.')
+    print('       Подходит и для команды, где ключи выдаёт администратор.')
     print()
     try:
-        auth_choice = input("  Choice [1]: ").strip()
+        auth_choice = input('  Выберите [1]: ').strip()
     except (KeyboardInterrupt, EOFError):
         print()
         return
@@ -2503,7 +2494,7 @@ def _model_flow_bedrock(config, current_model=""):
         return
 
     # 3. Model discovery — try live API first, fall back to static list
-    print(f"  Discovering models in {region}...")
+    print(f'  Получаем модели в регионе {region}…')
     live_models = discover_bedrock_models(region)
 
     if live_models:
@@ -2584,17 +2575,17 @@ def _model_flow_bedrock(config, current_model=""):
         deduped.sort(key=_sort_key)
         model_list = [m["id"] for m in deduped]
         print(
-            f"  Found {len(model_list)} text model(s) (filtered from {len(live_models)} total)"
+            f'  Найдено текстовых моделей: {len(model_list)}; всего моделей: {len(live_models)}'
         )
     else:
         model_list = _PROVIDER_MODELS.get("bedrock", [])
         if model_list:
             print(
-                f"  Using {len(model_list)} curated models (live discovery unavailable)"
+                f'  Используются рекомендованные модели ({len(model_list)}): получить список с сервера не удалось'
             )
         else:
             print(
-                "  No models found. Check IAM permissions for bedrock:ListFoundationModels."
+                '  Модели не найдены. Проверьте права IAM для bedrock:ListFoundationModels.'
             )
             return
 
@@ -2608,7 +2599,7 @@ def _model_flow_bedrock(config, current_model=""):
         )
     else:
         try:
-            selected = line_input("  Model ID: ").strip()
+            selected = line_input('  ID модели: ').strip()
         except (KeyboardInterrupt, EOFError):
             selected = None
 
@@ -2634,9 +2625,9 @@ def _model_flow_bedrock(config, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"  Default model set to: {selected} (via AWS Bedrock, {region})")
+        print(f'  Основная модель: {selected}; через AWS Bedrock, {region}')
     else:
-        print("  No change.")
+        print('  Без изменений.')
 
 
 def _model_flow_vertex(config, current_model=""):
@@ -2662,12 +2653,12 @@ def _model_flow_vertex(config, current_model=""):
         or ""
     ).strip()
     if sa_path:
-        print(f"  Vertex credentials: service account JSON ({sa_path}) ✓")
+        print(f'  Вход Vertex: JSON служебной учётной записи ({sa_path}) ✓')
     else:
-        print("  Vertex credentials: Application Default Credentials (ADC)")
-        print("    Vertex uses OAuth2, not a static API key. Either:")
-        print("      • run 'gcloud auth application-default login', or")
-        print("      • set VERTEX_CREDENTIALS_PATH in ~/.hermes/.env to a service account JSON")
+        print('  Вход Vertex: стандартные данные приложения (ADC)')
+        print('    Vertex использует OAuth2. Выберите способ входа:')
+        print('      • выполните gcloud auth application-default login')
+        print('      • или укажите JSON служебной учётной записи в VERTEX_CREDENTIALS_PATH файла .env')
     print()
 
     cfg = load_config()
@@ -2679,7 +2670,7 @@ def _model_flow_vertex(config, current_model=""):
     current_project = str(vertex_cfg.get("project_id") or "").strip()
     try:
         project_input = line_input(
-            f"  GCP project ID [{current_project or 'from credentials'}]: "
+            f"  ID проекта GCP [{current_project or 'из данных входа'}]: "
         ).strip()
     except (KeyboardInterrupt, EOFError):
         print()
@@ -2689,7 +2680,7 @@ def _model_flow_vertex(config, current_model=""):
     # 3. Region (default global — required for the Gemini 3.x previews).
     current_region = str(vertex_cfg.get("region") or "global").strip() or "global"
     try:
-        region_input = line_input(f"  Vertex region [{current_region}]: ").strip()
+        region_input = line_input(f'  Регион Vertex [{current_region}]: ').strip()
     except (KeyboardInterrupt, EOFError):
         print()
         return
@@ -2738,9 +2729,9 @@ def _model_flow_vertex(config, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"  Default model set to: {selected} (via Google Vertex AI, {region})")
+        print(f'  Основная модель: {selected}; через Google Vertex AI, {region}')
     else:
-        print("  No change.")
+        print('  Без изменений.')
 
 def _select_zai_endpoint(current_base: str) -> str:
     """Present a picker for Z.AI endpoint selection during setup.
@@ -2773,12 +2764,12 @@ def _select_zai_endpoint(current_base: str) -> str:
             default_idx = len(options)
 
     choices = [f"{label} ({url})" for label, url in options]
-    choices.append("Custom proxy URL")
+    choices.append('Свой адрес прокси')
 
     selected = _prompt_provider_choice(
         choices,
         default=default_idx,
-        title="Select Z.AI / GLM endpoint:",
+        title='Выберите сервер Z.AI / GLM:',
     )
     if selected is None:
         return current_base
@@ -2786,14 +2777,14 @@ def _select_zai_endpoint(current_base: str) -> str:
     if selected == len(options):
         # Custom proxy URL
         try:
-            override = line_input(f"Custom base URL [{current_base}]: ").strip()
+            override = line_input(f'Свой основной адрес API [{current_base}]: ').strip()
         except (KeyboardInterrupt, EOFError):
             print()
             return current_base
         if not override:
             return current_base
         if not override.startswith(("http://", "https://")):
-            print("  Invalid URL — must start with http:// or https://. Keeping current value.")
+            print('  Неверный адрес: нужен http:// или https://. Текущее значение сохранено.')
             return current_base
         return override.rstrip("/")
 
@@ -2829,7 +2820,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
     # OpenCode Free is keyless — the tier is served anonymously and any
     # unrecognized bearer 401s, so there is no key to prompt for.
     if provider_id == "opencode-free":
-        print("  OpenCode Free is keyless — no API key or account needed.")
+        print('  OpenCode Free работает без ключа API и учётной записи.')
         existing_key = ""
     else:
         # Check / prompt for API key
@@ -2854,7 +2845,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         except Exception:
             probe_gemini_tier = None
         if probe_gemini_tier is not None:
-            print("  Checking Gemini API tier...")
+            print('  Проверяем тариф Gemini API…')
             probe_base = (
                 (get_env_value(base_url_env) if base_url_env else "")
                 or os.getenv(base_url_env or "", "")
@@ -2864,42 +2855,36 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
             if tier == "free":
                 print()
                 print(
-                    "❌ This Google API key is on the free tier "
-                    "(<= 250 requests/day for gemini-2.5-flash)."
+                    '❌ Этот ключ Google API относится к бесплатному тарифу: до 250 запросов в день для gemini-2.5-flash.'
                 )
                 print(
-                    "   Korra typically makes 3-10 API calls per user turn "
-                    "(tool iterations + auxiliary tasks),"
+                    '   Корра обычно делает 3–10 вызовов API за ход: инструменты и вспомогательные задачи.'
                 )
                 print(
-                    "   so the free tier is exhausted after a handful of "
-                    "messages and cannot sustain"
+                    '   Бесплатный лимит заканчивается после нескольких сообщений'
                 )
-                print("   an agent session.")
+                print('   и не подходит для полноценной работы агента.')
                 print()
                 print(
-                    "   To use Gemini with Korra, enable billing on your "
-                    "Google Cloud project and regenerate"
+                    '   Для Gemini включите оплату в проекте Google Cloud и создайте'
                 )
                 print(
-                    "   the key in a billing-enabled project: "
-                    "https://aistudio.google.com/apikey"
+                    '   новый ключ в этом проекте: https://aistudio.google.com/apikey'
                 )
                 print()
                 print(
-                    "   Alternatives with workable free usage: DeepSeek, "
-                    "OpenRouter (free models), Groq, Nous."
+                    '   Другие варианты с доступными бесплатными моделями: DeepSeek, OpenRouter, Groq, Nous.'
                 )
                 print()
-                print("Not saving Gemini as the default provider.")
+                print('Gemini не сохранён как основной провайдер.')
                 return
             if tier == "paid":
-                print("  Tier check: paid ✓")
+                print('  Тариф проверен: платный ✓')
             else:
                 # "unknown" -- network issue, auth problem, unexpected response.
                 # Don't block; the runtime 429 handler will surface free-tier
                 # guidance if the key turns out to be free tier.
-                print("  Tier check: could not verify (proceeding anyway).")
+                print('  Не удалось проверить тариф; продолжаем.')
             print()
 
     # Optional base URL override.
@@ -2930,14 +2915,14 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         effective_base = chosen_base
     else:
         try:
-            override = line_input(f"Base URL [{effective_base}]: ").strip()
+            override = line_input(f'Основной адрес API [{effective_base}]: ').strip()
         except (KeyboardInterrupt, EOFError):
             print()
             override = ""
         if override and base_url_env:
             if not override.startswith(("http://", "https://")):
                 print(
-                    "  Invalid URL — must start with http:// or https://. Keeping current value."
+                    '  Неверный адрес: нужен http:// или https://. Текущее значение сохранено.'
                 )
             else:
                 save_env_value(base_url_env, override)
@@ -2960,11 +2945,11 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
                 api_key=api_key_for_probe, base_url=effective_base
             )
         except AuthError as exc:
-            print(f"  LM Studio rejected the request: {exc}")
-            print("  Set LM_API_KEY (or update it) to match the server's bearer token.")
+            print(f'  LM Studio отклонил запрос: {exc}')
+            print('  Задайте или обновите LM_API_KEY, чтобы он совпадал с токеном сервера.')
             model_list = []
         if model_list:
-            print(f"  Found {len(model_list)} model(s) from LM Studio")
+            print(f'  Получено моделей LM Studio: {len(model_list)}')
     elif provider_id == "ollama-cloud":
         from korra_cli.models import fetch_ollama_cloud_models
 
@@ -2979,7 +2964,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
             force_refresh=True,
         )
         if model_list:
-            print(f"  Found {len(model_list)} model(s) from Ollama Cloud")
+            print(f'  Получено моделей Ollama Cloud: {len(model_list)}')
     elif provider_id == "novita":
         from korra_cli.models import fetch_api_models
 
@@ -2988,7 +2973,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         live_models = fetch_api_models(api_key_for_probe, effective_base)
         if live_models:
             model_list = live_models
-            print(f"  Found {len(model_list)} model(s) from {pconfig.name} API")
+            print(f'  Получено моделей из API {pconfig.name}: {len(model_list)}')
         else:
             mdev_models: list = []
             try:
@@ -3004,12 +2989,12 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
                     if m.lower() not in seen:
                         model_list.append(m)
                         seen.add(m.lower())
-                print(f"  Found {len(model_list)} model(s) from models.dev registry")
+                print(f'  Получено моделей из каталога models.dev: {len(model_list)}')
             else:
                 model_list = curated
                 if model_list:
                     print(
-                        f'  Showing {len(model_list)} curated models — use "Enter custom model name" for others.'
+                        f'  Показано рекомендованных моделей: {len(model_list)}. Для остальных выберите «Ввести имя модели».'
                     )
     elif provider_id == "opencode-free":
         # Keyless free tier: the curated list is synced against anonymous
@@ -3019,7 +3004,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         model_list = _PROVIDER_MODELS.get(provider_id, [])
         if model_list:
             print(
-                f'  Showing {len(model_list)} keyless free models — use "Enter custom model name" for others.'
+                f'  Показано бесплатных моделей без ключа: {len(model_list)}. Для остальных выберите «Ввести имя модели».'
             )
     else:
         curated = _PROVIDER_MODELS.get(provider_id, [])
@@ -3046,12 +3031,12 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
                 model_list = merged
             else:
                 model_list = mdev_models
-            print(f"  Found {len(model_list)} model(s) from models.dev registry")
+            print(f'  Получено моделей из каталога models.dev: {len(model_list)}')
         elif curated and len(curated) >= 8:
             # Curated list is substantial — use it directly, skip live probe
             model_list = curated
             print(
-                f'  Showing {len(model_list)} curated models — use "Enter custom model name" for others.'
+                f'  Показано рекомендованных моделей: {len(model_list)}. Для остальных выберите «Ввести имя модели».'
             )
         else:
             api_key_for_probe = existing_key or (
@@ -3060,12 +3045,12 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
             live_models = fetch_api_models(api_key_for_probe, effective_base)
             if live_models and len(live_models) >= len(curated):
                 model_list = live_models
-                print(f"  Found {len(model_list)} model(s) from {pconfig.name} API")
+                print(f'  Получено моделей из API {pconfig.name}: {len(model_list)}')
             else:
                 model_list = curated
                 if model_list:
                     print(
-                        f'  Showing {len(model_list)} curated models — use "Enter custom model name" for others.'
+                        f'  Показано рекомендованных моделей: {len(model_list)}. Для остальных выберите «Ввести имя модели».'
                     )
             # else: no defaults either, will fall through to raw input
 
@@ -3099,7 +3084,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         )
     else:
         try:
-            selected = line_input("Model name: ").strip()
+            selected = line_input('Имя модели: ').strip()
         except (KeyboardInterrupt, EOFError):
             selected = None
 
@@ -3125,9 +3110,9 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"Default model set to: {selected} (via {pconfig.name})")
+        print(f'Основная модель: {selected}; провайдер {pconfig.name}')
     else:
-        print("No change.")
+        print('Без изменений.')
 
 def _model_flow_anthropic(config, current_model=""):
     """Flow for Anthropic provider — OAuth subscription, API key, or Claude Code creds."""
@@ -3190,12 +3175,12 @@ def _model_flow_anthropic(config, current_model=""):
                     if source_suffix:
                         break
             print(
-                f"  Anthropic credentials: {existing_key[:12]}... ✓{source_suffix}"
+                f'  Вход Anthropic: {existing_key[:12]}… ✓{source_suffix}'
             )
         elif cc_available:
-            print("  Claude Code credentials: ✓ (auto-detected)")
+            print('  Данные входа Claude Code найдены автоматически: ✓')
         print()
-        choice = _prompt_auth_credentials_choice("Anthropic credentials:")
+        choice = _prompt_auth_credentials_choice('Вход Anthropic:')
 
         if choice == "reauth":
             needs_auth = True
@@ -3206,14 +3191,14 @@ def _model_flow_anthropic(config, current_model=""):
     if needs_auth:
         # Show auth method choice
         print()
-        print("  Choose authentication method:")
+        print('  Выберите способ входа:')
         print()
-        print("    1. Claude Pro/Max subscription (OAuth login)")
-        print("    2. Anthropic API key (pay-per-token)")
-        print("    3. Cancel")
+        print('    1. Подписка Claude Pro/Max: вход через OAuth')
+        print('    2. Ключ API Anthropic: оплата за токены')
+        print('    3. Отмена')
         print()
         try:
-            choice = input("  Choice [1/2/3]: ").strip()
+            choice = input('  Выберите [1/2/3]: ').strip()
         except (KeyboardInterrupt, EOFError):
             print()
             return
@@ -3224,23 +3209,23 @@ def _model_flow_anthropic(config, current_model=""):
 
         elif choice == "2":
             print()
-            print("  Get an API key at: https://platform.claude.com/settings/keys")
+            print('  Получить ключ API: https://platform.claude.com/settings/keys')
             print()
             from korra_cli.secret_prompt import masked_secret_prompt
 
             try:
-                api_key = masked_secret_prompt("  API key (sk-ant-...): ").strip()
+                api_key = masked_secret_prompt('  Ключ API (sk-ant-...): ').strip()
             except (KeyboardInterrupt, EOFError):
                 print()
                 return
             if not api_key:
-                print("  Cancelled.")
+                print('  Отменено.')
                 return
             save_anthropic_api_key(api_key, save_fn=save_env_value)
-            print("  ✓ API key saved.")
+            print('  ✓ Ключ API сохранён.')
 
         else:
-            print("  No change.")
+            print('  Без изменений.')
             return
     print()
 
@@ -3254,7 +3239,7 @@ def _model_flow_anthropic(config, current_model=""):
         )
     else:
         try:
-            selected = line_input("Model name (e.g., claude-sonnet-4-20250514): ").strip()
+            selected = line_input('Имя модели, например claude-sonnet-4-20250514: ').strip()
         except (KeyboardInterrupt, EOFError):
             selected = None
 
@@ -3276,6 +3261,6 @@ def _model_flow_anthropic(config, current_model=""):
         save_config(cfg)
         deactivate_provider()
 
-        print(f"Default model set to: {selected} (via Anthropic)")
+        print(f'Основная модель: {selected}; через Anthropic')
     else:
-        print("No change.")
+        print('Без изменений.')

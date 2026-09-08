@@ -50,9 +50,9 @@ class TestGeminiSetupFreeTierBlock:
             _model_flow_api_key_provider(load_config(), "gemini", "old-model")
 
         output = capsys.readouterr().out
-        assert "free tier" in output.lower()
+        assert "бесплатному тарифу" in output.lower()
         assert "aistudio.google.com/apikey" in output
-        assert "Not saving Gemini as the default provider" in output
+        assert "Gemini не сохранён как основной провайдер" in output
 
         # Config must NOT show gemini as the provider
         import yaml
@@ -83,8 +83,8 @@ class TestGeminiSetupFreeTierBlock:
             _model_flow_api_key_provider(load_config(), "gemini", "old-model")
 
         output = capsys.readouterr().out
-        assert "paid" in output.lower()
-        assert "Not saving Gemini" not in output
+        assert "платный" in output.lower()
+        assert "Gemini не сохранён" not in output
 
         import yaml
         cfg = yaml.safe_load((config_home / "config.yaml").read_text()) or {}

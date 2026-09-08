@@ -194,7 +194,28 @@ def _api_key_default_label(count: int) -> str:
 
 
 def _display_source(source: str) -> str:
-    return source.split(":", 1)[1] if source.startswith("manual:") else source
+    source = source.split(":", 1)[1] if source.startswith("manual:") else source
+    if source.startswith("env:"):
+        return f"из {source.split(':', 1)[1]}"
+    if source.startswith("pool:"):
+        return f"из набора {source.split(':', 1)[1]}"
+    return {
+        "manual": "вручную",
+        "device_code": "вход по коду",
+        "oauth-device-code": "вход по коду",
+        "hermes_pkce": "вход через браузер",
+        "codex_auth": "вход Codex",
+        "claude_code": "вход Claude Code",
+        "gh_cli": "GitHub CLI",
+        "qwen_cli": "Qwen CLI",
+        "minimax_oauth": "вход MiniMax",
+    }.get(source, source)
+
+
+def _display_auth_type(auth_type: str) -> str:
+    return {AUTH_TYPE_API_KEY: "ключ API", AUTH_TYPE_OAUTH: "OAuth"}.get(
+        auth_type, auth_type
+    )
 
 
 def _classify_exhausted_status(entry) -> tuple[str, bool]:
@@ -220,36 +241,41 @@ def _format_exhausted_status(entry) -> str:
     if entry.last_status != STATUS_EXHAUSTED:
         return ""
     label, show_retry_window = _classify_exhausted_status(entry)
+    label = {
+        "rate-limited": "достигнут лимит запросов",
+        "auth failed": "ошибка входа",
+        "exhausted": "лимит исчерпан",
+    }.get(label, label)
     reason = getattr(entry, "last_error_reason", None)
     reason_text = f" {reason}" if isinstance(reason, str) and reason.strip() else ""
     code = f" ({entry.last_error_code})" if entry.last_error_code else ""
     if not show_retry_window:
-        return f" {label}{reason_text}{code} (re-auth may be required)"
+        return f' {label}{reason_text}{code}; возможно, нужно войти заново'
     exhausted_until = _exhausted_until(entry)
     if exhausted_until is None:
         return f" {label}{reason_text}{code}"
     remaining = max(0, int(math.ceil(exhausted_until - time.time())))
     if remaining <= 0:
-        return f" {label}{reason_text}{code} (ready to retry)"
+        return f' {label}{reason_text}{code}; можно повторить попытку'
     minutes, seconds = divmod(remaining, 60)
     hours, minutes = divmod(minutes, 60)
     days, hours = divmod(hours, 24)
     if days:
-        wait = f"{days}d {hours}h"
+        wait = f'{days} д {hours} ч'
     elif hours:
-        wait = f"{hours}h {minutes}m"
+        wait = f'{hours} ч {minutes} мин'
     elif minutes:
-        wait = f"{minutes}m {seconds}s"
+        wait = f'{minutes} мин {seconds} с'
     else:
-        wait = f"{seconds}s"
-    return f" {label}{reason_text}{code} ({wait} left)"
+        wait = f'{seconds} с'
+    return f' {label}{reason_text}{code}; осталось {wait}'
 
 
 def auth_add_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", ""))
     configured_provider = _configured_provider_entry(provider)
     if not _is_known_provider(provider, configured_provider):
-        raise SystemExit(f"Unknown provider: {provider}")
+        raise SystemExit(f'Неизвестный провайдер: {provider}')
     if configured_provider is not None:
         _migrate_legacy_custom_pool_key(provider, configured_provider["pool_key"])
 
@@ -284,14 +310,14 @@ def auth_add_command(args) -> None:
     if requested_type == AUTH_TYPE_API_KEY:
         token = (getattr(args, "api_key", None) or "").strip()
         if not token:
-            token = masked_secret_prompt("Paste your API key: ").strip()
+            token = masked_secret_prompt('Вставьте ключ API: ').strip()
         if not token:
-            raise SystemExit("No API key provided.")
+            raise SystemExit('Ключ API не указан.')
         default_label = _api_key_default_label(len(pool.entries()) + 1)
         label = (getattr(args, "label", None) or "").strip()
         if not label:
             if sys.stdin.isatty():
-                label = line_input(f"Label (optional, default: {default_label}): ").strip() or default_label
+                label = line_input(f'Метка; по умолчанию {default_label}: ').strip() or default_label
             else:
                 label = default_label
         entry = PooledCredential(
@@ -305,7 +331,7 @@ def auth_add_command(args) -> None:
             base_url=_provider_base_url(provider),
         )
         pool.add_entry(entry)
-        print(f'Added {provider} credential #{len(pool.entries())}: "{label}"')
+        print(f'Добавлены данные входа {provider} №{len(pool.entries())}: «{label}»')
         return
 
     if provider == "anthropic":
@@ -313,7 +339,7 @@ def auth_add_command(args) -> None:
 
         creds = anthropic_mod.run_hermes_oauth_login_pure()
         if not creds:
-            raise SystemExit("Anthropic OAuth login did not return credentials.")
+            raise SystemExit('Вход Anthropic OAuth не вернул данные учётной записи.')
         label = (getattr(args, "label", None) or "").strip() or label_from_token(
             creds["access_token"],
             _oauth_default_label(provider, len(pool.entries()) + 1),
@@ -331,7 +357,7 @@ def auth_add_command(args) -> None:
             base_url=_provider_base_url(provider),
         )
         pool.add_entry(entry)
-        print(f'Added {provider} OAuth credential #{len(pool.entries())}: "{entry.label}"')
+        print(f'Добавлена учётная запись OAuth {provider} №{len(pool.entries())}: «{entry.label}»')
         return
 
     if provider == "nous":
@@ -349,15 +375,15 @@ def auth_add_command(args) -> None:
                 path = None
             print()
             if path:
-                print(f"Found existing Nous OAuth credentials at {path}")
+                print(f'Найдены сохранённые данные входа Nous OAuth: {path}')
             else:
-                print("Found existing shared Nous OAuth credentials")
+                print('Найдены общие данные входа Nous OAuth')
             try:
-                do_import = input("Import these credentials? [Y/n]: ").strip().lower()
+                do_import = input('Импортировать эти данные входа? [Y/n]: ').strip().lower()
             except (EOFError, KeyboardInterrupt):
                 do_import = "y"
             if do_import in {"", "y", "yes"}:
-                print("Rehydrating Nous session from shared credentials...")
+                print('Восстанавливаем вход Nous из общих данных…')
                 rehydrated = auth_mod._try_import_shared_nous_state(
                     timeout_seconds=getattr(args, "timeout", None) or 15.0,
                 )
@@ -367,11 +393,11 @@ def auth_add_command(args) -> None:
                     shown_label = entry.label if entry is not None else label_from_token(
                         rehydrated.get("access_token", ""), _oauth_default_label(provider, 1),
                     )
-                    print(f'Imported {provider} OAuth credentials: "{shown_label}"')
+                    print(f'Импортированы данные входа OAuth {provider}: «{shown_label}»')
                     return
                 # Rehydrate failed (expired refresh_token, portal down, etc.)
                 # — fall through to device-code flow.
-                print("Could not refresh shared credentials — falling back to device-code login.")
+                print('Не удалось обновить общие данные. Используется вход по коду устройства.')
 
         creds = auth_mod._nous_device_code_login(
             portal_base_url=getattr(args, "portal_url", None),
@@ -391,7 +417,7 @@ def auth_add_command(args) -> None:
         shown_label = entry.label if entry is not None else label_from_token(
             creds.get("access_token", ""), _oauth_default_label(provider, 1),
         )
-        print(f'Saved {provider} OAuth device-code credentials: "{shown_label}"')
+        print(f'Сохранены данные входа {provider} через код устройства OAuth: «{shown_label}»')
         return
 
     if provider == "openai-codex":
@@ -429,7 +455,7 @@ def auth_add_command(args) -> None:
         # _save_provider_state). Subsequent adds leave the active provider as-is.
         if first_credential:
             auth_mod.mark_provider_active_if_unset(provider)
-        print(f'Added {provider} OAuth credential #{len(pool.entries())}: "{entry.label}"')
+        print(f'Добавлена учётная запись OAuth {provider} №{len(pool.entries())}: «{entry.label}»')
         return
 
     if provider == "xai-oauth":
@@ -470,7 +496,7 @@ def auth_add_command(args) -> None:
         # _save_provider_state). Subsequent adds leave the active provider as-is.
         if first_credential:
             auth_mod.mark_provider_active_if_unset(provider)
-        print(f'Added {provider} OAuth credential #{len(pool.entries())}: "{entry.label}"')
+        print(f'Добавлена учётная запись OAuth {provider} №{len(pool.entries())}: «{entry.label}»')
         return
 
     if provider == "qwen-oauth":
@@ -491,7 +517,7 @@ def auth_add_command(args) -> None:
             base_url=creds.get("base_url"),
         )
         pool.add_entry(entry)
-        print(f'Added {provider} OAuth credential #{len(pool.entries())}: "{entry.label}"')
+        print(f'Добавлена учётная запись OAuth {provider} №{len(pool.entries())}: «{entry.label}»')
         return
 
     if provider == "minimax-oauth":
@@ -515,10 +541,10 @@ def auth_add_command(args) -> None:
             base_url=creds.get("inference_base_url"),
         )
         pool.add_entry(entry)
-        print(f'Added {provider} OAuth credential #{len(pool.entries())}: "{entry.label}"')
+        print(f'Добавлена учётная запись OAuth {provider} №{len(pool.entries())}: «{entry.label}»')
         return
 
-    raise SystemExit(f"`hermes auth add {provider}` is not implemented for auth type {requested_type} yet.")
+    raise SystemExit(f'korra auth add {provider} пока не поддерживает способ входа {requested_type}.')
 
 
 def auth_list_command(args) -> None:
@@ -548,14 +574,14 @@ def auth_list_command(args) -> None:
         if not entries:
             continue
         current = pool.peek()
-        print(f"{provider} ({len(entries)} credentials):")
+        print(f'{provider}; записей входа: {len(entries)}')
         for idx, entry in enumerate(entries, start=1):
             marker = "  "
             if current is not None and entry.id == current.id:
                 marker = "← "
             status = _format_exhausted_status(entry)
             source = _display_source(entry.source)
-            print(f"  #{idx}  {entry.label:<20} {entry.auth_type:<7} {source}{status} {marker}".rstrip())
+            print(f"  #{idx}  {entry.label:<20} {_display_auth_type(entry.auth_type):<8} {source}{status} {marker}".rstrip())
         print()
 
 
@@ -567,11 +593,11 @@ def auth_remove_command(args) -> None:
     pool = load_pool(provider)
     index, matched, error = pool.resolve_target(target)
     if matched is None or index is None:
-        raise SystemExit(f"{error} Provider: {provider}.")
+        raise SystemExit(f'{error} Провайдер: {provider}.')
     removed = pool.remove_index(index)
     if removed is None:
-        raise SystemExit(f'No credential matching "{target}" for provider {provider}.')
-    print(f"Removed {provider} credential #{index} ({removed.label})")
+        raise SystemExit(f'Запись входа «{target}» для провайдера {provider} не найдена.')
+    print(f'Данные входа {provider} №{index} удалены: {removed.label}')
 
     # Unified removal dispatch.  Every credential source Hermes reads from
     # (env vars, external OAuth files, auth.json blocks, custom config)
@@ -601,23 +627,23 @@ def auth_reset_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", ""))
     pool = load_pool(provider)
     count = pool.reset_statuses()
-    print(f"Reset status on {count} {provider} credentials")
+    print(f'Состояние сброшено для {count} записей входа {provider}')
 
 
 def auth_status_command(args) -> None:
     provider = _normalize_provider(getattr(args, "provider", "") or "")
     if not provider:
-        raise SystemExit("Provider is required. Example: `hermes auth status spotify`.")
+        raise SystemExit('Укажите провайдера, например korra auth status spotify.')
     status = auth_mod.get_auth_status(provider)
     if not status.get("logged_in"):
         reason = status.get("error")
         if reason:
-            print(f"{provider}: logged out ({reason})")
+            print(f'{provider}: вход не выполнен ({reason})')
         else:
-            print(f"{provider}: logged out")
+            print(f'{provider}: вход не выполнен')
         return
 
-    print(f"{provider}: logged in")
+    print(f'{provider}: вход выполнен')
     for key in ("auth_type", "client_id", "redirect_uri", "scope", "expires_at", "api_base_url"):
         value = status.get(key)
         if value:
@@ -639,13 +665,13 @@ def auth_spotify_command(args) -> None:
     if action == "logout":
         auth_logout_command(SimpleNamespace(provider="spotify"))
         return
-    raise SystemExit(f"Unknown Spotify auth action: {action}")
+    raise SystemExit(f'Неизвестное действие входа Spotify: {action}')
 
 
 def _interactive_auth() -> None:
     """Interactive credential pool management when `hermes auth` is called bare."""
     # Show current pool status first
-    print("Credential Pool Status")
+    print('Ключи и учётные записи провайдеров')
     print("=" * 50)
 
     auth_list_command(SimpleNamespace(provider=None))
@@ -656,17 +682,17 @@ def _interactive_auth() -> None:
         if has_aws_credentials():
             auth_source = resolve_aws_auth_env_var() or "unknown"
             region = resolve_bedrock_region()
-            print("bedrock (AWS SDK credential chain):")
-            print(f"  Auth: {auth_source}")
-            print(f"  Region: {region}")
+            print('Bedrock: стандартная цепочка входа AWS SDK')
+            print(f'  Вход: {auth_source}')
+            print(f'  Регион: {region}')
             try:
                 import boto3
                 sts = boto3.client("sts", region_name=region)
                 identity = sts.get_caller_identity()
                 arn = identity.get("Arn", "unknown")
-                print(f"  Identity: {arn}")
+                print(f'  Учётная запись: {arn}')
             except Exception:
-                print("  Identity: (could not resolve — boto3 STS call failed)")
+                print('  Учётная запись не определена: запрос boto3 STS не удался')
             print()
     except ImportError:
         pass  # boto3 or bedrock_adapter not available
@@ -694,12 +720,11 @@ def _interactive_auth() -> None:
                     str(_entra.get("scope") or "").strip()
                     or SCOPE_AI_AZURE_DEFAULT
                 )
-                print("azure-foundry (Microsoft Entra ID):")
-                print(f"  Endpoint: {_base_url or '(not configured)'}")
-                print(f"  Scope: {_scope}")
+                print('Azure Foundry: Microsoft Entra ID')
+                print(f"  Адрес: {_base_url or '(не настроено)'}")
+                print(f'  Права: {_scope}')
                 if not has_azure_identity_installed():
-                    print("  Status: ⚠ azure-identity not installed "
-                          "(pip install azure-identity)")
+                    print('  ⚠ azure-identity не установлен: pip install azure-identity')
                 else:
                     _entra_cfg = EntraIdentityConfig(
                         scope=_scope,
@@ -707,14 +732,14 @@ def _interactive_auth() -> None:
                     _info = describe_active_credential(config=_entra_cfg, timeout_seconds=10.0)
                     _env_sources = _info.get("env_sources") or []
                     if _info.get("ok"):
-                        _tag = ", ".join(_env_sources) if _env_sources else "default chain"
-                        print(f"  Status: ✓ token acquired ({_tag})")
+                        _tag = ", ".join(_env_sources) if _env_sources else 'стандартная цепочка входа'
+                        print(f'  ✓ Токен получен: {_tag}')
                     else:
-                        _err = _info.get("error") or "credential chain exhausted"
-                        print(f"  Status: ⚠ {_err}")
+                        _err = _info.get("error") or 'подходящих данных входа не найдено'
+                        print(f'  ⚠ Состояние: {_err}')
                         _hint = _info.get("hint")
                         if _hint:
-                            print(f"  Hint: {_hint}")
+                            print(f'  Подсказка: {_hint}')
                 print()
     except Exception:
         pass
@@ -722,18 +747,18 @@ def _interactive_auth() -> None:
 
     # Main menu
     choices = [
-        "Add a credential",
-        "Remove a credential",
-        "Reset cooldowns for a provider",
-        "Set rotation strategy for a provider",
-        "Exit",
+        'Добавить ключ или учётную запись',
+        'Удалить ключ или учётную запись',
+        'Снять временную блокировку ключей провайдера',
+        'Выбрать порядок использования ключей провайдера',
+        'Выход',
     ]
-    print("What would you like to do?")
+    print('Что вы хотите сделать?')
     for i, choice in enumerate(choices, 1):
         print(f"  {i}. {choice}")
 
     try:
-        raw = input("\nChoice: ").strip()
+        raw = input('Выберите: ').strip()
     except (EOFError, KeyboardInterrupt):
         return
 
@@ -750,16 +775,16 @@ def _interactive_auth() -> None:
         _interactive_strategy()
 
 
-def _pick_provider(prompt: str = "Provider") -> str:
+def _pick_provider(prompt: str = 'Провайдер') -> str:
     """Prompt for a provider name with auto-complete hints."""
     known = sorted(set(list(PROVIDER_REGISTRY.keys()) + ["openrouter"]))
     custom_names = _get_custom_provider_names()
     if custom_names:
         custom_display = [name for name, _key, _provider_key in custom_names]
-        print(f"\nKnown providers: {', '.join(known)}")
-        print(f"Custom endpoints: {', '.join(custom_display)}")
+        print(f"Известные провайдеры: {', '.join(known)}")
+        print(f"Свои серверы: {', '.join(custom_display)}")
     else:
-        print(f"\nKnown providers: {', '.join(known)}")
+        print(f"Известные провайдеры: {', '.join(known)}")
     try:
         raw = line_input(f"{prompt}: ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -768,18 +793,18 @@ def _pick_provider(prompt: str = "Provider") -> str:
 
 
 def _interactive_add() -> None:
-    provider = _pick_provider("Provider to add credential for")
+    provider = _pick_provider('Провайдер для добавления ключа или учётной записи')
     configured_provider = _configured_provider_entry(provider)
     if not _is_known_provider(provider, configured_provider):
-        raise SystemExit(f"Unknown provider: {provider}")
+        raise SystemExit(f'Неизвестный провайдер: {provider}')
 
     # For OAuth-capable providers, ask which type
     if provider in _OAUTH_CAPABLE_PROVIDERS:
-        print(f"\n{provider} supports both API keys and OAuth login.")
-        print("  1. API key (paste a key from the provider dashboard)")
-        print("  2. OAuth login (authenticate via browser)")
+        print(f'{provider} поддерживает ключи API и вход OAuth.')
+        print('  1. Ключ API: вставить ключ из кабинета провайдера')
+        print('  2. OAuth: войти через браузер')
         try:
-            type_choice = input("Type [1/2]: ").strip()
+            type_choice = input('Способ [1/2]: ').strip()
         except (EOFError, KeyboardInterrupt):
             return
         if type_choice == "2":
@@ -791,7 +816,7 @@ def _interactive_add() -> None:
 
     label = None
     try:
-        typed_label = line_input("Label / account name (optional): ").strip()
+        typed_label = line_input('Метка или имя учётной записи (необязательно): ').strip()
     except (EOFError, KeyboardInterrupt):
         return
     if typed_label:
@@ -805,19 +830,19 @@ def _interactive_add() -> None:
 
 
 def _interactive_remove() -> None:
-    provider = _pick_provider("Provider to remove credential from")
+    provider = _pick_provider('Провайдер для удаления ключа или учётной записи')
     pool = load_pool(provider)
     if not pool.has_credentials():
-        print(f"No credentials for {provider}.")
+        print(f'Нет данных входа для {provider}.')
         return
 
     # Show entries with indices
     for i, e in enumerate(pool.entries(), 1):
         exhausted = _format_exhausted_status(e)
-        print(f"  #{i}  {e.label:25s} {e.auth_type:10s} {e.source}{exhausted} [id:{e.id}]")
+        print(f"  #{i}  {e.label:25s} {_display_auth_type(e.auth_type):10s} {_display_source(e.source)}{exhausted} [id:{e.id}]")
 
     try:
-        raw = line_input("Remove #, id, or label (blank to cancel): ").strip()
+        raw = line_input('Для удаления укажите номер, ID или метку; пусто — отмена: ').strip()
     except (EOFError, KeyboardInterrupt):
         return
     if not raw:
@@ -827,30 +852,30 @@ def _interactive_remove() -> None:
 
 
 def _interactive_reset() -> None:
-    provider = _pick_provider("Provider to reset cooldowns for")
+    provider = _pick_provider('Провайдер для сброса временных блокировок')
 
     auth_reset_command(SimpleNamespace(provider=provider))
 
 
 def _interactive_strategy() -> None:
-    provider = _pick_provider("Provider to set strategy for")
+    provider = _pick_provider('Провайдер для настройки порядка ключей')
     current = get_pool_strategy(provider)
     strategies = [STRATEGY_FILL_FIRST, STRATEGY_ROUND_ROBIN, STRATEGY_LEAST_USED, STRATEGY_RANDOM]
 
-    print(f"\nCurrent strategy for {provider}: {current}")
+    print(f'Текущая стратегия {provider}: {current}')
     print()
     descriptions = {
-        STRATEGY_FILL_FIRST: "Use first key until exhausted, then next",
-        STRATEGY_ROUND_ROBIN: "Cycle through keys evenly",
-        STRATEGY_LEAST_USED: "Always pick the least-used key",
-        STRATEGY_RANDOM: "Random selection",
+        STRATEGY_FILL_FIRST: 'Использовать первый ключ до исчерпания лимита, затем следующий',
+        STRATEGY_ROUND_ROBIN: 'Равномерно чередовать ключи',
+        STRATEGY_LEAST_USED: 'Выбирать наименее использованный ключ',
+        STRATEGY_RANDOM: 'Случайный выбор',
     }
     for i, s in enumerate(strategies, 1):
         marker = " ←" if s == current else ""
         print(f"  {i}. {s:15s} — {descriptions.get(s, '')}{marker}")
 
     try:
-        raw = input("\nStrategy [1-4]: ").strip()
+        raw = input('Стратегия [1–4]: ').strip()
     except (EOFError, KeyboardInterrupt):
         return
     if not raw:
@@ -860,7 +885,7 @@ def _interactive_strategy() -> None:
         idx = int(raw) - 1
         strategy = strategies[idx]
     except (ValueError, IndexError):
-        print("Invalid choice.")
+        print('Неверный выбор.')
         return
 
     from korra_cli.config import load_config, save_config
@@ -871,7 +896,7 @@ def _interactive_strategy() -> None:
     pool_strategies[provider] = strategy
     cfg["credential_pool_strategies"] = pool_strategies
     save_config(cfg)
-    print(f"Set {provider} strategy to: {strategy}")
+    print(f'Стратегия {provider} изменена на {strategy}')
 
 
 def auth_command(args) -> None:

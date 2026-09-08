@@ -180,21 +180,17 @@ def _remove_env_source(provider: str, removed) -> RemovalResult:
 
     cleared = remove_env_value(env_var)
     if cleared:
-        result.cleaned.append(f"Cleared {env_var} from .env")
+        result.cleaned.append(f'{env_var} удалён из .env')
 
     if shell_exported:
         result.hints.extend([
-            f"Note: {env_var} is still set in your shell environment "
-            f"(not in ~/.hermes/.env).",
-            "  Unset it there (shell profile, systemd EnvironmentFile, "
-            "launchd plist, etc.) or it will keep being visible to Korra.",
-            f"  The pool entry is now suppressed — Korra will ignore "
-            f"{env_var} until you run `hermes auth add {provider}`.",
+            f'{env_var} всё ещё задан в среде терминала, а не в .env профиля.',
+            '  Удалите его из настроек оболочки, EnvironmentFile systemd или plist launchd, иначе Корра продолжит его видеть.',
+            f'  Запись отключена. Корра не будет использовать {env_var} до команды korra auth add {provider}.',
         ])
     else:
         result.hints.append(
-            f"Suppressed env:{env_var} — it will not be re-seeded even "
-            f"if the variable is re-exported later."
+            f'Источник env:{env_var} отключён и не добавится повторно, даже если переменная снова появится в среде.'
         )
     return result
 
@@ -206,9 +202,9 @@ def _remove_claude_code(provider: str, removed) -> RemovalResult:
     work.  We just suppress it so Hermes stops reading it.
     """
     return RemovalResult(hints=[
-        "Suppressed claude_code credential — it will not be re-seeded.",
-        "Note: Claude Code credentials still live in ~/.claude/.credentials.json",
-        "Run `hermes auth add anthropic` to re-enable if needed.",
+        'Данные входа Claude Code отключены и не будут загружены повторно.',
+        'Данные входа Claude Code сохраняются в ~/.claude/.credentials.json.',
+        'Для повторного подключения выполните korra auth add anthropic.',
     ])
 
 
@@ -221,9 +217,9 @@ def _remove_hermes_pkce(provider: str, removed) -> RemovalResult:
     if oauth_file.exists():
         try:
             oauth_file.unlink()
-            result.cleaned.append("Cleared Korra Anthropic OAuth credentials")
+            result.cleaned.append('Данные входа Anthropic OAuth удалены из Корры')
         except OSError as exc:
-            result.hints.append(f"Could not delete {oauth_file}: {exc}")
+            result.hints.append(f'Не удалось удалить {oauth_file}: {exc}')
     return result
 
 
@@ -256,7 +252,7 @@ def _remove_nous_device_code(provider: str, removed) -> RemovalResult:
     """
     result = RemovalResult()
     if _clear_auth_store_provider(provider):
-        result.cleaned.append(f"Cleared {provider} OAuth tokens from auth store")
+        result.cleaned.append(f'Токены OAuth {provider} удалены из хранилища входа')
     return result
 
 
@@ -269,7 +265,7 @@ def _remove_minimax_oauth(provider: str, removed) -> RemovalResult:
     """
     result = RemovalResult()
     if _clear_auth_store_provider(provider):
-        result.cleaned.append(f"Cleared {provider} OAuth tokens from auth store")
+        result.cleaned.append(f'Токены OAuth {provider} удалены из хранилища входа')
     return result
 
 
@@ -286,9 +282,9 @@ def _remove_xai_oauth_device_code(provider: str, removed) -> RemovalResult:
     """
     result = RemovalResult()
     if _clear_auth_store_provider(provider):
-        result.cleaned.append(f"Cleared {provider} OAuth tokens from auth store")
+        result.cleaned.append(f'Токены OAuth {provider} удалены из хранилища входа')
     result.hints.append(
-        "Run `hermes model` → xAI Grok OAuth (SuperGrok / Premium+) to re-authenticate if needed."
+        'Для повторного входа выполните korra model и выберите xAI Grok OAuth (SuperGrok / Premium+).'
     )
     return result
 
@@ -314,15 +310,15 @@ def _remove_codex_device_code(provider: str, removed) -> RemovalResult:
 
     result = RemovalResult()
     if _clear_auth_store_provider(provider):
-        result.cleaned.append(f"Cleared {provider} OAuth tokens from auth store")
+        result.cleaned.append(f'Токены OAuth {provider} удалены из хранилища входа')
     # Suppress the canonical re-seed source, not just whatever source the
     # removed entry had.  Otherwise `manual:device_code` removals wouldn't
     # block the `device_code` re-seed path.
     suppress_credential_source(provider, "device_code")
     result.hints.extend([
-        "Suppressed openai-codex device_code source — it will not be re-seeded.",
-        "Note: Codex CLI credentials still live in ~/.codex/auth.json",
-        "Run `hermes auth add openai-codex` to re-enable if needed.",
+        'Источник device_code для OpenAI Codex отключён и не будет загружен повторно.',
+        'Данные входа Codex CLI сохраняются в ~/.codex/auth.json.',
+        'Для повторного подключения выполните korra auth add openai-codex.',
     ])
     return result
 
@@ -334,9 +330,9 @@ def _remove_qwen_cli(provider: str, removed) -> RemovalResult:
     Qwen CLI install still reads from that file.
     """
     return RemovalResult(hints=[
-        "Suppressed qwen-cli credential — it will not be re-seeded.",
-        "Note: Qwen CLI credentials still live in ~/.qwen/oauth_creds.json",
-        "Run `hermes auth add qwen-oauth` to re-enable if needed.",
+        'Данные входа Qwen CLI отключены и не будут загружены повторно.',
+        'Данные входа Qwen CLI сохраняются в ~/.qwen/oauth_creds.json.',
+        'Для повторного подключения выполните korra auth add qwen-oauth.',
     ])
 
 
@@ -363,9 +359,9 @@ def _remove_copilot_gh(provider: str, removed) -> RemovalResult:
         suppress_credential_source(provider, f"env:{env_var}")
 
     return RemovalResult(hints=[
-        "Suppressed all copilot token sources (gh_cli + env vars) — they will not be re-seeded.",
-        "Note: Your gh CLI / shell environment is unchanged.",
-        "Run `hermes auth add copilot` to re-enable if needed.",
+        'Все источники токенов Copilot отключены: gh_cli и переменные среды. Они не будут загружены повторно.',
+        'Данные gh CLI и среды терминала сохранены без изменений.',
+        'Для повторного подключения выполните korra auth add copilot.',
     ])
 
 
@@ -377,9 +373,8 @@ def _remove_custom_config(provider: str, removed) -> RemovalResult:
     """
     source_label = removed.source
     return RemovalResult(hints=[
-        f"Suppressed {source_label} — it will not be re-seeded.",
-        "Note: The underlying value in config.yaml is unchanged.  Edit it "
-        "directly if you want to remove the credential from disk.",
+        f'Источник {source_label} отключён и не будет загружен повторно.',
+        'Значение в config.yaml сохранено. Чтобы удалить ключ с диска, измените файл вручную.',
     ])
 
 
@@ -402,7 +397,7 @@ def _register_all_sources() -> None:
         provider="*", source_id="env:",
         match_fn=lambda src: src.startswith("env:"),
         remove_fn=_remove_env_source,
-        description="Any env-seeded credential (XAI_API_KEY, DEEPSEEK_API_KEY, etc.)",
+        description='Данные входа из переменных среды: XAI_API_KEY, DEEPSEEK_API_KEY и другие',
     ))
     register(RemovalStep(
         provider="anthropic", source_id="claude_code",
@@ -444,7 +439,7 @@ def _register_all_sources() -> None:
         provider="*", source_id="config:",
         match_fn=lambda src: src.startswith("config:") or src == "model_config",
         remove_fn=_remove_custom_config,
-        description="Custom provider config.yaml api_key field",
+        description='Поле api_key своего провайдера в config.yaml',
     ))
 
 

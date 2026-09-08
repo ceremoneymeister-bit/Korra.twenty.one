@@ -291,7 +291,7 @@ def test_auth_list_includes_non_registry_configured_provider(
 
     auth_list_command(type("Args", (), {"provider": None})())
 
-    assert "private-groq (1 credentials):" in capsys.readouterr().out
+    assert "private-groq; записей входа: 1" in capsys.readouterr().out
 
 
 def test_interactive_auth_add_accepts_non_registry_configured_provider(
@@ -998,14 +998,14 @@ def test_credential_sources_registry_has_expected_steps():
     # assumes exist. When deliberately dropping one, update this list.
     required = {
         "gh auth token / COPILOT_GITHUB_TOKEN / GH_TOKEN",
-        "Any env-seeded credential (XAI_API_KEY, DEEPSEEK_API_KEY, etc.)",
+        "Данные входа из переменных среды: XAI_API_KEY, DEEPSEEK_API_KEY и другие",
         "~/.claude/.credentials.json",
         "~/.hermes/.anthropic_oauth.json",
         "auth.json providers.nous",
         "auth.json providers.openai-codex + ~/.codex/auth.json",
         "auth.json providers.minimax-oauth",
         "~/.qwen/oauth_creds.json",
-        "Custom provider config.yaml api_key field",
+        "Поле api_key своего провайдера в config.yaml",
     }
     missing = required - set(descriptions)
     assert not missing, f"Registry missing required steps: {missing}"
@@ -1026,7 +1026,7 @@ def test_credential_sources_find_step_copilot_before_generic_env(tmp_path, monke
     # Generic step still matches any other provider's env var
     step = find_removal_step("xai", "env:XAI_API_KEY")
     assert step is not None
-    assert "env-seeded" in step.description.lower()
+    assert "из переменных среды" in step.description.lower()
 
 
 def test_auth_remove_copilot_suppresses_all_variants(tmp_path, monkeypatch):
@@ -1108,5 +1108,5 @@ def test_auth_remove_env_seeded_dotenv_with_bom_no_shell_hint(tmp_path, monkeypa
     auth_remove_command(SimpleNamespace(provider="deepseek", target="1"))
 
     out = capsys.readouterr().out
-    assert "Cleared DEEPSEEK_API_KEY from .env" in out
-    assert "still set in your shell environment" not in out
+    assert "DEEPSEEK_API_KEY удалён из .env" in out
+    assert "всё ещё задан в среде терминала" not in out
