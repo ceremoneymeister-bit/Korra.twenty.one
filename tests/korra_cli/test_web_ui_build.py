@@ -278,7 +278,7 @@ class TestBuildWebUIRetryAndStaleFallback:
         # because cmd_dashboard passes fatal=True and is the primary caller.
         assert result is True
         out = capsys.readouterr().out
-        assert "serving stale dist as fallback" in out
+        assert 'Используется предыдущая сборка' in out
         assert "vite ENOMEM" in out  # combined output surfaced to user
 
 

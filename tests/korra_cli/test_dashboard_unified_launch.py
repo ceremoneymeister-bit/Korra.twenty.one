@@ -107,7 +107,7 @@ class TestInteractiveDashboardAuthSetup:
 
         assert exc.value.code == 1
         output = capsys.readouterr().out
-        assert "configured external dashboard.public_url" in output
+        assert 'внешний dashboard.public_url' in output
 
 
 

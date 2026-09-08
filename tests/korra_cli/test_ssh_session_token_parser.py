@@ -96,7 +96,7 @@ def test_token_under_profile_desktop_ssh_is_rejected(tmp_path, monkeypatch):
     token_path.chmod(0o600)
     override = set_hermes_home_override(profile_home)
     try:
-        with pytest.raises(SystemExit, match="desktop-ssh directory"):
+        with pytest.raises(SystemExit, match='внутри desktop-ssh'):
             _read_ssh_session_token_file(str(token_path))
     finally:
         reset_hermes_home_override(override)
@@ -115,7 +115,7 @@ def test_token_file_rejects_symlink(tmp_path, monkeypatch):
     token_path.symlink_to(target)
     override = set_hermes_home_override(home / ".hermes")
     try:
-        with pytest.raises(SystemExit, match="symlink|not accessible"):
+        with pytest.raises(SystemExit, match='символической ссылкой|недоступен'):
             _read_ssh_session_token_file(str(token_path))
         assert not token_path.exists()
         assert target.read_text() == "b" * 64
@@ -133,7 +133,7 @@ def test_token_file_rejects_parent_escape(tmp_path, monkeypatch):
     escaped.chmod(0o600)
     override = set_hermes_home_override(home / ".hermes")
     try:
-        with pytest.raises(SystemExit, match="invalid runtime path"):
+        with pytest.raises(SystemExit, match='неверный путь среды выполнения'):
             _read_ssh_session_token_file(str(token_root / ".." / escaped.name))
         assert escaped.exists()
     finally:

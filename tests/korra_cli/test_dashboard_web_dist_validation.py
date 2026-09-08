@@ -130,7 +130,7 @@ def test_skip_build_missing_dist_attempts_one_recovery_build(
     assert builds[0][0] == project_root / "web"
     assert len(started) == 1
     out = capsys.readouterr().out
-    assert "recovery build" in out.lower()
+    assert 'восстановить веб-сборку' in out.lower()
 
 
 

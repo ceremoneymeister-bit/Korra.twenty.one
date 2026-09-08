@@ -44,7 +44,7 @@ def test_computer_use_rejects_removed_browser_approve_command() -> None:
     result = _run("browser-approve", "--pid", "123")
 
     assert result.returncode == 2
-    assert "invalid choice: 'browser-approve'" in result.stderr
+    assert "неверный выбор: 'browser-approve'" in result.stderr
 
 
 def test_computer_use_status_returns_zero_for_compatible_driver(
@@ -79,7 +79,7 @@ def test_computer_use_status_returns_nonzero_when_driver_is_missing(
     monkeypatch.setattr(cua_backend, "resolve_cua_driver_cmd", lambda: None)
 
     assert _invoke(monkeypatch, "status") == 1
-    assert "cua-driver: not installed" in capsys.readouterr().out
+    assert 'cua-driver не установлен' in capsys.readouterr().out
 
 
 def test_computer_use_status_returns_nonzero_for_incompatible_standard_driver(
@@ -103,8 +103,8 @@ def test_computer_use_status_returns_nonzero_for_incompatible_standard_driver(
 
     assert _invoke(monkeypatch, "status") == 1
     output = capsys.readouterr().out
-    assert "Repair required" in output
-    assert "Run: hermes computer-use install" in output
+    assert 'Требуется восстановление' in output
+    assert 'Выполните: korra computer-use install' in output
 
 
 def test_computer_use_status_returns_nonzero_for_incompatible_custom_driver(
@@ -125,8 +125,8 @@ def test_computer_use_status_returns_nonzero_for_incompatible_custom_driver(
 
     assert _invoke(monkeypatch, "status") == 1
     output = capsys.readouterr().out
-    assert "custom binary from HERMES_CUA_DRIVER_CMD" in output
-    assert "unset the override" in output
+    assert 'своя программа из HERMES_CUA_DRIVER_CMD' in output
+    assert 'снимите эту настройку' in output
 
 
 @pytest.mark.parametrize(("ready", "expected"), [(True, 0), (False, 1)])

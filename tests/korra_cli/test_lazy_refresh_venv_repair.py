@@ -107,8 +107,8 @@ def test_refresh_repairs_venv_after_lazy_failure(tmp_path, monkeypatch, capsys):
 
     assert ok is True
     assert repair_calls == [["PyYAML"]]
-    assert "Venv repair succeeded" in out
-    assert "import probes" in out
+    assert 'Окружение Python восстановлено' in out
+    assert 'Найдены повреждённые пакеты окружения' in out
     assert "Backends keep their previously-installed version" not in out
 
 

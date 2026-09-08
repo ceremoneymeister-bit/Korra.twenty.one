@@ -497,9 +497,7 @@ def _require_tty(command_name: str) -> None:
     """
     if not sys.stdin.isatty():
         print(
-            f"Error: 'hermes {command_name}' requires an interactive terminal.\n"
-            f"It cannot be run through a pipe or non-interactive subprocess.\n"
-            f"Run it directly in your terminal instead.",
+            f'Команду korra {command_name} нужно запускать напрямую в интерактивном терминале. Запуск через конвейер или подпроцесс без ввода не поддерживается.',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -704,15 +702,15 @@ def _apply_profile_override() -> None:
         except FileNotFoundError as exc:
             hermes_home = _resolve_sudo_user_profile_env(profile_name)
             if not hermes_home:
-                print(f"Error: {exc}", file=sys.stderr)
+                print(f'Ошибка: {exc}', file=sys.stderr)
                 sys.exit(1)
         except ValueError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            print(f'Ошибка: {exc}', file=sys.stderr)
             sys.exit(1)
         except Exception as exc:
             # A bug in profiles.py must NEVER prevent hermes from starting
             print(
-                f"Warning: profile override failed ({exc}), using default",
+                f'Не удалось выбрать профиль: {exc}. Используется профиль по умолчанию.',
                 file=sys.stderr,
             )
             return
@@ -1216,8 +1214,7 @@ def _confirm_startup_expensive_model_override(args) -> None:
         if acknowledged:
             sys.stderr.write(combined_message(acknowledged) + "\n")
             sys.stderr.write(
-                "Proceeding in non-interactive mode because "
-                "security.allow_data_training_tiers_noninteractive is true.\n"
+                'Продолжаем без интерактивного ввода: включено security.allow_data_training_tiers_noninteractive.'
             )
             warnings = [
                 warning for warning in warnings if warning.kind != "data_policy"
@@ -1230,23 +1227,20 @@ def _confirm_startup_expensive_model_override(args) -> None:
         sys.stderr.write(message + "\n")
         if any(warning.kind == "data_policy" for warning in warnings):
             sys.stderr.write(
-                "To acknowledge data-training tiers for unattended runs, set "
-                "security.allow_data_training_tiers_noninteractive to true "
-                "in config.yaml.\n"
+                'Чтобы разрешить тарифы с использованием данных для обучения при запуске без ввода, задайте security.allow_data_training_tiers_noninteractive: true в config.yaml.'
             )
         sys.stderr.write(
-            "Refusing this startup model override in non-interactive mode. "
-            "Run interactively and confirm if you intend to use it.\n"
+            'Эту замену модели нужно подтвердить в интерактивном терминале. Без подтверждения запуск отменён.'
         )
         raise SystemExit(1)
 
     sys.stderr.write(message + "\n")
     try:
-        reply = input("Use this model for this invocation? [y/N] ").strip().lower()
+        reply = input('Использовать эту модель для текущего запуска? [y/N] ').strip().lower()
     except (EOFError, KeyboardInterrupt):
         reply = ""
     if reply not in {"y", "yes"}:
-        sys.stderr.write("Model override cancelled.\n")
+        sys.stderr.write('Замена модели отменена.')
         raise SystemExit(1)
 
 
@@ -1290,7 +1284,7 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
     Returns the selected session ID, or None if cancelled.
     """
     if not sessions:
-        print("No sessions found.")
+        print('Беседы не найдены.')
         return None
 
     _annotate_session_statuses(sessions, session_db)
@@ -1388,7 +1382,7 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
                 if max_y < 5 or max_x < 40:
                     # Terminal too small
                     try:
-                        stdscr.addstr(0, 0, "Terminal too small")
+                        stdscr.addstr(0, 0, 'Окно терминала слишком маленькое')
                     except curses.error:
                         pass
                     stdscr.refresh()
@@ -1397,14 +1391,13 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
 
                 # Header line
                 if search_text:
-                    header = f"  Browse sessions — filter: {search_text}█"
+                    header = f'  Беседы — поиск: {search_text}█'
                     header_attr = curses.A_BOLD
                     if curses.has_colors():
                         header_attr |= curses.color_pair(3)
                 else:
                     header = (
-                        "  Browse sessions — ↑↓ navigate  Enter select"
-                        "  Type to filter  Esc quit"
+                        '  Беседы: ↑↓ выбор, Enter открыть, ввод — поиск, Esc выход'
                     )
                     header_attr = curses.A_BOLD
                     if curses.has_colors():
@@ -1417,8 +1410,8 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
                 # Column header line
                 name_width = max(20, max_x - _FIXED_COLS)
                 col_header = (
-                    f"   {'Title / Preview':<{name_width}}  {'Stat':<5}  "
-                    f"{'Msgs':>5}  {'Active':<10}  {'Src':<5} {'ID'}"
+                    f"   {'Название / начало':<{name_width}}  {'Стат.':<5}  "
+                    f"{'Сообщ':>5}  {'Активность':<10}  {'Источник':<5} {'ID'}"
                 )
                 try:
                     dim_attr = (
@@ -1435,7 +1428,7 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
                 # Clamp cursor and scroll
                 if not filtered:
                     try:
-                        msg = "  No sessions match the filter."
+                        msg = '  Подходящих бесед нет.'
                         stdscr.addnstr(3, 0, msg, max_x - 1, curses.A_DIM)
                     except curses.error:
                         pass
@@ -1492,7 +1485,7 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
                     )
                     if len(label) > 40:
                         label = label[:37] + "..."
-                    footer = f"  Delete session '{label}'? [y/N]"
+                    footer = f'  Удалить беседу «{label}»? [y/N]'
                     footer_attr = curses.A_BOLD
                     if curses.has_colors():
                         footer_attr |= curses.color_pair(5)
@@ -1501,13 +1494,13 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
                     flash = ""
                 else:
                     if filtered:
-                        footer = f"  {cursor + 1}/{len(filtered)} sessions"
+                        footer = f'  Беседы: {cursor + 1}/{len(filtered)}'
                         if len(filtered) < len(sessions):
-                            footer += f" (filtered from {len(sessions)})"
+                            footer += f' (отобрано из {len(sessions)})'
                     else:
-                        footer = f"  0/{len(sessions)} sessions"
+                        footer = f'  Беседы: 0/{len(sessions)}'
                     if session_db is not None and not search_text:
-                        footer += "   d delete"
+                        footer += '   d — удалить'
                 try:
                     stdscr.addnstr(footer_y, 0, footer, max_x - 1, footer_attr)
                 except curses.error:
@@ -1530,11 +1523,11 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
                                 if search_text
                                 else list(sessions)
                             )
-                            flash = "Deleted."
+                            flash = 'Удалено.'
                             if not sessions:
                                 return
                         else:
-                            flash = "Delete failed."
+                            flash = 'Не удалось удалить.'
                     continue
 
                 if key in {curses.KEY_UP,}:
@@ -1592,7 +1585,7 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
 
     # Fallback: numbered list (Windows without curses, etc.). Shows the same
     # status/message-count columns but has no delete support.
-    print("\n  Browse sessions  (enter number to resume, q to cancel)\n")
+    print('  Выбор беседы: введите номер для продолжения или q для отмены')
     for i, s in enumerate(sessions):
         title = (s.get("title") or "").strip()
         preview = (s.get("preview") or "").strip()
@@ -1611,15 +1604,15 @@ def _session_browse_picker(sessions: list, session_db=None) -> Optional[str]:
 
     while True:
         try:
-            val = input(f"\n  Select [1-{len(sessions)}]: ").strip()
+            val = input(f'  Выберите [1–{len(sessions)}]: ').strip()
             if not val or val.lower() in {"q", "quit", "exit"}:
                 return None
             idx = int(val) - 1
             if 0 <= idx < len(sessions):
                 return sessions[idx]["id"]
-            print(f"  Invalid selection. Enter 1-{len(sessions)} or q to cancel.")
+            print(f'  Неверный выбор. Введите число от 1 до {len(sessions)} или q для отмены.')
         except ValueError:
-            print("  Invalid input. Enter a number or q to cancel.")
+            print('  Неверный ввод. Введите число или q для отмены.')
         except (KeyboardInterrupt, EOFError):
             print()
             return None
@@ -1692,8 +1685,7 @@ def _probe_container(cmd: list, backend: str, via_sudo: bool = False):
     except subprocess.TimeoutExpired:
         label = f"sudo {backend}" if via_sudo else backend
         print(
-            f"Error: timed out waiting for {label} to respond.\n"
-            f"The {backend} daemon may be unresponsive or starting up.",
+            f'Не дождались ответа {label}. Возможно, служба {backend} не отвечает или ещё запускается.',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1720,7 +1712,7 @@ def _exec_in_container(container_info: dict, cli_args: list):
     runtime = shutil.which(backend)
     if not runtime:
         print(
-            f"Error: {backend} not found on PATH. Cannot route to container.",
+            f'Ошибка: {backend} не найден в PATH. Не удалось подключиться к контейнеру.',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1743,28 +1735,13 @@ def _exec_in_container(container_info: dict, cli_args: list):
             )
             if probe2.returncode != 0:
                 print(
-                    f"Error: container '{container_name}' not found via {backend}.\n"
-                    f"\n"
-                    f"The container is likely running as root. Your user cannot see it\n"
-                    f"because {backend} uses per-user namespaces. Grant passwordless\n"
-                    f"sudo for {backend} — the -n (non-interactive) flag is required\n"
-                    f"because a password prompt would hang or break piped commands.\n"
-                    f"\n"
-                    f"On NixOS:\n"
-                    f"\n"
-                    f"  security.sudo.extraRules = [{{\n"
-                    f'    users = [ "{os.getenv("USER", "your-user")}" ];\n'
-                    f'    commands = [{{ command = "{runtime}"; options = [ "NOPASSWD" ]; }}];\n'
-                    f"  }}];\n"
-                    f"\n"
-                    f"Or run: sudo hermes {' '.join(cli_args)}",
+                    f"""Контейнер «{container_name}» не найден через {backend}. Возможно, он работает от root: {backend} разделяет контейнеры по пользователям. Разрешите sudo без пароля для {backend}; нужен флаг -n, иначе запрос пароля заблокирует конвейер. В NixOS задайте security.sudo.extraRules для пользователя «{os.getenv('USER', 'your-user')}» и команды «{runtime}» с options = [ "NOPASSWD" ]. Или запустите: sudo korra {' '.join(cli_args)}""",
                     file=sys.stderr,
                 )
                 sys.exit(1)
         else:
             print(
-                f"Error: container '{container_name}' not found via {backend}.\n"
-                f"The container may be running under root. Try: sudo hermes {' '.join(cli_args)}",
+                f"Контейнер «{container_name}» не найден через {backend}. Возможно, он работает от root. Попробуйте: sudo korra {' '.join(cli_args)}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -1909,16 +1886,14 @@ def _resolve_continue_arg(args, *, use_tui: bool) -> None:
                     args.resume = new_sid
                 else:
                     print(
-                        f"No session found matching '{continue_val}' and "
-                        "a new titled session could not be created.",
+                        f'Беседа «{continue_val}» не найдена, создать новую с этим названием не удалось.',
                         file=sys.stderr,
                     )
                     sys.exit(1)
             else:
-                print(f"No session found matching '{continue_val}'.", file=sys.stderr)
+                print(f'Беседа «{continue_val}» не найдена.', file=sys.stderr)
                 print(
-                    "Use 'hermes sessions list' to see available sessions, or "
-                    "pass --create-if-missing to start a new session with that title.",
+                    'Посмотрите korra sessions list или добавьте --create-if-missing, чтобы создать беседу с этим названием.',
                     file=sys.stderr,
                 )
                 sys.exit(1)
@@ -1933,8 +1908,7 @@ def _resolve_continue_arg(args, *, use_tui: bool) -> None:
                 # with a bare -c there is nothing to create, so surface the
                 # no-op to programmatic callers instead of silently ignoring it.
                 print(
-                    "--create-if-missing requires a session name: "
-                    "`-c <name> --create-if-missing`",
+                    'Для --create-if-missing нужно название беседы: -c <name> --create-if-missing',
                     file=sys.stderr,
                 )
             try:
@@ -1955,7 +1929,7 @@ def _resolve_continue_arg(args, *, use_tui: bool) -> None:
                     args.resume = last_id
                 else:
                     kind = "TUI" if use_tui else "CLI"
-                    print(f"No previous {kind} session found to continue.")
+                    print(f'Предыдущая беседа {kind} для продолжения не найдена.')
                     sys.exit(1)
 
 
@@ -2014,19 +1988,17 @@ def _print_tui_exit_summary(
             db.close()
 
     print()
-    print("Resume this session with:")
-    print(f"  hermes --tui --resume {target}")
+    print('Продолжить эту беседу:')
+    print(f'  korra --tui --resume {target}')
     if title:
-        print(f'  hermes --tui -c "{title}"')
+        print(f'  korra --tui -c "{title}"')
     print()
-    print(f"Session:        {target}")
+    print(f'Беседа:         {target}')
     if title:
-        print(f"Title:          {title}")
-    print(f"Messages:       {message_count}")
+        print(f'Название:       {title}')
+    print(f'Сообщений:      {message_count}')
     print(
-        "Tokens:         "
-        f"{total_tokens} (in {input_tokens}, out {output_tokens}, "
-        f"cache {cache_read_tokens + cache_write_tokens}, reasoning {reasoning_tokens})"
+        f'Токенов:        {total_tokens} (вход: {input_tokens}, выход: {output_tokens}, кеш: {cache_read_tokens + cache_write_tokens}, рассуждения: {reasoning_tokens})'
     )
 
 
@@ -2527,18 +2499,11 @@ def _ensure_tui_workspace(tui_dir: Path) -> None:
 
     if _restore_tui_workspace(tui_dir):
         if not korra_env("KORRA_QUIET"):
-            print(f"Restored missing TUI workspace: {tui_dir}")
+            print(f'Отсутствовавшие файлы терминального интерфейса восстановлены: {tui_dir}')
         return
 
     print(
-        "Error: the TUI workspace is missing from this Korra checkout.\n"
-        f"Expected directory: {tui_dir}\n"
-        "This usually means `hermes update` left tracked ui-tui files deleted.\n"
-        "Recovery:\n"
-        "  1. From the Korra checkout, run `git restore -- ui-tui`\n"
-        "  2. Run `npm install --silent --no-fund --no-audit --progress=false`\n"
-        "  3. Retry `hermes --tui`\n"
-        "If the checkout is still inconsistent, run `hermes update --force`.",
+        f'Ошибка: в этой копии Корры отсутствуют файлы терминального интерфейса. Ожидаемая папка: {tui_dir}. Возможно, korra update оставил удалённые файлы ui-tui. Восстановление: из папки Корры выполните git restore -- ui-tui, затем npm install --silent --no-fund --no-audit --progress=false и повторите korra --tui. Если установка всё ещё повреждена: korra update --force.',
         file=sys.stderr,
     )
     sys.exit(1)
@@ -2577,7 +2542,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
             except Exception:
                 pass
         if not path:
-            print(f"{bin} not found — install Node.js to use the TUI.")
+            print(f'{bin} не найден. Для терминального интерфейса установите Node.js.')
             sys.exit(1)
         return path
 
@@ -2585,9 +2550,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
     ext_dir = korra_env("KORRA_TUI_DIR")
     if tui_dev and ext_dir:
         print(
-            f"Error: --dev is incompatible with HERMES_TUI_DIR={ext_dir}\n"
-            f"The prebuilt TUI has no source code to hot-reload.\n"
-            f"Unset HERMES_TUI_DIR (e.g. `unset HERMES_TUI_DIR`) to use --dev from a checkout.",
+            f'Ошибка: --dev несовместим с HERMES_TUI_DIR={ext_dir}. Готовая сборка не содержит исходников для обновления на ходу. Снимите HERMES_TUI_DIR командой unset HERMES_TUI_DIR, чтобы использовать --dev из репозитория.',
             file=sys.stderr,
         )
         sys.exit(1)
@@ -2639,7 +2602,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
     ):
         npm = _node_bin("npm")
         if not korra_env("KORRA_QUIET"):
-            print("Installing TUI dependencies…")
+            print('Устанавливаем зависимости терминального интерфейса…')
         npm_cwd = _workspace_root(tui_dir)
         # --workspace ui-tui avoids resolving apps/desktop (Electron + node-pty).
         # See #38772.
@@ -2703,7 +2666,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
         if result.returncode != 0:
             combined = f"{result.stdout or ''}\n{result.stderr or ''}".strip()
             preview = "\n".join(combined.splitlines()[-30:])
-            print("npm install failed.")
+            print('Не удалось выполнить npm install.')
             if preview:
                 print(preview)
             sys.exit(1)
@@ -2729,7 +2692,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
         if result.returncode != 0:
             combined = f"{result.stdout or ''}{result.stderr or ''}".strip()
             preview = "\n".join(combined.splitlines()[-30:])
-            print("TUI dev prebuild failed.")
+            print('Не удалось подготовить сборку терминального интерфейса для разработки.')
             if preview:
                 print(preview)
             sys.exit(1)
@@ -2760,7 +2723,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
         if result.returncode != 0:
             combined = f"{result.stdout or ''}{result.stderr or ''}".strip()
             preview = "\n".join(combined.splitlines()[-30:])
-            print("TUI build failed.")
+            print('Не удалось собрать терминальный интерфейс.')
             if preview:
                 print(preview)
             sys.exit(1)
@@ -2964,7 +2927,7 @@ def _launch_tui(
                 ).start()
             wt_info = _setup_worktree()
         except Exception as exc:
-            print(f"✗ Failed to create TUI worktree: {exc}", file=sys.stderr)
+            print(f'✗ Не удалось создать рабочую копию Git для терминального интерфейса: {exc}', file=sys.stderr)
             wt_info = None
         if not wt_info:
             sys.exit(1)
@@ -3070,7 +3033,7 @@ def _launch_tui(
         from korra_cli.relaunch import relaunch
 
         print()
-        print("⚕ Launching update...")
+        print('⚕ Запускаем обновление…')
         print()
         relaunch(["update"], preserve_inherited=False)
 
@@ -3183,12 +3146,12 @@ def cmd_chat(args):
             os.path.expanduser(_msys_to_windows_path(in_dir))
         )
         if not os.path.isdir(_target_dir):
-            print(f"Error: --in directory not found: {in_dir}")
+            print(f'Ошибка: папка --in не найдена: {in_dir}')
             sys.exit(1)
         try:
             os.chdir(_target_dir)
         except OSError as e:
-            print(f"Error: cannot enter --in directory {in_dir}: {e}")
+            print(f'Ошибка: не удалось перейти в папку --in {in_dir}: {e}')
             sys.exit(1)
         args.no_restore_cwd = True
 
@@ -3206,8 +3169,8 @@ def cmd_chat(args):
             args.resume = _last_id
         else:
             kind = "TUI" if use_tui else "CLI"
-            print(f"No previous {kind} session found to resume.")
-            print("Use 'hermes sessions list' to see available sessions.")
+            print(f'Предыдущая беседа {kind} не найдена.')
+            print('Посмотреть доступные беседы: korra sessions list.')
             sys.exit(1)
 
     # Resolve --continue into --resume with the latest session or by name
@@ -3232,10 +3195,10 @@ def cmd_chat(args):
         try:
             _imported_id = import_foreign_session(_picked.source, _picked.path)
         except ValueError as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
-        print(f"✓ Imported as {_imported_id} — resuming it now.")
-        print(f"  (later: hermes --resume {_imported_id})")
+        print(f'✓ Беседа импортирована как {_imported_id}. Продолжаем её.')
+        print(f'  Позже можно открыть так: korra --resume {_imported_id}')
         args.resume = _imported_id
 
     # Resolve --resume by title if it's not a direct session ID
@@ -3263,10 +3226,10 @@ def cmd_chat(args):
             _resume_db = SessionDB()
             _saved_cwd = ((_resume_db.get_session(args.resume) or {}).get("cwd") or "").strip()
             if _saved_cwd and not os.path.isdir(_saved_cwd):
-                print(f"⚠ session's recorded dir is gone ({_saved_cwd}); staying in {os.getcwd()}")
+                print(f'⚠ Сохранённая папка беседы удалена: {_saved_cwd}. Остаёмся в {os.getcwd()}.')
             elif _saved_cwd and os.path.realpath(_saved_cwd) != os.path.realpath(os.getcwd()):
                 os.chdir(_saved_cwd)
-                print(f"↪ restored workspace dir: {_saved_cwd}")
+                print(f'↪ Рабочая папка восстановлена: {_saved_cwd}')
         except Exception:
             pass  # never let cwd-restore break a resume
         finally:
@@ -3289,13 +3252,12 @@ def cmd_chat(args):
         _retired_xai_refs = find_retired_xai_refs(_load_config_for_xai_check())
         if _retired_xai_refs:
             sys.stderr.write(
-                f"\033[33m⚠ xAI retires {len(_retired_xai_refs)} model(s) "
-                f"in your config on {RETIREMENT_DATE}:\033[0m\n"
+                f'\x1b[33m⚠ xAI снимает с поддержки модели из ваших настроек ({len(_retired_xai_refs)}) с {RETIREMENT_DATE}:\x1b[0m'
             )
             for _ref in _retired_xai_refs:
                 sys.stderr.write(f"  \033[33m⚠\033[0m {format_issue(_ref)}\n")
-            sys.stderr.write(f"  \033[2mMigration guide: {MIGRATION_GUIDE_URL}\033[0m\n")
-            sys.stderr.write("  \033[2mRun 'hermes doctor' for details.\033[0m\n\n")
+            sys.stderr.write(f'  \x1b[2mИнструкция по переходу: {MIGRATION_GUIDE_URL}\x1b[0m')
+            sys.stderr.write('  Подробнее: korra doctor.')
     except Exception:
         pass
 
@@ -3303,10 +3265,10 @@ def cmd_chat(args):
     if not _has_any_provider_configured():
         print()
         print(
-            "It looks like Korra isn't configured yet -- no API keys or providers found."
+            'Корра ещё не настроена: ключи API и провайдеры не найдены.'
         )
         print()
-        print("  Run:  hermes setup")
+        print('  Выполните: korra setup')
         print()
 
         from korra_cli.setup import (
@@ -3316,19 +3278,19 @@ def cmd_chat(args):
 
         if not is_interactive_stdin():
             print_noninteractive_setup_guidance(
-                "No interactive TTY detected for the first-run setup prompt."
+                'Интерактивный терминал для первой настройки не найден.'
             )
             sys.exit(1)
 
         try:
-            reply = input("Run setup now? [Y/n] ").strip().lower()
+            reply = input('Открыть настройку сейчас? [Y/n] ').strip().lower()
         except (EOFError, KeyboardInterrupt):
             reply = "n"
         if reply in {"", "y", "yes"}:
             cmd_setup(args)
             return
         print()
-        print("You can run 'hermes setup' at any time to configure.")
+        print('Вы можете настроить Корру в любое время командой korra setup.')
         sys.exit(1)
 
     # Start update check in background (runs while other init happens).
@@ -3448,7 +3410,7 @@ def cmd_chat(args):
         if args.query:
             # argparse's mutually-exclusive group catches the normal CLI path;
             # this guards programmatic callers that fill the namespace directly.
-            print("Error: -q/--query and --query-file are mutually exclusive", file=sys.stderr)
+            print('Ошибка: -q/--query и --query-file нельзя использовать вместе', file=sys.stderr)
             sys.exit(2)
         try:
             if _qfile == "-":
@@ -3457,10 +3419,10 @@ def cmd_chat(args):
                 with open(_qfile, "r", encoding="utf-8", errors="replace") as _fh:
                     args.query = _fh.read()
         except OSError as _e:
-            print(f"Error: cannot read --query-file {_qfile}: {_e}", file=sys.stderr)
+            print(f'Ошибка чтения --query-file {_qfile}: {_e}', file=sys.stderr)
             sys.exit(2)
         if not (args.query or "").strip():
-            print(f"Error: --query-file {_qfile} is empty", file=sys.stderr)
+            print(f'Ошибка: файл --query-file {_qfile} пуст', file=sys.stderr)
             sys.exit(2)
 
     # Build kwargs from args
@@ -3493,7 +3455,7 @@ def cmd_chat(args):
 
         cli_main(**kwargs)
     except ValueError as e:
-        print(f"Error: {e}")
+        print(f'Ошибка: {e}')
         sys.exit(1)
     except ImportError as e:
         # Mixed-version installs (new cli.py, older korra_cli.config) crash
@@ -3535,58 +3497,58 @@ def cmd_whatsapp(args):
     from korra_constants import find_node_executable, with_hermes_node_path
 
     print()
-    print("⚕ WhatsApp Setup")
+    print('⚕ Настройка WhatsApp')
     print("=" * 50)
 
     # ── Step 1: Choose mode ──────────────────────────────────────────────
     current_mode = get_env_value("WHATSAPP_MODE") or ""
     if not current_mode:
         print()
-        print("How will you use WhatsApp with Korra?")
+        print('Как вы будете использовать WhatsApp с Коррой?')
         print()
-        print("  1. Separate bot number (recommended)")
-        print("     People message the bot's number directly — cleanest experience.")
+        print('  1. Отдельный номер бота — рекомендуется')
+        print('     Пользователи пишут прямо на номер бота.')
         print(
-            "     Requires a second phone number with WhatsApp installed on a device."
+            '     Нужен второй номер с WhatsApp на устройстве.'
         )
         print()
-        print("  2. Personal number (self-chat)")
-        print("     You message yourself to talk to the agent.")
-        print("     Quick to set up, but the UX is less intuitive.")
+        print('  2. Личный номер — чат с собой')
+        print('     Для общения с агентом вы пишете себе.')
+        print('     Настроить быстрее, но пользоваться менее удобно.')
         print()
         try:
-            choice = input("  Choose [1/2]: ").strip()
+            choice = input('  Выберите [1/2]: ').strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nSetup cancelled.")
+            print('Настройка отменена.')
             return
 
         if choice == "1":
             save_env_value("WHATSAPP_MODE", "bot")
             wa_mode = "bot"
-            print("  ✓ Mode: separate bot number")
+            print('  ✓ Режим: отдельный номер бота')
             print()
             print("  ┌─────────────────────────────────────────────────┐")
-            print("  │  Getting a second number for the bot:           │")
+            print('  │  Как получить второй номер для бота:           │')
             print("  │                                                 │")
-            print("  │  Easiest: Install WhatsApp Business (free app)  │")
-            print("  │  on your phone with a second number:            │")
-            print("  │    • Dual-SIM: use your 2nd SIM slot            │")
-            print("  │    • Google Voice: free US number (voice.google) │")
-            print("  │    • Prepaid SIM: $3-10, verify once            │")
+            print('  │  Установите бесплатный WhatsApp Business       │')
+            print('  │  на телефон со вторым номером:                 │')
+            print('  │    • Dual-SIM: используйте вторую SIM-карту     │')
+            print('  │    • Google Voice: номер США (voice.google)     │')
+            print('  │    • Предоплатная SIM-карта: проверка один раз  │')
             print("  │                                                 │")
-            print("  │  WhatsApp Business runs alongside your personal │")
-            print("  │  WhatsApp — no second phone needed.             │")
+            print('  │  WhatsApp Business работает рядом с личным     │')
+            print('  │  WhatsApp. Второй телефон не нужен.             │')
             print("  └─────────────────────────────────────────────────┘")
         else:
             save_env_value("WHATSAPP_MODE", "self-chat")
             wa_mode = "self-chat"
-            print("  ✓ Mode: personal number (self-chat)")
+            print('  ✓ Режим: личный номер, чат с собой')
     else:
         wa_mode = current_mode
         mode_label = (
-            "separate bot number" if wa_mode == "bot" else "personal number (self-chat)"
+            'отдельный номер бота' if wa_mode == "bot" else 'личный номер, чат с собой'
         )
-        print(f"\n✓ Mode: {mode_label}")
+        print(f'✓ Режим: {mode_label}')
 
     # ── Step 2: Mode is selected, will enable WhatsApp only after pairing ──
     # We intentionally don't write WHATSAPP_ENABLED=true here.  If the user
@@ -3599,40 +3561,40 @@ def cmd_whatsapp(args):
     # successful pairing) stay enabled — we just don't write it pre-emptively.
     print()
     if (get_env_value("WHATSAPP_ENABLED") or "").lower() == "true":
-        print("✓ WhatsApp is already enabled")
+        print('✓ WhatsApp уже включён')
 
     # ── Step 3: Allowed users ────────────────────────────────────────────
     current_users = get_env_value("WHATSAPP_ALLOWED_USERS") or ""
     if current_users:
-        print(f"✓ Allowed users: {current_users}")
+        print(f'✓ Пользователи с доступом: {current_users}')
         try:
-            response = input("\n  Update allowed users? [y/N] ").strip()
+            response = input('  Изменить список пользователей с доступом? [y/N] ').strip()
         except (EOFError, KeyboardInterrupt):
             response = "n"
         if response.lower() in {"y", "yes"}:
             if wa_mode == "bot":
                 phone = line_input(
-                    "  Phone numbers that can message the bot (comma-separated): "
+                    '  Номера телефонов с доступом к боту, через запятую: '
                 ).strip()
             else:
-                phone = line_input("  Your phone number (e.g. 15551234567): ").strip()
+                phone = line_input('  Ваш номер телефона, например 15551234567: ').strip()
             if phone:
                 save_env_value("WHATSAPP_ALLOWED_USERS", phone.replace(" ", ""))
-                print(f"  ✓ Updated to: {phone}")
+                print(f'  ✓ Обновлено: {phone}')
     else:
         print()
         if wa_mode == "bot":
-            print("  Who should be allowed to message the bot?")
+            print('  Кому разрешить писать боту?')
             phone = line_input(
-                "  Phone numbers (comma-separated, or * for anyone): "
+                '  Номера телефонов через запятую или * для доступа всем: '
             ).strip()
         else:
-            phone = line_input("  Your phone number (e.g. 15551234567): ").strip()
+            phone = line_input('  Ваш номер телефона, например 15551234567: ').strip()
         if phone:
             save_env_value("WHATSAPP_ALLOWED_USERS", phone.replace(" ", ""))
-            print(f"  ✓ Allowed users set: {phone}")
+            print(f'  ✓ Доступ разрешён: {phone}')
         else:
-            print("  ⚠ No allowlist — the agent will respond to ALL incoming messages")
+            print('  ⚠ Список доступа пуст: агент ответит на все входящие сообщения')
 
     # ── Step 4: Install bridge dependencies ──────────────────────────────
     from gateway.platforms.whatsapp_common import resolve_whatsapp_bridge_dir
@@ -3640,16 +3602,16 @@ def cmd_whatsapp(args):
     bridge_script = bridge_dir / "bridge.js"
 
     if not bridge_script.exists():
-        print(f"\n✗ Bridge script not found at {bridge_script}")
+        print(f'✗ Скрипт моста не найден: {bridge_script}')
         return
 
     if not (bridge_dir / "node_modules").exists():
         print(
-            "\n→ Installing WhatsApp bridge dependencies (this can take a few minutes)..."
+            '→ Устанавливаем зависимости моста WhatsApp. Это может занять несколько минут…'
         )
         npm = find_node_executable("npm")
         if not npm:
-            print("  ✗ npm not found on PATH — install Node.js first")
+            print('  ✗ npm не найден в PATH. Сначала установите Node.js.')
             return
         try:
             result = subprocess.run(
@@ -3663,34 +3625,34 @@ def cmd_whatsapp(args):
                 env=with_hermes_node_path(),
             )
         except KeyboardInterrupt:
-            print("\n  ✗ Install cancelled")
+            print('  ✗ Установка отменена')
             return
         if result.returncode != 0:
             err = (result.stderr or "").strip()
-            preview = "\n".join(err.splitlines()[-30:]) if err else "(no output)"
-            print("  ✗ npm install failed:")
+            preview = "\n".join(err.splitlines()[-30:]) if err else '(нет вывода)'
+            print('  ✗ Не удалось выполнить npm install:')
             print(preview)
             return
-        print("  ✓ Dependencies installed")
+        print('  ✓ Зависимости установлены')
     else:
-        print("✓ Bridge dependencies already installed")
+        print('✓ Зависимости моста уже установлены')
 
     # ── Step 5: Check for existing session ───────────────────────────────
     session_dir = get_hermes_home() / "whatsapp" / "session"
     session_dir.mkdir(parents=True, exist_ok=True)
 
     if (session_dir / "creds.json").exists():
-        print("✓ Existing WhatsApp session found")
+        print('✓ Найдено существующее подключение WhatsApp')
         try:
             response = input(
-                "\n  Re-pair? This will clear the existing session. [y/N] "
+                '  Подключить заново? Текущее подключение будет удалено. [y/N] '
             ).strip()
         except (EOFError, KeyboardInterrupt):
             response = "n"
         if response.lower() in {"y", "yes"}:
             shutil.rmtree(session_dir, ignore_errors=True)
             session_dir.mkdir(parents=True, exist_ok=True)
-            print("  ✓ Session cleared")
+            print('  ✓ Подключение сброшено')
         else:
             # Existing pairing — ensure WHATSAPP_ENABLED reflects that.
             # (Older installs may have lost the env var; covers re-runs
@@ -3698,20 +3660,20 @@ def cmd_whatsapp(args):
             # was never set or got removed.)
             if (get_env_value("WHATSAPP_ENABLED") or "").lower() != "true":
                 save_env_value("WHATSAPP_ENABLED", "true")
-            print("\n✓ WhatsApp is configured and paired!")
-            print("  Start the gateway with: hermes gateway")
+            print('✓ WhatsApp настроен и подключён!')
+            print('  Запустить шлюз: korra gateway')
             return
 
     # ── Step 6: QR code pairing ──────────────────────────────────────────
     print()
     print("─" * 50)
     if wa_mode == "bot":
-        print("📱 Open WhatsApp (or WhatsApp Business) on the")
-        print("   phone with the BOT's number, then scan:")
+        print('📱 Откройте WhatsApp или WhatsApp Business')
+        print('   на телефоне с номером бота и отсканируйте код:')
     else:
-        print("📱 Open WhatsApp on your phone, then scan:")
+        print('📱 Откройте WhatsApp на телефоне и отсканируйте код:')
     print()
-    print("   Settings → Linked Devices → Link a Device")
+    print('   Настройки → Связанные устройства → Привязка устройства')
     print("─" * 50)
     print()
 
@@ -3738,27 +3700,27 @@ def cmd_whatsapp(args):
         # and `hermes gateway` skips it cleanly instead of paying a 30s
         # bridge timeout + queueing the platform for indefinite retries.
         save_env_value("WHATSAPP_ENABLED", "true")
-        print("✓ WhatsApp paired successfully!")
+        print('✓ WhatsApp подключён!')
         print()
         if wa_mode == "bot":
-            print("  Next steps:")
-            print("    1. Start the gateway:  hermes gateway")
-            print("    2. Send a message to the bot's WhatsApp number")
-            print("    3. The agent will reply automatically")
+            print('  Дальше:')
+            print('    1. Запустите шлюз: korra gateway')
+            print('    2. Напишите на номер бота в WhatsApp')
+            print('    3. Агент ответит автоматически')
             print()
-            print("  Tip: Agent responses are prefixed with '⚕ Korra'")
+            print('  Ответы агента начинаются с «⚕ Korra»')
         else:
-            print("  Next steps:")
-            print("    1. Start the gateway:  hermes gateway")
-            print("    2. Open WhatsApp → Message Yourself")
-            print("    3. Type a message — the agent will reply")
+            print('  Дальше:')
+            print('    1. Запустите шлюз: korra gateway')
+            print('    2. Откройте WhatsApp → Сообщение себе')
+            print('    3. Напишите сообщение — агент ответит')
             print()
-            print("  Tip: Agent responses are prefixed with '⚕ Korra'")
-            print("  so you can tell them apart from your own messages.")
+            print('  Ответы агента начинаются с «⚕ Korra»')
+            print('  Так вы отличите их от своих сообщений.')
         print()
-        print("  Or install as a service: hermes gateway install")
+        print('  Или установите службу: korra gateway install')
     else:
-        print("⚠ Pairing may not have completed. Run 'hermes whatsapp' to try again.")
+        print('⚠ Подключение могло не завершиться. Повторите: korra whatsapp.')
 
 
 def cmd_whatsapp_cloud(args):
@@ -3794,7 +3756,7 @@ def cmd_model(args):
         try:
             from korra_cli.models import clear_provider_models_cache
             clear_provider_models_cache()
-            print("  Cleared model picker cache.")
+            print('  Кеш выбора моделей очищен.')
         except Exception:
             pass
     from korra_cli.setup import run_setup_action_with_navigation
@@ -3802,7 +3764,7 @@ def cmd_model(args):
     run_setup_action_with_navigation(
         "Model & Provider",
         lambda: select_provider_and_model(args=args),
-        cancelled_message="No change.",
+        cancelled_message='Без изменений.',
     )
 
 
@@ -3849,7 +3811,7 @@ def select_provider_and_model(args=None):
     current_model = config.get("model")
     if isinstance(current_model, dict):
         current_model = current_model.get("default", "")
-    current_model = current_model or "(not set)"
+    current_model = current_model or '(не задано)'
 
     # Read effective provider the same way the CLI does at startup:
     # config.yaml model.provider > env var > auto-detect
@@ -4030,18 +3992,16 @@ def select_provider_and_model(args=None):
                 active = _canonical_named_custom_key(active)
         else:
             warning = (
-                f"Unknown provider '{effective_provider}'. Check 'hermes model' for "
-                "available providers, or run 'hermes doctor' to diagnose config "
-                "issues."
+                f'Неизвестный провайдер «{effective_provider}». Посмотрите доступных через korra model или проверьте настройки через korra doctor.'
             )
-            print(f"Warning: {warning} Falling back to auto provider detection.")
+            print(f'Внимание: {warning} Используется автоматический выбор провайдера.')
     if not active:
         try:
             active = resolve_provider("auto")
         except AuthError as exc:
             if effective_provider == "auto":
                 warning = format_auth_error(exc)
-                print(f"Warning: {warning} Falling back to auto provider detection.")
+                print(f'Внимание: {warning} Используется автоматический выбор провайдера.')
             active = None  # no provider yet; default to first in list
 
     # Detect custom endpoint
@@ -4063,8 +4023,8 @@ def select_provider_and_model(args=None):
         active_label = provider_labels.get(active, active) if active else "none"
 
     print()
-    print(f"  Current model:    {current_model}")
-    print(f"  Active provider:  {active_label}")
+    print(f'  Текущая модель:   {current_model}')
+    print(f'  Провайдер:        {active_label}')
     print()
 
     # Step 1: Provider selection.
@@ -4124,7 +4084,7 @@ def select_provider_and_model(args=None):
             is_active = bool(active) and slug == active
             members = []
         if is_active:
-            ordered.append((key, f"{label}  ← currently active", members))
+            ordered.append((key, f'{label}  ← выбран сейчас', members))
             default_idx = len(ordered) - 1
         else:
             ordered.append((key, label, members))
@@ -4137,26 +4097,26 @@ def select_provider_and_model(args=None):
         model_hint = f" — {saved_model}" if saved_model else ""
         label = f"{name} ({short_url}){model_hint}"
         if active and key == active:
-            ordered.append((key, f"{label}  ← currently active", []))
+            ordered.append((key, f'{label}  ← выбран сейчас', []))
             default_idx = len(ordered) - 1
         else:
             ordered.append((key, label, []))
 
-    ordered.append(("custom", "Custom endpoint (enter URL manually)", []))
+    ordered.append(("custom", 'Свой сервер: ввести адрес вручную', []))
     _has_saved_custom_list = isinstance(config.get("custom_providers"), list) and bool(
         config.get("custom_providers")
     )
     if _has_saved_custom_list:
-        ordered.append(("remove-custom", "Remove a saved custom provider", []))
-    ordered.append(("aux-config", "Configure auxiliary models...", []))
-    ordered.append(("cancel", "Leave unchanged", []))
+        ordered.append(("remove-custom", 'Удалить сохранённого провайдера', []))
+    ordered.append(("aux-config", 'Настроить вспомогательные модели…', []))
+    ordered.append(("cancel", 'Оставить без изменений', []))
 
     provider_idx = _prompt_provider_choice(
         [label for _, label, _ in ordered],
         default=default_idx,
     )
     if provider_idx is None or ordered[provider_idx][0] == "cancel":
-        print("No change.")
+        print('Без изменений.')
         return
 
     selected_key = ordered[provider_idx][0]
@@ -4176,10 +4136,10 @@ def select_provider_and_model(args=None):
         member_idx = _prompt_provider_choice(
             member_labels,
             default=member_default,
-            title=f"Select {group_label} provider:",
+            title=f'Выберите провайдера {group_label}:',
         )
         if member_idx is None:
-            print("No change.")
+            print('Без изменений.')
             return
         selected_provider = selected_members[member_idx]
     else:
@@ -4219,8 +4179,7 @@ def select_provider_and_model(args=None):
         provider_info = _named_custom_provider_map(load_config()).get(selected_provider)
         if provider_info is None:
             print(
-                "Warning: the selected saved custom provider is no longer available. "
-                "It may have been removed from config.yaml. No change."
+                'Выбранный сохранённый провайдер больше недоступен. Возможно, он удалён из config.yaml. Настройки не изменены.'
             )
             return
         _model_flow_named_custom(config, provider_info)
@@ -4300,9 +4259,9 @@ def _clear_stale_openai_base_url():
     if stale_url:
         save_env_value("OPENAI_BASE_URL", "")
         print(
-            f"Cleared stale OPENAI_BASE_URL from .env (was: {stale_url[:40]}...)"
+            f'Устаревший OPENAI_BASE_URL удалён из .env; прежнее значение: {stale_url[:40]}…'
             if len(stale_url) > 40
-            else f"Cleared stale OPENAI_BASE_URL from .env (was: {stale_url})"
+            else f'Устаревший OPENAI_BASE_URL удалён из .env; прежнее значение: {stale_url}'
         )
 
 
@@ -4321,19 +4280,19 @@ def _clear_stale_openai_base_url():
 
 # (task_key, display_name, short_description)
 _AUX_TASKS: list[tuple[str, str, str]] = [
-    ("vision", "Vision", "image/screenshot analysis"),
-    ("compression", "Compression", "context summarization"),
-    ("approval", "Approval", "smart command approval"),
-    ("mcp", "MCP", "MCP tool reasoning"),
-    ("title_generation", "Title generation", "session titles"),
-    ("review", "Review", "/review reviewer subagent"),
-    ("memory_query_rewrite", "Memory query rewrite", "memory retrieval queries"),
-    ("tts_audio_tags", "TTS audio tags", "Gemini TTS tag insertion"),
-    ("skills_hub", "Skills hub", "skills search/install"),
-    ("triage_specifier", "Triage specifier", "kanban spec fleshing"),
-    ("kanban_decomposer", "Kanban decomposer", "task decomposition"),
-    ("profile_describer", "Profile describer", "auto profile descriptions"),
-    ("curator", "Curator", "skill-usage review pass"),
+    ("vision", 'Изображения', 'анализ изображений и снимков экрана'),
+    ("compression", 'Сжатие', 'краткое изложение контекста'),
+    ("approval", 'Подтверждения', 'умное подтверждение команд'),
+    ("mcp", "MCP", 'рассуждения инструментов MCP'),
+    ("title_generation", 'Названия бесед', 'создание названий бесед'),
+    ("review", 'Проверка', 'независимый агент проверки /review'),
+    ("memory_query_rewrite", 'Поиск в памяти', 'уточнение поисковых запросов к памяти'),
+    ("tts_audio_tags", 'Голосовые пометки', 'пометки для синтеза речи Gemini'),
+    ("skills_hub", 'Каталог навыков', 'поиск и установка навыков'),
+    ("triage_specifier", 'Уточнение задач', 'подготовка заданий на доске'),
+    ("kanban_decomposer", 'Разделение задач', 'разделение на подзадачи'),
+    ("profile_describer", 'Описания профилей', 'автоматическое описание профилей'),
+    ("curator", 'Обслуживание навыков', 'проверка использования навыков'),
 ]
 
 # Special non-auxiliary task surfaced in the same picker: subagent delegation.
@@ -4344,8 +4303,8 @@ _AUX_TASKS: list[tuple[str, str, str]] = [
 # provider/model/credentials" and is stored as empty strings — never persist
 # the literal "auto", or it would be resolved as a provider name.
 _DELEGATION_TASK_KEY = "delegation"
-_DELEGATION_TASK_NAME = "Delegation"
-_DELEGATION_TASK_DESC = "subagent model (delegate_task)"
+_DELEGATION_TASK_NAME = 'Делегирование'
+_DELEGATION_TASK_DESC = 'модель подчинённых агентов (delegate_task)'
 
 
 def _all_aux_tasks() -> list[tuple[str, str, str]]:
@@ -4378,7 +4337,7 @@ def _format_aux_current(task_cfg: dict) -> str:
     model = str(task_cfg.get("model") or "").strip()
     if base_url:
         short = base_url.replace("https://", "").replace("http://", "").rstrip("/")
-        return f"custom ({short})" + (f" · {model}" if model else "")
+        return f'свой сервер ({short})' + (f" · {model}" if model else "")
     if provider == "auto":
         return "auto" + (f" · {model}" if model else "")
     if model:
@@ -4521,13 +4480,13 @@ def _aux_config_menu() -> None:
         aux = cfg.get("auxiliary", {}) if isinstance(cfg.get("auxiliary"), dict) else {}
 
         print()
-        print("  Auxiliary models — side-task routing")
+        print('  Вспомогательные модели для отдельных задач')
         print()
-        print("  Side tasks (vision, compression, web extraction, etc.) default")
-        print('  to your main chat model.  "auto" means "use my main model" —')
-        print("  Korra only falls back to a lightweight backend (OpenRouter,")
-        print("  Nous Portal) if the main model is unavailable.  Override a")
-        print("  task below if you want it pinned to a specific provider/model.")
+        print('  Анализ изображений, сжатие, чтение страниц и другие задачи')
+        print('  по умолчанию используют основную модель. auto означает')
+        print('  «использовать основную модель». Если она недоступна,')
+        print('  Корра пробует облегчённого провайдера OpenRouter или Nous.')
+        print('  Ниже можно закрепить провайдера и модель за конкретной задачей.')
         print()
 
         # Build the task menu with current settings inline
@@ -4550,8 +4509,8 @@ def _aux_config_menu() -> None:
                 f"{name.ljust(name_col)}{('(' + desc + ')').ljust(desc_col)}{current}"
             )
             entries.append((task_key, label))
-        entries.append(("__reset__", "Reset all to auto"))
-        entries.append(("__back__", "Back"))
+        entries.append(("__reset__", 'Вернуть автоматический выбор для всех'))
+        entries.append(("__back__", 'Назад'))
 
         idx = _prompt_provider_choice(
             [label for _, label in entries],
@@ -4565,9 +4524,9 @@ def _aux_config_menu() -> None:
         if key == "__reset__":
             n = _reset_aux_to_auto()
             if n:
-                print(f"Reset {n} auxiliary task(s) to auto.")
+                print(f'Автоматический выбор восстановлен для вспомогательных задач: {n}.')
             else:
-                print("All auxiliary tasks were already set to auto.")
+                print('Все вспомогательные задачи уже настроены на автоматический выбор.')
             print()
             continue
         # Otherwise configure the specific task
@@ -4608,7 +4567,7 @@ def _aux_select_for_task(task: str) -> None:
             current_base_url=current_base_url,
         )
     except Exception as exc:
-        print(f"Could not detect authenticated providers: {exc}")
+        print(f'Не удалось определить провайдеров с выполненным входом: {exc}')
         providers = []
 
     entries: list[tuple[str, str, list[str]]] = []  # (slug, label, models)
@@ -4617,7 +4576,7 @@ def _aux_select_for_task(task: str) -> None:
         "  ← current" if current_provider == "auto" and not current_base_url else ""
     )
     auto_label = (
-        "auto (inherit main agent)"
+        'авто: модель основного агента'
         if task == _DELEGATION_TASK_KEY
         else "auto (recommended)"
     )
@@ -4633,11 +4592,11 @@ def _aux_select_for_task(task: str) -> None:
 
     # Custom endpoint (raw base_url)
     custom_marker = "  ← current" if current_base_url else ""
-    entries.append(("__custom__", f"Custom endpoint (direct URL){custom_marker}", []))
-    entries.append(("__back__", "Back", []))
+    entries.append(("__custom__", f'Свой сервер по прямому адресу{custom_marker}', []))
+    entries.append(("__back__", 'Назад', []))
 
     print()
-    print(f"  Configure {display_name} — current: {_format_aux_current(task_cfg)}")
+    print(f'  Настройка {display_name}; сейчас: {_format_aux_current(task_cfg)}')
     print()
 
     idx = _prompt_provider_choice([label for _, label, _ in entries], default=0)
@@ -4650,7 +4609,7 @@ def _aux_select_for_task(task: str) -> None:
 
     if slug == "__auto__":
         _save_aux_choice(task, provider="auto", model="", base_url="", api_key="")
-        print(f"{display_name}: reset to auto.")
+        print(f'{display_name}: восстановлен автоматический выбор.')
         return
 
     if slug == "__custom__":
@@ -4686,10 +4645,10 @@ def _aux_flow_provider_model(
     # model name" and cancel.  When there's no curated list (rare), fall back
     # to a raw input prompt.
     if not model_list:
-        print(f"No curated model list for {provider_slug}.")
-        print("Enter a model slug manually (blank = use provider default):")
+        print(f'Для {provider_slug} нет готового списка моделей.')
+        print('Введите имя модели вручную; пустая строка — выбор провайдера по умолчанию:')
         try:
-            val = line_input("Model: ").strip()
+            val = line_input('Модель: ').strip()
         except (KeyboardInterrupt, EOFError):
             print()
             return
@@ -4702,7 +4661,7 @@ def _aux_flow_provider_model(
             confirm_provider=provider_slug,
         )
         if selected is None:
-            print("No change.")
+            print('Без изменений.')
             return
 
     _save_aux_choice(
@@ -4711,7 +4670,7 @@ def _aux_flow_provider_model(
     if selected:
         print(f"{display_name}: {provider_slug} · {selected}")
     else:
-        print(f"{display_name}: {provider_slug} (provider default model)")
+        print(f'{display_name}: {provider_slug}; модель провайдера по умолчанию')
 
 
 def _aux_flow_custom_endpoint(task: str, task_cfg: dict) -> None:
@@ -4723,12 +4682,12 @@ def _aux_flow_custom_endpoint(task: str, task_cfg: dict) -> None:
     current_model = str(task_cfg.get("model") or "").strip()
 
     print()
-    print(f"  Custom endpoint for {display_name}")
-    print("  Provide an OpenAI-compatible base URL (e.g. http://localhost:11434/v1)")
+    print(f'  Свой адрес сервера для {display_name}')
+    print('  Укажите адрес API, совместимого с OpenAI, например http://localhost:11434/v1')
     print()
     try:
         url_prompt = (
-            f"Base URL [{current_base_url}]: " if current_base_url else "Base URL: "
+            f'Адрес API [{current_base_url}]: ' if current_base_url else 'Адрес API: '
         )
         url = line_input(url_prompt).strip()
     except (KeyboardInterrupt, EOFError):
@@ -4736,13 +4695,13 @@ def _aux_flow_custom_endpoint(task: str, task_cfg: dict) -> None:
         return
     url = url or current_base_url
     if not url:
-        print("No URL provided. No change.")
+        print('Адрес не указан. Без изменений.')
         return
     try:
         model_prompt = (
-            f"Model slug (optional) [{current_model}]: "
+            f'Имя модели (необязательно) [{current_model}]: '
             if current_model
-            else "Model slug (optional): "
+            else 'Имя модели (необязательно): '
         )
         model = line_input(model_prompt).strip()
     except (KeyboardInterrupt, EOFError):
@@ -4751,7 +4710,7 @@ def _aux_flow_custom_endpoint(task: str, task_cfg: dict) -> None:
     model = model or current_model
     try:
         api_key = masked_secret_prompt(
-            "API key (optional, blank = use OPENAI_API_KEY): "
+            'Ключ API (необязательно; пусто — использовать OPENAI_API_KEY): '
         ).strip()
     except (KeyboardInterrupt, EOFError):
         print()
@@ -4765,10 +4724,10 @@ def _aux_flow_custom_endpoint(task: str, task_cfg: dict) -> None:
         api_key=api_key,
     )
     short_url = url.replace("https://", "").replace("http://", "").rstrip("/")
-    print(f"{display_name}: custom ({short_url})" + (f" · {model}" if model else ""))
+    print(f'{display_name}: свой сервер ({short_url})' + (f" · {model}" if model else ""))
 
 
-def _prompt_provider_choice(choices, *, default=0, title="Select provider:"):
+def _prompt_provider_choice(choices, *, default=0, title='Выберите провайдера:'):
     """Show provider selection menu with curses arrow-key navigation.
 
     Falls back to a numbered list when curses is unavailable (e.g. piped
@@ -4793,15 +4752,15 @@ def _prompt_provider_choice(choices, *, default=0, title="Select provider:"):
     print()
     while True:
         try:
-            val = input(f"Choice [1-{len(choices)}] ({default + 1}): ").strip()
+            val = input(f'Выберите [1–{len(choices)}] ({default + 1}): ').strip()
             if not val:
                 return default
             idx = int(val) - 1
             if 0 <= idx < len(choices):
                 return idx
-            print(f"Please enter 1-{len(choices)}")
+            print(f'Введите число от 1 до {len(choices)}')
         except ValueError:
-            print("Please enter a number")
+            print('Введите число')
         except (KeyboardInterrupt, EOFError):
             print()
             return None
@@ -4835,44 +4794,44 @@ def _prompt_custom_api_mode_selection(base_url: str, current_api_mode: str = "")
     mode_options = [
         (
             "",
-            "Auto-detect",
-            "Use Korra URL heuristics; best for standard OpenAI-compatible endpoints.",
+            'Определить автоматически',
+            'Определить по адресу; подходит для обычных серверов с API OpenAI.',
         ),
         (
             "chat_completions",
             "Chat Completions",
-            "Use /chat/completions for standard OpenAI-compatible servers.",
+            'Использовать /chat/completions для серверов с API OpenAI.',
         ),
         (
             "codex_responses",
             "Responses / Codex",
-            "Use /responses for Codex-compatible tool-calling backends.",
+            'Использовать /responses для серверов с инструментами Codex.',
         ),
         (
             "anthropic_messages",
             "Anthropic Messages",
-            "Use /v1/messages for Anthropic-compatible endpoints.",
+            'Использовать /v1/messages для серверов с API Anthropic.',
         ),
     ]
 
     print()
-    print("Select API compatibility mode:")
+    print('Выберите режим совместимости API:')
     for idx, (value, label, description) in enumerate(mode_options, 1):
         markers = []
         if value == detected_mode:
-            markers.append("detected")
+            markers.append('определён автоматически')
         if value == default_mode:
-            markers.append("current")
+            markers.append('текущий')
         suffix = f" [{' / '.join(markers)}]" if markers else ""
         print(f"  {idx}. {label}{suffix}")
         print(f"     {description}")
 
     try:
         raw = input(
-            "Choice [1-4, Enter to keep current/detected]: "
+            'Выберите [1–4]; Enter — сохранить текущий или определённый режим: '
         ).strip().lower()
     except (KeyboardInterrupt, EOFError):
-        print("\nCancelled.")
+        print('Отменено.')
         raise
 
     if not raw:
@@ -4887,7 +4846,7 @@ def _prompt_custom_api_mode_selection(base_url: str, current_api_mode: str = "")
     if raw in {"4", "anthropic", "anthropic_messages", "messages"}:
         return "anthropic_messages"
 
-    print(f"Invalid API mode choice: {raw}. Falling back to auto-detect.")
+    print(f'Неверный режим API: {raw}. Используется автоопределение.')
     return None
 
 
@@ -4904,7 +4863,7 @@ def _auto_provider_name(base_url: str) -> str:
     clean = re.sub(r"/v1/?$", "", clean)
     name = clean.split("/")[0]
     if "localhost" in name or "127.0.0.1" in name:
-        name = f"Local ({name})"
+        name = f'Локальный сервер ({name})'
     elif "runpod" in name.lower():
         name = f"RunPod ({name})"
     else:
@@ -5004,7 +4963,7 @@ def _save_custom_provider(
     providers.append(entry)
     cfg["custom_providers"] = providers
     save_config(cfg)
-    print(f'  💾 Saved to custom providers as "{name}" (edit in config.yaml)')
+    print(f'  💾 Сохранено в своих провайдерах как «{name}»; можно изменить в config.yaml')
 
 
 
@@ -5016,10 +4975,10 @@ def _remove_custom_provider(config):
     cfg = load_config()
     providers = cfg.get("custom_providers") or []
     if not isinstance(providers, list) or not providers:
-        print("No custom providers configured.")
+        print('Свои провайдеры не настроены.')
         return
 
-    print("Remove a custom provider:\n")
+    print('Удаление своего провайдера:')
 
     choices = []
     for entry in providers:
@@ -5036,7 +4995,7 @@ def _remove_custom_provider(config):
         from korra_cli.curses_ui import curses_radiolist
 
         idx = curses_radiolist(
-            "Select provider to remove:",
+            'Выберите провайдера для удаления:',
             list(choices),
             selected=0,
             cancel_returns=-1,
@@ -5049,13 +5008,13 @@ def _remove_custom_provider(config):
             print(f"  {i}. {c}")
         print()
         try:
-            val = input(f"Choice [1-{len(choices)}]: ").strip()
+            val = input(f'Выберите [1–{len(choices)}]: ').strip()
             idx = int(val) - 1 if val else None
         except (ValueError, KeyboardInterrupt, EOFError):
             idx = None
 
     if idx is None or idx >= len(providers):
-        print("No change.")
+        print('Без изменений.')
         return
 
     removed = providers.pop(idx)
@@ -5064,7 +5023,7 @@ def _remove_custom_provider(config):
     removed_name = (
         removed.get("name", "unnamed") if isinstance(removed, dict) else str(removed)
     )
-    print(f'✅ Removed "{removed_name}" from custom providers.')
+    print(f'✅ Провайдер «{removed_name}» удалён из ваших настроек.')
 
 
 
@@ -5307,11 +5266,11 @@ def _prompt_reasoning_effort_selection(efforts, current_effort=""):
 
     def _label(effort):
         if effort == current_effort:
-            return f"{effort}  ← currently in use"
+            return f'{effort}  ← используется сейчас'
         return effort
 
-    disable_label = "Disable reasoning"
-    skip_label = "Skip (keep current)"
+    disable_label = 'Отключить рассуждения'
+    skip_label = 'Пропустить и сохранить текущее'
 
     if current_effort == "none":
         default_idx = len(ordered)
@@ -5329,7 +5288,7 @@ def _prompt_reasoning_effort_selection(efforts, current_effort=""):
         choices.append(disable_label)
         choices.append(skip_label)
         idx = curses_radiolist(
-            "Select reasoning effort:",
+            'Выберите глубину рассуждений:',
             choices,
             selected=default_idx,
             cancel_returns=-1,
@@ -5345,7 +5304,7 @@ def _prompt_reasoning_effort_selection(efforts, current_effort=""):
     except (ImportError, NotImplementedError, OSError, subprocess.SubprocessError):
         pass
 
-    print("Select reasoning effort:")
+    print('Выберите глубину рассуждений:')
     for i, effort in enumerate(ordered, 1):
         print(f"  {i}. {_label(effort)}")
     n = len(ordered)
@@ -5355,7 +5314,7 @@ def _prompt_reasoning_effort_selection(efforts, current_effort=""):
 
     while True:
         try:
-            choice = input(f"Choice [1-{n + 2}] (default: keep current): ").strip()
+            choice = input(f'Выберите [1–{n + 2}]; по умолчанию сохранить текущее: ').strip()
             if not choice:
                 return None
             idx = int(choice)
@@ -5365,9 +5324,9 @@ def _prompt_reasoning_effort_selection(efforts, current_effort=""):
                 return "none"
             if idx == n + 2:
                 return None
-            print(f"Please enter 1-{n + 2}")
+            print(f'Введите число от 1 до {n + 2}')
         except ValueError:
-            print("Please enter a number")
+            print('Введите число')
         except (KeyboardInterrupt, EOFError):
             return None
 
@@ -5400,9 +5359,9 @@ def _prompt_api_key(
 
     def _prompt_new_key(*, allow_lmstudio_default: bool) -> str:
         if provider_id == "lmstudio" and allow_lmstudio_default:
-            prompt = f"{key_env} (Enter for no-auth default {LMSTUDIO_NOAUTH_PLACEHOLDER!r}): "
+            prompt = f'{key_env} (Enter — без авторизации, значение {LMSTUDIO_NOAUTH_PLACEHOLDER!r}): '
         else:
-            prompt = f"{key_env} (or Enter to cancel): "
+            prompt = f'{key_env} (Enter — отмена): '
         try:
             entered = masked_secret_prompt(prompt).strip()
         except (KeyboardInterrupt, EOFError):
@@ -5414,15 +5373,15 @@ def _prompt_api_key(
 
     # First-time entry ────────────────────────────────────────────────────
     if not existing_key:
-        print(f"No {pconfig.name} API key configured.")
+        print(f'Ключ API {pconfig.name} не настроен.')
         if not key_env:
             return "", True
         new_key = _prompt_new_key(allow_lmstudio_default=True)
         if not new_key:
-            print("Cancelled.")
+            print('Отменено.')
             return "", True
         save_env_value(key_env, new_key)
-        print("API key saved.")
+        print('Ключ API сохранён.')
         print()
         return new_key, False
 
@@ -5430,7 +5389,7 @@ def _prompt_api_key(
     from korra_cli.env_loader import format_secret_source_suffix
 
     source_suffix = format_secret_source_suffix(key_env) if key_env else ""
-    print(f"  {pconfig.name} API key: {existing_key[:8]}... ✓{source_suffix}")
+    print(f'  Ключ API {pconfig.name}: {existing_key[:8]}… ✓{source_suffix}')
     if not key_env:
         # Nothing we can rewrite; just acknowledge and move on.
         print()
@@ -5450,18 +5409,18 @@ def _prompt_api_key(
     if choice.startswith("r"):
         new_key = _prompt_new_key(allow_lmstudio_default=False)
         if not new_key:
-            print("  No change.")
+            print('  Без изменений.')
             print()
             return existing_key, False
         save_env_value(key_env, new_key)
-        print("  API key updated.")
+        print('  Ключ API обновлён.')
         print()
         return new_key, False
 
     if choice.startswith("c") and not pool_backed:
         save_env_value(key_env, "")
         print(
-            f"  API key cleared.  Re-run `hermes setup` to configure {pconfig.name} again."
+            f'  Ключ API удалён. Повторно настройте {pconfig.name} командой korra setup.'
         )
         return "", True
 
@@ -5522,75 +5481,75 @@ def _run_anthropic_oauth_flow(save_env_value):
             is_claude_code_token_valid(creds) or bool(creds.get("refreshToken"))
         ):
             use_anthropic_claude_code_credentials(save_fn=save_env_value)
-            print("  ✓ Claude Code credentials linked.")
+            print('  ✓ Данные входа Claude Code подключены.')
             from korra_constants import display_hermes_home as _dhh_fn
 
             print(
-                f"    Korra will use Claude's credential store directly instead of copying a setup-token into {_dhh_fn()}/.env."
+                f'    Корра будет использовать хранилище Claude напрямую, без копирования setup-token в {_dhh_fn()}/.env.'
             )
             return True
         return False
 
     try:
         print()
-        print("  Running 'claude setup-token' — follow the prompts below.")
-        print("  A browser window will open for you to authorize access.")
+        print('  Запускаем claude setup-token. Следуйте подсказкам ниже.')
+        print('  Откроется браузер для разрешения доступа.')
         print()
         token = run_oauth_setup_token()
         if token:
             if _activate_claude_code_credentials_if_available():
                 return True
             save_anthropic_oauth_token(token, save_fn=save_env_value)
-            print("  ✓ OAuth credentials saved.")
+            print('  ✓ Данные входа OAuth сохранены.')
             return True
 
         # Subprocess completed but no token auto-detected — ask user to paste
         print()
-        print("  If the setup-token was displayed above, paste it here:")
+        print('  Если токен setup-token показан выше, вставьте его сюда:')
         print()
         from korra_cli.secret_prompt import masked_secret_prompt
 
         try:
             manual_token = masked_secret_prompt(
-                "  Paste setup-token (or Enter to cancel): "
+                '  Вставьте setup-token; Enter — отмена: '
             ).strip()
         except (KeyboardInterrupt, EOFError):
             print()
             return False
         if manual_token:
             save_anthropic_oauth_token(manual_token, save_fn=save_env_value)
-            print("  ✓ Setup-token saved.")
+            print('  ✓ Setup-token сохранён.')
             return True
 
-        print("  ⚠ Could not detect saved credentials.")
+        print('  ⚠ Не удалось найти сохранённые данные входа.')
         return False
 
     except FileNotFoundError:
         # Claude CLI not installed — guide user through manual setup
         print()
-        print("  The 'claude' CLI is required for OAuth login.")
+        print('  Для входа через OAuth нужна команда claude.')
         print()
-        print("  To install and authenticate:")
+        print('  Установка и вход:')
         print()
-        print("    1. Install Claude Code:  npm install -g @anthropic-ai/claude-code")
-        print("    2. Run:                  claude setup-token")
-        print("    3. Follow the browser prompts to authorize")
-        print("    4. Re-run:               hermes model")
+        print('    1. Установите Claude Code: npm install -g @anthropic-ai/claude-code')
+        print('    2. Выполните: claude setup-token')
+        print('    3. Подтвердите доступ в браузере')
+        print('    4. Повторите: korra model')
         print()
-        print("  Or paste an existing setup-token now (sk-ant-oat-...):")
+        print('  Или вставьте готовый setup-token сейчас: sk-ant-oat-...')
         print()
         from korra_cli.secret_prompt import masked_secret_prompt
 
         try:
-            token = masked_secret_prompt("  Setup-token (or Enter to cancel): ").strip()
+            token = masked_secret_prompt('  Setup-token; Enter — отмена: ').strip()
         except (KeyboardInterrupt, EOFError):
             print()
             return False
         if token:
             save_anthropic_oauth_token(token, save_fn=save_env_value)
-            print("  ✓ Setup-token saved.")
+            print('  ✓ Setup-token сохранён.')
             return True
-        print("  Cancelled — install Claude Code and try again.")
+        print('  Отменено. Установите Claude Code и повторите попытку.')
         return False
 
 
@@ -5639,20 +5598,7 @@ def cmd_sync(args):
 
     if sub in {None, ""}:
         print(
-            "usage: hermes sync "
-            "<status|pull|push|now|enable|disable|device|propose>\n"
-            "\n"
-            "Your skills, across your devices:\n"
-            "  status            Show what is synced, and from where\n"
-            "  pull              Pull your synced skills\n"
-            "  push              Push your opted-in skills\n"
-            "  now               Reconcile now: pull then push\n"
-            "  enable <skill>    Include a skill in your sync\n"
-            "  disable <skill>   Exclude a skill from your sync\n"
-            "  device [--name N] Show or set this device's label\n"
-            "\n"
-            "Shared with your team:\n"
-            "  propose <skill>   Share a skill with your organisation",
+            'Использование: korra sync <status|pull|push|now|enable|disable|device|propose>. Между вашими устройствами: status — состояние; pull — получить навыки; push — отправить выбранные навыки; now — получить и отправить; enable <skill> — включить синхронизацию; disable <skill> — исключить; device [--name N] — имя устройства. Для команды: propose <skill> — предложить навык организации.',
             file=sys.stderr,
         )
         return 1
@@ -5665,12 +5611,11 @@ def cmd_sync(args):
             try:
                 stored = ssc.set_device_name(name)
             except ValueError as e:
-                print(f"error: {e}", file=sys.stderr)
+                print(f'Ошибка: {e}', file=sys.stderr)
                 return 1
-            print(f"device label set to '{stored}'.")
+            print(f'Имя устройства изменено на «{stored}».')
             print(
-                "New commits from this device will use this label; existing "
-                "commits keep their previous one.",
+                'Новые коммиты этого устройства будут использовать это имя; в старых оно сохранится.',
                 file=sys.stderr,
             )
             return 0
@@ -5685,19 +5630,17 @@ def cmd_sync(args):
         try:
             result = ssc.propose_skill(name, message=args.message)
         except ssc.SyncInertError as e:
-            print(f"cannot share this skill: {e}", file=sys.stderr)
+            print(f'Не удалось поделиться навыком: {e}', file=sys.stderr)
             return 1
         except ssc.SyncError as e:
-            print(f"could not share '{name}': {e}", file=sys.stderr)
+            print(f'Не удалось поделиться «{name}»: {e}', file=sys.stderr)
             return 1
         if result.get("proposal_pending"):
             print(
-                f"Shared '{name}' with your organisation — an admin needs to "
-                f"approve it (proposal #{result.get('proposal_id')}). It is "
-                f"not live for the team until then."
+                f"Навык «{name}» предложен организации. Нужна проверка администратора (предложение №{result.get('proposal_id')}); до одобрения команда его не получит."
             )
         else:
-            print(f"Added '{name}' to your organisation's shared skills.")
+            print(f'Навык «{name}» добавлен в общие навыки организации.')
         return 0
 
     if sub in {"enable", "disable"}:
@@ -5706,14 +5649,12 @@ def cmd_sync(args):
         skill = args.skill
         if not is_curation_eligible(skill):
             print(
-                f"'{skill}' is not sync-eligible (bundled, hub-installed, "
-                f"external, or not found). Only agent-created / user-authored "
-                f"skills under ~/.hermes/skills/ can sync.",
+                f'Навык «{skill}» не подходит для синхронизации: встроенный, из каталога, внешний или не найден. Синхронизируются только навыки, созданные агентом или вами в папке навыков профиля.',
                 file=sys.stderr,
             )
             return 1
         set_sync(skill, sub == "enable")
-        print(f"sync {'enabled' if sub == 'enable' else 'disabled'} for '{skill}'.")
+        print(f"Синхронизация {('включена' if sub == 'enable' else 'отключена')} для «{skill}».")
         return 0
 
     from tools import skills_sync_client as ssc
@@ -5725,42 +5666,34 @@ def cmd_sync(args):
             n = len(status.get("org_skills") or [])
             modified = status.get("org_skills_modified") or []
             print(
-                f"\nOrg skills: {n} shared skill(s) from your organisation "
-                f"(your role: {status.get('org_role')}). They load alongside "
-                f"your own, labeled by origin, and you can edit them.",
+                f"Общие навыки: {n}; ваша роль в организации — {status.get('org_role')}. Загружаются рядом с личными, с указанием источника, и доступны для редактирования.",
                 file=sys.stderr,
             )
             if modified:
                 print(
-                    f"  {len(modified)} with local edits not yet shared: "
-                    f"{', '.join(modified)}\n"
-                    f"  Share them back with `hermes sync propose <skill>`. "
-                    f"Org updates will not overwrite them.",
+                    f"  Общих навыков с неопубликованными локальными правками: {len(modified)}: {', '.join(modified)}. Поделиться: korra sync propose <skill>. Обновления организации не заменят ваши правки.",
                     file=sys.stderr,
                 )
         elif status.get("logged_in"):
             print(
-                "\nOrg skills: not applicable — this account isn't a member "
-                "of a shared organisation.",
+                'Общие навыки недоступны: учётная запись не входит в организацию.',
                 file=sys.stderr,
             )
         if not status.get("logged_in"):
-            print("\nNot logged into Nous Portal — sync is inert.", file=sys.stderr)
+            print('Вход Nous не выполнен; синхронизация не работает.', file=sys.stderr)
         elif not status.get("nous_admin"):
             print(
-                "\nSync is not enabled for your account yet.",
+                'Синхронизация пока не включена для вашей учётной записи.',
                 file=sys.stderr,
             )
         elif not status.get("feature_enabled"):
             print(
-                "\nSync feature is off for this instance (set HERMES_SYNC_ENABLED=1 "
-                "or config.yaml sync.enabled: true). Sync is inert.",
+                'Синхронизация отключена для этой установки. Включите sync.enabled: true в config.yaml.',
                 file=sys.stderr,
             )
         elif not status.get("base_url"):
             print(
-                "\nNo sync base URL configured (config.yaml sync.base_url or "
-                "HERMES_SYNC_BASE_URL). Sync is inert.",
+                'Адрес синхронизации не настроен. Задайте sync.base_url в config.yaml.',
                 file=sys.stderr,
             )
         return 0
@@ -5769,18 +5702,17 @@ def cmd_sync(args):
     try:
         identity = ssc.resolve_identity()
     except ssc.SyncInertError as e:
-        print(f"sync inert: {e}", file=sys.stderr)
+        print(f'Синхронизация не работает: {e}', file=sys.stderr)
         return 1
     if not identity.get("nous_admin"):
         print(
-            "sync unavailable: not enabled for your account yet.",
+            'Синхронизация пока недоступна для вашей учётной записи.',
             file=sys.stderr,
         )
         return 1
     if not ssc.resolve_sync_base_url():
         print(
-            "sync inert: no sync base URL configured (config.yaml sync.base_url "
-            "or HERMES_SYNC_BASE_URL).",
+            'Синхронизация не работает: адрес sync.base_url в config.yaml не настроен.',
             file=sys.stderr,
         )
         return 1
@@ -5794,32 +5726,26 @@ def cmd_sync(args):
             if org_result:
                 n = len(org_result.get("updated") or [])
                 print(
-                    f"org: refreshed {n} shared skill(s) from your "
-                    f"organisation.",
+                    f'Организация: обновлено общих навыков — {n}.',
                     file=sys.stderr,
                 )
                 clashes = org_result.get("conflicted") or []
                 if clashes:
                     print(
-                        f"org: {len(clashes)} skill(s) have BOTH local edits "
-                        f"and org updates, so they were left as-is: "
-                        f"{', '.join(clashes)}\n"
-                        f"     Your local version is intact. Review it, then "
-                        f"either propose it or delete the local copy and pull "
-                        f"again to take the org version.",
+                        f"Организация: у {len(clashes)} навыков есть одновременно ваши правки и обновления команды, поэтому они сохранены без изменений: {', '.join(clashes)}. Проверьте локальную версию и предложите её команде либо удалите локальную копию и получите версию организации заново.",
                         file=sys.stderr,
                     )
         elif sub == "push":
-            result = ssc.push_skills(identity=identity, message="hermes sync push")
+            result = ssc.push_skills(identity=identity, message='korra sync push')
         elif sub == "now":
             pull_res = ssc.pull_skills(identity=identity)
-            push_res = ssc.push_skills(identity=identity, message="hermes sync now")
+            push_res = ssc.push_skills(identity=identity, message='korra sync now')
             result = {"pull": pull_res, "push": push_res}
         else:
-            print(f"Unknown sync subcommand: {sub}", file=sys.stderr)
+            print(f'Неизвестная подкоманда sync: {sub}', file=sys.stderr)
             return 1
     except ssc.SyncError as e:
-        print(f"sync failed: {e}", file=sys.stderr)
+        print(f'Ошибка синхронизации: {e}', file=sys.stderr)
         return 1
 
     print(_json.dumps(result, indent=2, ensure_ascii=False))
@@ -5844,13 +5770,7 @@ def cmd_slack(args):
     if sub in {None, ""}:
         # No subcommand — print usage hint.
         print(
-            "usage: hermes slack <subcommand>\n"
-            "\n"
-            "subcommands:\n"
-            "  manifest   Generate a Slack app manifest with every gateway\n"
-            "             command registered as a native slash\n"
-            "\n"
-            "Run `hermes slack manifest -h` for details.",
+            'Использование: korra slack <subcommand>. manifest — создать манифест Slack с командами шлюза. Подробнее: korra slack manifest -h.',
             file=sys.stderr,
         )
         return 1
@@ -5863,7 +5783,7 @@ def cmd_slack(args):
             raise SystemExit(status)
         return status
 
-    print(f"Unknown slack subcommand: {sub}", file=sys.stderr)
+    print(f'Неизвестная подкоманда slack: {sub}', file=sys.stderr)
     return 1
 
 
@@ -5911,7 +5831,7 @@ def cmd_security(args):
         # Default subcommand is `audit` when no subcmd is given.
         code = cmd_security_audit(args)
         sys.exit(int(code or 0))
-    print(f"unknown security subcommand: {sub}", file=sys.stderr)
+    print(f'Неизвестная подкоманда security: {sub}', file=sys.stderr)
     sys.exit(2)
 
 
@@ -6332,9 +6252,7 @@ def _run_with_idle_timeout(
     combined = "".join(merged_chunks)
     if idle_killed:
         msg = (
-            f"\n  ⚠ Build produced no output for {idle_timeout_seconds}s — terminated.\n"
-            "    Common causes: out-of-memory on a low-RAM host (WSL/container),\n"
-            "    a stuck Node process, or an antivirus scan stalling I/O.\n"
+            f'  ⚠ Сборка не выдавала сообщений {idle_timeout_seconds} с и остановлена. Возможные причины: мало памяти в WSL или контейнере, зависший Node либо проверка файлов антивирусом.'
         )
         combined += msg
         # Force a non-zero rc even if terminate() raced with a clean exit.
@@ -6623,11 +6541,11 @@ def _do_build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
     npm = _resolve_node_runtime_npm()
     if not npm:
         if fatal:
-            _say("Web UI frontend not built and npm is not available.")
-            _say("Install Node.js, then run:  cd web && npm install && npm run build")
+            _say('Веб-панель не собрана, npm недоступен.')
+            _say('Установите Node.js, затем выполните cd web && npm install && npm run build.')
         return not fatal
     build_env = _npm_lifecycle_env(with_hermes_node_path())
-    _say("→ Building web UI...")
+    _say('→ Собираем веб-панель…')
 
     def _relay(result: "subprocess.CompletedProcess") -> None:
         """Print captured npm output so users can see *why* a step failed.
@@ -6684,12 +6602,12 @@ def _do_build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
     r1 = _install_web_deps(silent=True)
     if r1.returncode != 0:
         _say(
-            f"  {'✗' if fatal else '⚠'} Web UI npm install failed"
-            + ("" if fatal else " (hermes web will not be available)")
+            f"  {('✗' if fatal else '⚠')} Не удалось установить зависимости веб-панели через npm"
+            + ("" if fatal else ' (веб-панель Корры будет недоступна)')
         )
         _relay(r1)
         if fatal:
-            _say("  Run manually:  npm install --workspace web && npm run build -w web")
+            _say('  Выполните вручную: npm install --workspace web && npm run build -w web')
         return False
     # First attempt — stream output via idle-timeout helper (issue #33788).
     # capture_output=True on a long Vite build looks identical to a hang;
@@ -6705,7 +6623,7 @@ def _do_build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
         # served forever. Reinstall (non-silent, so the user sees it) first.
         missing_tool = _missing_web_build_tool((r2.stdout or "") + (r2.stderr or ""))
         if missing_tool:
-            _say(f"  ⚠ Build could not resolve {missing_tool} — reinstalling web dependencies...")
+            _say(f'  ⚠ При сборке не найден {missing_tool}. Переустанавливаем зависимости веб-панели…')
             _install_web_deps(silent=False)
             r2 = _run_with_idle_timeout([npm, "run", "build"], cwd=web_dir, env=build_env)
         if r2.returncode != 0:
@@ -6731,20 +6649,20 @@ def _do_build_web_ui(web_dir: Path, *, fatal: bool = False) -> bool:
         # A stale UI is far better than no UI for non-interactive callers
         # (Windows Scheduled Tasks, CI) — issue #23817.
         if dist_index.exists():
-            _say("  ⚠ Web UI build failed — serving stale dist as fallback")
+            _say('  ⚠ Не удалось собрать веб-панель. Используется предыдущая сборка.')
             if stderr_tail:
-                _say(f"  Build error:\n  {stderr_tail}")
+                _say(f'  Ошибка сборки: {stderr_tail}')
             return True
 
         _say(
-            f"  {'✗' if fatal else '⚠'} Web UI build failed"
-            + ("" if fatal else " (hermes web will not be available)")
+            f"  {('✗' if fatal else '⚠')} Не удалось собрать веб-панель"
+            + ("" if fatal else ' (веб-панель Корры будет недоступна)')
         )
         _relay(r2)
         if fatal:
-            _say("  Run manually:  npm install --workspace web && npm run build -w web")
+            _say('  Выполните вручную: npm install --workspace web && npm run build -w web')
         return False
-    _say("  ✓ Web UI built")
+    _say('  ✓ Веб-панель собрана')
     project_root = web_dir.parent.parent if web_dir.parent.name == "apps" else web_dir.parent
     _write_web_ui_build_stamp(project_root, web_dir)
     return True
@@ -6926,7 +6844,7 @@ def _desktop_build_needed(desktop_dir: Path, project_root: Path, *, source_mode:
     # half-replaced one that crashes on its first lazy import.
     dist_dir = _renderer_bundle_dir(desktop_dir, source_mode=source_mode)
     if dist_dir is not None and _renderer_bundle_torn(dist_dir):
-        print(f"  ⚠ A previous update left the desktop bundle incomplete ({dist_dir}); rebuilding it")
+        print(f'  ⚠ После прежнего обновления приложение неполное ({dist_dir}); пересобираем')
         return True
 
     stamp_file = _desktop_stamp_path()
@@ -7195,25 +7113,24 @@ def _parse_pe_machine(path: Path) -> int:
     try:
         file_size = path.stat().st_size
     except OSError as exc:
-        raise ValueError(f"unreadable: {exc}")
+        raise ValueError(f'не удалось прочитать: {exc}')
     if file_size < 512:
         raise ValueError(
-            f"file is only {file_size} bytes — far too small to be a Windows executable"
+            f'В файле только {file_size} байт — слишком мало для программы Windows'
         )
     with path.open("rb") as fh:
         head = fh.read(64)
         if len(head) < 64 or head[:2] != b"MZ":
             raise ValueError(
-                "missing MZ header — not a Windows executable "
-                "(a truncated or non-binary file saved as .exe?)"
+                'Нет заголовка MZ: это не программа Windows. Возможно, файл .exe неполный или содержит текст.'
             )
         e_lfanew = struct.unpack_from("<I", head, 0x3C)[0]
         if e_lfanew <= 0 or e_lfanew + 24 > file_size:
-            raise ValueError("corrupt DOS header: PE header offset points past end of file")
+            raise ValueError('Повреждён заголовок DOS: указатель PE находится за концом файла')
         fh.seek(e_lfanew)
         pe_head = fh.read(24)
         if len(pe_head) < 24 or pe_head[:4] != b"PE\x00\x00":
-            raise ValueError("missing PE signature — corrupt executable header")
+            raise ValueError('Нет сигнатуры PE: заголовок программы повреждён')
         machine, n_sections = struct.unpack_from("<HH", pe_head, 4)
         size_of_optional = struct.unpack_from("<H", pe_head, 20)[0]
         fh.seek(e_lfanew + 24 + size_of_optional)
@@ -7221,13 +7138,12 @@ def _parse_pe_machine(path: Path) -> int:
         for _ in range(n_sections):
             section = fh.read(40)
             if len(section) < 40:
-                raise ValueError("truncated PE section table")
+                raise ValueError('Таблица секций PE обрезана')
             size_of_raw, pointer_to_raw = struct.unpack_from("<II", section, 16)
             max_section_end = max(max_section_end, pointer_to_raw + size_of_raw)
         if file_size < max_section_end:
             raise ValueError(
-                f"truncated executable: file is {file_size} bytes but its PE "
-                f"sections extend to {max_section_end} bytes"
+                f'Программа обрезана: файл содержит {file_size} байт, а секции PE требуют {max_section_end}'
             )
     return machine
 
@@ -7249,10 +7165,9 @@ def _desktop_exe_integrity_error(path: Path) -> Optional[str]:
         return str(exc)
     expected = _expected_windows_pe_machines()
     if machine not in expected:
-        got = _PE_MACHINE_NAMES.get(machine, f"unknown machine 0x{machine:04X}")
+        got = _PE_MACHINE_NAMES.get(machine, f'неизвестная архитектура 0x{machine:04X}')
         return (
-            f"architecture mismatch: built a {got} executable but this is a "
-            f"{_windows_native_machine()} Windows host"
+            f'Несовместимая архитектура: программа для {got}, а Windows работает на {_windows_native_machine()}'
         )
     return None
 
@@ -7315,8 +7230,8 @@ def _ensure_desktop_exe_launchable(
     if error is None:
         return packaged_executable, False
 
-    print(f"✗ The built Hermes.exe failed its integrity check: {error}")
-    print(f"    at: {packaged_executable}")
+    print(f'✗ Собранное приложение не прошло проверку целостности: {error}')
+    print(f'    Путь: {packaged_executable}')
 
     # Self-heal setup for the retry: drop the (likely corrupt) cached Electron
     # zip and the content stamp so the next rebuild is a genuine re-download +
@@ -7329,14 +7244,14 @@ def _ensure_desktop_exe_launchable(
 
     restored = _rollback_desktop_from_backup(packaged_executable)
     if restored is not None:
-        print("  ↩ Update aborted — restored the previous working Hermes.exe from backup.")
-        print("    Your existing version was kept and still works. Run `hermes desktop`")
-        print("    (or the in-app update) again to retry with a fresh Electron download.")
+        print('  ↩ Обновление отменено. Рабочая версия приложения восстановлена из резервной копии.')
+        print('    Прежняя версия сохранена и работает. Повторите korra desktop')
+        print('    или обновление из приложения, чтобы заново загрузить Electron.')
         return restored, True
 
-    print("  ✗ No usable backup was found to restore.")
-    print("    Run `hermes desktop --force-build` to rebuild, or re-run the Hermes")
-    print("    installer to repair the install.")
+    print('  ✗ Подходящая резервная копия не найдена.')
+    print('    Пересоберите: korra desktop --force-build,')
+    print('    либо повторно запустите установщик Корры для восстановления.')
     return None, False
 
 
@@ -7665,8 +7580,7 @@ def _desktop_macos_local_signing_identity() -> Optional[str]:
         return identity.strip() or None
     except Exception as exc:
         print(
-            "  (warning: could not load desktop.macos_signing_identity: "
-            f"{exc}; falling back to ad-hoc signing)"
+            f'  Не удалось загрузить desktop.macos_signing_identity: {exc}. Используется временная подпись.'
         )
         return None
 
@@ -7735,7 +7649,7 @@ def _desktop_macos_local_codesign(
         # worse than the legacy plain ad-hoc sign. Bail out so the caller
         # falls back to that legacy path instead.
         raise FileNotFoundError(
-            f"desktop entitlement plists missing under {desktop_dir / 'electron'}"
+            f"Файлы разрешений приложения plist отсутствуют в {desktop_dir / 'electron'}"
         )
 
     def sign_path(
@@ -7850,16 +7764,15 @@ def _desktop_macos_relaunchable_fixup(
     identity = _desktop_macos_local_signing_identity() or "-"
     try:
         if _desktop_macos_local_codesign(app, desktop_dir=desktop_dir, identity=identity):
-            label = "keychain identity" if identity != "-" else "stable ad-hoc identity"
-            print(f"  → macOS desktop signed with {label}; TCC grants persist across rebuilds")
+            label = 'подпись из связки ключей' if identity != "-" else 'постоянная локальная подпись'
+            print(f'  → Приложение macOS подписано с {label}; разрешения TCC сохранятся после пересборки')
             return True
     except Exception as exc:
         if identity != "-":
             print(
-                f"  (warning: configured macOS signing identity failed: {identity!r}; "
-                "falling back to ad-hoc — TCC grants may need to be re-granted)"
+                f'  Настроенная подпись macOS не сработала: {identity!r}. Используется временная; возможно, разрешения TCC придётся выдать заново.'
             )
-        print(f"  (warning: stable macOS signing failed ({exc}); using legacy ad-hoc sign)")
+        print(f'  Постоянная подпись macOS не удалась: {exc}. Используется прежняя временная подпись.')
     try:
         # Legacy ad-hoc fallback: re-sign, but NEVER delete the safeStorage
         # keychain item. Deleting it would permanently orphan every
@@ -7877,8 +7790,7 @@ def _desktop_macos_relaunchable_fixup(
         )
         if result.returncode != 0:
             print(
-                f"  (warning: legacy ad-hoc re-sign failed (exit {result.returncode}); "
-                "leaving safeStorage keychain item untouched)"
+                f'  Повторная временная подпись завершилась с кодом {result.returncode}; запись safeStorage в связке ключей сохранена.'
             )
             return False
         verify = subprocess.run(
@@ -7887,14 +7799,13 @@ def _desktop_macos_relaunchable_fixup(
         )
         if verify.returncode != 0:
             print(
-                f"  (warning: legacy ad-hoc re-sign did not pass strict verification; "
-                "leaving safeStorage keychain item untouched)"
+                f'  Временная подпись не прошла строгую проверку; запись safeStorage в связке ключей сохранена.'
             )
             return False
-        print("  → macOS desktop re-signed (legacy ad-hoc); safeStorage keychain item left untouched")
+        print('  → Приложение macOS переподписано прежним способом; запись ключей safeStorage сохранена')
         return True
     except Exception as exc:
-        print(f"  (warning: macOS relaunch fixup skipped: {exc})")
+        print(f'  Исправление перезапуска macOS пропущено: {exc}')
     return False
 
 
@@ -7941,7 +7852,7 @@ def _desktop_macos_setup_tcc_identity(identity: str = "Hermes Local Signing") ->
     already configured), False on failure. Never raises.
     """
     if sys.platform != "darwin":
-        print("  (--setup-tcc-identity is macOS-only; skipping)")
+        print('  --setup-tcc-identity доступен только в macOS; пропускаем')
         return False
 
     openssl = shutil.which("openssl")
@@ -7949,8 +7860,7 @@ def _desktop_macos_setup_tcc_identity(identity: str = "Hermes Local Signing") ->
     codesign = shutil.which("codesign")
     if not (openssl and security and codesign):
         print(
-            "  (--setup-tcc-identity requires openssl, security, and codesign; "
-            f"found openssl={bool(openssl)} security={bool(security)} codesign={bool(codesign)})"
+            f'  Для --setup-tcc-identity нужны openssl, security и codesign. Найдены: openssl={bool(openssl)}, security={bool(security)}, codesign={bool(codesign)}'
         )
         return False
 
@@ -8019,7 +7929,7 @@ def _desktop_macos_setup_tcc_identity(identity: str = "Hermes Local Signing") ->
                     # Older OpenSSL without -legacy: keep the original failure.
                     pass
             if imported.returncode != 0:
-                print(f"  (could not import signing identity into keychain: {imported.stderr.strip()})")
+                print(f'  Не удалось импортировать подпись в связку ключей: {imported.stderr.strip()}')
                 return False
 
             # Importing is still not enough: without explicit trust for the
@@ -8035,27 +7945,24 @@ def _desktop_macos_setup_tcc_identity(identity: str = "Hermes Local Signing") ->
             )
             if trusted.returncode != 0:
                 print(
-                    "  (could not trust the certificate for code signing: "
-                    f"{(trusted.stderr or trusted.stdout).strip()})"
+                    f'  Не удалось добавить сертификат подписи в доверенные: {(trusted.stderr or trusted.stdout).strip()}'
                 )
                 return False
-            print(f"  → created, imported, and trusted self-signed identity: {identity!r}")
+            print(f'  → Создан, импортирован и добавлен в доверенные самоподписанный сертификат: {identity!r}')
         except Exception as exc:
-            print(f"  (certificate creation failed: {exc})")
+            print(f'  Не удалось создать сертификат: {exc}')
             return False
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
     else:
-        print(f"  → identity {identity!r} already valid in keychain")
+        print(f'  → Подпись {identity!r} уже действительна в связке ключей')
 
     # Postcondition gate: only report success once macOS actually agrees the
     # identity is usable for code signing. Name-in-output checks pass for
     # invalid identities; this is the check that failed silently before.
     if not _macos_codesigning_identity_valid(security, identity):
         print(
-            f"  (identity {identity!r} was imported but is not a VALID code-signing identity; "
-            "run `security find-identity -v -p codesigning` to inspect, and see the manual "
-            "Keychain Access steps in the desktop docs)"
+            f'  Подпись {identity!r} импортирована, но не подходит для подписи кода. Проверьте security find-identity -v -p codesigning и инструкцию по связке ключей в документации приложения.'
         )
         return False
 
@@ -8064,9 +7971,9 @@ def _desktop_macos_setup_tcc_identity(identity: str = "Hermes Local Signing") ->
         from korra_cli.config import set_config_value
 
         set_config_value("desktop.macos_signing_identity", identity)
-        print(f"  → set desktop.macos_signing_identity = {identity!r}")
+        print(f'  → Сохранено desktop.macos_signing_identity = {identity!r}')
     except Exception as exc:
-        print(f"  (could not write desktop.macos_signing_identity: {exc})")
+        print(f'  Не удалось сохранить desktop.macos_signing_identity: {exc}')
         return False
 
     # Re-sign the packaged app so the current build already uses the identity.
@@ -8075,16 +7982,13 @@ def _desktop_macos_setup_tcc_identity(identity: str = "Hermes Local Signing") ->
         try:
             if _desktop_macos_relaunchable_fixup(desktop_dir):
                 print(
-                    "  → packaged app re-signed with certificate-anchored identity; "
-                    "TCC grants persist across rebuilds"
+                    '  → Приложение переподписано сертификатом; разрешения TCC сохранятся после пересборки'
                 )
         except Exception as exc:
-            print(f"  (could not re-sign packaged app: {exc})")
+            print(f'  Не удалось переподписать приложение: {exc}')
 
     print(
-        "\n  Note: macOS will re-prompt for permissions ONE final time (the identity "
-        "changed). Grant them and they persist from then on. If a permission gets "
-        "stuck, reset it with:  tccutil reset All com.nousresearch.hermes"
+        '  macOS запросит разрешения ещё один раз из-за смены подписи. После подтверждения они сохранятся. Если разрешение не применяется, сбросьте его: tccutil reset All com.nousresearch.hermes'
     )
     return True
 
@@ -8167,7 +8071,7 @@ def _desktop_linux_sandbox_fixup(packaged_executable: Path) -> bool:
 
     sandbox = packaged_executable.parent / "chrome-sandbox"
     if not sandbox.exists():
-        print(f"✗ Hermes Desktop is missing Electron's Linux sandbox helper: {sandbox}")
+        print(f'✗ В приложении Корры отсутствует компонент изоляции Electron для Linux: {sandbox}')
         return False
 
     # Reject symlinks — chown/chmod must not follow an attacker-controlled
@@ -8176,10 +8080,10 @@ def _desktop_linux_sandbox_fixup(packaged_executable: Path) -> bool:
     try:
         sandbox_lstat = sandbox.lstat()
     except OSError:
-        print(f"✗ Cannot stat Electron's Linux sandbox helper: {sandbox}")
+        print(f'✗ Не удалось прочитать сведения о компоненте изоляции Electron: {sandbox}')
         return False
     if not stat.S_ISREG(sandbox_lstat.st_mode):
-        print(f"✗ Electron's Linux sandbox helper is not a regular file: {sandbox}")
+        print(f'✗ Компонент изоляции Electron не является обычным файлом: {sandbox}')
         return False
 
     if sandbox_lstat.st_uid == 0 and stat.S_IMODE(sandbox_lstat.st_mode) == 0o4755:
@@ -8187,13 +8091,13 @@ def _desktop_linux_sandbox_fixup(packaged_executable: Path) -> bool:
 
     sudo = shutil.which("sudo")
     if not sudo:
-        print("✗ Hermes Desktop requires sudo to configure Electron's Linux sandbox helper.")
+        print('✗ Для настройки изоляции Electron в Linux приложению Корры нужен sudo.')
         return False
 
-    print("→ Configuring Electron Linux sandbox helper (sudo required)...")
+    print('→ Настраиваем изоляцию Electron в Linux; нужен sudo…')
     for command in ([sudo, "chown", "root:root", str(sandbox)], [sudo, "chmod", "4755", str(sandbox)]):
         if subprocess.run(command, check=False).returncode != 0:
-            print(f"✗ Failed to configure Electron's Linux sandbox helper: {sandbox}")
+            print(f'✗ Не удалось настроить изоляцию Electron в Linux: {sandbox}')
             return False
     return True
 
@@ -8311,16 +8215,16 @@ def _register_linux_desktop_entry() -> None:
             return
         entry = install_desktop_entry(PROJECT_ROOT)
         if entry:
-            print(f"✓ Desktop launcher entry installed: {entry}")
+            print(f'✓ Ярлык приложения установлен: {entry}')
     except Exception as exc:  # never block a launch on launcher plumbing
-        print(f"⚠ Could not install the desktop launcher entry: {exc}")
+        print(f'⚠ Не удалось установить ярлык приложения: {exc}')
 
 
 def cmd_gui(args: argparse.Namespace):
     """Build and launch the native Electron desktop GUI."""
     desktop_dir = PROJECT_ROOT / "apps" / "desktop"
     if not (desktop_dir / "package.json").exists():
-        print(f"Desktop GUI source not found at: {desktop_dir}")
+        print(f'Исходники приложения не найдены: {desktop_dir}')
         sys.exit(1)
 
     try:
@@ -8389,8 +8293,8 @@ def cmd_gui(args: argparse.Namespace):
     if source_mode or not skip_build:
         npm = _resolve_node_runtime_npm()
         if not npm:
-            print("Desktop GUI requires Node.js/npm, but npm was not found on PATH.")
-            print("Install Node.js, then run:  hermes gui")
+            print('Для приложения нужны Node.js и npm, но npm не найден в PATH.')
+            print('Установите Node.js, затем выполните korra gui.')
             sys.exit(1)
     else:
         npm = None
@@ -8398,23 +8302,23 @@ def cmd_gui(args: argparse.Namespace):
     if skip_build:
         if source_mode:
             if not _desktop_dist_exists(desktop_dir):
-                print(f"✗ --skip-build --source was passed but no desktop dist found at: {desktop_dir / 'dist'}")
-                print("  Pre-build first:  cd apps/desktop && npm run build")
-                print("  Or drop --skip-build to install dependencies and build automatically.")
+                print(f"✗ Указаны --skip-build --source, но dist приложения не найден: {desktop_dir / 'dist'}")
+                print('  Сначала соберите: cd apps/desktop && npm run build')
+                print('  Или уберите --skip-build для автоматической установки зависимостей и сборки.')
                 sys.exit(1)
             if not (_electron_dir(PROJECT_ROOT) / "package.json").exists():
-                print("✗ --skip-build --source requires existing desktop workspace dependencies.")
-                print(f"  Install first:  cd {PROJECT_ROOT} && npm ci")
-                print("  Or drop --skip-build to install dependencies and build automatically.")
+                print('✗ Для --skip-build --source нужны уже установленные зависимости приложения.')
+                print(f'  Сначала установите: cd {PROJECT_ROOT} && npm ci')
+                print('  Или уберите --skip-build для автоматической установки зависимостей и сборки.')
                 sys.exit(1)
-            print(f"→ Skipping desktop source build (--skip-build --source); using dist at {desktop_dir / 'dist'}")
+            print(f"→ Сборка исходников пропущена (--skip-build --source); используем dist из {desktop_dir / 'dist'}")
         elif packaged_executable is None:
-            print(f"✗ --skip-build was passed but no packaged desktop app was found at: {desktop_dir / 'release'}")
-            print("  Pre-build first:  cd apps/desktop && npm run pack")
-            print("  Or drop --skip-build to package automatically.")
+            print(f"✗ Указан --skip-build, но готовое приложение не найдено: {desktop_dir / 'release'}")
+            print('  Сначала соберите: cd apps/desktop && npm run pack')
+            print('  Или уберите --skip-build для автоматической упаковки.')
             sys.exit(1)
         else:
-            print(f"→ Skipping desktop package build (--skip-build); using {packaged_executable}")
+            print(f'→ Упаковка приложения пропущена (--skip-build); используем {packaged_executable}')
     else:
         # Check the content-hash stamp before doing any build work.
         # If the source tree hasn't changed since the last successful build,
@@ -8424,10 +8328,10 @@ def cmd_gui(args: argparse.Namespace):
             desktop_dir, PROJECT_ROOT, source_mode=source_mode
         )
         if not build_needed:
-            build_label = "source build" if source_mode else "packaged app"
-            print(f"✓ Desktop {build_label} is up to date (content stamp matches)")
+            build_label = 'сборка исходников' if source_mode else 'готовое приложение'
+            print(f'✓ Приложение {build_label} актуально; содержимое не изменилось')
         else:
-            print("→ Installing desktop workspace dependencies...")
+            print('→ Устанавливаем зависимости приложения…')
             # Put the Hermes-managed Node on PATH so npm's child scripts (which
             # shell out to bare `node`, e.g. electron-winstaller's
             # select-7z-arch.js) resolve it even when the parent PATH is
@@ -8439,24 +8343,20 @@ def cmd_gui(args: argparse.Namespace):
             install_result = _run_npm_install_deterministic(npm, PROJECT_ROOT, capture_output=False, env=nixos_env)
             if install_result.returncode != 0:
                 if not _electron_pkg_staged_missing_dist(PROJECT_ROOT):
-                    print("✗ Desktop dependency install failed")
-                    print(f"  Run manually:  cd {PROJECT_ROOT} && npm ci")
+                    print('✗ Не удалось установить зависимости приложения')
+                    print(f'  Выполните вручную: cd {PROJECT_ROOT} && npm ci')
                     sys.exit(install_result.returncode or 1)
                 repaired = _try_redownload_electron_dist(PROJECT_ROOT, env)
                 if repaired:
-                    print("  ⚠ Dependency install failed with a missing Electron dist; "
-                          "repopulated it and continuing.")
+                    print('  ⚠ При установке отсутствовал dist Electron; он восстановлен, продолжаем.')
                 else:
-                    print("  ⚠ Dependency install failed with a missing Electron dist; "
-                          "continuing to the build so electron-builder can attempt "
-                          "the Electron fetch itself.")
+                    print('  ⚠ При установке отсутствовал dist Electron. Продолжаем сборку, чтобы electron-builder попробовал загрузить его сам.')
 
-            build_label = "source build" if source_mode else "packaged app"
-            print(f"→ Building desktop {build_label}...")
+            build_label = 'сборка исходников' if source_mode else 'готовое приложение'
+            print(f'→ Собираем приложение {build_label}…')
             build_script = "build" if source_mode else "pack"
             if _force_adhoc_macos_signing(env, source_mode=source_mode):
-                print("  → No Developer ID configured; ad-hoc signing this local rebuild "
-                      "(CSC_IDENTITY_AUTO_DISCOVERY=false)")
+                print('  → Developer ID не настроен; временная подпись локальной сборки, CSC_IDENTITY_AUTO_DISCOVERY=false')
             npm_build_env = _npm_lifecycle_env(env)
             if not source_mode:
                 # A running desktop instance launched from release/win-unpacked
@@ -8466,7 +8366,7 @@ def cmd_gui(args: argparse.Namespace):
                 # headless --update rebuild — succeeds instead of failing cryptically.
                 stopped = _stop_desktop_processes_locking_build(desktop_dir)
                 if stopped:
-                    print(f"  ⚠ Stopped running desktop app to free the build output (pid {', '.join(map(str, stopped))})")
+                    print(f"  ⚠ Работающее приложение остановлено, чтобы освободить файлы сборки; PID {', '.join(map(str, stopped))}")
             build_result = subprocess.run(
                 [npm, "run", build_script], cwd=desktop_dir, env=npm_build_env, check=False
             )
@@ -8490,7 +8390,7 @@ def cmd_gui(args: argparse.Namespace):
                     purged = _purge_electron_build_cache(desktop_dir)
                     restored = _redownload_electron_dist(PROJECT_ROOT, env)
                 if restored:
-                    print("  ⚠ Desktop build failed; refreshed the Electron download and retrying once...")
+                    print('  ⚠ Сборка приложения не удалась. Обновили загрузку Electron и пробуем ещё раз…')
                     for p in purged:
                         print(f"    - {p}")
                     # The purge can't remove a win-unpacked tree whose Hermes.exe
@@ -8505,9 +8405,7 @@ def cmd_gui(args: argparse.Namespace):
                 and not env.get("ELECTRON_MIRROR")
                 and _desktop_packaged_executable(desktop_dir) is None
             ):
-                print("  ⚠ Desktop build still failing; the Electron download from "
-                      "GitHub looks blocked. Re-downloading via a public mirror "
-                      "(npmmirror.com)... (set ELECTRON_MIRROR to use another mirror)")
+                print('  ⚠ Сборка снова не удалась: похоже, GitHub блокирует загрузку Electron. Загружаем через зеркало npmmirror.com. Другое зеркало можно указать в ELECTRON_MIRROR.')
                 mirror = _ELECTRON_FALLBACK_MIRROR
                 mirror_env = dict(npm_build_env)
                 mirror_env["ELECTRON_MIRROR"] = mirror
@@ -8516,13 +8414,13 @@ def cmd_gui(args: argparse.Namespace):
                 _stop_desktop_processes_locking_build(desktop_dir)
                 build_result = subprocess.run([npm, "run", build_script], cwd=desktop_dir, env=mirror_env, check=False)
             if build_result.returncode != 0:
-                print("✗ Desktop GUI build failed")
-                print(f"  Run manually:  cd apps/desktop && npm run {build_script}")
+                print('✗ Не удалось собрать приложение')
+                print(f'  Выполните вручную: cd apps/desktop && npm run {build_script}')
                 if sys.platform == "win32":
-                    print("  If this says \"Access is denied\" on Hermes.exe, close any")
-                    print("  running Hermes desktop window and retry.")
-                print("  If the log shows Electron download retries, rebuild via a mirror:")
-                print("    ELECTRON_MIRROR=<mirror-base-url> hermes desktop --force-build")
+                    print('  Если в ошибке указано «Access is denied» для файла приложения,')
+                    print('  закройте все окна приложения Корры и повторите попытку.')
+                print('  Если журнал показывает повторные загрузки Electron, используйте зеркало:')
+                print('    ELECTRON_MIRROR=<mirror-base-url> korra desktop --force-build')
                 sys.exit(build_result.returncode or 1)
             packaged_executable = _desktop_packaged_executable(desktop_dir)
             if not source_mode:
@@ -8564,37 +8462,37 @@ def cmd_gui(args: argparse.Namespace):
     if getattr(args, "build_only", False):
         if source_mode:
             if not _desktop_dist_exists(desktop_dir):
-                print(f"✗ --build-only --source produced no dist at: {desktop_dir / 'dist'}")
+                print(f"✗ --build-only --source не создал dist: {desktop_dir / 'dist'}")
                 sys.exit(1)
-            print(f"✓ Desktop source build ready at {desktop_dir / 'dist'} (not launching; --build-only)")
+            print(f"✓ Исходники приложения собраны в {desktop_dir / 'dist'}; без запуска из-за --build-only")
         elif packaged_executable is None:
-            print(f"✗ --build-only produced no launchable app at: {desktop_dir / 'release'}")
-            print("  Expected an unpacked Electron app for the current OS.")
+            print(f"✗ --build-only не создал готовое к запуску приложение: {desktop_dir / 'release'}")
+            print('  Ожидалось распакованное приложение Electron для текущей системы.')
             sys.exit(1)
         else:
-            print(f"✓ Desktop packaged app ready: {packaged_executable} (not launching; --build-only)")
+            print(f'✓ Приложение готово: {packaged_executable}; не запускается из-за --build-only')
         return
 
     if source_mode:
-        print("→ Launching Hermes Desktop from source build...")
+        print('→ Запускаем приложение Корры из сборки исходников…')
         launch_result = subprocess.run([npm, "exec", "--", "electron", "."], cwd=desktop_dir, env=env, check=False)
         sys.exit(launch_result.returncode)
 
     if packaged_executable is None:
-        print(f"✗ Desktop package build completed but no launchable app was found at: {desktop_dir / 'release'}")
-        print("  Expected an unpacked Electron app for the current OS.")
+        print(f"✗ Сборка завершена, но готовое к запуску приложение не найдено: {desktop_dir / 'release'}")
+        print('  Ожидалось распакованное приложение Electron для текущей системы.')
         sys.exit(1)
 
     launch_command = [str(packaged_executable)]
     if not _desktop_linux_sandbox_fixup(packaged_executable):
         if _desktop_linux_needs_no_sandbox() and _desktop_linux_sandbox_helper_is_regular_file(packaged_executable):
-            print("⚠ Falling back to --no-sandbox because this Linux host restricts unprivileged user namespaces and the Electron sandbox helper could not be configured.")
+            print('⚠ Используется --no-sandbox: эта система Linux ограничивает пользовательские пространства имён, а компонент изоляции Electron настроить не удалось.')
             launch_command.append("--no-sandbox")
         else:
             sys.exit(1)
 
     launch_command.extend(config_electron_flags)
-    print(f"→ Launching packaged Hermes Desktop: {' '.join(launch_command)}")
+    print(f"→ Запускаем приложение Корры: {' '.join(launch_command)}")
     launch_result = subprocess.run(launch_command, cwd=desktop_dir, env=env, check=False)
     sys.exit(launch_result.returncode)
 
@@ -8731,7 +8629,7 @@ def _restart_managed_dashboard_service(
         return False
 
     print()
-    print(f"⟲ Restarting managed dashboard service ({reason})")
+    print(f'⟲ Перезапускаем управляемую службу веб-панели: {reason}')
 
     scope_label = "systemctl --user" if scope else "sudo systemctl"
     restart = ("systemctl", *scope, "restart", unit)
@@ -8754,21 +8652,20 @@ def _restart_managed_dashboard_service(
             errors.append(f"{' '.join(command)}: {e}")
             continue
         if result.returncode == 0:
-            print(f"    ✓ restarted {unit}")
+            print(f'    ✓ Перезапущено: {unit}')
             return True
         errors.append(
             f"{' '.join(command)}: {(result.stderr or result.stdout or '').strip()}"
         )
 
-    print(f"    ✗ failed to restart {unit}")
+    print(f'    ✗ Не удалось перезапустить {unit}')
     for err in errors:
         if err.strip():
             print(f"      {err}")
     print(
-        "  Dashboard is managed by systemd; not raw-killing its PID because "
-        "systemd would treat that as a clean stop."
+        '  Веб-панель управляется systemd. Для корректного перезапуска используйте команду службы.'
     )
-    print(f"  Restart manually: {scope_label} restart {unit}")
+    print(f'  Перезапуск вручную: {scope_label} restart {unit}')
     return True
 
 
@@ -8963,9 +8860,9 @@ def _respawn_dashboard_processes(commands: list[list[str]]) -> list[list[str]]:
             failed.append((command, str(exc)))
 
     for command in respawned:
-        print(f"    ✓ restarted: {shlex.join(command)}")
+        print(f'    ✓ Перезапущено: {shlex.join(command)}')
     for command, err_msg in failed:
-        print(f"    ✗ failed to restart ({shlex.join(command)}): {err_msg}")
+        print(f'    ✗ Не удалось перезапустить ({shlex.join(command)}): {err_msg}')
     return [command for command, _ in failed]
 
 
@@ -9159,26 +9056,23 @@ def _recover_from_interrupted_install() -> None:
 def _recover_lazy_refresh_marker_locked() -> None:
     """Heal ``.lazy-refresh-incomplete`` via confirmed import-probe repair."""
     print(
-        "⚠ A previous lazy-backend refresh may have left the venv unhealthy — "
-        "running import-based package repair..."
+        '⚠ Предыдущее обновление инструментов могло повредить окружение Python. Проверяем загрузку пакетов и восстанавливаем…'
     )
     install_prefix, install_env = _default_venv_install_target()
     status = _repair_venv_via_import_probes(install_prefix, env=install_env)
     if status in ("healthy", "repaired"):
         _clear_lazy_refresh_incomplete_marker()
-        print("✓ Lazy-refresh venv recovery confirmed — install is healthy again.")
+        print('✓ Окружение после обновления инструментов восстановлено и исправно.')
         return
     if status == "indeterminate":
         print(
-            "  ⚠ Import probes unavailable — cannot confirm venv health. "
-            "Leaving `.lazy-refresh-incomplete` for the next launch."
+            '  ⚠ Проверка загрузки пакетов недоступна. Сохраняем .lazy-refresh-incomplete для повторной проверки при запуске.'
         )
     else:
         print(
-            "  ⚠ Lazy-refresh package repair incomplete. "
-            "Leaving `.lazy-refresh-incomplete` for the next launch."
+            '  ⚠ Пакеты восстановлены не полностью. Сохраняем .lazy-refresh-incomplete для следующего запуска.'
         )
-        print("  Recover manually with:")
+        print('  Восстановление вручную:')
         all_specs = _lazy_refresh_repair_specs(
             sorted(set(_LAZY_REFRESH_REPAIR_PACKAGES.values()))
         )
@@ -9196,8 +9090,7 @@ def _recover_core_update_marker_locked() -> None:
     would otherwise look healthy and clear the breadcrumb too early.
     """
     print(
-        "⚠ A previous `hermes update` was interrupted mid-install — "
-        "finishing dependency installation now..."
+        '⚠ Предыдущее korra update прервалось при установке. Завершаем установку зависимостей…'
     )
 
     # Windows: a normal ``hermes.exe`` launch always has the launcher as an
@@ -9208,9 +9101,7 @@ def _recover_core_update_marker_locked() -> None:
     if self_locked:
         install_prefix, install_env = _default_venv_install_target()
         print(
-            "  → Running from hermes.exe; applying package-only first aid, "
-            "then quarantined full reinstall (core marker stays until that "
-            "succeeds)..."
+            '  → Запуск из hermes.exe: сначала восстанавливаем пакеты, затем переустанавливаем полностью с резервной копией. Метка незавершённого обновления сохранится до успеха.'
         )
         _repair_venv_via_import_probes(install_prefix, env=install_env)
 
@@ -9232,24 +9123,22 @@ def _recover_core_update_marker_locked() -> None:
         _ir.run_core_install(PROJECT_ROOT)
 
         _clear_update_incomplete_marker()
-        print("✓ Dependency installation recovered — your install is healthy again.")
+        print('✓ Установка зависимостей восстановлена. Корра снова исправна.')
     except Exception as exc:
         # Leave the marker in place so the next launch retries. Give the user
         # the exact manual recovery command in the meantime.
         logger.debug("Interrupted-install recovery failed: %s", exc)
-        print("✗ Could not auto-recover the interrupted install.")
+        print('✗ Не удалось автоматически восстановить прерванную установку.')
         if self_locked:
             print(
-                "  Hermes is still running from the launcher that needs "
-                "replacing. Close other Hermes windows, restart from a "
-                "different terminal, then run:"
+                '  Корра ещё работает через команду, которую нужно заменить. Закройте другие окна, откройте другой терминал и выполните:'
             )
             print(f'    cd /d "{PROJECT_ROOT}"')
             print(
                 f'    "{sys.executable}" -m pip install -e ".[all]"'
             )
         else:
-            print("  Recover manually with:")
+            print('  Восстановление вручную:')
             print(f"    cd {PROJECT_ROOT}")
             print(f"    {sys.executable} -m ensurepip --upgrade")
             print(f"    {sys.executable} -m pip install -e '.[all]'")
@@ -9396,18 +9285,16 @@ def _reexec_dependency_sync_off_windows_shim() -> bool:
                 stdin=subprocess.DEVNULL,
             )
             print(
-                f"→ Windows: {shim.name} cannot replace itself while it runs; "
-                "finishing the dependency install under the venv Python."
+                f'→ Windows: {shim.name} не может заменить себя во время работы. Завершаем установку зависимостей через Python виртуального окружения.'
             )
             print(
-                "  The code update is already applied. The install continues "
-                "below and this shell returns right away."
+                '  Код уже обновлён. Установка продолжается ниже, терминал сразу вернёт управление.'
             )
             return True
         except OSError as exc:
             logger.debug("Dependency-sync hand-off via %s failed: %s", python_exe, exc)
-        print(f"  ⚠ Could not hand the dependency install off {shim.name}.")
-        print("    Continuing in-process; if it cannot replace the shim, run:")
+        print(f'  ⚠ Не удалось передать установку зависимостей {shim.name}.')
+        print('    Продолжаем в текущем процессе. Если не удастся заменить команду, выполните:')
         print(f"    {subprocess.list2cmdline(cmd)}")
     return False
 
@@ -9452,8 +9339,7 @@ def _run_install_with_heartbeat(
         while not done.wait(heartbeat_interval_seconds):
             elapsed = int(_time.time() - start)
             print(
-                f"  … still installing dependencies ({elapsed}s elapsed)"
-                " — compiling Rust/C extensions can take several minutes",
+                f'  … Зависимости ещё устанавливаются: прошло {elapsed} с. Сборка расширений Rust/C может занять несколько минут.',
                 flush=True,
             )
 
@@ -9584,12 +9470,10 @@ def _quarantine_running_hermes_exe(
         # aside at next boot. Report and let uv try its luck instead —
         # sometimes its own retry handling pulls through.
         print(
-            f"  ⚠ Could not quarantine {shim.name} ({last_exc.__class__.__name__}: "
-            f"another process is holding it open)."
+            f'  ⚠ Не удалось переместить {shim.name} в резервную папку: {last_exc.__class__.__name__}; файл открыт другим процессом.'
         )
         print(
-            "    Close Hermes Desktop, exit other `hermes` REPLs, stop the "
-            "gateway, or pause AV scanning, then re-run `hermes update`."
+            '    Закройте приложение Корры и другие её терминалы, остановите шлюз или приостановите проверку антивирусом, затем повторите korra update.'
         )
         if failed_out is not None:
             failed_out.append(shim.name)
@@ -9699,7 +9583,7 @@ class ShimQuarantineError(RuntimeError):
     def __init__(self, failed_shims: list[str]):
         self.failed_shims = list(failed_shims)
         super().__init__(
-            "could not quarantine live shim(s): " + ", ".join(self.failed_shims)
+            'Не удалось переместить используемые команды в резервную папку: ' + ", ".join(self.failed_shims)
         )
 
 
@@ -10037,24 +9921,23 @@ def _repair_venv_via_import_probes(
     broken = _detect_broken_lazy_refresh_imports(install_cmd_prefix, env=env)
     if broken is None:
         print(
-            "  ⚠ Import probes unavailable — cannot confirm venv package health."
+            '  ⚠ Проверка загрузки пакетов недоступна; исправность окружения не подтверждена.'
         )
         return "indeterminate"
     if not broken:
         return "healthy"
     print(
-        "  → Detected corrupted venv packages via import probes: "
-        f"{', '.join(broken)}; repairing..."
+        f"  → Найдены повреждённые пакеты окружения Python: {', '.join(broken)}. Восстанавливаем…"
     )
     if _repair_broken_lazy_refresh_imports(
         install_cmd_prefix, broken, env=env
     ):
-        print("  ✓ Venv repair succeeded")
+        print('  ✓ Окружение Python восстановлено')
         return "repaired"
     manual = " ".join(
         shlex.quote(s) for s in _lazy_refresh_repair_specs(broken)
     )
-    print("  ⚠ Venv repair incomplete. Run manually, then `hermes update`:")
+    print('  ⚠ Восстановление окружения не завершено. Выполните вручную, затем korra update:')
     print(
         f"    {' '.join(install_cmd_prefix)} install --force-reinstall {manual}"
     )
@@ -10188,7 +10071,7 @@ def _install_python_dependencies_with_optional_fallback(
         return
     except subprocess.CalledProcessError:
         print(
-            "  ⚠ Optional extras failed, reinstalling base dependencies and retrying extras individually..."
+            '  ⚠ Ошибка дополнительных пакетов. Переустанавливаем основные зависимости и пробуем дополнительные по одному…'
         )
 
     _install(["install", "-e", "."])
@@ -10204,11 +10087,11 @@ def _install_python_dependencies_with_optional_fallback(
 
     if installed_extras:
         print(
-            f"  ✓ Reinstalled optional extras individually: {', '.join(installed_extras)}"
+            f"  ✓ Дополнительные пакеты переустановлены по отдельности: {', '.join(installed_extras)}"
         )
     if failed_extras:
         print(
-            f"  ⚠ Skipped optional extras that still failed: {', '.join(failed_extras)}"
+            f"  ⚠ Пропущены дополнительные пакеты с ошибками: {', '.join(failed_extras)}"
         )
 
     # Belt-and-suspenders: verify every declared core dependency from
@@ -10286,10 +10169,9 @@ def _verify_console_scripts_installed(
         return
 
     print(
-        f"  ⚠ Verification: {len(missing)} console script(s) missing on disk: "
-        f"{', '.join(missing)}"
+        f"  ⚠ Проверка: команд, отсутствующих на диске, — {len(missing)}: {', '.join(missing)}"
     )
-    print("  → Reinstalling entry points with --reinstall...")
+    print('  → Восстанавливаем команды через --reinstall…')
 
     try:
         _run_quarantined_install(
@@ -10300,19 +10182,17 @@ def _verify_console_scripts_installed(
     except subprocess.CalledProcessError as e:
         logger.warning("console script verification: repair install failed: %s", e)
         print(
-            "  ⚠ Entry point repair failed; try `hermes update --force` after "
-            "closing other hermes processes."
+            '  ⚠ Команды не восстановлены. Закройте остальные процессы Корры и выполните korra update --force.'
         )
         return
 
     still_missing = _missing()
     if still_missing:
         print(
-            f"  ⚠ Still missing after repair: {', '.join(still_missing)}. "
-            "Workaround: python -m korra_cli.main <command>"
+            f"  ⚠ После восстановления всё ещё отсутствуют: {', '.join(still_missing)}. Временный запуск: python -m korra_cli.main <command>"
         )
     else:
-        print("  ✓ All console entry points restored")
+        print('  ✓ Все команды восстановлены')
 
 
 def _verify_core_dependencies_installed(
@@ -10429,10 +10309,9 @@ def _verify_core_dependencies_installed(
         return
 
     print(
-        f"  ⚠ Verification: {len(missing)} declared dep(s) missing after install: "
-        f"{', '.join(missing[:8])}{'...' if len(missing) > 8 else ''}"
+        f"  ⚠ Проверка: после установки отсутствуют зависимости ({len(missing)}): {', '.join(missing[:8])}{('...' if len(missing) > 8 else '')}"
     )
-    print("  → Reinstalling base group with --reinstall to repair...")
+    print('  → Восстанавливаем основные зависимости через --reinstall…')
 
     # Reinstall base group with --reinstall so uv re-resolves from scratch
     # against the current pyproject. We don't pass ``[{group}]`` here on
@@ -10451,12 +10330,12 @@ def _verify_core_dependencies_installed(
         )
     except subprocess.CalledProcessError as e:
         logger.warning("dep verification: repair install failed: %s", e)
-        print("  ⚠ Repair install failed; check `hermes update` output above.")
+        print('  ⚠ Восстановление не удалось. Проверьте вывод korra update выше.')
         return
 
     still_missing = _missing_deps()
     if not still_missing:
-        print("  ✓ All declared core dependencies now installed")
+        print('  ✓ Все основные зависимости установлены')
         return
 
     # Last-ditch: install each remaining missing dep with its pin directly.
@@ -10474,7 +10353,7 @@ def _verify_core_dependencies_installed(
 
     specs = [name_to_spec.get(n, n) for n in still_missing]
     print(
-        f"  → Force-installing remaining missing dep(s): {', '.join(specs)}"
+        f"  → Принудительно устанавливаем оставшиеся зависимости: {', '.join(specs)}"
     )
     try:
         _run_install_with_heartbeat(
@@ -10483,19 +10362,17 @@ def _verify_core_dependencies_installed(
     except subprocess.CalledProcessError as e:
         logger.warning("dep verification: per-package repair failed: %s", e)
         print(
-            f"  ⚠ Could not install: {', '.join(still_missing)}. "
-            "Run `hermes update --force` after closing other hermes processes."
+            f"  ⚠ Не удалось установить: {', '.join(still_missing)}. Закройте остальные процессы Корры и выполните korra update --force."
         )
         return
 
     final_missing = _missing_deps()
     if final_missing:
         print(
-            f"  ⚠ Still missing after repair: {', '.join(final_missing)}. "
-            "Run `hermes update --force` after closing other hermes processes."
+            f"  ⚠ После восстановления всё ещё отсутствуют: {', '.join(final_missing)}. Закройте остальные процессы Корры и выполните korra update --force."
         )
     else:
-        print("  ✓ All declared core dependencies now installed")
+        print('  ✓ Все основные зависимости установлены')
 
 
 def _resolve_install_target_python(
@@ -10784,8 +10661,8 @@ def _size_delta_label(saved_mb: float) -> str:
     instead.
     """
     if saved_mb >= 0:
-        return f"reclaimed {saved_mb:.1f} MB"
-    return f"grew by {-saved_mb:.1f} MB"
+        return f'освобождено {saved_mb:.1f} МБ'
+    return f'увеличилось на {-saved_mb:.1f} МБ'
 
 
 def cmd_update(args):
@@ -10801,7 +10678,7 @@ def cmd_update(args):
     )
 
     if is_managed():
-        managed_error("update Korra")
+        managed_error('обновить Корру')
         return
 
     # --plan is read-only and deployment-kind aware, so it runs BEFORE the
@@ -11056,23 +10933,23 @@ def cmd_profile(args):
         label = format_profile_label(
             profile_name, current.display_name if current else ""
         )
-        print(f"\nActive profile: {label}")
-        print(f"Path:           {dhh}")
+        print(f'Текущий профиль: {label}')
+        print(f'Путь:           {dhh}')
 
         if current is not None:
             p = current
             if p.model:
                 print(
-                    f"Model:          {p.model}"
+                    f'Модель:         {p.model}'
                     + (f" ({p.provider})" if p.provider else "")
                 )
             print(
-                f"Gateway:        {'running' if p.gateway_running else 'stopped'}"
+                f"Шлюз:           {('работает' if p.gateway_running else 'остановлен')}"
             )
-            print(f"Skills:         {p.skill_count} installed")
+            print(f'Навыков:        {p.skill_count} установлено')
             if p.alias_path:
                 alias_display = p.alias_name or p.name
-                print(f"Alias:          {alias_display} → hermes -p {p.name}")
+                print(f'Команда:        {alias_display} → korra -p {p.name}')
         print()
         return
 
@@ -11083,7 +10960,7 @@ def cmd_profile(args):
         active = get_active_profile_name()
 
         if not profiles:
-            print("No profiles found.")
+            print('Профили не найдены.')
             return
 
         # Header
@@ -11121,11 +10998,11 @@ def cmd_profile(args):
         try:
             set_active_profile(name)
             if name == "default":
-                print("Switched to: default (~/.hermes)")
+                print('Выбран основной профиль default')
             else:
-                print(f"Switched to: {name}")
+                print(f'Выбран профиль: {name}')
         except (ValueError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
 
     elif action == "create":
@@ -11148,7 +11025,7 @@ def cmd_profile(args):
                 no_skills=no_skills,
                 description=getattr(args, "description", None),
             )
-            print(f"\nProfile '{name}' created at {profile_dir}")
+            print(f'Профиль «{name}» создан в {profile_dir}')
 
             if clone_config or clone_all:
                 source_label = (
@@ -11156,12 +11033,11 @@ def cmd_profile(args):
                 )
                 if clone_all:
                     print(
-                        f"Full copy from {source_label} "
-                        "(excluding session history, backups, and snapshots)."
+                        f'Полная копия {source_label} без истории бесед, резервных копий и снимков.'
                     )
                 else:
                     print(
-                        f"Cloned config, .env, SOUL.md, and skills from {source_label}."
+                        f'Настройки, .env, SOUL.md и навыки скопированы из {source_label}.'
                     )
 
             # Auto-clone Honcho config for the new profile (only with clone operations)
@@ -11170,7 +11046,7 @@ def cmd_profile(args):
                     from plugins.memory.honcho.cli import clone_honcho_for_profile
 
                     if clone_honcho_for_profile(name):
-                        print(f"Honcho config cloned (peer: {name})")
+                        print(f'Настройки Honcho скопированы; участник: {name}')
                 except Exception:
                     pass  # Honcho plugin not installed or not configured
 
@@ -11181,15 +11057,14 @@ def cmd_profile(args):
                 result = seed_profile_skills(profile_dir)
                 if result and result.get("skipped_opt_out"):
                     print(
-                        "No bundled skills seeded (--no-skills). "
-                        "Delete .no-bundled-skills in the profile to opt back in."
+                        'Встроенные навыки не добавлены (--no-skills). Для включения удалите .no-bundled-skills из профиля.'
                     )
                 elif result:
                     copied = len(result.get("copied", []))
-                    print(f"{copied} bundled skills synced.")
+                    print(f'Синхронизировано встроенных навыков: {copied}.')
                 else:
                     print(
-                        "⚠ Skills could not be seeded. Run `{} update` to retry.".format(
+                        '⚠ Не удалось добавить навыки. Повторите: {} update.'.format(
                             name
                         )
                     )
@@ -11198,19 +11073,19 @@ def cmd_profile(args):
             if not no_alias:
                 collision = check_alias_collision(name)
                 if collision:
-                    print(f"\n⚠ Cannot create alias '{name}' — {collision}")
+                    print(f'⚠ Нельзя создать команду «{name}»: {collision}')
                     print(
-                        f"  Choose a custom alias:  hermes profile alias {name} --name <custom>"
+                        f'  Выберите другое имя: korra profile alias {name} --name <custom>'
                     )
-                    print(f"  Or access via flag:     hermes -p {name} chat")
+                    print(f'  Или запускайте через параметр: korra -p {name} chat')
                 else:
                     wrapper_path = create_wrapper_script(name)
                     if wrapper_path:
-                        print(f"Wrapper created: {wrapper_path}")
+                        print(f'Команда-обёртка создана: {wrapper_path}')
                         if not _is_wrapper_dir_in_path():
-                            print(f"\n⚠ {_get_wrapper_dir()} is not in your PATH.")
+                            print(f'⚠ Папка {_get_wrapper_dir()} не входит в PATH.')
                             print(
-                                "  Add to your shell config (~/.bashrc or ~/.zshrc):"
+                                '  Добавьте в настройки оболочки ~/.bashrc или ~/.zshrc:'
                             )
                             print('    export PATH="$HOME/.local/bin:$PATH"')
 
@@ -11221,23 +11096,23 @@ def cmd_profile(args):
                 profile_dir_display = str(profile_dir)
 
             # Next steps
-            print("\nNext steps:")
-            print(f"  {name} setup              Configure API keys and model")
-            print(f"  {name} chat               Start chatting")
-            print(f"  {name} gateway start      Start the messaging gateway")
+            print('Дальше:')
+            print(f'  {name} setup              Настроить ключи API и модель')
+            print(f'  {name} chat               Начать беседу')
+            print(f'  {name} gateway start      Запустить шлюз мессенджеров')
             if clone or clone_all:
-                print(f"\n  Edit {profile_dir_display}/.env for different API keys")
-                print(f"  Edit {profile_dir_display}/SOUL.md for different personality")
+                print(f'  Другие ключи API задаются в {profile_dir_display}/.env')
+                print(f'  Другой характер общения задаётся в {profile_dir_display}/SOUL.md')
             else:
                 print(
-                    f"\n  ⚠ This profile has no API keys yet. Run '{name} setup' first,"
+                    f'  ⚠ У этого профиля пока нет ключей API. Сначала выполните {name} setup,'
                 )
-                print("    or it will inherit keys from your shell environment.")
-                print(f"  Edit {profile_dir_display}/SOUL.md to customize personality")
+                print('    иначе будут использованы ключи из среды вашего терминала.')
+                print(f'  Характер общения можно настроить в {profile_dir_display}/SOUL.md')
             print()
 
         except (ValueError, FileExistsError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
 
     elif action == "delete":
@@ -11246,7 +11121,7 @@ def cmd_profile(args):
         try:
             delete_profile(name, yes=yes)
         except (ValueError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
 
     elif action == "describe":
@@ -11262,20 +11137,20 @@ def cmd_profile(args):
         name = getattr(args, "profile_name", None)
 
         if all_flag and not auto_flag:
-            print("profile describe: --all requires --auto", file=sys.stderr)
+            print('profile describe: для --all нужен --auto', file=sys.stderr)
             sys.exit(2)
         if all_flag and (text_value or name):
             print(
-                "profile describe: --all is mutually exclusive with a profile name / --text",
+                'profile describe: --all нельзя использовать с именем профиля или --text',
                 file=sys.stderr,
             )
             sys.exit(2)
         if not all_flag and not name:
-            print("profile describe: profile name is required (or --all --auto)", file=sys.stderr)
+            print('profile describe: укажите имя профиля либо --all --auto', file=sys.stderr)
             sys.exit(2)
         if text_value and auto_flag:
             print(
-                "profile describe: --text is mutually exclusive with --auto",
+                'profile describe: --text и --auto нельзя использовать вместе',
                 file=sys.stderr,
             )
             sys.exit(2)
@@ -11289,15 +11164,15 @@ def cmd_profile(args):
                 else:
                     profile_dir = _profiles_mod.get_profile_dir(name)
             except Exception as exc:
-                print(f"Error: {exc}", file=sys.stderr)
+                print(f'Ошибка: {exc}', file=sys.stderr)
                 sys.exit(1)
             if not profile_dir.is_dir():
-                print(f"Error: profile '{name}' not found", file=sys.stderr)
+                print(f'Ошибка: профиль «{name}» не найден', file=sys.stderr)
                 sys.exit(1)
             meta = _profiles_mod.read_profile_meta(profile_dir)
             desc = meta.get("description") or ""
             if not desc:
-                print(f"(no description set for '{name}')")
+                print(f'Для «{name}» описание не задано')
             else:
                 tag = "[auto] " if meta.get("description_auto") else ""
                 print(f"{tag}{desc}")
@@ -11316,9 +11191,9 @@ def cmd_profile(args):
                     description=text_value,
                     description_auto=False,
                 )
-                print(f"Description updated for '{name}'.")
+                print(f'Описание «{name}» обновлено.')
             except Exception as exc:
-                print(f"Error: {exc}", file=sys.stderr)
+                print(f'Ошибка: {exc}', file=sys.stderr)
                 sys.exit(1)
             sys.exit(0)
 
@@ -11328,7 +11203,7 @@ def cmd_profile(args):
         if all_flag:
             targets = _pd.list_describable_profiles(missing_only=True)
             if not targets:
-                print("All profiles already have descriptions.")
+                print('У всех профилей уже есть описания.')
                 sys.exit(0)
         else:
             targets = [name]
@@ -11339,7 +11214,7 @@ def cmd_profile(args):
             outcome = _pd.describe_profile(tgt, overwrite=overwrite_flag)
             if outcome.ok:
                 ok_count += 1
-                print(f"Described '{outcome.profile_name}': {outcome.description}")
+                print(f'Описание «{outcome.profile_name}»: {outcome.description}')
             else:
                 fail_count += 1
                 print(
@@ -11366,7 +11241,7 @@ def cmd_profile(args):
         )
 
         if not profile_exists(name):
-            print(f"Error: Profile '{name}' does not exist.")
+            print(f'Ошибка: профиль «{name}» не существует.')
             sys.exit(1)
         profile_dir = get_profile_dir(name)
         model, provider = _read_config_model(profile_dir)
@@ -11376,27 +11251,27 @@ def cmd_profile(args):
         alias_name = find_alias_for_profile(name)
         display = read_profile_meta(profile_dir).get("display_name", "")
 
-        print(f"\nProfile: {format_profile_label(name, display)}")
-        print(f"Path:    {profile_dir}")
+        print(f'Профиль: {format_profile_label(name, display)}')
+        print(f'Путь:    {profile_dir}')
         if model:
-            print(f"Model:   {model}" + (f" ({provider})" if provider else ""))
-        print(f"Gateway: {'running' if gw else 'stopped'}")
-        print(f"Skills:  {skills}")
+            print(f'Модель:  {model}' + (f" ({provider})" if provider else ""))
+        print(f"Шлюз:    {('работает' if gw else 'остановлен')}")
+        print(f'Навыки:  {skills}')
         print(
-            f".env:    {'exists' if (profile_dir / '.env').exists() else 'not configured'}"
+            f".env:    {'есть' if (profile_dir / '.env').exists() else 'не настроено'}"
         )
         print(
-            f"SOUL.md: {'exists' if (profile_dir / 'SOUL.md').exists() else 'not configured'}"
+            f"SOUL.md: {'есть' if (profile_dir / 'SOUL.md').exists() else 'не настроено'}"
         )
         if dist_name:
-            print(f"Distribution: {dist_name}@{dist_version or '?'}")
+            print(f"Готовый профиль: {dist_name}@{dist_version or '?'}")
             if dist_source:
-                print(f"Installed from: {dist_source}")
-            print(f"  (run `hermes profile info {name}` for full manifest)")
+                print(f'Установлено из: {dist_source}')
+            print(f'  Полный манифест: korra profile info {name}')
         if alias_name:
             is_windows = sys.platform == "win32"
             wrapper = _get_wrapper_dir() / (f"{alias_name}.bat" if is_windows else alias_name)
-            print(f"Alias:   {alias_name} → hermes -p {name}  ({wrapper})")
+            print(f'Команда: {alias_name} → korra -p {name} ({wrapper})')
         print()
 
     elif action == "alias":
@@ -11407,7 +11282,7 @@ def cmd_profile(args):
         from korra_cli.profiles import profile_exists, validate_alias_name
 
         if not profile_exists(name):
-            print(f"Error: Profile '{name}' does not exist.")
+            print(f'Ошибка: профиль «{name}» не существует.')
             sys.exit(1)
 
         alias_name = custom_name or name
@@ -11415,26 +11290,26 @@ def cmd_profile(args):
         try:
             validate_alias_name(alias_name)
         except ValueError as exc:
-            print(f"Error: {exc}")
+            print(f'Ошибка: {exc}')
             sys.exit(1)
 
         if remove:
             if remove_wrapper_script(alias_name):
-                print(f"✓ Removed alias '{alias_name}'")
+                print(f'✓ Команда «{alias_name}» удалена')
             else:
-                print(f"No alias '{alias_name}' found to remove.")
+                print(f'Команда «{alias_name}» для удаления не найдена.')
         else:
             collision = check_alias_collision(alias_name)
             if collision:
-                print(f"Error: {collision}")
+                print(f'Ошибка: {collision}')
                 sys.exit(1)
             wrapper_path = create_wrapper_script(
                 alias_name, target=name if custom_name else None
             )
             if wrapper_path:
-                print(f"✓ Alias created: {wrapper_path}")
+                print(f'✓ Команда создана: {wrapper_path}')
                 if not _is_wrapper_dir_in_path():
-                    print(f"⚠ {_get_wrapper_dir()} is not in your PATH.")
+                    print(f'⚠ Папка {_get_wrapper_dir()} не входит в PATH.')
 
     elif action == "rename":
         from korra_cli.profiles import normalize_profile_name, rename_profile
@@ -11442,10 +11317,10 @@ def cmd_profile(args):
         try:
             new_dir = rename_profile(args.old_name, args.new_name)
             if normalize_profile_name(args.old_name) != "default":
-                print(f"\nProfile renamed: {args.old_name} → {args.new_name}")
-                print(f"Path: {new_dir}\n")
+                print(f'Профиль переименован: {args.old_name} → {args.new_name}')
+                print(f'Путь: {new_dir}')
         except (ValueError, FileExistsError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
 
     elif action == "export":
@@ -11455,9 +11330,9 @@ def cmd_profile(args):
         output = args.output or f"{name}.tar.gz"
         try:
             result_path = export_profile(name, output)
-            print(f"✓ Exported '{name}' to {result_path}")
+            print(f'✓ Профиль «{name}» сохранён в {result_path}')
         except (ValueError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
 
     elif action == "import":
@@ -11468,17 +11343,17 @@ def cmd_profile(args):
                 args.archive, name=getattr(args, "import_name", None)
             )
             name = profile_dir.name
-            print(f"✓ Imported profile '{name}' at {profile_dir}")
+            print(f'✓ Профиль «{name}» загружен в {profile_dir}')
 
             # Offer to create alias
             collision = check_alias_collision(name)
             if not collision:
                 wrapper_path = create_wrapper_script(name)
                 if wrapper_path:
-                    print(f"  Wrapper created: {wrapper_path}")
+                    print(f'  Команда-обёртка создана: {wrapper_path}')
             print()
         except (ValueError, FileExistsError, FileNotFoundError) as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
 
     elif action == "install":
@@ -11503,11 +11378,11 @@ def cmd_profile(args):
 
                 if not getattr(args, "yes", False):
                     try:
-                        answer = input("\nProceed with install? [y/N] ").strip().lower()
+                        answer = input('Продолжить установку? [y/N] ').strip().lower()
                     except (EOFError, KeyboardInterrupt):
                         answer = ""
                     if answer not in {"y", "yes"}:
-                        print("Install cancelled.")
+                        print('Установка отменена.')
                         return
 
             plan = install_distribution(
@@ -11516,21 +11391,19 @@ def cmd_profile(args):
                 force=getattr(args, "force", False),
                 create_alias=getattr(args, "alias", False),
             )
-            print(f"\n✓ Installed '{plan.manifest.name}' v{plan.manifest.version}")
-            print(f"  Profile path: {plan.target_dir}")
+            print(f'✓ Установлен профиль «{plan.manifest.name}» v{plan.manifest.version}')
+            print(f'  Папка профиля: {plan.target_dir}')
             if plan.manifest.env_requires:
                 print(
-                    f"  Next: copy .env.EXAMPLE to .env and fill in required keys:\n"
-                    f"    {plan.target_dir}/.env.EXAMPLE"
+                    f'  Скопируйте .env.EXAMPLE в .env и заполните обязательные ключи: {plan.target_dir}/.env.EXAMPLE'
                 )
             if plan.has_cron:
                 print(
-                    "  Cron jobs were included but are NOT scheduled automatically.\n"
-                    f"  Review them with:  hermes -p {plan.manifest.name} cron list"
+                    f'  Задачи по расписанию включены в поставку, но не запускаются автоматически. Проверьте: korra -p {plan.manifest.name} cron list'
                 )
-            print(f"\n  Use with:      hermes -p {plan.manifest.name} chat")
+            print(f'  Запуск: korra -p {plan.manifest.name} chat')
         except (DistributionError, ValueError) as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
 
     elif action == "update":
@@ -11547,37 +11420,35 @@ def cmd_profile(args):
             current = read_manifest(get_profile_dir(canon))
             if current is None:
                 print(
-                    f"Error: Profile '{canon}' is not a distribution (no distribution.yaml). "
-                    "Only profiles installed via `hermes profile install` can be updated."
+                    f'Профиль «{canon}» не является готовой поставкой: нет distribution.yaml. Обновлять можно только профили, установленные через korra profile install.'
                 )
                 sys.exit(1)
 
             force_config = getattr(args, "force_config", False)
             if not getattr(args, "yes", False):
-                print(f"\nUpdate '{canon}' from: {current.source or '(no source)'}")
-                print(f"  Currently at version {current.version}")
+                print(f"Обновление «{canon}» из {current.source or '(нет источника)'}")
+                print(f'  Текущая версия: {current.version}')
                 if force_config:
-                    print("  --force-config set: config.yaml WILL be overwritten.")
+                    print('  Указан --force-config: config.yaml будет заменён.')
                 else:
-                    print("  config.yaml will be preserved (pass --force-config to overwrite).")
-                print("  User data (memories, sessions, auth, .env) will NOT be touched.")
+                    print('  config.yaml сохранится; для замены добавьте --force-config.')
+                print('  Память, беседы, данные входа и .env сохранятся.')
                 try:
-                    answer = input("\nProceed? [y/N] ").strip().lower()
+                    answer = input('Продолжить? [y/N] ').strip().lower()
                 except (EOFError, KeyboardInterrupt):
                     answer = ""
                 if answer not in {"y", "yes"}:
-                    print("Update cancelled.")
+                    print('Обновление отменено.')
                     return
 
             plan = update_distribution(canon, force_config=force_config)
-            print(f"\n✓ Updated '{plan.manifest.name}' → v{plan.manifest.version}")
+            print(f'✓ Профиль «{plan.manifest.name}» обновлён до v{plan.manifest.version}')
             if plan.has_cron:
                 print(
-                    "  Cron files were refreshed.  Review with:  "
-                    f"hermes -p {plan.manifest.name} cron list"
+                    f'  Файлы расписания обновлены. Проверьте: korra -p {plan.manifest.name} cron list'
                 )
         except (DistributionError, ValueError) as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
 
     elif action == "info":
@@ -11586,31 +11457,30 @@ def cmd_profile(args):
         try:
             data = describe_distribution(args.profile_name)
         except (DistributionError, ValueError) as e:
-            print(f"Error: {e}")
+            print(f'Ошибка: {e}')
             sys.exit(1)
         if not data:
             print(
-                f"Profile '{args.profile_name}' is not a distribution "
-                "(no distribution.yaml)."
+                f'Профиль «{args.profile_name}» не является готовой поставкой: нет distribution.yaml.'
             )
             return
-        print(f"\nDistribution: {data.get('name')}")
-        print(f"Version:      {data.get('version', '?')}")
+        print(f"Готовый профиль: {data.get('name')}")
+        print(f"Версия:         {data.get('version', '?')}")
         if data.get("description"):
-            print(f"Description:  {data['description']}")
+            print(f"Описание:       {data['description']}")
         if data.get("author"):
-            print(f"Author:       {data['author']}")
+            print(f"Автор:          {data['author']}")
         if data.get("license"):
-            print(f"License:      {data['license']}")
+            print(f"Лицензия:       {data['license']}")
         if data.get("hermes_requires"):
-            print(f"Requires:     Korra {data['hermes_requires']}")
+            print(f"Нужна Корра     {data['hermes_requires']}")
         if data.get("source"):
-            print(f"Source:       {data['source']}")
+            print(f"Источник:       {data['source']}")
         if data.get("installed_at"):
-            print(f"Installed:    {data['installed_at']}")
+            print(f"Установлено:    {data['installed_at']}")
         env_reqs = data.get("env_requires") or []
         if env_reqs:
-            print("\nEnvironment variables:")
+            print('Переменные среды:')
             for er in env_reqs:
                 tag = "required" if er.get("required", True) else "optional"
                 line = f"  {er['name']} ({tag})"
@@ -11618,7 +11488,7 @@ def cmd_profile(args):
                     line += f" — {er['description']}"
                 print(line)
                 if er.get("default") is not None:
-                    print(f"      default: {er['default']}")
+                    print(f"      По умолчанию: {er['default']}")
         print()
 
 
@@ -11626,15 +11496,15 @@ def _render_distribution_plan(plan) -> None:
     """Print a human-readable summary of a pending distribution install."""
     from korra_cli.profile_distribution import MANIFEST_FILENAME
     mf = plan.manifest
-    print(f"\nDistribution: {mf.name} v{mf.version}")
+    print(f'Готовый профиль: {mf.name} v{mf.version}')
     if mf.description:
         print(f"  {mf.description}")
     if mf.author:
-        print(f"  Author:   {mf.author}")
+        print(f'  Автор:    {mf.author}')
     if mf.hermes_requires:
-        print(f"  Requires: Korra {mf.hermes_requires}")
-    print(f"  Source:   {plan.provenance}")
-    print(f"  Target:   {plan.target_dir}")
+        print(f'  Нужна Корра {mf.hermes_requires}')
+    print(f'  Источник: {plan.provenance}')
+    print(f'  Папка:    {plan.target_dir}')
     if plan.existing:
         # Distinguish "updating an existing distribution" (well-understood
         # semantics — dist-owned overwritten, config preserved, user data
@@ -11643,16 +11513,13 @@ def _render_distribution_plan(plan) -> None:
         # the profile manually).
         existing_is_distribution = (plan.target_dir / MANIFEST_FILENAME).is_file()
         if existing_is_distribution:
-            print("  (profile exists — will overwrite distribution-owned files only)")
+            print('  Профиль уже существует; будут заменены только файлы поставки.')
         else:
             print(
-                "  ⚠ Profile exists but is NOT a distribution.  Installing here will\n"
-                "    overwrite its SOUL.md, skills/, cron/, and mcp.json.\n"
-                "    Your memories, sessions, auth.json, and .env will be preserved,\n"
-                "    but any hand-edits to distribution-owned files will be lost."
+                '  ⚠ Этот профиль уже существует и не относится к готовой поставке. Будут заменены SOUL.md, skills/, cron/ и mcp.json; ручные правки этих файлов потеряются. Память, беседы, auth.json и .env сохранятся.'
             )
     if mf.env_requires:
-        print("\n  Env vars:")
+        print('  Переменные среды:')
         for er in mf.env_requires:
             tag = "required" if er.required else "optional"
             # Check both the current shell environment and the target profile's
@@ -11679,15 +11546,14 @@ def _render_distribution_plan(plan) -> None:
                         # the old guard let a mis-encoded .env abort the whole
                         # install preview. Skip the pre-check instead.
                         pass
-            status = "✓ set" if already else ("needs setting" if er.required else "—")
+            status = "✓ set" if already else ('нужно настроить' if er.required else "—")
             line = f"    • {er.name} ({tag}, {status})"
             if er.description:
                 line += f" — {er.description}"
             print(line)
     if plan.has_cron:
         print(
-            "\n  ⚠ This distribution ships cron jobs.  They will NOT run "
-            "automatically — review and enable manually."
+            '  ⚠ В готовом профиле есть задачи по расписанию. Они не запустятся автоматически: проверьте и включите их вручную.'
         )
 
 
@@ -11715,10 +11581,10 @@ def _report_dashboard_status() -> int:
         live.append((pid, command, mode))
 
     if not live:
-        print("No hermes dashboard or serve processes running.")
+        print('Запущенных процессов веб-панели или сервера Корры нет.')
         return 0
 
-    print(f"{len(live)} hermes dashboard/serve process(es) running:")
+    print(f'Работает процессов веб-сервера Корры: {len(live)}')
     for pid, command, mode in live:
         print(f"    PID {pid} [{mode}]: {command}")
     return len(live)
@@ -11779,39 +11645,32 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
         return
 
     print()
-    print(f"⚠ Dashboard authentication is required for this configuration ({host}).")
+    print(f'⚠ Для этой настройки веб-панели требуется вход: {host}.')
     print(
-        "  Non-loopback binds and configured external dashboard.public_url "
-        "values require authentication (--insecure does not bypass this)."
+        '  Публичные адреса и внешний dashboard.public_url требуют авторизации. --insecure её не отключает.'
     )
     print()
-    print("  How do you want to authenticate the dashboard?")
-    print("    [1] Username & password (quickest; for a trusted LAN / VPN)")
-    print("    [2] OAuth via Nous Portal (run `hermes dashboard register`)")
-    print("    [3] Cancel")
+    print('  Выберите способ входа в веб-панель:')
+    print('    [1] Имя и пароль — быстро, для доверенной локальной сети или VPN')
+    print('    [2] OAuth через Nous Portal: korra dashboard register')
+    print('    [3] Отмена')
     print()
 
     try:
-        choice = input("  Choice [1]: ").strip() or "1"
+        choice = input('  Выберите [1]: ').strip() or "1"
     except (EOFError, KeyboardInterrupt):
-        print("\n  Cancelled.")
+        print('  Отменено.')
         sys.exit(1)
 
     if choice == "2":
         print()
         print(
-            "  Run this on the host where the dashboard lives, then start "
-            "the dashboard again:\n"
-            "    hermes dashboard register\n"
-            "  It provisions a Nous Portal OAuth client and writes "
-            "HERMES_DASHBOARD_OAUTH_CLIENT_ID into ~/.hermes/.env for you.\n"
-            "  Docs: https://hermes-agent.nousresearch.com/docs/"
-            "user-guide/features/web-dashboard#authentication-gated-mode"
+            '  На компьютере с веб-панелью выполните korra dashboard register, затем запустите панель снова. Команда создаст клиента OAuth Nous и сохранит HERMES_DASHBOARD_OAUTH_CLIENT_ID в .env профиля. Документация: https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard#authentication-gated-mode'
         )
         sys.exit(0)
 
     if choice not in ("1",):
-        print("  Cancelled.")
+        print('  Отменено.')
         sys.exit(1)
 
     # ── Username/password setup ──────────────────────────────────────────
@@ -11820,24 +11679,24 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
 
     print()
     try:
-        username = line_input("  Username [admin]: ").strip() or "admin"
+        username = line_input('  Имя пользователя [admin]: ').strip() or "admin"
         password = getpass.getpass("  Password: ")
-        confirm = getpass.getpass("  Confirm password: ")
+        confirm = getpass.getpass('  Повторите пароль: ')
     except (EOFError, KeyboardInterrupt):
-        print("\n  Cancelled.")
+        print('  Отменено.')
         sys.exit(1)
 
     if not password:
-        print("  ✗ Empty password — aborting.")
+        print('  ✗ Пароль пуст. Настройка отменена.')
         sys.exit(1)
     if password != confirm:
-        print("  ✗ Passwords don't match — aborting.")
+        print('  ✗ Пароли не совпадают. Настройка отменена.')
         sys.exit(1)
 
     try:
         from plugins.dashboard_auth.basic import hash_password
     except Exception as exc:
-        print(f"  ✗ Could not load the password provider: {exc}")
+        print(f'  ✗ Не удалось загрузить модуль входа по паролю: {exc}')
         sys.exit(1)
 
     password_hash = hash_password(password)
@@ -11864,12 +11723,11 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
         # disabled it isn't surprised.
         if ensure_basic_auth_plugin_enabled_in_config(cfg):
             print(
-                "  ✓ Re-enabled the bundled 'basic' auth plugin "
-                "(was in plugins.disabled)"
+                '  ✓ Встроенный плагин входа basic включён повторно; ранее он был в plugins.disabled'
             )
         save_config(cfg)
     except Exception as exc:
-        print(f"  ✗ Failed to write config.yaml: {exc}")
+        print(f'  ✗ Не удалось сохранить config.yaml: {exc}')
         sys.exit(1)
 
     # Re-run plugin discovery so the basic provider registers from the
@@ -11879,13 +11737,12 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
 
         discover_plugins(force=True)
     except Exception as exc:
-        print(f"  ⚠ Plugin re-discovery failed ({exc}); the gate may still "
-              "fail closed. Set the password again or restart the dashboard.")
+        print(f'  ⚠ Не удалось обновить список плагинов: {exc}. Вход может остаться заблокированным. Задайте пароль заново или перезапустите панель.')
 
     print()
-    print(f"  ✓ Username/password auth configured (user: {username}).")
-    print("    Saved to config.yaml under dashboard.basic_auth.")
-    print("    Sign in at the dashboard with these credentials.")
+    print(f'  ✓ Вход по имени и паролю настроен; пользователь: {username}.')
+    print('    Сохранено в dashboard.basic_auth файла config.yaml.')
+    print('    Войдите в веб-панель с этими данными.')
     print()
 
 
@@ -11899,7 +11756,7 @@ def _read_ssh_session_token_file(path: str) -> str:
     from pathlib import Path as _Path
 
     if not os.path.isabs(path):
-        raise SystemExit("--ssh-session-token-file must be absolute")
+        raise SystemExit('--ssh-session-token-file: нужен абсолютный путь')
 
     token_path = _Path(path)
     # The Desktop client writes the token under $HOME/.hermes/desktop-ssh: a
@@ -11913,11 +11770,11 @@ def _read_ssh_session_token_file(path: str) -> str:
     try:
         relative = token_path.relative_to(token_root)
     except ValueError as exc:
-        raise SystemExit("--ssh-session-token-file must be under the desktop-ssh directory") from exc
+        raise SystemExit('--ssh-session-token-file должен находиться внутри desktop-ssh') from exc
     if len(relative.parts) != 2 or not re.fullmatch(r"[0-9a-f]{32}", relative.parts[0]):
-        raise SystemExit("--ssh-session-token-file has an invalid runtime path")
+        raise SystemExit('--ssh-session-token-file: неверный путь среды выполнения')
     if not re.fullmatch(r"[0-9a-f]{16}\.token", relative.parts[1]):
-        raise SystemExit("--ssh-session-token-file has an invalid filename")
+        raise SystemExit('--ssh-session-token-file: неверное имя файла')
 
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -11929,41 +11786,41 @@ def _read_ssh_session_token_file(path: str) -> str:
             root_fd = os.open(token_root, directory_flags)
             root_stat = os.fstat(root_fd)
             if not _stat.S_ISDIR(root_stat.st_mode):
-                raise SystemExit("--ssh-session-token-file has an unsafe runtime root")
+                raise SystemExit('--ssh-session-token-file: небезопасная корневая папка среды')
             if hasattr(os, "getuid") and root_stat.st_uid != os.getuid():
-                raise SystemExit("--ssh-session-token-file runtime root has the wrong owner")
+                raise SystemExit('--ssh-session-token-file: корневая папка среды принадлежит другому пользователю')
             directory_fd = os.open(relative.parts[0], directory_flags, dir_fd=root_fd)
             directory_stat = os.fstat(directory_fd)
             if not _stat.S_ISDIR(directory_stat.st_mode):
-                raise SystemExit("--ssh-session-token-file has an unsafe parent directory")
+                raise SystemExit('--ssh-session-token-file: небезопасная родительская папка')
             if hasattr(os, "getuid") and directory_stat.st_uid != os.getuid():
-                raise SystemExit("--ssh-session-token-file parent has the wrong owner")
+                raise SystemExit('--ssh-session-token-file: родительская папка принадлежит другому пользователю')
             if (directory_stat.st_mode & 0o777) != 0o700:
-                raise SystemExit("--ssh-session-token-file parent has unsafe permissions")
+                raise SystemExit('--ssh-session-token-file: небезопасные права родительской папки')
             file_fd = os.open(relative.parts[1], file_flags, dir_fd=directory_fd)
         except SystemExit:
             raise
         except OSError as exc:
             if exc.errno == getattr(__import__("errno"), "ELOOP", -1):
-                raise SystemExit("--ssh-session-token-file is a symlink") from exc
-            raise SystemExit("--ssh-session-token-file is not accessible") from exc
+                raise SystemExit('--ssh-session-token-file является символической ссылкой') from exc
+            raise SystemExit('--ssh-session-token-file недоступен') from exc
 
         file_stat = os.fstat(file_fd)
         if not _stat.S_ISREG(file_stat.st_mode):
-            raise SystemExit("--ssh-session-token-file is not a regular file")
+            raise SystemExit('--ssh-session-token-file не является обычным файлом')
         if file_stat.st_size != 64:
-            raise SystemExit("--ssh-session-token-file contains an invalid token")
+            raise SystemExit('--ssh-session-token-file содержит неверный токен')
         if hasattr(os, "getuid") and file_stat.st_uid != os.getuid():
-            raise SystemExit("--ssh-session-token-file has the wrong owner")
+            raise SystemExit('--ssh-session-token-file принадлежит другому пользователю')
         if hasattr(os, "getuid") and (file_stat.st_mode & 0o777) & ~0o600:
-            raise SystemExit("--ssh-session-token-file has unsafe permissions")
+            raise SystemExit('--ssh-session-token-file имеет небезопасные права доступа')
 
         with os.fdopen(file_fd, "r", encoding="utf-8") as token_stream:
             file_fd = -1
             token = token_stream.read(65)
 
         if not re.fullmatch(r"[0-9a-f]{64}", token):
-            raise SystemExit("--ssh-session-token-file contains an invalid token")
+            raise SystemExit('--ssh-session-token-file содержит неверный токен')
         return token
     finally:
         if file_fd >= 0:
@@ -11999,7 +11856,7 @@ def cmd_dashboard(args):
     if _token_file and (
         getattr(args, "status", False) or getattr(args, "stop", False)
     ):
-        raise SystemExit("--ssh-session-token-file cannot be used with --status or --stop")
+        raise SystemExit('--ssh-session-token-file нельзя использовать с --status или --stop')
 
     # --status: report running dashboards and exit, no deps needed.
     if getattr(args, "status", False):
@@ -12010,7 +11867,7 @@ def cmd_dashboard(args):
     if getattr(args, "stop", False):
         pids = _find_stale_dashboard_pids()
         if not pids:
-            print("No hermes dashboard processes running.")
+            print('Запущенных процессов веб-панели Корры нет.')
             sys.exit(0)
         # Reuse the same SIGTERM-grace-SIGKILL path used after `hermes update`.
         _self()._kill_stale_dashboard_processes(reason="requested via --stop")
@@ -12025,10 +11882,10 @@ def cmd_dashboard(args):
     _headless_backend = getattr(args, "headless_backend", False)
     _ssh_owner_nonce = getattr(args, "ssh_owner_nonce", None)
     if _ssh_owner_nonce and not re.fullmatch(r"[0-9a-f]{16}", _ssh_owner_nonce):
-        raise SystemExit("--ssh-owner-nonce must be 16 lowercase hex characters")
+        raise SystemExit('--ssh-owner-nonce должен содержать 16 шестнадцатеричных символов в нижнем регистре')
     _ssh_session_token = None
     if _token_file and not _headless_backend:
-        raise SystemExit("--ssh-session-token-file is only valid with hermes serve")
+        raise SystemExit('--ssh-session-token-file доступен только с korra serve')
 
     # ── Sanitize Desktop-inherited env that hijacks a standalone launch ─
     # Desktop Electron spawns its backend with HERMES_DESKTOP=1 plus
@@ -12077,8 +11934,8 @@ def cmd_dashboard(args):
     ):
         url = f"http://{args.host or '127.0.0.1'}:{args.port}/?profile={_launch_profile}"
         if _dashboard_listening(args.host, args.port):
-            print(f"Machine dashboard already running on port {args.port}.")
-            print(f"  Managing profile '{_launch_profile}': {url}")
+            print(f'Общий сервер панели уже работает на порту {args.port}.')
+            print(f'  Управление профилем «{_launch_profile}»: {url}')
             if not args.no_open:
                 try:
                     import webbrowser
@@ -12088,8 +11945,7 @@ def cmd_dashboard(args):
             sys.exit(0)
 
         print(
-            f"Routing to the machine dashboard (profile '{_launch_profile}' "
-            f"preselected). Use --isolated for a dedicated per-profile server."
+            f'Подключаемся к общему серверу панели с выбранным профилем «{_launch_profile}». Для отдельного сервера профиля используйте --isolated.'
         )
         reexec_argv = [
             sys.executable, "-m", "korra_cli.main",
@@ -12168,14 +12024,11 @@ def cmd_dashboard(args):
         import fastapi  # noqa: F401
         import uvicorn  # noqa: F401
     except ImportError as e:
-        print("Web UI dependencies not installed (need fastapi + uvicorn).")
+        print('Не установлены зависимости веб-панели: fastapi и uvicorn.')
         print(
-            f"Re-install the package into this interpreter so metadata updates apply:\n"
-            f"  cd {PROJECT_ROOT}\n"
-            f"  {sys.executable} -m pip install -e .\n"
-            "If `pip` is missing in this venv, use:  uv pip install -e ."
+            f'Переустановите пакет в этот интерпретатор для обновления метаданных: cd {PROJECT_ROOT}, затем {sys.executable} -m pip install -e . Если pip отсутствует, используйте uv pip install -e .'
         )
-        print(f"Import error: {e}")
+        print(f'Ошибка загрузки модуля: {e}')
         sys.exit(1)
 
     # Seed bundled skills on first dashboard launch so the desktop GUI's
@@ -12226,18 +12079,18 @@ def cmd_dashboard(args):
             # points at a caller-managed directory the build cannot populate.
             _recoverable = not korra_env_present("KORRA_WEB_DIST")
             if _recoverable:
-                print(f"⚠ --skip-build was passed but no web dist found at: {_dist_root}")
-                print("  Attempting one recovery build of the web UI...")
+                print(f'⚠ Указан --skip-build, но веб-сборка не найдена: {_dist_root}')
+                print('  Пробуем один раз восстановить веб-сборку…')
                 _build_web_ui(PROJECT_ROOT / "web", fatal=True)
             if not (_dist_root / "index.html").exists():
-                print(f"✗ --skip-build was passed but no web dist found at: {_dist_root}")
+                print(f'✗ Указан --skip-build, но веб-сборка не найдена: {_dist_root}')
                 if _recoverable:
-                    print("  The recovery build did not produce a usable dist.")
-                print("  Pre-build first:  npm install --workspace web && npm run build -w web")
-                print("  Or drop --skip-build to build automatically.")
+                    print('  Восстановительная сборка не создала пригодный dist.')
+                print('  Сначала соберите: npm install --workspace web && npm run build -w web')
+                print('  Или уберите --skip-build для автоматической сборки.')
                 sys.exit(1)
-            print("  ✓ Recovery build produced a web dist")
-        print(f"→ Skipping web UI build (--skip-build); using dist at {_dist_root}")
+            print('  ✓ Восстановительная сборка создала веб-интерфейс')
+        print(f'→ Сборка веб-панели пропущена (--skip-build); используем dist из {_dist_root}')
     else:
         # HERMES_WEB_DIST is set without --skip-build: the build is skipped
         # (the env var points at a caller-managed dist), so validate it the
@@ -12246,15 +12099,15 @@ def cmd_dashboard(args):
         # via the env-var path).
         _dist_root = Path(korra_env("KORRA_WEB_DIST", "")).expanduser()
         if not (_dist_root / "index.html").exists():
-            print(f"✗ HERMES_WEB_DIST is set but no web dist found at: {_dist_root}")
-            print("  Pre-build first:  npm install --workspace web && npm run build -w web")
-            print("  Or unset HERMES_WEB_DIST to build and use the default web UI dist.")
+            print(f'✗ HERMES_WEB_DIST задан, но веб-сборка не найдена: {_dist_root}')
+            print('  Сначала соберите: npm install --workspace web && npm run build -w web')
+            print('  Или снимите HERMES_WEB_DIST для сборки и использования обычной веб-панели.')
             sys.exit(1)
         # Write the expanded path back: web_server reads HERMES_WEB_DIST raw
         # at import (no expanduser), so a validated "~/dist" would otherwise
         # pass here and still 404 there.
         korra_env_set(os.environ, "KORRA_WEB_DIST", str(_dist_root))
-        print(f"→ Using web dist from HERMES_WEB_DIST: {_dist_root}")
+        print(f'→ Используем веб-сборку из HERMES_WEB_DIST: {_dist_root}')
 
     # Discover and load plugins so any DashboardAuthProvider plugin
     # (e.g. plugins/dashboard_auth/nous) registers BEFORE start_server's
@@ -12270,7 +12123,7 @@ def cmd_dashboard(args):
         # Discovery failures must not block dashboard startup outright —
         # log and proceed; the gate's fail-closed branch will surface
         # the missing-provider state if it matters.
-        print(f"⚠ Plugin discovery failed: {exc}", file=sys.stderr)
+        print(f'⚠ Не удалось найти плагины: {exc}', file=sys.stderr)
 
     # Desktop chat uses the dashboard's in-process /api/ws gateway, which builds
     # agents via tui_gateway.server._make_agent.  That path only snapshots the
@@ -12861,8 +12714,8 @@ def cmd_memory(args):
             config["memory"] = {}
         config["memory"]["provider"] = ""
         save_config(config)
-        print("\n  ✓ Memory provider: built-in only")
-        print("  Saved to config.yaml\n")
+        print('  ✓ Память: только встроенная')
+        print('  Сохранено в config.yaml')
     elif sub == "reset":
         from korra_constants import get_hermes_home, display_hermes_home
 
@@ -12870,9 +12723,9 @@ def cmd_memory(args):
         target = getattr(args, "target", "all")
         files_to_reset = []
         if target in {"all", "memory"}:
-            files_to_reset.append(("MEMORY.md", "agent notes"))
+            files_to_reset.append(("MEMORY.md", 'заметки агента'))
         if target in {"all", "user"}:
-            files_to_reset.append(("USER.md", "user profile"))
+            files_to_reset.append(("USER.md", 'профиль пользователя'))
 
         # Check what exists
         existing = [
@@ -12880,34 +12733,34 @@ def cmd_memory(args):
         ]
         if not existing:
             print(
-                f"\n  Nothing to reset — no memory files found in {display_hermes_home()}/memories/\n"
+                f'  Очищать нечего: файлы памяти в {display_hermes_home()}/memories/ не найдены'
             )
             return
 
-        print("\n  This will permanently erase the following memory files:")
+        print('  Эти файлы памяти будут удалены безвозвратно:')
         for f, desc in existing:
             path = mem_dir / f
             size = path.stat().st_size
-            print(f"    ◆ {f} ({desc}) — {size:,} bytes")
+            print(f'    ◆ {f} ({desc}) — {size:,} байт')
 
         if not getattr(args, "yes", False):
             try:
-                answer = input("\n  Type 'yes' to confirm: ").strip().lower()
+                answer = input('  Для подтверждения введите yes: ').strip().lower()
             except (EOFError, KeyboardInterrupt):
-                print("\n  Cancelled.\n")
+                print('  Отменено.')
                 return
             if answer != "yes":
-                print("  Cancelled.\n")
+                print('  Отменено.')
                 return
 
         for f, desc in existing:
             (mem_dir / f).unlink()
-            print(f"  ✓ Deleted {f} ({desc})")
+            print(f'  ✓ Удалён {f} ({desc})')
 
         print(
-            "\n  Memory reset complete. New sessions will start with a blank slate."
+            '  Память очищена. Новые беседы начнутся с чистого листа.'
         )
-        print(f"  Files were in: {display_hermes_home()}/memories/\n")
+        print(f'  Файлы находились в {display_hermes_home()}/memories/')
     else:
         from korra_cli.memory_setup import memory_command
 
@@ -12932,8 +12785,8 @@ def cmd_acp(args):
             acp_argv.append("--yes")
         acp_main(acp_argv)
     except ImportError:
-        print("ACP dependencies not installed.", file=sys.stderr)
-        print("Install them with:  pip install -e '.[acp]'", file=sys.stderr)
+        print('Зависимости ACP не установлены.', file=sys.stderr)
+        print("Установите их: pip install -e '.[acp]'", file=sys.stderr)
         sys.exit(1)
 
 
@@ -12965,7 +12818,7 @@ def cmd_insights(args):
         report = engine.generate(days=args.days, source=args.source)
         print(engine.format_terminal(report))
     except Exception as e:
-        print(f"Error generating insights: {e}")
+        print(f'Не удалось подготовить статистику: {e}')
     finally:
         if db is not None:
             try:
@@ -12993,29 +12846,24 @@ def cmd_monitoring(args):
         otlp_raw = export_cfg.get("otlp")
         otlp: dict = otlp_raw if isinstance(otlp_raw, dict) else {}
 
-        print("Gateway monitoring")
-        print(f"  Health export:  {'enabled' if gh.get('enabled') else 'disabled'} "
-              f"(monitoring.gateway_health_export.enabled)")
+        print('Мониторинг шлюза')
+        print(f"  Выгрузка состояния: {('включена' if gh.get('включена') else 'отключена')} (monitoring.gateway_health_export.enabled)")
         if gh.get("enabled"):
-            print(f"    Metrics:            {'on' if gh.get('metrics_enabled', True) else 'off'} "
-                  f"(interval {gh.get('export_interval_seconds', 60)}s)")
-            print(f"    Diagnostic events:  {'on' if gh.get('diagnostic_events_enabled', True) else 'off'}")
-            print(f"    Warning/error logs: {'on' if gh.get('warning_error_events_enabled', True) else 'off'} "
-                  f"(interval {gh.get('logs_export_interval_seconds', 5)}s)")
-            print("    Content safety:     always on "
-                  "(rendered messages are never exported; not configurable)")
+            print(f"    Показатели:           {('вкл.' if gh.get('metrics_enabled', True) else 'выкл.')}; интервал {gh.get('export_interval_seconds', 60)} с")
+            print(f"    События диагностики:  {('вкл.' if gh.get('diagnostic_events_enabled', True) else 'выкл.')}")
+            print(f"    Предупреждения и ошибки: {('вкл.' if gh.get('warning_error_events_enabled', True) else 'выкл.')}; интервал {gh.get('logs_export_interval_seconds', 5)} с")
+            print('    Защита содержимого всегда включена: тексты сообщений не выгружаются, отключить нельзя')
         endpoint = otlp.get("endpoint") or ""
         if otlp.get("enabled") and endpoint:
-            print(f"  OTLP endpoint:  {endpoint}")
+            print(f'  Адрес OTLP:     {endpoint}')
         else:
-            print("  OTLP endpoint:  not configured (monitoring.export.otlp)")
-        print(f"  OTel SDK:       {'installed' if otlp_exporter.is_available() else 'not installed'} "
-              f"(optional extra: hermes-agent[otlp])")
-        print("\n  Scope: gateway service health + redacted diagnostics only.")
-        print("  No prompts, messages, tool args/results, usage analytics, or traces.")
+            print('  Адрес OTLP не настроен: monitoring.export.otlp')
+        print(f"  SDK OTel:      {('установлен' if otlp_exporter.is_available() else 'не установлен')}; дополнительный пакет hermes-agent[otlp]")
+        print('  Состав: только состояние шлюза и диагностика со скрытыми секретами.')
+        print('  Без запросов, сообщений, аргументов и результатов инструментов, аналитики использования и трассировок.')
         return
 
-    print(f"Unknown monitoring action: {action}", file=sys.stderr)
+    print(f'Неизвестное действие monitoring: {action}', file=sys.stderr)
     sys.exit(2)
 
 
@@ -13056,14 +12904,13 @@ def _cmd_skills_trust(args):
     if raw_path:
         root = Path(raw_path).expanduser().resolve()
         if not root.is_dir():
-            print(f"Not a directory: {root}")
+            print(f'Это не папка: {root}')
             return
     else:
         root = find_project_root()
         if root is None:
             print(
-                "Not inside a git checkout. Run from a project directory or "
-                "pass the project root path explicitly."
+                'Текущая папка не в репозитории Git. Откройте папку проекта или укажите путь к корню.'
             )
             return
 
@@ -13078,22 +12925,22 @@ def _cmd_skills_trust(args):
     if action == "untrust":
         kept = [t for t in trusted if str(Path(t).expanduser().resolve()) != root_str]
         if len(kept) == len(trusted):
-            print(f"{root} was not trusted.")
+            print(f'Для {root} доверие не было задано.')
             return
         skills_cfg["trusted_project_dirs"] = kept
         save_config(config)
-        print(f"Untrusted: {root}")
-        print("Project skills from this repo will no longer load.")
+        print(f'Доверие отозвано: {root}')
+        print('Навыки из этого проекта больше не будут загружаться.')
         return
 
     # trust
     if any(str(Path(t).expanduser().resolve()) == root_str for t in trusted):
-        print(f"Already trusted: {root}")
+        print(f'Уже доверенный проект: {root}')
     else:
         trusted.append(root_str)
         skills_cfg["trusted_project_dirs"] = trusted
         save_config(config)
-        print(f"Trusted: {root}")
+        print(f'Доверенный проект: {root}')
 
     # Show what this unlocks
     count = 0
@@ -13101,12 +12948,11 @@ def _cmd_skills_trust(args):
         count += sum(1 for _ in iter_skill_index_files(d, "SKILL.md"))
     if count:
         print(
-            f"{count} project skill(s) will load in sessions started inside "
-            "this repo (they take precedence over same-named profile skills)."
+            f'Навыков проекта для загрузки в новых беседах внутри репозитория: {count}. Они имеют приоритет над одноимёнными навыками профиля.'
         )
     else:
         subdirs = " or ".join(PROJECT_SKILLS_SUBDIRS)
-        print(f"No project skills found yet — add them under {subdirs}.")
+        print(f'Навыков проекта пока нет. Добавьте их в {subdirs}.')
 
 
 def cmd_pairing(args):
@@ -13352,11 +13198,11 @@ def main():
             return 2
         browser = getattr(_args, "browser", None) or detect_default_chromium()
         if not browser or browser == UNSUPPORTED_CHANNEL:
-            print("✗ No supported Chromium default browser detected.", file=sys.stderr)
+            print('✗ Поддерживаемый браузер Chromium по умолчанию не найден.', file=sys.stderr)
             return 1
         src = real_profile_data_dir(browser)
         if not src:
-            print(f"✗ Could not resolve the {browser} profile directory.", file=sys.stderr)
+            print(f'✗ Не удалось определить папку профиля {browser}.', file=sys.stderr)
             return 1
         closed, msg = close_browser_holding_profile(src)
         if closed:
@@ -13933,41 +13779,40 @@ def main():
                 # to repair an install that `hermes computer-use install` will
                 # (correctly) refuse to touch, with nothing pointing at the
                 # env var that actually selected the binary.
-                origin = " [custom binary from HERMES_CUA_DRIVER_CMD]" if override else ""
+                origin = ' [своя программа из HERMES_CUA_DRIVER_CMD]' if override else ""
                 if version:
-                    print(f"cua-driver: installed at {path}{origin} ({version})")
+                    print(f'cua-driver установлен: {path}{origin} ({version})')
                 else:
-                    print(f"cua-driver: installed at {path}{origin}")
+                    print(f'cua-driver установлен: {path}{origin}')
                 contract = _cua_driver_contract_status(path)
                 if not contract.get("ready"):
                     print(
-                        "  ⚠ Repair required: "
-                        + (contract.get("reason") or "runtime contract is incomplete")
+                        '  ⚠ Требуется восстановление: '
+                        + (contract.get("reason") or 'среда выполнения настроена не полностью')
                     )
                     if override:
                         print(
-                            "    Update the binary selected by HERMES_CUA_DRIVER_CMD, or unset "
-                            "the override and run: hermes computer-use install --upgrade"
+                            '    Обновите программу из HERMES_CUA_DRIVER_CMD либо снимите эту настройку и выполните korra computer-use install --upgrade.'
                         )
                     else:
-                        print("    Run: hermes computer-use install")
+                        print('    Выполните: korra computer-use install')
                     return 1
                 try:
                     st = cua_driver_update_check()
                     if st and st.get("update_available"):
                         latest = st.get("latest_version") or "?"
-                        print(f"  ⬆ Update available: cua-driver {latest}.")
-                        print("    Run: hermes computer-use install --upgrade")
+                        print(f'  ⬆ Доступно обновление cua-driver {latest}.')
+                        print('    Выполните: korra computer-use install --upgrade')
                     elif st:
-                        print("  ✓ Up to date.")
+                        print('  ✓ Установлена последняя версия.')
                     else:
                         # Older driver (no check-update verb) or offline.
-                        print("  Refresh to latest: hermes computer-use install --upgrade")
+                        print('  Обновить до последней версии: korra computer-use install --upgrade')
                 except Exception:
-                    print("  Refresh to latest: hermes computer-use install --upgrade")
+                    print('  Обновить до последней версии: korra computer-use install --upgrade')
                 return 0
-            print("cua-driver: not installed")
-            print("  Run: hermes computer-use install")
+            print('cua-driver не установлен')
+            print('  Выполните: korra computer-use install')
             return 1
         if action == "doctor":
             from tools.computer_use.doctor import run_doctor
@@ -13990,20 +13835,20 @@ def main():
                     print(_json.dumps(st, indent=2, sort_keys=True))
                     sys.exit(0 if st["ready"] else 1)
                 if not st["platform_supported"]:
-                    print(f"Computer Use is not supported on {st['platform']}.")
+                    print(f"Computer Use не поддерживается в {st['platform']}.")
                     sys.exit(1)
                 if not st["installed"]:
-                    print("cua-driver: not installed. Run: hermes computer-use install")
+                    print('cua-driver не установлен. Выполните korra computer-use install.')
                     sys.exit(1)
                 glyph = lambda v: "✅" if v is True else ("❌" if v is False else "•")  # noqa: E731
-                print(f"cua-driver: {st['version'] or 'installed'} ({st['platform']})")
+                print(f"cua-driver: {st['version'] or 'установлен'} ({st['platform']})")
                 if st["can_grant"]:  # macOS TCC permissions
-                    print(f"  {glyph(st['accessibility'])} Accessibility")
-                    print(f"  {glyph(st['screen_recording'])} Screen Recording")
+                    print(f"  {glyph(st['accessibility'])} Управление компьютером")
+                    print(f"  {glyph(st['screen_recording'])} Запись экрана")
                     if not st["ready"]:
-                        print("  Grant: hermes computer-use permissions grant")
+                        print('  Выдать разрешения: korra computer-use permissions grant')
                 else:  # no TCC model — readiness is driver health
-                    print(f"  {glyph(st['ready'])} driver health (no permission toggles on {st['platform']})")
+                    print(f"  {glyph(st['ready'])} Состояние драйвера; в {st['platform']} нет отдельных переключателей разрешений")
                 for c in st["checks"]:
                     if c["status"] != "ok":
                         print(f"  ⚠ {c['label']}: {c['message']}")
@@ -14185,8 +14030,7 @@ def main():
     )
     _add_session_filter_args(
         sessions_export,
-        "Only export sessions older than AGE (duration like '5h'/'2d', "
-        "bare number of days, or an ISO timestamp)",
+        'Экспортировать только беседы старше AGE: период 5h/2d, число дней или дата ISO',
     )
     sessions_export.add_argument(
         "--redact",
@@ -14224,9 +14068,7 @@ def main():
     )
     _add_session_filter_args(
         sessions_prune,
-        "Delete sessions older than AGE — days if bare number, or a duration "
-        "like '5h'/'2d'/'1w', or an ISO timestamp (bare prune with no filters "
-        "defaults to 90 days; any filter matches all ages)",
+        'Удалить беседы старше AGE: число дней, период 5h/2d/1w или дата ISO. Без фильтров prune удаляет старше 90 дней; с фильтром по умолчанию возраст не ограничен.',
     )
     sessions_prune.add_argument(
         "--include-archived",
@@ -14252,8 +14094,7 @@ def main():
     )
     _add_session_filter_args(
         sessions_archive,
-        "Only archive sessions older than AGE (duration like '5h'/'2d', "
-        "bare number of days, or ISO timestamp)",
+        'Архивировать только беседы старше AGE: период 5h/2d, число дней или дата ISO',
     )
 
     sessions_subparsers.add_parser(

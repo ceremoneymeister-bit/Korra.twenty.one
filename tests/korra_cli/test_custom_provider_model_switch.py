@@ -385,7 +385,7 @@ class TestCustomProviderModelSwitch:
 
         active_label = captured["labels"][captured["default"]]
         assert "Local Ollama" in active_label
-        assert "currently active" in active_label
+        assert 'выбран сейчас' in active_label
 
     def test_key_env_providers_dict_preserves_existing_api_key(
         self, config_home, monkeypatch

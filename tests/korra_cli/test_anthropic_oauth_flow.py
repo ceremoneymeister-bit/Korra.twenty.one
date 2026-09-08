@@ -31,7 +31,7 @@ def test_run_anthropic_oauth_flow_prefers_claude_code_credentials(tmp_path, monk
     assert env_vars["ANTHROPIC_TOKEN"] == ""
     assert env_vars["ANTHROPIC_API_KEY"] == ""
     output = capsys.readouterr().out
-    assert "Claude Code credentials linked" in output
+    assert 'Данные входа Claude Code подключены' in output
 
 
 def test_run_anthropic_oauth_flow_manual_token_still_persists(tmp_path, monkeypatch, capsys):
@@ -52,4 +52,4 @@ def test_run_anthropic_oauth_flow_manual_token_still_persists(tmp_path, monkeypa
     env_vars = load_env()
     assert env_vars["ANTHROPIC_TOKEN"] == "sk-ant-oat01-manual-token"
     output = capsys.readouterr().out
-    assert "Setup-token saved" in output
+    assert 'Setup-token сохранён' in output

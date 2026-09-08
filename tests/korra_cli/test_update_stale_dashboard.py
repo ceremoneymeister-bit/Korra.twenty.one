@@ -260,7 +260,7 @@ class TestKillStaleDashboardPosix:
         assert all(call[:1] != ["sudo"] and call[:2] != ["systemctl"] for call in calls)
         find_pids.assert_not_called()
         kill.assert_not_called()
-        assert "✓ restarted hermes-dashboard.service" in capsys.readouterr().out
+        assert '✓ Перезапущено: hermes-dashboard.service' in capsys.readouterr().out
 
 
 
@@ -573,7 +573,7 @@ class TestManualBackendRespawn:
 
         assert failed == [["hermes", "serve"]]
         out = capsys.readouterr().out
-        assert "✗ failed to restart" in out
+        assert '✗ Не удалось перезапустить' in out
 
 
 class TestFilterDashboardRespawnCandidates:

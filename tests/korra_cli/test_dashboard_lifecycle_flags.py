@@ -35,7 +35,7 @@ class TestDashboardStatus:
             cmd_dashboard(_ns(status=True))
         assert exc.value.code == 0
         out = capsys.readouterr().out
-        assert "No hermes dashboard or serve processes running" in out
+        assert 'Запущенных процессов веб-панели или сервера Корры нет' in out
 
     def test_status_with_processes(self, capsys):
         # Includes a serve-mode backend: --status must LIST it, not hide it —
@@ -54,7 +54,7 @@ class TestDashboardStatus:
         # Status is informational — always exits 0.
         assert exc.value.code == 0
         out = capsys.readouterr().out
-        assert "3 hermes dashboard/serve process(es) running" in out
+        assert 'Работает процессов веб-сервера Корры: 3' in out
         assert "PID 12345" in out
         assert "PID 12346" in out
         assert "PID 12347" in out and "[serve]" in out

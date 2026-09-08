@@ -275,7 +275,7 @@ def test_gui_does_not_retry_after_packaged_executable_exists(tmp_path, monkeypat
     mock_purge.assert_not_called()
     mock_dl.assert_not_called()
     assert mock_run.call_count == 1
-    assert "Desktop GUI build failed" in capsys.readouterr().out
+    assert 'Не удалось собрать приложение' in capsys.readouterr().out
 
 
 
@@ -540,8 +540,8 @@ def test_setup_tcc_identity_creates_cert_imports_trusts_and_configures(tmp_path,
     assert cli_main._desktop_macos_setup_tcc_identity(identity) is True
 
     out = capsys.readouterr().out
-    assert "created, imported, and trusted self-signed identity" in out
-    assert "set desktop.macos_signing_identity" in out
+    assert 'Создан, импортирован и добавлен в доверенные самоподписанный сертификат' in out
+    assert 'Сохранено desktop.macos_signing_identity' in out
     # openssl cert generation + pkcs12 export + security import + trust all ran.
     assert any(c[0] == "/usr/bin/openssl" and "req" in c for c in calls)
     assert any(c[0] == "/usr/bin/openssl" and "pkcs12" in c for c in calls)
@@ -625,7 +625,7 @@ def test_setup_tcc_identity_fails_when_trust_step_fails(tmp_path, monkeypatch, c
     monkeypatch.setattr(cli_main.subprocess, "run", fake_run)
 
     assert cli_main._desktop_macos_setup_tcc_identity("Hermes Local Signing") is False
-    assert "could not trust the certificate" in capsys.readouterr().out
+    assert 'Не удалось добавить сертификат подписи в доверенные' in capsys.readouterr().out
 
 
 def test_setup_tcc_identity_fails_when_identity_never_becomes_valid(tmp_path, monkeypatch, capsys):
@@ -648,7 +648,7 @@ def test_setup_tcc_identity_fails_when_identity_never_becomes_valid(tmp_path, mo
     monkeypatch.setattr(cli_main.subprocess, "run", fake_run)
 
     assert cli_main._desktop_macos_setup_tcc_identity("Hermes Local Signing") is False
-    assert "not a VALID code-signing identity" in capsys.readouterr().out
+    assert 'не подходит для подписи кода' in capsys.readouterr().out
 
 
 def test_setup_tcc_identity_skips_generation_when_already_valid(tmp_path, monkeypatch, capsys):
@@ -677,7 +677,7 @@ def test_setup_tcc_identity_skips_generation_when_already_valid(tmp_path, monkey
     assert cli_main._desktop_macos_setup_tcc_identity("Hermes Local Signing") is True
 
     out = capsys.readouterr().out
-    assert "already valid in keychain" in out
+    assert 'уже действительна в связке ключей' in out
     # No openssl generation, no security import — only find-identity + config.
     assert not any(c[0] == "/usr/bin/openssl" for c in calls)
     assert not any(c[0] == "/usr/bin/security" and c[1] == "import" for c in calls)
@@ -725,7 +725,7 @@ def test_setup_tcc_identity_non_macos_skips(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli_main.sys, "platform", "linux")
 
     assert cli_main._desktop_macos_setup_tcc_identity() is False
-    assert "macOS-only" in capsys.readouterr().out
+    assert 'доступен только в macOS' in capsys.readouterr().out
 
 
 def test_cmd_gui_setup_tcc_identity_exits_before_build(tmp_path, monkeypatch):

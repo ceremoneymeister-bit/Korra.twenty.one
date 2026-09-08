@@ -186,7 +186,7 @@ def test_leave_unchanged_replaces_cancel_label(tmp_path, monkeypatch):
         captured.append(list(choices))
         # Pick 'Leave unchanged' (last item) to exit cleanly
         for i, label in enumerate(choices):
-            if label == "Leave unchanged":
+            if label == 'Оставить без изменений':
                 return i
         raise AssertionError("Leave unchanged not in provider list")
 
@@ -196,6 +196,6 @@ def test_leave_unchanged_replaces_cancel_label(tmp_path, monkeypatch):
 
     assert captured, "provider menu never rendered"
     labels = captured[0]
-    assert "Leave unchanged" in labels
-    assert "Cancel" not in labels, "Cancel label should be replaced"
-    assert any("Configure auxiliary models" in label for label in labels)
+    assert 'Оставить без изменений' in labels
+    assert not {"Cancel", "Отмена"}.intersection(labels), "Cancel label should be replaced"
+    assert any("Настроить вспомогательные модели" in label for label in labels)

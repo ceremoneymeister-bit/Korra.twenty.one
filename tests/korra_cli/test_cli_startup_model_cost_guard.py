@@ -107,7 +107,7 @@ def test_cmd_chat_rejects_noninteractive_gpt55_pro_startup_override(
     err = capsys.readouterr().err
     assert "EXPENSIVE MODEL WARNING" in err
     assert "did you mean to select openai/gpt-5.5?" in err
-    assert "non-interactive" in err
+    assert 'Без подтверждения запуск отменён' in err
 
 
 def test_cmd_chat_rejects_noninteractive_gpt55_pro_even_with_yolo(
@@ -206,7 +206,7 @@ def test_data_training_acknowledgement_does_not_skip_interactive_confirmation(
 
     assert excinfo.value.code == 1
     assert not fake_cli
-    assert "Model override cancelled" in capsys.readouterr().err
+    assert 'Замена модели отменена' in capsys.readouterr().err
 
 
 def test_cmd_chat_allows_interactive_gpt55_pro_when_confirmed(
@@ -231,7 +231,7 @@ def test_cmd_chat_cancels_interactive_gpt55_pro_when_not_confirmed(
 
     assert excinfo.value.code == 1
     assert not fake_cli
-    assert "Model override cancelled" in capsys.readouterr().err
+    assert 'Замена модели отменена' in capsys.readouterr().err
 
 
 def test_cmd_chat_cancels_interactive_gpt55_pro_on_eof(
@@ -249,7 +249,7 @@ def test_cmd_chat_cancels_interactive_gpt55_pro_on_eof(
 
     assert excinfo.value.code == 1
     assert not fake_cli
-    assert "Model override cancelled" in capsys.readouterr().err
+    assert 'Замена модели отменена' in capsys.readouterr().err
 
 
 def test_cmd_chat_rejects_noninteractive_provider_only_override_when_default_is_expensive(
@@ -306,4 +306,4 @@ def test_top_level_oneshot_rejects_noninteractive_gpt55_pro_startup_override(
     assert called is False
     err = capsys.readouterr().err
     assert "EXPENSIVE MODEL WARNING" in err
-    assert "non-interactive" in err
+    assert 'Без подтверждения запуск отменён' in err

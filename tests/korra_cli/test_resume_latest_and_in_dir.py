@@ -145,7 +145,7 @@ def test_resume_latest_no_sessions_exits_with_error(main_mod, monkeypatch, capsy
         main_mod.cmd_chat(_args(resume="latest"))
     assert exc.value.code == 1
     out = capsys.readouterr().out
-    assert "No previous TUI session found" in out
+    assert 'Предыдущая беседа TUI не найдена' in out
 
 
 def test_resume_real_id_untouched_by_latest_keyword(main_mod, launched, monkeypatch):
@@ -212,7 +212,7 @@ def test_in_dir_missing_directory_exits(main_mod, monkeypatch, tmp_path, capsys)
     with pytest.raises(SystemExit) as exc:
         main_mod.cmd_chat(_args(in_dir=str(tmp_path / "nope")))
     assert exc.value.code == 1
-    assert "--in directory not found" in capsys.readouterr().out
+    assert 'папка --in не найдена' in capsys.readouterr().out
 
 
 def test_in_dir_expands_user_home(main_mod, launched, monkeypatch, tmp_path):

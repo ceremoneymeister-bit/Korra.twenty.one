@@ -178,7 +178,7 @@ def test_quarantine_reports_a_lock_it_cannot_break(_winp, tmp_path, capsys, monk
 
     assert pairs == []
     # A clear message, not raw [WinError 32], and no reboot promise we can't keep.
-    assert "could not quarantine" in captured
+    assert 'не удалось переместить' in captured
     assert "reboot" not in captured
 
 

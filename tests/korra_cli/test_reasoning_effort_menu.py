@@ -20,6 +20,6 @@ def test_reasoning_menu_orders_minimal_before_low(monkeypatch):
     assert captured["items"][:4] == [
         "minimal",
         "low",
-        "medium  ← currently in use",
+        'medium  ← используется сейчас',
         "high",
     ]

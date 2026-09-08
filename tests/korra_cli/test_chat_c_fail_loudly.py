@@ -130,7 +130,7 @@ class TestChatCFailLoudlyOnStderr:
             main_mod._resolve_continue_arg(args, use_tui=False)
 
         assert ei.value.args[0] == 1
-        assert any("No session found matching 'Bot Chat'" in l for l in stderr_lines)
+        assert any('Беседа «Bot Chat» не найдена' in l for l in stderr_lines)
         assert not stderr_lines[0].startswith("Use 'hermes sessions list'")
 
     def test_create_if_missing_sets_resume(self, isolated_home, monkeypatch):

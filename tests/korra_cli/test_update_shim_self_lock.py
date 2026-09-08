@@ -140,7 +140,7 @@ def test_reexec_runs_same_args_under_venv_python(venv, monkeypatch, capsys):
         str(venv / "python.exe"), "-m", "korra_cli.main", "update", "--yes",
     ]
     assert env[cli_main._UPDATE_REEXEC_ENV] == "1"
-    assert "under the venv Python" in capsys.readouterr().out
+    assert 'через Python виртуального окружения' in capsys.readouterr().out
 
 
 def test_reexec_child_runs_unattended(venv, monkeypatch):
