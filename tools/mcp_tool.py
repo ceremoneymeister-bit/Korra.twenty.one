@@ -1102,6 +1102,57 @@ def _wrap_command_with_watchdog(command: str, args: list) -> tuple[str, list]:
 # MCP ImageContent block → Hermes MEDIA tag
 # ---------------------------------------------------------------------------
 
+_MCP_MODEL_IMAGE_MAX_COUNT = 4
+_MCP_MODEL_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+_MCP_MODEL_IMAGES_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _mcp_model_image(block, remaining_bytes: int) -> tuple[dict | None, int]:
+    """Validate a typed image before allocating/cache-writing or sending pixels.
+
+    Only protocol ImageContent reaches this helper. Text/structured JSON is
+    never interpreted as a trusted multimodal envelope or a local image path.
+    """
+    import base64
+    import binascii
+
+    encoded = getattr(block, "data", None)
+    mime = str(mcp_field(block, "mime_type", "mimeType") or "").split(";", 1)[0].strip().lower()
+    mime = "image/jpeg" if mime == "image/jpg" else mime
+    if mime not in {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"}:
+        raise ValueError("unsupported image MIME type")
+    limit = min(_MCP_MODEL_IMAGE_MAX_BYTES, remaining_bytes)
+    if not isinstance(encoded, str) or len(encoded) > ((limit + 2) // 3) * 4:
+        raise ValueError("image byte limit exceeded")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        raise ValueError("invalid image base64") from None
+    if not data or len(data) > limit:
+        raise ValueError("image byte limit exceeded")
+    matches = {
+        "image/png": data.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg": data.startswith(b"\xff\xd8\xff"),
+        "image/gif": data[:6] in {b"GIF87a", b"GIF89a"},
+        "image/webp": data[:4] == b"RIFF" and data[8:12] == b"WEBP",
+        "image/bmp": data.startswith(b"BM"),
+    }
+    if not matches[mime]:
+        raise ValueError("image MIME and content disagree")
+    # Preserve existing BMP delivery without sending a format that the model
+    # image-input protocol does not support. It still consumes the byte budget.
+    if mime == "image/bmp":
+        return None, len(data)
+    return {"type": "image_url", "image_url": {
+        "url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"}}, len(data)
+
+
+def _mcp_model_result(text: str, images: list[dict]):
+    if not images:
+        return text
+    return {"_multimodal": True, "content": [{"type": "text", "text": text}, *images],
+            "text_summary": text}
+
 
 def _is_reserved_mcp_meta_key(key: str) -> bool:
     """Return True if an MCP ``_meta`` key uses a protocol-reserved prefix.
@@ -6080,12 +6131,12 @@ def _make_tool_handler(
     """Return a sync handler that calls an MCP tool via the background loop.
 
     The handler conforms to the registry's dispatch interface:
-    ``handler(args_dict, **kwargs) -> str``
+    ``handler(args_dict, **kwargs) -> str | multimodal envelope``
     """
 
     trusted_context = dict(context_arguments or {})
 
-    def _handler(args: dict, **kwargs) -> str:
+    def _handler(args: dict, **kwargs):
         call_args = dict(args or {})
         for argument_name, context_name in trusted_context.items():
             if context_name == "request_scope":
@@ -6301,11 +6352,35 @@ def _make_tool_handler(
             # both too stale to cherry-pick. #10848's approach (integrate with
             # Hermes' MEDIA tag + cache_image_from_bytes) was the cleaner of
             # the two — plugs into existing infrastructure.
+            # MEDIA references are outbound delivery, not model image input.
+            # Valid typed blocks additionally use the executor's multimodal
+            # envelope; its text summary retains the original JSON contract.
             parts: List[str] = []
+            model_images: List[dict] = []
+            image_bytes = 0
+            image_blocks = 0
             for block in (result.content or []):
                 if hasattr(block, "text") and block.text:
                     parts.append(strip_unicode_tags(block.text))
                     continue
+                if getattr(block, "type", None) == "image":
+                    image_blocks += 1
+                    if image_blocks > _MCP_MODEL_IMAGE_MAX_COUNT:
+                        if image_blocks == _MCP_MODEL_IMAGE_MAX_COUNT + 1:
+                            parts.append("[MCP images omitted: image count limit exceeded]")
+                        continue
+                    try:
+                        image_part, byte_count = _mcp_model_image(
+                            block, _MCP_MODEL_IMAGES_MAX_BYTES - image_bytes,
+                        )
+                    except ValueError as exc:
+                        parts.append(f"[MCP image omitted: {exc}]")
+                        continue
+                    image_bytes += byte_count
+                    if image_part is not None:
+                        model_images.append(image_part)
+                    else:
+                        parts.append("[MCP image available for delivery only: unsupported model image format]")
                 image_tag = _cache_mcp_image_block(block)
                 if image_tag:
                     parts.append(image_tag)
@@ -6387,12 +6462,12 @@ def _make_tool_handler(
                 if "result" not in payload:
                     payload["result"] = text_result
                 try:
-                    return json.dumps(payload, ensure_ascii=False)
+                    return _mcp_model_result(json.dumps(payload, ensure_ascii=False), model_images)
                 except (TypeError, ValueError):
                     # Non-serializable metadata: drop the extras rather than
                     # failing the whole tool call.
-                    return json.dumps({"result": text_result}, ensure_ascii=False)
-            return json.dumps({"result": text_result}, ensure_ascii=False)
+                    return _mcp_model_result(json.dumps({"result": text_result}, ensure_ascii=False), model_images)
+            return _mcp_model_result(json.dumps({"result": text_result}, ensure_ascii=False), model_images)
 
         def _call_once():
             return _run_on_mcp_loop(_call, timeout=tool_timeout)
