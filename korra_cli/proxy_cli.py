@@ -129,53 +129,53 @@ def cmd_install(args: argparse.Namespace) -> int:
     try:
         binary = ip.install_iron_proxy(force=bool(args.force))
     except Exception as exc:  # noqa: BLE001 — top-level user-facing error funnel
-        console.print(f"[red]✗ install failed:[/red] {exc}")
+        console.print(f"[red]✗ Ошибка установки:[/red] {exc}")
         console.print(
-            "  Manual install: https://github.com/ironsh/iron-proxy/releases"
+            "  Установить вручную: https://github.com/ironsh/iron-proxy/releases"
         )
         return 1
-    version = ip.iron_proxy_version(binary) or "(version unknown)"
-    console.print(f"[green]✓[/green] installed {binary}  {version}")
+    version = ip.iron_proxy_version(binary) or "(версия неизвестна)"
+    console.print(f"[green]✓[/green] Установлено: {binary}  {version}")
     return 0
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
     console = Console()
     console.print(Panel.fit(
-        "[bold]iron-proxy setup[/bold]\n\n"
-        "Routes outbound sandbox traffic through a local TLS-intercepting\n"
-        "proxy so prompt-injected agents never see real provider API keys.\n\n"
+        "[bold]Настройка iron-proxy[/bold]\n\n"
+        "Направляет исходящий трафик изолированной среды через локальный\n"
+        "TLS-прокси, чтобы агенты не видели настоящие ключи API провайдеров.\n\n"
         "[dim]Project: https://github.com/ironsh/iron-proxy  (Apache-2.0)[/dim]",
         border_style="cyan",
     ))
 
     # ------------------------------------------------------------------ binary
     console.print()
-    console.print("[bold]Step 1[/bold]  Install the iron-proxy binary")
+    console.print("[bold]Шаг 1[/bold]  Установка iron-proxy")
     try:
         binary = ip.find_iron_proxy(install_if_missing=False)
         if binary is None:
-            console.print("  No iron-proxy on PATH — downloading…")
+            console.print("  iron-proxy не найден в PATH; загружаю…")
             binary = ip.install_iron_proxy()
-        version = ip.iron_proxy_version(binary) or "(version unknown)"
+        version = ip.iron_proxy_version(binary) or "(версия неизвестна)"
         console.print(f"  [green]✓[/green] {binary}  {version}")
     except Exception as exc:  # noqa: BLE001
-        console.print(f"  [red]✗ install failed: {exc}[/red]")
+        console.print(f"  [red]✗ Ошибка установки: {exc}[/red]")
         return 1
 
     # ------------------------------------------------------------------ CA
     console.print()
-    console.print("[bold]Step 2[/bold]  Generate a CA cert")
+    console.print("[bold]Шаг 2[/bold]  Создание сертификата центра сертификации")
     try:
         ca_crt, ca_key = ip.ensure_ca_cert()
     except Exception as exc:  # noqa: BLE001
-        console.print(f"  [red]✗ CA generation failed: {exc}[/red]")
+        console.print(f"  [red]✗ Не удалось создать сертификат: {exc}[/red]")
         return 1
     console.print(f"  [green]✓[/green] {ca_crt}")
 
     # ------------------------------------------------------------------ mint
     console.print()
-    console.print("[bold]Step 3[/bold]  Mint proxy tokens for known providers")
+    console.print("[bold]Шаг 3[/bold]  Создание прокси-токенов для известных провайдеров")
 
     available_env_names: List[str] = []
     if args.from_bitwarden:
@@ -183,12 +183,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
         bw_cfg = (cfg.get("secrets") or {}).get("bitwarden") or {}
         if not bw_cfg.get("enabled"):
             console.print(
-                "  [red]✗ --from-bitwarden requested but "
-                "secrets.bitwarden.enabled is false.[/red]"
+                "  [red]✗ Запрошен --from-bitwarden, но secrets.bitwarden.enabled выключен.[/red]"
             )
             console.print(
-                "  Run `hermes secrets bitwarden setup` first, or omit "
-                "--from-bitwarden."
+                "  Сначала выполните `korra secrets bitwarden setup` или уберите --from-bitwarden."
             )
             return 1
         try:
@@ -198,9 +196,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
             ).strip()
             if not access_token:
                 console.print(
-                    f"  [red]✗ --from-bitwarden requested but "
-                    f"{bw_cfg.get('access_token_env', 'BWS_ACCESS_TOKEN')} "
-                    "is not set in the environment.[/red]"
+                    f"  [red]✗ Запрошен --from-bitwarden, но переменная "
+                    f"{bw_cfg.get('access_token_env', 'BWS_ACCESS_TOKEN')} не задана.[/red]"
                 )
                 return 1
             secrets, _ = bw.fetch_bitwarden_secrets(
@@ -212,22 +209,20 @@ def cmd_setup(args: argparse.Namespace) -> int:
             available_env_names = list(secrets.keys())
             if not available_env_names:
                 console.print(
-                    "  [red]✗ Bitwarden returned an empty secrets list.[/red]\n"
-                    "  Check the project_id in secrets.bitwarden and the "
-                    "BWS access-token's project scope."
+                    "  [red]✗ Bitwarden вернул пустой список секретов.[/red]\n"
+                    "  Проверьте project_id в secrets.bitwarden и права токена BWS на проект."
                 )
                 return 1
             console.print(
-                f"  Pulled {len(available_env_names)} env names from Bitwarden."
+                f"  Из Bitwarden получено переменных окружения: {len(available_env_names)}."
             )
         except Exception as exc:  # noqa: BLE001 — explicit user-facing error
             console.print(
-                f"  [red]✗ Could not enumerate Bitwarden secrets: {exc}[/red]"
+                f"  [red]✗ Не удалось получить секреты Bitwarden: {exc}[/red]"
             )
             console.print(
-                "  Either fix the Bitwarden config and retry, or rerun setup "
-                "without --from-bitwarden (the proxy will read secrets from "
-                "the host process env at start time)."
+                "  Исправьте настройки Bitwarden или повторите без --from-bitwarden: "
+                "тогда прокси прочитает секреты из окружения основного процесса."
             )
             return 1
     else:
@@ -240,8 +235,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         loaded = _load_env_file_into_environ()
         if loaded:
             console.print(
-                f"  [dim]Loaded {loaded} provider key name(s) from "
-                f"~/.hermes/.env for discovery.[/dim]"
+                f"  [dim]Из ~/.hermes/.env загружены имена ключей провайдеров: {loaded}.[/dim]"
             )
 
     discovered = ip.discover_provider_mappings(
@@ -266,16 +260,15 @@ def cmd_setup(args: argparse.Namespace) -> int:
         from datetime import datetime as _dt
         if _sys.stdin.isatty():
             console.print(
-                "[yellow]⚠[/yellow]  --rotate-tokens will invalidate proxy "
-                "tokens in every running Korra sandbox.  They will start "
-                "401-ing against upstreams until restarted."
+                "[yellow]⚠[/yellow] --rotate-tokens сделает недействительными токены "
+                "во всех работающих средах Korra. До перезапуска запросы будут получать 401."
             )
             try:
-                ans = input("Type 'rotate' to confirm: ").strip().lower()
+                ans = input("Введите 'rotate' для подтверждения: ").strip().lower()
             except EOFError:
                 ans = ""
             if ans != "rotate":
-                console.print("[yellow]Cancelled.[/yellow]")
+                console.print("[yellow]Отменено.[/yellow]")
                 return 1
         # Backup the existing mappings before we overwrite.  The
         # resulting ``.rotated-<unix>`` sibling is plain JSON and lets
@@ -289,16 +282,15 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 ts = _dt.now().strftime("%Y%m%dT%H%M%S")
                 backup = state_dir / f"mappings.json.rotated-{ts}"
                 _shutil.copy2(str(mappings_src), str(backup))
-                console.print(f"  [dim]backup: {backup}[/dim]")
+                console.print(f"  [dim]резервная копия: {backup}[/dim]")
         except OSError as exc:
             console.print(
-                f"  [yellow]Could not back up mappings before rotation: "
+                f"  [yellow]Не удалось сохранить сопоставления перед заменой токенов: "
                 f"{exc}[/yellow]"
             )
     elif rotate and not existing:
         console.print(
-            "[dim]Note: --rotate-tokens is a no-op on first-time setup "
-            "(no existing tokens to rotate).[/dim]"
+            "[dim]При первой настройке --rotate-tokens ничего не меняет: старых токенов ещё нет.[/dim]"
         )
 
     mappings = ip.merge_mappings(
@@ -309,10 +301,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     if not mappings:
         console.print(
-            "  [yellow]No known provider API keys found in env/Bitwarden.[/yellow]"
+            "  [yellow]В окружении и Bitwarden не найдены известные ключи API провайдеров.[/yellow]"
         )
         console.print(
-            "  Set at least one of these and rerun setup:"
+            "  Задайте хотя бы одну из переменных и повторите настройку:"
         )
         for env_name in sorted(ip._BEARER_PROVIDERS):
             console.print(f"    - {env_name}")
@@ -327,22 +319,20 @@ def cmd_setup(args: argparse.Namespace) -> int:
     if uncovered:
         console.print()
         console.print(
-            "  [yellow]⚠[/yellow]  Detected provider env vars that the "
-            "proxy does not yet cover:"
+            "  [yellow]⚠[/yellow] Найдены переменные провайдеров, которые прокси пока не защищает:"
         )
         for name in uncovered:
             console.print(f"    - {name}")
         console.print(
-            "  [dim]These providers use request signing or SDK-minted "
-            "OAuth (SigV4, service-account files) and will hold real "
-            "credentials inside the sandbox.  Egress isolation is "
-            "INCOMPLETE for these.[/dim]"
+            "  [dim]Эти провайдеры используют подпись запросов или OAuth из SDK "
+            "(SigV4, файлы сервисных аккаунтов), поэтому реальные данные входа "
+            "останутся внутри среды. Для них изоляция исходящего трафика неполна.[/dim]"
         )
 
     table = Table(show_header=True, header_style="bold")
-    table.add_column("Provider env", style="cyan")
-    table.add_column("Upstream hosts", style="dim")
-    table.add_column("Proxy token", style="green")
+    table.add_column("Переменная провайдера", style="cyan")
+    table.add_column("Серверы назначения", style="dim")
+    table.add_column("Токен прокси", style="green")
     for m in mappings:
         table.add_row(
             m.real_env_name,
@@ -353,7 +343,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     # ------------------------------------------------------------------ write
     console.print()
-    console.print("[bold]Step 4[/bold]  Write config and persist mappings")
+    console.print("[bold]Шаг 4[/bold]  Сохранение настроек и сопоставлений")
 
     cfg = load_config()
     proxy_cfg = cfg.setdefault("proxy", {})
@@ -364,8 +354,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     if args.tunnel_port is not None:
         if args.tunnel_port < 1 or args.tunnel_port > 65534:
             console.print(
-                "  [red]✗ --tunnel-port must be between 1 and 65534 "
-                "(the plain-HTTP listener uses port+1).[/red]"
+                "  [red]✗ --tunnel-port должен быть от 1 до 65534; HTTP использует следующий порт.[/red]"
             )
             return 1
         tunnel_port = int(args.tunnel_port)
@@ -415,13 +404,12 @@ def cmd_setup(args: argparse.Namespace) -> int:
     # restart; the daemon requires the key env var to be non-empty at
     # startup, so make sure the token exists before first start.
     ip.ensure_management_token()
-    console.print(f"  [green]✓[/green] config:   {cfg_path}")
-    console.print(f"  [green]✓[/green] mappings: {mappings_path}")
+    console.print(f"  [green]✓[/green] настройки: {cfg_path}")
+    console.print(f"  [green]✓[/green] сопоставления: {mappings_path}")
     if audit_log_ok:
         console.print(
-            f"  [green]✓[/green] audit log: {audit_log_path} "
-            f"[dim](reserved — not written by iron-proxy v0.39; "
-            f"per-request records land in iron-proxy.log)[/dim]"
+            f"  [green]✓[/green] журнал аудита: {audit_log_path} "
+            f"[dim](зарезервирован; iron-proxy v0.39 пишет запросы в iron-proxy.log)[/dim]"
         )
 
     # ------------------------------------------------------------------ enable
@@ -441,14 +429,14 @@ def cmd_setup(args: argparse.Namespace) -> int:
         proxy_cfg["credential_source"] = "env"
         if existing_source == "bitwarden":
             console.print(
-                "[yellow]Switched credential_source from bitwarden to env.[/yellow]"
+                "[yellow]credential_source переключён с bitwarden на env.[/yellow]"
             )
     elif existing_source == "bitwarden":
         # Preserve the existing bitwarden mode.  Surface the decision so
         # the operator knows we kept it.
         console.print(
-            "[dim]Keeping credential_source=bitwarden from existing config. "
-            "Pass --no-bitwarden to switch to env-based credentials.[/dim]"
+            "[dim]Сохраняю credential_source=bitwarden из текущих настроек. "
+            "Для перехода на переменные окружения укажите --no-bitwarden.[/dim]"
         )
     else:
         proxy_cfg["credential_source"] = "env"
@@ -478,11 +466,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
         if _sys.stdin.isatty():
             try:
                 ans = input(
-                    "  Restart the running proxy now with the new config? [Y/n] "
+                    "  Перезапустить работающий прокси с новыми настройками? [Д/н] "
                 ).strip().lower()
             except EOFError:
                 ans = ""
-            do_restart = ans in ("", "y", "yes")
+            do_restart = ans in ("", "y", "yes", "д", "да")
         else:
             do_restart = True
     else:
@@ -495,40 +483,38 @@ def cmd_setup(args: argparse.Namespace) -> int:
             )
         except Exception as exc:  # noqa: BLE001 — user-facing funnel
             console.print(
-                f"  [yellow]⚠ could not start iron-proxy with the new "
-                f"config: {exc}[/yellow]"
+                f"  [yellow]⚠ Не удалось запустить iron-proxy с новыми настройками: {exc}[/yellow]"
             )
             console.print(
-                "  Run [cyan]hermes egress start[/cyan] manually before "
-                "launching new Docker sandboxes."
+                "  Перед запуском новых сред Docker выполните вручную "
+                "[cyan]korra egress start[/cyan]."
             )
         else:
-            listening = "listening" if new_status.listening else "not yet listening"
-            verb = "restarted" if was_running else "started"
+            listening = "принимает соединения" if new_status.listening else "ещё не принимает соединения"
+            verb = "перезапущен" if was_running else "запущен"
             console.print(
-                f"  [green]✓[/green] {verb} iron-proxy with the new config "
+                f"  [green]✓[/green] iron-proxy {verb} с новыми настройками "
                 f"(pid={new_status.pid}, port={new_status.tunnel_port}, {listening})"
             )
     elif was_running:
         console.print(
-            "  [yellow]⚠ stopped the running iron-proxy; config or tokens "
-            "changed.  Run [cyan]hermes egress restart[/cyan] (or "
-            "[cyan]start[/cyan]) before launching new Docker sandboxes.[/yellow]"
+            "  [yellow]⚠ Работающий iron-proxy остановлен: настройки или токены изменились. "
+            "Перед запуском новых сред Docker выполните [cyan]korra egress restart[/cyan] "
+            "или [cyan]korra egress start[/cyan].[/yellow]"
         )
 
     console.print()
     console.print(
-        "[green]✓ iron-proxy is configured.[/green]  "
-        "Sandboxes will route outbound traffic through it."
+        "[green]✓ iron-proxy настроен.[/green] "
+        "Исходящий трафик изолированных сред будет проходить через него."
     )
     console.print(
-        "  Start:   [cyan]hermes egress start[/cyan]\n"
-        "  Restart: [cyan]hermes egress restart[/cyan]  (after any re-setup)\n"
-        "  Reload:  [cyan]hermes egress reload[/cyan]   (apply ruleset edits "
-        "in-place, no restart)\n"
-        "  Status:  [cyan]hermes egress status[/cyan]\n"
-        "  Stop:    [cyan]hermes egress stop[/cyan]\n"
-        "  Disable: [cyan]hermes egress disable[/cyan]"
+        "  Запустить:     [cyan]korra egress start[/cyan]\n"
+        "  Перезапустить: [cyan]korra egress restart[/cyan] после повторной настройки\n"
+        "  Перечитать:    [cyan]korra egress reload[/cyan] без перезапуска\n"
+        "  Состояние:     [cyan]korra egress status[/cyan]\n"
+        "  Остановить:    [cyan]korra egress stop[/cyan]\n"
+        "  Выключить:     [cyan]korra egress disable[/cyan]"
     )
     return 0
 
@@ -539,8 +525,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     proxy_cfg = cfg.get("proxy") or {}
     if not proxy_cfg.get("enabled"):
         console.print(
-            "[yellow]proxy.enabled is false — run `hermes egress setup` "
-            "first.[/yellow]"
+            "[yellow]proxy.enabled выключен. Сначала выполните `korra egress setup`.[/yellow]"
         )
         return 1
 
@@ -564,22 +549,19 @@ def cmd_start(args: argparse.Namespace) -> int:
     if credential_source == "bitwarden" and not refresh_bw:
         if bool(proxy_cfg.get("allow_env_fallback", False)):
             console.print(
-                "[yellow]⚠ credential_source=bitwarden but "
-                "secrets.bitwarden is disabled or missing — falling back "
-                "to host-env secrets (allow_env_fallback=true).  Rotated "
-                "Bitwarden keys will NOT propagate.[/yellow]"
+                "[yellow]⚠ credential_source=bitwarden, но secrets.bitwarden выключен или отсутствует. "
+                "Используются секреты окружения (allow_env_fallback=true); новые ключи Bitwarden "
+                "не будут подхвачены.[/yellow]"
             )
         else:
             console.print(
-                "[red]✗ Refusing to start: proxy.credential_source is "
-                "'bitwarden' but secrets.bitwarden is disabled or "
-                "missing.[/red]"
+                "[red]✗ Запуск запрещён: proxy.credential_source равен 'bitwarden', "
+                "но secrets.bitwarden выключен или отсутствует.[/red]"
             )
             console.print(
-                "  Re-enable it (`secrets.bitwarden.enabled: true`), switch "
-                "back to env credentials with `hermes egress setup "
-                "--no-bitwarden`, or set `proxy.allow_env_fallback: true` "
-                "to opt into the host-env fallback."
+                "  Включите secrets.bitwarden.enabled: true, переключитесь на окружение "
+                "командой `korra egress setup --no-bitwarden` или разрешите резервный "
+                "вариант через proxy.allow_env_fallback: true."
             )
             return 1
     # Pass the proxy-side allow_env_fallback opt-in through to
@@ -607,24 +589,22 @@ def cmd_start(args: argparse.Namespace) -> int:
         bw_access_env = (bw_cfg or {}).get("access_token_env", "BWS_ACCESS_TOKEN")
         if not os.environ.get(bw_access_env, "").strip():
             console.print(
-                f"[red]✗ Refusing to start: credential_source=bitwarden but "
-                f"{bw_access_env} is not set in the environment.[/red]"
+                f"[red]✗ Запуск запрещён: credential_source=bitwarden, но "
+                f"переменная {bw_access_env} не задана.[/red]"
             )
             console.print(
-                "  Either export the access token, or run "
-                "`hermes egress setup --no-bitwarden` to switch back to "
-                "env-based credentials."
+                "  Экспортируйте токен доступа или выполните "
+                "`korra egress setup --no-bitwarden` для перехода на окружение."
             )
             return 1
         if not (bw_cfg or {}).get("project_id"):
             console.print(
-                "[red]✗ Refusing to start: credential_source=bitwarden but "
-                "secrets.bitwarden.project_id is empty.[/red]"
+                "[red]✗ Запуск запрещён: credential_source=bitwarden, но "
+                "secrets.bitwarden.project_id пуст.[/red]"
             )
             console.print(
-                "  Run `hermes secrets bitwarden setup` to configure the "
-                "project, or switch back via `hermes egress setup "
-                "--no-bitwarden`."
+                "  Настройте проект командой `korra secrets bitwarden setup` или "
+                "переключитесь обратно: `korra egress setup --no-bitwarden`."
             )
             return 1
 
@@ -635,20 +615,20 @@ def cmd_start(args: argparse.Namespace) -> int:
             bitwarden_config=bw_cfg,
         )
     except Exception as exc:  # noqa: BLE001 — top-level user-facing funnel
-        console.print(f"[red]✗ failed to start iron-proxy:[/red] {exc}")
+        console.print(f"[red]✗ Не удалось запустить iron-proxy:[/red] {exc}")
         return 1
     if status.pid:
         listening = (
-            "[green]listening[/green]"
+            "[green]принимает соединения[/green]"
             if status.listening
-            else "[yellow]not yet listening[/yellow]"
+            else "[yellow]ещё не принимает соединения[/yellow]"
         )
         console.print(
-            f"[green]✓[/green] iron-proxy running  pid={status.pid}  "
+            f"[green]✓[/green] iron-proxy работает  pid={status.pid}  "
             f"port={status.tunnel_port}  {listening}"
         )
     else:
-        console.print("[red]✗ iron-proxy did not come up cleanly[/red]")
+        console.print("[red]✗ iron-proxy не запустился корректно[/red]")
         return 1
     return 0
 
@@ -656,9 +636,9 @@ def cmd_start(args: argparse.Namespace) -> int:
 def cmd_stop(args: argparse.Namespace) -> int:
     console = Console()
     if ip.stop_proxy():
-        console.print("[green]✓[/green] iron-proxy stopped")
+        console.print("[green]✓[/green] iron-proxy остановлен")
     else:
-        console.print("[dim]iron-proxy was not running[/dim]")
+        console.print("[dim]iron-proxy не был запущен[/dim]")
     return 0
 
 
@@ -673,7 +653,7 @@ def cmd_restart(args: argparse.Namespace) -> int:
     console = Console()
     was_running = ip.stop_proxy()
     if was_running:
-        console.print("[dim]stopped the running iron-proxy[/dim]")
+        console.print("[dim]Работающий iron-proxy остановлен[/dim]")
     return cmd_start(args)
 
 
@@ -692,16 +672,15 @@ def cmd_reload(args: argparse.Namespace) -> int:
     try:
         ip.reload_proxy()
     except Exception as exc:  # noqa: BLE001 — top-level user-facing funnel
-        console.print(f"[red]✗ reload failed:[/red] {exc}")
+        console.print(f"[red]✗ Не удалось перечитать настройки:[/red] {exc}")
         return 1
     console.print(
-        "[green]✓[/green] iron-proxy ruleset reloaded in-place "
-        "(no restart, connections preserved)"
+        "[green]✓[/green] Правила iron-proxy перечитаны без перезапуска; "
+        "соединения сохранены"
     )
     console.print(
-        "[dim]Note: new upstream secrets (rotated keys, new providers) "
-        "still need `hermes egress restart` — the daemon reads real "
-        "credentials from its environment at spawn time.[/dim]"
+        "[dim]Новые секреты назначения, заменённые ключи и новые провайдеры "
+        "требуют `korra egress restart`: процесс читает данные входа при запуске.[/dim]"
     )
     return 0
 
@@ -713,27 +692,27 @@ def format_status_text(*, show_tokens: bool = False) -> str:
     status = ip.get_status()
 
     def yn(value: bool) -> str:
-        return "yes" if value else "no"
+        return "да" if value else "нет"
 
     lines = [
-        "Egress proxy status",
+        "Состояние прокси исходящего трафика",
         "",
-        f"Enabled: {yn(bool(proxy_cfg.get('enabled')))}",
-        f"Binary: {status.binary_path or '(missing)'}",
-        f"Binary version: {status.binary_version or '(unknown)'}",
-        f"Config: {status.config_path or '(not generated)'}",
-        f"CA cert: {status.ca_cert_path or '(not generated)'}",
-        f"Tunnel port: {status.tunnel_port}",
-        f"Process: pid {status.pid}" if status.pid else "Process: (stopped)",
-        f"Listening: {yn(status.listening)}",
-        f"Credential src: {proxy_cfg.get('credential_source', 'env')}",
-        f"Docker enforce: {yn(bool(proxy_cfg.get('enforce_on_docker', True)))}",
-        "Scope: Docker backend only in this release",
+        f"Включён: {yn(bool(proxy_cfg.get('enabled')))}",
+        f"Программа: {status.binary_path or '(не найдена)'}",
+        f"Версия программы: {status.binary_version or '(неизвестна)'}",
+        f"Настройки: {status.config_path or '(не созданы)'}",
+        f"Сертификат CA: {status.ca_cert_path or '(не создан)'}",
+        f"Порт туннеля: {status.tunnel_port}",
+        f"Процесс: pid {status.pid}" if status.pid else "Процесс: остановлен",
+        f"Принимает соединения: {yn(status.listening)}",
+        f"Источник данных входа: {proxy_cfg.get('credential_source', 'env')}",
+        f"Защита Docker: {yn(bool(proxy_cfg.get('enforce_on_docker', True)))}",
+        "Область действия: в этой версии только среда Docker",
     ]
 
     mappings = ip.load_mappings()
     if mappings:
-        lines.extend(["", "Token mappings:"])
+        lines.extend(["", "Сопоставления токенов:"])
         for m in mappings:
             tok = m.proxy_token if show_tokens else _redact_token(m.proxy_token)
             lines.append(f"  - {m.real_env_name}: {tok} ({', '.join(m.upstream_hosts)})")
@@ -742,15 +721,15 @@ def format_status_text(*, show_tokens: bool = False) -> str:
     if uncovered:
         lines.extend([
             "",
-            "Uncovered providers (real credentials still visible inside the sandbox):",
+            "Незащищённые провайдеры; реальные данные входа видны внутри среды:",
         ])
         for name in uncovered:
             lines.append(f"  - {name}")
 
     if bool(proxy_cfg.get("enabled")) and not status.configured:
-        lines.extend(["", "Next: run `hermes egress setup` to mint tokens and write proxy.yaml."])
+        lines.extend(["", "Далее выполните `korra egress setup`, чтобы создать токены и proxy.yaml."])
     elif bool(proxy_cfg.get("enabled")) and not (status.pid and status.listening):
-        lines.extend(["", "Next: run `hermes egress start` before launching Docker sandboxes."])
+        lines.extend(["", "Перед запуском сред Docker выполните `korra egress start`."])
 
     return "\n".join(lines)
 
@@ -764,35 +743,34 @@ def cmd_status(args: argparse.Namespace) -> int:
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("", style="bold")
     table.add_column("")
-    table.add_row("Enabled",        _yn(bool(proxy_cfg.get("enabled"))))
-    table.add_row("Binary",         str(status.binary_path or "[dim](missing)[/dim]"))
-    table.add_row("Binary version", status.binary_version or "[dim](unknown)[/dim]")
-    table.add_row("Config",         str(status.config_path or "[dim](not generated)[/dim]"))
-    table.add_row("CA cert",        str(status.ca_cert_path or "[dim](not generated)[/dim]"))
-    table.add_row("Tunnel port",    str(status.tunnel_port))
-    table.add_row("Process",        f"pid {status.pid}" if status.pid else "[dim](stopped)[/dim]")
-    table.add_row("Listening",      _yn(status.listening))
-    table.add_row("Credential src", str(proxy_cfg.get("credential_source", "env")))
-    table.add_row("Docker enforce", _yn(bool(proxy_cfg.get("enforce_on_docker", True))))
+    table.add_row("Включён", _yn(bool(proxy_cfg.get("enabled"))))
+    table.add_row("Программа", str(status.binary_path or "[dim](не найдена)[/dim]"))
+    table.add_row("Версия программы", status.binary_version or "[dim](неизвестна)[/dim]")
+    table.add_row("Настройки", str(status.config_path or "[dim](не созданы)[/dim]"))
+    table.add_row("Сертификат CA", str(status.ca_cert_path or "[dim](не создан)[/dim]"))
+    table.add_row("Порт туннеля", str(status.tunnel_port))
+    table.add_row("Процесс", f"pid {status.pid}" if status.pid else "[dim](остановлен)[/dim]")
+    table.add_row("Принимает соединения", _yn(status.listening))
+    table.add_row("Источник данных входа", str(proxy_cfg.get("credential_source", "env")))
+    table.add_row("Защита Docker", _yn(bool(proxy_cfg.get("enforce_on_docker", True))))
     console.print(table)
 
     mappings = ip.load_mappings()
     if mappings:
         console.print()
-        console.print("[bold]Token mappings[/bold]")
+        console.print("[bold]Сопоставления токенов[/bold]")
         m_table = Table(show_header=True, header_style="bold")
-        m_table.add_column("Real env", style="cyan")
-        m_table.add_column("Upstream", style="dim")
-        m_table.add_column("Proxy token", style="green")
+        m_table.add_column("Переменная", style="cyan")
+        m_table.add_column("Назначение", style="dim")
+        m_table.add_column("Токен прокси", style="green")
         for m in mappings:
             tok = m.proxy_token if args.show_tokens else _redact_token(m.proxy_token)
             m_table.add_row(m.real_env_name, ", ".join(m.upstream_hosts), tok)
         console.print(m_table)
         if args.show_tokens:
             console.print(
-                "[yellow]⚠[/yellow]  proxy tokens just printed in full — "
-                "they may persist in your shell history.  Consider clearing "
-                "it after this command."
+                "[yellow]⚠[/yellow] Токены прокси показаны полностью и могут остаться "
+                "в истории терминала. После команды очистите историю."
             )
 
     # Surface uncovered providers so the operator knows the isolation
@@ -801,8 +779,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     if uncovered:
         console.print()
         console.print(
-            "[yellow]Uncovered providers[/yellow] "
-            "(real credentials still visible inside the sandbox):"
+            "[yellow]Незащищённые провайдеры[/yellow]; "
+            "реальные данные входа видны внутри среды:"
         )
         for name in uncovered:
             console.print(f"  - {name}")
@@ -815,11 +793,11 @@ def cmd_disable(args: argparse.Namespace) -> int:
     cfg = load_config()
     proxy_cfg = cfg.setdefault("proxy", {})
     if not proxy_cfg.get("enabled"):
-        console.print("[dim]proxy.enabled was already false.[/dim]")
+        console.print("[dim]proxy.enabled уже выключен.[/dim]")
         return 0
     proxy_cfg["enabled"] = False
     save_config(cfg)
-    console.print("[green]✓[/green] proxy.enabled set to false")
+    console.print("[green]✓[/green] proxy.enabled выключен")
     # Use the public get_status() pid (which already incorporates the
     # _pid_alive check) instead of reaching into ip._read_pid().  That
     # private accessor only proves the pidfile is non-empty — a stale
@@ -827,8 +805,8 @@ def cmd_disable(args: argparse.Namespace) -> int:
     # spuriously.
     if ip.get_status().pid is not None:
         console.print(
-            "  iron-proxy is still running — stop it with "
-            "[cyan]hermes egress stop[/cyan] if you want it down too."
+            "  iron-proxy продолжает работать. Чтобы остановить его, выполните "
+            "[cyan]korra egress stop[/cyan]."
         )
     return 0
 
@@ -838,7 +816,7 @@ def cmd_config(args: argparse.Namespace) -> int:
     status = ip.get_status()
     if status.config_path is None:
         console.print(
-            "[yellow](no config generated — run `hermes egress setup`)[/yellow]"
+            "[yellow](настройки не созданы; выполните `korra egress setup`)[/yellow]"
         )
         return 1
     console.print(str(status.config_path))
@@ -884,7 +862,7 @@ def _load_env_file_into_environ() -> int:
 
 
 def _yn(value: bool) -> str:
-    return "[green]yes[/green]" if value else "[dim]no[/dim]"
+    return "[green]да[/green]" if value else "[dim]нет[/dim]"
 
 
 def _redact_token(token: str) -> str:
