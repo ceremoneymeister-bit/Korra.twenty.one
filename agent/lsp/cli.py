@@ -22,46 +22,46 @@ def register_subparser(subparsers: argparse._SubParsersAction) -> None:
     """Wire the ``hermes lsp`` subcommand tree into the main argparse."""
     parser = subparsers.add_parser(
         "lsp",
-        help="Language Server Protocol management",
+        help="Управление языковыми серверами LSP",
         description=(
-            "Manage the LSP layer that powers post-write semantic "
-            "diagnostics in write_file/patch."
+            "Настроить языковые серверы для проверки кода "
+            "после write_file/patch."
         ),
     )
     sub = parser.add_subparsers(dest="lsp_command")
 
-    sub_status = sub.add_parser("status", help="Show LSP service status")
+    sub_status = sub.add_parser("status", help="Показать состояние службы LSP")
     sub_status.add_argument(
-        "--json", action="store_true", help="Emit machine-readable JSON"
+        "--json", action="store_true", help="Вывести машиночитаемый JSON"
     )
 
-    sub_list = sub.add_parser("list", help="List supported language servers")
+    sub_list = sub.add_parser("list", help="Показать поддерживаемые языковые серверы")
     sub_list.add_argument(
         "--installed-only",
         action="store_true",
-        help="Only show servers whose binary is currently available",
+        help="Показать только серверы с доступной программой",
     )
 
-    sub_install = sub.add_parser("install", help="Install a server binary")
-    sub_install.add_argument("server", help="Server id (e.g. pyright, gopls)")
+    sub_install = sub.add_parser("install", help="Установить программу сервера")
+    sub_install.add_argument("server", help="ID сервера, например pyright или gopls")
 
     sub_install_all = sub.add_parser(
         "install-all",
-        help="Install every server with a known auto-install recipe",
+        help="Установить все серверы с готовым способом установки",
     )
     sub_install_all.add_argument(
         "--include-manual",
         action="store_true",
-        help="Even attempt servers marked manual-install (best effort)",
+        help="Попробовать установить и серверы с отметкой ручной установки",
     )
 
     sub.add_parser(
         "restart",
-        help="Tear down running LSP clients (next edit re-spawns)",
+        help="Остановить клиенты LSP; при следующем изменении кода они запустятся заново",
     )
 
-    sub_which = sub.add_parser("which", help="Print binary path for a server")
-    sub_which.add_argument("server", help="Server id")
+    sub_which = sub.add_parser("which", help="Показать путь к программе сервера")
+    sub_which.add_argument("server", help="ID сервера")
 
     parser.set_defaults(func=run_lsp_command)
 
@@ -82,7 +82,7 @@ def run_lsp_command(args: argparse.Namespace) -> int:
             return _cmd_restart()
         if sub == "which":
             return _cmd_which(args.server)
-        sys.stderr.write(f"unknown lsp subcommand: {sub}\n")
+        sys.stderr.write(f"Неизвестная подкоманда lsp: {sub}\n")
         return 2
     except KeyboardInterrupt:
         return 130
@@ -115,30 +115,30 @@ def _cmd_status(emit_json: bool) -> int:
         return 0
 
     out = []
-    out.append("LSP Service")
+    out.append("Служба LSP")
     out.append("===========")
-    out.append(f"  enabled:         {info.get('enabled', False)}")
+    out.append(f"  включена:        {info.get('enabled', False)}")
     if service_active:
-        out.append(f"  wait_mode:       {info.get('wait_mode')}")
-        out.append(f"  wait_timeout:    {info.get('wait_timeout')}s")
-        out.append(f"  install_strategy:{info.get('install_strategy')}")
+        out.append(f"  режим ожидания:  {info.get('wait_mode')}")
+        out.append(f"  время ожидания:  {info.get('wait_timeout')}s")
+        out.append(f"  способ установки:{info.get('install_strategy')}")
         clients = info.get("clients") or []
         if clients:
-            out.append(f"  active clients:  {len(clients)}")
+            out.append(f"  активных клиентов: {len(clients)}")
             for c in clients:
                 out.append(
                     f"    - {c['server_id']:20s} state={c['state']:10s} root={c['workspace_root']}"
                 )
         else:
-            out.append("  active clients:  none")
+            out.append("  активных клиентов: none")
         broken = info.get("broken") or []
         if broken:
-            out.append(f"  broken pairs:    {len(broken)}")
+            out.append(f"  проблемных связей: {len(broken)}")
             for b in broken:
                 out.append(f"    - {b}")
         disabled = info.get("disabled_servers") or []
         if disabled:
-            out.append(f"  disabled in cfg: {', '.join(disabled)}")
+            out.append(f"  отключено в настройках: {', '.join(disabled)}")
 
     # Surface backend-tool gaps that aren't visible in the registry table:
     # some servers spawn fine but emit no diagnostics without a sidecar
@@ -146,12 +146,12 @@ def _cmd_status(emit_json: bool) -> int:
     backend_warnings = _backend_warnings()
     if backend_warnings:
         out.append("")
-        out.append("Backend warnings")
+        out.append("Предупреждения среды")
         out.append("================")
         for line in backend_warnings:
             out.append(f"  ! {line}")
     out.append("")
-    out.append("Registered Servers")
+    out.append("Доступные серверы")
     out.append("==================")
     for s in SERVERS:
         pkg = _recipe_pkg_for(s.server_id)
@@ -193,22 +193,22 @@ def _cmd_install(server_id: str) -> int:
     pkg = _recipe_pkg_for(server_id)
     pre_status = detect_status(pkg)
     if pre_status == "installed":
-        sys.stdout.write(f"{server_id} already installed\n")
+        sys.stdout.write(f"{server_id} уже установлен\n")
         return 0
-    sys.stdout.write(f"installing {server_id} (pkg={pkg}) ...\n")
+    sys.stdout.write(f"Установка {server_id} (pkg={pkg}) ...\n")
     sys.stdout.flush()
     bin_path = try_install(pkg, "auto")
     if bin_path is None:
         recipe = INSTALL_RECIPES.get(pkg)
         if recipe and recipe.get("strategy") == "manual":
             sys.stderr.write(
-                f"{server_id}: this server requires a manual install. "
-                f"See documentation.\n"
+                f"{server_id}: этот сервер нужно установить вручную. "
+                f"См. документацию.\n"
             )
         else:
-            sys.stderr.write(f"{server_id}: install failed (see logs).\n")
+            sys.stderr.write(f"{server_id}: не удалось установить; см. журналы.\n")
         return 1
-    sys.stdout.write(f"installed: {bin_path}\n")
+    sys.stdout.write(f"Установлено: {bin_path}\n")
     return 0
 
 
@@ -225,15 +225,15 @@ def _cmd_install_all(include_manual: bool) -> int:
         if recipe.get("strategy") == "manual" and not include_manual:
             continue
         if detect_status(pkg) == "installed":
-            sys.stdout.write(f"  {s.server_id:24s} already installed\n")
+            sys.stdout.write(f"  {s.server_id:24s} уже установлен\n")
             continue
-        sys.stdout.write(f"  installing {s.server_id} (pkg={pkg}) ... ")
+        sys.stdout.write(f"  Установка {s.server_id} (pkg={pkg}) ... ")
         sys.stdout.flush()
         path = try_install(pkg, "auto")
         if path:
             sys.stdout.write(f"ok ({path})\n")
         else:
-            sys.stdout.write("FAILED\n")
+            sys.stdout.write("ОШИБКА\n")
             rc = 1
     return rc
 
@@ -242,7 +242,7 @@ def _cmd_restart() -> int:
     from agent.lsp import shutdown_service
 
     shutdown_service()
-    sys.stdout.write("LSP service shut down. Next edit will respawn clients.\n")
+    sys.stdout.write("Служба LSP остановлена. При следующем изменении кода клиенты запустятся заново.\n")
     return 0
 
 
@@ -255,7 +255,7 @@ def _cmd_which(server_id: str) -> int:
     if resolved:
         sys.stdout.write(resolved + "\n")
         return 0
-    sys.stderr.write(f"{server_id}: not installed\n")
+    sys.stderr.write(f"{server_id}: не установлен\n")
     return 1
 
 

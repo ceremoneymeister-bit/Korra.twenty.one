@@ -10507,7 +10507,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                     try:
                         sanitized = SessionDB.sanitize_title(title)
                     except ValueError as e:
-                        _cprint(f"  Title rejected: {e}")
+                        _cprint(f'  Название не принято: {e}')
                         sanitized = None
                         title = None
                     if sanitized:
@@ -10517,13 +10517,13 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                             self._status_bar_title_checked_at = 0.0
                             title = sanitized
                         except ValueError as e:
-                            _cprint(f"  {e} — session started untitled.")
+                            _cprint(f'  {e} — беседа начата без названия.')
                             title = None
                         except Exception:
                             title = None
                     elif title is not None:
                         # sanitize_title returned empty (whitespace-only / unprintable)
-                        _cprint("  Title is empty after cleanup — session started untitled.")
+                        _cprint('  После очистки название пустое. Беседа начата без названия.')
                         title = None
             # Notify memory providers that session_id rotated to a fresh
             # conversation. reset=True signals providers to flush accumulated
@@ -10559,9 +10559,9 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
 
         if not silent:
             if title:
-                print(f"(^_^)v New session started: {title}")
+                print(f'(^_^)v Новая беседа: {title}')
             else:
-                print("(^_^)v New session started!")
+                print('(^_^)v Новая беседа начата!')
 
 
     def _consume_pending_resume_selection(self, text: str) -> bool:
@@ -12667,7 +12667,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                             _cprint(f"  {e}")
                             return True
                         if not new_title:
-                            _cprint("  Title is empty after cleanup. Please use printable characters.")
+                            _cprint('  После очистки название пустое. Используйте печатные символы.')
                         elif self._session_db.get_session(self.session_id):
                             # Session exists in DB — set title directly
                             try:
