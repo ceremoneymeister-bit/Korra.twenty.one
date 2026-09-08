@@ -134,23 +134,23 @@ def _warn_if_openclaw_running(auto_yes: bool) -> None:
         return
 
     print()
-    print_error("OpenClaw appears to be running:")
+    print_error("OpenClaw сейчас работает:")
     for detail in running:
         print_info(f"  * {detail}")
     print_info(
-        "Messaging platforms (Telegram, Discord, Slack) only allow one "
-        "active session per bot token. If you continue, both OpenClaw and "
-        "Korra may try to use the same token, causing disconnects."
+        "Telegram, Discord и Slack разрешают только одно активное подключение "
+        "для токена бота. Если продолжить, OpenClaw и Korra будут одновременно "
+        "использовать токен, что приведёт к разрывам связи."
     )
-    print_info("Recommendation: stop OpenClaw before migrating.")
+    print_info("Перед переносом остановите OpenClaw.")
     print()
     if auto_yes:
         return
     if not sys.stdin.isatty():
-        print_info("Non-interactive session — continuing to preview only.")
+        print_info("Запуск без участия пользователя: доступен только предварительный просмотр.")
         return
-    if not prompt_yes_no("Continue anyway?", default=False):
-        print_info("Migration cancelled. Stop OpenClaw and try again.")
+    if not prompt_yes_no("Всё равно продолжить?", default=False):
+        print_info("Перенос отменён. Остановите OpenClaw и повторите попытку.")
         sys.exit(0)
 
 
@@ -175,18 +175,17 @@ def _warn_if_gateway_running(auto_yes: bool) -> None:
 
     print()
     print_error(
-        "Korra gateway is running with active connections: "
+        "Шлюз Korra работает с активными подключениями: "
         + ", ".join(connected)
     )
     print_info(
-        "Migrating bot tokens while the gateway is active will cause "
-        "conflicts (Telegram, Discord, and Slack only allow one active "
-        "session per token)."
+        "Перенос токенов при работающем шлюзе вызовет конфликт: Telegram, "
+        "Discord и Slack разрешают одно активное подключение на токен."
     )
-    print_info("Recommendation: stop the gateway first with 'hermes gateway stop'.")
+    print_info("Сначала остановите шлюз: `korra gateway stop`.")
     print()
-    if not auto_yes and not prompt_yes_no("Continue anyway?", default=False):
-        print_info("Migration cancelled. Stop the gateway and try again.")
+    if not auto_yes and not prompt_yes_no("Всё равно продолжить?", default=False):
+        print_info("Перенос отменён. Остановите шлюз и повторите попытку.")
         sys.exit(0)
 
 # State files commonly found in OpenClaw workspace directories — listed
@@ -307,13 +306,13 @@ def claw_command(args):
     elif action in {"cleanup", "clean"}:
         _cmd_cleanup(args)
     else:
-        print("Usage: hermes claw <command> [options]")
+        print("Использование: korra claw <команда> [параметры]")
         print()
-        print("Commands:")
-        print("  migrate          Migrate settings from OpenClaw to Korra")
-        print("  cleanup          Archive leftover OpenClaw directories after migration")
+        print("Команды:")
+        print("  migrate          перенести настройки из OpenClaw в Korra")
+        print("  cleanup          архивировать оставшиеся после переноса папки OpenClaw")
         print()
-        print("Run 'hermes claw <command> --help' for options.")
+        print("Параметры: `korra claw <команда> --help`.")
 
 
 def _cmd_migrate(args):
@@ -354,7 +353,7 @@ def _cmd_migrate(args):
     )
     print(
         color(
-            "│          ⚕ Korra — OpenClaw Migration                  │",
+            "│          ⚕ Korra — перенос из OpenClaw                 │",
             Colors.MAGENTA,
         )
     )
@@ -368,36 +367,36 @@ def _cmd_migrate(args):
     # Check source directory
     if not source_dir.is_dir():
         print()
-        print_error(f"OpenClaw directory not found: {source_dir}")
-        print_info("Make sure your OpenClaw installation is at the expected path.")
-        print_info("You can specify a custom path: hermes claw migrate --source /path/to/.openclaw")
+        print_error(f"Папка OpenClaw не найдена: {source_dir}")
+        print_info("Проверьте путь установки OpenClaw.")
+        print_info("Другой путь можно указать так: korra claw migrate --source /путь/к/.openclaw")
         return
 
     # Find the migration script
     script_path = _find_migration_script()
     if not script_path:
         print()
-        print_error("Migration script not found.")
-        print_info("Expected at one of:")
+        print_error("Сценарий переноса не найден.")
+        print_info("Ожидается в одном из расположений:")
         print_info(f"  {_OPENCLAW_SCRIPT}")
         print_info(f"  {_OPENCLAW_SCRIPT_INSTALLED}")
-        print_info("Make sure the openclaw-migration skill is installed.")
+        print_info("Убедитесь, что навык openclaw-migration установлен.")
         return
 
     # Show what we're doing
     hermes_home = get_hermes_home()
     auto_yes = getattr(args, "yes", False)
     print()
-    print_header("Migration Settings")
-    print_info(f"Source:      {source_dir}")
-    print_info(f"Target:      {hermes_home}")
-    print_info(f"Preset:      {preset}")
-    print_info(f"Overwrite:   {'yes' if overwrite else 'no (skip conflicts)'}")
-    print_info(f"Secrets:     {'yes (allowlisted only)' if migrate_secrets else 'no'}")
+    print_header("Настройки переноса")
+    print_info(f"Источник:       {source_dir}")
+    print_info(f"Назначение:     {hermes_home}")
+    print_info(f"Набор:          {preset}")
+    print_info(f"Перезапись:     {'да' if overwrite else 'нет; конфликты пропускаются'}")
+    print_info(f"Секреты:        {'да; только разрешённые' if migrate_secrets else 'нет'}")
     if skill_conflict != "skip":
-        print_info(f"Skill conflicts: {skill_conflict}")
+        print_info(f"Конфликты навыков: {skill_conflict}")
     if workspace_target:
-        print_info(f"Workspace:   {workspace_target}")
+        print_info(f"Рабочая папка: {workspace_target}")
     print()
 
     # Check if OpenClaw is still running — migrating tokens while both are
@@ -416,11 +415,11 @@ def _cmd_migrate(args):
     try:
         mod = _load_migration_module(script_path)
         if mod is None:
-            print_error("Could not load migration script.")
+            print_error("Не удалось загрузить сценарий переноса.")
             return
     except Exception as e:
         print()
-        print_error(f"Could not load migration script: {e}")
+        print_error(f"Не удалось загрузить сценарий переноса: {e}")
         logger.debug("OpenClaw migration error", exc_info=True)
         return
 
@@ -444,7 +443,7 @@ def _cmd_migrate(args):
         preview_report = preview.migrate()
     except Exception as e:
         print()
-        print_error(f"Migration preview failed: {e}")
+        print_error(f"Не удалось подготовить план переноса: {e}")
         logger.debug("OpenClaw migration preview error", exc_info=True)
         return
 
@@ -457,18 +456,18 @@ def _cmd_migrate(args):
     # surface the refusal/--overwrite guidance instead of silently bailing.
     if preview_count == 0 and preview_conflicts == 0:
         print()
-        print_info("Nothing to migrate from OpenClaw.")
+        print_info("В OpenClaw нет данных для переноса.")
         _print_migration_report(preview_report, dry_run=True)
         return
 
     print()
     if preview_count > 0:
-        print_header(f"Migration Preview — {preview_count} item(s) would be imported")
+        print_header(f"План переноса — будет импортировано объектов: {preview_count}")
     else:
         print_header(
-            f"Migration Preview — {preview_conflicts} conflict(s), nothing would be imported"
+            f"План переноса — конфликтов: {preview_conflicts}; импортировать нечего"
         )
-    print_info("No changes have been made yet. Review the list below:")
+    print_info("Изменения ещё не внесены. Проверьте список:")
     _print_migration_report(preview_report, dry_run=True)
 
     # If --dry-run, stop here
@@ -483,25 +482,25 @@ def _cmd_migrate(args):
     if preview_conflicts > 0 and not overwrite:
         print()
         print_error(
-            f"Plan has {preview_conflicts} conflict(s). Refusing to apply."
+            f"В плане конфликтов: {preview_conflicts}. Применение остановлено."
         )
         print_info(
-            "Each conflict is an item whose target already exists in ~/.hermes/. "
-            "Re-run with --overwrite to replace conflicting targets (item-level "
-            "backups are written to the migration report directory)."
+            "Конфликт означает, что целевой объект уже есть в папке данных Korra. "
+            "Чтобы заменить такие объекты, повторите с --overwrite. Их резервные "
+            "копии будут сохранены рядом с отчётом переноса."
         )
-        print_info("Or re-run with --dry-run to review the full plan.")
+        print_info("Для повторного просмотра полного плана используйте --dry-run.")
         return
 
     # ── Phase 2: Confirm and execute ───────────────────────────
     print()
     if not auto_yes:
         if not sys.stdin.isatty():
-            print_info("Non-interactive session — preview only.")
-            print_info("To execute, re-run with: hermes claw migrate --yes")
+            print_info("Запуск без участия пользователя: доступен только просмотр.")
+            print_info("Для выполнения повторите: korra claw migrate --yes")
             return
-        if not prompt_yes_no("Proceed with migration?", default=True):
-            print_info("Migration cancelled.")
+        if not prompt_yes_no("Выполнить перенос?", default=True):
+            print_info("Перенос отменён.")
             return
 
     # ── Phase 2b: Pre-apply backup of the Hermes home ─────────
@@ -519,13 +518,13 @@ def _cmd_migrate(args):
             if backup_archive:
                 size_str = _format_size(backup_archive.stat().st_size)
                 print()
-                print_success(f"Pre-migration backup: {backup_archive} ({size_str})")
-                print_info(f"Restore with: hermes import {backup_archive.name}")
+                print_success(f"Резервная копия перед переносом: {backup_archive} ({size_str})")
+                print_info(f"Восстановить: korra import {backup_archive.name}")
         except Exception as e:
             print()
-            print_error(f"Could not create pre-migration backup: {e}")
+            print_error(f"Не удалось создать резервную копию перед переносом: {e}")
             print_info(
-                "Re-run with --no-backup to skip, or free up disk space under the Korra home."
+                "Освободите место в папке данных Korra или повторите с --no-backup, чтобы пропустить копию."
             )
             logger.debug("Pre-migration backup error", exc_info=True)
             return
@@ -546,11 +545,11 @@ def _cmd_migrate(args):
         report = migrator.migrate()
     except Exception as e:
         print()
-        print_error(f"Migration failed: {e}")
+        print_error(f"Ошибка переноса: {e}")
         logger.debug("OpenClaw migration error", exc_info=True)
         if backup_archive:
-            print_info(f"A pre-migration backup is available at: {backup_archive}")
-            print_info(f"Restore with: hermes import {backup_archive.name}")
+            print_info(f"Резервная копия перед переносом: {backup_archive}")
+            print_info(f"Восстановить: korra import {backup_archive.name}")
         return
 
     # Print results
@@ -580,7 +579,7 @@ def _cmd_cleanup(args):
     )
     print(
         color(
-            "│          ⚕ Korra — OpenClaw Cleanup                    │",
+            "│          ⚕ Korra — очистка после OpenClaw              │",
             Colors.MAGENTA,
         )
     )
@@ -599,7 +598,7 @@ def _cmd_cleanup(args):
 
     if not dirs_to_check:
         print()
-        print_success("No OpenClaw directories found. Nothing to clean up.")
+        print_success("Папки OpenClaw не найдены. Очищать нечего.")
         return
 
     # Warn if OpenClaw is still running — archiving while the service is
@@ -607,28 +606,28 @@ def _cmd_cleanup(args):
     running = _detect_openclaw_processes()
     if running:
         print()
-        print_error("OpenClaw appears to be still running:")
+        print_error("OpenClaw всё ещё работает:")
         for detail in running:
             print_info(f"  * {detail}")
         print_info(
-            "Archiving .openclaw/ while the service is active may cause it to "
-            "immediately recreate an empty skeleton directory, destroying your config."
+            "Если архивировать .openclaw/ при работающей службе, она может сразу "
+            "создать пустую папку заново и повредить настройки."
         )
-        print_info("Stop OpenClaw first: systemctl --user stop openclaw-gateway.service")
+        print_info("Сначала остановите OpenClaw: systemctl --user stop openclaw-gateway.service")
         print()
         if not auto_yes:
             if not sys.stdin.isatty():
-                print_info("Non-interactive session — aborting. Stop OpenClaw and re-run.")
+                print_info("Запуск без участия пользователя остановлен. Остановите OpenClaw и повторите.")
                 return
-            if not prompt_yes_no("Proceed anyway?", default=False):
-                print_info("Aborted. Stop OpenClaw first, then re-run: hermes claw cleanup")
+            if not prompt_yes_no("Всё равно продолжить?", default=False):
+                print_info("Отменено. Остановите OpenClaw и выполните: korra claw cleanup")
                 return
 
     total_archived = 0
 
     for source_dir in dirs_to_check:
         print()
-        print_header(f"Found: {source_dir}")
+        print_header(f"Найдена папка: {source_dir}")
 
         # Scan for state files
         state_files = _scan_workspace_state(source_dir)
@@ -644,7 +643,7 @@ def _cmd_cleanup(args):
             workspace_dirs = []
 
         if workspace_dirs:
-            print_info(f"Workspace directories: {len(workspace_dirs)}")
+            print_info(f"Рабочих папок: {len(workspace_dirs)}")
             for ws in workspace_dirs[:5]:
                 items = []
                 if (ws / "todo.json").exists():
@@ -655,55 +654,53 @@ def _cmd_cleanup(args):
                     items.append("SOUL.md")
                 if (ws / "MEMORY.md").exists():
                     items.append("MEMORY.md")
-                detail = ", ".join(items) if items else "empty"
+                detail = ", ".join(items) if items else "пусто"
                 print(f"      {ws.name}/  ({detail})")
             if len(workspace_dirs) > 5:
-                print(f"      ... and {len(workspace_dirs) - 5} more")
+                print(f"      … и ещё {len(workspace_dirs) - 5}")
 
         if state_files:
             print()
-            print(color(f"  {len(state_files)} state file(s) found:", Colors.YELLOW))
+            print(color(f"  Найдено файлов состояния: {len(state_files)}:", Colors.YELLOW))
             for path, desc in state_files[:8]:
                 print(f"      {desc}")
             if len(state_files) > 8:
-                print(f"      ... and {len(state_files) - 8} more")
+                print(f"      … и ещё {len(state_files) - 8}")
 
         print()
 
         if dry_run:
             archive_path = _archive_directory(source_dir, dry_run=True)
-            print_info(f"Would archive: {source_dir} → {archive_path}")
+            print_info(f"Будет архивировано: {source_dir} → {archive_path}")
         elif not auto_yes and not sys.stdin.isatty():
-            print_info(f"Non-interactive session — would archive: {source_dir}")
-            print_info("To execute, re-run with: hermes claw cleanup --yes")
-        elif auto_yes or prompt_yes_no(f"Archive {source_dir}?", default=True):
+            print_info(f"Запуск без участия пользователя; будет архивировано: {source_dir}")
+            print_info("Для выполнения повторите: korra claw cleanup --yes")
+        elif auto_yes or prompt_yes_no(f"Архивировать {source_dir}?", default=True):
             try:
                 archive_path = _archive_directory(source_dir)
-                print_success(f"Archived: {source_dir} → {archive_path}")
+                print_success(f"Архивировано: {source_dir} → {archive_path}")
                 total_archived += 1
             except OSError as e:
-                print_error(f"Could not archive: {e}")
-                print_info(f"Try manually: mv {source_dir} {source_dir}.pre-migration")
+                print_error(f"Не удалось архивировать: {e}")
+                print_info(f"Попробуйте вручную: mv {source_dir} {source_dir}.pre-migration")
         else:
-            print_info("Skipped.")
+            print_info("Пропущено.")
 
     # Summary
     print()
     if dry_run:
         _n_dirs = len(dirs_to_check)
         print_info(
-            f"Dry run complete. {_n_dirs} "
-            f"{'directory' if _n_dirs == 1 else 'directories'} would be archived."
+            f"Проверка завершена. Будет архивировано папок: {_n_dirs}."
         )
-        print_info("Run without --dry-run to archive them.")
+        print_info("Для архивации запустите без --dry-run.")
     elif total_archived:
         print_success(
-            f"Cleaned up {total_archived} OpenClaw "
-            f"{'directory' if total_archived == 1 else 'directories'}."
+            f"Архивировано папок OpenClaw: {total_archived}."
         )
-        print_info("Directories were renamed, not deleted. You can undo by renaming them back.")
+        print_info("Папки переименованы, а не удалены. Для отмены верните прежние имена.")
     else:
-        print_info("No directories were archived.")
+        print_info("Ни одна папка не архивирована.")
 
 
 def _print_migration_report(report: dict, dry_run: bool):
@@ -716,10 +713,10 @@ def _print_migration_report(report: dict, dry_run: bool):
 
     print()
     if dry_run:
-        print_header("Dry Run Results")
-        print_info("No files were modified. This is a preview of what would happen.")
+        print_header("Результат проверки")
+        print_info("Файлы не изменены. Показан предварительный результат.")
     else:
-        print_header("Migration Results")
+        print_header("Результат переноса")
 
     print()
 
@@ -733,10 +730,10 @@ def _print_migration_report(report: dict, dry_run: bool):
         error_items = [i for i in items if i.get("status") == "error"]
 
         if migrated_items:
-            label = "Would migrate" if dry_run else "Migrated"
+            label = "Будет перенесено" if dry_run else "Перенесено"
             print(color(f"  ✓ {label}:", Colors.GREEN))
             for item in migrated_items:
-                kind = item.get("kind", "unknown")
+                kind = item.get("kind", "неизвестно")
                 dest = item.get("destination", "")
                 if dest:
                     dest_short = str(dest).replace(str(Path.home()), "~")
@@ -746,58 +743,58 @@ def _print_migration_report(report: dict, dry_run: bool):
             print()
 
         if conflict_items:
-            print(color("  ⚠ Conflicts (skipped — use --overwrite to force):", Colors.YELLOW))
+            print(color("  ⚠ Конфликты; пропущены, для замены используйте --overwrite:", Colors.YELLOW))
             for item in conflict_items:
-                kind = item.get("kind", "unknown")
-                reason = item.get("reason", "already exists")
+                kind = item.get("kind", "неизвестно")
+                reason = item.get("reason", "уже существует")
                 print(f"      {kind:<22s}  {reason}")
             print()
 
         if skipped_items:
-            print(color("  ─ Skipped:", Colors.DIM))
+            print(color("  ─ Пропущено:", Colors.DIM))
             for item in skipped_items:
-                kind = item.get("kind", "unknown")
+                kind = item.get("kind", "неизвестно")
                 reason = item.get("reason", "")
                 print(f"      {kind:<22s}  {reason}")
             print()
 
         if error_items:
-            print(color("  ✗ Errors:", Colors.RED))
+            print(color("  ✗ Ошибки:", Colors.RED))
             for item in error_items:
-                kind = item.get("kind", "unknown")
-                reason = item.get("reason", "unknown error")
+                kind = item.get("kind", "неизвестно")
+                reason = item.get("reason", "неизвестная ошибка")
                 print(f"      {kind:<22s}  {reason}")
             print()
 
     # Summary line
     parts = []
     if migrated:
-        action = "would migrate" if dry_run else "migrated"
+        action = "будет перенесено" if dry_run else "перенесено"
         parts.append(f"{migrated} {action}")
     if conflicts:
-        parts.append(f"{conflicts} conflict(s)")
+        parts.append(f"конфликтов: {conflicts}")
     if skipped:
-        parts.append(f"{skipped} skipped")
+        parts.append(f"пропущено: {skipped}")
     if errors:
-        parts.append(f"{errors} error(s)")
+        parts.append(f"ошибок: {errors}")
 
     if parts:
-        print_info(f"Summary: {', '.join(parts)}")
+        print_info(f"Итого: {', '.join(parts)}")
     else:
-        print_info("Nothing to migrate.")
+        print_info("Переносить нечего.")
 
     # Output directory
     output_dir = report.get("output_dir")
     if output_dir:
-        print_info(f"Full report saved to: {output_dir}")
+        print_info(f"Полный отчёт сохранён: {output_dir}")
 
     if dry_run:
         print()
-        print_info("To execute the migration, run without --dry-run:")
-        print_info(f"  hermes claw migrate --preset {report.get('preset', 'full')}")
+        print_info("Чтобы выполнить перенос, запустите без --dry-run:")
+        print_info(f"  korra claw migrate --preset {report.get('preset', 'full')}")
     elif migrated:
         print()
-        print_success("Migration complete!")
+        print_success("Перенос завершён!")
         # Warn if API keys were skipped (migrate_secrets not enabled)
         skipped_keys = [
             i for i in report.get("items", [])
@@ -805,11 +802,11 @@ def _print_migration_report(report: dict, dry_run: bool):
         ]
         if skipped_keys:
             print()
-            print(color("  ⚠ API keys were NOT migrated (secrets migration is disabled by default).", Colors.YELLOW))
-            print(color("  Your OPENROUTER_API_KEY and other provider keys must be added manually.", Colors.YELLOW))
+            print(color("  ⚠ Ключи API не перенесены: перенос секретов по умолчанию выключен.", Colors.YELLOW))
+            print(color("  Добавьте OPENROUTER_API_KEY и другие ключи провайдеров вручную.", Colors.YELLOW))
             print()
-            print_info("To migrate API keys, re-run with:")
-            print_info("  hermes claw migrate --migrate-secrets")
+            print_info("Чтобы перенести ключи API, повторите:")
+            print_info("  korra claw migrate --migrate-secrets")
             print()
-            print_info("Or add your key manually:")
-            print_info("  hermes config set OPENROUTER_API_KEY sk-or-v1-...")
+            print_info("Или добавьте ключ вручную:")
+            print_info("  korra config set OPENROUTER_API_KEY sk-or-v1-...")

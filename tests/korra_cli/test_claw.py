@@ -186,7 +186,7 @@ class TestCmdMigrate:
             claw_mod._cmd_migrate(args)
 
         captured = capsys.readouterr()
-        assert "Could not load migration script" in captured.out
+        assert "Не удалось загрузить сценарий переноса" in captured.out
 
     def test_full_preset_does_not_enable_secrets_silently(self, tmp_path, capsys):
         """The 'full' preset must NOT auto-enable migrate_secrets.
@@ -293,7 +293,7 @@ class TestCmdCleanup:
             claw_mod._cmd_cleanup(args)
 
         captured = capsys.readouterr()
-        assert "Would archive" in captured.out
+        assert "Будет архивировано" in captured.out
         assert openclaw.is_dir()  # Not actually archived
 
 
@@ -306,7 +306,7 @@ class TestCmdCleanup:
         claw_mod._cmd_cleanup(args)
 
         captured = capsys.readouterr()
-        assert "Archived" in captured.out
+        assert "Архивировано" in captured.out
         assert not custom_dir.exists()
 
 
@@ -333,9 +333,9 @@ class TestPrintMigrationReport:
         }
         claw_mod._print_migration_report(report, dry_run=True)
         captured = capsys.readouterr()
-        assert "Dry Run Results" in captured.out
-        assert "Would migrate" in captured.out
-        assert "2 would migrate" in captured.out
+        assert "Результат проверки" in captured.out
+        assert "Будет перенесено" in captured.out
+        assert "2 будет перенесено" in captured.out
         assert "--dry-run" in captured.out
 
 
@@ -346,7 +346,7 @@ class TestPrintMigrationReport:
         }
         claw_mod._print_migration_report(report, dry_run=False)
         captured = capsys.readouterr()
-        assert "Nothing to migrate" in captured.out
+        assert "Переносить нечего" in captured.out
 
 
 class TestDetectOpenclawProcesses:
@@ -393,6 +393,4 @@ class TestWarnIfOpenclawRunning:
                         claw_mod._warn_if_openclaw_running(auto_yes=False)
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
-        assert "OpenClaw appears to be running" in captured.out
-
-
+        assert "OpenClaw сейчас работает" in captured.out
