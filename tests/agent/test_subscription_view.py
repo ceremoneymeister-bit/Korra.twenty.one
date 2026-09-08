@@ -71,9 +71,9 @@ def test_manage_url_omits_org_when_absent():
 
 def test_format_tier_row_hides_absent_or_zero_credits():
     # A None / zero-credits tier hides the suffix — never "· — credits/mo" / "· $0 credits/mo".
-    assert format_tier_row(_tier("plus", 1, "20", "0")) == "Plus · $20/mo"
-    assert format_tier_row(_tier("plus", 1, "20", None)) == "Plus · $20/mo"
-    assert "credits/mo" not in format_tier_row(_tier("plus", 1, "20", "0"))
+    assert format_tier_row(_tier("plus", 1, "20", "0")) == "Plus · $20/мес."
+    assert format_tier_row(_tier("plus", 1, "20", None)) == "Plus · $20/мес."
+    assert "баланс:" not in format_tier_row(_tier("plus", 1, "20", "0"))
 
 
 

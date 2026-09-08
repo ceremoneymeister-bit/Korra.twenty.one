@@ -276,7 +276,7 @@ def build_subscription_state(*, timeout: float = 15.0) -> SubscriptionState:
             resolve_portal_base_url,
         )
     except Exception:
-        return SubscriptionState(logged_in=False, error="billing client unavailable")
+        return SubscriptionState(logged_in=False, error="Сервис оплаты недоступен")
 
     try:
         payload = get_subscription_state(timeout=timeout)
@@ -287,7 +287,7 @@ def build_subscription_state(*, timeout: float = 15.0) -> SubscriptionState:
         return SubscriptionState(logged_in=False, error=str(exc))
     except Exception:
         logger.debug("subscription ▸ /state unexpected error (fail-open)", exc_info=True)
-        return SubscriptionState(logged_in=False, error="could not load subscription state")
+        return SubscriptionState(logged_in=False, error="Не удалось загрузить состояние подписки")
 
     raw_portal = payload.get("portalUrl") if isinstance(payload, dict) else None
     portal_url = _absolutize_portal_url(raw_portal) if raw_portal else None
@@ -390,10 +390,10 @@ def format_tier_row(tier: SubscriptionTier) -> str:
     and > 0 (a ``None`` / zero-credits tier hides it — never ``· — credits/mo`` or
     ``· $0 credits/mo``).
     """
-    row = f"{tier.name} · {_format_dollars_grouped(tier.dollars_per_month)}/mo"
+    row = f"{tier.name} · {_format_dollars_grouped(tier.dollars_per_month)}/мес."
     mc = tier.monthly_credits
     if mc is not None and mc > 0:
-        row += f" · {_format_dollars_grouped(mc)} credits/mo"
+        row += f" · баланс: {_format_dollars_grouped(mc)}/мес."
     return row
 
 

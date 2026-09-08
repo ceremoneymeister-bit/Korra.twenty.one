@@ -112,10 +112,29 @@ def test_render_account_usage_lines_includes_reset_and_provider():
     )
     lines = render_account_usage_lines(snapshot)
 
-    assert lines[0] == "📈 Account limits"
+    assert lines[0] == "📈 Лимиты учётной записи"
     assert "openai-codex (Pro)" in lines[1]
-    assert "Session: 75% remaining (25% used)" in lines[2]
-    assert "Credits balance: $9.99" in lines[3]
+    assert "Беседа: осталось 75% (использовано 25%)" in lines[2]
+    assert "Баланс: $9.99" in lines[3]
+
+
+def test_russian_usage_filters_topup_hints_without_mutating_snapshot():
+    snapshot = AccountUsageSnapshot(
+        provider="nous",
+        source="portal-account",
+        fetched_at=datetime.now(timezone.utc),
+        details=("Credits balance: $9.99", "Top up: https://example.test/billing", "(or run /topup)"),
+    )
+    raw_details = snapshot.details
+
+    full = render_account_usage_lines(snapshot)
+    balance = render_account_usage_lines(snapshot, include_topup_hints=False)
+
+    assert "Пополнить: https://example.test/billing" in full
+    assert "(или выполните /topup)" in full
+    assert "Баланс: $9.99" in balance
+    assert not any("/billing" in line or "/topup" in line for line in balance)
+    assert snapshot.details == raw_details
 
 
 def test_fetch_account_usage_openrouter_uses_limit_remaining_and_ignores_deprecated_rate_limit(monkeypatch):

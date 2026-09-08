@@ -74,49 +74,100 @@ def _parse_dt(value: Any) -> Optional[datetime]:
 
 def _format_reset(dt: Optional[datetime]) -> str:
     if not dt:
-        return "unknown"
+        return "неизвестно"
     local_dt = dt.astimezone()
     delta = dt - _utc_now()
     total_seconds = int(delta.total_seconds())
     if total_seconds <= 0:
-        return f"now ({local_dt.strftime('%Y-%m-%d %H:%M %Z')})"
+        return f"сейчас ({local_dt.strftime('%Y-%m-%d %H:%M %Z')})"
     hours, rem = divmod(total_seconds, 3600)
     minutes = rem // 60
     if hours >= 24:
         days, hours = divmod(hours, 24)
-        rel = f"in {days}d {hours}h"
+        rel = f"через {days} дн {hours} ч"
     elif hours > 0:
-        rel = f"in {hours}h {minutes}m"
+        rel = f"через {hours} ч {minutes} мин"
     else:
-        rel = f"in {minutes}m"
+        rel = f"через {minutes} мин"
     return f"{rel} ({local_dt.strftime('%Y-%m-%d %H:%M %Z')})"
 
 
-def render_account_usage_lines(snapshot: Optional[AccountUsageSnapshot], *, markdown: bool = False) -> list[str]:
+def _usage_text_for_display(text: str) -> str:
+    """Русский текст квот; исходный snapshot и его маркеры не меняются."""
+    import re
+
+    exact = {
+        "Account limits": "Лимиты учётной записи", "Nous credits": "Баланс Nous",
+        "Subscription": "Подписка", "Session": "Беседа", "Weekly": "Неделя",
+        "Current session": "Текущая беседа", "Current week": "Текущая неделя",
+        "Opus week": "Opus за неделю", "Sonnet week": "Sonnet за неделю",
+        "API key quota": "Лимит API-ключа", "Credits balance: unlimited": "Баланс: без лимита",
+        "Status: access depleted — top up to restore": "Средства закончились. Пополните баланс для продолжения.",
+        "(or run /topup)": "(или выполните /topup)",
+        "Anthropic account limits are only available for OAuth-backed Claude accounts.": "Лимиты Anthropic доступны только при входе в Claude через OAuth.",
+        "(dev fixture — HERMES_DEV_CREDITS_FIXTURE)": "(тестовый сценарий — HERMES_DEV_CREDITS_FIXTURE)",
+    }
+    if text in exact:
+        return exact[text]
+    if " • " in text:
+        return " • ".join(_usage_text_for_display(part) for part in text.split(" • "))
+    for before, after in {
+        "Subscription credits: ": "Баланс подписки: ", "Top-up credits: ": "Пополнения: ",
+        "Total usable: ": "Всего доступно: ", "Rollover: ": "Перенос с прошлого периода: ",
+        "Renews: ": "Продление: ", "Top up: ": "Пополнить: ",
+        "Credits balance: ": "Баланс: ", "Extra usage: ": "Дополнительный расход: ",
+    }.items():
+        if text.startswith(before):
+            return after + text[len(before):]
+    match = re.fullmatch(r"You have (\d+) resets? banked - use /usage reset to activate", text)
+    if match:
+        return f"Доступно сбросов лимита: {match[1]}. Для использования — /usage reset."
+    match = re.fullmatch(r"(\$[\d,.]+) of (\$[\d,.]+) (?:left|remaining)", text)
+    if match:
+        return f"Осталось {match[1]} из {match[2]}"
+    match = re.fullmatch(r"API key usage: (\$[\d,.]+) total", text)
+    if match:
+        return f"Всего израсходовано по API-ключу: {match[1]}"
+    match = re.fullmatch(r"(\$[\d,.]+) (today|this week|this month)", text)
+    if match:
+        period = {"today": "за сегодня", "this week": "за неделю", "this month": "за месяц"}[match[2]]
+        return f"{match[1]} {period}"
+    if text.startswith("resets "):
+        period = text[7:]
+        return "сброс " + {"daily": "каждый день", "weekly": "каждую неделю", "monthly": "каждый месяц"}.get(period, period)
+    return text
+
+
+def render_account_usage_lines(snapshot: Optional[AccountUsageSnapshot], *, markdown: bool = False,
+                               include_topup_hints: bool = True) -> list[str]:
     if not snapshot:
         return []
-    header = f"📈 {'**' if markdown else ''}{snapshot.title}{'**' if markdown else ''}"
+    header = f"📈 {'**' if markdown else ''}{_usage_text_for_display(snapshot.title)}{'**' if markdown else ''}"
     lines = [header]
     if snapshot.plan:
-        lines.append(f"Provider: {snapshot.provider} ({snapshot.plan})")
+        lines.append(f"Провайдер: {snapshot.provider} ({snapshot.plan})")
     else:
-        lines.append(f"Provider: {snapshot.provider}")
+        lines.append(f"Провайдер: {snapshot.provider}")
     for window in snapshot.windows:
+        label = _usage_text_for_display(window.label)
         if window.used_percent is None:
-            base = f"{window.label}: unavailable"
+            base = f"{label}: недоступно"
         else:
             remaining = max(0, round(100 - float(window.used_percent)))
             used = max(0, round(float(window.used_percent)))
-            base = f"{window.label}: {remaining}% remaining ({used}% used)"
+            base = f"{label}: осталось {remaining}% (использовано {used}%)"
         if window.reset_at:
-            base += f" • resets {_format_reset(window.reset_at)}"
+            base += f" • сброс {_format_reset(window.reset_at)}"
         elif window.detail:
-            base += f" • {window.detail}"
+            base += f" • {_usage_text_for_display(window.detail)}"
         lines.append(base)
     for detail in snapshot.details:
-        lines.append(detail)
+        # Эти английские префиксы — внутренний контракт. Фильтруем ДО перевода.
+        if not include_topup_hints and (detail.lstrip().startswith("Top up:") or detail.lstrip().startswith("(or run")):
+            continue
+        lines.append(_usage_text_for_display(detail))
     if snapshot.unavailable_reason:
-        lines.append(f"Unavailable: {snapshot.unavailable_reason}")
+        lines.append(f"Недоступно: {_usage_text_for_display(snapshot.unavailable_reason)}")
     return lines
 
 
@@ -398,13 +449,9 @@ def build_credits_view(*, markdown: bool = False, timeout: float = 10.0) -> Cred
     # appends for the /usage surface. /topup renders its own button/panel.
     balance_lines: list[str] = []
     if snapshot is not None:
-        rendered = render_account_usage_lines(snapshot, markdown=markdown)
-        balance_lines = [
-            line
-            for line in rendered
-            if not line.lstrip().startswith("Top up:")
-            and not line.lstrip().startswith("(or run")
-        ]
+        balance_lines = render_account_usage_lines(
+            snapshot, markdown=markdown, include_topup_hints=False
+        )
 
     # Identity line — shown before any open (roadmap §4.4).
     email = getattr(account, "email", None)
@@ -413,8 +460,8 @@ def build_credits_view(*, markdown: bool = False, timeout: float = 10.0) -> Cred
     if email:
         who.append(str(email))
     if org_name:
-        who.append(f"org {org_name}")
-    identity_line = ("Topping up as " + " / ".join(who)) if who else None
+        who.append(f"организация {org_name}")
+    identity_line = ("Пополнение от имени " + " / ".join(who)) if who else None
 
     return CreditsView(
         logged_in=True,

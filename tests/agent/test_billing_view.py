@@ -301,12 +301,12 @@ def test_new_idempotency_key_unique_and_uuid_shaped():
 @pytest.mark.parametrize(
     "raw,err_substr",
     [
-        ("", "dollar amount"),
-        ("0", "greater than"),
-        ("-5", "greater than"),
-        ("10.005", "cent"),       # multipleOf 0.01 — sub-cent rejected
-        ("5", "Minimum"),         # below bounds.minUsd
-        ("99999", "Maximum"),     # above bounds.maxUsd
+        ("", "сумму в долларах"),
+        ("0", "больше"),
+        ("-5", "больше"),
+        ("10.005", "цента"),       # multipleOf 0.01 — sub-cent rejected
+        ("5", "Минимум"),         # below bounds.minUsd
+        ("99999", "Максимум"),     # above bounds.maxUsd
     ],
 )
 def test_validate_amount_rejections(raw, err_substr):

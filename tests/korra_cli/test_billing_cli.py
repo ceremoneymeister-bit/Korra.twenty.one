@@ -63,10 +63,10 @@ def test_topup_overview_splits_onetime_from_automatic_copy(cli, monkeypatch, cap
     cli._show_billing("/topup")
     out = capsys.readouterr().out
 
-    assert "Add funds now — a single charge, added to your balance today." in out
-    assert "Refill when low — charges your card automatically when your balance falls below" in out
+    assert "Пополнить баланс сейчас: разовое списание, средства доступны сегодня." in out
+    assert "Автоматически списывать средства с карты, когда баланс опускается" in out
     # Dollars-only surface: no "credits" word leaks into /topup.
-    assert "credits" not in out.lower()
+    assert "кредит" not in out.lower()
 
 
 def test_topup_automatic_copy_generic_when_amounts_missing(cli, monkeypatch, capsys):
@@ -88,10 +88,10 @@ def test_topup_automatic_copy_generic_when_amounts_missing(cli, monkeypatch, cap
     out = capsys.readouterr().out
 
     assert (
-        "Refill when low — charges your card automatically when your balance "
-        "falls below the amount you set."
+        "Автоматически списывать средства с карты, когда баланс "
+        "опускается ниже указанного порога."
     ) in out
-    assert "charges — automatically" not in out
+    assert "автоматически списывать —" not in out
 
 
 
@@ -119,6 +119,6 @@ def test_buy_flow_no_card_back_abandons(cli, monkeypatch, capsys):
     cli._billing_buy_flow(nocard)
     out = capsys.readouterr().out
 
-    assert "Add a card first" in out
-    assert "Cancelled. No funds added." in out
+    assert "Сначала добавьте карту" in out
+    assert "Отменено. Баланс не пополнен." in out
     assert calls["n"] == 0  # backed out before any re-check

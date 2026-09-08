@@ -82,7 +82,7 @@ def format_renews(value: Optional[str]) -> Optional[str]:
         except ValueError:
             return text
     # %-d isn't portable to Windows; build the day without a leading zero.
-    return f"{dt.strftime('%b')} {dt.day}, {dt.year}"
+    return f"{dt.day:02d}.{dt.month:02d}.{dt.year}"
 
 
 @dataclass(frozen=True)

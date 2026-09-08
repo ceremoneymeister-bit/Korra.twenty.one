@@ -362,7 +362,7 @@ def build_billing_state(*, timeout: float = 15.0) -> BillingState:
             resolve_portal_base_url,
         )
     except Exception:
-        return BillingState(logged_in=False, error="billing client unavailable")
+        return BillingState(logged_in=False, error="Сервис оплаты недоступен")
 
     try:
         payload = get_billing_state(timeout=timeout)
@@ -373,7 +373,7 @@ def build_billing_state(*, timeout: float = 15.0) -> BillingState:
         return BillingState(logged_in=False, error=str(exc))
     except Exception:
         logger.debug("billing ▸ /state unexpected error (fail-open)", exc_info=True)
-        return BillingState(logged_in=False, error="could not load billing state")
+        return BillingState(logged_in=False, error="Не удалось загрузить данные оплаты")
 
     # Prefer a server-supplied portalUrl if present (resolved to absolute in case
     # it's relative); else build the standard one.
@@ -498,14 +498,14 @@ def validate_charge_amount(
     cleaned = (raw or "").strip().lstrip("$").strip()
     amount = parse_money(cleaned)
     if amount is None:
-        return AmountValidation(ok=False, error="Enter a dollar amount, e.g. 100")
+        return AmountValidation(ok=False, error="Введите сумму в долларах, например 100")
     if amount <= 0:
-        return AmountValidation(ok=False, error="Amount must be greater than $0")
+        return AmountValidation(ok=False, error="Сумма должна быть больше $0")
     # multipleOf 0.01 — reject sub-cent precision.
     if amount != amount.quantize(Decimal("0.01")):
-        return AmountValidation(ok=False, error="Amount can't be smaller than a cent")
+        return AmountValidation(ok=False, error="Укажите сумму с точностью до одного цента")
     if min_usd is not None and amount < min_usd:
-        return AmountValidation(ok=False, error=f"Minimum is {format_money(min_usd)}")
+        return AmountValidation(ok=False, error=f"Минимум: {format_money(min_usd)}")
     if max_usd is not None and amount > max_usd:
-        return AmountValidation(ok=False, error=f"Maximum is {format_money(max_usd)}")
+        return AmountValidation(ok=False, error=f"Максимум: {format_money(max_usd)}")
     return AmountValidation(ok=True, amount=amount)
