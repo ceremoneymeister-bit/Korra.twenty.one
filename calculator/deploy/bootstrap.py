@@ -10,7 +10,7 @@ import yaml
 
 
 ROLES = {
-    "default": ("front", "Приём заказов"),
+    "default": ("front", "Приёмщик"),
     "raschet-route": ("tech", "Технолог"),
     "raschet-blank": ("supply", "Материалы и заготовка"),
     "raschet-time": ("norm", "Нормировщик"),

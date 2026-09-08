@@ -16,6 +16,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -86,11 +87,10 @@ function tabMenuLeft(trigger: DOMRect): number {
 
 export default function AgentWorkbenchPage() {
   const managedCalculator = productUiMode() === "calc";
-  // Состав вкладок — реальные профили контура (см. lib/agent-tabs.ts):
-  // главная «Корра» есть всегда, остальные приезжают из /api/profiles и
-  // подхватываются без перезагрузки страницы.
+  // Managed Calc21 uses the existing main profile as its intake agent.
+  // Only its presentation label changes; chat/history keep the same profile id.
   const {
-    tabs,
+    tabs: profileTabs,
     hiddenTabs,
     refresh,
     updateDisplayName,
@@ -98,6 +98,14 @@ export default function AgentWorkbenchPage() {
     showTab,
     moveTab,
   } = useAgentTabs();
+  const tabs = useMemo(
+    () => managedCalculator
+      ? profileTabs.map((tab) => tab.profile === MAIN_AGENT_TAB.profile
+        ? { ...tab, label: "Приёмщик" }
+        : tab)
+      : profileTabs,
+    [managedCalculator, profileTabs],
+  );
   const [selectedId, setActiveId] = useState<string>(MAIN_AGENT_TAB.profile);
   const [newChatByProfile, setNewChatByProfile] = useState<
     Record<string, number>

@@ -58,6 +58,8 @@ async function openCalculatorMenu() {
 describe("calculator agent workbench", () => {
   it("сохраняет рабочие действия и скрывает изменение управляемых ролей", async () => {
     await mount("calc");
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain("Приёмщик");
+    expect(container.querySelector('[data-profile=""][data-active="true"]')).not.toBeNull();
     const menu = await openCalculatorMenu();
     expect(menu.textContent).toContain("Новый чат");
     expect(menu.textContent).toContain("Модель");
@@ -69,6 +71,7 @@ describe("calculator agent workbench", () => {
 
   it("сохраняет управление агентами в основном интерфейсе Korra21", async () => {
     await mount("fleet");
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain("Корра");
     const menu = await openCalculatorMenu();
     for (const action of ["Переименовать", "Роль и поведение", "Навыки", "Расписание", "Удалить агента"]) {
       expect(menu.textContent).toContain(action);
