@@ -3086,7 +3086,7 @@ def _run_setup_wizard_impl(args):
     """
     from korra_cli.config import is_managed, managed_error
     if is_managed():
-        managed_error("run setup wizard")
+        managed_error("запустить мастер настройки")
         return
     ensure_hermes_home()
 

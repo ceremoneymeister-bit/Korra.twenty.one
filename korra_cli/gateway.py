@@ -7869,7 +7869,7 @@ def _configure_platform(platform: dict) -> None:
 def gateway_setup():
     """Interactive setup for messaging platforms + gateway service."""
     if is_managed():
-        managed_error("run gateway setup")
+        managed_error("настроить шлюз")
         return
 
     print()
@@ -8385,7 +8385,7 @@ def _gateway_command_inner(args):
     # Service management commands
     if subcmd == "install":
         if is_managed():
-            managed_error("install gateway service")
+            managed_error("установить службу шлюза")
             return
         force = getattr(args, "force", False)
         system = getattr(args, "system", False)
@@ -8509,7 +8509,7 @@ def _gateway_command_inner(args):
             sys.exit(1)
 
         if is_managed():
-            managed_error("uninstall gateway service")
+            managed_error("удалить службу шлюза")
             return
         system = getattr(args, "system", False)
         if is_termux():
