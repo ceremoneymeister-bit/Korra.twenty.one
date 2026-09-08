@@ -398,3 +398,29 @@ class TestChannelAliases:
                  if e["id"] == "120363@g.us"]
         assert names == ["general"]
 
+
+
+def test_russian_cli_directory_preserves_model_output_and_target_names():
+    import copy
+
+    platforms = {
+        "telegram": [],
+        "discord": [
+            {"id": "1", "name": "KeepOriginal", "guild": "DMs", "type": "channel"},
+            {"id": "2", "name": "owner", "type": "dm"},
+        ],
+    }
+    before = copy.deepcopy(platforms)
+    model_text = format_directory_for_display(platforms)
+    cli_text = format_directory_for_display(platforms, language="ru")
+
+    assert model_text.startswith("Available messaging targets:")
+    assert cli_text.startswith("Доступные получатели:")
+    assert "Discord (DMs):" in cli_text  # Actual guild name must not be translated.
+    assert "Discord (личные сообщения):" in cli_text
+    assert "каналы ещё не обнаружены" in cli_text
+    assert "telegram:<chat_id>" in cli_text
+    model_targets = [line for line in model_text.splitlines() if line.startswith("  discord:")]
+    cli_targets = [line for line in cli_text.splitlines() if line.startswith("  discord:")]
+    assert cli_targets == model_targets
+    assert platforms == before

@@ -598,7 +598,9 @@ def resolve_channel_name(platform_name: str, name: str) -> Optional[str]:
     return None
 
 
-def format_directory_for_display(platforms: Optional[Dict[str, Any]] = None) -> str:
+def format_directory_for_display(
+    platforms: Optional[Dict[str, Any]] = None, *, language: str = "en"
+) -> str:
     """Format the channel directory as a human-readable list for the model.
 
     ``platforms`` overrides the on-disk directory when provided (used by
@@ -607,21 +609,31 @@ def format_directory_for_display(platforms: Optional[Dict[str, Any]] = None) -> 
     with a "(no channels discovered yet)" hint instead of being hidden —
     a configured platform is a valid send target even before discovery.
     """
+    # The model-facing default remains byte-identical. CLI callers explicitly
+    # choose Russian without changing channel names or target identifiers.
+    russian = language == "ru"
     if platforms is None:
         directory = load_directory()
         platforms = directory.get("platforms", {})
 
     if not platforms:
-        return "No messaging platforms connected or no channels discovered yet."
+        return (
+            "Мессенджеры не подключены или каналы ещё не обнаружены."
+            if russian else "No messaging platforms connected or no channels discovered yet."
+        )
 
-    lines = ["Available messaging targets:\n"]
+    lines = ["Доступные получатели:\n" if russian else "Available messaging targets:\n"]
 
     for plat_name, channels in sorted(platforms.items()):
         if not channels:
             lines.append(f"{plat_name.title()}:")
             lines.append(
-                f"  (no channels discovered yet — send directly with "
-                f"{plat_name}:<chat_id>, or bare '{plat_name}' for the home channel)"
+                f"  (каналы ещё не обнаружены; укажите {plat_name}:<chat_id> "
+                f"или просто '{plat_name}' для главного канала)"
+                if russian else (
+                    f"  (no channels discovered yet — send directly with "
+                    f"{plat_name}:<chat_id>, or bare '{plat_name}' for the home channel)"
+                )
             )
             lines.append("")
             continue
@@ -642,7 +654,7 @@ def format_directory_for_display(platforms: Optional[Dict[str, Any]] = None) -> 
                 for ch in sorted(guild_channels, key=lambda c: c["name"]):
                     lines.append(f"  discord:{_channel_target_name(plat_name, ch)}")
             if dms:
-                lines.append("Discord (DMs):")
+                lines.append("Discord (личные сообщения):" if russian else "Discord (DMs):")
                 for ch in dms:
                     lines.append(f"  discord:{_channel_target_name(plat_name, ch)}")
             lines.append("")
@@ -652,7 +664,13 @@ def format_directory_for_display(platforms: Optional[Dict[str, Any]] = None) -> 
                 lines.append(f"  {plat_name}:{_channel_target_name(plat_name, ch)}")
             lines.append("")
 
-    lines.append('Use these as the "target" parameter when sending.')
-    lines.append('Bare platform name (e.g. "telegram") sends to home channel.')
+    lines.append(
+        'Укажите получателя из списка в --to при отправке.'
+        if russian else 'Use these as the "target" parameter when sending.'
+    )
+    lines.append(
+        'Имя платформы без уточнений (например, "telegram") отправляет в главный канал.'
+        if russian else 'Bare platform name (e.g. "telegram") sends to home channel.'
+    )
 
     return "\n".join(lines)

@@ -106,27 +106,7 @@ def _get_webhook_base_url() -> str:
 
 def _setup_hint() -> str:
     _dhh = display_hermes_home()
-    return f"""
-  Webhook platform is not enabled. To set it up:
-
-  1. Run the gateway setup wizard:
-     hermes gateway setup
-
-  2. Or manually add to {_dhh}/config.yaml:
-     platforms:
-       webhook:
-         enabled: true
-         extra:
-           port: 8644
-           secret: "your-global-hmac-secret"
-
-  3. Or set environment variables in {_dhh}/.env:
-     WEBHOOK_ENABLED=true
-     WEBHOOK_PORT=8644
-     WEBHOOK_SECRET=your-global-secret
-
-  Then start the gateway: hermes gateway run
-"""
+    return f'\n  Вебхуки не включены. Настроить их можно так:\n\n  1. Запустите мастер подключения:\n     korra gateway setup\n\n  2. Или добавьте в {_dhh}/config.yaml:\n     platforms:\n       webhook:\n         enabled: true\n         extra:\n           port: 8644\n           secret: "ваш-секрет-hmac"\n\n  Затем запустите шлюз: korra gateway run\n'
 
 
 def _require_webhook_enabled() -> bool:
@@ -142,8 +122,8 @@ def webhook_command(args):
     sub = getattr(args, "webhook_action", None)
 
     if not sub:
-        print("Usage: hermes webhook {subscribe|list|remove|test}")
-        print("Run 'hermes webhook --help' for details.")
+        print('Использование: korra webhook {subscribe|list|remove|test}')
+        print("Подробности: 'korra webhook --help'.")
         return
 
     if not _require_webhook_enabled():
@@ -162,7 +142,7 @@ def webhook_command(args):
 def _cmd_subscribe(args):
     name = args.name.strip().lower().replace(" ", "-")
     if not re.match(r'^[a-z0-9][a-z0-9_-]*$', name):
-        print(f"Error: Invalid name '{name}'. Use lowercase alphanumeric with hyphens/underscores.")
+        print(f"Ошибка: неверное имя '{name}'. Используйте строчные латинские буквы, цифры, дефис или подчёркивание.")
         return
 
     subs = _load_subscriptions()
@@ -172,7 +152,7 @@ def _cmd_subscribe(args):
     events = [e.strip() for e in args.events.split(",")] if args.events else []
 
     route = {
-        "description": args.description or f"Agent-created subscription: {name}",
+        "description": args.description or f'Подписка, созданная агентом: {name}',
         "events": events,
         "secret": secret,
         "prompt": args.prompt or "",
@@ -184,8 +164,7 @@ def _cmd_subscribe(args):
     if getattr(args, "deliver_only", False):
         if route["deliver"] == "log":
             print(
-                "Error: --deliver-only requires --deliver to be a real target "
-                "(telegram, discord, slack, github_comment, etc.) — not 'log'."
+                "Ошибка: --deliver-only требует получателя --deliver (telegram, discord, slack, github_comment и другие). Значение 'log' здесь не подходит."
             )
             return
         route["deliver_only"] = True
@@ -201,52 +180,52 @@ def _cmd_subscribe(args):
     _save_subscriptions(subs)
 
     base_url = _get_webhook_base_url()
-    status = "Updated" if is_update else "Created"
+    status = 'Обновлена' if is_update else 'Создана'
 
-    print(f"\n  {status} webhook subscription: {name}")
-    print(f"  URL:    {base_url}/webhooks/{name}")
-    print(f"  Secret: {secret}")
+    print(f'\n  {status} подписка на вебхук: {name}')
+    print(f'  Адрес:  {base_url}/webhooks/{name}')
+    print(f'  Секрет: {secret}')
     if events:
-        print(f"  Events: {', '.join(events)}")
+        print(f"  События: {', '.join(events)}")
     else:
-        print("  Events: (all)")
-    print(f"  Deliver: {route['deliver']}")
+        print('  События: все')
+    print(f"  Доставка: {route['deliver']}")
     if route.get("deliver_only"):
-        print("  Mode: direct delivery (no agent, zero LLM cost)")
+        print('  Режим: прямая доставка без агента и расходов на модель')
     if route.get("prompt"):
         prompt_preview = route["prompt"][:80] + ("..." if len(route["prompt"]) > 80 else "")
-        label = "Message" if route.get("deliver_only") else "Prompt"
+        label = 'Сообщение' if route.get("deliver_only") else 'Запрос'
         print(f"  {label}: {prompt_preview}")
     if route.get("script"):
-        print(f"  Script: {route['script']}")
-    print("\n  Configure your service to POST to the URL above.")
-    print("  Use the secret for HMAC-SHA256 signature validation.")
-    print("  The gateway must be running to receive events (hermes gateway run).\n")
+        print(f"  Скрипт: {route['script']}")
+    print('\n  Настройте отправку POST-запросов из вашего сервиса на адрес выше.')
+    print('  Используйте секрет для проверки подписи HMAC-SHA256.')
+    print('  Для получения событий шлюз должен работать: korra gateway run.\n')
 
 
 def _cmd_list(args):
     subs = _load_subscriptions()
     if not subs:
-        print("  No dynamic webhook subscriptions.")
-        print("  Create one with: hermes webhook subscribe <name>")
+        print('  Созданных подписок на вебхуки нет.')
+        print('  Создать: korra webhook subscribe <имя>')
         return
 
     base_url = _get_webhook_base_url()
-    print(f"\n  {len(subs)} webhook subscription(s):\n")
+    print(f'\n  Подписки на вебхуки ({len(subs)}):\n')
     for name, route in subs.items():
-        events = ", ".join(route.get("events", [])) or "(all)"
+        events = ", ".join(route.get("events", [])) or "(все)"
         deliver = route.get("deliver", "log")
         if route.get("deliver_only"):
-            deliver = f"{deliver} (direct — no agent)"
+            deliver = f'{deliver} (напрямую, без агента)'
         desc = route.get("description", "")
         print(f"  ◆ {name}")
         if desc:
             print(f"    {desc}")
-        print(f"    URL:     {base_url}/webhooks/{name}")
-        print(f"    Events:  {events}")
-        print(f"    Deliver: {deliver}")
+        print(f'    Адрес:    {base_url}/webhooks/{name}')
+        print(f'    События:  {events}')
+        print(f'    Доставка: {deliver}')
         if route.get("script"):
-            print(f"    Script:  {route['script']}")
+            print(f"    Скрипт:   {route['script']}")
         print()
 
 
@@ -255,13 +234,13 @@ def _cmd_remove(args):
     subs = _load_subscriptions()
 
     if name not in subs:
-        print(f"  No subscription named '{name}'.")
-        print("  Note: Static routes from config.yaml cannot be removed here.")
+        print(f"  Подписка '{name}' не найдена.")
+        print('  Маршруты из config.yaml нельзя удалить этой командой.')
         return
 
     del subs[name]
     _save_subscriptions(subs)
-    print(f"  Removed webhook subscription: {name}")
+    print(f'  Подписка на вебхук удалена: {name}')
 
 
 def _cmd_test(args):
@@ -270,7 +249,7 @@ def _cmd_test(args):
     subs = _load_subscriptions()
 
     if name not in subs:
-        print(f"  No subscription named '{name}'.")
+        print(f"  Подписка '{name}' не найдена.")
         return
 
     route = subs[name]
@@ -278,7 +257,7 @@ def _cmd_test(args):
     base_url = _get_webhook_base_url()
     url = f"{base_url}/webhooks/{name}"
 
-    payload = args.payload or '{"test": true, "event_type": "test", "message": "Hello from hermes webhook test"}'
+    payload = args.payload or '{"test": true, "event_type": "test", "message": "Проверка вебхука Korra"}'
 
     import hmac
     import hashlib
@@ -286,7 +265,7 @@ def _cmd_test(args):
         secret.encode(), payload.encode(), hashlib.sha256
     ).hexdigest()
 
-    print(f"  Sending test POST to {url}")
+    print(f'  Отправляю тестовый POST-запрос на {url}')
     try:
         import urllib.request
         req = urllib.request.Request(
@@ -301,7 +280,7 @@ def _cmd_test(args):
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = resp.read().decode()
-            print(f"  Response ({resp.status}): {body}")
+            print(f'  Ответ ({resp.status}): {body}')
     except Exception as e:
-        print(f"  Error: {e}")
-        print("  Is the gateway running? (hermes gateway run)")
+        print(f'  Ошибка: {e}')
+        print('  Проверьте, запущен ли шлюз: korra gateway run.')

@@ -89,7 +89,7 @@ def test_file_decode_error_suggests_media_directive(fake_tool, capsys, monkeypat
         send_cmd.cmd_send(args)
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "not a text file" in err.lower()
+    assert "не является текстовым файлом" in err.lower()
     assert f"MEDIA:{bad}" in err
     assert "[[as_document]]" in err
 
@@ -126,7 +126,8 @@ def test_list_includes_configured_platform_without_discovered_channels(
     fake_dir = types.ModuleType("gateway.channel_directory")
     fake_dir.load_directory = lambda: {"updated_at": None, "platforms": {}}
 
-    def _format(platforms=None):
+    def _format(platforms=None, *, language="en"):
+        assert language == "ru"
         lines = []
         for name, channels in sorted((platforms or {}).items()):
             lines.append(f"{name}:")

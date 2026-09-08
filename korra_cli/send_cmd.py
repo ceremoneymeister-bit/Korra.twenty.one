@@ -61,19 +61,12 @@ def _read_message_body(
             return Path(file_path).read_text(encoding="utf-8")
         except UnicodeDecodeError:
             print(
-                f"hermes send: {file_path} is not a text file. --file reads the "
-                "message *body* (logs, reports, markdown).\n"
-                "To send an image/document/audio file as a native attachment, "
-                "reference it with MEDIA: in the message text instead:\n"
-                f'  hermes send --to telegram "MEDIA:{file_path}"\n'
-                f'  hermes send --to telegram "optional caption MEDIA:{file_path}"\n'
-                "Add [[as_document]] to deliver an image as an uncompressed file:\n"
-                f'  hermes send --to telegram "[[as_document]] MEDIA:{file_path}"',
+                f'korra send: {file_path} не является текстовым файлом. --file читает текст сообщения: журнал, отчёт или Markdown.\nЧтобы отправить изображение, документ или аудио вложением, укажите MEDIA: в сообщении:\n  korra send --to telegram "MEDIA:{file_path}"\n  korra send --to telegram "Подпись к файлу MEDIA:{file_path}"\nЧтобы отправить изображение без сжатия, добавьте [[as_document]]:\n  korra send --to telegram "[[as_document]] MEDIA:{file_path}"',
                 file=sys.stderr,
             )
             sys.exit(_USAGE_EXIT)
         except OSError as exc:
-            print(f"hermes send: cannot read {file_path}: {exc}", file=sys.stderr)
+            print(f'korra send: не удалось прочитать {file_path}: {exc}', file=sys.stderr)
             sys.exit(_USAGE_EXIT)
 
     # Piped input: only consume stdin when it is not a TTY. Reading from a
@@ -110,7 +103,7 @@ def _emit_result(
     except json.JSONDecodeError:
         # Shouldn't happen with the shared tool, but be defensive — pass the
         # raw string through so the user can still see what went wrong.
-        payload = {"error": "invalid JSON from send_message_tool", "raw": result_json}
+        payload = {"error": 'send_message_tool вернул некорректный JSON', "raw": result_json}
 
     if json_mode:
         print(json.dumps(payload, indent=2))
@@ -118,7 +111,7 @@ def _emit_result(
         pass
     else:
         if payload.get("error"):
-            print(f"hermes send: {payload['error']}", file=sys.stderr)
+            print(f"korra send: {payload['error']}", file=sys.stderr)
         elif payload.get("success"):
             note = payload.get("note")
             if note:
@@ -153,13 +146,13 @@ def _list_targets(platform_filter: Optional[str], *, json_mode: bool) -> int:
             load_directory,
         )
     except Exception as exc:
-        print(f"hermes send: failed to load channel directory: {exc}", file=sys.stderr)
+        print(f'korra send: не удалось загрузить список каналов: {exc}', file=sys.stderr)
         return _FAILURE_EXIT
 
     try:
         raw = load_directory()
     except Exception as exc:
-        print(f"hermes send: failed to read channel directory: {exc}", file=sys.stderr)
+        print(f'korra send: не удалось прочитать список каналов: {exc}', file=sys.stderr)
         return _FAILURE_EXIT
 
     platforms = dict(raw.get("platforms") or {})
@@ -189,8 +182,7 @@ def _list_targets(platform_filter: Optional[str], *, json_mode: bool) -> int:
         filtered = {k: v for k, v in platforms.items() if k.lower() == key}
         if not filtered:
             print(
-                f"hermes send: no targets found for platform '{platform_filter}'. "
-                f"Configured: {', '.join(sorted(platforms)) or '(none)'}",
+                f"korra send: для платформы '{platform_filter}' не найдены получатели. Настроены: {', '.join(sorted(platforms)) or '(нет)'}",
                 file=sys.stderr,
             )
             return _FAILURE_EXIT
@@ -201,23 +193,23 @@ def _list_targets(platform_filter: Optional[str], *, json_mode: bool) -> int:
         return _SUCCESS_EXIT
 
     if not platforms:
-        print("No messaging platforms configured or no channels discovered yet.")
-        print("Set one up with `hermes gateway setup`, or run the gateway once so")
-        print("channel discovery can populate ~/.hermes/channel_directory.json.")
+        print('Мессенджеры не настроены или каналы ещё не обнаружены.')
+        print('Настройте их через `korra gateway setup` либо один раз запустите шлюз,')
+        print('чтобы он заполнил channel_directory.json вашего профиля Korra.')
         return _SUCCESS_EXIT
 
     # Human display — when unfiltered, reuse the shared formatter the agent
     # already sees (passing the merged view so configured-but-undiscovered
     # platforms are listed too). When filtered, build a minimal view ourselves.
     if platform_filter is None:
-        print(format_directory_for_display(platforms))
+        print(format_directory_for_display(platforms, language="ru"))
         return _SUCCESS_EXIT
 
     for plat_name in sorted(platforms):
         channels = platforms[plat_name]
         print(f"{plat_name}:")
         if not channels:
-            print("  (no channels discovered yet)")
+            print('  (каналы ещё не обнаружены)')
             continue
         for ch in channels:
             name = ch.get("name", "?")
@@ -344,11 +336,7 @@ def cmd_send(args: argparse.Namespace) -> None:
     target = _resolve_target(getattr(args, "to", None))
     if not target:
         print(
-            "hermes send: --to PLATFORM[:channel[:thread]] is required\n"
-            "Examples:\n"
-            "  hermes send --to telegram \"hello\"\n"
-            "  hermes send --to discord:#ops --file report.md\n"
-            "  hermes send --list      # list available targets",
+            'korra send: укажите --to ПЛАТФОРМА[:канал[:ветка]]\nПримеры:\n  korra send --to telegram "Привет"\n  korra send --to discord:#ops --file report.md\n  korra send --list      # доступные получатели',
             file=sys.stderr,
         )
         sys.exit(_USAGE_EXIT)
@@ -359,8 +347,7 @@ def cmd_send(args: argparse.Namespace) -> None:
     )
     if message is None or not message.strip():
         print(
-            "hermes send: no message provided. Pass text as a positional "
-            "argument, use --file PATH, or pipe data via stdin.",
+            'korra send: сообщение не задано. Передайте текст аргументом, укажите --file ПУТЬ или направьте текст через стандартный ввод.',
             file=sys.stderr,
         )
         sys.exit(_USAGE_EXIT)

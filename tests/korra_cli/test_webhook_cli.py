@@ -75,7 +75,7 @@ class TestList:
         capsys.readouterr()  # clear
         webhook_command(_make_args(webhook_action="list"))
         out = capsys.readouterr().out
-        assert "2 webhook" in out
+        assert "Подписки на вебхуки (2)" in out
         assert "a" in out
         assert "b" in out
 
@@ -132,13 +132,13 @@ class TestWebhookEnabledGate:
         monkeypatch.setattr("korra_cli.webhook._is_webhook_enabled", lambda: False)
         webhook_command(_make_args(webhook_action="list"))
         out = capsys.readouterr().out
-        assert "not enabled" in out.lower()
+        assert "не включены" in out.lower()
 
     def test_allows_when_enabled(self, capsys):
         # _is_webhook_enabled already patched to True by autouse fixture
         webhook_command(_make_args(webhook_action="subscribe", name="allowed"))
         out = capsys.readouterr().out
-        assert "Created" in out
+        assert "Создана" in out
         assert "allowed" in _load_subscriptions()
 
     def test_real_check_disabled(self, monkeypatch):

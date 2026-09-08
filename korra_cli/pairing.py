@@ -24,8 +24,8 @@ def pairing_command(args):
     elif action == "clear-pending":
         _cmd_clear_pending(store)
     else:
-        print("Usage: hermes pairing {list|approve|revoke|clear-pending}")
-        print("Run 'hermes pairing --help' for details.")
+        print('Использование: korra pairing {list|approve|revoke|clear-pending}')
+        print("Подробности: 'korra pairing --help'.")
 
 
 def _cmd_list(store):
@@ -34,31 +34,30 @@ def _cmd_list(store):
     approved = store.list_approved()
 
     if not pending and not approved:
-        print("No pairing data found. No one has tried to pair yet~")
+        print('Запросов на подключение пока не было.')
         return
 
     if pending:
-        print(f"\n  Pending Pairing Requests ({len(pending)}):")
-        print(f"  {'Platform':<12} {'Request ID':<18} {'User ID':<20} {'Name':<20} {'Age'}")
+        print(f'\n  Запросы на подключение ({len(pending)}):')
+        print(f"  {'Платформа':<12} {'ID запроса':<18} {'ID пользователя':<20} {'Имя':<20} {'Ожидание'}")
         print(f"  {'--------':<12} {'----------':<18} {'-------':<20} {'----':<20} {'---'}")
         for p in pending:
             print(
-                f"  {p['platform']:<12} {(p.get('request_id') or '-'):<18} {p['user_id']:<20} "
-                f"{(p.get('user_name') or ''):<20} {p['age_minutes']}m ago"
+                f"  {p['platform']:<12} {p.get('request_id') or '-':<18} {p['user_id']:<20} {p.get('user_name') or '':<20} {p['age_minutes']} мин назад"
             )
-        print("\n  Approve with: hermes pairing approve <platform> <request-id>")
-        print("  The code the bot DM'd the user also works if they relay it.")
+        print('\n  Подтвердить: korra pairing approve <платформа> <ID-запроса>')
+        print('  Также подходит код, который бот отправил пользователю в личном сообщении.')
     else:
-        print("\n  No pending pairing requests.")
+        print('\n  Нет запросов на подключение.')
 
     if approved:
-        print(f"\n  Approved Users ({len(approved)}):")
-        print(f"  {'Platform':<12} {'User ID':<20} {'Name':<20}")
+        print(f'\n  Пользователи с доступом ({len(approved)}):')
+        print(f"  {'Платформа':<12} {'ID пользователя':<20} {'Имя':<20}")
         print(f"  {'--------':<12} {'-------':<20} {'----':<20}")
         for a in approved:
             print(f"  {a['platform']:<12} {a['user_id']:<20} {(a.get('user_name') or ''):<20}")
     else:
-        print("\n  No approved users.")
+        print('\n  Пользователей с доступом пока нет.')
 
     print()
 
@@ -76,8 +75,8 @@ def _cmd_approve(store, platform: str, code: str):
         uid = result["user_id"]
         name = result.get("user_name") or ""
         display = f"{name} ({uid})" if name else uid
-        print(f"\n  Approved! User {display} on {platform} can now use the bot~")
-        print("  They'll be recognized automatically on their next message.\n")
+        print(f'\n  Подтверждено! Пользователь {display} в {platform} получил доступ к боту.')
+        print('  Бот узнает его при следующем сообщении.\n')
     elif store._is_locked_out(platform):
         # Disambiguate: approve_code returns None for both invalid codes
         # and lockout. Tell the operator it's lockout so they don't chase
@@ -88,17 +87,15 @@ def _cmd_approve(store, platform: str, code: str):
         remaining = max(0, int(lockout_until - _time.time()))
         mins = remaining // 60
         print(
-            f"\n  Platform '{platform}' is locked out after too many failed "
-            f"approval attempts."
+            f"\n  Подтверждения в '{platform}' временно заблокированы после слишком большого числа неудачных попыток."
         )
-        print(f"  Lockout clears in ~{mins} minute(s).")
+        print(f'  Блокировка снимется примерно через {mins} мин.')
         print(
-            "  To reset sooner, delete the '_lockout:{0}' entry from "
-            "~/.hermes/platforms/pairing/_rate_limits.json\n".format(platform)
+            "  Для досрочного сброса удалите запись '_lockout:{0}' из platforms/pairing/_rate_limits.json вашего профиля Korra.\n".format(platform)
         )
     else:
-        print(f"\n  Pairing request or code '{code}' not found or expired for platform '{platform}'.")
-        print("  Run 'hermes pairing list' to see pending requests.\n")
+        print(f"\n  Запрос или код '{code}' для '{platform}' не найден либо срок его действия истёк.")
+        print("  Список запросов: 'korra pairing list'.\n")
 
 
 def _cmd_revoke(store, platform: str, user_id: str):
@@ -106,15 +103,15 @@ def _cmd_revoke(store, platform: str, user_id: str):
     platform = platform.lower().strip()
 
     if store.revoke(platform, user_id):
-        print(f"\n  Revoked access for user {user_id} on {platform}.\n")
+        print(f'\n  Доступ пользователя {user_id} в {platform} отозван.\n')
     else:
-        print(f"\n  User {user_id} not found in approved list for {platform}.\n")
+        print(f'\n  Пользователь {user_id} не найден в списке доступа {platform}.\n')
 
 
 def _cmd_clear_pending(store):
     """Clear all pending pairing codes."""
     count = store.clear_pending()
     if count:
-        print(f"\n  Cleared {count} pending pairing request(s).\n")
+        print(f'\n  Удалено запросов на подключение: {count}.\n')
     else:
-        print("\n  No pending requests to clear.\n")
+        print('\n  Нет запросов для удаления.\n')
