@@ -95,9 +95,9 @@ class TestMCPConfigWatch:
         obj._reload_mcp.assert_not_called()
 
         out = capsys.readouterr().out
-        assert "reload skipped" in out
+        assert "автоматическое обновление отключено" in out
         assert "/reload-mcp" in out
-        assert "prompt cache" in out
+        assert "кеш запросов" in out
 
     def test_optout_updates_snapshot_so_reload_mcp_applies_cleanly(self, tmp_path):
         """After an opted-out change, the watcher must not re-notify every

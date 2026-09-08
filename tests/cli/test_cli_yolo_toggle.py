@@ -156,7 +156,7 @@ class TestIsSessionYoloActiveHelper:
             assert not approval_module.is_session_yolo_enabled(SESSION_KEY)
 
         joined = "\n".join(printed)
-        assert "locked ON" in joined
+        assert "всегда включён" in joined
         assert "will require approval" not in joined
 
 

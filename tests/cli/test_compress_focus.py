@@ -37,7 +37,7 @@ def test_focus_topic_extracted_and_passed(capsys):
         shell._manual_compress("/compress database schema")
 
     output = capsys.readouterr().out
-    assert 'focus: "database schema"' in output
+    assert 'тема: «database schema»' in output
 
     # Verify focus_topic was passed through
     shell.agent._compress_context.assert_called_once()
@@ -96,7 +96,7 @@ def test_focus_topic_printed_in_compression_banner(capsys):
         shell._manual_compress("/compress API endpoints")
 
     output = capsys.readouterr().out
-    assert 'focus: "API endpoints"' in output
+    assert 'тема: «API endpoints»' in output
 
 
 def test_no_focus_prints_standard_banner(capsys):
@@ -114,5 +114,5 @@ def test_no_focus_prints_standard_banner(capsys):
         shell._manual_compress("/compress")
 
     output = capsys.readouterr().out
-    assert "focus:" not in output
+    assert "тема:" not in output
     assert "Compressing" in output

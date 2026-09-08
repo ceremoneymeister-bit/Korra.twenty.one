@@ -157,7 +157,7 @@ class TestGatewayQuickCommands:
         with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
             result = await runner._handle_message(event)
         assert result is not None
-        assert "timed out" in result.lower()
+        assert "не завершилась за 30 секунд" in result.lower()
 
     @pytest.mark.asyncio
     async def test_gateway_config_object_supports_quick_commands(self):

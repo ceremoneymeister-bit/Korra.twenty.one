@@ -170,7 +170,7 @@ class TestBangHandlerDispatch:
     def test_nonzero_exit_is_surfaced_to_the_user(self):
         cli = _make_cli()
         assert cli.handle_bang_shell("!exit 3") is True
-        assert any("exited 3" in line for line in _printed(cli))
+        assert any("завершено с кодом 3" in line for line in _printed(cli))
 
     def test_zero_exit_prints_no_exit_line(self):
         cli = _make_cli()

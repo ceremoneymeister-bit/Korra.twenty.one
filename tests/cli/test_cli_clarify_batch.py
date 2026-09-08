@@ -214,8 +214,8 @@ class TestClarifyBatchPanel:
 
         calls = cli._persist_prompt_summary.call_args_list
         assert len(calls) == 2
-        assert calls[0].args == ("?", "Clarify", "Color?", "red")
-        assert calls[1].args == ("?", "Clarify", "Size?", "small")
+        assert calls[0].args == ("?", "Уточнение", "Color?", "red")
+        assert calls[1].args == ("?", "Уточнение", "Size?", "small")
 
     def test_single_question_path_returns_plain_string(self):
         cli = _make_cli_stub()

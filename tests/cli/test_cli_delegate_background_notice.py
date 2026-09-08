@@ -32,8 +32,8 @@ def test_background_dispatch_prints_resume_notice(monkeypatch):
     cli_obj._on_tool_complete("tc1", "delegate_task", {"goal": "x"}, result)
 
     joined = "\n".join(printed)
-    assert "resume" in joined.lower()
-    assert "it finishes" in joined
+    assert "продолжу" in joined.lower()
+    assert "она завершится" in joined
 
 
 def test_background_batch_dispatch_pluralizes(monkeypatch):
@@ -44,8 +44,8 @@ def test_background_batch_dispatch_pluralizes(monkeypatch):
     cli_obj._on_tool_complete("tc2", "delegate_task", {"tasks": []}, result)
 
     joined = "\n".join(printed)
-    assert "3 tasks" in joined
-    assert "they finish" in joined
+    assert "Фоновых задач: 3" in joined
+    assert "они завершатся" in joined
 
 
 def test_synchronous_delegate_result_prints_no_notice(monkeypatch):
@@ -57,7 +57,7 @@ def test_synchronous_delegate_result_prints_no_notice(monkeypatch):
     result = json.dumps({"results": [{"status": "completed", "summary": "done"}]})
     cli_obj._on_tool_complete("tc3", "delegate_task", {"goal": "x"}, result)
 
-    assert not any("resume" in p.lower() for p in printed)
+    assert not any("продолжу" in p.lower() for p in printed)
 
 
 def test_non_delegate_tool_prints_no_notice(monkeypatch):
@@ -66,4 +66,4 @@ def test_non_delegate_tool_prints_no_notice(monkeypatch):
 
     cli_obj._on_tool_complete("tc4", "read_file", {"path": "a"}, '{"ok": true}')
 
-    assert not any("resume" in p.lower() for p in printed)
+    assert not any("продолжу" in p.lower() for p in printed)

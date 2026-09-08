@@ -80,7 +80,7 @@ class TestHandleBusyCommand(unittest.TestCase):
 
         mock_save.assert_not_called()
         printed = " ".join(str(c) for c in mock_cprint.call_args_list)
-        self.assertIn("Usage: /busy", printed)
+        self.assertIn("Использование: /busy", printed)
 
 
 class TestBusyCommandRegistry(unittest.TestCase):

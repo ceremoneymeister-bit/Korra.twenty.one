@@ -43,12 +43,12 @@ class TestReloadSkillsCLI:
             cli._reload_skills()
 
         out = capsys.readouterr().out
-        assert "Added Skills:" in out
+        assert "Добавленные навыки:" in out
         assert "- alpha: Run alpha to do xyz" in out
         assert "- beta: Run beta to do abc" in out
-        assert "Removed Skills:" in out
+        assert "Удалённые навыки:" in out
         assert "- gamma: Old removed skill" in out
-        assert "3 skill(s) available" in out
+        assert "Доступно навыков: 3" in out
 
         # Must NOT pollute conversation_history — alternation-safe.
         assert cli.conversation_history == []
@@ -79,8 +79,8 @@ class TestReloadSkillsCLI:
             cli._reload_skills()
 
         out = capsys.readouterr().out
-        assert "No new skills detected" in out
-        assert "1 skill(s) available" in out
+        assert "Новые навыки не найдены" in out
+        assert "Доступно навыков: 1" in out
         assert cli.conversation_history == []
         assert getattr(cli, "_pending_skills_reload_note", None) is None
 
@@ -93,7 +93,7 @@ class TestReloadSkillsCLI:
             cli._reload_skills()
 
         out = capsys.readouterr().out
-        assert "Skills reload failed" in out
+        assert "Не удалось обновить навыки" in out
         assert "boom" in out
         assert cli.conversation_history == []
         assert getattr(cli, "_pending_skills_reload_note", None) is None

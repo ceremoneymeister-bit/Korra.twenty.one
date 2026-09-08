@@ -38,7 +38,7 @@ class TestCliResumeCommand:
         assert "Coding" in output
         assert "Research" in output
         assert "/resume 2" in output
-        assert "/resume <session title>" in output
+        assert "/resume <название беседы>" in output
 
     def test_show_recent_sessions_uses_prompt_toolkit_safe_print(self):
         cli_obj = _make_cli()
@@ -55,7 +55,7 @@ class TestCliResumeCommand:
 
         assert shown is True
         printed = "\n".join(call.args[0] for call in mock_cprint.call_args_list)
-        assert "Recent sessions" in printed
+        assert "Недавние беседы" in printed
         assert "Coding" in printed
 
 
@@ -84,7 +84,7 @@ class TestCliResumeCommand:
 
         printed = " ".join(str(call) for call in mock_cprint.call_args_list)
         assert cli_obj.session_id == "sess_001"
-        assert "Resumed session sess_001" in printed
+        assert "Беседа восстановлена: sess_001" in printed
         assert "Research" in printed
 
     def test_handle_resume_by_index_out_of_range(self):
@@ -97,7 +97,7 @@ class TestCliResumeCommand:
             cli_obj._handle_resume_command("/resume 9")
 
         printed = " ".join(str(call) for call in mock_cprint.call_args_list)
-        assert "out of range" in printed.lower()
+        assert "нет в списке" in printed.lower()
         assert "/resume" in printed
         assert cli_obj.session_id == "current_session"
 

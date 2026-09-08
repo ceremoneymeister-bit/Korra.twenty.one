@@ -56,9 +56,9 @@ def _print_lightpanda_engine_status() -> None:
     except Exception:
         return
     if not used:
-        print(f"   ⚠ browser.engine is 'lightpanda' but it is NOT in use: {reason}")
+        print(f'   ⚠ В browser.engine выбран lightpanda, но он не используется: {reason}')
         return
-    print(f"   Engine: Lightpanda — {reason} (no screenshots)")
+    print(f'   Движок: Lightpanda — {reason} (без снимков экрана)')
     try:
         from tools.browser_lightpanda import LIGHTPANDA_INSTALL_HINT, find_lightpanda_binary
 
@@ -66,9 +66,9 @@ def _print_lightpanda_engine_status() -> None:
     except Exception:
         return
     if lightpanda_bin:
-        print(f"   Binary: {lightpanda_bin}")
+        print(f'   Программа: {lightpanda_bin}')
     else:
-        print(f"   ⚠ lightpanda binary not found — {LIGHTPANDA_INSTALL_HINT}")
+        print(f'   ⚠ Программа lightpanda не найдена — {LIGHTPANDA_INSTALL_HINT}')
 
 
 class CLICommandsMixin:
@@ -94,14 +94,14 @@ class CLICommandsMixin:
         from tools.checkpoint_manager import format_checkpoint_list
 
         if not hasattr(self, 'agent') or not self.agent:
-            print("  No active agent session.")
+            print('  Нет активной беседы с агентом.')
             return
 
         mgr = self.agent._checkpoint_mgr
         if not mgr.enabled:
-            print("  Checkpoints are not enabled.")
-            print("  Enable with: hermes --checkpoints")
-            print("  Or in config.yaml: checkpoints: { enabled: true }")
+            print('  Контрольные точки выключены.')
+            print('  Включить: korra --checkpoints')
+            print('  Или в config.yaml: checkpoints: { enabled: true }')
             return
 
         cwd = os.getenv("TERMINAL_CWD", os.getcwd())
@@ -129,8 +129,8 @@ class CLICommandsMixin:
             if not checkpoints:
                 all_checkpoints = mgr.list_all_checkpoints()
                 if all_checkpoints:
-                    print(f"  No checkpoints for {cwd} — showing all directories.")
-                    print(format_checkpoint_list(all_checkpoints, "all directories"))
+                    print(f'  Нет контрольных точек для {cwd} — показываю все папки.')
+                    print(format_checkpoint_list(all_checkpoints, 'все папки'))
                     return
             print(format_checkpoint_list(checkpoints, cwd))
             return
@@ -138,11 +138,11 @@ class CLICommandsMixin:
         # Handle /rollback diff <N>
         if args[0].lower() == "diff":
             if len(args) < 2:
-                print("  Usage: /rollback diff <N>")
+                print('  Использование: /rollback diff <N>')
                 return
             checkpoints = mgr.list_checkpoints(cwd)
             if not checkpoints:
-                print(f"  No checkpoints found for {cwd}")
+                print(f'  Контрольные точки не найдены для {cwd}')
                 return
             target_hash = self._resolve_checkpoint_ref(args[1], checkpoints)
             if not target_hash:
@@ -152,7 +152,7 @@ class CLICommandsMixin:
                 stat = result.get("stat", "")
                 diff = result.get("diff", "")
                 if not stat and not diff:
-                    print("  No changes since this checkpoint.")
+                    print('  После этой контрольной точки изменений не было.')
                 else:
                     if stat:
                         print(f"\n{stat}")
@@ -161,7 +161,7 @@ class CLICommandsMixin:
                         diff_lines = diff.splitlines()
                         if len(diff_lines) > 80:
                             print("\n".join(diff_lines[:80]))
-                            print(f"\n  ... ({len(diff_lines) - 80} more lines, showing first 80)")
+                            print(f'\n  ... ({len(diff_lines) - 80} строк ещё; показаны первые 80)')
                         else:
                             print(f"\n{diff}")
             else:
@@ -171,7 +171,7 @@ class CLICommandsMixin:
         # Resolve checkpoint reference (number or hash)
         checkpoints = mgr.list_checkpoints(cwd)
         if not checkpoints:
-            print(f"  No checkpoints found for {cwd}")
+            print(f'  Контрольные точки не найдены для {cwd}')
             return
 
         target_hash = self._resolve_checkpoint_ref(args[0], checkpoints)
@@ -187,32 +187,32 @@ class CLICommandsMixin:
         )
         if result["success"]:
             if file_path:
-                print(f"  ✅ Restored {file_path} from checkpoint {result['restored_to']}: {result['reason']}")
+                print(f"  ✅ Восстановлено: {file_path} из контрольной точки {result['restored_to']}: {result['reason']}")
             else:
-                print(f"  ✅ Restored to checkpoint {result['restored_to']}: {result['reason']}")
+                print(f"  ✅ Восстановлена контрольная точка {result['restored_to']}: {result['reason']}")
             skipped = result.get("skipped_user_edits") or []
             if skipped:
                 shown = ", ".join(skipped[:5])
                 more = f" (+{len(skipped) - 5} more)" if len(skipped) > 5 else ""
-                print(f"  ↷ Kept your hand-edits: {shown}{more}")
-                print("  Use /rollback <N> --all to restore those too.")
+                print(f'  ↷ Ваши ручные изменения сохранены: {shown}{more}')
+                print('  /rollback <N> --all также отменит ручные изменения.')
             oversize = result.get("skipped_oversize") or []
             if oversize:
                 shown = ", ".join(oversize[:5])
                 more = f" (+{len(oversize) - 5} more)" if len(oversize) > 5 else ""
-                print(f"  ↷ Kept (too large for checkpoints, no stored copy to revert to): {shown}{more}")
+                print(f'  ↷ Сохранены на месте: файлы слишком велики, резервной копии нет: {shown}{more}')
             failed = result.get("failed_deletes") or []
             if failed:
                 shown = ", ".join(failed[:5])
                 more = f" (+{len(failed) - 5} more)" if len(failed) > 5 else ""
-                print(f"  ⚠️ Could not remove (left in place): {shown}{more}")
-            print("  A pre-rollback snapshot was saved automatically.")
+                print(f'  ⚠️ Не удалось удалить, оставлено на месте: {shown}{more}')
+            print('  Перед восстановлением автоматически создана резервная копия.')
 
             # Also undo the last conversation turn so the agent's context
             # matches the restored filesystem state
             if self.conversation_history:
                 self.undo_last(prefill=False)
-                print("  Chat turn undone to match restored file state.")
+                print('  Ход беседы отменён в соответствии с восстановленными файлами.')
         else:
             print(f"  ❌ {result['error']}")
 
@@ -260,14 +260,14 @@ class CLICommandsMixin:
 
         result = collect_working_diff(cwd, mode=mode, paths=paths or None)
         if not result.get("success"):
-            print(f"  {result.get('error', 'Could not generate diff')}")
+            print(f"  {result.get('error', 'Не удалось получить список изменений')}")
             return
 
         stat = result.get("stat", "")
         diff = result.get("diff", "")
         untracked = result.get("untracked", [])
         if result.get("empty") or (not stat and not diff and not untracked):
-            print("  No changes.")
+            print('  Изменений нет.')
             return
 
         label = {"working": "Unstaged", "staged": "Staged", "all": "All (vs HEAD)"}[mode]
@@ -275,11 +275,11 @@ class CLICommandsMixin:
             print(f"\n  {label}:")
             self._print_diff_text(stat)
         if untracked and mode in ("working", "all"):
-            print("\n  Untracked:")
+            print('\n  Неотслеживаемые файлы:')
             for rel in untracked[:20]:
                 print(f"    + {rel}")
             if len(untracked) > 20:
-                print(f"    ... and {len(untracked) - 20} more")
+                print(f'    ... и ещё {len(untracked) - 20} строк')
         if stat_only or not diff:
             return
 
@@ -288,8 +288,7 @@ class CLICommandsMixin:
         if len(diff_lines) > 400:
             self._print_diff_text("\n".join(diff_lines[:400]))
             print(
-                f"\n  ... ({len(diff_lines) - 400} more lines — "
-                "run /diff --stat for a summary)"
+                f'\n  ... ({len(diff_lines) - 400} строк ещё; краткий итог: /diff --stat)'
             )
         else:
             self._print_diff_text(diff)
@@ -297,26 +296,26 @@ class CLICommandsMixin:
     def _print_session_diff(self, cwd: str, stat_only: bool):
         """Print the cumulative checkpoint-baseline diff (/diff session)."""
         if not hasattr(self, 'agent') or not self.agent:
-            print("  No active agent session.")
+            print('  Нет активной беседы с агентом.')
             return
 
         mgr = self.agent._checkpoint_mgr
         if not mgr.enabled:
-            print("  Checkpoints are not enabled, so there's no session baseline.")
-            print("  Enable with: hermes --checkpoints")
-            print("  Or in config.yaml: checkpoints: { enabled: true }")
-            print("  (Plain /diff still works — it uses git directly.)")
+            print('  Контрольные точки выключены, исходного состояния беседы нет.')
+            print('  Включить: korra --checkpoints')
+            print('  Или в config.yaml: checkpoints: { enabled: true }')
+            print('  (Обычный /diff доступен: он сравнивает файлы через Git.)')
             return
 
         result = mgr.session_diff(cwd)
         if not result.get("success"):
-            print(f"  {result.get('error', 'Could not generate diff')}")
+            print(f"  {result.get('error', 'Не удалось получить список изменений')}")
             return
 
         stat = result.get("stat", "")
         diff = result.get("diff", "")
         if result.get("empty") or (not stat and not diff):
-            print("  No changes — Korra hasn't edited any files here yet.")
+            print('  Изменений нет: Korra ещё не редактировала файлы в этой папке.')
             return
 
         if stat:
@@ -328,8 +327,7 @@ class CLICommandsMixin:
         if len(diff_lines) > 400:
             self._print_diff_text("\n".join(diff_lines[:400]))
             print(
-                f"\n  ... ({len(diff_lines) - 400} more lines — "
-                "run /diff session --stat for a summary)"
+                f'\n  ... ({len(diff_lines) - 400} строк ещё; краткий итог: /diff session --stat)'
             )
         else:
             self._print_diff_text(diff)
@@ -371,11 +369,11 @@ class CLICommandsMixin:
         if subcmd in {"list", "ls"}:
             snaps = list_quick_snapshots()
             if not snaps:
-                print("  No state snapshots yet.")
-                print("  Create one: /snapshot create [label]")
+                print('  Снимков состояния пока нет.')
+                print('  Создать: /snapshot create [название]')
                 return
-            print(f"  State snapshots ({display_hermes_home()}/state-snapshots/):\n")
-            print(f"  {'#':>3}  {'ID':<35} {'Files':>5} {'Size':>10} {'Label'}")
+            print(f'  Снимки состояния ({display_hermes_home()}/state-snapshots/):\n')
+            print(f"  {'#':>3}  {'ID':<35} {'Файлы':>5} {'Размер':>10} {'Название'}")
             print(f"  {'─'*3}  {'─'*35} {'─'*5} {'─'*10} {'─'*20}")
             for i, s in enumerate(snaps, 1):
                 size = s.get("total_size", 0)
@@ -392,17 +390,17 @@ class CLICommandsMixin:
             label = " ".join(parts[2:]) if len(parts) > 2 else None
             snap_id = create_quick_snapshot(label=label)
             if snap_id:
-                print(f"  Snapshot created: {snap_id}")
+                print(f'  Снимок создан: {snap_id}')
             else:
-                print("  No state files found to snapshot.")
+                print('  Не найдены файлы состояния для снимка.')
 
         elif subcmd in {"restore", "rewind"}:
             if len(parts) < 3:
-                print("  Usage: /snapshot restore <snapshot-id>")
+                print('  Использование: /snapshot restore <ID-снимка>')
                 # Show hint with most recent snapshot
                 snaps = list_quick_snapshots(limit=1)
                 if snaps:
-                    print(f"  Most recent: {snaps[0]['id']}")
+                    print(f"  Последний: {snaps[0]['id']}")
                 return
             snap_id = parts[2]
             # Allow restore by number (1-indexed)
@@ -412,7 +410,7 @@ class CLICommandsMixin:
                 if 1 <= idx <= len(snaps):
                     snap_id = snaps[idx - 1]["id"]
                 else:
-                    print(f"  Invalid snapshot number. Use 1-{len(snaps)}.")
+                    print(f'  Неверный номер снимка. Выберите от 1 до {len(snaps)}.')
                     return
             except ValueError:
                 pass
@@ -429,13 +427,12 @@ class CLICommandsMixin:
                     pass
 
             if restore_quick_snapshot(snap_id):
-                print(f"  Restored state from: {snap_id}")
+                print(f'  Состояние восстановлено из: {snap_id}')
                 print(
-                    "  Restart recommended for gateway/dashboard processes "
-                    "to pick up state.db changes."
+                    '  Перезапустите шлюз и панель, чтобы они прочитали изменения state.db.'
                 )
             else:
-                print(f"  Snapshot not found: {snap_id}")
+                print(f'  Снимок не найден: {snap_id}')
 
         elif subcmd == "prune":
             keep = 20
@@ -443,14 +440,14 @@ class CLICommandsMixin:
                 try:
                     keep = int(parts[2])
                 except ValueError:
-                    print("  Usage: /snapshot prune [keep-count]")
+                    print('  Использование: /snapshot prune [сколько-оставить]')
                     return
             deleted = prune_quick_snapshots(keep=keep)
-            print(f"  Pruned {deleted} old snapshot(s) (keeping {keep}).")
+            print(f'  Удалено {deleted} старых снимков (оставлено {keep}).')
 
         else:
-            print(f"  Unknown subcommand: {subcmd}")
-            print("  Usage: /snapshot [list|create [label]|restore <id>|prune [N]]")
+            print(f'  Неизвестная подкоманда: {subcmd}')
+            print('  Использование: /snapshot [list|create [название]|restore <ID>|prune [N]]')
 
     def _handle_export_command(self, command: str):
         """Handle /export — export a profile to a shareable .tar.gz archive.
@@ -467,7 +464,7 @@ class CLICommandsMixin:
         if "-o" in parts:
             idx = parts.index("-o")
             if idx + 1 >= len(parts):
-                print("  Usage: /export [profile] [-o output.tar.gz]")
+                print('  Использование: /export [профиль] [-o output.tar.gz]')
                 return
             output = parts[idx + 1]
             parts = parts[:idx] + parts[idx + 2:]
@@ -478,10 +475,10 @@ class CLICommandsMixin:
 
         try:
             result = export_profile(name, output)
-            print(f"  ✓ Exported '{name}' to {result}")
-            print("  Share it: the other user runs /import or `hermes profile import <archive>`.")
+            print(f"  ✓ Экспортирован '{name}' to {result}")
+            print('  Передайте архив другому пользователю. Он сможет выполнить /import или `korra profile import <архив>`.')
         except (ValueError, FileNotFoundError) as e:
-            print(f"  Error: {e}")
+            print(f'  Ошибка: {e}')
 
     def _handle_import_command(self, command: str):
         """Handle /import — import a shared profile archive as a new profile.
@@ -498,13 +495,13 @@ class CLICommandsMixin:
         if "--name" in parts:
             idx = parts.index("--name")
             if idx + 1 >= len(parts):
-                print("  Usage: /import <archive.tar.gz> [--name <name>]")
+                print('  Использование: /import <архив.tar.gz> [--name <имя>]')
                 return
             name = parts[idx + 1]
             parts = parts[:idx] + parts[idx + 2:]
 
         if not parts:
-            print("  Usage: /import <archive.tar.gz> [--name <name>]")
+            print('  Использование: /import <архив.tar.gz> [--name <имя>]')
             return
 
         archive = " ".join(parts)  # paths may contain spaces
@@ -512,19 +509,19 @@ class CLICommandsMixin:
         try:
             profile_dir = import_profile(archive, name=name)
         except (ValueError, FileExistsError, FileNotFoundError) as e:
-            print(f"  Error: {e}")
+            print(f'  Ошибка: {e}')
             return
 
         imported = profile_dir.name
-        print(f"  ✓ Imported profile '{imported}' at {profile_dir}")
+        print(f"  ✓ Импортирован профиль '{imported}' at {profile_dir}")
         try:
             if not check_alias_collision(imported):
                 wrapper_path = create_wrapper_script(imported)
                 if wrapper_path:
-                    print(f"  Wrapper created: {wrapper_path}")
+                    print(f'  Создана команда запуска: {wrapper_path}')
         except Exception:
             pass
-        print(f"  Use it: hermes -p {imported}")
+        print(f'  Открыть: korra -p {imported}')
 
     def _handle_stop_command(self):
         """Handle /stop — kill all running background processes and
@@ -548,16 +545,16 @@ class CLICommandsMixin:
             interrupt_all = None
 
         if not running and not n_async:
-            print("  No running background processes.")
+            print('  Нет запущенных фоновых процессов.')
             return
 
         if running:
-            print(f"  Stopping {len(running)} background process(es)...")
+            print(f'  Останавливаю {len(running)} фоновых процессов...')
             killed = process_registry.kill_all()
-            print(f"  ✅ Stopped {killed} process(es).")
+            print(f'  ✅ Остановлено {killed} процессов.')
         if n_async and interrupt_all is not None:
             stopped = interrupt_all(reason="/stop")
-            print(f"  ✅ Interrupted {stopped} background delegation(s).")
+            print(f'  ✅ Прервано {stopped} фоновых поручений.')
 
     def _handle_agents_command(self):
         """Handle /agents — show background processes and agent status."""
@@ -568,14 +565,14 @@ class CLICommandsMixin:
         running = [p for p in processes if p.get("status") == "running"]
         finished = [p for p in processes if p.get("status") != "running"]
 
-        _cprint(f"  Running processes: {len(running)}")
+        _cprint(f'  Выполняющиеся процессы: {len(running)}')
         for p in running:
             cmd = p.get("command", "")[:80]
             up = format_uptime_short(p.get("uptime_seconds", 0))
             _cprint(f"    {p.get('session_id', '?')} · {up} · {cmd}")
 
         if finished:
-            _cprint(f"  Recently finished: {len(finished)}")
+            _cprint(f'  Недавно завершены: {len(finished)}')
 
         # Background (async) delegations — delegate_task(background=true)
         try:
@@ -588,7 +585,7 @@ class CLICommandsMixin:
             if d.get("status") in ("running", "stalling")
         ]
         if delegations:
-            _cprint(f"  Background delegations: {len(running_d)} running")
+            _cprint(f'  Фоновые поручения: {len(running_d)} выполняются')
             for d in delegations:
                 goal = (d.get("goal") or "")[:60]
                 status = d.get("status", "?")
@@ -623,7 +620,7 @@ class CLICommandsMixin:
                     _cprint(part)
 
         agent_running = getattr(self, "_agent_running", False)
-        _cprint(f"  Agent: {'running' if agent_running else 'idle'}")
+        _cprint(f"  Агент: {('работает' if agent_running else 'ожидает')}")
 
     def _handle_journey_command(self, cmd_original: str) -> None:
         """Handle /journey — the learning timeline (see `hermes journey`).
@@ -660,7 +657,7 @@ class CLICommandsMixin:
                 args.func(args)
             _cprint(buf.getvalue().rstrip("\n"))
         except Exception as exc:
-            _cprint(f"  /journey failed: {exc}")
+            _cprint(f'  Ошибка /journey: {exc}')
 
     def _handle_paste_command(self):
         """Handle /paste — explicitly check clipboard for an image.
@@ -672,9 +669,7 @@ class CLICommandsMixin:
         from cli import _DIM, _RST, _cprint, _termux_example_image_path
         if _is_termux_environment():
             _cprint(
-                f"  {_DIM}Clipboard image paste is not available on Termux — "
-                f"use /image <path> or paste a local image path like "
-                f"{_termux_example_image_path()}{_RST}"
+                f'  {_DIM}В Termux нельзя вставить изображение из буфера. Используйте /image <путь> или вставьте путь к локальному файлу, например {_termux_example_image_path()}{_RST}'
             )
             return
 
@@ -682,11 +677,11 @@ class CLICommandsMixin:
         if has_clipboard_image():
             if self._try_attach_clipboard_image():
                 n = len(self._attached_images)
-                _cprint(f"  📎 Image #{n} attached from clipboard")
+                _cprint(f'  📎 Изображение №{n} вставлено из буфера')
             else:
-                _cprint(f"  {_DIM}(>_<) Clipboard has an image but extraction failed{_RST}")
+                _cprint(f'  {_DIM}(>_<) В буфере есть изображение, но извлечь его не удалось.{_RST}')
         else:
-            _cprint(f"  {_DIM}(._.) No image found in clipboard{_RST}")
+            _cprint(f'  {_DIM}(._.) В буфере нет изображения.{_RST}')
 
     def _handle_copy_command(self, cmd_original: str) -> None:
         """Handle /copy [number] — copy assistant output to clipboard."""
@@ -696,29 +691,29 @@ class CLICommandsMixin:
 
         assistant = [m for m in self.conversation_history if m.get("role") == "assistant"]
         if not assistant:
-            _cprint("  Nothing to copy yet.")
+            _cprint('  Пока нечего копировать.')
             return
 
         if arg:
             try:
                 idx = int(arg) - 1
             except ValueError:
-                _cprint("  Usage: /copy [number]")
+                _cprint('  Использование: /copy [номер]')
                 return
             if idx < 0 or idx >= len(assistant):
-                _cprint(f"  Invalid response number. Use 1-{len(assistant)}.")
+                _cprint(f'  Неверный номер ответа. Выберите от 1 до {len(assistant)}.')
                 return
         else:
             idx = len(assistant) - 1
             while idx >= 0 and not _assistant_copy_text(assistant[idx].get("content")):
                 idx -= 1
             if idx < 0:
-                _cprint("  Nothing to copy in assistant responses yet.")
+                _cprint('  Пока нет ответа агента для копирования.')
                 return
 
         text = _assistant_copy_text(assistant[idx].get("content"))
         if not text:
-            _cprint("  Nothing to copy in that assistant response.")
+            _cprint('  В этом ответе нечего копировать.')
             return
 
         try:
@@ -732,22 +727,20 @@ class CLICommandsMixin:
                 # the user is actually sitting at. Fixes #31528.
                 self._write_osc52_clipboard(text)
                 _cprint(
-                    f"  Copied assistant response #{idx + 1} via OSC 52 "
-                    "(terminal support required)"
+                    f'  Ответ агента №{idx + 1} скопирован через OSC 52 (нужна поддержка терминала)'
                 )
                 return
             if write_clipboard_text(text):
-                _cprint(f"  Copied assistant response #{idx + 1} to clipboard")
+                _cprint(f'  Ответ агента №{idx + 1} скопирован в буфер')
                 return
             # Native tools unavailable/failed — fall back to OSC 52 so
             # SSH/tmux sessions can still copy via the terminal emulator.
             self._write_osc52_clipboard(text)
             _cprint(
-                f"  Copied assistant response #{idx + 1} via OSC 52 "
-                "(terminal support required)"
+                f'  Ответ агента №{idx + 1} скопирован через OSC 52 (нужна поддержка терминала)'
             )
         except Exception as e:
-            _cprint(f"  Clipboard copy failed: {e}")
+            _cprint(f'  Не удалось скопировать: {e}')
 
     def _handle_image_command(self, cmd_original: str):
         """Handle /image <path> — attach a local image file for the next prompt."""
@@ -755,24 +748,24 @@ class CLICommandsMixin:
         raw_args = (cmd_original.split(None, 1)[1].strip() if " " in cmd_original else "")
         if not raw_args:
             hint = _termux_example_image_path() if _is_termux_environment() else "/path/to/image.png"
-            _cprint(f"  {_DIM}Usage: /image <path>  e.g. /image {hint}{_RST}")
+            _cprint(f'  {_DIM}Использование: /image <путь>, например /image {hint}{_RST}')
             return
 
         path_token, _remainder = _split_path_input(raw_args)
         image_path = _resolve_attachment_path(path_token)
         if image_path is None:
-            _cprint(f"  {_DIM}(>_<) File not found: {path_token}{_RST}")
+            _cprint(f'  {_DIM}(>_<) Файл не найден: {path_token}{_RST}')
             return
         if image_path.suffix.lower() not in _IMAGE_EXTENSIONS:
-            _cprint(f"  {_DIM}(._.) Not a supported image file: {image_path.name}{_RST}")
+            _cprint(f'  {_DIM}(._.) Формат изображения не поддерживается: {image_path.name}{_RST}')
             return
 
         self._attached_images.append(image_path)
-        _cprint(f"  📎 Attached image: {image_path.name}")
+        _cprint(f'  📎 Прикреплено изображение: {image_path.name}')
         if _remainder:
-            _cprint(f"  {_DIM}Now type your prompt (or use --image in single-query mode): {_remainder}{_RST}")
+            _cprint(f'  {_DIM}Теперь введите запрос (или используйте --image для разового запроса): {_remainder}{_RST}')
         elif _is_termux_environment():
-            _cprint(f"  {_DIM}Tip: type your next message, or run hermes chat -q --image {_termux_example_image_path(image_path.name)} \"What do you see?\"{_RST}")
+            _cprint(f'  {_DIM}Подсказка: введите сообщение или выполните korra chat -q --image {_termux_example_image_path(image_path.name)} "Что вы видите?"{_RST}')
 
     def _handle_tools_command(self, cmd: str):
         """Handle /tools [list|disable|enable] slash commands.
@@ -833,9 +826,9 @@ class CLICommandsMixin:
 
         names = parts[2:]
         if not names:
-            print(f"(._.) Usage: /tools {subcommand} <name> [name ...]")
-            print(f"  Built-in toolset:  /tools {subcommand} web")
-            print(f"  MCP tool:          /tools {subcommand} github:create_issue")
+            print(f'(._.) Использование: /tools {subcommand} <имя> [имя ...]')
+            print(f'  Набор инструментов: /tools {subcommand} web')
+            print(f'  Инструмент MCP:     /tools {subcommand} github:create_issue')
             return
 
         # Apply the change directly — the user typing the command is implicit
@@ -852,7 +845,7 @@ class CLICommandsMixin:
         from korra_cli.config import load_config
         self.enabled_toolsets = _get_platform_tools(load_config(), "cli")
         self.new_session()
-        _cprint(f"{_DIM}Session reset. New tool configuration is active.{_RST}")
+        _cprint(f'{_DIM}Беседа сброшена. Новые настройки инструментов применены.{_RST}')
 
     def _handle_profile_command(self):
         """Display active profile name and home directory."""
@@ -863,8 +856,8 @@ class CLICommandsMixin:
         display = reply.data["home"]
 
         print()
-        print(f"  Profile: {profile_name}")
-        print(f"  Home:    {display}")
+        print(f'  Профиль: {profile_name}')
+        print(f'  Папка:   {display}')
         print()
 
     def _handle_handoff_command(self, cmd_original: str) -> bool:
@@ -892,9 +885,9 @@ class CLICommandsMixin:
 
         parts = cmd_original.split(maxsplit=1)
         if len(parts) < 2 or not parts[1].strip():
-            _cprint("  Usage: /handoff <platform>")
-            _cprint("  Hands the current session off to that platform's home channel.")
-            _cprint("  The CLI session ends here; resume it later with /resume.")
+            _cprint('  Использование: /handoff <платформа>')
+            _cprint('  Передаёт текущую беседу в главный канал выбранной платформы.')
+            _cprint('  Беседа в терминале завершится; вернуться можно через /resume.')
             return True
 
         platform_name = parts[1].strip().lower()
@@ -903,19 +896,19 @@ class CLICommandsMixin:
         try:
             from gateway.config import load_gateway_config, Platform
         except Exception as exc:  # pragma: no cover — gateway pkg always shipped
-            _cprint(f"  Could not load gateway config: {exc}")
+            _cprint(f'  Не удалось загрузить настройки шлюза: {exc}')
             return True
 
         try:
             platform = Platform(platform_name)
         except (ValueError, KeyError):
-            _cprint(f"  Unknown platform '{platform_name}'.")
+            _cprint(f"  Неизвестная платформа '{platform_name}'.")
             return True
 
         try:
             gw_config = load_gateway_config()
         except Exception as exc:
-            _cprint(f"  Could not load gateway config: {exc}")
+            _cprint(f'  Не удалось загрузить настройки шлюза: {exc}')
             return True
 
         pcfg = gw_config.platforms.get(platform)
@@ -938,19 +931,19 @@ class CLICommandsMixin:
             except Exception:
                 relay_fronts = False
             if not relay_fronts:
-                _cprint(f"  Platform '{platform_name}' is not configured/enabled in the gateway.")
+                _cprint(f"  Платформа '{platform_name}' не настроена или выключена в шлюзе.")
                 return True
 
         home = gw_config.get_home_channel(platform)
         if not home or not home.chat_id:
-            _cprint(f"  No home channel configured for {platform_name}.")
-            _cprint("  Set one with /sethome on the destination chat first.")
+            _cprint(f'  Не задан главный канал для {platform_name}.')
+            _cprint('  Сначала выполните /sethome в нужном чате.')
             return True
 
         # Refuse mid-turn: an in-flight agent run would race with the
         # gateway's switch_session and the synthetic turn dispatch.
         if getattr(self, "_agent_running", False):
-            _cprint("  Agent is busy. Wait for the current turn to finish, then retry /handoff.")
+            _cprint('  Агент занят. Дождитесь завершения хода и повторите /handoff.')
             return True
 
         # Make sure we have a SessionDB handle.
@@ -978,7 +971,7 @@ class CLICommandsMixin:
                 placeholder_title = f"handoff-{self.session_id[:8]}"
                 self._session_db.set_session_title(self.session_id, placeholder_title)
         except Exception as exc:
-            _cprint(f"  Could not ensure session row in state.db: {exc}")
+            _cprint(f'  Не удалось сохранить запись беседы в state.db: {exc}')
             return True
 
         # Display title for messaging.
@@ -995,11 +988,11 @@ class CLICommandsMixin:
         # Mark pending — gateway watcher will pick this up.
         ok = self._session_db.request_handoff(self.session_id, platform_name)
         if not ok:
-            _cprint("  Session is already in flight for handoff. Wait for it to settle, then retry.")
+            _cprint('  Беседа уже передаётся. Дождитесь завершения и попробуйте снова.')
             return True
 
-        _cprint(f"  Queued handoff of '{session_title}' → {platform_name} (home: {home.name}).")
-        _cprint("  Waiting for the gateway to pick it up...")
+        _cprint(f"  В очередь поставлена передача '{session_title}' → {platform_name} (главный канал: {home.name}).")
+        _cprint('  Ожидаю, пока шлюз примет беседу...')
 
         # Two-phase poll, tick every 0.5s.
         #
@@ -1036,14 +1029,14 @@ class CLICommandsMixin:
             current = (state_row or {}).get("state") or "pending"
             if current != last_state:
                 if current == "running":
-                    _cprint("  Gateway picked it up; transferring...")
+                    _cprint('  Шлюз принял беседу. Передаю...')
                     running_deadline = _time.time() + _RUNNING_TIMEOUT
                     next_heartbeat = _time.time() + _HEARTBEAT_EVERY
                 last_state = current
             if current == "completed":
                 _cprint("")
-                _cprint(f"  ↻ Handoff complete. The session is now active on {platform_name}.")
-                _cprint(f"  Resume it on this CLI later with: /resume {session_title}")
+                _cprint(f'  ↻ Беседа передана. Сейчас она активна в {platform_name}.')
+                _cprint(f'  Позже можно вернуться в терминал: /resume {session_title}')
                 _cprint("")
                 # Mark this session as handed off so _run_cleanup does NOT
                 # finalize it on CLI exit.  The gateway reopened the session
@@ -1058,8 +1051,8 @@ class CLICommandsMixin:
                 return False
             if current == "failed":
                 err = (state_row or {}).get("error") or "unknown error"
-                _cprint(f"  Handoff failed: {err}")
-                _cprint("  Your CLI session is intact. Try /handoff again, or /resume on the platform manually.")
+                _cprint(f'  Передать беседу не удалось: {err}')
+                _cprint('  Беседа в терминале сохранена. Повторите /handoff или выполните /resume на нужной платформе.')
                 return True
             now = _time.time()
             if current == "pending":
@@ -1067,16 +1060,16 @@ class CLICommandsMixin:
                     break
             else:  # running
                 if next_heartbeat is not None and now >= next_heartbeat:
-                    _cprint("  Still transferring (the agent is replaying your session on the destination)...")
+                    _cprint('  Передача продолжается: агент восстанавливает беседу на новой платформе...')
                     next_heartbeat = now + _HEARTBEAT_EVERY
                 if running_deadline is not None and now >= running_deadline:
                     # Do NOT fail the row: the gateway owns it and will record
                     # its own terminal state (or startup reclaim handles a
                     # dead gateway). Stomping it here is the split-brain bug.
-                    _cprint("  The gateway is taking unusually long to finish the transfer.")
-                    _cprint(f"  Check {platform_name} — the session may still arrive there.")
-                    _cprint("  This CLI is no longer waiting. Avoid continuing this session here;")
-                    _cprint("  if nothing arrives, retry /handoff once the state settles.")
+                    _cprint('  Шлюз передаёт беседу дольше обычного.')
+                    _cprint(f'  Проверьте {platform_name} — беседа ещё может появиться там.')
+                    _cprint('  Терминал больше не ждёт. Пока не продолжайте эту беседу здесь.')
+                    _cprint('  Если беседа не появится, повторите /handoff после завершения текущей передачи.')
                     return True
             _time.sleep(0.5)
 
@@ -1098,8 +1091,8 @@ class CLICommandsMixin:
                 pass
         except Exception:
             pass
-        _cprint("  Timed out waiting for the gateway. Is `hermes gateway` running?")
-        _cprint("  Your CLI session is intact.")
+        _cprint('  Шлюз не ответил вовремя. Проверьте, запущен ли `korra gateway`.')
+        _cprint('  Беседа в терминале сохранена.')
         return True
 
     def _handle_resume_command(self, cmd_original: str) -> None:
@@ -1122,7 +1115,7 @@ class CLICommandsMixin:
             target = target[1:-1].strip()
 
         if not target:
-            _cprint("  Usage: /resume <number|session_id_or_title>")
+            _cprint('  Использование: /resume <номер|ID|название-беседы>')
             if self._show_recent_sessions(reason="resume"):
                 # Arm a one-shot pending-resume selection so the user can type
                 # just the number (`3`) on the next line instead of having to
@@ -1132,7 +1125,7 @@ class CLICommandsMixin:
                 # #34584.
                 self._pending_resume_sessions = self._list_recent_sessions(limit=10)
                 return
-            _cprint("  Tip:   Use /history or `hermes sessions list` to find sessions.")
+            _cprint('  Подсказка: найти беседу можно через /history или `korra sessions list`.')
             return
 
         # Any explicit /resume <target> supersedes a previously-armed bare
@@ -1149,8 +1142,8 @@ class CLICommandsMixin:
             sessions = self._list_recent_sessions(limit=10)
             index = int(target)
             if index < 1 or index > len(sessions):
-                _cprint(f"  Resume index {index} is out of range.")
-                _cprint("  Use /resume with no arguments to see available sessions.")
+                _cprint(f'  Беседы под номером {index} нет в списке.')
+                _cprint('  Список доступных бесед: /resume без аргументов.')
                 return
             selected = sessions[index - 1]
             target_id = selected["id"]
@@ -1161,8 +1154,8 @@ class CLICommandsMixin:
 
         session_meta = self._session_db.get_session(target_id)
         if not session_meta:
-            _cprint(f"  Session not found: {target}")
-            _cprint("  Use /sessions or `hermes sessions list` to see available sessions.")
+            _cprint(f'  Беседа не найдена: {target}')
+            _cprint('  Список доступных бесед: /sessions или `korra sessions list`.')
             return
 
         # If the target is the empty head of a compression chain, redirect to
@@ -1173,8 +1166,7 @@ class CLICommandsMixin:
             resolved_id = target_id
         if resolved_id and resolved_id != target_id:
             _cprint(
-                f"  Session {target_id} was compressed into {resolved_id}; "
-                f"resuming the descendant with your transcript."
+                f'  Беседа {target_id} после сжатия продолжена в {resolved_id}; восстанавливаю сообщения в новой беседе.'
             )
             target_id = resolved_id
             resolved_meta = self._session_db.get_session(target_id)
@@ -1182,7 +1174,7 @@ class CLICommandsMixin:
                 session_meta = resolved_meta
 
         if target_id == self.session_id:
-            _cprint("  Already on that session.")
+            _cprint('  Эта беседа уже открыта.')
             return
 
         old_session_id = self.session_id
@@ -1272,13 +1264,11 @@ class CLICommandsMixin:
         msg_count = len([m for m in self._resume_display_history if is_user_originated_turn(m)])
         if self.conversation_history:
             _cprint(
-                f"  ↻ Resumed session {target_id}{title_part}"
-                f" ({msg_count} user message{'s' if msg_count != 1 else ''},"
-                f" {len(self.conversation_history)} total)"
+                f"  ↻ Беседа восстановлена: {target_id}{title_part} ({msg_count} ваших сообщений{('' if msg_count != 1 else '')}, {len(self.conversation_history)} всего)"
             )
             self._display_resumed_history()
         else:
-            _cprint(f"  ↻ Resumed session {target_id}{title_part} — no messages, starting fresh.")
+            _cprint(f'  ↻ Беседа восстановлена: {target_id}{title_part} — сообщений нет; начинаем заново.')
 
         # Retarget the process + tool cwd to where the session was started, so a
         # mid-chat /resume (and /sessions <id>, which delegates here) lands in the
@@ -1326,7 +1316,7 @@ class CLICommandsMixin:
                 _cprint(f"  {format_session_db_unavailable()}")
                 return
             if not self._show_recent_sessions(reason="sessions"):
-                _cprint("  (._.) No previous sessions yet.")
+                _cprint('  (._.) Предыдущих бесед пока нет.')
             return
 
         # /sessions <id_or_title> behaves the same as /resume <id_or_title>.
@@ -1363,20 +1353,20 @@ class CLICommandsMixin:
         if not sub or sub in {"status", "show"}:
             active = _cli._active_worktree
             if active:
-                print(f"  Active worktree: {active['path']}")
-                print(f"  Branch: {active['branch']}")
+                print(f"  Текущая рабочая копия: {active['path']}")
+                print(f"  Ветка: {active['branch']}")
             else:
-                print("  No active worktree for this session.")
+                print('  У этой беседы нет рабочей копии.')
             if repo_root:
-                print("  /worktree new [name] — create one and move this session into it")
-                print("  /worktree prune      — reclaim stale trees and merged branches")
+                print('  /worktree new [имя] — создать копию и продолжить в ней беседу')
+                print('  /worktree prune     — удалить старые копии и объединённые ветки')
             else:
-                print("  (not inside a git repository)")
+                print('  (текущая папка не является репозиторием Git)')
             return
 
         if sub in {"prune", "gc", "clean"}:
             if not repo_root:
-                print("  Not inside a git repository.")
+                print('  Текущая папка не является репозиторием Git.')
                 return
             rest = parts[2].strip().lower() if len(parts) > 2 else ""
             dry_run = "--dry-run" in rest or "-n" in rest.split()
@@ -1399,23 +1389,23 @@ class CLICommandsMixin:
             if actions:
                 for line in actions:
                     print(f"  {line}")
-                print(f"  {len(actions)} action(s) {'planned' if dry_run else 'done'}.")
+                print(f"  {len(actions)} действий {('запланировано' if dry_run else 'выполнено')}.")
             else:
-                print("  Nothing to reclaim — remaining trees/branches carry real work.")
+                print('  Удалять нечего: в остальных копиях и ветках есть рабочие изменения.')
             kept = [
                 record for record in tree_records
                 if record.verdict == "keep"
                 and "kanban" not in record.reason and "in use" not in record.reason
             ]
             if kept:
-                print(f"  Preserved {len(kept)} tree(s) with real work:")
+                print(f'  Сохранено {len(kept)} рабочих копий с изменениями:')
                 for record in kept:
                     print(f"    {record.name}: {record.reason}")
             return
 
         if sub in {"list", "ls"}:
             if not repo_root:
-                print("  Not inside a git repository.")
+                print('  Текущая папка не является репозиторием Git.')
                 return
             try:
                 result = subprocess.run(
@@ -1430,12 +1420,12 @@ class CLICommandsMixin:
                 for line in out.splitlines():
                     print(f"  {line}")
             else:
-                print("  Could not list worktrees.")
+                print('  Не удалось получить список рабочих копий.')
             return
 
         if sub in {"new", "add", "create"}:
             if not repo_root:
-                print("  ❌ /worktree new requires being inside a git repository.")
+                print('  ❌ /worktree new нужно запускать из репозитория Git.')
                 return
             name = parts[2].strip() if len(parts) > 2 else None
             from korra_cli.config import load_config
@@ -1453,7 +1443,7 @@ class CLICommandsMixin:
             try:
                 os.chdir(wt_info["path"])
             except OSError as e:
-                print(f"  ⚠ Created worktree but could not enter it: {e}")
+                print(f'  ⚠ Рабочая копия создана, но перейти в неё не удалось: {e}')
             os.environ["TERMINAL_CWD"] = wt_info["path"]
             # Register for the same keep-if-unpushed cleanup as `hermes -w`.
             # Only one worktree is tracked as "active" per process; an earlier
@@ -1461,13 +1451,13 @@ class CLICommandsMixin:
             import atexit
             _cli._active_worktree = wt_info
             atexit.register(_cli._cleanup_worktree, wt_info)
-            print(f"  ✅ Worktree ready: {wt_info['path']}")
-            print(f"  Branch: {wt_info['branch']}")
-            print("  Terminal and file tools now operate in the worktree.")
+            print(f"  ✅ Рабочая копия готова: {wt_info['path']}")
+            print(f"  Ветка: {wt_info['branch']}")
+            print('  Терминал и файловые инструменты теперь работают в этой копии.')
             return
 
-        print(f"  Unknown /worktree subcommand: {sub}")
-        print("  Usage: /worktree [new [name] | list]")
+        print(f'  Неизвестная подкоманда /worktree: {sub}')
+        print('  Использование: /worktree [new [имя] | list]')
 
     def _handle_branch_command(self, cmd_original: str) -> None:
         """Handle /branch [name] — fork the current session into a new independent copy.
@@ -1478,7 +1468,7 @@ class CLICommandsMixin:
         """
         from cli import _cprint, _sync_process_session_id
         if not self.conversation_history:
-            _cprint("  No conversation to branch — send a message first.")
+            _cprint('  Нечего разветвлять. Сначала отправьте сообщение.')
             return
 
         if not self._session_db:
@@ -1543,7 +1533,7 @@ class CLICommandsMixin:
                 parent_session_id=parent_session_id,
             )
         except Exception as e:
-            _cprint(f"  Failed to create branch session: {e}")
+            _cprint(f'  Не удалось создать ветку беседы: {e}')
             return
 
         # Copy conversation history to the new session in bounded-chunk
@@ -1624,11 +1614,10 @@ class CLICommandsMixin:
 
         msg_count = len([m for m in self.conversation_history if m.get("role") == "user"])
         _cprint(
-            f"  ⑂ Branched session \"{branch_title}\""
-            f" ({msg_count} user message{'s' if msg_count != 1 else ''})"
+            f'''  ⑂ Создана ветка беседы "{branch_title}" ({msg_count} ваших сообщений{('' if msg_count != 1 else '')})'''
         )
-        _cprint(f"  Original session: {parent_session_id}")
-        _cprint(f"  Branch session:   {new_session_id}")
+        _cprint(f'  Исходная беседа: {parent_session_id}')
+        _cprint(f'  Ветка беседы:    {new_session_id}')
 
     def _handle_personality_command(self, cmd: str):
         """Handle the /personality command to set predefined personalities.
@@ -1654,8 +1643,8 @@ class CLICommandsMixin:
                     personality_name, getattr(self, "config", None)
                 )
             except ValueError:
-                print(f"(._.) Unknown personality: {personality_name.lower()}")
-                print(f"  Available: none, {', '.join(self.personalities.keys())}")
+                print(f'(._.) Неизвестная личность: {personality_name.lower()}')
+                print(f"  Доступны: none, {', '.join(self.personalities.keys())}")
                 return
 
             saved = persist_personality(name)
@@ -1671,17 +1660,17 @@ class CLICommandsMixin:
                     self.system_prompt = ""
                 self.agent = None  # Force re-init
                 if saved:
-                    print("(^_^)b Personality cleared (saved to config)")
+                    print('(^_^)b Личность убрана; настройка сохранена.')
                 else:
-                    print("(^_^) Personality cleared (session only)")
-                print("  No personality overlay — using base agent behavior.")
+                    print('(^_^) Личность убрана для этой беседы.')
+                print('  Корра использует своё базовое поведение.')
             else:
                 self.system_prompt = personality_prompt
                 self.agent = None  # Force re-init
                 if saved:
-                    print(f"(^_^)b Personality set to '{name}' (saved to config)")
+                    print(f"(^_^)b Выбрана личность '{name}'; настройка сохранена.")
                 else:
-                    print(f"(^_^) Personality set to '{name}' (session only)")
+                    print(f"(^_^) Выбрана личность '{name}' для этой беседы.")
                 print(f"  \"{personality_prompt[:60]}{'...' if len(personality_prompt) > 60 else ''}\"")
         else:
             # Show available personalities
@@ -1695,16 +1684,16 @@ class CLICommandsMixin:
                 current = ""
             print()
             print("+" + "-" * 50 + "+")
-            print("|" + " " * 12 + "(^o^)/ Personalities" + " " * 15 + "|")
+            print("|" + " " * 12 + '(^o^)/ Личности' + " " * 15 + "|")
             print("+" + "-" * 50 + "+")
             print()
             marker = " *" if not current else "  "
-            print(f" {marker}{'none':<12} - (no personality overlay)")
+            print(f" {marker}{'none':<12} - (без дополнительной личности)")
             for name, prompt in self.personalities.items():
                 marker = " *" if name == current else "  "
                 print(f" {marker}{name:<12} - {describe_personality(prompt)}")
             print()
-            print("  Usage: /personality <name>   (* = active)")
+            print('  Использование: /personality <имя>   (* = активная)')
             print()
 
     def _handle_pet_command(self, cmd: str):
@@ -1733,9 +1722,9 @@ class CLICommandsMixin:
                 print(f"(x_x) {err}")
                 return
             if enabled:
-                print(f"(^_^)b {name} is out — it'll pop in shortly.")
+                print(f'(^_^)b {name} скоро появится на экране.')
             else:
-                print(f"(-_-)zzZ {name} put away." if name else "(-_-)zzZ Pet put away.")
+                print(f'(-_-)zzZ {name} убран.' if name else '(-_-)zzZ Питомец убран.')
             return
 
         if low in ("list", "gallery", "browse", "all"):
@@ -1745,25 +1734,25 @@ class CLICommandsMixin:
         if low == "scale" or low.startswith("scale "):
             value = arg[len("scale"):].strip()
             if not value:
-                print("(o_o) Usage: /pet scale <factor>  (e.g. /pet scale 0.5)")
+                print('(o_o) Использование: /pet scale <масштаб>, например /pet scale 0.5')
                 return
             scale, err = set_pet_scale(value)
-            print(f"(x_x) {err}" if err else f"(^_^) Pet scale → {scale:g}.")
+            print(f"(x_x) {err}" if err else f'(^_^) Масштаб питомца → {scale:g}.')
             return
 
         if low == "off":
             _set_enabled(False)
-            print("(-_-)zzZ Pet put away.")
+            print('(-_-)zzZ Питомец убран.')
             return
 
-        print(f"(o_o) Fetching '{arg}' from petdex…")
+        print(f"(o_o) Загружаю '{arg}' из каталога питомцев…")
         try:
             pet = store.install_pet(arg)
         except (store.PetStoreError, ManifestError) as exc:
-            print(f"(x_x) Couldn't adopt '{arg}': {exc}")
+            print(f"(x_x) Не удалось добавить питомца '{arg}': {exc}")
             return
         _set_active(arg)
-        print(f"(^_^)b {pet.display_name} is out — it'll pop in shortly.")
+        print(f'(^_^)b {pet.display_name} скоро появится на экране.')
 
     def _handle_hatch_command(self, cmd: str):
         """Generate ("hatch") a brand-new petdex pet from a description.
@@ -1796,39 +1785,39 @@ class CLICommandsMixin:
                 concept = (prompt_helper("(o_o) Describe your pet: ") or "").strip()
             else:
                 try:
-                    concept = input("(o_o) Describe your pet: ").strip()
+                    concept = input('(o_o) Опишите питомца: ').strip()
                 except (EOFError, KeyboardInterrupt):
                     print()
                     return
 
         if not concept:
-            print("(o_o) Usage: /hatch <description>  (e.g. /hatch a tiny cyber fox)")
+            print('(o_o) Использование: /hatch <описание>, например /hatch маленькая киберлиса')
             return
 
         # A short, friendly display name from the first few words of the concept.
         display_name = " ".join(w.capitalize() for w in concept.split()[:3])[:28].strip() or "Pet"
         slug = store.slugify(display_name) or store.slugify(concept) or "pet"
 
-        print(f"(o_o) Designing '{concept}'… (a minute of image-model calls)")
+        print(f"(o_o) Создаю '{concept}'… (генерация изображений займёт около минуты)")
         try:
             drafts = orchestrate.generate_base_drafts(concept, n=1)
         except GenerationError as exc:
-            print(f"(x_x) Couldn't generate a base look: {exc}")
+            print(f'(x_x) Не удалось создать внешний вид: {exc}')
             return
 
         if not drafts:
-            print("(x_x) No base draft came back — try again.")
+            print('(x_x) Черновик изображения не получен. Попробуйте ещё раз.')
             return
 
         def _progress(event: str, detail: str) -> None:
             if event == "row":
                 # detail is "<state>:<done>:<total>"; show the state name.
                 state = detail.split(":", 1)[0]
-                print(f"  ┊ drawing {state}…")
+                print(f'  ┊ рисую {state}…')
             elif event == "compose":
-                print("  ┊ composing spritesheet…")
+                print('  ┊ собираю кадры анимации…')
             elif event == "save":
-                print("  ┊ saving…")
+                print('  ┊ сохраняю…')
 
         try:
             result = orchestrate.hatch_pet(
@@ -1839,11 +1828,11 @@ class CLICommandsMixin:
                 on_progress=_progress,
             )
         except GenerationError as exc:
-            print(f"(x_x) Hatch failed: {exc}")
+            print(f'(x_x) Не удалось создать питомца: {exc}')
             return
 
         _set_active(result.slug)
-        print(f"(^_^)b {result.display_name} hatched and adopted — it'll pop in shortly!")
+        print(f'(^_^)b {result.display_name} создан и добавлен; скоро появится на экране!')
 
     def _handle_cron_command(self, cmd: str):
         """Handle the /cron command to manage scheduled tasks."""
@@ -1889,7 +1878,7 @@ class CLICommandsMixin:
                     try:
                         opts["repeat"] = int(tokens[i + 1])
                     except ValueError:
-                        print("(._.) --repeat must be an integer")
+                        print('(._.) --repeat должен быть целым числом.')
                         return None
                     i += 2
                 elif token == "--skill" and i + 1 < len(tokens):
@@ -1923,13 +1912,13 @@ class CLICommandsMixin:
         if len(tokens) == 1:
             print()
             print("+" + "-" * 68 + "+")
-            print("|" + " " * 22 + "(^_^) Scheduled Tasks" + " " * 23 + "|")
+            print("|" + " " * 22 + '(^_^) Задачи по расписанию' + " " * 23 + "|")
             print("+" + "-" * 68 + "+")
             print()
-            print("  Commands:")
+            print('  Команды:')
             print("    /cron list")
-            print('    /cron add "every 2h" "Check server status" [--skill blogwatcher]')
-            print('    /cron edit <job_id> --schedule "every 4h" --prompt "New task"')
+            print('    /cron add "every 2h" "Проверить состояние сервера" [--skill blogwatcher]')
+            print('    /cron edit <job_id> --schedule "every 4h" --prompt "Новая задача"')
             print("    /cron edit <job_id> --skill blogwatcher --skill maps")
             print("    /cron edit <job_id> --remove-skill blogwatcher")
             print("    /cron edit <job_id> --clear-skills")
@@ -1941,19 +1930,19 @@ class CLICommandsMixin:
             result = _cron_api(action="list")
             jobs = result.get("jobs", []) if result.get("success") else []
             if jobs:
-                print("  Current Jobs:")
+                print('  Текущие задачи:')
                 print("  " + "-" * 63)
                 for job in jobs:
                     repeat_str = job.get("repeat", "?")
                     print(f"    {job['job_id'][:12]:<12} | {job['schedule']:<15} | {repeat_str:<8}")
                     if job.get("skills"):
-                        print(f"      Skills: {', '.join(job['skills'])}")
+                        print(f"      Навыки: {', '.join(job['skills'])}")
                     print(f"      {job.get('prompt_preview', '')}")
                     if job.get("next_run_at"):
-                        print(f"      Next: {job['next_run_at']}")
+                        print(f"      Следующий запуск: {job['next_run_at']}")
                     print()
             else:
-                print("  No scheduled jobs. Use '/cron add' to create one.")
+                print("  Задач по расписанию нет. Создать: '/cron add'.")
             print()
             return
 
@@ -1966,36 +1955,36 @@ class CLICommandsMixin:
             result = _cron_api(action="list", include_disabled=opts["all"])
             jobs = result.get("jobs", []) if result.get("success") else []
             if not jobs:
-                print("(._.) No scheduled jobs.")
+                print('(._.) Задач по расписанию нет.')
                 return
 
             print()
-            print("Scheduled Jobs:")
+            print('Задачи по расписанию:')
             print("-" * 80)
             for job in jobs:
                 print(f"  ID: {job['job_id']}")
-                print(f"  Name: {job['name']}")
-                print(f"  State: {job.get('state', '?')}")
-                print(f"  Schedule: {job['schedule']} ({job.get('repeat', '?')})")
-                print(f"  Next run: {job.get('next_run_at', 'N/A')}")
+                print(f"  Название: {job['name']}")
+                print(f"  Состояние: {job.get('state', '?')}")
+                print(f"  Расписание: {job['schedule']} ({job.get('repeat', '?')})")
+                print(f"  Следующий запуск: {job.get('next_run_at', 'N/A')}")
                 if job.get("skills"):
-                    print(f"  Skills: {', '.join(job['skills'])}")
-                print(f"  Prompt: {job.get('prompt_preview', '')}")
+                    print(f"  Навыки: {', '.join(job['skills'])}")
+                print(f"  Запрос: {job.get('prompt_preview', '')}")
                 if job.get("last_run_at"):
-                    print(f"  Last run: {job['last_run_at']} ({job.get('last_status', '?')})")
+                    print(f"  Последний запуск: {job['last_run_at']} ({job.get('last_status', '?')})")
                 print()
             return
 
         if subcommand in {"add", "create"}:
             positionals = opts["positionals"]
             if not positionals:
-                print("(._.) Usage: /cron add <schedule> <prompt>")
+                print('(._.) Использование: /cron add <расписание> <запрос>')
                 return
             schedule = opts["schedule"] or positionals[0]
             prompt = opts["prompt"] or " ".join(positionals[1:])
             skills = _normalize_skills(opts["skills"])
             if not prompt and not skills:
-                print("(._.) Please provide a prompt or at least one skill")
+                print('(._.) Укажите запрос или хотя бы один навык.')
                 return
             result = _cron_api(
                 action="create",
@@ -2007,24 +1996,24 @@ class CLICommandsMixin:
                 skills=skills or None,
             )
             if result.get("success"):
-                print(f"(^_^)b Created job: {result['job_id']}")
-                print(f"  Schedule: {result['schedule']}")
+                print(f"(^_^)b Задача создана: {result['job_id']}")
+                print(f"  Расписание: {result['schedule']}")
                 if result.get("skills"):
-                    print(f"  Skills: {', '.join(result['skills'])}")
-                print(f"  Next run: {result['next_run_at']}")
+                    print(f"  Навыки: {', '.join(result['skills'])}")
+                print(f"  Следующий запуск: {result['next_run_at']}")
             else:
-                print(f"(x_x) Failed to create job: {result.get('error')}")
+                print(f"(x_x) Не удалось создать задачу: {result.get('error')}")
             return
 
         if subcommand == "edit":
             positionals = opts["positionals"]
             if not positionals:
-                print("(._.) Usage: /cron edit <job_id> [--schedule ...] [--prompt ...] [--skill ...]")
+                print('(._.) Использование: /cron edit <job_id> [--schedule ...] [--prompt ...] [--skill ...]')
                 return
             job_id = positionals[0]
             existing = get_job(job_id)
             if not existing:
-                print(f"(._.) Job not found: {job_id}")
+                print(f'(._.) Задача не найдена: {job_id}')
                 return
 
             final_skills = None
@@ -2054,42 +2043,42 @@ class CLICommandsMixin:
             )
             if result.get("success"):
                 job = result["job"]
-                print(f"(^_^)b Updated job: {job['job_id']}")
-                print(f"  Schedule: {job['schedule']}")
+                print(f"(^_^)b Задача обновлена: {job['job_id']}")
+                print(f"  Расписание: {job['schedule']}")
                 if job.get("skills"):
-                    print(f"  Skills: {', '.join(job['skills'])}")
+                    print(f"  Навыки: {', '.join(job['skills'])}")
                 else:
-                    print("  Skills: none")
+                    print('  Навыки: нет')
             else:
-                print(f"(x_x) Failed to update job: {result.get('error')}")
+                print(f"(x_x) Не удалось обновить задачу: {result.get('error')}")
             return
 
         if subcommand in {"pause", "resume", "run", "remove", "rm", "delete"}:
             positionals = opts["positionals"]
             if not positionals:
-                print(f"(._.) Usage: /cron {subcommand} <job_id>")
+                print(f'(._.) Использование: /cron {subcommand} <job_id>')
                 return
             job_id = positionals[0]
             action = "remove" if subcommand in {"remove", "rm", "delete"} else subcommand
             result = _cron_api(action=action, job_id=job_id, reason="paused from /cron" if action == "pause" else None)
             if not result.get("success"):
-                print(f"(x_x) Failed to {action} job: {result.get('error')}")
+                print(f"(x_x) Не удалось выполнить действие {action} с задачей: {result.get('error')}")
                 return
             if action == "pause":
-                print(f"(^_^)b Paused job: {result['job']['name']} ({job_id})")
+                print(f"(^_^)b Задача приостановлена: {result['job']['name']} ({job_id})")
             elif action == "resume":
-                print(f"(^_^)b Resumed job: {result['job']['name']} ({job_id})")
-                print(f"  Next run: {result['job'].get('next_run_at')}")
+                print(f"(^_^)b Задача возобновлена: {result['job']['name']} ({job_id})")
+                print(f"  Следующий запуск: {result['job'].get('next_run_at')}")
             elif action == "run":
-                print(f"(^_^)b Triggered job: {result['job']['name']} ({job_id})")
-                print("  It will run on the next scheduler tick.")
+                print(f"(^_^)b Задача поставлена на запуск: {result['job']['name']} ({job_id})")
+                print('  Она начнётся при ближайшей проверке расписания.')
             else:
                 removed = result.get("removed_job", {})
-                print(f"(^_^)b Removed job: {removed.get('name', job_id)} ({job_id})")
+                print(f"(^_^)b Задача удалена: {removed.get('name', job_id)} ({job_id})")
             return
 
-        print(f"(._.) Unknown cron command: {subcommand}")
-        print("  Available: list, add, edit, pause, resume, run, remove")
+        print(f'(._.) Неизвестная команда расписания: {subcommand}')
+        print('  Доступны: list, add, edit, pause, resume, run, remove')
 
     def _handle_suggestions_command(self, cmd: str):
         """Handle /suggestions — review/accept/dismiss suggested automations.
@@ -2224,13 +2213,13 @@ class CLICommandsMixin:
 
         msg = build_learn_prompt(user_request)
         if user_request:
-            print("\n⚡ Learning a skill from what you described...")
+            print('\n⚡ Создаю навык по вашему описанию...')
         else:
-            print("\n⚡ Learning a skill from this conversation...")
+            print('\n⚡ Создаю навык по этой беседе...')
         if hasattr(self, "_pending_input"):
             self._pending_input.put(msg)
         else:  # pragma: no cover - defensive (no live input loop)
-            print("  /learn needs an active chat session to run.")
+            print('  Для /learn нужна активная беседа.')
 
     def _handle_plan_command(self, cmd: str):
         """Handle /plan — write a markdown implementation plan, no execution.
@@ -2251,13 +2240,13 @@ class CLICommandsMixin:
 
         msg = build_plan_prompt(task)
         if task:
-            print(f"\n📋 Planning: {task[:80]}{'...' if len(task) > 80 else ''}")
+            print(f"\n📋 Планирую: {task[:80]}{('...' if len(task) > 80 else '')}")
         else:
-            print("\n📋 Planning from this conversation's context...")
+            print('\n📋 Составляю план по контексту беседы...')
         if hasattr(self, "_pending_input"):
             self._pending_input.put(msg)
         else:  # pragma: no cover - defensive (no live input loop)
-            print("  /plan needs an active chat session to run.")
+            print('  Для /plan нужна активная беседа.')
 
     def _handle_init_command(self, cmd: str):
         """Handle /init — generate or update AGENTS.md from a project scan.
@@ -2277,13 +2266,13 @@ class CLICommandsMixin:
 
         msg = build_init_prompt_for_cwd(extra=extra)
         if "UPDATE the existing AGENTS.md" in msg:
-            print("\n⚡ Updating AGENTS.md from a project scan...")
+            print('\n⚡ Изучаю проект и обновляю AGENTS.md...')
         else:
-            print("\n⚡ Generating AGENTS.md from a project scan...")
+            print('\n⚡ Изучаю проект и создаю AGENTS.md...')
         if hasattr(self, "_pending_input"):
             self._pending_input.put(msg)
         else:  # pragma: no cover - defensive (no live input loop)
-            print("  /init needs an active chat session to run.")
+            print('  Для /init нужна активная беседа.')
 
     def _handle_memory_command(self, cmd: str):
         """Handle /memory slash command — pending review + approval-gate toggle."""
@@ -2328,10 +2317,10 @@ class CLICommandsMixin:
         from cli import AIAgent, ChatConsole, _accent_hex, _cprint, _maybe_remap_for_light_mode, _render_final_assistant_content, set_approval_callback, set_secret_capture_callback, set_sudo_password_callback
         parts = cmd.strip().split(maxsplit=1)
         if len(parts) < 2 or not parts[1].strip():
-            _cprint("  Usage: /bg <prompt>")
-            _cprint("  Example: /bg Summarize the top HN stories today")
-            _cprint("  (For a side question about this conversation, use /btw <question>.)")
-            _cprint("  The task runs in a separate session and results display here when done.")
+            _cprint('  Использование: /bg <запрос>')
+            _cprint('  Пример: /bg Подготовь сводку новостей для моего бизнеса')
+            _cprint('  (Попутный вопрос по этой беседе: /btw <вопрос>.)')
+            _cprint('  Задача выполняется отдельно, результат появится здесь по завершении.')
             return
 
         prompt = parts[1].strip()
@@ -2341,12 +2330,12 @@ class CLICommandsMixin:
 
         # Make sure we have valid credentials
         if not self._ensure_runtime_credentials():
-            _cprint("  (>_<) Cannot start background task: no valid credentials.")
+            _cprint('  (>_<) Нельзя запустить фоновую задачу: нет действующих данных входа.')
             return
 
-        _cprint(f"  🔄 Background task #{task_num} started: \"{prompt[:60]}{'...' if len(prompt) > 60 else ''}\"")
-        _cprint(f"  Task ID: {task_id}")
-        _cprint("  You can continue chatting — results will appear when done.\n")
+        _cprint(f'''  🔄 Фоновая задача №{task_num} запущена: "{prompt[:60]}{('...' if len(prompt) > 60 else '')}"''')
+        _cprint(f'  ID задачи: {task_id}')
+        _cprint('  Можно общаться дальше. Результат появится по завершении.\n')
 
         turn_route = self._resolve_turn_agent_config(prompt)
 
@@ -2415,8 +2404,8 @@ class CLICommandsMixin:
                     time.sleep(0.05)  # brief pause for refresh
                 print()
                 ChatConsole().print(f"[{_accent_hex()}]{'─' * 40}[/]")
-                _cprint(f"  ✅ Background task #{task_num} complete")
-                _cprint(f"  Prompt: \"{prompt[:60]}{'...' if len(prompt) > 60 else ''}\"")
+                _cprint(f'  ✅ Фоновая задача №{task_num} выполнена')
+                _cprint(f'''  Запрос: "{prompt[:60]}{('...' if len(prompt) > 60 else '')}"''')
                 ChatConsole().print(f"[{_accent_hex()}]{'─' * 40}[/]")
                 if response:
                     try:
@@ -2433,7 +2422,7 @@ class CLICommandsMixin:
                     _chat_console = ChatConsole()
                     _chat_console.print(Panel(
                         _render_final_assistant_content(response, mode=self.final_response_markdown),
-                        title=f"[{_resp_color} bold]{label} (background #{task_num})[/]",
+                        title=f'[{_resp_color} bold]{label} (фоновая №{task_num})[/]',
                         title_align="left",
                         border_style=_resp_color,
                         style=_resp_text,
@@ -2442,7 +2431,7 @@ class CLICommandsMixin:
                         width=self._scrollback_box_width(),
                     ))
                 else:
-                    _cprint("  (No response generated)")
+                    _cprint('  (Ответ не получен)')
 
                 # Play bell if enabled
                 if self.bell_on_complete:
@@ -2455,7 +2444,7 @@ class CLICommandsMixin:
                     self._app.invalidate()
                     time.sleep(0.05)
                 print()
-                _cprint(f"  ❌ Background task #{task_num} failed: {e}")
+                _cprint(f'  ❌ Фоновая задача №{task_num} завершилась с ошибкой: {e}')
             finally:
                 try:
                     set_sudo_password_callback(None)
@@ -2487,16 +2476,16 @@ class CLICommandsMixin:
 
         parts = cmd.strip().split(maxsplit=1)
         if len(parts) < 2 or not parts[1].strip():
-            _cprint("  Usage: /btw <question>")
-            _cprint("  Example: /btw which file was that error in?")
-            _cprint("  Answers a quick question about this conversation without interrupting it.")
-            _cprint("  (For an independent background task, use /bg <prompt>.)")
+            _cprint('  Использование: /btw <вопрос>')
+            _cprint('  Пример: /btw в каком файле была та ошибка?')
+            _cprint('  Ответ на попутный вопрос по текущей беседе без остановки работы.')
+            _cprint('  (Независимая фоновая задача: /bg <запрос>.)')
             return
 
         question = parts[1].strip()
 
         if not self._ensure_runtime_credentials():
-            _cprint("  (>_<) Cannot answer side question: no valid credentials.")
+            _cprint('  (>_<) Нельзя ответить на попутный вопрос: нет действующих данных входа.')
             return
 
         # Snapshot NOW, on the UI thread — the foreground turn keeps appending
@@ -2514,8 +2503,8 @@ class CLICommandsMixin:
         }
 
         preview = question[:60] + ("..." if len(question) > 60 else "")
-        _cprint(f"  💬 Side question: \"{preview}\"")
-        _cprint("  Answering from a snapshot of this conversation — the current work continues.\n")
+        _cprint(f'  💬 Попутный вопрос: "{preview}"')
+        _cprint('  Отвечаю по копии этой беседы; текущая работа продолжается.\n')
 
         def run_side_question():
             try:
@@ -2547,7 +2536,7 @@ class CLICommandsMixin:
                         _resp_text = "#FFF8DC"
                     ChatConsole().print(Panel(
                         _render_final_assistant_content(answer, mode=self.final_response_markdown),
-                        title=f"[{_resp_color} bold]{label} (btw)[/]",
+                        title=f'[{_resp_color} bold]{label} (попутный вопрос)[/]',
                         title_align="left",
                         border_style=_resp_color,
                         style=_resp_text,
@@ -2556,13 +2545,13 @@ class CLICommandsMixin:
                         width=self._scrollback_box_width(),
                     ))
                 else:
-                    _cprint("  (No answer generated)")
+                    _cprint('  (Ответ не получен)')
             except Exception as e:
                 if self._app:
                     self._app.invalidate()
                     time.sleep(0.05)
                 print()
-                _cprint(f"  ❌ /btw failed: {e}")
+                _cprint(f'  ❌ Не удалось ответить на /btw: {e}')
             finally:
                 if self._app:
                     self._invalidate(min_interval=0)
@@ -2581,32 +2570,29 @@ class CLICommandsMixin:
 
         reply = execute_command("bundles", CommandContext(surface="cli"))
         if "error" in reply.data:
-            _cprint(f"\033[1;31mBundle subsystem unavailable: {reply.data['error']}{_RST}")
+            _cprint(f"\x1b[1;31mНаборы навыков недоступны: {reply.data['error']}{_RST}")
             return
 
         bundles = reply.data["bundles"]
         if not bundles:
-            _cprint("  No skill bundles installed.")
+            _cprint('  Наборы навыков не установлены.')
             _cprint(
-                f"  {_DIM}Create one with: hermes bundles create "
-                f"<name> --skill <s1> --skill <s2>{_RST}"
+                f'  {_DIM}Создать: korra bundles create <имя> --skill <s1> --skill <s2>{_RST}'
             )
-            _cprint(f"  {_DIM}Directory: {reply.data['dir']}{_RST}")
+            _cprint(f"  {_DIM}Папка: {reply.data['dir']}{_RST}")
             return
 
-        _cprint(f"\n  ▣ {_BOLD}Skill Bundles{_RST} ({len(bundles)} installed):")
+        _cprint(f'\n  ▣ {_BOLD}Наборы навыков{_RST} ({len(bundles)} установлено):')
         for info in bundles:
             skill_count = len(info.get("skills", []))
             desc = info.get("description") or f"Load {skill_count} skills"
             ChatConsole().print(
-                f"    [bold {_accent_hex()}]/{info['slug']:<20}[/] "
-                f"[dim]-[/] {_escape(desc)} [dim]({skill_count} skills)[/]"
+                f"    [bold {_accent_hex()}]/{info['slug']:<20}[/] [dim]-[/] {_escape(desc)} [dim]({skill_count} навыков)[/]"
             )
             for s in info.get("skills", []):
                 ChatConsole().print(f"        [dim]· {_escape(s)}[/]")
         _cprint(
-            f"\n  {_DIM}Invoke a bundle with /<slug>. "
-            f"Manage with `hermes bundles`.{_RST}"
+            f'\n  {_DIM}Запуск набора: /<slug>. Управление: `korra bundles`.{_RST}'
         )
 
     def _handle_browser_command(self, cmd: str):
@@ -2627,9 +2613,9 @@ class CLICommandsMixin:
 
             if arg not in {"on", "off"}:
                 print()
-                print("Usage: /browser use [off]")
-                print("   /browser use       — switch to Browser Use mode (browser_exec via CLI 3.0)")
-                print("   /browser use off   — revert to the built-in browser tools")
+                print('Использование: /browser use [off]')
+                print('   /browser use     — включить Browser Use (browser_exec через CLI 3.0)')
+                print('   /browser use off — вернуть встроенные инструменты браузера')
                 print()
                 return
 
@@ -2641,8 +2627,8 @@ class CLICommandsMixin:
                 invalidate_check_fn_cache()
                 self.new_session()
                 print()
-                print("🌐 Browser Use mode enabled — browser_exec via the Browser Use CLI 3.0")
-                print("   Session reset. New tool configuration is active.")
+                print('🌐 Включён Browser Use: browser_exec через Browser Use CLI 3.0')
+                print('   Беседа сброшена. Новые настройки инструментов применены.')
                 print()
             else:
                 from tools.browser_use_cli import BACKEND_DISABLED
@@ -2652,8 +2638,8 @@ class CLICommandsMixin:
                 invalidate_check_fn_cache()
                 self.new_session()
                 print()
-                print("🌐 Browser Use mode disabled — built-in browser tools restored")
-                print("   Session reset. New tool configuration is active.")
+                print('🌐 Browser Use выключен. Встроенные инструменты браузера восстановлены.')
+                print('   Беседа сброшена. Новые настройки инструментов применены.')
                 print()
             return
 
@@ -2665,8 +2651,7 @@ class CLICommandsMixin:
             if parsed_cdp.scheme not in {"http", "https", "ws", "wss"}:
                 print()
                 print(
-                    f"   ⚠ Unsupported browser url scheme: {parsed_cdp.scheme or '(missing)'} "
-                    "(expected one of: http, https, ws, wss)"
+                    f"   ⚠ Неподдерживаемый протокол адреса браузера: {parsed_cdp.scheme or '(не задан)'} (допустимы http, https, ws, wss)"
                 )
                 print()
                 return
@@ -2674,12 +2659,12 @@ class CLICommandsMixin:
                 _port = parsed_cdp.port or (443 if parsed_cdp.scheme in {"https", "wss"} else 80)
             except ValueError:
                 print()
-                print(f"   ⚠ Invalid port in browser url: {cdp_url}")
+                print(f'   ⚠ Неверный порт в адресе браузера: {cdp_url}')
                 print()
                 return
             if not parsed_cdp.hostname:
                 print()
-                print(f"   ⚠ Missing host in browser url: {cdp_url}")
+                print(f'   ⚠ В адресе браузера не указан сервер: {cdp_url}')
                 print()
                 return
             _host = parsed_cdp.hostname
@@ -2716,20 +2701,20 @@ class CLICommandsMixin:
                 _already_open = is_browser_debug_ready(cdp_url, timeout=1.0)
 
             if _already_open:
-                print(f"   ✓ Chromium-family browser is already listening at {cdp_url}")
+                print(f'   ✓ Браузер Chromium уже доступен по адресу {cdp_url}')
             elif _is_default:
                 _launch_port = _port
                 if local_port_in_use(_port):
                     _launch_port = find_free_debug_port(_port)
                     print(
-                        f"   ⚠ Port {_port} is occupied by another application that isn't a CDP browser"
+                        f'   ⚠ Порт {_port} занят другим приложением, которое не поддерживает CDP'
                     )
                     print(
-                        f"     (an IDE debugger or dev server may be using it) — launching on port {_launch_port} instead..."
+                        f'     (возможно, отладчиком или сервером разработки). Запускаю на порту {_launch_port}...'
                     )
                 else:
                     # Try to auto-launch a Chromium-family browser with remote debugging
-                    print("   Chromium-family browser isn't running with remote debugging — attempting to launch...")
+                    print('   Браузер Chromium не запущен с удалённой отладкой. Пробую запустить...')
                 _launch = launch_chrome_debug(_launch_port, _plat.system())
                 if _launch.launched:
                     # Wait for the DevTools discovery endpoint to come up
@@ -2741,28 +2726,28 @@ class CLICommandsMixin:
                             break
                         time.sleep(0.5)
                     if _already_open:
-                        print(f"   ✓ Chromium-family browser launched and listening on port {_launch_port}")
+                        print(f'   ✓ Браузер Chromium запущен и доступен на порту {_launch_port}')
                     else:
-                        print(f"   ⚠ Browser launched but port {_launch_port} isn't responding yet")
-                        print("     Try again in a few seconds — the debug instance may still be starting")
+                        print(f'   ⚠ Браузер запущен, но порт {_launch_port} пока не отвечает.')
+                        print('     Попробуйте через несколько секунд: браузер может ещё запускаться.')
                 else:
-                    print("   ⚠ Could not auto-launch a Chromium-family browser")
+                    print('   ⚠ Не удалось автоматически запустить браузер Chromium.')
                     _hint = _launch.hint
                     if _hint:
                         print(f"     {_hint}")
                     sys_name = _plat.system()
                     chrome_cmd = manual_chrome_debug_command(_launch_port, sys_name)
                     if chrome_cmd:
-                        print("     Launch a Chromium-family browser manually:")
+                        print('     Запустите браузер Chromium вручную:')
                         print(f"     {chrome_cmd}")
                     else:
-                        print("     No supported Chromium-family browser executable found in this environment")
+                        print('     В этой среде не найдена программа поддерживаемого браузера Chromium.')
             else:
-                print(f"   ⚠ Port {_port} is not reachable at {cdp_url}")
+                print(f'   ⚠ Порт {_port} недоступен по адресу {cdp_url}')
 
             if not _already_open:
                 print()
-                print("Browser not connected — start a Chromium-family browser with remote debugging and retry /browser connect")
+                print('Браузер не подключён. Запустите браузер Chromium с удалённой отладкой и повторите /browser connect.')
                 print()
                 return
 
@@ -2775,8 +2760,8 @@ class CLICommandsMixin:
             except Exception:
                 pass
             print()
-            print("🌐 Browser connected to live Chromium-family browser via CDP")
-            print(f"   Endpoint: {cdp_url}")
+            print('🌐 Подключён открытый браузер Chromium через CDP')
+            print(f'   Адрес: {cdp_url}')
             print()
 
             # Inject context message so the model knows this slash command
@@ -2804,8 +2789,8 @@ class CLICommandsMixin:
                 except Exception:
                     pass
                 print()
-                print("🌐 Browser disconnected from live Chromium-family browser")
-                print("   Browser tools reverted to default mode (local headless or cloud provider)")
+                print('🌐 Подключение к открытому браузеру Chromium закрыто.')
+                print('   Восстановлен режим по умолчанию: локальный браузер без окна или облачный провайдер.')
                 print()
 
                 if hasattr(self, '_pending_input'):
@@ -2815,7 +2800,7 @@ class CLICommandsMixin:
                     )
             else:
                 print()
-                print("Browser is not connected to a live Chromium-family browser (already using default mode)")
+                print('Открытый браузер Chromium не подключён. Уже используется режим по умолчанию.')
                 print()
 
         elif sub == "status":
@@ -2826,16 +2811,16 @@ class CLICommandsMixin:
             except Exception:
                 _bu_mode = False
             if _bu_mode:
-                print("🌐 Browser: Browser Use mode (browser_exec via the Browser Use CLI 3.0)")
-                print("   Local Chrome via CDP, or Browser Use cloud browsers")
+                print('🌐 Браузер: Browser Use (browser_exec через Browser Use CLI 3.0)')
+                print('   Локальный Chrome через CDP или облачные браузеры Browser Use')
                 _print_lightpanda_engine_status()
                 print()
-                print("   /browser use off      — revert to the built-in browser tools")
+                print('   /browser use off — вернуть встроенные инструменты')
                 print()
                 return
             if current:
-                print("🌐 Browser: connected to live Chromium-family browser via CDP")
-                print(f"   Endpoint: {current}")
+                print('🌐 Браузер: подключён открытый Chromium через CDP')
+                print(f'   Адрес: {current}')
                 _print_lightpanda_engine_status()
 
                 _port = 9222
@@ -2849,9 +2834,9 @@ class CLICommandsMixin:
                     s.settimeout(1)
                     s.connect(("127.0.0.1", _port))
                     s.close()
-                    print("   Status: ✓ reachable")
+                    print('   Состояние: ✓ доступен')
                 except (OSError, Exception):
-                    print("   Status: ⚠ not reachable (browser may not be running)")
+                    print('   Состояние: ⚠ недоступен (возможно, браузер закрыт)')
             else:
                 try:
                     from tools.browser_tool import _get_cloud_provider
@@ -2860,7 +2845,7 @@ class CLICommandsMixin:
                     provider = None
 
                 if provider is not None:
-                    print(f"🌐 Browser: {provider.provider_name()} (cloud)")
+                    print(f'🌐 Браузер: {provider.provider_name()} (облако)')
                     _print_lightpanda_engine_status()
                 else:
                     # Show engine info for local mode
@@ -2870,27 +2855,27 @@ class CLICommandsMixin:
                     except Exception:
                         engine = "auto"
                     if engine == "lightpanda":
-                        print("🌐 Browser: local Lightpanda (agent-browser --engine lightpanda)")
-                        print("   ⚡ Lightpanda: faster navigation, no screenshot support")
-                        print("   Automatic Chromium fallback for screenshots and failed commands")
+                        print('🌐 Браузер: локальный Lightpanda (agent-browser --engine lightpanda)')
+                        print('   ⚡ Lightpanda: быстрая навигация без снимков экрана')
+                        print('   Для снимков и при ошибках автоматически используется Chromium.')
                         _print_lightpanda_engine_status()
                     elif engine == "chrome":
-                        print("🌐 Browser: local headless Chromium (agent-browser --engine chrome)")
+                        print('🌐 Браузер: локальный Chromium без окна (agent-browser --engine chrome)')
                     else:
-                        print("🌐 Browser: local headless Chromium (agent-browser)")
+                        print('🌐 Браузер: локальный Chromium без окна (agent-browser)')
             print()
-            print("   /browser connect      — connect to your live Chromium-family browser")
-            print("   /browser disconnect   — revert to default")
+            print('   /browser connect    — подключить открытый браузер Chromium')
+            print('   /browser disconnect — вернуть режим по умолчанию')
             print()
 
         else:
             print()
-            print("Usage: /browser connect|disconnect|status|use")
+            print('Использование: /browser connect|disconnect|status|use')
             print()
-            print("   connect      Connect browser tools to your live Chromium-family browser session")
-            print("   disconnect   Revert to default browser backend")
-            print("   status       Show current browser mode")
-            print("   use [off]    Switch to Browser Use mode (CLI 3.0) / back to built-in tools")
+            print('   connect    Подключить инструменты к открытому браузеру Chromium')
+            print('   disconnect Вернуть браузер по умолчанию')
+            print('   status     Показать текущий режим браузера')
+            print('   use [off]  Включить Browser Use CLI 3.0 или вернуть встроенные инструменты')
             print()
 
     def _handle_heartbeat_command(self, cmd: str) -> None:
@@ -2910,7 +2895,7 @@ class CLICommandsMixin:
 
         mgr = self._get_heartbeat_manager()
         if mgr is None:
-            _cprint(f"  {_DIM}Heartbeats unavailable (no active session).{_RST}")
+            _cprint(f'  {_DIM}Периодические проверки недоступны: нет активной беседы.{_RST}')
             return
 
         if not arg or lower == "status":
@@ -2920,25 +2905,25 @@ class CLICommandsMixin:
         if lower == "pause":
             state = mgr.pause()
             if state is None:
-                _cprint(f"  {_DIM}No heartbeat set.{_RST}")
+                _cprint(f'  {_DIM}Периодическая проверка не задана.{_RST}')
             else:
-                _cprint(f"  ⏸ Heartbeat paused: {state.prompt}")
+                _cprint(f'  ⏸ Периодическая проверка приостановлена: {state.prompt}')
             return
 
         if lower == "resume":
             state = mgr.resume()
             if state is None:
-                _cprint(f"  {_DIM}No heartbeat to resume.{_RST}")
+                _cprint(f'  {_DIM}Нет периодической проверки для продолжения.{_RST}')
             else:
                 self._start_heartbeat_watchdog()
-                _cprint(f"  ▶ Heartbeat resumed (every {format_interval(state.interval_seconds)}): {state.prompt}")
+                _cprint(f'  ▶ Периодическая проверка возобновлена (каждые {format_interval(state.interval_seconds)}): {state.prompt}')
             return
 
         if lower in {"clear", "stop", "off"}:
             if mgr.clear():
-                _cprint("  ✓ Heartbeat cleared.")
+                _cprint('  ✓ Периодическая проверка удалена.')
             else:
-                _cprint(f"  {_DIM}No heartbeat set.{_RST}")
+                _cprint(f'  {_DIM}Периодическая проверка не задана.{_RST}')
             return
 
         # Set: `/heartbeat every 10m <prompt>` (also accepts `10m <prompt>`).
@@ -2953,29 +2938,26 @@ class CLICommandsMixin:
             prompt = arg[len(tokens[0]):].strip() if interval and interval > 0 else ""
 
         if interval is None:
-            _cprint("  Usage: /heartbeat every <interval> <prompt>   (e.g. /heartbeat every 10m Check CI)")
-            _cprint(f"  {_DIM}Also: /heartbeat status | pause | resume | clear{_RST}")
+            _cprint('  Использование: /heartbeat every <интервал> <запрос>, например /heartbeat every 10m Проверь CI')
+            _cprint(f'  {_DIM}Также: /heartbeat status | pause | resume | clear{_RST}')
             return
         if interval < 0:
             from korra_cli.heartbeat import MIN_INTERVAL_SECONDS
-            _cprint(f"  Interval too small — minimum is {MIN_INTERVAL_SECONDS}s.")
+            _cprint(f'  Интервал слишком мал. Минимум: {MIN_INTERVAL_SECONDS}s.')
             return
         if not prompt.strip():
-            _cprint("  Usage: /heartbeat every <interval> <prompt> — the prompt is required.")
+            _cprint('  Использование: /heartbeat every <интервал> <запрос>. Запрос обязателен.')
             return
 
         try:
             state = mgr.set(prompt, interval)
         except ValueError as exc:
-            _cprint(f"  Invalid heartbeat: {exc}")
+            _cprint(f'  Некорректная периодическая проверка: {exc}')
             return
         self._start_heartbeat_watchdog()
-        _cprint(f"  ♥ Heartbeat set (every {format_interval(state.interval_seconds)}): {state.prompt}")
+        _cprint(f'  ♥ Периодическая проверка задана (каждые {format_interval(state.interval_seconds)}): {state.prompt}')
         _cprint(
-            f"  {_DIM}Fires as a normal turn whenever the session is idle and the "
-            f"interval has elapsed. /heartbeat pause | resume | clear to manage; "
-            f"lives only while this Korra process runs — use `hermes cron` for "
-            f"durable schedules.{_RST}"
+            f'  {_DIM}Запускается обычным ходом, когда агент свободен и прошёл заданный интервал. Управление: /heartbeat pause | resume | clear. Работает, пока запущена Korra. Для постоянного расписания используйте `korra cron`.{_RST}'
         )
 
     def _handle_refine_command(self, cmd: str) -> None:
@@ -2994,12 +2976,12 @@ class CLICommandsMixin:
 
         agent = getattr(self, "agent", None)
         if agent is None:
-            _cprint(f"  {_DIM}Nothing to refine yet — send a message first.{_RST}")
+            _cprint(f'  {_DIM}Пока нечего улучшать. Сначала отправьте сообщение.{_RST}')
             return
 
         snapshot = list(getattr(self, "conversation_history", None) or [])
         if not snapshot:
-            _cprint(f"  {_DIM}Nothing to refine yet — the conversation is empty.{_RST}")
+            _cprint(f'  {_DIM}Пока нечего улучшать: беседа пуста.{_RST}')
             return
 
         review_skills = "skill_manage" in getattr(agent, "valid_tool_names", set())
@@ -3011,12 +2993,11 @@ class CLICommandsMixin:
                 focus=focus or None,
             )
         except Exception as exc:
-            _cprint(f"  /refine failed to start: {exc}")
+            _cprint(f'  Не удалось запустить /refine: {exc}')
             return
         tail = f" (focus: {focus})" if focus else ""
         _cprint(
-            f"  ⚗ Reviewing this conversation in the background{tail} — "
-            f"any memory/skill updates will be reported when done."
+            f'  ⚗ Анализирую беседу в фоне{tail}; сообщу об изменениях памяти или навыков по завершении.'
         )
 
     def _handle_review_command(self, cmd: str) -> None:
@@ -3035,7 +3016,7 @@ class CLICommandsMixin:
 
         agent = getattr(self, "agent", None)
         if agent is None:
-            _cprint(f"  {_DIM}Nothing to review yet — send a message first.{_RST}")
+            _cprint(f'  {_DIM}Пока нечего проверять. Сначала отправьте сообщение.{_RST}')
             return
 
         snapshot = list(getattr(self, "conversation_history", None) or [])
@@ -3047,7 +3028,7 @@ class CLICommandsMixin:
             _cprint(f"  {_DIM}{exc}{_RST}")
             return
         except Exception as exc:
-            _cprint(f"  /review failed to start: {exc}")
+            _cprint(f'  Не удалось запустить /review: {exc}')
             return
         _cprint(f"  {format_dispatch_note(result, prompt)}")
 
@@ -3059,7 +3040,7 @@ class CLICommandsMixin:
 
         mgr = self._get_goal_manager()
         if mgr is None:
-            _cprint(f"  {_DIM}Goals unavailable (no active session).{_RST}")
+            _cprint(f'  {_DIM}Цели недоступны: нет активной беседы.{_RST}')
             return
 
         lower = arg.lower()
@@ -3083,7 +3064,7 @@ class CLICommandsMixin:
         if lower.startswith("draft"):
             objective = arg[len("draft"):].strip()
             if not objective:
-                _cprint("  Usage: /goal draft <objective in plain language>")
+                _cprint('  Использование: /goal draft <цель своими словами>')
                 return
             self._handle_goal_draft(objective)
             return
@@ -3091,17 +3072,17 @@ class CLICommandsMixin:
         if lower == "pause":
             state = mgr.pause(reason="user-paused")
             if state is None:
-                _cprint(f"  {_DIM}No goal set.{_RST}")
+                _cprint(f'  {_DIM}Цель не задана.{_RST}')
             else:
-                _cprint(f"  ⏸ Goal paused: {state.goal}")
+                _cprint(f'  ⏸ Цель приостановлена: {state.goal}')
             return
 
         if lower == "resume":
             state = mgr.resume()
             if state is None:
-                _cprint(f"  {_DIM}No goal to resume.{_RST}")
+                _cprint(f'  {_DIM}Нет цели для продолжения.{_RST}')
             else:
-                _cprint(f"  ▶ Goal resumed: {state.goal}")
+                _cprint(f'  ▶ Работа над целью возобновлена: {state.goal}')
                 # Resume must restart work, not just flip persisted state
                 # (#75362): queue the canonical continuation prompt the same
                 # way /goal <text> queues its kickoff, so the loop takes the
@@ -3115,10 +3096,10 @@ class CLICommandsMixin:
                     except Exception:
                         pass
                 if queued:
-                    _cprint(f"  {_DIM}Continuing now — taking the next step.{_RST}")
+                    _cprint(f'  {_DIM}Продолжаю: выполняю следующий шаг.{_RST}')
                 else:
                     _cprint(
-                        f"  {_DIM}Send any message to kick off the next step.{_RST}"
+                        f'  {_DIM}Отправьте любое сообщение, чтобы начать следующий шаг.{_RST}'
                     )
             return
 
@@ -3126,9 +3107,9 @@ class CLICommandsMixin:
             had = mgr.has_goal()
             mgr.clear()
             if had:
-                _cprint("  ✓ Goal cleared.")
+                _cprint('  ✓ Цель удалена.')
             else:
-                _cprint(f"  {_DIM}No active goal.{_RST}")
+                _cprint(f'  {_DIM}Нет активной цели.{_RST}')
             return
 
         # /goal wait <pid> [reason] — park the loop on a background process so
@@ -3137,13 +3118,13 @@ class CLICommandsMixin:
         if lower == "wait" or lower.startswith("wait "):
             wait_arg = arg[len("wait"):].strip()
             if not wait_arg:
-                _cprint("  Usage: /goal wait <pid> [reason]")
+                _cprint('  Использование: /goal wait <pid> [причина]')
                 return
             wtokens = wait_arg.split(None, 1)
             try:
                 pid = int(wtokens[0])
             except ValueError:
-                _cprint("  /goal wait: <pid> must be an integer process id.")
+                _cprint('  /goal wait: <pid> должен быть целым номером процесса.')
                 return
             reason = wtokens[1].strip() if len(wtokens) > 1 else ""
             try:
@@ -3152,15 +3133,15 @@ class CLICommandsMixin:
                 _cprint(f"  /goal wait: {exc}")
                 return
             rtxt = f" ({reason})" if reason else ""
-            _cprint(f"  ⏳ Goal parked on pid {pid}{rtxt}. Loop pauses until it exits.")
+            _cprint(f'  ⏳ Цель ожидает завершения процесса {pid}{rtxt}. Повторы приостановлены до его завершения.')
             return
 
         # /goal unwait — drop the wait barrier and resume normal looping.
         if lower == "unwait":
             if mgr.stop_waiting():
-                _cprint("  ▶ Wait barrier cleared — goal loop resumes.")
+                _cprint('  ▶ Ожидание снято. Работа над целью продолжается.')
             else:
-                _cprint(f"  {_DIM}No wait barrier set.{_RST}")
+                _cprint(f'  {_DIM}Ожидание не задано.{_RST}')
             return
 
         # /goal gate ... — manage deterministic quality gates. A gate is a
@@ -3181,9 +3162,7 @@ class CLICommandsMixin:
                     _cprint(f"  /goal gate add: {exc}")
                     return
                 _cprint(
-                    f"  ⚿ Gate added: $ {gate.command} "
-                    f"({gate.max_retries} retries, {gate.timeout_seconds}s timeout). "
-                    f"It must pass before the goal can complete."
+                    f'  ⚿ Проверка добавлена: $ {gate.command} ({gate.max_retries} повторов, {gate.timeout_seconds} с ожидания). Она должна пройти до завершения цели.'
                 )
                 return
             if gate_lower.startswith("remove ") or gate_lower.startswith("rm "):
@@ -3193,7 +3172,7 @@ class CLICommandsMixin:
                 except (RuntimeError, ValueError, IndexError) as exc:
                     _cprint(f"  /goal gate remove: {exc}")
                     return
-                _cprint(f"  ✓ Gate removed: $ {removed}")
+                _cprint(f'  ✓ Проверка удалена: $ {removed}')
                 return
             if gate_lower == "clear":
                 try:
@@ -3201,9 +3180,9 @@ class CLICommandsMixin:
                 except RuntimeError as exc:
                     _cprint(f"  /goal gate clear: {exc}")
                     return
-                _cprint(f"  ✓ Cleared {prev} gate{'s' if prev != 1 else ''}.")
+                _cprint(f"  ✓ Удалено {prev} проверок{('' if prev != 1 else '')}.")
                 return
-            _cprint("  Usage: /goal gate [list | add <command> | remove <N> | clear]")
+            _cprint('  Использование: /goal gate [list | add <команда> | remove <N> | clear]')
             return
 
         # Otherwise treat the arg as the goal text. Inline `field: value`
@@ -3217,19 +3196,16 @@ class CLICommandsMixin:
         try:
             state = mgr.set(goal_text, contract=contract if not contract.is_empty() else None)
         except ValueError as exc:
-            _cprint(f"  Invalid goal: {exc}")
+            _cprint(f'  Некорректная цель: {exc}')
             return
 
-        _cprint(f"  ⊙ Goal set ({state.max_turns}-turn budget): {state.goal}")
+        _cprint(f'  ⊙ Цель задана (лимит {state.max_turns} ходов): {state.goal}')
         if state.has_contract():
-            _cprint(f"  {_DIM}Completion contract:{_RST}")
+            _cprint(f'  {_DIM}Условия завершения:{_RST}')
             for line in state.contract.render_block().splitlines():
                 _cprint(f"    {line}")
         _cprint(
-            f"  {_DIM}After each turn, a judge model checks if the goal is done"
-            f"{' against the contract above' if state.has_contract() else ''}. "
-            f"Korra keeps working until it is, you pause/clear it, or the budget is "
-            f"exhausted. Use /goal status, /goal show, /goal pause, /goal resume, /goal clear.{_RST}"
+            f"  {_DIM}После каждого хода другая модель проверяет достижение цели{(' по условиям выше' if state.has_contract() else '')}. Korra продолжает работу, пока цель не достигнута, вы её не приостановите/удалите или не закончится лимит. Управление: /goal status, /goal show, /goal pause, /goal resume, /goal clear.{_RST}"
         )
         # Kick the loop off immediately so the user doesn't have to send a
         # separate message after setting the goal.
@@ -3247,10 +3223,10 @@ class CLICommandsMixin:
 
         mgr = self._get_goal_manager()
         if mgr is None:
-            _cprint(f"  {_DIM}Goals unavailable (no active session).{_RST}")
+            _cprint(f'  {_DIM}Цели недоступны: нет активной беседы.{_RST}')
             return
 
-        _cprint(f"  {_DIM}Drafting completion contract…{_RST}")
+        _cprint(f'  {_DIM}Составляю условия завершения…{_RST}')
         try:
             contract = draft_contract(objective)
         except Exception as exc:
@@ -3261,23 +3237,20 @@ class CLICommandsMixin:
         try:
             state = mgr.set(objective, contract=contract)
         except ValueError as exc:
-            _cprint(f"  Invalid goal: {exc}")
+            _cprint(f'  Некорректная цель: {exc}')
             return
 
-        _cprint(f"  ⊙ Goal set ({state.max_turns}-turn budget): {state.goal}")
+        _cprint(f'  ⊙ Цель задана (лимит {state.max_turns} ходов): {state.goal}')
         if state.has_contract():
-            _cprint(f"  {_DIM}Drafted completion contract:{_RST}")
+            _cprint(f'  {_DIM}Подготовлены условия завершения:{_RST}')
             for line in state.contract.render_block().splitlines():
                 _cprint(f"    {line}")
             _cprint(
-                f"  {_DIM}Tighten any field by re-setting the goal with inline "
-                f"lines (e.g. verify: <command>), then /goal resume. "
-                f"Use /goal show to review.{_RST}"
+                f'  {_DIM}Чтобы уточнить условия, задайте цель заново со строками параметров (например, verify: <команда>), затем выполните /goal resume. Просмотр: /goal show.{_RST}'
             )
         else:
             _cprint(
-                f"  {_DIM}Couldn't draft a contract (aux model unavailable) — "
-                f"running as a free-form goal. The per-turn judge still applies.{_RST}"
+                f'  {_DIM}Не удалось составить условия: вспомогательная модель недоступна. Продолжаю со свободной формулировкой цели; проверка после каждого хода сохраняется.{_RST}'
             )
         try:
             self._pending_input.put(state.goal)
@@ -3297,7 +3270,7 @@ class CLICommandsMixin:
 
         mgr = self._get_loop_manager()
         if mgr is None:
-            _cprint(f"  {_DIM}Loops unavailable (no active session).{_RST}")
+            _cprint(f'  {_DIM}Повторы недоступны: нет активной беседы.{_RST}')
             return
 
         from korra_cli.loops import dispatch_loop_command
@@ -3311,8 +3284,7 @@ class CLICommandsMixin:
 
                 if goal_blocks_loop_tick(mgr.session_id):
                     _cprint(
-                        f"  {_DIM}Note: an active /goal is driving this session — "
-                        f"loop wakeups defer until the goal finishes, pauses, or parks.{_RST}"
+                        f'  {_DIM}Сейчас беседой управляет /goal. Повторы будут отложены до завершения, паузы или ожидания цели.{_RST}'
                     )
             except Exception:
                 pass
@@ -3338,11 +3310,11 @@ class CLICommandsMixin:
 
         mgr = self._get_goal_manager()
         if mgr is None:
-            _cprint(f"  {_DIM}Goals unavailable (no active session).{_RST}")
+            _cprint(f'  {_DIM}Цели недоступны: нет активной беседы.{_RST}')
             return
 
         if not mgr.has_goal():
-            _cprint(f"  {_DIM}No active goal. Set one with /goal <text>.{_RST}")
+            _cprint(f'  {_DIM}Нет активной цели. Задайте её: /goal <текст>.{_RST}')
             return
 
         # No args → list current subgoals.
@@ -3357,19 +3329,19 @@ class CLICommandsMixin:
 
         if verb == "remove":
             if not rest:
-                _cprint("  Usage: /subgoal remove <n>")
+                _cprint('  Использование: /subgoal remove <номер>')
                 return
             try:
                 idx = int(rest.split()[0])
             except ValueError:
-                _cprint("  /subgoal remove: <n> must be an integer (1-based index).")
+                _cprint('  /subgoal remove: нужен целый номер, начиная с 1.')
                 return
             try:
                 removed = mgr.remove_subgoal(idx)
             except (IndexError, RuntimeError) as exc:
                 _cprint(f"  /subgoal remove: {exc}")
                 return
-            _cprint(f"  ✓ Removed subgoal {idx}: {removed}")
+            _cprint(f'  ✓ Подцель удалена: {idx}: {removed}')
             return
 
         if verb == "clear":
@@ -3379,9 +3351,9 @@ class CLICommandsMixin:
                 _cprint(f"  /subgoal clear: {exc}")
                 return
             if prev:
-                _cprint(f"  ✓ Cleared {prev} subgoal{'s' if prev != 1 else ''}.")
+                _cprint(f"  ✓ Удалено {prev} подцелей{('' if prev != 1 else '')}.")
             else:
-                _cprint(f"  {_DIM}No subgoals to clear.{_RST}")
+                _cprint(f'  {_DIM}Нет подцелей для удаления.{_RST}')
             return
 
         # Otherwise — append the whole arg as a new subgoal.
@@ -3391,7 +3363,7 @@ class CLICommandsMixin:
             _cprint(f"  /subgoal: {exc}")
             return
         idx = len(mgr.state.subgoals) if mgr.state else 0
-        _cprint(f"  ✓ Added subgoal {idx}: {text}")
+        _cprint(f'  ✓ Подцель добавлена: {idx}: {text}')
 
     def _handle_skin_command(self, cmd: str):
         """Handle /skin [name] — show or change the display skin."""
@@ -3399,7 +3371,7 @@ class CLICommandsMixin:
         try:
             from korra_cli.skin_engine import list_skins, set_active_skin, get_active_skin_name
         except ImportError:
-            print("Skin engine not available.")
+            print('Темы оформления недоступны.')
             return
 
         parts = cmd.strip().split(maxsplit=1)
@@ -3407,21 +3379,21 @@ class CLICommandsMixin:
             # Show current skin and list available
             current = get_active_skin_name()
             skins = list_skins()
-            print(f"\n  Current skin: {current}")
-            print("  Available skins:")
+            print(f'\n  Текущая тема: {current}')
+            print('  Доступные темы:')
             for s in skins:
                 marker = " ●" if s["name"] == current else "  "
                 source = f" ({s['source']})" if s["source"] == "user" else ""
                 print(f"   {marker} {s['name']}{source} — {s['description']}")
-            print("\n  Usage: /skin <name>")
-            print(f"  Custom skins: drop a YAML file in {display_hermes_home()}/skins/\n")
+            print('\n  Использование: /skin <имя>')
+            print(f'  Своя тема: добавьте YAML-файл в {display_hermes_home()}/skins/\n')
             return
 
         new_skin = parts[1].strip().lower()
         available = {s["name"] for s in list_skins()}
         if new_skin not in available:
-            print(f"  Unknown skin: {new_skin}")
-            print(f"  Available: {', '.join(sorted(available))}")
+            print(f'  Неизвестная тема: {new_skin}')
+            print(f"  Доступны: {', '.join(sorted(available))}")
             return
 
         set_active_skin(new_skin)
@@ -3429,12 +3401,12 @@ class CLICommandsMixin:
         # _DIM is now a fixed dim+italic ANSI escape (terminal-default fg)
         # so it doesn't need re-resolving on skin switch.
         if save_config_value("display.skin", new_skin):
-            print(f"  Skin set to: {new_skin} (saved)")
+            print(f'  Выбрана тема: {new_skin} (сохранено)')
         else:
-            print(f"  Skin set to: {new_skin}")
-        print("  Note: banner colors will update on next session start.")
+            print(f'  Выбрана тема: {new_skin}')
+        print('  Цвета заставки обновятся при следующем запуске беседы.')
         if self._apply_tui_skin_style():
-            print("  Prompt + TUI colors updated.")
+            print('  Цвета ввода и TUI обновлены.')
 
     def _compose_in_editor(self, initial_text: str = "") -> str:
         """Open ``$VISUAL``/``$EDITOR`` on a temp markdown file and return the
@@ -3498,11 +3470,11 @@ class CLICommandsMixin:
         try:
             composed = self._compose_in_editor(initial)
         except Exception as exc:
-            _cprint(f"  {_DIM}(>_<) Could not open editor: {exc}{_RST}")
+            _cprint(f'  {_DIM}(>_<) Не удалось открыть редактор: {exc}{_RST}')
             return
 
         if not composed:
-            _cprint(f"  {_DIM}(._.) Empty prompt — nothing sent.{_RST}")
+            _cprint(f'  {_DIM}(._.) Запрос пуст. Ничего не отправлено.{_RST}')
             return
 
         # One-shot seed: the interactive loop runs this as the next agent turn
@@ -3553,7 +3525,7 @@ class CLICommandsMixin:
         action, target = resolve_focus_arg(arg, current)
 
         if action == "usage":
-            _cprint("  Usage: /focus [on|off|status]")
+            _cprint('  Использование: /focus [on|off|status]')
             return
 
         # The mode /focus off will restore. While focus is ON the live
@@ -3700,8 +3672,7 @@ class CLICommandsMixin:
         if arg in {"status", "?"}:
             state = "ON" if current else "OFF"
             _cprint(
-                f"  {_Colors.BOLD}Runtime footer:{_Colors.RESET} {state}\n"
-                f"  Fields: {', '.join(fields)}"
+                f"  {_Colors.BOLD}Строка состояния под ответом:{_Colors.RESET} {state}\n  Поля: {', '.join(fields)}"
             )
             return
 
@@ -3712,7 +3683,7 @@ class CLICommandsMixin:
         elif arg == "":
             new_state = not current
         else:
-            _cprint("  Usage: /footer [on|off|status]")
+            _cprint('  Использование: /footer [on|off|status]')
             return
 
         if save_config_value("display.runtime_footer.enabled", new_state):
@@ -3720,9 +3691,9 @@ class CLICommandsMixin:
                 f"{_Colors.GREEN}ON{_Colors.RESET}" if new_state
                 else f"{_Colors.DIM}OFF{_Colors.RESET}"
             )
-            _cprint(f"  Runtime footer: {state}")
+            _cprint(f'  Строка состояния под ответом: {state}')
         else:
-            _cprint("  Failed to save runtime_footer setting to config.yaml")
+            _cprint('  Не удалось сохранить runtime_footer в config.yaml')
 
     def _handle_timestamps_command(self, cmd_original: str) -> None:
         """Toggle or inspect ``display.timestamps`` from the CLI.
@@ -3751,7 +3722,7 @@ class CLICommandsMixin:
 
         if arg in {"status", "?"}:
             state = "ON" if current else "OFF"
-            _cprint(f"  {_Colors.BOLD}Message timestamps:{_Colors.RESET} {state}")
+            _cprint(f'  {_Colors.BOLD}Время сообщений:{_Colors.RESET} {state}')
             return
 
         if arg in {"on", "enable", "true", "1"}:
@@ -3761,7 +3732,7 @@ class CLICommandsMixin:
         elif arg == "":
             new_state = not current
         else:
-            _cprint("  Usage: /timestamps [on|off|status]")
+            _cprint('  Использование: /timestamps [on|off|status]')
             return
 
         self.show_timestamps = new_state
@@ -3770,9 +3741,9 @@ class CLICommandsMixin:
                 f"{_Colors.GREEN}ON{_Colors.RESET}" if new_state
                 else f"{_Colors.DIM}OFF{_Colors.RESET}"
             )
-            _cprint(f"  Message timestamps: {state}")
+            _cprint(f'  Время сообщений: {state}')
         else:
-            _cprint("  Failed to save timestamps setting to config.yaml")
+            _cprint('  Не удалось сохранить timestamps в config.yaml')
 
     def _handle_reasoning_command(self, cmd: str):
         """Handle /reasoning — manage effort level and display toggle.
@@ -3800,9 +3771,9 @@ class CLICommandsMixin:
                 level = rc.get("effort", "medium")
             display_state = "on ✓" if self.show_reasoning else "off"
             full_state = "full" if getattr(self, "reasoning_full", False) else "clamped to 10 lines"
-            _cprint(f"  {_ACCENT}Reasoning effort:  {level}{_RST}")
-            _cprint(f"  {_ACCENT}Reasoning display: {display_state} ({full_state}){_RST}")
-            _cprint(f"  {_DIM}Usage: /reasoning <none|minimal|low|medium|high|xhigh|max|ultra|show|hide|full|clamp> [--global]{_RST}")
+            _cprint(f'  {_ACCENT}Глубина рассуждений: {level}{_RST}')
+            _cprint(f'  {_ACCENT}Показ рассуждений:   {display_state} ({full_state}){_RST}')
+            _cprint(f'  {_DIM}Использование: /reasoning <none|minimal|low|medium|high|xhigh|max|ultra|show|hide|full|clamp> [--global]{_RST}')
             return
 
         arg = parts[1].strip().lower()
@@ -3823,39 +3794,39 @@ class CLICommandsMixin:
             if self.agent:
                 self.agent.reasoning_callback = self._current_reasoning_callback()
             save_config_value("display.show_reasoning", True)
-            _cprint(f"  {_ACCENT}✓ Reasoning display: ON (saved){_RST}")
-            _cprint(f"  {_DIM}  Model thinking will be shown during and after each response.{_RST}")
+            _cprint(f'  {_ACCENT}✓ Показ рассуждений включён (сохранено){_RST}')
+            _cprint(f'  {_DIM}  Рассуждения модели будут видны во время и после ответа.{_RST}')
             return
         if arg in {"hide", "off"}:
             self.show_reasoning = False
             if self.agent:
                 self.agent.reasoning_callback = self._current_reasoning_callback()
             save_config_value("display.show_reasoning", False)
-            _cprint(f"  {_ACCENT}✓ Reasoning display: OFF (saved){_RST}")
+            _cprint(f'  {_ACCENT}✓ Показ рассуждений выключен (сохранено){_RST}')
             return
 
         # Full / clamped recap toggle
         if arg in {"full", "all"}:
             self.reasoning_full = True
             save_config_value("display.reasoning_full", True)
-            _cprint(f"  {_ACCENT}✓ Reasoning display: FULL (saved){_RST}")
-            _cprint(f"  {_DIM}  The post-response recap box will print complete thinking.{_RST}")
+            _cprint(f'  {_ACCENT}✓ Рассуждения показываются полностью (сохранено){_RST}')
+            _cprint(f'  {_DIM}  После ответа будут показаны полные рассуждения модели.{_RST}')
             if not self.show_reasoning:
-                _cprint(f"  {_DIM}  Note: reasoning display is OFF — run /reasoning show to see it.{_RST}")
+                _cprint(f'  {_DIM}  Показ рассуждений выключен. Чтобы включить: /reasoning show.{_RST}')
             return
         if arg in {"clamp", "collapse", "short"}:
             self.reasoning_full = False
             save_config_value("display.reasoning_full", False)
-            _cprint(f"  {_ACCENT}✓ Reasoning display: CLAMPED to 10 lines (saved){_RST}")
+            _cprint(f'  {_ACCENT}✓ Рассуждения сокращены до 10 строк (сохранено){_RST}')
             return
 
         # Effort level change
         parsed = _parse_reasoning_config(arg)
         if parsed is None:
-            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}{_RST}")
-            _cprint(f"  {_DIM}Valid levels: none, minimal, low, medium, high, xhigh, max, ultra{_RST}")
-            _cprint(f"  {_DIM}Display:      show, hide{_RST}")
-            _cprint(f"  {_DIM}Scope:        session-scoped by default, --global to persist{_RST}")
+            _cprint(f'  {_DIM}(._.) Неизвестный аргумент: {arg}{_RST}')
+            _cprint(f'  {_DIM}Глубина: none, minimal, low, medium, high, xhigh, max, ultra{_RST}')
+            _cprint(f'  {_DIM}Показ:   show, hide{_RST}')
+            _cprint(f'  {_DIM}Срок:    текущая беседа; --global сохраняет настройку{_RST}')
             return
 
         self.reasoning_config = parsed
@@ -3867,11 +3838,11 @@ class CLICommandsMixin:
                 agent_cfg = {}
                 CLI_CONFIG["agent"] = agent_cfg
             agent_cfg["reasoning_effort"] = arg
-            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (saved to config){_RST}")
+            _cprint(f"  {_ACCENT}✓ Глубина рассуждений: '{arg}'; настройка сохранена.{_RST}")
         elif explicit_global:
-            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (session only; config save failed){_RST}")
+            _cprint(f"  {_ACCENT}✓ Глубина рассуждений: '{arg}' (только эта беседа; настройки сохранить не удалось){_RST}")
         else:
-            _cprint(f"  {_ACCENT}✓ Reasoning effort set to '{arg}' (this session — use --global to persist){_RST}")
+            _cprint(f"  {_ACCENT}✓ Глубина рассуждений: '{arg}' (только эта беседа; для сохранения добавьте --global){_RST}")
 
     def _handle_busy_command(self, cmd: str):
         """Handle /busy — control what Enter does while Hermes is working.
@@ -3886,21 +3857,21 @@ class CLICommandsMixin:
         from cli import _ACCENT, _DIM, _RST, _cprint, save_config_value
         parts = cmd.strip().split(maxsplit=1)
         if len(parts) < 2 or parts[1].strip().lower() == "status":
-            _cprint(f"  {_ACCENT}Busy input mode: {self.busy_input_mode}{_RST}")
+            _cprint(f'  {_ACCENT}Новые сообщения во время работы: {self.busy_input_mode}{_RST}')
             if self.busy_input_mode == "queue":
                 _behavior = "queues for next turn"
             elif self.busy_input_mode == "steer":
                 _behavior = "steers into current run (after next tool call)"
             else:
                 _behavior = "redirects current run immediately"
-            _cprint(f"  {_DIM}Enter while busy: {_behavior}{_RST}")
-            _cprint(f"  {_DIM}Usage: /busy [queue|steer|interrupt|status]{_RST}")
+            _cprint(f'  {_DIM}Enter во время работы: {_behavior}{_RST}')
+            _cprint(f'  {_DIM}Использование: /busy [queue|steer|interrupt|status]{_RST}')
             return
 
         arg = parts[1].strip().lower()
         if arg not in {"queue", "interrupt", "steer"}:
-            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}{_RST}")
-            _cprint(f"  {_DIM}Usage: /busy [queue|steer|interrupt|status]{_RST}")
+            _cprint(f'  {_DIM}(._.) Неизвестный аргумент: {arg}{_RST}')
+            _cprint(f'  {_DIM}Использование: /busy [queue|steer|interrupt|status]{_RST}')
             return
 
         self.busy_input_mode = arg
@@ -3911,10 +3882,10 @@ class CLICommandsMixin:
                 behavior = "Enter will steer your message into the current run (after the next tool call)."
             else:
                 behavior = "Enter will redirect the current run while Korra is busy; /stop still cancels it."
-            _cprint(f"  {_ACCENT}✓ Busy input mode set to '{arg}' (saved to config){_RST}")
+            _cprint(f"  {_ACCENT}✓ Режим новых сообщений: '{arg}'; настройка сохранена.{_RST}")
             _cprint(f"  {_DIM}{behavior}{_RST}")
         else:
-            _cprint(f"  {_ACCENT}✓ Busy input mode set to '{arg}' (session only){_RST}")
+            _cprint(f"  {_ACCENT}✓ Режим новых сообщений: '{arg}' для этой беседы.{_RST}")
 
     def _handle_indicator_command(self, cmd: str):
         """Handle /indicator — pick the TUI busy-indicator style.
@@ -3939,22 +3910,22 @@ class CLICommandsMixin:
 
         parts = cmd.strip().split(maxsplit=1)
         if len(parts) < 2 or parts[1].strip().lower() == "status":
-            _cprint(f"  {_ACCENT}Busy-indicator style: {current}{_RST}")
-            _cprint(f"  {_DIM}Usage: /indicator [{'|'.join(styles)}]{_RST}")
+            _cprint(f'  {_ACCENT}Вид индикатора работы: {current}{_RST}')
+            _cprint(f"  {_DIM}Использование: /indicator [{'|'.join(styles)}]{_RST}")
             return
 
         arg = parts[1].strip().lower()
         if arg not in styles:
-            _cprint(f"  {_DIM}(._.) Unknown indicator style: {arg}{_RST}")
-            _cprint(f"  {_DIM}Usage: /indicator [{'|'.join(styles)}]{_RST}")
+            _cprint(f'  {_DIM}(._.) Неизвестный вид индикатора: {arg}{_RST}')
+            _cprint(f"  {_DIM}Использование: /indicator [{'|'.join(styles)}]{_RST}")
             return
 
         self.config.setdefault("display", {})["tui_status_indicator"] = arg
         if save_config_value("display.tui_status_indicator", arg):
-            _cprint(f"  {_ACCENT}✓ Busy-indicator style set to '{arg}' (saved to config){_RST}")
-            _cprint(f"  {_DIM}The TUI picks up the new style on its next render.{_RST}")
+            _cprint(f"  {_ACCENT}✓ Выбран индикатор: '{arg}'; настройка сохранена.{_RST}")
+            _cprint(f'  {_DIM}TUI применит новый вид при следующем обновлении экрана.{_RST}')
         else:
-            _cprint(f"  {_ACCENT}✓ Busy-indicator style set to '{arg}' (session only){_RST}")
+            _cprint(f"  {_ACCENT}✓ Выбран индикатор: '{arg}' для этой беседы.{_RST}")
 
     def _handle_fast_command(self, cmd: str):
         """Handle /fast — toggle fast mode (OpenAI Priority Processing / Anthropic Fast Mode).
@@ -3964,7 +3935,7 @@ class CLICommandsMixin:
         """
         from cli import _ACCENT, _DIM, _RST, _cprint, save_config_value
         if not self._fast_command_available():
-            _cprint("  (._.) /fast is only available for models that support fast mode (OpenAI Priority Processing or Anthropic Fast Mode).")
+            _cprint('  (._.) /fast доступен только для моделей с быстрым режимом: приоритетная обработка OpenAI или быстрый режим Anthropic.')
             return
 
         # Determine the branding for the current model
@@ -3980,7 +3951,7 @@ class CLICommandsMixin:
         if len(parts) < 2 or parts[1].strip().lower() == "status":
             status = "fast" if self.service_tier == "priority" else "normal"
             _cprint(f"  {_ACCENT}{feature_name}: {status}{_RST}")
-            _cprint(f"  {_DIM}Usage: /fast [normal|fast|status] [--global]{_RST}")
+            _cprint(f'  {_DIM}Использование: /fast [normal|fast|status] [--global]{_RST}')
             return
 
         arg_tokens = parts[1].strip().lower().split()
@@ -3999,17 +3970,17 @@ class CLICommandsMixin:
             saved_value = "normal"
             label = "NORMAL"
         else:
-            _cprint(f"  {_DIM}(._.) Unknown argument: {arg}{_RST}")
-            _cprint(f"  {_DIM}Usage: /fast [normal|fast|status] [--global]{_RST}")
+            _cprint(f'  {_DIM}(._.) Неизвестный аргумент: {arg}{_RST}')
+            _cprint(f'  {_DIM}Использование: /fast [normal|fast|status] [--global]{_RST}')
             return
 
         self.agent = None  # Force agent re-init with new service-tier config
         if explicit_global and save_config_value("agent.service_tier", saved_value):
-            _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (saved to config){_RST}")
+            _cprint(f'  {_ACCENT}✓ {feature_name} установлен: {label} (сохранено в настройках){_RST}')
         elif explicit_global:
-            _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (session only; config save failed){_RST}")
+            _cprint(f'  {_ACCENT}✓ {feature_name} установлен: {label} (только эта беседа; настройки сохранить не удалось){_RST}')
         else:
-            _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (this session — use --global to persist){_RST}")
+            _cprint(f'  {_ACCENT}✓ {feature_name} установлен: {label} (только эта беседа; для сохранения добавьте --global){_RST}')
 
     def _handle_debug_command(self, cmd_original: str = ""):
         """Handle /debug — upload debug report + logs and print share URLs.
@@ -4052,7 +4023,7 @@ class CLICommandsMixin:
         from korra_cli.config import is_managed, format_managed_message
 
         if is_managed():
-            print(f"  ✗ {format_managed_message('update Korra')}")
+            print(f"  ✗ {format_managed_message('обновить Korra')}")
             return False
 
         # Use the prompt_toolkit-native modal so the confirmation panel
@@ -4069,15 +4040,15 @@ class CLICommandsMixin:
             choices=choices,
         )
         if raw is None:
-            print("  🟡 /update cancelled.")
+            print('  🟡 /update отменена.')
             return False
         choice = self._normalize_slash_confirm_choice(raw, choices)
         if choice != "once":
-            print("  🟡 /update cancelled.")
+            print('  🟡 /update отменена.')
             return False
 
         print()
-        print("  ⚕ Launching update...")
+        print('  ⚕ Запускаю обновление...')
         print()
 
         # Store the relaunch args so run() can exec them from the main thread
@@ -4110,8 +4081,8 @@ class CLICommandsMixin:
             else:
                 self._enable_voice_mode()
         else:
-            _cprint(f"Unknown voice subcommand: {subcommand}")
-            _cprint("Usage: /voice [on|off|tts|status]")
+            _cprint(f'Неизвестная подкоманда голоса: {subcommand}')
+            _cprint('Использование: /voice [on|off|tts|status]')
 
     def _handle_wake_command(self, command: str):
         """Handle /wake [on|off|status] — the 'Hey Hermes' hotword listener.
@@ -4141,8 +4112,8 @@ class CLICommandsMixin:
             else:
                 self._show_wake_word_status()
         else:
-            _cprint(f"Unknown wake subcommand: {subcommand}")
-            _cprint("Usage: /wake [on|off|status]")
+            _cprint(f'Неизвестная подкоманда голосовой активации: {subcommand}')
+            _cprint('Использование: /wake [on|off|status]')
 
     def _persist_wake_word_enabled(self, enabled: bool):
         """Save ``wake_word.enabled`` so the /wake toggle sticks for future sessions."""
@@ -4156,5 +4127,4 @@ class CLICommandsMixin:
         except Exception:
             pass
         if save_config_value("wake_word.enabled", enabled):
-            _cprint(f"{_DIM}Wake word {'enabled' if enabled else 'disabled'} in config "
-                    f"(wake_word.enabled: {str(enabled).lower()}).{_RST}")
+            _cprint(f"{_DIM}Голосовая активация {('включена' if enabled else 'выключена')} в настройках (wake_word.enabled: {str(enabled).lower()}).{_RST}")

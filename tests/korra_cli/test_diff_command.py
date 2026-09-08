@@ -86,7 +86,7 @@ def repo(tmp_path, monkeypatch):
 @requires_git
 def test_diff_clean_repo_reports_no_changes(repo):
     out = _run(_Stub(), "/diff")
-    assert "No changes" in out
+    assert "Изменений нет" in out
 
 
 @requires_git
@@ -107,6 +107,6 @@ def test_diff_session_empty_reports_no_changes(tmp_path, monkeypatch):
     monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
     mgr = _Mgr({"success": True, "stat": "", "diff": "", "empty": True})
     out = _run(_Stub(_Agent(mgr)), "/diff session")
-    assert "No changes" in out
+    assert "Изменений нет" in out
 
 

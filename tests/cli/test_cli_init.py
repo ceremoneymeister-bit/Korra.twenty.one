@@ -301,14 +301,14 @@ class TestHistoryDisplay:
         cli.show_history()
         output = capsys.readouterr().out
 
-        assert "[You #1]" in output
-        assert "[Hermes #2]" in output
-        assert "(requested 2 tool calls)" in output
-        assert "[Tools]" in output
-        assert "(2 tool messages hidden)" in output
-        assert "[Hermes #3]" in output
-        assert "[You #4]" in output
-        assert "[You #5]" not in output
+        assert "[Вы №1]" in output
+        assert "[Korra №2]" in output
+        assert "(запрошено вызовов инструментов: 2)" in output
+        assert "[Инструменты]" in output
+        assert "(скрыто сообщений инструментов: 2)" in output
+        assert "[Korra №3]" in output
+        assert "[Вы №4]" in output
+        assert "[Вы №5]" not in output
         assert "A" * 250 in output
         assert "A" * 250 + "..." not in output
 
@@ -335,10 +335,10 @@ class TestHistoryDisplay:
         cli._handle_resume_command("/resume")
         output = capsys.readouterr().out
 
-        assert "Recent sessions" in output
+        assert "Недавние беседы" in output
         assert "Checking Running Hermes Agent" in output
-        assert "Use /resume" in output
-        assert "session title" in output
+        assert "Чтобы продолжить, используйте /resume" in output
+        assert "название беседы" in output
 
 
 
@@ -368,7 +368,7 @@ class TestHistoryDisplay:
         output = capsys.readouterr().out
 
         assert "Unknown command" not in output
-        assert "Recent sessions" in output
+        assert "Недавние беседы" in output
         assert "Checking Running Hermes Agent" in output
         assert "20260401_201329_d85961" in output
 
@@ -460,10 +460,10 @@ class TestNestedDictModelDefaultPairing:
         output = capsys.readouterr().out
 
         assert "Unknown command" not in output
-        assert "cli (local terminal)" in output
-        assert "Tier:" in output
-        assert "unrestricted" in output
-        assert "Slash commands: all available" in output
+        assert "CLI (локальный терминал)" in output
+        assert "Доступ:" in output
+        assert "без ограничений" in output
+        assert "Команды /:      доступны все" in output
 
 
 class TestRootLevelProviderOverride:

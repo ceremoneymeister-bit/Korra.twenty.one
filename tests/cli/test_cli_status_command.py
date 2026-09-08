@@ -82,13 +82,13 @@ def test_show_session_status_prints_gateway_style_summary():
         cli_obj._show_session_status()
 
     printed = "\n".join(str(call.args[0]) for call in cli_obj.console.print.call_args_list)
-    assert "Hermes CLI Status" in printed
-    assert "Session ID: session-123" in printed
-    assert "Path: ~/.hermes" in printed
-    assert "Title: My titled session" in printed
-    assert "Model: openai/gpt-5.4 (openai)" in printed
-    assert "Tokens: 321" in printed
-    assert "Agent Running: No" in printed
+    assert "Состояние терминала Korra" in printed
+    assert "ID беседы: session-123" in printed
+    assert "Папка: ~/.hermes" in printed
+    assert "Название: My titled session" in printed
+    assert "Модель: openai/gpt-5.4 (openai)" in printed
+    assert "Токены: 321" in printed
+    assert "Агент работает: Нет" in printed
     _, kwargs = cli_obj.console.print.call_args
     assert kwargs.get("highlight") is False
     assert kwargs.get("markup") is False
@@ -113,9 +113,9 @@ def test_show_session_status_includes_reasoning_approvals_context():
         cli_obj._show_session_status()
 
     printed = "\n".join(str(call.args[0]) for call in cli_obj.console.print.call_args_list)
-    assert "Reasoning: high (display: on)" in printed
-    assert "Approvals: manual" in printed
-    assert "Context: 75% left · 50,000 / 200,000 tokens used" in printed
+    assert "Рассуждения: high (показ: вкл)" in printed
+    assert "Одобрения: manual" in printed
+    assert "Контекст: осталось 75% · 50,000 / 200,000 токенов использовано" in printed
 
 
 def test_profile_command_reports_custom_root_profile(monkeypatch, tmp_path, capsys):
@@ -129,5 +129,5 @@ def test_profile_command_reports_custom_root_profile(monkeypatch, tmp_path, caps
     cli_obj._handle_profile_command()
 
     out = capsys.readouterr().out
-    assert "Profile: coder" in out
-    assert f"Home:    {profile_home}" in out
+    assert "Профиль: coder" in out
+    assert f"Папка:   {profile_home}" in out

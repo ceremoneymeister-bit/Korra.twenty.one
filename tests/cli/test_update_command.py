@@ -103,7 +103,7 @@ def test_affirmative_answer_sets_pending_relaunch_and_returns_true(answer, capsy
 
     assert self_._pending_relaunch == ["update"]
     assert result is True
-    assert "Launching update" in capsys.readouterr().out
+    assert "Запускаю обновление" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ def test_negative_answer_cancels(answer, capsys):
 
     assert self_._pending_relaunch is None
     assert not result
-    assert "Launching update" not in capsys.readouterr().out
+    assert "Запускаю обновление" not in capsys.readouterr().out
 
 
 def test_none_response_cancels(capsys):

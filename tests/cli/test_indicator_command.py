@@ -122,7 +122,7 @@ class TestHandleIndicatorCommand(unittest.TestCase):
         # The stored value must be untouched.
         self.assertEqual(stub.config["display"]["tui_status_indicator"], "kaomoji")
         printed = " ".join(str(c) for c in mock_cprint.call_args_list)
-        self.assertIn("Usage: /indicator", printed)
+        self.assertIn("Использование: /indicator", printed)
 
 
 class TestIndicatorRegistry(unittest.TestCase):

@@ -53,10 +53,10 @@ class TestResumeQuietStderr:
         captured = capsys.readouterr()
         assert result is False
         # stdout must stay clean
-        assert "Session not found" not in captured.out
+        assert "Беседа не найдена" not in captured.out
         # the resume status goes to stderr
-        assert "Session not found" in captured.err
-        assert "hermes sessions list" in captured.err
+        assert "Беседа не найдена" in captured.err
+        assert "korra sessions list" in captured.err
 
     def test_session_not_found_goes_to_stdout_in_full_mode(self, capsys):
         db = MagicMock()
@@ -69,7 +69,7 @@ class TestResumeQuietStderr:
         captured = capsys.readouterr()
         assert result is False
         # Interactive mode keeps the existing _cprint path → stdout.
-        assert "Session not found" in captured.out
+        assert "Беседа не найдена" in captured.out
 
     def test_resumed_banner_goes_to_stderr_in_quiet_mode(self, capsys):
         db = MagicMock()
@@ -95,8 +95,8 @@ class TestResumeQuietStderr:
 
         captured = capsys.readouterr()
         # Banner on stderr — stdout stays clean for automation.
-        assert "↻ Resumed session" not in captured.out
-        assert "↻ Resumed session" in captured.err
+        assert "↻ Беседа восстановлена" not in captured.out
+        assert "↻ Беседа восстановлена" in captured.err
         assert "20260524_111111_xyz" in captured.err
         assert "demo" in captured.err
 
@@ -115,6 +115,6 @@ class TestResumeQuietStderr:
                 pass
 
         captured = capsys.readouterr()
-        assert "has no messages" not in captured.out
-        assert "has no messages" in captured.err
-        assert "Starting fresh" in captured.err
+        assert "сообщений в ней нет" not in captured.out
+        assert "сообщений в ней нет" in captured.err
+        assert "Начинаем заново" in captured.err

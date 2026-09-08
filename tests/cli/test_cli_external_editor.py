@@ -47,7 +47,7 @@ def test_open_external_editor_rejects_when_no_tui():
         assert cli_obj._open_external_editor() is False
 
     assert mock_cprint.called
-    assert "interactive cli" in str(mock_cprint.call_args).lower()
+    assert "интерактивном терминале" in str(mock_cprint.call_args).lower()
 
 
 

@@ -30,7 +30,7 @@ class TestSlashCommandPrefixMatching:
         with patch("cli._cprint") as mock_cprint:
             cli_obj.process_command("/re")
             printed = " ".join(str(c) for c in mock_cprint.call_args_list)
-        assert "Ambiguous" in printed or "Did you mean" in printed
+        assert "Команда неоднозначна" in printed or "Возможно, вы имели в виду" in printed
 
 
 
@@ -62,7 +62,7 @@ class TestSlashCommandPrefixMatching:
         # /help is an exact match so should work normally, not show ambiguous
         mock_help.assert_called_once()
         printed = " ".join(str(c) for c in cli_obj.console.print.call_args_list)
-        assert "Ambiguous" not in printed
+        assert "Команда неоднозначна" not in printed
 
     def test_shortest_match_preferred_over_longer_skill(self):
         """/qui should dispatch to /quit (5 chars) not report ambiguous with /quint-pipeline (15 chars)."""
@@ -77,7 +77,7 @@ class TestSlashCommandPrefixMatching:
         # Returns False because /quit was dispatched (exits chat loop)
         assert result is False
         printed = " ".join(str(c) for c in cli_obj.console.print.call_args_list)
-        assert "Ambiguous" not in printed
+        assert "Команда неоднозначна" not in printed
 
     def test_tied_shortest_matches_still_ambiguous(self):
         """/re matches /reset and /retry (both 6 chars) — no unique shortest, stays ambiguous."""
@@ -87,7 +87,7 @@ class TestSlashCommandPrefixMatching:
         with patch.object(cli_mod, '_cprint', side_effect=lambda t: printed.append(t)):
             cli_obj.process_command("/re")
         combined = " ".join(printed)
-        assert "Ambiguous" in combined or "Did you mean" in combined
+        assert "Команда неоднозначна" in combined or "Возможно, вы имели в виду" in combined
 
     def test_exact_typed_name_dispatches_over_longer_match(self):
         """/help typed with /help-extra skill installed → exact match wins."""
@@ -99,4 +99,4 @@ class TestSlashCommandPrefixMatching:
             cli_obj.process_command("/help")
         mock_help.assert_called_once()
         printed = " ".join(str(c) for c in cli_obj.console.print.call_args_list)
-        assert "Ambiguous" not in printed
+        assert "Команда неоднозначна" not in printed

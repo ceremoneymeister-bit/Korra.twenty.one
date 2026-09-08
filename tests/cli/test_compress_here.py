@@ -84,8 +84,8 @@ def test_compress_here_banner_mentions_summarizing_up_to_here(capsys):
         shell._manual_compress("/compress here")
 
     out = capsys.readouterr().out
-    assert "Summarizing up to here" in out
-    assert "verbatim" in out
+    assert "Сжимаю историю до этой точки" in out
+    assert "полностью" in out
 
 
 def test_bare_compress_still_full(capsys):
@@ -102,7 +102,7 @@ def test_bare_compress_still_full(capsys):
     # Full mode passes the entire history as the head.
     assert call.args[0] == history
     out = capsys.readouterr().out
-    assert "Summarizing up to here" not in out
+    assert "Сжимаю историю до этой точки" not in out
 
 
 def test_focus_still_works(capsys):

@@ -42,7 +42,7 @@ class TestImageCommand:
 
         assert cli_obj._attached_images == []
         rendered = " ".join(str(arg) for call in mock_print.call_args_list for arg in call.args)
-        assert "Not a supported image file" in rendered
+        assert "Формат изображения не поддерживается" in rendered
 
 
 class TestCollectQueryImages:

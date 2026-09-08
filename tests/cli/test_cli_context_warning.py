@@ -54,7 +54,7 @@ class TestLowContextWarning:
             cli_obj.show_banner()
 
         calls = [str(c) for c in cli_obj.console.print.call_args_list]
-        warning_calls = [c for c in calls if "too low" in c]
+        warning_calls = [c for c in calls if "может не хватить" in c]
         assert len(warning_calls) == 1
         minimum_calls = [c for c in calls if f"{MINIMUM_CONTEXT_LENGTH:,}" in c]
         assert minimum_calls
@@ -68,7 +68,7 @@ class TestLowContextWarning:
             cli_obj.show_banner()
 
         calls = [str(c) for c in cli_obj.console.print.call_args_list]
-        warning_calls = [c for c in calls if "too low" in c]
+        warning_calls = [c for c in calls if "может не хватить" in c]
         assert len(warning_calls) == 1
 
     def test_no_warning_at_boundary(self, cli_obj):
@@ -79,7 +79,7 @@ class TestLowContextWarning:
             cli_obj.show_banner()
 
         calls = [str(c) for c in cli_obj.console.print.call_args_list]
-        warning_calls = [c for c in calls if "too low" in c]
+        warning_calls = [c for c in calls if "может не хватить" in c]
         assert len(warning_calls) == 0
 
     def test_no_warning_above_boundary(self, cli_obj):
@@ -90,7 +90,7 @@ class TestLowContextWarning:
             cli_obj.show_banner()
 
         calls = [str(c) for c in cli_obj.console.print.call_args_list]
-        warning_calls = [c for c in calls if "too low" in c]
+        warning_calls = [c for c in calls if "может не хватить" in c]
         assert len(warning_calls) == 0
 
     def test_ollama_specific_hint(self, cli_obj):
@@ -129,5 +129,5 @@ class TestLowContextWarning:
             cli_obj.show_banner()
 
         calls = [str(c) for c in cli_obj.console.print.call_args_list]
-        warning_calls = [c for c in calls if "too low" in c]
+        warning_calls = [c for c in calls if "может не хватить" in c]
         assert len(warning_calls) == 1

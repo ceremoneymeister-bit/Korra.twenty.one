@@ -251,18 +251,20 @@ class TestCLIUsageReport:
         output = capsys.readouterr().out
 
         # Token counts and session metadata still shown.
-        assert "Model:" in output
-        assert "Input tokens:" in output
-        assert "Output tokens:" in output
-        assert "Total tokens:" in output
-        assert "Session duration:" in output
-        assert "Compressions:" in output
+        assert "Модель:" in output
+        assert "Входные токены:" in output
+        assert "Выходные токены:" in output
+        assert "Всего токенов:" in output
+        assert "Длительность беседы:" in output
+        assert "Сжатия:" in output
         # Cost and cache-hit reporting is removed everywhere.
         assert "Total cost:" not in output
         assert "Cost status:" not in output
         assert "Cost source:" not in output
         assert "Cache read tokens:" not in output
+        assert "Токены чтения кеша:" not in output
         assert "Cache write tokens:" not in output
+        assert "Токены записи кеша:" not in output
 
 
 class TestStatusBarWidthSource:

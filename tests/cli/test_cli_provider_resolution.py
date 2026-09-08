@@ -606,8 +606,8 @@ def test_cmd_model_forwards_nous_login_tls_options(monkeypatch):
 
 def test_auto_provider_name_localhost():
     from korra_cli.main import _auto_provider_name
-    assert _auto_provider_name("http://localhost:11434/v1") == "Local (localhost:11434)"
-    assert _auto_provider_name("http://127.0.0.1:1234/v1") == "Local (127.0.0.1:1234)"
+    assert _auto_provider_name("http://localhost:11434/v1") == "Локальный сервер (localhost:11434)"
+    assert _auto_provider_name("http://127.0.0.1:1234/v1") == "Локальный сервер (127.0.0.1:1234)"
 
 
 

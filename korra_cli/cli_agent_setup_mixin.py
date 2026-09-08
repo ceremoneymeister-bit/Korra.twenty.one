@@ -100,7 +100,7 @@ class CLIAgentSetupMixin:
                             "Primary provider auth failed (%s). Falling through to fallback: %s/%s",
                             _primary_exc, _fb_provider, _fb_model,
                         )
-                        _cprint(f"⚠️  Primary auth failed — switching to fallback: {_fb_provider} / {_fb_model}")
+                        _cprint(f'⚠️ Не удалось войти к основному провайдеру. Переключаюсь на резервного: {_fb_provider} / {_fb_model}')
                         self.requested_provider = _fb_provider
                         self.model = _fb_model
                         _primary_exc = None
@@ -147,15 +147,13 @@ class CLIAgentSetupMixin:
             else:
                 _prov = (resolved_provider or self.requested_provider or "").strip()
                 if _prov and _prov != "auto":
-                    print(f"\n⚠️  No API key found for provider '{_prov}'.")
+                    print(f"\n⚠️ Не найден API-ключ провайдера '{_prov}'.")
                 else:
-                    print("\n⚠️  No inference provider is configured.")
-                print("   Run 'hermes model' to choose a provider, or "
-                      "'hermes setup' for first-time setup.")
+                    print('\n⚠️ Провайдер модели не настроен.')
+                print("   Выберите провайдера через 'korra model' или запустите полную настройку: 'korra setup'.")
                 return False
         if not isinstance(base_url, str) or not base_url:
-            print("\n⚠️  Provider resolver returned an empty base URL. "
-                  "Check your provider config or run: hermes setup")
+            print('\n⚠️ В настройках провайдера пустой адрес API. Проверьте настройки или выполните korra setup.')
             return False
 
         credentials_changed = api_key != self.api_key or base_url != self.base_url
@@ -265,16 +263,15 @@ class CLIAgentSetupMixin:
         from cli import _cprint, logger
 
         _cprint("")
-        _cprint("⚕ No inference provider is configured yet — let's fix that.")
-        _cprint("  You'll pick a provider (Nous Portal OAuth is the fastest; "
-                "no API key needed) and a model.")
+        _cprint('⚕ Провайдер модели пока не настроен. Давайте подключим его.')
+        _cprint('  Вы выберете провайдера и модель. Для Nous Portal можно войти по подписке, без API-ключа.')
         try:
-            answer = input("  Set up a provider now? [Y/n]: ").strip().lower()
+            answer = input('  Настроить провайдера сейчас? [Y — да / n — нет]: ').strip().lower()
         except (KeyboardInterrupt, EOFError):
             print()
             answer = "n"
         if answer in {"n", "no"}:
-            _cprint("  Skipped. Run 'hermes model' or 'hermes setup' any time.")
+            _cprint("  Пропущено. Настройку можно открыть позже: 'korra model' или 'korra setup'.")
             return False
 
         try:
@@ -282,12 +279,12 @@ class CLIAgentSetupMixin:
             select_provider_and_model()
         except (KeyboardInterrupt, EOFError, SystemExit):
             print()
-            _cprint("  Setup cancelled. Run 'hermes model' any time.")
+            _cprint("  Настройка отменена. Вернуться к ней: 'korra model'.")
             return False
         except Exception as exc:
             logger.debug("first-run provider setup failed: %s", exc)
-            _cprint(f"  ⚠️  Provider setup failed: {exc}")
-            _cprint("  Run 'hermes model' to try again.")
+            _cprint(f'  ⚠️ Не удалось настроить провайдера: {exc}')
+            _cprint("  Повторить настройку: 'korra model'.")
             return False
 
         # Re-sync CLI state from what the picker persisted so the very next
@@ -311,9 +308,9 @@ class CLIAgentSetupMixin:
         self._active_agent_route_signature = None
 
         if self._runtime_credentials_ready():
-            _cprint("  ✓ Provider configured — you're ready to chat.")
+            _cprint('  ✓ Провайдер настроен. Можно общаться.')
             return True
-        _cprint("  Provider setup didn't complete. Run 'hermes model' to retry.")
+        _cprint("  Настройка провайдера не завершена. Повторить: 'korra model'.")
         return False
 
     def _resolve_turn_agent_config(self, user_message: str) -> dict:
@@ -417,14 +414,14 @@ class CLIAgentSetupMixin:
             _quiet_mode = getattr(self, "tool_progress_mode", "full") == "off"
             if not session_meta:
                 if _quiet_mode:
-                    print(f"Session not found: {self.session_id}", file=sys.stderr)
+                    print(f'Беседа не найдена: {self.session_id}', file=sys.stderr)
                     print(
-                        "Use a session ID from a previous CLI run (hermes sessions list).",
+                        'Используйте ID прошлой беседы. Список: korra sessions list.',
                         file=sys.stderr,
                     )
                 else:
-                    _cprint(f"\033[1;31mSession not found: {self.session_id}{_RST}")
-                    _cprint(f"{_DIM}Use a session ID from a previous CLI run (hermes sessions list).{_RST}")
+                    _cprint(f'\x1b[1;31mБеседа не найдена: {self.session_id}{_RST}')
+                    _cprint(f'{_DIM}Используйте ID прошлой беседы. Список: korra sessions list.{_RST}')
                 return False
             # If the requested session is the (empty) head of a compression
             # chain, walk to the descendant that actually holds the messages.
@@ -435,9 +432,7 @@ class CLIAgentSetupMixin:
                 resolved_id = self.session_id
             if resolved_id and resolved_id != self.session_id:
                 ChatConsole().print(
-                    f"[dim]Session {_escape(self.session_id)} was compressed into "
-                    f"{_escape(resolved_id)}; resuming the descendant with your "
-                    f"transcript.[/dim]"
+                    f'[dim]Беседа {_escape(self.session_id)} после сжатия продолжена в {_escape(resolved_id)}; восстанавливаю сообщения в новой беседе.[/dim]'
                 )
                 self.session_id = resolved_id
                 resolved_meta = self._session_db.get_session(self.session_id)
@@ -453,10 +448,10 @@ class CLIAgentSetupMixin:
             if resume_limit_error:
                 self._resume_history_error = resume_limit_error
                 if _quiet_mode:
-                    print(f"Cannot resume session: {resume_limit_error}", file=sys.stderr)
+                    print(f'Не удалось продолжить беседу: {resume_limit_error}', file=sys.stderr)
                 else:
                     ChatConsole().print(
-                        f"[bold red]Cannot resume session:[/] {_escape(resume_limit_error)}"
+                        f'[bold red]Не удалось продолжить беседу:[/] {_escape(resume_limit_error)}'
                     )
                 return False
             restored = self._session_db.get_messages_as_conversation(
@@ -471,17 +466,12 @@ class CLIAgentSetupMixin:
                     title_part = f" \"{session_meta['title']}\""
                 if _quiet_mode:
                     print(
-                        f"↻ Resumed session {self.session_id}{title_part} "
-                        f"({msg_count} user message{'s' if msg_count != 1 else ''}, "
-                        f"{len(restored)} total messages)",
+                        f"↻ Беседа восстановлена: {self.session_id}{title_part} ({msg_count} ваших сообщений{('' if msg_count != 1 else '')}, {len(restored)} сообщений всего)",
                         file=sys.stderr,
                     )
                 else:
                     ChatConsole().print(
-                        f"[bold {_accent_hex()}]↻ Resumed session[/] "
-                        f"[bold]{_escape(self.session_id)}[/]"
-                        f"[bold {_accent_hex()}]{_escape(title_part)}[/] "
-                        f"({msg_count} user message{'s' if msg_count != 1 else ''}, {len(restored)} total messages)"
+                        f"[bold {_accent_hex()}]↻ Беседа восстановлена[/] [bold]{_escape(self.session_id)}[/][bold {_accent_hex()}]{_escape(title_part)}[/] ({msg_count} ваших сообщений{('' if msg_count != 1 else '')}, {len(restored)} сообщений всего)"
                     )
                 self._restore_session_cwd(session_meta, quiet=_quiet_mode)
                 self._restore_session_yolo(session_meta, quiet=_quiet_mode)
@@ -489,12 +479,12 @@ class CLIAgentSetupMixin:
             else:
                 if _quiet_mode:
                     print(
-                        f"Session {self.session_id} found but has no messages. Starting fresh.",
+                        f'Беседа {self.session_id} найдена, но сообщений в ней нет. Начинаем заново.',
                         file=sys.stderr,
                     )
                 else:
                     ChatConsole().print(
-                        f"[bold {_accent_hex()}]Session {_escape(self.session_id)} found but has no messages. Starting fresh.[/]"
+                        f'[bold {_accent_hex()}]Беседа {_escape(self.session_id)} найдена, но сообщений в ней нет. Начинаем заново.[/]'
                     )
             # Re-open the session (clear ended_at so it's active again)
             try:
@@ -618,16 +608,16 @@ class CLIAgentSetupMixin:
                     self.agent._ensure_db_session()
                     if self.agent._session_db_created:
                         self._session_db.set_session_title(self.session_id, self._pending_title)
-                        _cprint(f"  Session title applied: {self._pending_title}")
+                        _cprint(f'  Название беседы сохранено: {self._pending_title}')
                         self._pending_title = None
                     # else: row creation failed transiently — keep _pending_title for retry
                 except (ValueError, Exception) as e:
-                    _cprint(f"  Could not apply pending title: {e}")
+                    _cprint(f'  Не удалось сохранить отложенное название: {e}')
                     # Keep _pending_title so it can be retried after row creation succeeds
             return True
         except Exception as e:
             console = ChatConsole()
-            console.print(f"[bold red]Failed to initialize agent: {e}[/]")
+            console.print(f'[bold red]Не удалось запустить агента: {e}[/]')
             from korra_constants import partial_update_hint
 
             for line in partial_update_hint(e):
@@ -959,7 +949,7 @@ class CLIAgentSetupMixin:
 
         panel = Panel(
             lines,
-            title=f"[dim {_session_label_c}]Previous Conversation[/]",
+            title=f'[dim {_session_label_c}]Предыдущая беседа[/]',
             border_style=f"dim {_session_border_c}",
             padding=(0, 1),
             style=_history_text_c,

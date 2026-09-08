@@ -37,7 +37,7 @@ def test_compact_resolves_to_compress():
 
 def test_compact_listed_in_flat_commands():
     assert "/compact" in COMMANDS
-    assert "alias for /compress" in COMMANDS["/compact"]
+    assert "другое имя /compress" in COMMANDS["/compact"]
 
 
 

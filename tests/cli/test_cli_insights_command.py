@@ -52,4 +52,4 @@ def test_subcommand_insights_closes_database_when_generation_fails(capsys):
         cmd_insights(SimpleNamespace(days=30, source=None))
 
     db.close.assert_called_once()
-    assert "Error generating insights: boom" in capsys.readouterr().out
+    assert "Не удалось подготовить статистику: boom" in capsys.readouterr().out

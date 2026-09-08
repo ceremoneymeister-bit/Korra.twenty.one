@@ -206,12 +206,12 @@ class TestCliApprovalUi:
         rendered = "".join(text for _style, text in fragments)
 
         # All four choices visible even with a huge command.
-        for label in ("Allow once", "Allow for this session",
-                      "Add to permanent allowlist", "Deny"):
+        for label in ("Разрешить один раз", "Разрешить для этой беседы",
+                      "Разрешить всегда", "Отклонить"):
             assert label in rendered, f"choice {label!r} missing"
 
         # Command got truncated with a marker.
-        assert "(command truncated" in rendered
+        assert "(команда сокращена" in rendered
 
     def test_background_task_registers_thread_local_approval_callbacks(self):
         """Background /btw tasks must use the prompt_toolkit approval UI.
@@ -469,9 +469,9 @@ class TestPersistPromptSummary:
             verdict = self._resolve_approval(cli, "session")
         assert verdict == "session"
         summary = "\n".join(printed)
-        assert "Approval" in summary
+        assert "Одобрение" in summary
         assert "rm -rf /tmp/scratch" in summary
-        assert "allowed for session" in summary
+        assert "разрешено для беседы" in summary
 
 
     def test_persist_prompts_false_suppresses_summary(self):
@@ -481,7 +481,7 @@ class TestPersistPromptSummary:
              patch.object(cli_module, "_cprint", printed.append):
             verdict = self._resolve_approval(cli, "once")
         assert verdict == "once"
-        assert not any("Approval" in p for p in printed)
+        assert not any("Одобрение" in p for p in printed)
 
     def test_clarify_resolution_prints_summary_line(self):
         cli = _make_cli_stub()
@@ -505,7 +505,7 @@ class TestPersistPromptSummary:
 
         assert result["value"] == "B"
         summary = "\n".join(printed)
-        assert "Clarify" in summary
+        assert "Уточнение" in summary
         assert "Pick a path?" in summary
         assert "B" in summary
 

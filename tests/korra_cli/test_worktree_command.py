@@ -78,7 +78,7 @@ def repo(tmp_path, monkeypatch):
 @requires_git
 def test_status_no_active_worktree(repo):
     out = _run(_Stub(), "/worktree")
-    assert "No active worktree" in out
+    assert "нет рабочей копии" in out
     assert "/worktree new" in out
 
 
@@ -86,13 +86,13 @@ def test_status_outside_repo(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli_mod, "_active_worktree", None)
     out = _run(_Stub(), "/worktree")
-    assert "not inside a git repository" in out
+    assert "текущая папка не является репозиторием Git" in out
 
 
 def test_new_outside_repo(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     out = _run(_Stub(), "/worktree new")
-    assert "requires being inside a git repository" in out
+    assert "нужно запускать из репозитория Git" in out
 
 
 @requires_git
@@ -104,7 +104,7 @@ def test_list_shows_worktrees(repo):
 @requires_git
 def test_new_named_creates_and_retargets(repo):
     out = _run(_Stub(), "/worktree new fix-login")
-    assert "Worktree ready" in out
+    assert "Рабочая копия готова" in out
     wt = repo / ".worktrees" / "fix-login"
     assert wt.is_dir()
     assert os.environ["TERMINAL_CWD"] == str(wt)
@@ -121,7 +121,7 @@ def test_new_named_collision_refused(repo):
     first = cli_mod._active_worktree
     os.chdir(repo)
     out = _run(_Stub(), "/worktree new dup")
-    assert "already exists" in out
+    assert "уже существует" in out
     # Active worktree not clobbered by the failed attempt.
     assert cli_mod._active_worktree == first
 
@@ -129,7 +129,7 @@ def test_new_named_collision_refused(repo):
 @requires_git
 def test_new_unnamed_uses_random_hermes_prefix(repo):
     out = _run(_Stub(), "/worktree new")
-    assert "Worktree ready" in out
+    assert "Рабочая копия готова" in out
     name = os.path.basename(cli_mod._active_worktree["path"])
     assert name.startswith("hermes-")
 
@@ -144,4 +144,4 @@ def test_new_sanitizes_name(repo):
 @requires_git
 def test_unknown_subcommand(repo):
     out = _run(_Stub(), "/worktree frobnicate")
-    assert "Unknown /worktree subcommand" in out
+    assert "Неизвестная подкоманда /worktree" in out

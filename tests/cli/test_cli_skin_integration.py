@@ -74,8 +74,8 @@ class TestCliSkinPromptIntegration:
             cli._handle_skin_command("/skin ares")
 
         output = capsys.readouterr().out
-        assert "Skin set to: ares (saved)" in output
-        assert "Prompt + TUI colors updated." in output
+        assert "Выбрана тема: ares (сохранено)" in output
+        assert "Цвета ввода и TUI обновлены." in output
         assert cli._app.style is not None
 
 
