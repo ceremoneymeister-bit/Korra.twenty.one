@@ -85,12 +85,12 @@ def test_catalog_placeholders_match_english(lang: str):
 
 
 def test_default_when_nothing_set(monkeypatch):
-    """With no env var and no config override, falls back to English."""
+    """With no env var and no config override, uses the Korra Russian default."""
     monkeypatch.delenv("HERMES_LANGUAGE", raising=False)
     # Force config lookup to return None -- patch the cached reader.
     i18n.reset_language_cache()
     monkeypatch.setattr(i18n, "_config_language_cached", lambda: None)
-    assert i18n.get_language() == "en"
+    assert i18n.get_language() == "ru"
 
 
 # ---------------------------------------------------------------------------
@@ -140,3 +140,36 @@ def test_locales_dir_env_override_ignored_when_missing(tmp_path, monkeypatch):
     assert result.name == "locales"
 
 
+
+
+@pytest.mark.parametrize("config_text", [None, "display: {}\n", "display:\n  language: ru\n"])
+def test_russian_default_with_real_profile_config(tmp_path, monkeypatch, config_text):
+    """New and legacy profiles use Russian without a language setting."""
+    monkeypatch.delenv("KORRA_LANGUAGE", raising=False)
+    monkeypatch.delenv("HERMES_LANGUAGE", raising=False)
+    monkeypatch.setenv("KORRA_HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    if config_text is not None:
+        (tmp_path / "config.yaml").write_text(config_text, encoding="utf-8")
+    i18n.reset_language_cache()
+    try:
+        assert i18n.get_language() == "ru"
+        assert i18n.t("gateway.help.header") == i18n.t("gateway.help.header", lang="ru")
+        assert "Команды Korra" in i18n.t("gateway.help.header")
+    finally:
+        i18n.reset_language_cache()
+
+
+def test_explicit_english_and_russian_catalog_fallback_are_independent(tmp_path, monkeypatch):
+    """Choosing Russian by default must not turn the English fallback into Russian."""
+    (tmp_path / "en.yaml").write_text("shared: English\nmissing_ru: Fallback\n", encoding="utf-8")
+    (tmp_path / "ru.yaml").write_text("shared: Русский\n", encoding="utf-8")
+    monkeypatch.setattr(i18n, "_locales_dir", lambda: tmp_path)
+    i18n.reset_language_cache()
+    try:
+        assert i18n.t("shared", lang="en") == "English"
+        assert i18n.t("shared", lang="ru") == "Русский"
+        assert i18n.t("missing_ru", lang="ru") == "Fallback"
+        assert i18n.t("shared", lang="unsupported") == "Русский"
+    finally:
+        i18n.reset_language_cache()
