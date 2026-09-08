@@ -113,7 +113,7 @@ async def test_unknown_slash_command_returns_guidance(monkeypatch):
     result = await runner._handle_message(_make_event("/definitely-not-a-command"))
 
     assert result is not None
-    assert "Unknown command" in result
+    assert 'Неизвестная команда' in result
     assert "/definitely-not-a-command" in result
     assert "/commands" in result
     runner._run_agent.assert_not_called()

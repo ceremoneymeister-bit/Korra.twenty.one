@@ -178,7 +178,7 @@ async def test_non_streaming_media_failure_notifies_user(tmp_path, monkeypatch):
     await adapter._process_message_background(event, build_session_key(event.source))
 
     adapter.send_video.assert_awaited_once()
-    assert adapter.notices == ["⚠️ Couldn't deliver the video attachment."]
+    assert adapter.notices == ['⚠️ Не удалось отправить видео.']
 
 
 class _DiscordMediaFailureAdapter(BasePlatformAdapter):

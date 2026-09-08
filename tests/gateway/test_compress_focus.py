@@ -87,6 +87,6 @@ async def test_compress_focus_topic_passed_to_agent():
     assert call_kwargs.kwargs.get("focus_topic") == "database schema"
 
     # Verify focus is mentioned in response
-    assert 'Focus: "database schema"' in result
+    assert 'Фокус: "database schema"' in result
 
 

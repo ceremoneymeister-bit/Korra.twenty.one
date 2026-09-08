@@ -81,7 +81,7 @@ async def test_aggressive_dry_run_shows_preview_plus_note():
         _make_event("/compress --aggressive --dry-run")
     )
     assert "no changes made" in result.lower()
-    assert "--aggressive is not supported" in result
+    assert '--aggressive не поддерживается' in result
     runner.session_store.rewrite_transcript.assert_not_called()
 
 

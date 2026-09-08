@@ -134,7 +134,7 @@ async def test_handle_fast_command_global_flag_persists_config(monkeypatch, tmp_
 
     response = await runner._handle_fast_command(_make_event("/fast fast --global"))
 
-    assert "FAST" in response
+    assert 'БЫСТРО' in response
     assert runner._service_tier == "priority"
 
     saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
@@ -162,7 +162,7 @@ async def test_session_fast_override_beats_config_default(monkeypatch, tmp_path)
 
     response = await runner._handle_fast_command(event)
 
-    assert "NORMAL" in response
+    assert 'ОБЫЧНО' in response
     # Override stores explicit None (normal) and wins over config "fast".
     assert session_key in runner._session_service_tier_overrides
     assert runner._resolve_session_service_tier(session_key=session_key) is None

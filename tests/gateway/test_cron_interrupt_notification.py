@@ -72,7 +72,7 @@ class TestNotifyInterruptedCronJobs:
         assert len(adapter.sent) == 1
         body = adapter.sent[0]
         assert "daily-digest" in body
-        assert "interrupted" in body.lower()
+        assert 'прервана' in body.lower()
         assert adapter.sent_calls[0][0] == "123456"
 
     @pytest.mark.asyncio
@@ -87,7 +87,7 @@ class TestNotifyInterruptedCronJobs:
                    return_value=[_telegram_target()]):
             await runner._notify_interrupted_cron_jobs([job["id"]])
 
-        assert "restarting" in adapter.sent[0]
+        assert 'перезапускается' in adapter.sent[0]
 
     @pytest.mark.asyncio
     async def test_local_only_job_stays_silent(self):
@@ -184,7 +184,7 @@ class TestShutdownDeliversNoticeBeforeDisconnect:
         real_send = adapter.send
 
         async def _tracking_send(chat_id, content, reply_to=None, metadata=None):
-            if "was interrupted" in content:
+            if "прервана" in content:
                 events.append("cron_notice")
             return await real_send(chat_id, content, reply_to=reply_to, metadata=metadata)
 

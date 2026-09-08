@@ -87,7 +87,7 @@ class TestHandleUpdateCommand:
             with patch("gateway.slash_commands.__file__", fake_file):
                 result = await runner._handle_update_command(event)
 
-        assert "Not a git repository" in result
+        assert 'Не git-репозиторий' in result
 
 
     @pytest.mark.asyncio
@@ -175,7 +175,7 @@ class TestHandleUpdateCommand:
         # start_new_session=True should be in kwargs
         call_kwargs = mock_popen.call_args[1]
         assert call_kwargs.get("start_new_session") is True
-        assert "Starting Korra update" in result
+        assert 'Запуск обновления Korra' in result
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +344,7 @@ class TestSendUpdateNotification:
         mock_adapter.send.assert_called_once()
         call_args = mock_adapter.send.call_args
         assert call_args[0][0] == "67890"  # chat_id
-        assert "Update complete" in call_args[0][1] or "update finished" in call_args[0][1].lower()
+        assert "Update complete" in call_args[0][1] or 'обновление korra завершено' in call_args[0][1].lower()
 
 
     @pytest.mark.asyncio
@@ -487,7 +487,7 @@ class TestSendUpdateNotification:
         assert "ok before" in sent_text
         assert "invalid byte" in sent_text
         assert "continued after" in sent_text
-        assert "Korra update finished" in sent_text
+        assert 'Обновление Korra завершено' in sent_text
         assert not pending_path.exists()
         assert not output_path.exists()
         assert not exit_code_path.exists()
@@ -542,5 +542,5 @@ class TestWatchUpdateProgress:
         sent = "\n".join(call.args[1] for call in mock_adapter.send.call_args_list)
         assert "ok before" in sent
         assert "continued after" in sent
-        assert "Korra update finished" in sent
+        assert 'Обновление Korra завершено' in sent
         assert not (hermes_home / ".update_pending.json").exists()

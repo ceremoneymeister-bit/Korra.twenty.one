@@ -247,7 +247,7 @@ class TestDocumentDownloadBlock:
         # 1. User is told the download failed, with the filename + exception type.
         msg.reply_text.assert_awaited_once()
         reply = msg.reply_text.await_args.args[0]
-        assert "Couldn't download" in reply
+        assert 'Не удалось скачать' in reply
         assert "notes.md" in reply
         assert "RuntimeError" in reply
 
@@ -272,7 +272,7 @@ class TestDocumentDownloadBlock:
         await adapter._handle_media_message(update, MagicMock())
 
         msg.reply_text.assert_awaited_once()
-        assert "voice message" in msg.reply_text.await_args.args[0]
+        assert 'голосовое сообщение' in msg.reply_text.await_args.args[0]
         adapter.handle_message.assert_called_once()
         event = adapter.handle_message.call_args[0][0]
         assert "could not be downloaded" in (event.text or "")

@@ -57,7 +57,7 @@ class TestVerboseCommand:
         runner = _make_runner()
         result = await runner._handle_verbose_command(_make_event())
 
-        assert "not enabled" in result.lower()
+        assert 'не включена' in result.lower()
         assert "tool_progress_command" in result
 
     @pytest.mark.asyncio
@@ -77,7 +77,7 @@ class TestVerboseCommand:
         result = await runner._handle_verbose_command(_make_event())
 
         # all -> verbose
-        assert "VERBOSE" in result
+        assert 'ПОДРОБНО' in result
         assert "telegram" in result.lower()  # per-platform feedback
 
         # Verify config was saved to display.platforms.telegram
@@ -100,7 +100,7 @@ class TestVerboseCommand:
         runner = _make_runner()
         result = await runner._handle_verbose_command(_make_event())
 
-        assert "not enabled" in result.lower()
+        assert 'не включена' in result.lower()
         assert "tool_progress_command" in result
 
 

@@ -106,7 +106,7 @@ async def test_steer_calls_agent_steer_and_does_not_interrupt():
 
     # The handler replied with a confirmation
     assert result is not None
-    assert "steer" in result.lower() or "queued" in result.lower()
+    assert 'уточнение' in result.lower() or 'добавлено в очередь' in result.lower()
     # The agent's steer() was called with the payload (prefix stripped)
     running_agent.steer.assert_called_once_with("also check auth.log")
     # Critically: interrupt was NOT called
@@ -160,7 +160,7 @@ async def test_steer_agent_without_steer_method_falls_back():
 
     assert result is not None
     # Must mention queueing since steer wasn't available
-    assert "queued" in result.lower()
+    assert 'добавлено в очередь' in result.lower()
     assert sk in adapter._pending_messages
     assert adapter._pending_messages[sk].text == "fallback"
     assert (

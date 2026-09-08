@@ -112,13 +112,13 @@ async def test_reload_skills_handler_queues_note_on_diff(monkeypatch):
     out = await runner._handle_reload_skills_command(event)
 
     assert out is not None
-    assert "Skills Reloaded" in out
-    assert "Added Skills:" in out
+    assert 'Навыки перезагружены' in out
+    assert 'Добавленные навыки:' in out
     assert "- alpha: Run alpha to do xyz" in out
     assert "- beta: Run beta to do abc" in out
-    assert "Removed Skills:" in out
+    assert 'Удалённые навыки:' in out
     assert "- gamma: Old removed skill" in out
-    assert "3 skill(s) available" in out
+    assert "3 навык(ов) доступно" in out
 
     # MUST NOT write to the session transcript — that would break alternation.
     runner.session_store.append_to_transcript.assert_not_called()

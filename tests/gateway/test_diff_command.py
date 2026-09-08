@@ -84,7 +84,7 @@ async def test_diff_long_output_truncated(repo):
 
     # Hard-truncated in the handler before the platform senders apply their
     # own message-splitting limits (3-layer tool-progress-style truncation).
-    assert "truncated" in result
+    assert 'показана часть изменений' in result
     assert len(result) < 6000
 
 
@@ -120,6 +120,6 @@ async def test_diff_session_no_changes_message(tmp_path, monkeypatch):
 
     result = await _runner()._handle_diff_command(_event("/diff session"))
 
-    assert "No changes" in result
+    assert 'Изменений нет' in result
 
 

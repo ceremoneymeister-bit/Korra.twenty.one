@@ -143,7 +143,7 @@ class TestSendWithRetryExhausted:
         assert len(adapter._send_calls) == 4
         # The notice content should mention delivery failure
         notice_content = adapter._send_calls[-1][1]
-        assert "delivery failed" in notice_content.lower() or "Message delivery failed" in notice_content
+        assert 'не удалось доставить' in notice_content.lower() or 'Не удалось доставить' in notice_content
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +165,7 @@ class TestSendWithRetryFallback:
         assert result.success
         assert len(adapter._send_calls) == 2
         # Fallback content should be plain-text notice
-        assert "plain text" in adapter._send_calls[1][1].lower()
+        assert 'обычным текстом' in adapter._send_calls[1][1].lower()
 
 
 # ---------------------------------------------------------------------------

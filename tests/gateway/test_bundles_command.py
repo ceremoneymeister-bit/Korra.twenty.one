@@ -87,7 +87,7 @@ class TestHandleBundlesCommand:
     def test_empty(self, bundles_env):
         runner = _make_runner()
         result = asyncio.run(runner._handle_bundles_command(_make_event("/bundles")))
-        assert "No skill bundles" in result
+        assert 'Наборы навыков пока не установлены' in result
 
 
 class TestBundleResolutionPriority:

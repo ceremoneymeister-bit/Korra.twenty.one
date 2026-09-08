@@ -211,7 +211,7 @@ async def test_partial_empty_agent_response_is_normalized(monkeypatch, tmp_path)
         monkeypatch, tmp_path, PartialTruncationAgent, "sess-partial-empty"
     )
 
-    assert result["final_response"].startswith("⚠️ Processing stopped:")
+    assert result["final_response"].startswith('⚠️ Обработка остановлена:')
     assert "Response truncated due to output length limit" in result["final_response"]
     assert result["final_response"] != "⚠️ Response truncated due to output length limit"
     assert result["partial"] is True

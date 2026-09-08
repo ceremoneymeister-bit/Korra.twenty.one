@@ -85,12 +85,12 @@ class TestUsageCachedAgent:
         assert "10,000" in result  # output tokens
         assert "50,000" in result  # total
         assert "30,000" in result  # context
-        assert "Compressions: 1" in result
+        assert 'Сжатий: 1' in result
         # Cost and cache-hit reporting is removed everywhere.
         assert "$" not in result
-        assert "Cache read" not in result
-        assert "Cache write" not in result
-        assert "Cost" not in result
+        assert "Чтение кеша" not in result
+        assert "Запись кеша" not in result
+        assert "Стоимость" not in result
 
     @pytest.mark.asyncio
     async def test_running_agent_preferred_over_cache(self):
@@ -106,7 +106,7 @@ class TestUsageCachedAgent:
             result = await runner._handle_usage_command(event)
 
         assert "80,000" in result   # running agent's total
-        assert "API calls: 10" in result
+        assert 'Вызовы API: 10' in result
 
 
 class TestUsageAccountSection:
@@ -159,7 +159,7 @@ class TestUsageAccountSection:
 
         account_call = next(c for c in calls if c["args"] == ("openai-codex",))
         assert account_call["kwargs"]["base_url"] == "https://chatgpt.com/backend-api/codex"
-        assert "📊 **Session Info**" in result
+        assert '📊 **Информация о сеансе**' in result
         assert "📈 **Account limits**" in result
 
     @pytest.mark.asyncio
@@ -266,9 +266,9 @@ class TestUsageContextBreakdown:
 
         # Localized header + at least the two non-zero category labels appear,
         # each labelled as a percentage of the estimated total.
-        assert "Context breakdown" in result
-        assert "System prompt" in result
-        assert "Tool definitions" in result
+        assert 'Разбивка контекста' in result
+        assert 'Системный промпт' in result
+        assert 'Определения инструментов' in result
         assert "4,000" in result   # system prompt tokens, comma-formatted
         assert "40%" in result     # 4000 / 10000
         assert "60%" in result     # 6000 / 10000

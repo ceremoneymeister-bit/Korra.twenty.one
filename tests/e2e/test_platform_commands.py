@@ -38,7 +38,7 @@ class TestSlashCommands:
 
         send.assert_called_once()
         response_text = send.call_args[1].get("content") or send.call_args[0][1]
-        assert "session" in response_text.lower() or "Session" in response_text
+        assert 'сеанс' in response_text.lower() or 'Сеанс' in response_text
 
     @pytest.mark.asyncio
     async def test_new_resets_session(self, adapter, runner, platform):
@@ -54,7 +54,7 @@ class TestSlashCommands:
         send.assert_called_once()
         response_text = send.call_args[1].get("content") or send.call_args[0][1]
         response_lower = response_text.lower()
-        assert "no" in response_lower or "stop" in response_lower or "not running" in response_lower
+        assert 'нет' in response_lower or 'останов' in response_lower or 'не выполняется' in response_lower
 
     @pytest.mark.asyncio
     async def test_leading_space_stop_is_still_a_command(self, adapter, platform):
@@ -64,7 +64,7 @@ class TestSlashCommands:
         send.assert_called_once()
         response_text = send.call_args[1].get("content") or send.call_args[0][1]
         response_lower = response_text.lower()
-        assert "no" in response_lower or "stop" in response_lower or "not running" in response_lower
+        assert 'нет' in response_lower or 'останов' in response_lower or 'не выполняется' in response_lower
 
     @pytest.mark.asyncio
     async def test_commands_shows_listing(self, adapter, platform):
@@ -105,7 +105,7 @@ class TestSlashCommands:
 
         send.assert_called_once()
         response_text = send.call_args[1].get("content") or send.call_args[0][1]
-        assert "restart" in response_text.lower() or "draining" in response_text.lower()
+        assert "restart" in response_text.lower() or 'завершает работу перед обслуживанием' in response_text.lower()
         runner.request_restart.assert_called_once_with(detached=False, via_service=True)
 
     @pytest.mark.asyncio
@@ -146,7 +146,7 @@ class TestSlashCommands:
 
         send.assert_called_once()
         response_text = send.call_args[1].get("content") or send.call_args[0][1]
-        assert "compress" in response_text.lower() or "context" in response_text.lower()
+        assert 'сжатия' in response_text.lower() or 'контекст' in response_text.lower()
 
     @pytest.mark.asyncio
     async def test_quick_command_alias_targets_builtin_command_with_args(

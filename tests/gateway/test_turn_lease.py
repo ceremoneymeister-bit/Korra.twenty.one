@@ -219,8 +219,8 @@ async def test_full_dispatch_rejects_lease_timeout_without_running_goal_hook(
         assert runner._turn_leases.release(holder) is True
 
     assert isinstance(response, str)
-    assert "not processed" in response.lower()
-    assert "resend" in response.lower()
+    assert 'не обработано' in response.lower()
+    assert 'отправьте его ещё раз' in response.lower()
     runner.session_store.load_transcript.assert_not_called()
     runner._clear_session_env.assert_called_once_with(session_env_tokens)
     runner._post_turn_goal_continuation.assert_not_awaited()

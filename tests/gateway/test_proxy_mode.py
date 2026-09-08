@@ -251,7 +251,7 @@ class TestRunAgentViaProxy:
                         session_id="test",
                     )
 
-        assert "Proxy connection error" in result["final_response"]
+        assert 'Ошибка подключения к прокси' in result["final_response"]
 
 
     @pytest.mark.asyncio

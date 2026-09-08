@@ -188,6 +188,6 @@ class TestHandleReloadSkillsCallsRefreshSkillGroup:
                 runner._handle_reload_skills_command(event)
             )
 
-        assert "Skills Reloaded" in result
+        assert 'Навыки перезагружены' in result
         assert sync_refresh.called, "sync adapter refresh must be invoked"
         assert async_called["flag"], "async adapter refresh must be awaited"

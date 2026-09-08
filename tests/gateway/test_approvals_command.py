@@ -53,7 +53,7 @@ async def test_gateway_rejects_non_admin_persistent_approval_change():
     with patch("korra_cli.approval_mode.run_approval_mode_command") as run:
         output = await runner._handle_approvals_command(_event("/approvals off"))
 
-    assert "admin" in output.lower()
+    assert 'администратор' in output.lower()
     run.assert_not_called()
 
 

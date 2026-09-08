@@ -260,7 +260,7 @@ async def test_stop_during_sentinel_force_cleans_session():
         stop_event = _make_event(text="/stop")
         result = await runner._handle_message(stop_event)
         assert result is not None, "/stop during sentinel should return a message"
-        assert "stopped" in result.lower()
+        assert 'остановлено' in result.lower()
         assert session_key not in runner._running_agents, (
             "/stop must remove sentinel so the session is unlocked"
         )

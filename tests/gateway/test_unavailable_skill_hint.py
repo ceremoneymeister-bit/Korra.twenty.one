@@ -80,8 +80,8 @@ def test_frontmatter_slug_matched_even_when_dir_name_differs(
         "expected a 'disabled' hint for the frontmatter-derived slug; "
         "the old code compared the dir name 'stable-diffusion' and returned None"
     )
-    assert "disabled" in msg.lower()
-    assert "hermes skills config" in msg
+    assert 'отключён' in msg.lower()
+    assert 'korra skills config' in msg
 
 
 def test_unknown_command_still_returns_none(

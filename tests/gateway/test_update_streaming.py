@@ -158,7 +158,7 @@ class TestUpdateCommandGatewayFlag:
         assert "PYTHONUNBUFFERED" in cmd_string
         assert "rc=$?" in cmd_string
         assert "status=$?" not in cmd_string
-        assert "stream progress" in result
+        assert 'транслировать прогресс' in result
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ class TestWatchUpdateProgress:
         # Should have sent at least the output and a success message
         assert mock_adapter.send.call_count >= 1
         all_sent = " ".join(str(c) for c in mock_adapter.send.call_args_list)
-        assert "update finished" in all_sent.lower()
+        assert 'обновление korra завершено' in all_sent.lower()
 
     @pytest.mark.asyncio
     async def test_detects_and_forwards_prompt(self, tmp_path):

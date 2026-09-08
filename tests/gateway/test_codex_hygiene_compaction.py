@@ -327,7 +327,7 @@ def test_manual_compress_routes_to_live_thread():
     )
 
     assert agent._codex_session.compact_calls == 1
-    assert "compacted" in reply
+    assert 'сжат' in reply
 
 
 def test_manual_compress_without_live_thread_reports_honestly():
@@ -335,4 +335,4 @@ def test_manual_compress_without_live_thread_reports_honestly():
     reply = asyncio.run(
         host._compress_codex_app_server_session("tg:123", "sess-1")
     )
-    assert "Nothing to compact" in reply
+    assert 'Пока нечего сжимать' in reply

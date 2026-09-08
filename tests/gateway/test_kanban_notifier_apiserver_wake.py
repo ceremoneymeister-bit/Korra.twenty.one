@@ -134,8 +134,8 @@ def test_apiserver_sub_wakes_subscription_destination_via_self_post(tmp_path, mo
     # worker's completion handoff and the don't-recreate guidance so a
     # woken orchestrator doesn't re-decompose existing work.
     assert "done once" in wake_text, "creator wake must carry the worker handoff"
-    assert "not a request to decompose" in wake_text.lower()
-    assert "do not recreate" in wake_text.lower()
+    assert 'не запрос на её повторное разбиение' in wake_text.lower()
+    assert "не создавайте заново" in wake_text.lower()
     # The wake self-post IS the delivery on this path (no separate text-ping
     # fallback is attempted for stateless api_server subs) — cursor advances
     # once the wake succeeds.

@@ -129,7 +129,7 @@ async def test_review_command_rejects_while_agent_running():
     runner = _make_runner(agent)
     runner._running_agents = {SESSION_KEY: object()}
     out = await runner._handle_review_command(_Event())
-    assert "Agent is running" in out
+    assert 'Корра работает' in out
 
 
 @pytest.mark.asyncio
@@ -137,7 +137,7 @@ async def test_review_command_requires_cached_agent():
     runner = _make_runner(None)
     runner._agent_cache = {}
     out = await runner._handle_review_command(_Event())
-    assert "send a message first" in out
+    assert 'Сначала отправьте сообщение' in out
 
 
 @pytest.mark.asyncio

@@ -126,7 +126,7 @@ async def test_whoami_non_admin_lists_runnable_commands():
         }
     )
     result = await runner._handle_message(_make_event("/whoami", _make_source(user_id="999")))
-    assert "Tier: user" in result
+    assert 'Доступ: пользователь' in result
     assert "/help" in result      # always-allowed floor
     assert "/whoami" in result    # always-allowed floor
     assert "/status" in result
@@ -149,10 +149,10 @@ async def test_non_admin_with_empty_user_commands_gets_floor_only():
     # /stop denied
     result = await runner._handle_message(_make_event("/stop", _make_source(user_id="999")))
     assert "⛔" in result
-    assert "No slash commands are enabled" in result
+    assert "команды доступны только администраторам" in result
     # /whoami still works (always-allowed floor)
     whoami_result = await runner._handle_message(_make_event("/whoami", _make_source(user_id="999")))
-    assert "Tier: user" in whoami_result
+    assert 'Доступ: пользователь' in whoami_result
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ async def test_group_only_gating_leaves_dm_unrestricted():
         }
     )
     result = await runner._handle_message(_make_event("/whoami", _make_source(user_id="anyone", chat_type="dm")))
-    assert "Tier: unrestricted" in result
+    assert 'Доступ: без ограничений' in result
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +209,7 @@ async def test_non_admin_denied_for_unlisted_quick_command_exec():
 
     assert result is not None
     assert "⛔" in result
-    assert "/limits is admin-only here" in result
+    assert '/limits доступна только администраторам' in result
     assert "quick-command-bypass-confirmed" not in result
 
 
@@ -365,4 +365,4 @@ async def test_gating_isolated_per_platform():
     # Same user_id on Telegram → must be unrestricted (Telegram has no admin list).
     tg_src = _make_source(platform=Platform.TELEGRAM, user_id="999", chat_id="t1")
     result = await runner._handle_message(_make_event("/whoami", tg_src))
-    assert "Tier: unrestricted" in result
+    assert 'Доступ: без ограничений' in result

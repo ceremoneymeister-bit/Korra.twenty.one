@@ -77,7 +77,7 @@ class TestHandleResumeCommand:
         runner = _make_runner(session_db=None)
         event = _make_event(text="/resume My Project")
         result = await runner._handle_resume_command(event)
-        assert "not available" in result.lower()
+        assert "недоступна" in result.lower()
 
     @pytest.mark.asyncio
     async def test_list_named_sessions_when_no_arg(self, tmp_path):
@@ -101,7 +101,7 @@ class TestHandleResumeCommand:
         result = await runner._handle_resume_command(event)
         assert "Research" in result
         assert "Coding" in result
-        assert "Named Sessions" in result
+        assert "Именованные сеансы" in result
         assert "1." in result
         assert "2." in result
         assert "/resume 1" in result
@@ -133,7 +133,7 @@ class TestHandleResumeCommand:
 
         result = await runner._handle_resume_command(event)
 
-        assert "Resumed" in result
+        assert 'возобновлён' in result
         # The resumed chat's override + pending note are cleared...
         assert key not in runner._session_model_overrides
         assert key not in runner._pending_model_notes
@@ -166,7 +166,7 @@ class TestHandleResumeCommand:
 
         result = await runner._handle_resume_command(event)
 
-        assert "Resumed" in result
+        assert 'возобновлён' in result
         assert key not in runner._last_resolved_model
         assert runner._last_resolved_model["agent:main:telegram:dm:other"] == "keep-me"
         db.close()
@@ -199,8 +199,8 @@ class TestHandleResumeCommand:
 
         result = await runner._handle_resume_command(event)
 
-        assert "Resumed session" in result
-        assert "(1 message)" in result
+        assert 'возобновлён' in result
+        assert '(1 сообщение)' in result
         call_args = runner.session_store.switch_session.call_args
         assert call_args[0][1] == "compressed_child"
         runner.session_store.load_transcript.assert_called_with("compressed_child")
@@ -322,7 +322,7 @@ class TestHandleResumeCommand:
         )
         result = await runner._handle_resume_command(event)
 
-        assert "Resumed" in result
+        assert 'возобновлён' in result
         runner.session_store.switch_session.assert_called_once()
         assert runner.session_store.switch_session.call_args[0][1] == "lane_older"
         db.close()

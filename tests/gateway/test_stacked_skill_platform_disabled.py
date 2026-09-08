@@ -132,6 +132,6 @@ async def test_stacked_second_skill_disabled_for_platform_is_blocked(monkeypatch
 
     assert result is not None
     assert "disabled-skill" in result
-    assert "disabled for telegram" in result
+    assert 'отключены для telegram' in result
 
 

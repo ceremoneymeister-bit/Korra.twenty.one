@@ -670,7 +670,7 @@ def _extract_progress_preview(content: str) -> str | None:
     if match:
         return match.group(1)
     # Friendly form: "<emoji> <verb> <preview>". The terminal verb is "Running".
-    marker = " Running "
+    marker = " Выполняет "
     idx = content.find(marker)
     if idx != -1:
         return content[idx + len(marker):].strip()
@@ -1378,7 +1378,7 @@ async def test_run_agent_sends_normalized_failure_before_queued_followup(
     sent_texts = [call["content"] for call in adapter.sent]
     assert QueuedFailedEmptyAgent.calls == 2
     assert result["final_response"] == "follow-up processed"
-    assert any("The request failed: provider exploded" in text for text in sent_texts)
+    assert any('Не удалось выполнить запрос: provider exploded' in text for text in sent_texts)
 
 
 @pytest.mark.asyncio

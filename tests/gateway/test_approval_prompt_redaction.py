@@ -132,8 +132,8 @@ class TestApprovalTextFallbackContract:
             "rm -rf /", "dangerous deletion", "/",
             allow_permanent=False, smart_denied=True,
         )
-        assert "owner override" in text.lower()
-        assert "one operation" in text.lower()
+        assert 'владелец может разрешить' in text.lower()
+        assert 'операцию один раз' in text.lower()
         assert "`/approve`" in text
         assert "approve session" not in text
         assert "approve always" not in text

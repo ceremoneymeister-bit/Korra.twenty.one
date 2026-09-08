@@ -324,5 +324,5 @@ class TestNewTurnGate:
         )
         result = await runner._handle_message(event)
         assert result is not None
-        assert "draining" in result.lower()
+        assert 'завершает работу перед обслуживанием' in result.lower()
 

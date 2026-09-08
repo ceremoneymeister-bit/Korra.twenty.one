@@ -182,7 +182,7 @@ class TestBusySessionAck:
         if not content and call_kwargs.args:
             # positional args
             content = str(call_kwargs)
-        assert "Interrupting" in content or "respond" in content
+        assert 'Прерываю' in content or "respond" in content
         assert "/stop" not in content  # no need — we ARE interrupting
 
         # Verify agent interrupt was called
@@ -222,7 +222,7 @@ class TestBusySessionAck:
         adapter._send_with_retry.assert_called_once()
         call_kwargs = adapter._send_with_retry.call_args
         content = call_kwargs.kwargs.get("content") or call_kwargs[1].get("content", "")
-        assert "Steered" in content or "steer" in content.lower()
+        assert 'Уточнение добавлено' in content or 'уточнение' in content.lower()
         assert "Interrupting" not in content
 
     @pytest.mark.asyncio
@@ -260,7 +260,7 @@ class TestBusySessionAck:
         agent.interrupt.assert_not_called()
         assert sk not in adapter._pending_messages
         content = adapter._send_with_retry.call_args.kwargs["content"]
-        assert "Steered" in content
+        assert 'Уточнение добавлено' in content
         assert "Queued" not in content
 
 
@@ -291,7 +291,7 @@ class TestBusySessionAck:
         # Ack uses queue-mode wording (not steer, not interrupt)
         call_kwargs = adapter._send_with_retry.call_args
         content = call_kwargs.kwargs.get("content") or call_kwargs[1].get("content", "")
-        assert "Queued for the next turn" in content
+        assert 'Сообщение добавлено в очередь' in content
         assert "Steered" not in content
 
     @pytest.mark.asyncio
@@ -315,7 +315,7 @@ class TestBusySessionAck:
 
         call_kwargs = adapter._send_with_retry.call_args
         content = call_kwargs.kwargs.get("content") or call_kwargs[1].get("content", "")
-        assert "Queued for the next turn" in content
+        assert 'Сообщение добавлено в очередь' in content
 
     @pytest.mark.asyncio
     async def test_interrupt_mode_text_followups_fifo_not_merged(self):
@@ -400,7 +400,7 @@ class TestBusySessionAck:
         content = call_kwargs.kwargs.get("content", "")
         assert "21/60" in content  # iteration
         assert "terminal" in content  # current tool
-        assert "10 min" in content  # elapsed
+        assert '10 мин' in content  # elapsed
 
 
 class TestBusySessionOnboardingHint:
@@ -439,9 +439,9 @@ class TestBusySessionOnboardingHint:
         content = call_kwargs.kwargs.get("content", "")
 
         # Normal ack body
-        assert "Interrupting" in content
+        assert 'Прерываю' in content
         # First-touch hint appended
-        assert "First-time tip" in content
+        assert "Подсказка:" in content
         assert "/busy queue" in content
 
         # The flag is now persisted to tmp_path/config.yaml

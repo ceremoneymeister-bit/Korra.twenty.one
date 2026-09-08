@@ -45,9 +45,7 @@ class TestFormatExecApproval:
         ad = _bare(_DefaultAdapter)
         text = ad._format_exec_approval("rm -rf /", "scary")
         assert text == (
-            "⚠️ Command Approval Required\n\n"
-            "```\nrm -rf /\n```\n"
-            "Reason: scary"
+            '⚠️ Нужно разрешение на выполнение команды\n\n```\nrm -rf /\n```\nПричина: scary'
         )
 
 
@@ -75,7 +73,7 @@ class TestFormatChoicePage:
         opts, meta = BasePlatformAdapter._format_choice_page(list(range(25)), 99, 10)
         assert meta["page"] == 2
         assert opts == list(range(20, 25))
-        assert meta["page_info"] == " (21–25 of 25)"
+        assert meta["page_info"] == ' (21–25 из 25)'
 
 
 class TestAdapterParity:
@@ -91,7 +89,7 @@ class TestAdapterParity:
             page = max(0, min(page, total_pages - 1))
             start = page * page_size
             end = min(start + page_size, total)
-            page_info = f" ({start + 1}–{end} of {total})" if total_pages > 1 else ""
+            page_info = f" ({start + 1}–{end} из {total})" if total_pages > 1 else ""
             return options[start:end], page, total_pages, page_info
 
         for n in (0, 1, 8, 9, 10, 25):

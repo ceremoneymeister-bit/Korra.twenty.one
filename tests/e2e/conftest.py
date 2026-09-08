@@ -462,12 +462,9 @@ def bot_user():
 
 
 @pytest.fixture(autouse=True)
-def _korra_pin_english_ui(monkeypatch):
-    """Korra: дефолт интерфейса ru, а e2e-тесты ассертят английские подстроки
-    в ответах слэш-команд. Они проверяют МАРШРУТИЗАЦИЮ команд, не перевод —
-    язык закрепляется env-переменной (приоритет выше config.yaml).
-    Русскость дефолта сторожат test_korra_canonical_defaults и test_i18n."""
-    monkeypatch.setenv("HERMES_LANGUAGE", "en")
+def _korra_russian_ui(monkeypatch):
+    """Проверяем пользовательские ответы на каноническом русском языке Korra."""
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
     try:
         from agent import i18n
         i18n.reset_language_cache()

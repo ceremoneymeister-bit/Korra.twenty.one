@@ -51,7 +51,7 @@ class TestBusyCommand:
         runner = _make_runner()
         event = _make_event("/busy bananas")
         result = await runner._handle_busy_command(event)
-        assert "unknown" in str(result).lower()
+        assert 'неизвестный' in str(result).lower()
 
 class TestBusyCommandPersistence:
     """Test /busy persistence with mocked save_config_value."""
@@ -98,5 +98,5 @@ class TestBusyCommandPersistence:
         )
         event = _make_event("/busy queue")
         result = await runner._handle_busy_command(event)
-        assert "unchanged" in str(result).lower()
+        assert 'не изменились' in str(result).lower()
         assert runner._busy_input_mode == "steer"

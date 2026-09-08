@@ -94,7 +94,7 @@ class TestTelegramExecApproval:
             allow_permanent=False,
         )
 
-        assert buttons == ["✅ Allow Once", "✅ Session", "❌ Deny"]
+        assert buttons == ['✅ Один раз', '✅ До конца диалога', '❌ Запретить']
 
     @pytest.mark.asyncio
     async def test_full_approval_keyboard_is_two_by_two(self, monkeypatch):
@@ -116,8 +116,8 @@ class TestTelegramExecApproval:
         )
 
         assert captured_rows == [
-            ["✅ Allow Once", "✅ Session"],
-            ["✅ Always", "❌ Deny"],
+            ['✅ Один раз', '✅ До конца диалога'],
+            ['✅ Всегда', '❌ Запретить'],
         ]
 
 
@@ -142,7 +142,7 @@ class TestTelegramExecApproval:
         )
 
         assert captured_rows == [
-            ["✅ Allow Once", "❌ Deny"],
+            ['✅ Один раз', '❌ Запретить'],
         ]
 
 
@@ -236,7 +236,7 @@ class TestTelegramApprovalCallback:
         edit_kwargs = query.edit_message_text.call_args[1]
         assert "MARKDOWN_V2" in repr(edit_kwargs["parse_mode"])
         assert "Alice\\_Bob" in edit_kwargs["text"]
-        assert "Approved once" in edit_kwargs["text"]
+        assert 'Разрешено один раз' in edit_kwargs["text"]
 
 
     @pytest.mark.asyncio
@@ -293,7 +293,7 @@ class TestTelegramApprovalCallback:
                 await adapter._handle_callback_query(update, context)
 
         query.answer.assert_called_once()
-        assert "not authorized" in query.answer.call_args[1]["text"].lower()
+        assert 'нет прав' in query.answer.call_args[1]["text"].lower()
         query.edit_message_text.assert_not_called()
         assert not (tmp_path / ".update_response").exists()
 
@@ -323,7 +323,7 @@ class TestTelegramApprovalCallback:
                 await adapter._handle_callback_query(update, context)
 
         query.answer.assert_called_once()
-        assert "not authorized" in query.answer.call_args[1]["text"].lower()
+        assert 'нет прав' in query.answer.call_args[1]["text"].lower()
         query.edit_message_text.assert_not_called()
         assert not (tmp_path / ".update_response").exists()
         assert runner.last_source is not None

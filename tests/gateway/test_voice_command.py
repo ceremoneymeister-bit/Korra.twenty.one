@@ -101,7 +101,7 @@ class TestHandleVoiceCommand:
         runner._voice_mode["telegram:123"] = "voice_only"
         event = _make_event("/voice off")
         result = await runner._handle_voice_command(event)
-        assert "disabled" in result.lower()
+        assert 'отключён' in result.lower()
         assert runner._voice_mode["telegram:123"] == "off"
 
 
@@ -110,7 +110,7 @@ class TestHandleVoiceCommand:
         runner._voice_mode["telegram:123"] = "voice_only"
         event = _make_event("/voice")
         result = await runner._handle_voice_command(event)
-        assert "disabled" in result.lower()
+        assert 'отключён' in result.lower()
         assert runner._voice_mode["telegram:123"] == "off"
 
     @pytest.mark.asyncio
@@ -566,7 +566,7 @@ class TestVoiceChannelCommands:
         event.source.chat_name = "Hermes Server / #general"
         runner.adapters[event.source.platform] = mock_adapter
         result = await runner._handle_voice_channel_join(event)
-        assert "joined" in result.lower()
+        assert 'подключено' in result.lower()
         assert "General" in result
         assert runner._voice_mode["discord:123"] == "all"
         assert mock_adapter._voice_sources[111]["chat_id"] == "123"
@@ -588,7 +588,7 @@ class TestVoiceChannelCommands:
 
         result = await runner._handle_voice_channel_join(event)
 
-        assert "voice dependencies are missing" in result.lower()
+        assert 'не установлены компоненты голосовой связи' in result.lower()
         assert "PyNaCl" in result
 
     # -- _handle_voice_channel_leave --
@@ -604,7 +604,7 @@ class TestVoiceChannelCommands:
         runner.adapters[event.source.platform] = mock_adapter
         runner._voice_mode["discord:123"] = "all"
         result = await runner._handle_voice_channel_leave(event)
-        assert "left" in result.lower()
+        assert 'отключён' in result.lower()
         assert runner._voice_mode["discord:123"] == "off"
         mock_adapter.leave_voice_channel.assert_called_once_with(111)
 
@@ -994,7 +994,7 @@ class TestCallbackWiringOrder:
         runner.adapters[event.source.platform] = mock_adapter
 
         result = await runner._handle_voice_channel_join(event)
-        assert "failed" in result.lower()
+        assert 'не удалось' in result.lower()
         assert mock_adapter._voice_input_callback is None
 
 
@@ -1025,7 +1025,7 @@ class TestLeaveExceptionHandling:
         runner._voice_mode["telegram:123"] = "all"
 
         result = await runner._handle_voice_channel_leave(event)
-        assert "left" in result.lower()
+        assert 'отключён' in result.lower()
         assert runner._voice_mode["telegram:123"] == "off"
         assert mock_adapter._voice_input_callback is None
 

@@ -159,10 +159,10 @@ def test_hygiene_total_ceiling_warning_reports_elapsed_and_progress():
         progress_observed=True,
     )
 
-    assert "total ceiling after 600.4s" in warning
-    assert "summary output was observed" in warning
+    assert "предельного времени: 600.4 с" in warning
+    assert "появления текста сводки" in warning
     assert "30.0s" not in warning
-    assert "no output" not in warning
+    assert "не отвечала" not in warning
 
 
 class TestSessionHygieneWarnThreshold:
@@ -630,7 +630,7 @@ async def test_session_hygiene_timeout_continues_to_agent_and_sets_cooldown(monk
     _cd_args = fake_db.record_compression_failure_cooldown.call_args[0]
     assert _cd_args[0] == "sess-timeout"
     assert _cd_args[1] > time.time()
-    timeout_warnings = [s for s in adapter.sent if "Context compression timed out" in s["content"]]
+    timeout_warnings = [s for s in adapter.sent if "Модель сжатия не отвечала" in s["content"]]
     assert len(timeout_warnings) == 1
     fake_db.archive_and_compact.assert_not_called()
     assert lease_released.is_set()
@@ -808,11 +808,11 @@ async def test_session_hygiene_turn_hold_budget_abandons_streaming_wait(
     # provenance or send the "no output" user message.
     sent_contents = [m["content"] for m in adapter.sent]
     assert not any(
-        "timed out" in c.lower() and "no output" in c.lower()
+        "модель сжатия" in c.lower() and "не отвечала" in c.lower()
         for c in sent_contents
     ), f"turn-hold must not send idle-timeout message, got: {sent_contents}"
     assert any(
-        "deferred" in c.lower() or "still streaming" in c.lower()
+        "отложено" in c.lower() or "сводка ещё передаётся" in c.lower()
         for c in sent_contents
     ), f"turn-hold must send deferral notice, got: {sent_contents}"
 
@@ -977,7 +977,7 @@ async def test_session_hygiene_idle_timeout_still_takes_failure_path(
     # Behavior witness: idle timeout MUST send the "no output" message.
     sent_contents = [m["content"] for m in adapter.sent]
     assert any(
-        "timed out" in c.lower() and "no output" in c.lower()
+        "модель сжатия" in c.lower() and "не отвечала" in c.lower()
         for c in sent_contents
     ), f"idle timeout must send 'no output' message, got: {sent_contents}"
 
@@ -1613,7 +1613,7 @@ async def test_hygiene_fence_cancel_records_cooldown_without_abort_flag(
             f"got {state!r}"
         )
         assert not any(
-            "Context compression aborted" in s["content"] for s in adapter1.sent
+            "Сжатие истории прервано" in s["content"] for s in adapter1.sent
         ), "fence-cancel during /stop or /restart must not toast an abort"
 
         class ShouldNotRunAgent:
@@ -1712,7 +1712,7 @@ async def test_hygiene_does_not_wait_ceiling_after_fence_cancel(
         state = db.get_compression_failure_cooldown(session_id)
         assert state is not None and state["remaining_seconds"] > 0
         assert not any(
-            "Context compression timed out" in s["content"] for s in adapter.sent
+            "Модель сжатия не отвечала" in s["content"] for s in adapter.sent
         ), "fence-cancel is not a summary-model timeout; no timeout toast"
         release_worker.set()
         await asyncio.wait_for(asyncio.to_thread(cleanup_done.wait), timeout=2)

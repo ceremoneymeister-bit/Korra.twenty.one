@@ -382,7 +382,7 @@ class TestConciseFormatter:
             "1300\n1400\n1500\n{...huge json...}",
             duration_seconds=754,
         )
-        assert text.startswith("✅ Background task finished")
+        assert text.startswith("✅ Фоновая задача завершена")
         assert "scan_fleet.py" in text
         assert "12m 34s" in text
         # The raw output must NOT appear on success
@@ -395,7 +395,7 @@ class TestConciseFormatter:
         text = _format_concise_process_notification(
             "proc_abc", "make build", 2, out,
         )
-        assert text.startswith("❌ Background task failed (exit 2)")
+        assert text.startswith("❌ Фоновая задача с ошибкой (код 2)")
         assert "Traceback: boom" in text
         # Only a short tail, not the whole output
         assert "line0" not in text
@@ -435,7 +435,7 @@ async def test_concise_mode_sends_pretty_message_not_raw_dump(monkeypatch, tmp_p
 
     adapter.send.assert_awaited_once()
     sent_text = adapter.send.await_args.args[1]
-    assert sent_text.startswith("✅ Background task finished")
+    assert sent_text.startswith("✅ Фоновая задача завершена")
     assert "Here's the final output" not in sent_text
     assert "5000" not in sent_text
 
@@ -463,7 +463,7 @@ async def test_concise_mode_failure_includes_tail(monkeypatch, tmp_path):
 
     adapter.send.assert_awaited_once()
     sent_text = adapter.send.await_args.args[1]
-    assert sent_text.startswith("❌ Background task failed (exit 128)")
+    assert sent_text.startswith("❌ Фоновая задача с ошибкой (код 128)")
     assert "fatal: repo not found" in sent_text
 
 
@@ -497,7 +497,7 @@ async def test_concise_mode_no_interim_output_updates(monkeypatch, tmp_path):
     adapter.send.assert_awaited_once()
     sent_text = adapter.send.await_args.args[1]
     assert "is still running" not in sent_text
-    assert sent_text.startswith("✅ Background task finished")
+    assert sent_text.startswith("✅ Фоновая задача завершена")
 
 
 # ---------------------------------------------------------------------------

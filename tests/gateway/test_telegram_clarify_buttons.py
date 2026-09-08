@@ -205,7 +205,7 @@ class TestTelegramClarifyCallback:
         assert entry is not None
         assert not entry.event.is_set()
         query.answer.assert_called_once()
-        assert "not authorized" in query.answer.call_args[1]["text"].lower()
+        assert 'нет прав' in query.answer.call_args[1]["text"].lower()
         # State preserved
         assert adapter._clarify_state["cidC"] == "sk-auth"
 

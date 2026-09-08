@@ -2485,7 +2485,7 @@ class TestBuzzAdapterSend:
         assert args[:2] == ["messages", "send"]
         assert "--file" not in args
         assert str(missing) not in args
-        assert stdin_text == "screenshot\n⚠️ Couldn't deliver the image attachment."
+        assert stdin_text == 'screenshot\n⚠️ Не удалось отправить изображение.'
         assert str(missing) not in stdin_text
 
     @pytest.mark.asyncio

@@ -363,7 +363,7 @@ async def test_gateway_retry_does_not_rewind_a_newer_plain_turn(
         MessageEvent(text="/retry", message_type=MessageType.TEXT, source=MagicMock())
     )
 
-    assert result.startswith("Retry failed;")
+    assert result.startswith('Повторить запрос не удалось.')
     assert session_entry.last_prompt_tokens == 123
     gw._handle_message.assert_not_awaited()
     assert [
@@ -403,7 +403,7 @@ async def test_gateway_retry_rejects_media_before_redispatch_or_token_reset():
         MessageEvent(text="/retry", message_type=MessageType.TEXT, source=MagicMock())
     )
 
-    assert result.startswith("Cannot retry that message safely:")
+    assert result.startswith('Нельзя безопасно повторить это сообщение:')
     assert session_entry.last_prompt_tokens == 123
     gw._handle_message.assert_not_awaited()
     facade.rewrite_transcript.assert_not_awaited()
@@ -436,7 +436,7 @@ async def test_gateway_retry_preserves_composite_media_diagnostic_from_store():
     )
 
     assert result == (
-        "Cannot retry that message safely: retry does not support media content"
+        "Нельзя безопасно повторить это сообщение: retry does not support media content"
     )
     assert session_entry.last_prompt_tokens == 123
     gw._handle_message.assert_not_awaited()
@@ -466,7 +466,7 @@ async def test_gateway_retry_stops_when_transcript_rewrite_fails():
         MessageEvent(text="/retry", message_type=MessageType.TEXT, source=MagicMock())
     )
 
-    assert result.startswith("Retry failed;")
+    assert result.startswith('Повторить запрос не удалось.')
     assert session_entry.last_prompt_tokens == 123
     gw._handle_message.assert_not_awaited()
     facade.rewrite_transcript.assert_awaited_once()

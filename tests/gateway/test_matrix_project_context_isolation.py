@@ -290,14 +290,14 @@ async def test_matrix_status_reports_current_matrix_room_scope():
 
     result = await runner._handle_status_command(_event("/status", source_b))
 
-    assert "Matrix scope:" in result
+    assert 'Область Matrix:' in result
     assert PROJECT_B_NAME in result
     assert PROJECT_B_ROOM_ID in result
-    assert "session_scope: room" in result
+    assert "режим сеанса: room" in result
     session_key = build_session_key(source_b)
     assert session_key not in result
     assert session_key[:8] not in result
-    assert "session_key: sha256:" in result
+    assert "ключ сеанса: sha256:" in result
     assert PROJECT_A_NAME not in result
     assert PROJECT_A_ROOM_ID not in result
 
@@ -317,7 +317,7 @@ async def test_matrix_resume_quoted_title_same_room():
         _event('/resume "Project B Plan"', source_b)
     )
 
-    assert "Resumed session" in result
+    assert 'возобновлён' in result
     runner._session_db._db.resolve_session_by_title.assert_called_once_with("Project B Plan")
 
 
@@ -335,7 +335,7 @@ async def test_matrix_resume_cross_room_requires_explicit_flag_and_warns():
         _event("/resume --cross-room Project A Plan", source_b)
     )
 
-    assert "Cross-room resume" in result
+    assert 'Межкомнатное возобновление' in result
     assert PROJECT_B_NAME in result
     runner.session_store.switch_session.assert_called_once()
 

@@ -29,7 +29,7 @@ class TestPersistenceFailureRecoveryMessage:
 
         response = _normalize_empty_agent_response(agent_result, "", history_len=10)
 
-        assert "send it again" in response.lower()
+        assert 'отправьте его ещё раз' in response.lower()
         assert "/reset" not in response
         assert "unknown error" not in response.lower()
 
@@ -44,7 +44,7 @@ class TestPersistenceFailureRecoveryMessage:
 
         response = _normalize_empty_agent_response(agent_result, "", history_len=10)
 
-        assert "disk" in response.lower()
+        assert 'диске' in response.lower()
         assert "/reset" not in response
         assert "unknown error" not in response.lower()
 
@@ -60,7 +60,7 @@ class TestPersistenceFailureRecoveryMessage:
         response = _normalize_empty_agent_response(agent_result, "", history_len=10)
 
         assert "/reset" not in response
-        assert "send it again" in response.lower()
+        assert 'отправьте его ещё раз' in response.lower()
 
     def test_legacy_shape_error_text_mentioning_session_storage(self):
         """Legacy failed results carry no failure_reason but an error text
@@ -75,11 +75,11 @@ class TestPersistenceFailureRecoveryMessage:
         response = _normalize_empty_agent_response(agent_result, "", history_len=10)
 
         assert "/reset" not in response
-        assert "send it again" in response.lower()
+        assert 'отправьте его ещё раз' in response.lower()
 
 
 class TestExplicitNoneErrorIsNoneSafe:
-    """The gateway result dict is built with ``'error': holder.get('error')``
+    """The gateway result dict is built with ``"error": holder.get('error')``
     and can carry an EXPLICIT None, which bypasses dict.get defaults."""
 
     def test_explicit_none_error_never_renders_none(self):
@@ -111,7 +111,7 @@ class TestGenericFailureRegression:
 
         response = _normalize_empty_agent_response(agent_result, "", history_len=10)
 
-        assert "The request failed: provider exploded" in response
+        assert 'Не удалось выполнить запрос: provider exploded' in response
         assert "/reset" in response
 
     def test_context_failure_branch_unchanged(self):
@@ -124,5 +124,5 @@ class TestGenericFailureRegression:
 
         response = _normalize_empty_agent_response(agent_result, "", history_len=60)
 
-        assert "context window" in response
+        assert 'слишком большая для этой модели' in response
         assert "/compact" in response

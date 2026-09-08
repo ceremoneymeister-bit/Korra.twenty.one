@@ -177,7 +177,7 @@ class TestGatewayResumeRestartsWork:
 
         response = await GatewayRunner._handle_goal_command(runner, _resume_event())
 
-        assert "resume" in response.lower() or "Goal" in response
+        assert 'возобновлена' in response.lower() or 'Цель' in response
         pending = adapter._pending_messages.get(_GW_KEY)
         assert pending is not None, (
             "/goal resume must enqueue the continuation on the adapter FIFO "
@@ -198,5 +198,5 @@ class TestGatewayResumeRestartsWork:
 
         response = await GatewayRunner._handle_goal_command(runner, _resume_event())
 
-        assert "No goal to resume" in response
+        assert 'Нет цели для возобновления' in response
         assert adapter._pending_messages == {}

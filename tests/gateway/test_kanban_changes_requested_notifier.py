@@ -111,10 +111,10 @@ def test_changes_requested_notify_wake_is_actionable_and_exactly_routed(tmp_path
     assert wake.source.chat_id == "chat-1"
     assert wake.source.chat_type == "thread"
     assert wake.source.thread_id == "topic-7"
-    assert "implementation is not approved" in wake.text
-    assert "Inspect the existing card and its current review run" in wake.text
-    assert "do not create a duplicate task" in wake.text
-    assert wake.text.count("do not create a duplicate task") == 1
+    assert 'реализация не одобрена' in wake.text
+    assert 'Изучите существующую карточку и текущую проверку' in wake.text
+    assert "не создавайте дубликат задачи" in wake.text
+    assert wake.text.count("не создавайте дубликат задачи") == 1
     assert _unseen(task_id) == []
 
     # A fresh watcher after restart cannot replay an event whose cursor advanced.

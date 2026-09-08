@@ -100,7 +100,7 @@ async def test_status_command_reads_token_totals_from_session_db():
     result = await runner._handle_message(_make_event("/status"))
 
     # 1000 + 250 + 500 + 100 + 50 = 1,900
-    assert "**Lifetime tokens billed:** 1,900" in result
+    assert "**Токенов учтено за всё время:** 1,900" in result
 
 
 @pytest.mark.asyncio
@@ -136,9 +136,9 @@ async def test_status_command_includes_live_agent_model_and_context():
 
     result = await runner._handle_message(_make_event("/status"))
 
-    assert "**Model:** `openai/gpt-test` (openai)" in result
-    assert "**Context:** 12,345 / 100,000 (12%)" in result
-    assert "**Lifetime tokens billed:** 1,250" in result
+    assert "**Модель:** `openai/gpt-test` (openai)" in result
+    assert "**Контекст:** 12,345 / 100,000 (12%)" in result
+    assert "**Токенов учтено за всё время:** 1,250" in result
 
 
 @pytest.mark.asyncio
@@ -183,8 +183,8 @@ async def test_status_command_uses_dominant_persisted_model_route(tmp_path):
 
         result = await runner._handle_message(_make_event("/status"))
 
-        assert "**Model:** `z-ai/glm-5.2` (nvidia)" in result
-        assert "**Model:** `z-ai/glm-5.2` (nous)" not in result
+        assert "**Модель:** `z-ai/glm-5.2` (nvidia)" in result
+        assert "**Модель:** `z-ai/glm-5.2` (nous)" not in result
     finally:
         db.close()
 
@@ -227,8 +227,8 @@ async def test_agents_command_reports_active_agents_and_processes(monkeypatch):
 
     result = await runner._handle_message(_make_event("/agents"))
 
-    assert "**Active agents:** 1" in result
-    assert "**Running background processes:** 1" in result
+    assert "**Активные агенты:** 1" in result
+    assert "**Выполняющиеся фоновые процессы:** 1" in result
     assert "proc-1" in result
     running_agent.interrupt.assert_not_called()
 
@@ -255,7 +255,7 @@ async def test_tasks_alias_routes_to_agents_command(monkeypatch):
 
     result = await runner._handle_message(_make_event("/tasks"))
 
-    assert "Active Agents & Tasks" in result
+    assert "Активные агенты и задачи" in result
 
 
 @pytest.mark.asyncio
@@ -455,8 +455,8 @@ async def test_profile_command_reports_source_stamped_profile(monkeypatch, tmp_p
 
     result = await runner._handle_profile_command(event)
 
-    assert "**Profile:** `milo`" in result
-    assert f"**Home:** `{profile_home}`" in result
+    assert "**Профиль:** `milo`" in result
+    assert f"**Домашний каталог:** `{profile_home}`" in result
 
 
 # ── /context command tests ────────────────────────────────────────────────
@@ -509,8 +509,8 @@ async def test_context_command_keeps_configured_window_without_resident_agent():
     ) as context_lookup:
         result = await runner._handle_context_command(_make_event("/context"))
 
-    assert "Window: 262,144 tokens" in result
-    assert "In use: 66,570 / 262,144 (25%)" in result
+    assert 'Размер: 262,144 токенов' in result
+    assert 'Использовано: 66,570 / 262,144 (25%)' in result
     assert "131,072" not in result
     assert context_lookup.call_count == 1
     assert context_lookup.call_args.kwargs["config_context_length"] == 262_144

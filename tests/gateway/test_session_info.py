@@ -42,7 +42,7 @@ class TestFormatSessionInfo:
         with p1, p2, p3:
             info = runner._format_session_info()
         assert "32K" in info
-        assert "config" in info
+        assert "из настроек" in info
 
     def test_default_fallback_hint(self, runner, tmp_path):
         p1, p2, p3 = _patch_info(tmp_path, "model:\n  default: unknown-model-xyz\n",
@@ -113,7 +113,7 @@ class TestFormatSessionInfo:
         ):
             info = runner._format_session_info()
         assert "262K" in info
-        assert "config" in info
+        assert "из настроек" in info
         assert "131K" not in info
 
 

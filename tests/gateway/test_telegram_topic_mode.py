@@ -192,7 +192,7 @@ async def test_topic_restore_quote_never_exposes_compaction_scaffolding(tmp_path
         "restorable",
     )
 
-    assert "Last Korra message:\nreal completed answer" in result
+    assert 'Последнее сообщение Корры:\nreal completed answer' in result
     assert "CONTEXT COMPACTION" not in result
     assert "Historical Task Snapshot" not in result
     db.close()
@@ -223,7 +223,7 @@ async def test_topic_restore_quote_unwraps_merged_assistant_carrier(tmp_path):
         "restorable",
     )
 
-    assert "Last Korra message:\nreal completed answer" in result
+    assert 'Последнее сообщение Корры:\nreal completed answer' in result
     assert "PRIOR CONTEXT" not in result
     assert "CONTEXT COMPACTION" not in result
     db.close()
@@ -273,9 +273,9 @@ async def test_root_telegram_dm_new_shows_create_topic_instruction(monkeypatch):
 
     result = await runner._handle_message(_make_event("/new"))
 
-    assert "create a new topic" in result
-    assert "All Messages" in result
-    assert "Use /new inside" in result
+    assert 'создаст новую тему' in result
+    assert 'Все сообщения' in result
+    assert "Команда /new внутри" in result
     runner._run_agent.assert_not_called()
     runner.session_store.reset_session.assert_not_called()
     runner.session_store.get_or_create_session.assert_not_called()
@@ -575,11 +575,11 @@ async def test_topic_root_command_lists_unlinked_sessions_for_restore(tmp_path, 
 
     result = await runner._handle_message(_make_event("/topic"))
 
-    assert "Telegram multi-session topics are enabled" in result
-    assert "Previous unlinked sessions" in result
+    assert 'Режим отдельных диалогов по темам Telegram включён' in result
+    assert "Предыдущие диалоги без привязки к теме" in result
     assert "Old research" in result
     assert "old-unlinked" in result
-    assert "Send /topic old-unlinked inside a topic" in result
+    assert 'отправьте /topic old-unlinked внутри темы' in result
     assert "Already linked" not in result
     assert "other-user" not in result
     runner._run_agent.assert_not_called()
@@ -703,7 +703,7 @@ async def test_topic_refuses_unauthorized_user(tmp_path, monkeypatch):
 
     result = await runner._handle_topic_command(_make_event("/topic"))
 
-    assert "not authorized" in result.lower()
+    assert 'нет прав' in result.lower()
     # Tables must not be created for an unauthorized caller.
     tables = {
         row[0]

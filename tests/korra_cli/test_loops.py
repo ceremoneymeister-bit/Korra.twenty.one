@@ -542,14 +542,14 @@ class TestControls:
         from korra_cli.loops import LoopManager
 
         mgr = LoopManager(session_id="c4")
-        assert "No loop set" in mgr.status_line()
+        assert "Цикл не задан" in mgr.status_line()
         mgr.set("poll the build", interval_seconds=300)
-        assert "active" in mgr.status_line()
+        assert "работает" in mgr.status_line()
         assert "poll the build" in mgr.status_line()
         mgr.pause()
-        assert "paused" in mgr.status_line()
+        assert "на паузе" in mgr.status_line()
         mgr.clear()
-        assert "No loop set" in mgr.status_line()
+        assert "Цикл не задан" in mgr.status_line()
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -601,8 +601,8 @@ class TestDispatchLoopCommand:
         mgr = LoopManager(session_id="d1")
         result = dispatch_loop_command(mgr, "5m check the deploy")
         assert result["created"] is True
-        assert "Loop set" in result["output"]
-        assert "every 5m" in result["output"]
+        assert "Цикл задан" in result["output"]
+        assert "каждые 5m" in result["output"]
 
     def test_create_self_paced(self, hermes_home):
         from korra_cli.loops import LoopManager, dispatch_loop_command
@@ -610,7 +610,7 @@ class TestDispatchLoopCommand:
         mgr = LoopManager(session_id="d2")
         result = dispatch_loop_command(mgr, "keep fixing the tests")
         assert result["created"] is True
-        assert "Self-paced" in result["output"]
+        assert "Гибкий интервал" in result["output"]
 
     def test_create_fires_immediately(self, hermes_home):
         from korra_cli.loops import LoopManager, dispatch_loop_command
@@ -618,8 +618,8 @@ class TestDispatchLoopCommand:
         mgr = LoopManager(session_id="d2a")
         result = dispatch_loop_command(mgr, "1h check the deploy")
         assert result["created"] is True
-        assert "Loop set" in result["output"]
-        assert "fires now" in result["output"]
+        assert "Цикл задан" in result["output"]
+        assert "Первый запуск — сейчас" in result["output"]
         assert mgr.is_due() is True
 
     def test_status_empty(self, hermes_home):
@@ -628,17 +628,17 @@ class TestDispatchLoopCommand:
         mgr = LoopManager(session_id="d3")
         result = dispatch_loop_command(mgr, "")
         assert result["created"] is False
-        assert "No loop set" in result["output"]
+        assert "Цикл не задан" in result["output"]
 
     def test_pause_resume_stop(self, hermes_home):
         from korra_cli.loops import LoopManager, dispatch_loop_command
 
         mgr = LoopManager(session_id="d4")
         dispatch_loop_command(mgr, "5m poll")
-        assert "paused" in dispatch_loop_command(mgr, "pause")["output"].lower()
-        assert "resumed" in dispatch_loop_command(mgr, "resume")["output"].lower()
-        assert "stopped" in dispatch_loop_command(mgr, "stop")["output"].lower()
-        assert "No active loop" in dispatch_loop_command(mgr, "stop")["output"]
+        assert "приостановлен" in dispatch_loop_command(mgr, "pause")["output"].lower()
+        assert "возобновлён" in dispatch_loop_command(mgr, "resume")["output"].lower()
+        assert "остановлен" in dispatch_loop_command(mgr, "stop")["output"].lower()
+        assert "Нет активного цикла" in dispatch_loop_command(mgr, "stop")["output"]
 
     def test_route_stored(self, hermes_home):
         from korra_cli.loops import LoopManager, dispatch_loop_command, load_loop
@@ -653,7 +653,7 @@ class TestDispatchLoopCommand:
 
         mgr = LoopManager(session_id="d6")
         out = dispatch_loop_command(mgr, "help")["output"]
-        assert "Usage" in out
+        assert "Использование" in out
         assert "--times" in out
 
     def test_bad_times_error(self, hermes_home):

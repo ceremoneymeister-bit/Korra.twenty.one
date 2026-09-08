@@ -182,7 +182,7 @@ class TestApproveCommand:
         _gateway_queues[session_key] = [e1, e2]
 
         result = await runner._handle_approve_command(_make_event("/approve all"))
-        assert "2 commands" in result
+        assert '2 команд' in result
         assert e1.event.is_set()
         assert e2.event.is_set()
 
@@ -200,7 +200,7 @@ class TestApproveCommand:
         _gateway_queues[session_key] = [e1, e2]
 
         result = await runner._handle_approve_command(_make_event("/approve all session"))
-        assert "session" in result.lower()
+        assert 'сеанс' in result.lower()
         assert e1.result == "session"
         assert e2.result == "session"
 
@@ -251,7 +251,7 @@ class TestDenyCommand:
         result = await runner._handle_deny_command(
             _make_event("/deny all wrong directory")
         )
-        assert "2 commands" in result
+        assert '2 команд' in result
         assert all(e.result == "deny" for e in [e1, e2])
         assert all(e.reason == "wrong directory" for e in [e1, e2])
 

@@ -138,7 +138,7 @@ async def test_empty_success_still_gets_empty_response_warning(monkeypatch, tmp_
         _event(), _source(), "agent:main:telegram:group:-1001:12345", 1
     )
 
-    assert "no response was generated" in response
+    assert 'завершилась без ответа' in response
 
 
 @pytest.mark.asyncio

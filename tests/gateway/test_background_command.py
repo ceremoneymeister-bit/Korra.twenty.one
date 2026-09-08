@@ -66,7 +66,7 @@ class TestHandleBackgroundCommand:
         runner = _make_runner()
         event = _make_event(text="/bg")
         result = await runner._handle_background_command(event)
-        assert "Usage:" in result
+        assert 'Использование:' in result
         assert "/bg" in result
 
     @pytest.mark.asyncio
@@ -75,7 +75,7 @@ class TestHandleBackgroundCommand:
         runner = _make_runner()
         event = _make_event(text="/bg   ")
         result = await runner._handle_background_command(event)
-        assert "Usage:" in result
+        assert 'Использование:' in result
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +108,7 @@ class TestRunBackgroundTask:
         # Should have sent an error message
         mock_adapter.send.assert_called_once()
         call_args = mock_adapter.send.call_args
-        assert "failed" in call_args[1].get("content", call_args[0][1] if len(call_args[0]) > 1 else "").lower()
+        assert 'не выполнена' in call_args[1].get("content", call_args[0][1] if len(call_args[0]) > 1 else "").lower()
 
     @pytest.mark.asyncio
     async def test_successful_task_sends_result(self):
@@ -152,7 +152,7 @@ class TestRunBackgroundTask:
         mock_adapter.send.assert_called_once()
         call_args = mock_adapter.send.call_args
         content = call_args[1].get("content", call_args[0][1] if len(call_args[0]) > 1 else "")
-        assert "Background task complete" in content
+        assert 'Фоновая задача завершена' in content
         assert "Hello from background!" in content
         agent_kwargs = MockAgent.call_args.kwargs
         assert agent_kwargs["checkpoints_enabled"] is True
@@ -226,7 +226,7 @@ class TestHandleBtwCommand:
         runner = _make_runner()
         event = _make_event(text="/btw")
         result = await runner._handle_btw_command(event)
-        assert "Usage:" in result
+        assert 'Использование:' in result
         assert "/btw" in result
 
     @pytest.mark.asyncio
@@ -239,7 +239,7 @@ class TestHandleBtwCommand:
         runner._async_session_store = store
         event = _make_event(text="/btw what did we do?")
         result = await runner._handle_btw_command(event)
-        assert "conversation" in result.lower()
+        assert 'разговора' in result.lower()
 
     @pytest.mark.asyncio
     async def test_dispatches_side_question_and_sends_answer(self):

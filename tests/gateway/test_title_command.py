@@ -215,7 +215,7 @@ class TestResetCommandWithTitle:
         runner._session_db.set_session_title.assert_called_once()
         reply = str(result)
         assert "already in use" in reply
-        assert "session started untitled" in reply
+        assert 'сеанс запущен без названия' in reply
         # Header must NOT claim the rejected title as the session name
         assert "New session started: Dup" not in reply
 

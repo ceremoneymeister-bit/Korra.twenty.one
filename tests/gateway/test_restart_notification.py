@@ -52,7 +52,7 @@ async def test_restart_command_writes_notify_file(tmp_path, monkeypatch):
     )
 
     result = await runner._handle_restart_command(event)
-    assert "Restarting" in result
+    assert "Перезапуск" in result
 
     notify_path = tmp_path / ".restart_notify.json"
     assert notify_path.exists()
@@ -124,7 +124,7 @@ async def test_sethome_updates_running_config_for_same_process_restart(tmp_path,
     result = await runner._handle_set_home_command(event)
 
     home = runner.config.get_home_channel(Platform.TELEGRAM)
-    assert "Home channel set" in result
+    assert "Главный канал установлен" in result
     assert saved["TELEGRAM_HOME_CHANNEL"] == "home-42"
     assert home is not None
     assert home.chat_id == "home-42"
@@ -157,7 +157,7 @@ async def test_sethome_preserves_thread_target_for_same_process_restart(tmp_path
     result = await runner._handle_set_home_command(event)
 
     home = runner.config.get_home_channel(Platform.TELEGRAM)
-    assert "Home channel set" in result
+    assert "Главный канал установлен" in result
     assert saved["TELEGRAM_HOME_CHANNEL"] == "parent-42"
     assert saved["TELEGRAM_HOME_CHANNEL_THREAD_ID"] == "topic-7"
     assert home is not None
@@ -198,7 +198,7 @@ async def test_send_home_channel_startup_notification_preserves_thread_metadata(
     assert delivered == {("telegram", "parent-42", "777")}
     adapter.send.assert_called_once_with(
         "parent-42",
-        "♻️ Gateway online — Korra is back and ready.",
+        "♻️ Шлюз подключён. Корра готова к работе.",
         metadata={
             "thread_id": "777",
             "telegram_dm_topic_reply_fallback": True,
@@ -237,7 +237,7 @@ async def test_relay_fronted_logical_home_gets_startup_notification(tmp_path, mo
     assert relay.send_for_platform.await_args.args[:3] == (
         Platform.SLACK,
         "D123",
-        "♻️ Gateway online — Korra is back and ready.",
+        '♻️ Шлюз подключён. Корра готова к работе.',
     )
     assert relay.send_for_platform.await_args.kwargs["metadata"]["user_id"] == "U123"
     assert relay.send_for_platform.await_args.kwargs["metadata"]["scope_id"] == "T123"
@@ -387,7 +387,7 @@ async def test_shutdown_notifications_use_cached_live_thread_source_when_origin_
 
     adapter.send.assert_awaited_once_with(
         "parent-42",
-        "⚠️ Gateway shutting down — Your current task will be interrupted.",
+        "⚠️ Шлюз выключается — Текущая задача будет прервана.",
         metadata={"thread_id": "topic-7"},
     )
 
