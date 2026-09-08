@@ -15,7 +15,7 @@
     ## K21-2026.09.08 · Русский интерфейс
 
     - Дата: 08.09.2026
-    - Ревизия: 20cf8035d9
+    - Ревизия: @build-revision@
     - Пауза: около минуты
 
     Одно предложение о том, что изменилось.
@@ -27,6 +27,12 @@
 Разбор намеренно снисходительный: пропущенная метадата или лишний раздел не
 должны ломать экран обновления — человек увидит меньше подробностей, но не
 пустую страницу с ошибкой.
+
+Ревизия верхней записи не пишется руками: `@build-revision@` — метка, вместо
+которой подставляется провенанс сборки. Написать в файле точный хэш дерева,
+в которое входит сам файл, невозможно — коммит с этой записью его и меняет.
+Поэтому заметки, собранные из репозитория, ревизии не знают, а собранные из
+образа знают её точно; приёмка сверяет одно с другим до публикации.
 
 CLI-режим (`python -m korra_cli.release_notes`) умеет два дела: показать
 заметки в JSON и собрать ЧЕРНОВИК новой записи из коммитов между ревизиями и
@@ -68,6 +74,13 @@ _META_KEYS = {
 #: Размер, за которым файл заметок перестаёт быть заметками. Панель читает его
 #: на каждый запрос состояния, поэтому чужой гигабайт сюда попасть не должен.
 _MAX_NOTES_BYTES = 512 * 1024
+
+#: Метка вместо ревизии в верхней записи. Точный хэш дерева, из которого собран
+#: образ, в самом этом дереве записать невозможно: любая правка файла меняет
+#: коммит, а вместе с ним и хэш. Поэтому в заметках стоит метка, а настоящее
+#: значение проставляет сборка — то же самое, что уходит в OCI-метку
+#: `org.opencontainers.image.revision` и в провенанс образа.
+BUILD_REVISION_MARK = "@build-revision@"
 
 
 @dataclass
@@ -219,6 +232,37 @@ def parse_release_notes(text: str) -> list[ReleaseNote]:
     return releases
 
 
+def build_revision() -> str:
+    """Ревизия, которой на самом деле собран этот образ, — факт, а не текст.
+
+    Источник ровно один: провенанс, запечённый сборкой (`HERMES_GIT_SHA` →
+    `/etc/hermes/image-provenance.json`), из того же значения, что уходит в
+    OCI-метку `org.opencontainers.image.revision`. Вне образа источника нет —
+    и тогда честнее пустая строка, чем хэш, написанный руками.
+    """
+    try:
+        from korra_cli.image_provenance import read_image_provenance
+
+        provenance = read_image_provenance()
+    except Exception:  # pragma: no cover — провенанс не обязателен
+        return ""
+    if provenance is None or not provenance.valid:
+        return ""
+    return provenance.revision or ""
+
+
+def _stamp_build_revision(notes: list[ReleaseNote]) -> list[ReleaseNote]:
+    """Проставить верхней записи ревизию сборки вместо метки.
+
+    Верхняя запись описывает собранный образ, поэтому её ревизия — не текст
+    заметок, а метка сборки. Записи прошлых выпусков остаются как есть: их
+    ревизии уже известны и написаны точно.
+    """
+    if notes and notes[0].revision in ("", BUILD_REVISION_MARK):
+        notes[0].revision = build_revision()
+    return notes
+
+
 def read_release_notes(path: Optional[Path] = None) -> list[ReleaseNote]:
     """Прочитать заметки из файла. Никогда не бросает: нет файла — нет заметок.
 
@@ -229,7 +273,7 @@ def read_release_notes(path: Optional[Path] = None) -> list[ReleaseNote]:
     try:
         if target.stat().st_size > _MAX_NOTES_BYTES:
             return []
-        return parse_release_notes(target.read_text(encoding="utf-8"))
+        return _stamp_build_revision(parse_release_notes(target.read_text(encoding="utf-8")))
     except (OSError, ValueError, UnicodeDecodeError):
         return []
 
@@ -335,11 +379,6 @@ def draft_release_note(
     """
     commits = commits_between(repo, rev_range)
     reports = qa_reports_between(repo, rev_range)
-    head = ""
-    try:
-        head = _git(repo, "rev-parse", "--short=10", rev_range.split("..")[-1]).strip()
-    except RuntimeError:
-        pass
 
     changes = [(short, subject) for short, subject in commits if not _FIX_WORDS.search(subject)]
     fixes = [(short, subject) for short, subject in commits if _FIX_WORDS.search(subject)]
@@ -348,7 +387,10 @@ def draft_release_note(
         f"## {release_id}" + (f" · {title}" if title else " · ЗАГОЛОВОК ВЫПУСКА"),
         "",
         "- Дата: ДД.ММ.ГГГГ",
-        f"- Ревизия: {head or 'ХХХХХХ'}",
+        # Метка, а не хэш: ревизию верхней записи проставляет сборка. Хэш,
+        # написанный руками, обязан оказаться неверным — коммит с самой
+        # записью его и меняет.
+        f"- Ревизия: {BUILD_REVISION_MARK}",
         "- Пауза: около минуты",
         "",
         "ЧЕРНОВИК. Одно предложение о том, что изменилось для владельца.",

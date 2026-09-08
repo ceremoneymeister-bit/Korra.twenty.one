@@ -87,7 +87,7 @@ def test_failed_gate_cannot_reuse_previous_success(artifact, tmp_path, monkeypat
     receipt = tmp_path / "receipt.json"
     receipt.write_text(json.dumps({"accepted": True, "artifact": manifest}))
 
-    def fail(_):
+    def fail(_image, revision=""):
         raise ci.AcceptanceError("candidate regression")
 
     monkeypatch.setattr(ci, "check_image", fail)
@@ -101,10 +101,12 @@ def test_failed_gate_cannot_reuse_previous_success(artifact, tmp_path, monkeypat
 def test_success_receipt_is_bound_to_loaded_image(artifact, tmp_path, monkeypatch):
     directory, manifest, _ = artifact
     checked = []
-    monkeypatch.setattr(ci, "check_image", lambda image: checked.append(image) or ["synthetic acceptance"])
+    monkeypatch.setattr(ci, "check_image",
+                        lambda image, revision="": checked.append((image, revision)) or ["synthetic acceptance"])
     receipt = tmp_path / "receipt.json"
     result = ci.accept(directory, REVISION, "amd64", receipt)
-    assert checked == [manifest["image_id"]]
+    # Приёмка сверяет заметки к выпуску с ревизией собранного артефакта.
+    assert checked == [(manifest["image_id"], REVISION)]
     assert result["artifact"] == manifest
     assert ci.load_artifact(directory, REVISION, "amd64", receipt) == manifest
 
@@ -175,6 +177,50 @@ def test_probe_failure_cleans_only_generated_container(monkeypatch):
     name = create[create.index("--name") + 1]
     assert name.startswith("k21-release-ci-")
     assert commands[-1] == ("docker", "rm", "--force", "--volumes", name)
+
+
+def image_daemon(release_note, help_text="usage: korra"):
+    """Docker, отвечающий как на живом образе. Пробы подменены целиком."""
+    def docker(*args, **kwargs):
+        if args[:3] == ("docker", "image", "inspect"):
+            return json.dumps([INFO])
+        if args[:2] == ("docker", "inspect"):
+            return json.dumps([{"State": {"Running": True}, "Image": IMAGE_ID}])
+        if args[:2] == ("docker", "exec"):
+            if args[-1] == "health":
+                return json.dumps({"panel": {"gateway_running": True, "version": "1"},
+                                   "api": {"status": "ok", "version": "1"}})
+            if args[-1] == "release":
+                return json.dumps(release_note)
+            if args[-1] == "chat":
+                return stream()
+            if args[-1] == "--help":
+                return help_text
+        return ""
+    return docker
+
+
+def test_release_notes_must_be_stamped_with_the_build_revision():
+    ci.validate_release_note({"release_id": "K21-2026.09.08", "revision": REVISION}, REVISION)
+    for note in ({}, {"release_id": ""}, {"release_id": "K21-X", "revision": ""},
+                 {"release_id": "K21-X", "revision": "c" * 40}, "не словарь"):
+        with pytest.raises(ci.AcceptanceError):
+            ci.validate_release_note(note, REVISION)
+
+
+def test_acceptance_refuses_an_image_whose_notes_name_another_revision(monkeypatch):
+    """Заметки описывают собранный образ, иначе связь «заметки → код → digest»
+    держаться не на чем. Ревизия, написанная руками, обязана быть неверной:
+    коммит с самой записью её и меняет — так K21-2026.09.08 и уехал бы в
+    реестр с ревизией предыдущего дерева."""
+    monkeypatch.setattr(ci, "run", image_daemon({"release_id": "K21-2026.09.08", "revision": "c" * 40}))
+    with pytest.raises(ci.AcceptanceError, match="Release notes revision"):
+        ci.check_image(IMAGE_ID, revision=REVISION)
+
+
+def test_acceptance_confirms_notes_stamped_by_this_build(monkeypatch):
+    monkeypatch.setattr(ci, "run", image_daemon({"release_id": "K21-2026.09.08", "revision": REVISION}))
+    assert "release notes stamped with this build revision" in ci.check_image(IMAGE_ID, revision=REVISION)
 
 
 @pytest.mark.parametrize("gate_result", ["failure", "cancelled", "skipped"])

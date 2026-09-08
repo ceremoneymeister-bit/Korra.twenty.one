@@ -168,6 +168,11 @@ elif mode == 'bootstrap':
     assert len(list((web / 'assets').glob('index-*.js'))) == 1, 'stale dashboard entry chunks'
     assert (root / 'skills/autonomous-ai-agents/korra-agent/SKILL.md').is_file(), 'Korra agent skill absent'
     print('bootstrap, clean credentials/cron, bundled skill and dashboard assets passed')
+elif mode == 'release':
+    from korra_cli import release_notes
+    note = release_notes.current_release()
+    print(json.dumps({'release_id': note.release_id if note else '',
+                      'revision': note.revision if note else ''}))
 elif mode == 'chat':
     env = (data / '.env').read_text()
     key = re.search(r'^API_SERVER_KEY=(.+)$', env, re.M).group(1)
@@ -199,7 +204,21 @@ def container_command(name: str, info: dict) -> list[str]:
     return command + [info["Id"], "gateway", "run"]
 
 
-def check_image(image: str, timeout: int = 180) -> list[str]:
+def validate_release_note(note: dict, revision: str) -> None:
+    """The image must describe itself: top release note bound to this build.
+
+    A hand-written revision in RELEASE_NOTES.md cannot be right — the commit
+    carrying the line changes the very hash it claims. The file therefore
+    holds a marker and the build stamps it, so the operator can trust the
+    chain notes -> code -> digest. Verified here, before publication.
+    """
+    if not isinstance(note, dict) or not note.get("release_id"):
+        raise AcceptanceError("Image carries no release note for its own release")
+    if note.get("revision") != revision:
+        raise AcceptanceError("Release notes revision differs from the build revision")
+
+
+def check_image(image: str, timeout: int = 180, revision: str = "") -> list[str]:
     info = image_info(image)
     name = "k21-release-ci-" + uuid.uuid4().hex
     command = container_command(name, info)
@@ -223,6 +242,8 @@ def check_image(image: str, timeout: int = 180) -> list[str]:
                     raise AcceptanceError("Timed out waiting for dashboard and API JSON readiness")
                 time.sleep(2)
         probe("bootstrap")
+        if revision:
+            validate_release_note(json.loads(probe("release")), revision)
         help_text = run("docker", "exec", "--user", "10000:10000", name, "korra", "--help")
         if "usage" not in help_text.lower():
             raise AcceptanceError("Korra CLI did not start")
@@ -232,7 +253,8 @@ def check_image(image: str, timeout: int = 180) -> list[str]:
             raise AcceptanceError("Clean candidate tried to connect a Telegram bot")
         return ["dashboard and API JSON readiness", "clean bootstrap and empty credentials/cron",
                 "Korra CLI, skill and dashboard assets", "missing-provider SSE error with Ключи hint",
-                "no Telegram connection; network disabled"]
+                "no Telegram connection; network disabled"] + (
+                    ["release notes stamped with this build revision"] if revision else [])
     finally:
         # The name is generated above, never supplied by the operator. --volumes
         # also removes any anonymous image VOLUME (tmpfs itself leaves no state).
@@ -242,7 +264,7 @@ def check_image(image: str, timeout: int = 180) -> list[str]:
 def accept(directory: Path, revision: str, arch: str, receipt: Path) -> dict:
     receipt.unlink(missing_ok=True)
     manifest = load_artifact(directory, revision, arch)
-    checks = check_image(manifest["image_id"])
+    checks = check_image(manifest["image_id"], revision=manifest["revision"])
     result = {"accepted": True, "artifact": manifest, "checks": checks}
     receipt.parent.mkdir(parents=True, exist_ok=True)
     receipt.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
@@ -264,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--receipt", type=Path, required=name == "accept")
     check = sub.add_parser("check")
     check.add_argument("--image", required=True)
+    check.add_argument("--revision", default="", help="сверить ревизию заметок к выпуску со сборочной")
     args = parser.parse_args(argv)
     try:
         if args.command == "deployment-needed":
@@ -277,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             print(load_artifact(args.directory, args.revision, args.arch, args.receipt)["image_id"])
             return 0
         else:
-            result = {"accepted": True, "checks": check_image(args.image)}
+            result = {"accepted": True, "checks": check_image(args.image, revision=args.revision)}
         print(json.dumps(result, indent=2))
         return 0
     except (AcceptanceError, OSError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:

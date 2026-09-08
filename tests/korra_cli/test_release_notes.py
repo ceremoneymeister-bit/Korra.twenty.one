@@ -120,6 +120,76 @@ def test_shipped_notes_parse_and_describe_this_build():
     assert note is not None, "RELEASE_NOTES.md в корне не разобрался"
     assert note.release_id.startswith("K21-")
     assert note.summary and note.sections
+    # Ревизия верхней записи — факт сборки, а не текст: вне образа её нет.
+    assert note.revision == release_notes.build_revision()
+
+
+STAMPED = """## K21-2026.09.09 · Новый выпуск
+
+- Ревизия: @build-revision@
+
+### Что нового
+
+- **Пункт нового выпуска.**
+
+## K21-2026.09.08 · Прежний выпуск
+
+- Ревизия: 20cf8035d9
+
+### Что нового
+
+- **Пункт прежнего выпуска.**
+"""
+
+
+def test_top_revision_is_stamped_by_the_build_not_written_by_hand(tmp_path, monkeypatch):
+    """Точный хэш дерева, в которое входит сам файл, в нём не записать: коммит
+    с этой записью его и меняет. Ровно так в выпуск K21-2026.09.08 уехала
+    ревизия предыдущего дерева (найдено ревью 08.09.2026)."""
+    path = tmp_path / "RELEASE_NOTES.md"
+    path.write_text(STAMPED, encoding="utf-8")
+    monkeypatch.setattr(release_notes, "build_revision", lambda: "f" * 40)
+    notes = release_notes.read_release_notes(path)
+    assert notes[0].revision == "f" * 40
+    # Прошлые выпуски знают свою ревизию точно — их не трогаем.
+    assert notes[1].revision == "20cf8035d9"
+
+
+def test_marker_never_reaches_the_screen_outside_the_image(tmp_path, monkeypatch):
+    """Вне образа ревизии просто нет. Пустая строка честнее метки: карточка в
+    панели и в кабинете такую строку не показывает вовсе."""
+    path = tmp_path / "RELEASE_NOTES.md"
+    path.write_text(STAMPED, encoding="utf-8")
+    monkeypatch.setattr(release_notes, "build_revision", lambda: "")
+    assert release_notes.read_release_notes(path)[0].revision == ""
+
+
+def test_shipped_top_entry_leaves_the_revision_to_the_build():
+    text = release_notes.RELEASE_NOTES_PATH.read_text(encoding="utf-8")
+    top = text.split("\n## ", 1)[1].split("\n## ", 1)[0]
+    assert f"- Ревизия: {release_notes.BUILD_REVISION_MARK}" in top
+
+
+def test_build_revision_comes_from_the_image_provenance(monkeypatch):
+    from korra_cli import image_provenance
+
+    def provenance(marker_path=None):
+        return image_provenance.ImageProvenance(
+            schema=1, deployment_kind="image", manager="docker", image="ghcr.io/x/y",
+            version="0.21.0", revision="a" * 40, marker_path="/etc/hermes/image-provenance.json")
+
+    monkeypatch.setattr(image_provenance, "read_image_provenance", provenance)
+    assert release_notes.build_revision() == "a" * 40
+
+    monkeypatch.setattr(image_provenance, "read_image_provenance", lambda marker_path=None: None)
+    assert release_notes.build_revision() == ""
+
+    # Испорченный провенанс не даёт ревизии: подставлять нечего.
+    monkeypatch.setattr(image_provenance, "read_image_provenance",
+                        lambda marker_path=None: image_provenance.ImageProvenance(
+                            schema=1, deployment_kind="image", manager="unknown", image=None,
+                            version=None, revision=None, marker_path="/x", valid=False, error="broken"))
+    assert release_notes.build_revision() == ""
 
 
 @pytest.fixture
@@ -161,3 +231,9 @@ def test_draft_skips_noise_and_splits_fixes(repo):
 def test_draft_lists_qa_reports_from_the_range(repo):
     draft = release_notes.draft_release_note(repo, "HEAD~3..HEAD", "K21-2026.09.09")
     assert "docs/qa/отчёт.md — Отчёт приёмки" in draft
+
+
+def test_draft_leaves_the_revision_to_the_build(repo):
+    """Черновик не подсовывает автору хэш, который к моменту сборки устареет."""
+    draft = release_notes.draft_release_note(repo, "HEAD~3..HEAD", "K21-2026.09.09")
+    assert f"- Ревизия: {release_notes.BUILD_REVISION_MARK}" in draft
