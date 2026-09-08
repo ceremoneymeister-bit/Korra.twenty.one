@@ -146,6 +146,92 @@ def auth_adapter():
 
 class TestStartRun:
     @pytest.mark.asyncio
+    async def test_native_profile_discovers_mcp_before_agent_snapshot(
+        self, adapter, tmp_path, monkeypatch
+    ):
+        """A hidden profile must discover its MCP overlay before agent build."""
+        from contextlib import contextmanager
+
+        from agent.secret_scope import reset_secret_scope, set_secret_scope
+        from korra_constants import (
+            get_hermes_home,
+            reset_hermes_home_override,
+            set_hermes_home_override,
+        )
+
+        profile_home = tmp_path / "analysis"
+        profile_home.mkdir()
+        observed = []
+        loop_thread = threading.get_ident()
+        profile_key = "profile-api-test-key-1234567890"
+
+        @contextmanager
+        def profile_scope(profile):
+            assert profile == "analysis"
+            home_token = set_hermes_home_override(str(profile_home))
+            secret_token = set_secret_scope({"API_SERVER_KEY": profile_key})
+            try:
+                yield
+            finally:
+                reset_secret_scope(secret_token)
+                reset_hermes_home_override(home_token)
+
+        def discover():
+            observed.append(
+                ("discover", str(get_hermes_home()), threading.get_ident())
+            )
+
+        def create(**_kwargs):
+            observed.append(("create", str(get_hermes_home()), threading.get_ident()))
+            agent = MagicMock()
+            agent.run_conversation.return_value = {"final_response": "done"}
+            agent.session_prompt_tokens = 0
+            agent.session_completion_tokens = 0
+            agent.session_total_tokens = 0
+            return agent
+
+        monkeypatch.setattr(
+            adapter,
+            "_resolve_request_profile",
+            lambda request: request.match_info.get("profile"),
+        )
+        monkeypatch.setattr(adapter, "_profile_scope", profile_scope)
+        monkeypatch.setattr(adapter, "_create_agent", create)
+        monkeypatch.setattr(
+            "tools.mcp_tool.ensure_native_profile_mcp_tools", discover
+        )
+        app = web.Application(
+            middlewares=[adapter._make_profile_prefix_middleware()]
+        )
+        app.router.add_post("/p/{profile}/v1/runs", adapter._handle_runs)
+        app.router.add_get(
+            "/p/{profile}/v1/runs/{run_id}/events",
+            adapter._handle_run_events,
+        )
+
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post(
+                "/p/analysis/v1/runs",
+                json={"input": "check source"},
+                headers={"Authorization": f"Bearer {profile_key}"},
+            )
+            assert response.status == 202
+            result = await response.json()
+            events = await client.get(
+                f"/p/analysis/v1/runs/{result['run_id']}/events",
+                headers={"Authorization": f"Bearer {profile_key}"},
+            )
+            assert "run.completed" in await asyncio.wait_for(
+                events.text(), timeout=10
+            )
+
+        assert [item[:2] for item in observed] == [
+            ("discover", str(profile_home)),
+            ("create", str(profile_home)),
+        ]
+        assert observed[0][2] != loop_thread
+
+    @pytest.mark.asyncio
     async def test_room_auth_is_validated_before_body_parse_or_work_reservation(
         self, auth_adapter
     ):
