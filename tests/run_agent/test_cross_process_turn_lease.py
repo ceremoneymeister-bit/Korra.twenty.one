@@ -116,13 +116,13 @@ def test_run_conversation_acquires_then_reloads_latest_tip(monkeypatch):
     assert any(
         kind == "lifecycle"
         and text
-        and "waiting for it to finish" in text
+        and "Жду его завершения" in text
         for kind, text in status_events
     )
     assert any(
         kind == "lifecycle"
         and text
-        and "loading the latest transcript" in text
+        and "Загружаю последние сообщения" in text
         for kind, text in status_events
     )
 
@@ -217,16 +217,16 @@ def test_run_conversation_lease_timeout_returns_resend_notice(monkeypatch):
     assert result["failed"] is True
     assert result["completed"] is False
     assert "session_turn_lease_timeout:" in result["error"]
-    assert "send it again" in result["final_response"]
+    assert "отправьте сообщение заново" in result["final_response"]
     assert [event[0] for event in db.events] == ["acquire"]
     assert any(
         kind == "lifecycle"
         and text
-        and "waiting for it to finish" in text
+        and "Жду его завершения" in text
         for kind, text in status_events
     )
     assert any(
-        kind == "warn" and text and "send it again" in text
+        kind == "warn" and text and "отправьте сообщение заново" in text
         for kind, text in status_events
     )
 

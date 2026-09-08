@@ -250,5 +250,5 @@ def test_invalid_tool_exhaustion_closes_tool_tail(agent_env):
     msgs = result.get("messages") or []
     assert msgs, "expected persisted conversation messages"
     assert msgs[-1].get("role") == "assistant"
-    assert "invalid tool call" in (msgs[-1].get("content") or "").lower()
+    assert "некорректный вызов инструмента" in (msgs[-1].get("content") or "").lower()
 

@@ -2796,12 +2796,12 @@ class AIAgent:
             isinstance(error, ValueError)
             and "expected ident at line" in raw.lower()
         ):
-            return f"Malformed provider streaming response: {raw[:300]}"
+            return f"Некорректный потоковый ответ провайдера: {raw[:300]}"
 
         # Cloudflare / proxy HTML pages: grab the <title> for a clean summary
         if "<!DOCTYPE" in raw or "<html" in raw:
             m = re.search(r"<title[^>]*>([^<]+)</title>", raw, re.IGNORECASE)
-            title = m.group(1).strip() if m else "HTML error page (title not found)"
+            title = m.group(1).strip() if m else "Страница ошибки HTML без заголовка"
             # Also grab Cloudflare Ray ID if present
             ray = re.search(r"Cloudflare Ray ID:\s*<strong[^>]*>([^<]+)</strong>", raw)
             ray_id = ray.group(1).strip() if ray else None
@@ -2884,11 +2884,11 @@ class AIAgent:
             Clean, user-friendly error message
         """
         if not error_msg:
-            return "Unknown error"
+            return "Неизвестная ошибка"
             
         # Remove HTML content (common with CloudFlare and gateway error pages)
         if error_msg.strip().startswith('<!DOCTYPE html') or '<html' in error_msg:
-            return "Service temporarily unavailable (HTML error page returned)"
+            return "Сервис временно недоступен: вместо ответа получена страница ошибки"
             
         # Remove newlines and excessive whitespace
         cleaned = ' '.join(error_msg.split())
@@ -3957,140 +3957,97 @@ class AIAgent:
         if reason.startswith("text_response"):
             return ""
 
-        prefix = "⚠️ No reply: "
+        prefix = "⚠️ Ответ не завершён: "
         if reason == "empty_response_exhausted":
             return (
                 prefix
-                + "the model returned empty content after retries and any "
-                "fallback providers. Try `continue`, switch model/provider, "
-                "or inspect the tool output above."
+                + "модель вернула пустой ответ после всех повторов и резервных провайдеров. Отправьте `continue`, смените модель или провайдера либо проверьте результаты инструментов выше."
             )
         if reason == "all_retries_exhausted_no_response":
             return (
                 prefix
-                + "all API retries were exhausted before a response was "
-                "produced (provider errors / rate limits). Try `continue` "
-                "or switch provider."
+                + "все попытки исчерпаны из-за ошибок или лимитов провайдера. Отправьте `continue` или смените провайдера."
             )
         if reason == "partial_stream_recovery":
             return (
                 prefix
-                + "streaming stopped early and only a partial response was "
-                "recovered. Send `continue` to resume from where it stopped."
+                + "соединение прервалось, получена только часть ответа. Отправьте `continue`, чтобы продолжить."
             )
         if reason == "fallback_prior_turn_content":
             return (
                 prefix
-                + "no new content was produced this turn; showing recovered "
-                "prior context. Send `continue` to retry."
+                + "нового ответа нет; показан ранее полученный текст. Отправьте `continue`, чтобы повторить запрос."
             )
         if reason == "interrupted_during_api_call":
             return (
                 prefix
-                + "the request was interrupted mid-call before a reply was "
-                "received. Send `continue` to retry."
+                + "запрос остановлен до получения ответа. Отправьте `continue`, чтобы повторить."
             )
         if reason == "budget_exhausted":
             return (
                 prefix
-                + "the per-turn iteration/cost budget was exhausted before a "
-                "final answer. Send `continue` to keep going."
+                + "достигнут лимит действий или расходов на этот запрос. Отправьте `continue`, чтобы продолжить."
             )
         if reason == "ollama_runtime_context_too_small":
             return (
                 prefix
-                + "the local model's context window was too small to finish. "
-                "Increase the context size or use a larger model."
+                + "локальной модели не хватило контекста. Увеличьте его размер или выберите другую модель."
             )
         if reason.startswith("max_iterations_reached"):
             return (
                 prefix
-                + "the maximum tool-iteration limit was reached before a "
-                "final answer. Send `continue` to keep going, or raise "
-                "`max_iterations`."
+                + "достигнут лимит вызовов инструментов. Отправьте `continue`, чтобы продолжить, или увеличьте `max_iterations`."
             )
         if reason.startswith("error_near_max_iterations"):
             return (
                 prefix
-                + "an error occurred near the iteration limit before a final "
-                "answer. Check the tool output above, then send `continue`."
+                + "рядом с лимитом действий произошла ошибка. Проверьте результат инструмента выше и отправьте `continue`."
             )
         if reason.startswith("repeated_outer_errors"):
             return (
                 prefix
-                + "the turn kept failing with repeated errors and was stopped "
-                "early instead of retrying forever. Check the errors above, "
-                "then send `continue` to retry."
+                + "работа остановлена из-за повторяющихся ошибок. Проверьте ошибки выше и отправьте `continue` для новой попытки."
             )
         if reason == "pending_tool_result":
             return (
                 prefix
-                + "the turn stopped while a tool result was still pending and "
-                "the model produced no follow-up text. Send `continue` to "
-                "let it summarize."
+                + "работа остановлена во время ожидания инструмента, и модель не подвела итог. Отправьте `continue`, чтобы получить итог."
             )
         if reason == "session_persistence_failed":
             cause = persistence_cause or "unknown"
             if cause == "compression":
                 return (
                     prefix
-                    + "the turn was stopped because another process was "
-                    "compressing this session. Your message should already be "
-                    "saved — please send it again after compression completes."
+                    + "другой процесс сжимал эту беседу. Сообщение, вероятно, уже сохранено; отправьте его заново после завершения сжатия."
                 )
             if cause == "compression_closed":
                 return (
                     prefix
-                    + "the turn was stopped because this session was rotated "
-                    "by context compression and its live continuation could "
-                    "not be adopted. The storage itself is healthy — refresh "
-                    "the client (or start a new turn) so it picks up the new "
-                    "session id, then send your message again."
+                    + "после сжатия беседы создан новый сеанс, но переключиться на него не удалось. Обновите приложение или начните новый запрос, затем отправьте сообщение заново."
                 )
             if cause == "turn_lease":
                 return (
                     prefix
-                    + "the turn was stopped because another Hermes process "
-                    "took over this session. Your reply was not saved — wait "
-                    "for the other process to finish, then send your message "
-                    "again."
+                    + "другой процесс Korra занял эту беседу. Ваш ответ не сохранён. Дождитесь завершения другого процесса и отправьте сообщение заново."
                 )
             if cause == "locked":
                 return (
                     prefix
-                    + "the turn was stopped because session storage was busy "
-                    "(another Hermes process was writing to the state "
-                    "database). Your message should already be saved — "
-                    "please send it again in a moment."
+                    + "хранилище беседы занято: другой процесс Korra записывает данные. Сообщение, вероятно, уже сохранено; отправьте его заново чуть позже."
                 )
             if cause == "corrupt":
                 return (
                     prefix
-                    + "the turn was stopped because the state database "
-                    "reported structural corruption (the transcript would "
-                    "have been lost on restart). Freeing disk space will "
-                    "not help. Recovery options:\n"
-                    "1. Run `hermes doctor --fix`\n"
-                    "2. Salvage with: sqlite3 ~/.hermes/state.db \".recover\" "
-                    "(then replace state.db)\n"
-                    "3. Restore from a backup in ~/.hermes/backups/\n"
-                    "Then send your message again."
+                    + "повреждена структура базы бесед. Освобождение места на диске это не исправит. Способы восстановления:\n1. Выполните `korra doctor --fix`.\n2. Восстановите базу state.db через sqlite3 с командой `.recover` и замените повреждённый файл.\n3. Восстановите базу из папки backups вашего профиля Korra.\nПосле восстановления отправьте сообщение заново."
                 )
             if cause == "disk":
                 return (
                     prefix
-                    + "the turn was stopped because session storage could not "
-                    "be written (the transcript would have been lost on "
-                    "restart). This is often a full disk — free some space "
-                    "(or fix state.db permissions), then send your message "
-                    "again."
+                    + "не удалось записать беседу. Частая причина — заполненный диск. Освободите место или проверьте права доступа к state.db, затем отправьте сообщение заново."
                 )
             return (
                 prefix
-                + "the turn was stopped because session storage could not be "
-                "written (the transcript would have been lost on restart). "
-                "Check the state database health (`hermes doctor`), then "
-                "send your message again."
+                + "не удалось сохранить беседу. Проверьте хранилище командой `korra doctor`, затем отправьте сообщение заново."
             )
         # Unknown/diagnostic-only reasons (e.g. "unknown", guardrail_halt
         # which already surfaces its own message) — don't second-guess.
@@ -8465,12 +8422,9 @@ class AIAgent:
             self._tool_guardrail_halt_decision = decision
 
     def _toolguard_controlled_halt_response(self, decision: ToolGuardrailDecision) -> str:
-        tool = decision.tool_name or "a tool"
+        tool = decision.tool_name or "инструмент"
         return (
-            f"I stopped retrying {tool} because it hit the tool-call guardrail "
-            f"({decision.code}) after {decision.count} repeated non-progressing "
-            "attempts. The last tool result explains the blocker; the next step is "
-            "to change strategy instead of repeating the same call."
+            f"Работа инструмента {tool} остановлена проверкой безопасности ({decision.code}): попытки без результата повторились {decision.count} раз. Причина указана в последнем результате инструмента. Для продолжения нужен другой способ решения."
         )
 
     def _append_guardrail_observation(
@@ -8857,13 +8811,11 @@ class AIAgent:
                     _lease_waited = True
                     if elapsed < 1.0:
                         self._emit_status(
-                            "⏳ Another Hermes process is using this session; "
-                            "waiting for it to finish before starting your turn..."
+                            "⏳ Другой процесс Korra использует эту беседу. Жду его завершения..."
                         )
                     else:
                         self._emit_status(
-                            "⏳ Still waiting for the other Hermes process on "
-                            f"this session ({int(elapsed)}s)..."
+                            f"⏳ Жду завершения другого процесса Korra в этой беседе ({int(elapsed)} с)..."
                         )
 
                 if not _turn_db.acquire_session_turn_lease(
@@ -8911,9 +8863,7 @@ class AIAgent:
                     # enter load/run/flush, and surface a resend notice instead
                     # of a bare TimeoutError that looks like a hang.
                     timeout_msg = (
-                        "⏳ Another Hermes process kept this session busy too "
-                        "long. Your message was not processed - wait for the "
-                        "other process to finish, then send it again."
+                        "⏳ Другой процесс Korra слишком долго занимает эту беседу. Сообщение не обработано. Дождитесь завершения другого процесса и отправьте сообщение заново."
                     )
                     logger.error(
                         "session turn lease wait timed out for %s",
@@ -8945,7 +8895,7 @@ class AIAgent:
                 self._active_session_turn_lease_ttl_seconds = _lease_ttl
                 if _lease_waited:
                     self._emit_status(
-                        "Session is free; loading the latest transcript..."
+                        "Беседа свободна. Загружаю последние сообщения..."
                     )
 
                 # The holder may have compressed and rotated the session while

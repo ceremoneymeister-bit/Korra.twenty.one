@@ -256,3 +256,54 @@ def build_error_surface_from_exception(
     except Exception:  # pragma: no cover — never break the error path
         logger.debug("error_surface: exception classification failed", exc_info=True)
         return None
+
+
+def format_error_for_user(message: Any, *, reason: str = "") -> str:
+    """Russian guidance for raw failures at display boundaries, preserving diagnostics.
+
+    Call after classification; API codes and internal error markers must use the
+    original error. Known failures receive complete Russian guidance. Unknown
+    provider text is retained as redacted technical detail; callers retain raw
+    diagnostics for logs.
+    """
+    import re
+
+    from agent.i18n import get_language
+    from agent.redact import redact_sensitive_text
+
+    detail = redact_sensitive_text(str(message or ""), force=True)
+    if get_language() != "ru":
+        return detail
+    lower = detail.lower()
+    known_failure = True
+    if (
+        reason in {"auth", "auth_permanent"}
+        and not re.search(r"\bhttp\s*403\b", lower)
+    ) or re.search(r"\bhttp\s*401\b", lower):
+        guidance = (
+            "Провайдер не принял данные входа. Проверьте API-ключ в разделе «Ключи» "
+            "или войдите заново через `korra model`."
+        )
+    elif re.search(r"\bhttp\s*403\b", lower):
+        guidance = (
+            "Провайдер отказал в доступе. Проверьте разрешения ключа и доступность "
+            "модели для вашей подписки либо выберите другую модель через `/model`."
+        )
+    elif reason == "model_not_found" or re.search(r"\bhttp\s*404\b", lower):
+        guidance = "Модель или адрес сервиса не найдены. Проверьте настройки модели через `korra model`."
+    elif reason == "rate_limit" or re.search(r"\bhttp\s*429\b", lower):
+        guidance = "Провайдер временно ограничил запросы. Подождите до сброса лимита или выберите другую модель через `/model`."
+    elif "truncat" in lower:
+        guidance = "Ответ обрезан из-за ограничения длины. Попросите продолжить или выберите модель с большим лимитом ответа."
+    elif reason == "timeout" or "timed out" in lower or "timeout" in lower:
+        guidance = "Провайдер не ответил вовремя. Повторите запрос позже или выберите другую модель через `/model`."
+    elif reason == "ssl_cert_verification":
+        guidance = "Не удалось проверить сертификат сервиса модели. Проверьте настройки соединения и сертификатов."
+    elif re.search(r"[А-Яа-яЁё]", detail):
+        return detail
+    else:
+        known_failure = False
+        guidance = "Не удалось выполнить запрос. Проверьте причину ниже и повторите попытку после её устранения."
+    if known_failure:
+        return guidance
+    return f"{guidance}\n\nТехническая причина: {detail}" if detail else guidance

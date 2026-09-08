@@ -113,7 +113,7 @@ class TestOuterErrorRetryBound:
         assert result["turn_exit_reason"].startswith("repeated_outer_errors"), (
             f"unexpected exit reason: {result['turn_exit_reason']}"
         )
-        assert "repeated errors" in (result["final_response"] or "")
+        assert "повторяющейся ошибки" in (result["final_response"] or "")
         assert result["failed"] is True
         assert result["completed"] is False
 

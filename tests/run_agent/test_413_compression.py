@@ -1223,4 +1223,4 @@ class TestOverflowWithCompactionDisabled:
         mock_persist.assert_called()
         assert result.get("failed") is True
         assert result.get("compaction_disabled") is True
-        assert "auto-compaction is disabled" in result["error"]
+        assert "автоматическое сжатие отключено" in result["error"]

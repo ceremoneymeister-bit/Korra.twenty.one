@@ -95,7 +95,7 @@ def test_exhausted_reasoning_only_delivers_labeled_excerpt(tmp_path, monkeypatch
 
     final = result["final_response"]
     assert "(empty)" != final
-    assert "only internal reasoning" in final
+    assert "только внутренние рассуждения" in final
     assert "The answer is 42" in final
 
     # Persistence semantics unchanged: the delivered excerpt is
@@ -104,7 +104,7 @@ def test_exhausted_reasoning_only_delivers_labeled_excerpt(tmp_path, monkeypatch
     # and the labeled excerpt must never be persisted as assistant content.
     assert not any(
         m.get("role") == "assistant"
-        and "only internal reasoning" in (m.get("content") or "")
+        and "только внутренние рассуждения" in (m.get("content") or "")
         for m in result["messages"]
     )
 
@@ -124,8 +124,8 @@ def test_exhausted_truly_empty_keeps_existing_behavior(tmp_path, monkeypatch):
     final = result["final_response"]
     # Either the raw sentinel (explainer off) or the explainer's rewrite —
     # never the reasoning-excerpt frame, which requires reasoning to exist.
-    assert final == "(empty)" or final.startswith("⚠️ No reply:")
-    assert "only internal reasoning" not in final
+    assert final == "(empty)" or final.startswith("⚠️ Ответ не завершён:")
+    assert "только внутренние рассуждения" not in final
 
 
 def test_reasoning_never_promoted_before_ladder_exhaustion(tmp_path, monkeypatch):
@@ -158,4 +158,4 @@ def test_reasoning_never_promoted_before_ladder_exhaustion(tmp_path, monkeypatch
     result = agent.run_conversation("what is the answer?")
 
     assert result["final_response"] == "42."
-    assert "only internal reasoning" not in result["final_response"]
+    assert "только внутренние рассуждения" not in result["final_response"]

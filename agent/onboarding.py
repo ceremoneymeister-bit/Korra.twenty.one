@@ -41,29 +41,18 @@ def busy_input_hint_gateway(mode: str) -> str:
     """
     if mode == "queue":
         return (
-            "💡 First-time tip — I queued your message instead of interrupting. "
-            "Send `/busy interrupt` to make new messages stop the current task "
-            "immediately, or `/busy status` to check. This notice won't appear again."
+            "💡 Подсказка: сообщение поставлено в очередь после текущей задачи. Чтобы новые сообщения сразу прерывали задачу, отправьте `/busy interrupt`. Текущий режим: `/busy status`. Эта подсказка появляется один раз."
         )
     if mode == "steer":
         return (
-            "💡 First-time tip — I steered your message into the current run; "
-            "it will arrive after the next tool call instead of interrupting. "
-            "Send `/busy interrupt` or `/busy queue` to change this, or "
-            "`/busy status` to check. This notice won't appear again."
+            "💡 Подсказка: сообщение будет передано в текущую работу после ближайшего вызова инструмента. Режим можно сменить через `/busy interrupt` или `/busy queue`, проверить — через `/busy status`. Эта подсказка появляется один раз."
         )
     if mode == "redirect":
         return (
-            "💡 First-time tip — I redirected the current run using your message. "
-            "Completed work stays in context, and `/stop` still cancels the task. "
-            "Send `/busy queue` to wait for a separate turn, or `/busy status` "
-            "to check. This notice won't appear again."
+            "💡 Подсказка: ваше сообщение изменило направление текущей работы. Уже выполненное сохранено; `/stop` останавливает задачу. Для отдельных запросов по очереди используйте `/busy queue`, для проверки режима — `/busy status`. Эта подсказка появляется один раз."
         )
     return (
-        "💡 First-time tip — I just interrupted my current task to answer you. "
-        "Send `/busy queue` to queue follow-ups for after the current task instead, "
-        "`/busy steer` to inject them mid-run without interrupting, or "
-        "`/busy status` to check. This notice won't appear again."
+        "💡 Подсказка: я прервала текущую задачу, чтобы ответить вам. `/busy queue` ставит новые сообщения в очередь, `/busy steer` передаёт их в текущую работу без остановки, `/busy status` показывает режим. Эта подсказка появляется один раз."
     )
 
 
@@ -71,41 +60,30 @@ def busy_input_hint_cli(mode: str) -> str:
     """CLI version of the busy-input hint (plain text, no markdown)."""
     if mode == "queue":
         return (
-            "(tip) Your message was queued for the next turn. "
-            "Use /busy interrupt to make Enter stop the current run instead, "
-            "or /busy steer to inject mid-run. This tip only shows once."
+            "Подсказка: сообщение поставлено в очередь. `/busy interrupt` разрешает Enter прерывать текущую работу, `/busy steer` передаёт сообщение в работу без остановки. Эта подсказка появляется один раз."
         )
     if mode == "steer":
         return (
-            "(tip) Your message was steered into the current run; it arrives "
-            "after the next tool call. Use /busy interrupt or /busy queue to "
-            "change this. This tip only shows once."
+            "Подсказка: сообщение будет передано в текущую работу после ближайшего вызова инструмента. Сменить режим: /busy interrupt или /busy queue. Эта подсказка появляется один раз."
         )
     if mode == "redirect":
         return (
-            "(tip) Your correction redirected the current run without discarding "
-            "completed work. Use /stop to cancel or /busy queue to wait for a "
-            "separate turn. This tip only shows once."
+            "Подсказка: ваше уточнение изменило направление работы; уже выполненное сохранено. `/stop` остановит задачу, `/busy queue` включит очередь отдельных запросов. Эта подсказка появляется один раз."
         )
     return (
-        "(tip) Your message interrupted the current run. "
-        "Use /busy queue to queue messages for the next turn instead, "
-        "or /busy steer to inject mid-run. This tip only shows once."
+        "Подсказка: сообщение прервало текущую работу. `/busy queue` ставит новые сообщения в очередь, `/busy steer` передаёт их в работу без остановки. Эта подсказка появляется один раз."
     )
 
 
 def tool_progress_hint_gateway() -> str:
     return (
-        "💡 First-time tip — that tool took a while and I'm streaming every step. "
-        "If the progress messages feel noisy, send `/verbose` to cycle modes "
-        "(all → new → off). This notice won't appear again."
+        "💡 Подсказка: инструмент работает долго, поэтому я показываю ход выполнения. Команда `/verbose` меняет объём уведомлений: каждый вызов → только смена инструмента → выключено. Эта подсказка появляется один раз."
     )
 
 
 def tool_progress_hint_cli() -> str:
     return (
-        "(tip) That tool ran for a while. Use /verbose to cycle tool-progress "
-        "display modes (all -> new -> off -> verbose). This tip only shows once."
+        "Подсказка: инструмент работал долго. `/verbose` меняет объём уведомлений: каждый вызов → смена инструмента → выключено → подробно. Эта подсказка появляется один раз."
     )
 
 
@@ -118,13 +96,7 @@ def openclaw_residue_hint_cli() -> str:
     the old directory — with a warning that archiving breaks OpenClaw.
     """
     return (
-        "A legacy OpenClaw directory was detected at ~/.openclaw/.\n"
-        "To port your config, memory, and skills over to Korra, run "
-        "`hermes claw migrate`.\n"
-        "If you've already migrated and want to archive the old directory, "
-        "run `hermes claw cleanup` (renames it to ~/.openclaw.pre-migration — "
-        "OpenClaw will stop working after this).\n"
-        "This tip only shows once."
+        "Найдена старая папка OpenClaw: ~/.openclaw/.\nЧтобы перенести настройки, память и навыки в Korra, выполните `korra claw migrate`.\nПосле переноса можно убрать старую папку командой `korra claw cleanup`: она будет переименована в ~/.openclaw.pre-migration, и OpenClaw перестанет работать.\nЭта подсказка появляется один раз."
     )
 
 

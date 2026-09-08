@@ -2777,7 +2777,7 @@ class TestHandleMaxIterations:
         with patch("agent.relay_llm.complete_logical_call") as complete_logical:
             result = agent._handle_max_iterations(messages, 60)
         assert isinstance(result, str)
-        assert "error" in result.lower()
+        assert "ошибка" in result.lower()
         assert "API down" in result
         complete_logical.assert_called_once()
         assert complete_logical.call_args.kwargs == {"outcome": "failed"}
@@ -3212,7 +3212,7 @@ class TestRunConversation:
         assert result["completed"] is False
         assert result["api_calls"] == 0
         assert result["turn_exit_reason"] == "ollama_runtime_context_too_small"
-        assert "Ollama loaded `qwen3.5:9b` with only 4,096 tokens" in result["final_response"]
+        assert "Ollama загрузила `qwen3.5:9b` с контекстом 4,096 токенов" in result["final_response"]
         assert "model.ollama_num_ctx: 65536" in result["final_response"]
         assert not agent.client.chat.completions.create.called
         assert "Ollama runtime context too small for Hermes tool use" in caplog.text
@@ -3482,7 +3482,7 @@ class TestRunConversation:
         # test_empty_terminal_reasoning_surface.py; #34452's explainer still
         # covers the truly-empty case.
         assert result["final_response"] != "(empty)"
-        assert "only internal reasoning" in result["final_response"]
+        assert "только внутренние рассуждения" in result["final_response"]
         assert "reasoning only" in result["final_response"]
         assert result["turn_exit_reason"] == "empty_response_exhausted"
         assert result["api_calls"] == 6  # 1 original + 2 prefill + 3 retries
@@ -3508,7 +3508,7 @@ class TestRunConversation:
         # instead of the bare "(empty)" sentinel (see
         # test_empty_terminal_reasoning_surface.py).
         assert result["final_response"] != "(empty)"
-        assert "only internal reasoning" in result["final_response"]
+        assert "только внутренние рассуждения" in result["final_response"]
         assert "structured reasoning answer" in result["final_response"]
         assert result["api_calls"] == 6  # 1 original + 2 prefill + 3 retries
 
@@ -3531,7 +3531,7 @@ class TestRunConversation:
         assert result["completed"] is True
         # #34452: explanation replaces the bare "(empty)" sentinel.
         assert result["final_response"] != "(empty)"
-        assert "No reply:" in result["final_response"]
+        assert "Ответ не завершён:" in result["final_response"]
         assert result["api_calls"] == 4  # 1 original + 3 retries
 
     def test_deterministic_empty_stops_retries_early(self, agent):
@@ -3743,7 +3743,7 @@ class TestRunConversation:
         assert result["completed"] is True
         # #34452: explanation replaces the bare "(empty)" sentinel.
         assert result["final_response"] != "(empty)"
-        assert "No reply:" in result["final_response"]
+        assert "Ответ не завершён:" in result["final_response"]
 
 
     def test_empty_response_retry_backoff_interrupted(self, agent, monkeypatch):
@@ -3779,7 +3779,7 @@ class TestRunConversation:
             result = agent.run_conversation("answer me")
 
         assert result["interrupted"] is True
-        assert "Operation interrupted: retrying empty response from model" in result["final_response"]
+        assert "Действие остановлено при повторном запросе пустого ответа модели" in result["final_response"]
         assert agent._empty_content_retries == 1
         assert 0.2 in sleep_called
         assert mock_persist.call_count == 2
@@ -3830,7 +3830,7 @@ class TestRunConversation:
         # 7.5s wait, slept in 0.2s increments -> 37.5 -> at least 37 calls
         assert len([c for c in sleep_calls if c == 0.2]) >= 37
 
-        retry_status = [m for m in status_messages if "Empty response from model — retrying (1/3) in 8s" in m]
+        retry_status = [m for m in status_messages if "Пустой ответ модели — повтор (1/3) через 8 с" in m]
         assert len(retry_status) == 1
 
     def test_partial_stream_recovery_uses_streamed_content(self, agent):
@@ -3883,14 +3883,14 @@ class TestRunConversation:
         # Should recover partial streamed content, not fall through to (empty)
         assert result["completed"] is True
         assert result["final_response"].startswith("The answer to your question is that")
-        assert "No reply:" in result["final_response"]
+        assert "Ответ не завершён:" in result["final_response"]
         assert result["response_previewed"] is False
         assert result["api_calls"] == 1  # No wasted retries
         # Should emit the stream-interrupted status, NOT the empty-retry status
-        recovery_msgs = [m for m in status_messages if "stream interrupted" in m.lower()]
+        recovery_msgs = [m for m in status_messages if "соединение прервано" in m.lower()]
         assert len(recovery_msgs) >= 1, f"Expected stream recovery status, got: {status_messages}"
         # Should NOT have retry statuses
-        retry_msgs = [m for m in status_messages if "retrying" in m.lower()]
+        retry_msgs = [m for m in status_messages if "повтор" in m.lower()]
         assert len(retry_msgs) == 0, f"Should not retry when stream content exists: {status_messages}"
 
 
@@ -4409,11 +4409,11 @@ class TestRunConversation:
         # Should return immediately — no continuation, only 1 API call
         assert result["completed"] is False
         assert result["api_calls"] == 1
-        assert "reasoning" in result["error"].lower()
-        assert "output tokens" in result["error"].lower()
+        assert "рассуждения" in result["error"].lower()
+        assert "лимит ответа" in result["error"].lower()
         # Should have a user-friendly response (not None)
         assert result["final_response"] is not None
-        assert "Thinking Budget Exhausted" in result["final_response"]
+        assert "Модель исчерпала лимит на рассуждения" in result["final_response"]
         assert "/thinkon" in result["final_response"]
 
 
@@ -4597,7 +4597,7 @@ class TestRunConversation:
         assert result.get("partial") is True
         msgs = result.get("messages") or []
         assert msgs[-1].get("role") == "assistant"
-        assert "truncated" in (msgs[-1].get("content") or "").lower()
+        assert "обрезан" in (msgs[-1].get("content") or "").lower()
         assert any(isinstance(m, dict) and m.get("role") == "tool" for m in msgs)
 
 
@@ -5131,7 +5131,7 @@ class TestRetryExhaustion:
         )
         assert result.get("failed") is True
         assert "error" in result
-        assert "Invalid API response" in result["error"]
+        assert "некорректный ответ" in result["error"]
         assert result.get("final_response") == result["error"]
 
     def test_invalid_response_retry_completes_one_logical_call(self, agent):

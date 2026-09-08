@@ -119,18 +119,5 @@ def build_thinking_timeout_guidance(
     """
     label = model_label or model
     return (
-        "\n\nThe model's thinking phase exceeded the upstream proxy's "
-        "idle timeout before the first content token arrived. This is a "
-        f"known issue with reasoning models (like {label}) behind cloud "
-        "gateways (NVIDIA NIM, OpenAI, Anthropic, DeepSeek). Workarounds "
-        "in priority order:\n"
-        f"1. Set `providers.{provider}.models.{model}.stale_timeout_seconds: 900` "
-        "in `~/.hermes/config.yaml` to extend the per-call timeout. "
-        "(Korra's built-in floor is 600s for known reasoning models — "
-        "if you still see this after raising, the upstream cap is even "
-        "shorter.)\n"
-        "2. Lower `reasoning_budget` or set `reasoning_effort: medium` on this "
-        "model if the provider supports it.\n"
-        "3. Use a smaller / faster reasoning model if the task doesn't "
-        "require deep thinking."
+        f"\n\nМодель слишком долго рассуждала, и шлюз провайдера закрыл соединение до начала ответа. Такое бывает с моделями рассуждений, например {label}, через NVIDIA NIM, OpenAI, Anthropic или DeepSeek. Попробуйте по порядку:\n1. Увеличьте время ожидания в config.yaml профиля Korra: `providers.{provider}.models.{model}.stale_timeout_seconds: 900`. Для известных моделей рассуждений Korra ждёт не менее 600 секунд, но провайдер может прервать соединение раньше.\n2. Уменьшите `reasoning_budget` или задайте `reasoning_effort: medium`, если провайдер поддерживает эту настройку.\n3. Выберите более быструю модель, если задача не требует глубоких рассуждений."
     )

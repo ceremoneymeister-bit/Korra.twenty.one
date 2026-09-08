@@ -3271,7 +3271,7 @@ def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
                     {"role": "assistant", "content": final_response},
                 )
             else:
-                final_response = "I reached the iteration limit and couldn't generate a summary."
+                final_response = "Достигнут лимит действий; подвести итог не удалось."
         else:
             # Retry summary generation
             if agent.api_mode == "codex_responses":
@@ -3336,13 +3336,13 @@ def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
                         {"role": "assistant", "content": final_response},
                     )
                 else:
-                    final_response = "I reached the iteration limit and couldn't generate a summary."
+                    final_response = "Достигнут лимит действий; подвести итог не удалось."
             else:
-                final_response = "I reached the iteration limit and couldn't generate a summary."
+                final_response = "Достигнут лимит действий; подвести итог не удалось."
 
     except Exception as e:
         logger.warning("Failed to get summary response: %s", e)
-        final_response = f"I reached the maximum iterations ({agent.max_iterations}) but couldn't summarize. Error: {str(e)}"
+        final_response = f"Достигнут лимит действий ({agent.max_iterations}), но подвести итог не удалось. Ошибка: {str(e)}"
     finally:
         from agent import relay_llm
 

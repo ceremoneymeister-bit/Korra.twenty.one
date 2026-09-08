@@ -102,11 +102,11 @@ def test_explanation_persistence_locked_cause_says_busy_not_disk():
         "session_persistence_failed", "locked"
     )
     lower = out.lower()
-    assert "busy" in lower
-    assert "saved" in lower
-    assert "send it again" in lower
-    assert "disk" not in lower
-    assert "permission" not in lower
+    assert "занято" in lower
+    assert "сохранено" in lower
+    assert "отправьте его заново" in lower
+    assert "диск" not in lower
+    assert "прав доступа" not in lower
 
 
 def test_explanation_persistence_compression_cause_is_specific():
@@ -114,9 +114,9 @@ def test_explanation_persistence_compression_cause_is_specific():
         "session_persistence_failed", "compression"
     )
     lower = out.lower()
-    assert "compression" in lower
-    assert "database" not in lower
-    assert "disk" not in lower
+    assert "сжима" in lower
+    assert "баз" not in lower
+    assert "диск" not in lower
 
 
 def test_explanation_persistence_turn_lease_cause_is_specific():
@@ -124,11 +124,11 @@ def test_explanation_persistence_turn_lease_cause_is_specific():
         "session_persistence_failed", "turn_lease"
     )
     lower = out.lower()
-    assert "took over" in lower
-    assert "not saved" in lower
-    assert "disk" not in lower
-    assert "compression" not in lower
-    assert "hermes doctor" not in lower
+    assert "занял" in lower
+    assert "не сохранён" in lower
+    assert "диск" not in lower
+    assert "сжима" not in lower
+    assert "korra doctor" not in lower
 
 
 def test_explanation_persistence_disk_cause_keeps_disk_wording():
@@ -136,8 +136,8 @@ def test_explanation_persistence_disk_cause_keeps_disk_wording():
         "session_persistence_failed", "disk"
     )
     lower = out.lower()
-    assert "disk" in lower
-    assert "free some space" in lower or "disk space" in lower
+    assert "диск" in lower
+    assert "освободите место" in lower
 
 
 def test_explanation_persistence_corrupt_cause_never_says_free_space():
@@ -148,10 +148,10 @@ def test_explanation_persistence_corrupt_cause_never_says_free_space():
         "session_persistence_failed", "corrupt"
     )
     lower = out.lower()
-    assert "corrupt" in lower
-    assert "hermes doctor" in lower
-    assert "free some space" not in lower
-    assert "full disk" not in lower
+    assert "повреждена" in lower
+    assert "korra doctor" in lower
+    assert "освободите место" not in lower
+    assert "заполненный диск" not in lower
 
 
 def test_explanation_persistence_unknown_cause_is_neutral():
@@ -162,17 +162,17 @@ def test_explanation_persistence_unknown_cause_is_neutral():
         )
         lower = out.lower()
         assert out.strip() != ""
-        assert "disk space" not in lower
-        assert "full disk" not in lower
-        assert "hermes doctor" in lower
-        assert "again" in lower
+        assert "место на диске" not in lower
+        assert "заполненный диск" not in lower
+        assert "korra doctor" in lower
+        assert "заново" in lower
 
 
 def test_explanation_persistence_one_arg_backward_compat():
     """Existing one-arg callers must keep working (optional second param)."""
     out = AIAgent._format_turn_completion_explanation("session_persistence_failed")
     assert out.strip() != ""
-    assert "session storage" in out.lower()
+    assert "сохранить беседу" in out.lower()
 
 
 def test_explanation_cause_ignored_for_other_reasons():
@@ -392,7 +392,7 @@ def test_run_conversation_empty_exhausted_surfaces_explanation():
     # The user must NOT be left with a bare sentinel; the explanation wins.
     assert result["final_response"] != "(empty)"
     assert result["final_response"].strip() != ""
-    assert "No reply:" in result["final_response"]
+    assert "Ответ не завершён:" in result["final_response"]
 
 
 def test_run_conversation_partial_stream_recovery_surfaces_explanation():
@@ -422,7 +422,7 @@ def test_run_conversation_partial_stream_recovery_surfaces_explanation():
 
     assert result["turn_exit_reason"] == "partial_stream_recovery"
     assert result["final_response"].startswith(recovered)
-    assert "No reply:" in result["final_response"]
+    assert "Ответ не завершён:" in result["final_response"]
     assert result["response_previewed"] is False
 
 
