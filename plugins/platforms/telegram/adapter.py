@@ -7833,8 +7833,8 @@ class TelegramAdapter(BasePlatformAdapter):
                 )
             else:
                 stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
-                last_line = stderr_text.splitlines()[-1] if stderr_text else f"exit {proc.returncode}"
-                label = f"❌ {verb} failed: {last_line[:80]}"
+                last_line = stderr_text.splitlines()[-1] if stderr_text else f'''код завершения {proc.returncode}'''
+                label = f'''❌ Действие {verb} не выполнено: {last_line[:80]}'''
                 logger.error(
                     "[%s] gmail-triage callback failed: verb=%s arg=%s rc=%s stderr=%s",
                     self.name, verb, arg, proc.returncode, stderr_text,
@@ -7843,7 +7843,7 @@ class TelegramAdapter(BasePlatformAdapter):
             label = f'''❌ Истекло время выполнения действия {verb}'''
             logger.error("[%s] gmail-triage callback timed out: verb=%s arg=%s", self.name, verb, arg)
         except Exception as exc:
-            label = f"❌ {verb} error: {exc}"
+            label = f'''❌ Ошибка действия {verb}: {exc}'''
             logger.error(
                 "[%s] gmail-triage callback exception: verb=%s arg=%s err=%s",
                 self.name, verb, arg, exc, exc_info=True,

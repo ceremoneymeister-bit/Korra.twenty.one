@@ -181,7 +181,7 @@ def parse_loop_args(text: str) -> Dict[str, Any]:
             if times < 1:
                 raise ValueError
         except ValueError:
-            result["error"] = f"--times expects a positive integer, got {m_times.group(1)!r}"
+            result["error"] = f"--times: укажите целое число больше нуля, получено {m_times.group(1)!r}"
             return result
         raw = (raw[: m_times.start()] + raw[m_times.end():]).strip()
 
@@ -204,7 +204,7 @@ def parse_loop_args(text: str) -> Dict[str, Any]:
             raw = tokens[1].strip() if len(tokens) > 1 else ""
 
     if not raw:
-        result["error"] = "missing prompt (usage: /loop [interval] <prompt>)"
+        result["error"] = "не указана задача; используйте /loop [интервал] <задача>"
         return result
 
     result["interval_seconds"] = interval
@@ -354,8 +354,8 @@ class LoopState:
             return ""
         remaining = self.next_due_at - time.time()
         if remaining <= 0:
-            return "due now"
-        return f"next in {format_interval(remaining)}"
+            return "сейчас"
+        return f"через {format_interval(remaining)}"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -525,6 +525,32 @@ def _digest_response(response: str) -> str:
 # ──────────────────────────────────────────────────────────────────────
 
 
+def _display_loop_reason(reason: str) -> str:
+    # Persisted reasons also drive control flow; translate only their display.
+    labels = {
+        "user-paused": "по вашей команде",
+        "user-interrupted": "прервано пользователем",
+        "agent signaled the task is complete": "задача выполнена",
+    }
+    if reason in labels:
+        return labels[reason]
+    for prefix, label in (
+        ("tick budget exhausted", "бюджет шагов исчерпан"),
+        ("stop condition met: ", "условие остановки выполнено: "),
+        ("completed the requested ", "выполнены все запуски: "),
+    ):
+        if reason.startswith(prefix):
+            return label + reason[len(prefix):].replace(" runs", "")
+    return reason
+
+
+def _display_cadence(state: LoopState) -> str:
+    if state.mode == "self_paced":
+        delay = f", сейчас {format_interval(state.current_delay)}" if state.current_delay else ""
+        return f"гибкий интервал{delay}"
+    return f"каждые {format_interval(state.interval_seconds)}"
+
+
 class LoopManager:
     """Per-session /loop state + tick decisions.
 
@@ -562,31 +588,31 @@ class LoopManager:
     def status_line(self) -> str:
         s = self._state
         if s is None or s.status == "cleared":
-            return "No loop set. Start one with /loop [interval] <prompt>."
-        fired = f"{s.ticks_fired} tick{'s' if s.ticks_fired != 1 else ''}"
+            return "Цикл не задан. Начните командой /loop [интервал] <задача>."
+        fired = f"шагов: {s.ticks_fired}"
         caps = []
         if s.times:
-            caps.append(f"{s.ticks_fired}/{s.times} runs")
+            caps.append(f"запусков: {s.ticks_fired}/{s.times}")
         elif s.max_ticks:
-            caps.append(f"{s.ticks_fired}/{s.max_ticks} budget")
+            caps.append(f"бюджет: {s.ticks_fired}/{s.max_ticks}")
         else:
             caps.append(fired)
         if s.until:
-            caps.append(f"until: {s.until}")
-        meta = f"{s.cadence_label()}, {', '.join(caps)}"
+            caps.append(f"условие остановки: {s.until}")
+        meta = f"{_display_cadence(s)}, {', '.join(caps)}"
         if s.status == "active":
             remaining = s.remaining_label()
             tail = f", {remaining}" if remaining else ""
             if s.awaiting_response:
-                tail = ", wakeup running"
-            return f"↻ Loop (active, {meta}{tail}): {s.prompt}"
+                tail = ", задача выполняется"
+            return f"↻ Цикл работает ({meta}{tail}): {s.prompt}"
         if s.status == "paused":
-            extra = f" — {s.paused_reason}" if s.paused_reason else ""
-            return f"⏸ Loop (paused, {meta}{extra}): {s.prompt}"
+            extra = f" — {_display_loop_reason(s.paused_reason)}" if s.paused_reason else ""
+            return f"⏸ Цикл на паузе ({meta}{extra}): {s.prompt}"
         if s.status == "done":
-            extra = f" — {s.last_stop_reason}" if s.last_stop_reason else ""
-            return f"✓ Loop finished ({fired}{extra}): {s.prompt}"
-        return f"Loop ({s.status}, {meta}): {s.prompt}"
+            extra = f" — {_display_loop_reason(s.last_stop_reason)}" if s.last_stop_reason else ""
+            return f"✓ Цикл завершён ({fired}{extra}): {s.prompt}"
+        return f"Цикл ({s.status}, {meta}): {s.prompt}"
 
     # --- mutation -----------------------------------------------------
 
@@ -606,7 +632,7 @@ class LoopManager:
         """
         prompt = (prompt or "").strip()
         if not prompt:
-            raise ValueError("loop prompt is empty")
+            raise ValueError("Не указана задача цикла")
 
         now = time.time()
         if interval_seconds is not None:
@@ -747,7 +773,7 @@ class LoopManager:
                 "status": "done",
                 "stopped": True,
                 "reason": s.last_stop_reason,
-                "message": f"✓ Loop finished after {s.ticks_fired} tick{'s' if s.ticks_fired != 1 else ''} — task complete.",
+                "message": f"✓ Цикл завершён. Шагов: {s.ticks_fired}. Задача выполнена.",
             }
 
         # 2. Evidence-based --until judge (reuses the /goal judge; fail-open).
@@ -766,7 +792,7 @@ class LoopManager:
                     "status": "done",
                     "stopped": True,
                     "reason": s.last_stop_reason,
-                    "message": f"✓ Loop finished after {s.ticks_fired} tick{'s' if s.ticks_fired != 1 else ''} — {reason}",
+                    "message": f"✓ Цикл завершён. Шагов: {s.ticks_fired}. {reason}",
                 }
 
         # 3. --times user cap.
@@ -778,7 +804,7 @@ class LoopManager:
                 "status": "done",
                 "stopped": True,
                 "reason": s.last_stop_reason,
-                "message": f"✓ Loop finished — ran {s.times}/{s.times} times.",
+                "message": f"✓ Цикл завершён. Запусков: {s.times}/{s.times}.",
             }
 
         # 4. Config backstop budget → pause (recoverable), not done.
@@ -791,8 +817,8 @@ class LoopManager:
                 "stopped": True,
                 "reason": s.paused_reason,
                 "message": (
-                    f"⏸ Loop paused — {s.ticks_fired}/{s.max_ticks} ticks used "
-                    "(loops.max_ticks). /loop resume to keep going, /loop stop to end it."
+                    f"⏸ Цикл приостановлен: использовано {s.ticks_fired}/{s.max_ticks} шагов "
+                    "(loops.max_ticks). Продолжить: /loop resume. Завершить: /loop stop."
                 ),
             }
 
@@ -875,34 +901,33 @@ def dispatch_loop_command(
     if lower == "pause":
         state = mgr.pause(reason="user-paused")
         if state is None:
-            return {"output": "No loop set.", "created": False}
-        return {"output": f"⏸ Loop paused: {state.prompt}\nUse /loop resume to continue.", "created": False}
+            return {"output": "Цикл не задан.", "created": False}
+        return {"output": f"⏸ Цикл приостановлен: {state.prompt}\nДля продолжения: /loop resume.", "created": False}
 
     if lower == "resume":
         state = mgr.resume()
         if state is None:
-            return {"output": "No loop to resume.", "created": False}
+            return {"output": "Нет цикла для возобновления.", "created": False}
         return {
-            "output": f"▶ Loop resumed ({state.cadence_label()}): {state.prompt}",
+            "output": f"▶ Цикл возобновлён ({_display_cadence(state)}): {state.prompt}",
             "created": False,
         }
 
     if lower in {"stop", "clear", "cancel"}:
         had = mgr.clear()
-        return {"output": "✓ Loop stopped." if had else "No active loop.", "created": False}
+        return {"output": "✓ Цикл остановлен." if had else "Нет активного цикла.", "created": False}
 
     if lower in {"help", "--help", "-h"}:
         return {
             "output": (
-                "Usage: /loop [interval] <prompt> [--times N] [--until <condition>]\n"
-                "  /loop 5m check the deploy status      — first run now, then every 5m\n"
-                "  /loop every 10m /recap                — loop a slash command\n"
-                "  /loop keep fixing tests until green   — self-paced (backs off while output is unchanged)\n"
-                "  /loop 2m poll CI --times 30           — stop after 30 runs\n"
-                "  /loop 5m watch the queue --until queue is empty\n"
-                "Controls: /loop status · /loop pause · /loop resume · /loop stop\n"
-                "The loop also stops itself when the agent replies with "
-                f"{LOOP_COMPLETE_MARKER}."
+                "Использование: /loop [интервал] <задача> [--times N] [--until <условие>]\n"
+                "  /loop 5m проверьте публикацию — сейчас, затем каждые 5 минут\n"
+                "  /loop every 10m /recap — повторять команду\n"
+                "  /loop исправляйте тесты до успеха — гибкий интервал\n"
+                "  /loop 2m проверьте сборку --times 30 — 30 запусков\n"
+                "  /loop 5m проверяйте очередь --until очередь пуста\n"
+                "Управление: /loop status · /loop pause · /loop resume · /loop stop\n"
+                f"Цикл также остановится, когда агент вернёт {LOOP_COMPLETE_MARKER}."
             ),
             "created": False,
         }
@@ -910,7 +935,7 @@ def dispatch_loop_command(
     parsed = parse_loop_args(arg)
     if parsed["error"]:
         if parsed["error"] == "empty":
-            return {"output": "Usage: /loop [interval] <prompt> — see /loop help.", "created": False}
+            return {"output": "Использование: /loop [интервал] <задача>. Справка: /loop help.", "created": False}
         return {"output": f"/loop: {parsed['error']}", "created": False}
 
     replacing = mgr.has_loop()
@@ -925,29 +950,29 @@ def dispatch_loop_command(
     except ValueError as exc:
         return {"output": f"/loop: {exc}", "created": False}
 
-    lines = [f"↻ Loop set ({state.cadence_label()}): {state.prompt}"]
+    lines = [f"↻ Цикл задан ({_display_cadence(state)}): {state.prompt}"]
     if parsed["interval_seconds"] is not None and parsed["interval_seconds"] < state.interval_seconds:
         lines.append(
-            f"(interval raised to the {format_interval(state.interval_seconds)} minimum — "
+            f"(интервал увеличен до минимума {format_interval(state.interval_seconds)} — "
             "loops.min_interval_seconds)"
         )
     if state.mode == "self_paced":
         lines.append(
-            f"Self-paced: first check in {format_interval(state.current_delay)}; "
-            f"backs off up to {format_interval(self_paced_ceiling_seconds())} while nothing changes."
+            f"Гибкий интервал: первая проверка через {format_interval(state.current_delay)}. "
+            f"Пока изменений нет, интервал растёт до {format_interval(self_paced_ceiling_seconds())}."
         )
     if state.times:
-        lines.append(f"Runs {state.times} time{'s' if state.times != 1 else ''}, then stops.")
+        lines.append(f"Число запусков: {state.times}. Затем цикл остановится.")
     if state.until:
-        lines.append(f"Stops when: {state.until}")
+        lines.append(f"Остановится при условии: {state.until}")
     if not state.times and state.max_ticks:
-        lines.append(f"Backstop budget: {state.max_ticks} ticks (loops.max_ticks; 0 = unlimited).")
+        lines.append(f"Предельный бюджет: {state.max_ticks} шагов (loops.max_ticks; 0 — без ограничений).")
     if state.status == "active":
-        lines.append("First wakeup fires now, then on the cadence above. Controls: /loop status · pause · resume · stop.")
+        lines.append("Первый запуск — сейчас, затем по указанному расписанию. Управление: /loop status · pause · resume · stop.")
     else:
-        lines.append(f"First wakeup {state.remaining_label()}. Controls: /loop status · pause · resume · stop.")
+        lines.append(f"Первый запуск: {state.remaining_label()}. Управление: /loop status · pause · resume · stop.")
     if replacing:
-        lines.insert(1, "(replaced the previous loop for this session)")
+        lines.insert(1, "(предыдущий цикл этого диалога заменён)")
     return {"output": "\n".join(lines), "created": True}
 
 

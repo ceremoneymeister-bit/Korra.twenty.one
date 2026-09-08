@@ -4285,8 +4285,8 @@ def _format_concise_process_notification(
     """
     ok = exit_code in {0, None}
     icon = "✅" if ok else "❌"
-    verb = "finished" if ok else f"failed (exit {exit_code})"
-    parts = [f"{icon} Background task {verb}"]
+    verb = "завершена" if ok else f'''с ошибкой (код {exit_code})'''
+    parts = [f"{icon} Фоновая задача {verb}"]
     short_cmd = _shorten_command_for_display(command)
     if short_cmd:
         parts.append(f"— `{short_cmd}`")
@@ -11202,9 +11202,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     if elapsed_min > 0:
                         status_parts.append(f'''прошло {elapsed_min} мин''')
                 if max_iter:
-                    status_parts.append(f"iteration {iteration}/{max_iter}")
+                    status_parts.append(f'''шаг {iteration}/{max_iter}''')
                 if current_tool:
-                    status_parts.append(f"running: {current_tool}")
+                    status_parts.append(f"инструмент: {current_tool}")
             except Exception:
                 pass
 
@@ -17812,12 +17812,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         state = estop.get_state()
         if state is not None and not args:
             reason = state.get("reason")
-            suffix = f" (reason: {reason})" if reason else ""
+            suffix = f''' (причина: {reason})''' if reason else ""
             return (
                 f'''⏸️ Корра уже на паузе{suffix}. Команда `/pause off` возобновит работу.'''
             )
         estop.engage(reason=args or None)
-        suffix = f" (reason: {args})" if args else ""
+        suffix = f''' (причина: {args})''' if args else ""
         return (
             f'''⏸️ Пауза включена{suffix}. Новые задачи расписания, доски и мессенджеров приостановлены; текущие задачи завершатся. Команда `/pause off` возобновит работу.'''
         )
@@ -19025,7 +19025,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
             _plan_task = event.get_command_args().strip()
             _ack = (
-                f"Planning: {_plan_task[:80]}{'…' if len(_plan_task) > 80 else ''}"
+                f'''Составляю план: {_plan_task[:80]}{('…' if len(_plan_task) > 80 else '')}'''
                 if _plan_task
                 else '''Составляю план с учётом этого диалога…'''
             )
@@ -22293,17 +22293,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         _quoted = "\n".join(
                             f"-# {ln}" if ln else "-#" for ln in display_reasoning.splitlines()
                         )
-                        response = f"-# 💭 Reasoning\n{_quoted}\n\n{response}"
+                        response = f'''-# 💭 Рассуждения\n{_quoted}\n\n{response}'''
                     elif _reasoning_style == "blockquote":
                         _quoted = "\n".join(
                             f"> {ln}" if ln else ">" for ln in display_reasoning.splitlines()
                         )
-                        response = f"> 💭 **Reasoning:**\n{_quoted}\n\n{response}"
+                        response = f'''> 💭 **Рассуждения:**\n{_quoted}\n\n{response}'''
                     else:
                         # Escape ``` inside reasoning so inner fences don't
                         # break the outer code block used to render it.
                         display_reasoning = escape_code_fences_for_display(display_reasoning)
-                        response = f"💭 **Reasoning:**\n```\n{display_reasoning}\n```\n\n{response}"
+                        response = f'''💭 **Рассуждения:**\n```\n{display_reasoning}\n```\n\n{response}'''
 
             # Runtime-metadata footer — only on the FINAL message of the turn.
             # Off by default (display.runtime_footer.enabled=false).  When
@@ -22875,11 +22875,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         # Format context source hint
         if resolved.context_source == "config":
-            ctx_source = "config"
+            ctx_source = "из настроек"
         elif resolved.context_source == "default":
             ctx_source = '''по умолчанию; можно изменить model.context_length в настройках'''
         else:
-            ctx_source = "detected"
+            ctx_source = "определено автоматически"
 
         # Format context length for display
         if context_length >= 1_000_000:
@@ -22890,14 +22890,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             ctx_display = str(context_length)
 
         lines = [
-            f"◆ Model: `{model}`",
+            f"◆ Модель: `{model}`",
             f'''◆ Провайдер: {provider or 'openrouter'}''',
-            f"◆ Context: {ctx_display} tokens ({ctx_source})",
+            f"◆ Контекст: {ctx_display} токенов ({ctx_source})",
         ]
 
         # Show endpoint for local/custom setups
         if base_url and base_url_hostname(base_url) in ("localhost", "127.0.0.1", "0.0.0.0"):
-            lines.append(f"◆ Endpoint: {base_url}")
+            lines.append(f"◆ Адрес сервера: {base_url}")
 
         return "\n".join(lines)
 
@@ -23898,7 +23898,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             channel = adapter._client.get_channel(text_ch_id)
             if channel:
                 safe_text = transcript[:2000].replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
-                await channel.send(f"**[Voice]** <@{user_id}>: {safe_text}")
+                await channel.send(f'''**[Голос]** <@{user_id}>: {safe_text}''')
         except Exception:
             pass
 
@@ -24467,7 +24467,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
             response = result.get("final_response", "") if result else ""
             if not response and result and result.get("error"):
-                response = f"Error: {result['error']}"
+                response = f'''Ошибка: {result['error']}'''
 
             # Background tasks start a fresh conversation (no prior history),
             # so history_offset=0: every message in the run belongs to this
@@ -24657,7 +24657,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             await adapter.send_image_file(
                 chat_id=source.chat_id,
                 image_path=str(image_path),
-                caption="BotFather → Bot Settings → Threads Settings",
+                caption="Настройка тем: BotFather → Bot Settings → Threads Settings",
                 metadata={"thread_id": str(source.thread_id)} if source.thread_id else None,
             )
         except Exception:
@@ -25911,7 +25911,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             except Exception as btn_err:
                                 logger.debug("Button-based update prompt failed: %s", btn_err)
                         if not sent_buttons:
-                            default_hint = f" (default: {default})" if default else ""
+                            default_hint = f''' (по умолчанию: {default})''' if default else ""
                             _p = getattr(adapter, "typed_command_prefix", "/")
                             await adapter.send(
                                 chat_id,
@@ -30816,7 +30816,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         _parts = []
                         if _want_iteration_detail:
                             _parts.append(
-                                f"iteration {_a['api_call_count']}/{_a['max_iterations']}"
+                                f'''шаг {_a['api_call_count']}/{_a['max_iterations']}'''
                             )
                         _action = _a.get("current_tool") or _a.get("last_activity_desc")
                         if _action:
@@ -30828,7 +30828,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 _heartbeat_text = (
                     _generic_status_phrase("status")
                     if _long_running_mode == "generic"
-                    else f"⏳ Working — {_elapsed_mins} min{_status_detail}"
+                    else f'''⏳ Корра работает — {_elapsed_mins} мин{_status_detail}'''
                 )
                 try:
                     _notify_res = None

@@ -1377,9 +1377,9 @@ class GatewaySlashCommandsMixin:
                 if status == "stalling":
                     quiet = d.get("stalled_after_quiet_seconds")
                     if quiet is not None:
-                        row += f" · no progress {quiet:.0f}s"
+                        row += f''' · нет прогресса {quiet:.0f} с'''
                 elif d.get("seconds_since_progress", 0) >= 60:
-                    row += f" · quiet {d['seconds_since_progress']:.0f}s"
+                    row += f''' · нет активности {d['seconds_since_progress']:.0f} с'''
                 if goal:
                     row += f" · {goal}"
                 lines.append(row)
@@ -1393,7 +1393,7 @@ class GatewaySlashCommandsMixin:
                     )
                     idle = child.get("seconds_since_activity")
                     if idle is not None:
-                        part += f" · active {idle:.0f}s ago"
+                        part += f''' · активность {idle:.0f} с назад'''
                     lines.append(part)
             if len(delegations) > 12:
                 lines.append(
@@ -1524,9 +1524,9 @@ class GatewaySlashCommandsMixin:
             lines = ['''**Подключения мессенджеров**''']
             connected = sorted(p.value for p in self.adapters.keys())
             if connected:
-                lines.append("Connected: " + ", ".join(connected))
+                lines.append("Подключены: " + ", ".join(connected))
             else:
-                lines.append("Connected: (none)")
+                lines.append("Нет подключённых платформ")
             failed = getattr(self, "_failed_platforms", {}) or {}
             if failed:
                 for p, info in failed.items():
@@ -1538,15 +1538,15 @@ class GatewaySlashCommandsMixin:
                     else:
                         attempts = info.get("attempts", 0)
                         lines.append(
-                            f"  · {p.value} — retrying (attempt {attempts})"
+                            f"  · {p.value} — повторное подключение (попытка {attempts})"
                         )
             else:
-                lines.append("Failed/paused: (none)")
+                lines.append("Нет ошибок подключения и приостановленных платформ")
             return "\n".join(lines)
 
         if action in {"pause", "resume"}:
             if not target:
-                return f"Usage: /platform {action} <name>"
+                return f"Использование: /platform {action} <название>"
             platform = _resolve_platform(target)
             if platform is None:
                 return f'''Неизвестная платформа: {target}'''
@@ -2832,7 +2832,7 @@ class GatewaySlashCommandsMixin:
                     prev = mgr.clear_gates()
                 except RuntimeError as exc:
                     return f"/goal gate clear: {exc}"
-                return f"✓ Cleared {prev} gate{'s' if prev != 1 else ''}."
+                return f'''✓ Проверки удалены: {prev}.'''
             return '''Использование: /goal gate [list | add <команда> | remove <номер> | clear]'''
 
         # /goal draft <objective> → draft a structured completion contract,
@@ -3002,7 +3002,7 @@ class GatewaySlashCommandsMixin:
             )
         except Exception as exc:
             return f'''Не удалось запустить /refine: {exc}'''
-        tail = f" (focus: {args})" if args else ""
+        tail = f''' (тема: {args})''' if args else ""
         return (
             f'''⚗ Изучаю диалог в фоне{tail}. Сообщу об изменениях памяти и навыков после завершения.'''
         )
@@ -3106,7 +3106,7 @@ class GatewaySlashCommandsMixin:
             except RuntimeError as exc:
                 return f"/subgoal clear: {exc}"
             if prev:
-                return f"✓ Cleared {prev} subgoal{'s' if prev != 1 else ''}."
+                return f'''✓ Подцели удалены: {prev}.'''
             return '''Нет подцелей для удаления.'''
 
         try:
@@ -3524,8 +3524,8 @@ class GatewaySlashCommandsMixin:
             out.append(f"```\n{stat}\n```")
         if untracked:
             shown = "\n".join(f"+ {rel}" for rel in untracked[:15])
-            more = f"\n... and {len(untracked) - 15} more" if len(untracked) > 15 else ""
-            out.append(f"**Untracked:**\n```\n{shown}{more}\n```")
+            more = f'''\n… ещё {len(untracked) - 15}''' if len(untracked) > 15 else ""
+            out.append(f'''**Новые файлы:**\n```\n{shown}{more}\n```''')
         if not stat_only and diff:
             out.append(self._fenced_truncated_diff(diff))
         return "\n\n".join(out)
@@ -5258,7 +5258,7 @@ class GatewaySlashCommandsMixin:
         # Count messages for context
         history = await self.async_session_store.load_transcript(target_id)
         msg_count = len([m for m in history if m.get("role") == "user"]) if history else 0
-        msg_part = f" ({msg_count} message{'s' if msg_count != 1 else ''})" if msg_count else ""
+        msg_part = f" (сообщений: {msg_count})" if msg_count else ""
 
         if source.platform == Platform.MATRIX and allow_cross_room:
             return t(
@@ -6026,9 +6026,9 @@ class GatewaySlashCommandsMixin:
         lines = [f'''**Наборы навыков** (установлено: {len(bundles)}):''', ""]
         for info in bundles:
             skill_count = len(info.get("skills", []))
-            desc = info.get("description") or f"Load {skill_count} skills"
+            desc = info.get("description") or f'''Загрузить навыки: {skill_count}'''
             lines.append(
-                f"• `/{info['slug']}` — {desc} _({skill_count} skills)_"
+                f'''• `/{info['slug']}` — {desc} _(навыков: {skill_count})_'''
             )
             for s in info.get("skills", []):
                 lines.append(f"    · {s}")
