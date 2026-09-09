@@ -404,7 +404,8 @@ class TestLoginPageRender:
             assert "Korra21" in html
             from korra_cli.dashboard_auth.login_page import current_greeting
             assert current_greeting() in html
-            assert "Контур на связи." in html
+            # Слово «контур» с входа снято по решению владельца 09.09.2026.
+            assert "Контур" not in html
             # Слева знак и сменяющиеся строки, справа область входа —
             # композиция входа Claude, к которой владелец вернулся 09.09.2026.
             for line in (
@@ -419,6 +420,11 @@ class TestLoginPageRender:
             # иначе OAuth-вариант (он рендерится script-free) остался бы с
             # пятью наложенными фразами.
             assert "@keyframes tagline" in html
+            # Запрет анимаций гасит движение, но фразы обязаны продолжать
+            # сменяться: иначе на «Уменьшить движение» страница навсегда
+            # застывала бы на первой строке.
+            assert "@keyframes tagline-plain" in html
+            assert "animation-name: tagline-plain" in html
             assert "prefers-reduced-motion" in html
             assert 'class="login-shell"' in html
             assert 'class="identity"' in html

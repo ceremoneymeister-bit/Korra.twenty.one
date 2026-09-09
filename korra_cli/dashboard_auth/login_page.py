@@ -165,6 +165,16 @@ _LOGIN_HTML_TEMPLATE = """\
   /* Окно показа 22 % при шаге 20 % — фразы перекрываются на 0,6 с и
      переливаются одна в другую. Без перекрытия между ними остаётся пустой
      кадр, и смена читается как мигание. */
+  /* Запрет анимаций снимает движение, а не смену фраз: то же расписание,
+     но без сдвига и размытия. */
+  @keyframes tagline-plain {{
+    0%    {{ opacity: 0; }}
+    2%    {{ opacity: 1; }}
+    20%   {{ opacity: 1; }}
+    22%   {{ opacity: 0; }}
+    100%  {{ opacity: 0; }}
+  }}
+
   @keyframes tagline {{
     0%    {{ opacity: 0; transform: translateY(0.28em);  filter: blur(7px); }}
     2%    {{ opacity: 1; transform: translateY(0);       filter: blur(0); }}
@@ -182,18 +192,12 @@ _LOGIN_HTML_TEMPLATE = """\
   }}
 
   h2 {{
-    margin: 0;
+    margin: 0 0 1.9rem;
     font-size: clamp(1.7rem, 2.8vw, 2.15rem);
     font-weight: 680;
     line-height: 1.1;
     letter-spacing: -0.035em;
     text-wrap: balance;
-  }}
-
-  .sub {{
-    margin: 0.5rem 0 1.9rem;
-    color: var(--text-muted);
-    font-size: 0.95rem;
   }}
 
   .provider-list {{
@@ -348,7 +352,7 @@ _LOGIN_HTML_TEMPLATE = """\
     main {{ padding: 1.75rem 1.15rem 2.5rem; }}
     .login-shell {{ gap: 2rem; }}
     .card {{ padding: 1.5rem; border-radius: 1.5rem; }}
-    .sub {{ margin-bottom: 1.5rem; }}
+    h2 {{ margin-bottom: 1.5rem; }}
   }}
 
   @media (forced-colors: active) {{
@@ -359,13 +363,10 @@ _LOGIN_HTML_TEMPLATE = """\
     }}
   }}
 
-  /* При запрете анимаций строка не мигает и не пропадает: остаётся первая
-     фраза, остальные скрыты. */
   @media (prefers-reduced-motion: reduce) {{
     .login-shell {{ animation: none; }}
     .status-dot {{ animation: none; }}
-    .tagline-line {{ animation: none; opacity: 0; }}
-    .tagline-line:nth-child(1) {{ opacity: 1; }}
+    .tagline-line {{ animation-name: tagline-plain; }}
     .provider-btn {{ transition: none; }}
     .provider-btn:hover,
     .provider-btn:active {{ transform: none; }}
@@ -390,7 +391,6 @@ _LOGIN_HTML_TEMPLATE = """\
     </section>
     <section class="card" aria-labelledby="greeting">
       <h2 id="greeting">{greeting}</h2>
-      <p class="sub">Контур на связи.</p>
       <div class="provider-list">
 {provider_buttons}
       </div>
