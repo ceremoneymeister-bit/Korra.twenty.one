@@ -108,6 +108,7 @@ import type { Translations } from "@/i18n/types";
 import { PluginPage, PluginSlot, usePlugins } from "@/plugins";
 import type { PluginManifest } from "@/plugins";
 import { useTheme } from "@/themes";
+import { EveningThemePrompt } from "@/components/EveningThemePrompt";
 import {
   isDashboardBubbleChatEnabled,
   isDashboardEmbeddedChatEnabled,
@@ -439,6 +440,7 @@ export default function App() {
   const { pathname } = useLocation();
   const { manifests, loading: pluginsLoading } = usePlugins();
   const { theme } = useTheme();
+  const { isBusy: systemBusy } = useSystemActions();
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
@@ -1065,6 +1067,7 @@ export default function App() {
       </div>
 
       <PluginSlot name="overlay" />
+      <EveningThemePrompt blocked={systemBusy || sidebarReachable !== true || mobileOpen} />
     </div>
     </ProfileProvider>
   );

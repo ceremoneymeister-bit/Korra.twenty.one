@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import math
 from pathlib import Path
 from typing import Any
 
@@ -19,15 +20,20 @@ def preference(config: dict, installation_id: str | None, owner: str, base_path:
     dashboard = config.get("dashboard")
     dashboard = dashboard if isinstance(dashboard, dict) else {}
     raw = dashboard.get("theme")
+    evening_raw = dashboard.get("evening_prompt")
+    evening_raw = evening_raw if isinstance(evening_raw, dict) else {}
+    until = evening_raw.get("snooze_until", 0)
+    until = until if isinstance(until, (int, float)) and not isinstance(until, bool) and math.isfinite(until) and until >= 0 else 0
+    evening = {"disabled": evening_raw["disabled"] if isinstance(evening_raw.get("disabled"), bool) else normalize_theme(raw) == "dark", "snooze_until": until}
     # An operator's config edit invalidates caches without updating our field.
     revision = hashlib.sha256(json.dumps(
-        [raw, dashboard.get("theme_revision")], sort_keys=True, default=str,
+        [raw, dashboard.get("theme_revision"), evening], sort_keys=True, default=str,
     ).encode()).hexdigest()[:24]
     return {
         "version": 1, "theme": normalize_theme(raw), "known": True,
         "installation_id": installation_id,
         "owner": hashlib.sha256(owner.encode()).hexdigest()[:16],
-        "base_path": base_path, "revision": revision,
+        "base_path": base_path, "revision": revision, "evening": evening,
     }
 
 

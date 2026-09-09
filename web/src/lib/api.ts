@@ -1410,11 +1410,11 @@ export const api = {
   // Dashboard themes
   getThemes: () =>
     fetchJSON<DashboardThemesResponse>("/api/dashboard/themes"),
-  setTheme: (name: string, revision?: string) =>
+  setTheme: (name: string | undefined, revision?: string, evening_action?: "later" | "disable" | "enable") =>
     fetchJSON<{ ok: boolean; theme: string; preference: ThemePreference }>("/api/dashboard/theme", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, revision }),
+      body: JSON.stringify({ name, revision, evening_action }),
     }),
   getFontPref: () =>
     fetchJSON<DashboardFontResponse>("/api/dashboard/font"),

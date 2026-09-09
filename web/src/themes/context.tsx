@@ -388,8 +388,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const generation = useRef(0);
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const desiredTheme = useRef(preference?.theme ?? "light");
+  const lastChoice = useRef<{name?: string; action?: "later" | "disable" | "enable"}>({name: preference?.theme ?? "light"});
   const mounted = useRef(true);
-  const [themeName, setThemeName] = useState<string>(desiredTheme.current);
+  const [themeName, setThemeName] = useState<string>(() => preference?.theme ?? "light");
   const [saveState, setSaveState] = useState<"idle" | "pending" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState("");
   const [fontId, setFontId] = useState(() => {
@@ -441,11 +442,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  const saveTheme = useCallback((name: string, refresh = false): Promise<boolean> => {
-    const next = migrateThemeName(name);
+  const saveTheme = useCallback((name: string | undefined, refresh = false, action?: "later" | "disable" | "enable"): Promise<boolean> => {
+    const next = name === undefined ? undefined : migrateThemeName(name);
+    lastChoice.current = { name, action };
     const thisGeneration = ++generation.current;
-    desiredTheme.current = next;
-    setThemeName(next);
+    if (next !== undefined) {
+      desiredTheme.current = next;
+      setThemeName(next);
+    }
     setSaveState("pending");
     setSaveError("");
     // Serialize writes: each explicit choice uses the previous durable ACK's
@@ -457,16 +461,24 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           if (!latest) throw new Error("unknown preference");
           acceptPreference(latest);
         }
-        const response = await api.setTheme(next, preferenceRef.current!.revision);
+        const response = action ? await api.setTheme(next, preferenceRef.current!.revision, action) : await api.setTheme(next, preferenceRef.current!.revision);
         const ack = validPreference(response.preference);
-        if (!response.ok || !ack || ack.theme !== next) throw new Error("missing durable ACK");
+        if (!response.ok || !ack || (next !== undefined && ack.theme !== next)) throw new Error("missing durable ACK");
         acceptPreference(ack);
-        if (mounted.current && generation.current === thisGeneration) setSaveState("saved");
+        if (mounted.current && generation.current === thisGeneration) {
+          if (next === undefined) {
+            // An explicit prompt choice supersedes a failed local preview;
+            // show the palette that its durable ACK actually confirms.
+            desiredTheme.current = ack.theme;
+            setThemeName(ack.theme);
+          }
+          setSaveState("saved");
+        }
         return true;
       } catch {
         if (mounted.current && generation.current === thisGeneration) {
           setSaveState("error");
-          setSaveError("Тема показана на этом экране, но не сохранена. Проверьте соединение и повторите.");
+          setSaveError(action ? "Выбор не сохранён. Проверьте соединение и повторите." : "Тема показана на этом экране, но не сохранена. Проверьте соединение и повторите.");
         }
         return false;
       }
@@ -475,7 +487,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return saving;
   }, [acceptPreference]);
   const setTheme = useCallback((name: string) => saveTheme(name), [saveTheme]);
-  const retryTheme = useCallback(() => saveTheme(desiredTheme.current, true), [saveTheme]);
+  const retryTheme = useCallback(() => saveTheme(lastChoice.current.name, true, lastChoice.current.action), [saveTheme]);
+  const setEvening = useCallback((action: "later" | "disable" | "enable") => saveTheme(undefined, true, action), [saveTheme]);
   const setFont = useCallback((id: string) => {
     const next = getFontChoice(id) ? id : THEME_DEFAULT_FONT_ID;
     setFontId(next);
@@ -485,16 +498,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<ThemeContextValue>(() => ({
     theme: resolveTheme(themeName), themeName, availableThemes: BUILTIN_THEME_ENTRIES,
-    setTheme, preference, saveState, saveError, retryTheme,
+    setTheme, preference, saveState, saveError, retryTheme, setEvening,
     fontId, fontChoices: FONT_CHOICES, setFont,
-  }), [themeName, setTheme, resolveTheme, preference, saveState, saveError, retryTheme, fontId, setFont]);
+  }), [themeName, setTheme, resolveTheme, preference, saveState, saveError, retryTheme, setEvening, fontId, setFont]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 export function useTheme(): ThemeContextValue { return useContext(ThemeContext); }
 const ThemeContext = createContext<ThemeContextValue>({
   theme: defaultTheme, themeName: "light", availableThemes: BUILTIN_THEME_ENTRIES,
   setTheme: async () => false, preference: null, saveState: "idle", saveError: "",
-  retryTheme: async () => false,
+  retryTheme: async () => false, setEvening: async () => false,
   fontId: THEME_DEFAULT_FONT_ID, fontChoices: FONT_CHOICES, setFont: () => {},
 });
 interface ThemeContextValue {
@@ -504,6 +517,7 @@ interface ThemeContextValue {
   saveState: "idle" | "pending" | "saved" | "error";
   saveError: string;
   retryTheme: () => Promise<boolean>;
+  setEvening: (action: "later" | "disable" | "enable") => Promise<boolean>;
   theme: DashboardTheme;
   themeName: string;
   fontId: string;

@@ -20285,6 +20285,8 @@ async def get_dashboard_themes(request: Request = None):
 async def set_dashboard_theme(body: ThemeSetBody, request: Request = None):
     """Persist an explicit choice; optional revision protects concurrent browsers."""
     from korra_cli.dashboard_theme import normalize_theme
+    if body.name is None and body.evening_action is None:
+        raise HTTPException(status_code=400, detail="Выберите настройку темы.")
     def _run():
         with _CONFIG_MUTATION_LOCK:
             config = load_config()
@@ -20295,10 +20297,31 @@ async def set_dashboard_theme(body: ThemeSetBody, request: Request = None):
             dashboard = config.get("dashboard")
             if not isinstance(dashboard, dict):
                 dashboard = config["dashboard"] = {}
-            dashboard["theme"] = normalize_theme(body.name)
+            evening = dict(before["evening"])
+            if body.name is not None:
+                dashboard["theme"] = normalize_theme(body.name)
+                if dashboard["theme"] == "dark":
+                    evening["disabled"] = True
+            if body.evening_action == "later":
+                evening["snooze_until"] = int(time.time()) + 14 * 86400
+            elif body.evening_action == "disable":
+                evening["disabled"] = True
+            elif body.evening_action == "enable":
+                evening = {"disabled": False, "snooze_until": 0}
+            dashboard["evening_prompt"] = evening
             dashboard["theme_revision"] = secrets.token_hex(12)
-            save_config(config)
-            pref = _dashboard_theme_preference(config, prefix)
+            expected = _dashboard_theme_preference(config, prefix)
+            preserve = {("dashboard", "theme_revision"),
+                        ("dashboard", "evening_prompt", "disabled"),
+                        ("dashboard", "evening_prompt", "snooze_until")}
+            if body.name is not None:
+                preserve.add(("dashboard", "theme"))
+            save_config(config, preserve_keys=preserve)
+            # Managed policies can deliberately skip/strip a write without
+            # raising. ACK only a fresh read of the durable configuration.
+            pref = _dashboard_theme_preference(load_config(), prefix)
+            if pref["revision"] != expected["revision"]:
+                raise HTTPException(status_code=409, detail="Выбор не сохранён. Настройка ограничена или изменилась; повторите после проверки.")
         return {"ok": True, "theme": pref["theme"], "preference": pref}
 
     return await asyncio.to_thread(_run)

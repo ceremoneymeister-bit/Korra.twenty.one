@@ -775,8 +775,9 @@ class RawConfigUpdate(BaseModel):
 # --- from web_server.py (originally lines 19410-19411) ---
 
 class ThemeSetBody(BaseModel):
-    name: str
+    name: Optional[str] = None
     revision: Optional[str] = None
+    evening_action: Optional[Literal["later", "disable", "enable"]] = None
 
 
 # --- from web_server.py (originally lines 19449-19450) ---

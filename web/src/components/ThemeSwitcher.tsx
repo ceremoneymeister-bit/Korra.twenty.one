@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
  * the sidebar (same idea as a responsive Drawer).
  */
 export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitcherProps) {
-  const { themeName, availableThemes, setTheme, fontId, fontChoices, setFont, saveState, saveError, retryTheme } = useTheme();
+  const { themeName, availableThemes, setTheme, fontId, fontChoices, setFont, saveState, saveError, retryTheme, preference, setEvening } = useTheme();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -86,10 +86,11 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
         </span>
       </Button>
 
+      {open && preference?.evening?.disabled && <button type="button" className="min-h-11 p-2 text-xs underline" disabled={saveState === "pending"} onClick={() => void setEvening("enable")}>Разрешить вечернее предложение</button>}
       {saveState !== "idle" && (
         <div className="max-w-64 text-xs p-2" data-theme-save-status>
           {saveState === "error" ? <><p role="alert">{saveError}</p><button className="min-h-11 underline" type="button" onClick={() => void retryTheme()}>Повторить сохранение</button></> :
-            <p role="status">{saveState === "pending" ? "Сохраняем тему…" : "Тема сохранена"}</p>}
+            <p role="status">{saveState === "pending" ? "Сохраняем настройку…" : "Настройка сохранена"}</p>}
         </div>
       )}
       {useMobileSheet && (

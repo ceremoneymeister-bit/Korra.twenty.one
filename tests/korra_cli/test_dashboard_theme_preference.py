@@ -10,7 +10,7 @@ def pref_state(monkeypatch):
     state = {"dashboard": {}}
     writes = []
     monkeypatch.setattr(ws, "load_config", lambda: copy.deepcopy(state))
-    def save(config):
+    def save(config, **_kwargs):
         writes.append(copy.deepcopy(config))
         state.clear()
         state.update(copy.deepcopy(config))
