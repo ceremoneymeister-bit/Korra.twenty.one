@@ -466,3 +466,32 @@ def test_cold_tempdir_inside_data_never_probes_destination(tmp_path, isolated, m
     rejected(path, user)
     assert writes == []
     assert target.stat().st_mtime_ns == before_mtime
+
+
+def test_external_provider_alias_never_hosts_staging(tmp_path, isolated, monkeypatch):
+    require_host_proc()
+    user, target = isolated
+    provider = user / "provider-state"
+    provider.mkdir()
+    (provider / "config.json").write_text("{}")
+    (user / ".honcho").symlink_to(provider, target_is_directory=True)
+    path = archive(tmp_path, {"config.yaml": "replacement",
+                             "_external/.honcho/config.json": "{}",
+                             "_external/.honcho/late.db": b"corrupt SQLite"})
+    monkeypatch.setenv("TMPDIR", str(provider))
+    monkeypatch.setattr(backup.tempfile, "tempdir", None)
+    writes = []
+    original_open = os.open
+    def watch_open(path, flags, *args, **kwargs):
+        if flags & (os.O_CREAT | os.O_WRONLY | os.O_RDWR):
+            try:
+                if Path(path).resolve().is_relative_to(provider):
+                    writes.append(str(path))
+            except TypeError:
+                pass
+        return original_open(path, flags, *args, **kwargs)
+    monkeypatch.setattr(os, "open", watch_open)
+    before_mtime = provider.stat().st_mtime_ns
+    rejected(path, user)
+    assert writes == []
+    assert provider.stat().st_mtime_ns == before_mtime

@@ -1568,7 +1568,7 @@ def run_import(args) -> None:
             roots = [hermes_root]
             roots.extend(home_dir / entry["relative"].parts[0] for entry in plan
                          if entry["external"] and not entry["skipped"])
-            roots = list(dict.fromkeys(roots))
+            roots = list(dict.fromkeys(root.resolve() for root in roots))
             before = _assert_import_offline(roots, importer_fd=zf.fp.fileno())
             print(f"Папка восстановления: {hermes_root}")
             if ((hermes_root / "config.yaml").exists() or (hermes_root / ".env").exists()) and not args.force:
