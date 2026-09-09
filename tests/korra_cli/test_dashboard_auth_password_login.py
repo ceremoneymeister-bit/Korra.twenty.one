@@ -405,9 +405,21 @@ class TestLoginPageRender:
             from korra_cli.dashboard_auth.login_page import current_greeting
             assert current_greeting() in html
             assert "Контур на связи." in html
-            # Слева знак и одна строка о продукте, справа область входа —
+            # Слева знак и сменяющиеся строки, справа область входа —
             # композиция входа Claude, к которой владелец вернулся 09.09.2026.
-            assert "Партнёр для больших замыслов" in html
+            for line in (
+                "Чтобы твои идеи не оставались идеями",
+                "Дай своим идеям место в реальности",
+                "Реальность ждёт твоих творений",
+                "Мир ещё не видел того, что ты создашь",
+                "То, чего ещё нет, начинается с тебя",
+            ):
+                assert line in html, f"пропала строка слогана: {line}"
+            # Ротация — на CSS: страница входа обязана обходиться без скриптов,
+            # иначе OAuth-вариант (он рендерится script-free) остался бы с
+            # пятью наложенными фразами.
+            assert "@keyframes tagline" in html
+            assert "prefers-reduced-motion" in html
             assert 'class="login-shell"' in html
             assert 'class="identity"' in html
             assert 'class="card"' in html

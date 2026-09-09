@@ -135,14 +135,42 @@ _LOGIN_HTML_TEMPLATE = """\
   .brand-word {{ height: var(--word-h); width: auto; }}
   .brand-number {{ height: calc(var(--word-h) * 0.817); width: auto; }}
 
+  /* Строка слева меняется сама. Стек на grid, а не абсолютное
+     позиционирование: блок получает высоту самой длинной фразы, и раскладка
+     не прыгает при смене. Анимация только на CSS — OAuth-вариант этой
+     страницы не грузит скрипты вообще. */
   h1 {{
-    max-width: 17ch;
+    display: grid;
+    max-width: 20ch;
     margin: 0;
-    font-size: clamp(2.2rem, 4.2vw, 3.6rem);
+    font-size: clamp(1.9rem, 3.4vw, 2.9rem);
     font-weight: 700;
-    line-height: 1.06;
-    letter-spacing: -0.05em;
+    line-height: 1.08;
+    letter-spacing: -0.045em;
     text-wrap: balance;
+  }}
+
+  .tagline-line {{
+    grid-area: 1 / 1;
+    opacity: 0;
+    animation: tagline 30s cubic-bezier(.2,.8,.2,1) infinite;
+  }}
+
+  .tagline-line:nth-child(1) {{ animation-delay:  0s; }}
+  .tagline-line:nth-child(2) {{ animation-delay:  6s; }}
+  .tagline-line:nth-child(3) {{ animation-delay: 12s; }}
+  .tagline-line:nth-child(4) {{ animation-delay: 18s; }}
+  .tagline-line:nth-child(5) {{ animation-delay: 24s; }}
+
+  /* Окно показа 22 % при шаге 20 % — фразы перекрываются на 0,6 с и
+     переливаются одна в другую. Без перекрытия между ними остаётся пустой
+     кадр, и смена читается как мигание. */
+  @keyframes tagline {{
+    0%    {{ opacity: 0; transform: translateY(0.28em);  filter: blur(7px); }}
+    2%    {{ opacity: 1; transform: translateY(0);       filter: blur(0); }}
+    20%   {{ opacity: 1; transform: translateY(0);       filter: blur(0); }}
+    22%   {{ opacity: 0; transform: translateY(-0.28em); filter: blur(7px); }}
+    100%  {{ opacity: 0; }}
   }}
 
   .card {{
@@ -331,9 +359,13 @@ _LOGIN_HTML_TEMPLATE = """\
     }}
   }}
 
+  /* При запрете анимаций строка не мигает и не пропадает: остаётся первая
+     фраза, остальные скрыты. */
   @media (prefers-reduced-motion: reduce) {{
     .login-shell {{ animation: none; }}
     .status-dot {{ animation: none; }}
+    .tagline-line {{ animation: none; opacity: 0; }}
+    .tagline-line:nth-child(1) {{ opacity: 1; }}
     .provider-btn {{ transition: none; }}
     .provider-btn:hover,
     .provider-btn:active {{ transform: none; }}
@@ -348,7 +380,13 @@ _LOGIN_HTML_TEMPLATE = """\
         <img class="brand-word" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
         <img class="brand-number" src="{base_path}/brand/korra-21.png" alt="21" width="364" height="233">
       </div>
-      <h1>Партнёр для больших замыслов</h1>
+      <h1>
+        <span class="tagline-line">Чтобы твои идеи не оставались идеями</span>
+        <span class="tagline-line" aria-hidden="true">Дай своим идеям место в реальности</span>
+        <span class="tagline-line" aria-hidden="true">Реальность ждёт твоих творений</span>
+        <span class="tagline-line" aria-hidden="true">Мир ещё не видел того, что ты создашь</span>
+        <span class="tagline-line" aria-hidden="true">То, чего ещё нет, начинается с тебя</span>
+      </h1>
     </section>
     <section class="card" aria-labelledby="greeting">
       <h2 id="greeting">{greeting}</h2>
