@@ -75,3 +75,12 @@ def test_native_file_write_is_read_back_before_ack(tmp_path, monkeypatch, theme)
     assert persisted["dashboard"]["theme"] == theme
     assert persisted["dashboard"]["evening_prompt"]["disabled"] is (theme == "dark")
     assert ack == asyncio.run(ws.get_dashboard_themes())["preference"]
+
+
+def test_oversized_yaml_snooze_does_not_break_authoritative_dark_or_heal(state):
+    state[0]["dashboard"] = {"theme": "dark", "evening_prompt": {"snooze_until": 10 ** 400}}
+    before = deepcopy(state[0])
+    pref = asyncio.run(ws.get_dashboard_themes())["preference"]
+    assert pref["theme"] == "dark" and pref["evening"]["snooze_until"] == 0
+    assert "--background-base:#212121;" in ws._render_active_theme_bootstrap_css(pref)
+    assert state[0] == before and state[1] == []

@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import math
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +22,9 @@ def preference(config: dict, installation_id: str | None, owner: str, base_path:
     evening_raw = dashboard.get("evening_prompt")
     evening_raw = evening_raw if isinstance(evening_raw, dict) else {}
     until = evening_raw.get("snooze_until", 0)
-    until = until if isinstance(until, (int, float)) and not isinstance(until, bool) and math.isfinite(until) and until >= 0 else 0
+    # Bound before any float conversion: YAML integers can exceed float range.
+    # Year 9999 is safely representable in JS milliseconds; NaN/inf also fail.
+    until = until if isinstance(until, (int, float)) and not isinstance(until, bool) and 0 <= until <= 253402300799 else 0
     evening = {"disabled": evening_raw["disabled"] if isinstance(evening_raw.get("disabled"), bool) else normalize_theme(raw) == "dark", "snooze_until": until}
     # An operator's config edit invalidates caches without updating our field.
     revision = hashlib.sha256(json.dumps(
