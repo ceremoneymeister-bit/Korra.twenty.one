@@ -694,7 +694,7 @@ def _render_password_form(provider, next_path: str, base_path: str) -> str:
     safe_next = html.escape(next_path, quote=True) if next_path else ""
     return (
         f'      <form class="provider-form" data-provider="{pname}" '
-        f'action="{base_path}/auth/password-login" autocomplete="on">\n'
+        f'method="post" action="{base_path}/auth/password-login" autocomplete="on">\n'
         f'        <input type="hidden" name="next" value="{safe_next}">\n'
         f'        <div class="form-error" id="{error_id}" role="alert" hidden></div>\n'
         f'        <label class="field">\n'

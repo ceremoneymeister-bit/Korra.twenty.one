@@ -20016,6 +20016,18 @@ def mount_spa(application: FastAPI):
                 status_code=404,
             )
         file_path = WEB_DIST / full_path
+        # Pre-auth branding is a finite asset surface, never a SPA route or
+        # arbitrary files added to the brand directory by a future build.
+        if full_path == "brand" or full_path.startswith("brand/"):
+            allowed = {"brand/korra-wordmark.png", "brand/korra-21.png"}
+            if (
+                full_path not in allowed
+                or not file_path.is_file()
+                or not file_path.resolve().is_relative_to(WEB_DIST.resolve())
+                or file_path.resolve().parent != (WEB_DIST / "brand").resolve()
+            ):
+                return JSONResponse({"detail": "Not found"}, status_code=404)
+            return FileResponse(file_path, media_type="image/png")
         # Prevent path traversal via url-encoded sequences (%2e%2e/)
         if (
             full_path
