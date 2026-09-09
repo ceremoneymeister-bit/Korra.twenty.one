@@ -1,5 +1,5 @@
 """
-HTML Export generator for Hermes sessions.
+Standalone Korra session export.
 Generates a standalone, beautiful HTML file with all messages embedded.
 Supports single and multi-session exports with a professional sidebar.
 No remote dependencies.
@@ -7,6 +7,8 @@ Enhanced with UI-UX-PRO-MAX design intelligence.
 """
 
 import datetime
+import base64
+from pathlib import Path
 import secrets
 from typing import Any, Dict, List
 from urllib.parse import quote
@@ -20,57 +22,52 @@ ICON_SPARKLES = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" 
 ICON_CHEVRON_RIGHT = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right"><path d="m9 18 6-6-6-6"/></svg>'
 ICON_SEARCH = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-search"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>'
 ICON_SHIELD = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/></svg>'
-ICON_HERMES = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFD700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>'
+def _brand_html() -> str:
+    """Embed shipped brand assets; an exported file never fetches the network."""
+    roots = (Path(__file__).parent / "web_dist", Path(__file__).parents[1] / "web/public")
+    marks = []
+    for filename, label in (("korra-wordmark.png", "Korra"), ("korra-21.png", "21")):
+        for root in roots:
+            asset = root / "brand" / filename
+            if asset.is_file():
+                data = base64.b64encode(asset.read_bytes()).decode("ascii")
+                marks.append(f'<img src="data:image/png;base64,{data}" alt="{label}">')
+                break
+        else:
+            marks.append(f"<span>{label}</span>")
+    return '<span class="korra-brand">' + "".join(marks) + "</span>"
+
 
 HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-{script_nonce}'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-{script_nonce}'; style-src 'unsafe-inline'; font-src 'none'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'">
     <title>{page_title}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {{
-            --bg-color: #F8FAFC;
-            --text-color: #0F172A;
-            --secondary-text: #475569;
-            --user-bg: #FFFFFF;
-            --assistant-bg: #F1F5F9;
-            --border-color: #E2E8F0;
-            --accent-color: #CD7F32;
-            --accent-foreground: #FFFFFF;
-            --code-bg: #1E293B;
-            --code-text: #F8FAFC;
-            --reasoning-bg: #FFFBEB;
-            --reasoning-border: #FEF3C7;
-            --tool-bg: #F0F9FF;
-            --tool-border: #E0F2FE;
+            color-scheme: light;
+            --bg-color: #e8e8e8;
+            --text-color: #1f1f1f;
+            --secondary-text: #5c5c5c;
+            --user-bg: #e0e0e0;
+            --assistant-bg: #dcdcdc;
+            --border-color: #bebebe;
+            --accent-color: #1f1f1f;
+            --accent-foreground: #e0e0e0;
+            --code-bg: #dcdcdc;
+            --code-text: #1f1f1f;
+            --reasoning-bg: #e0e0e0;
+            --reasoning-border: #bebebe;
+            --tool-bg: #e0e0e0;
+            --tool-border: #bebebe;
             --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-            --sidebar-bg: #FFFFFF;
+            --sidebar-bg: #e0e0e0;
             --sidebar-width: 320px;
         }}
 
-        @media (prefers-color-scheme: dark) {{
-            :root {{
-                --bg-color: #000101;
-                --text-color: #FFF8DC;
-                --secondary-text: #94A3B8;
-                --user-bg: #041c1c;
-                --assistant-bg: #0c1a1a;
-                --border-color: #CD7F32;
-                --accent-color: #FFD700;
-                --code-bg: #000000;
-                --reasoning-bg: #1a1a1a;
-                --reasoning-border: #CD7F32;
-                --tool-bg: #0c4a6e;
-                --tool-border: #075985;
-                --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
-                --sidebar-bg: #041c1c;
-            }}
-        }}
+
 
         * {{
             box-sizing: border-box;
@@ -79,7 +76,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }}
 
         body {{
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             line-height: 1.6;
             color: var(--text-color);
             background-color: var(--bg-color);
@@ -106,9 +103,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }}
 
         @media (max-width: 768px) {{
+            .layout {{ flex-direction: column; }}
             .sidebar {{
-                transform: translateX(-100%);
+                position: static;
+                width: 100%;
+                height: auto;
+                transform: none;
             }}
+            .session-list {{ max-height: 12rem; }}
+            .main-content {{ padding: 1.25rem 1rem; }}
             .sidebar.open {{
                 transform: translateX(0);
             }}
@@ -177,11 +180,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             background-color: rgba(0, 0, 0, 0.05);
         }}
 
-        @media (prefers-color-scheme: dark) {{
-            .session-item:hover {{
-                background-color: rgba(255, 255, 255, 0.05);
-            }}
-        }}
+
 
         .session-item.active {{
             background-color: var(--user-bg);
@@ -287,24 +286,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             border-style: dotted;
         }}
 
-        @media (prefers-color-scheme: dark) {{
-            .message-user {{
-                background-color: #0c2121;
-            }}
 
-            .message-assistant {{
-                background-color: #041c1c;
-            }}
-
-            .message-system {{
-                background-color: #020617;
-                border-left: 4px solid var(--secondary-text);
-            }}
-
-            .message-tool {{
-                background-color: #0f172a;
-            }}
-        }}
 
         .message-header {{
             display: flex;
@@ -325,7 +307,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: var(--secondary-text);
         }}
 
-        .message.active svg.chevron {{
+        .message[open] > summary svg.chevron {{
             transform: rotate(90deg);
         }}
 
@@ -351,13 +333,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }}
 
         .message-body {{
-            display: none;
+            display: block;
             padding: 0 1.5rem 1.5rem 1.5rem;
             border-top: 1px solid var(--border-color);
             padding-top: 1.5rem;
         }}
 
-        .message.active .message-body {{
+        .message[open] .message-body {{
             display: block;
         }}
 
@@ -369,7 +351,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         /* Code Blocks */
         code {{
-            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+            font-family: ui-monospace, SFMono-Regular, monospace;
             background-color: rgba(0,0,0,0.05);
             padding: 0.2rem 0.4rem;
             border-radius: 0.375rem;
@@ -424,16 +406,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: var(--secondary-text);
         }}
 
-        .tool-call.active svg.chevron {{
+        .tool-call[open] > summary svg.chevron {{
             transform: rotate(90deg);
         }}
 
         .tool-call-content {{
-            display: none;
+            display: block;
             padding: 0 1rem 1rem 1rem;
         }}
 
-        .tool-call.active .tool-call-content {{
+        .tool-call[open] .tool-call-content {{
             display: block;
         }}
 
@@ -466,12 +448,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             color: var(--secondary-text);
         }}
 
-        .reasoning.active svg.chevron {{
+        .reasoning[open] > summary svg.chevron {{
             transform: rotate(90deg);
         }}
 
         .reasoning-content {{
-            display: none;
+            display: block;
             padding: 0 1rem 1rem 1rem;
             font-size: 0.925rem;
             color: var(--secondary-text);
@@ -479,7 +461,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             padding-top: 1rem;
         }}
 
-        .reasoning.active .reasoning-content {{
+        .reasoning[open] .reasoning-content {{
             display: block;
         }}
 
@@ -516,19 +498,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             transition: transform 0.2s ease;
         }}
 
-        .system-prompt-section.active svg.chevron {{
+        .system-prompt-section[open] > summary svg.chevron {{
             transform: rotate(90deg);
         }}
 
         .system-prompt-content {{
-            display: none;
+            display: block;
             padding: 0 1.25rem 1.25rem 1.25rem;
             font-size: 0.9rem;
             border-top: 1px solid var(--border-color);
             padding-top: 1rem;
         }}
 
-        .system-prompt-section.active .system-prompt-content {{
+        .system-prompt-section[open] .system-prompt-content {{
             display: block;
         }}
 
@@ -553,10 +535,39 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         /* Utilities */
         .hidden {{ display: none !important; }}
+        .korra-brand {{ display: inline-flex; align-items: center; gap: 0.25rem; }}
+        .korra-brand img {{ height: 2rem; width: auto; }}
+        .korra-brand img + img {{ height: 1.63rem; }}
+        .main-content, .message, .message-body {{ min-width: 0; }}
+        summary {{ min-height: 44px; list-style: none; }}
+        summary::-webkit-details-marker {{ display: none; }}
+        summary:focus-visible, a:focus-visible, input:focus-visible {{
+            outline: 2px solid #1f1f1f; outline-offset: 3px;
+        }}
+        summary .timestamp {{ flex-shrink: 0; }}
+        .message-header {{ flex-wrap: wrap; gap: 0.5rem; }}
+        .sidebar-brand {{ color: var(--text-color); }}
+        @media (prefers-reduced-motion: reduce) {{
+            *, *::before, *::after {{ animation: none !important; transition: none !important; }}
+        }}
+        @media (max-width: 768px) {{
+            .layout-multi .main-content {{ width: 100%; padding: 1.25rem 1rem; }}
+            .layout-single .session-view {{ max-width: 100%; }}
+        }}
+        @media print {{
+            :root {{ --bg-color: #ffffff; --text-color: #1f1f1f; }}
+            .sidebar, footer {{ display: none; }}
+            .main-content {{ margin: 0 !important; padding: 0; }}
+            .session-view {{ display: block !important; break-before: page; }}
+            .session-view:first-child {{ break-before: auto; }}
+            details::details-content {{ content-visibility: visible; }}
+            .message-body, .tool-call-content, .reasoning-content, .system-prompt-content {{ display: block !important; }}
+            .message {{ box-shadow: none; break-inside: avoid; }}
+        }}
     </style>
 </head>
 <body>
-    <div class="layout {layout_class}">
+    <noscript><style>.session-view {{ display: block !important; }}</style></noscript>\n    <div class="layout {layout_class}">
         {sidebar_html}
         
         <div class="main-content">
@@ -610,18 +621,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }});
         }}
 
-        // Card Toggles
-        document.addEventListener('click', function(e) {{
-            const header = e.target.closest('.message-header, .tool-call-header, .reasoning-header, .system-prompt-header');
-            if (header) {{
-                header.parentElement.classList.toggle('active');
-            }}
+        // Print every session and expanded disclosure, then restore the reader's state.
+        let collapsedForPrint = [];
+        window.addEventListener('beforeprint', () => {{
+            collapsedForPrint = [...document.querySelectorAll('details:not([open])')];
+            collapsedForPrint.forEach(el => el.open = true);
+        }});
+        window.addEventListener('afterprint', () => {{
+            collapsedForPrint.forEach(el => el.open = false);
         }});
 
         // Initialization
         window.addEventListener('load', () => {{
-            const hash = decodeURIComponent(window.location.hash.slice(1));
-            if (hash) {{
+            let hash = '';
+            try {{ hash = decodeURIComponent(window.location.hash.slice(1)); }} catch {{ /* malformed fragment */ }}
+            if (hash && document.getElementById('view-' + hash)) {{
                 showSession(hash);
             }} else {{
                 // Show first session by default if none selected
@@ -713,11 +727,11 @@ def _generate_messages_html(messages: List[Dict[str, Any]]) -> str:
         
         chevron_html = ICON_CHEVRON_RIGHT.replace('class="', 'class="chevron ')
         
-        html = f'<div class="{msg_class}"{delay_style}>'
-        html += f'  <div class="message-header">'
-        html += f'    <div class="role-badge">{chevron_html} {role_icon} {safe_role}</div>'
-        html += f'    <div class="timestamp">{timestamp}</div>'
-        html += '  </div>'
+        html = f'<details class="{msg_class}"{delay_style} open>'
+        html += f'  <summary class="message-header">'
+        html += f'    <span class="role-badge">{chevron_html} {role_icon} {safe_role}</span>'
+        html += f'    <span class="timestamp">{timestamp}</span>'
+        html += '  </summary>'
         html += '  <div class="message-body">'
         
         # Tool Calls
@@ -727,15 +741,15 @@ def _generate_messages_html(messages: List[Dict[str, Any]]) -> str:
                 fn_name = tc.get("function", {}).get("name", "неизвестно")
                 args = tc.get("function", {}).get("arguments", "{}")
                 html += f'''
-                <div class="tool-call">
-                    <div class="tool-call-header">
+                <details class="tool-call">
+                    <summary class="tool-call-header">
                         {ICON_CHEVRON_RIGHT.replace('class="', 'class="chevron ')}
                         {ICON_WRENCH} Вызов инструмента: {_escape_html(fn_name)}
-                    </div>
+                    </summary>
                     <div class="tool-call-content">
                         <pre><code>{_escape_html(args)}</code></pre>
                     </div>
-                </div>
+                </details>
                 '''
 
         # Content
@@ -749,25 +763,25 @@ def _generate_messages_html(messages: List[Dict[str, Any]]) -> str:
         reasoning = msg.get("reasoning") or msg.get("reasoning_content")
         if reasoning:
             html += f'''
-            <div class="reasoning">
-                <div class="reasoning-header">
+            <details class="reasoning">
+                <summary class="reasoning-header">
                     {ICON_CHEVRON_RIGHT.replace('class="', 'class="chevron ')}
                     {ICON_SPARKLES} Рассуждение
-                </div>
+                </summary>
                 <div class="reasoning-content">
                     <div class="content">{_escape_html(reasoning)}</div>
                 </div>
-            </div>
+            </details>
             '''
             
         html += '  </div>'
-        html += '</div>'
+        html += '</details>'
         html_list.append(html)
     return "\n".join(html_list)
 
 def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
     if not sessions:
-        return "<html><body><h1>Нет сессий для экспорта.</h1></body></html>"
+        return '<html lang="ru"><head><meta charset="utf-8"></head><body><h1>Нет сессий для экспорта.</h1></body></html>'
 
     is_multi = len(sessions) > 1
     generated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -798,11 +812,11 @@ def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="sidebar-brand">
-                    {ICON_HERMES} История Korra
+                    {_brand_html()}
                 </div>
                 <div class="search-container">
                     {ICON_SEARCH}
-                    <input type="text" id="session-search" placeholder="Поиск сессий…">
+                    <input type="text" id="session-search" placeholder="Поиск сессий…" aria-label="Поиск сессий">
                 </div>
             </div>
             <div class="session-list">
@@ -832,20 +846,21 @@ def generate_multi_session_html_export(sessions: List[Dict[str, Any]]) -> str:
         system_html = ""
         if system_prompt:
             system_html = f'''
-            <div class="system-prompt-section active">
-                <div class="system-prompt-header">
+            <details class="system-prompt-section active" open>
+                <summary class="system-prompt-header">
                     {ICON_CHEVRON_RIGHT.replace('class="', 'class="chevron ')}
                     {ICON_SHIELD} Системная инструкция (образ агента)
-                </div>
+                </summary>
                 <div class="system-prompt-content">
                     <div class="content">{_escape_html(system_prompt)}</div>
                 </div>
-            </div>
+            </details>
             '''
         
         session_html = f'''
         <div class="{view_class}" id="{session_view_id}">
             <header class="fade-in">
+                {"" if is_multi else _brand_html()}
                 <h1>{_escape_html(title)}</h1>
                 <div class="meta">
                     <div class="meta-item"><strong>ID:</strong> {escaped_sid}</div>
