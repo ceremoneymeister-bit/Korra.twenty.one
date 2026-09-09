@@ -33,6 +33,16 @@ export interface IntakeHandoff {
   updated_at?: number;
 }
 
+export interface IntakeHandoffLookup {
+  handoff: IntakeHandoff | null;
+}
+
+export function findIntakeHandoff(orderId: string): Promise<IntakeHandoffLookup> {
+  return fetchJSON<IntakeHandoffLookup>(
+    `/api/calc/orders/${encodeURIComponent(orderId)}/intake-handoff`,
+  );
+}
+
 export function createIntakeHandoff(orderId: string): Promise<IntakeHandoff> {
   return fetchJSON<IntakeHandoff>(
     `/api/calc/orders/${encodeURIComponent(orderId)}/intake-handoff`,

@@ -7,10 +7,12 @@ import {
   type SaveIntakeAnswersRequest,
 } from "@/lib/calc-intake-preparation";
 import { ownerFacingError } from "@/lib/owner-facing-error";
+import { cn } from "@/lib/utils";
 import { IntakeAnalysisPanel } from "./IntakeAnalysisPanel";
 
 interface Props {
   handoffId: string;
+  layout?: "embedded" | "page";
 }
 
 interface FormState {
@@ -25,11 +27,11 @@ const fieldClass = "mt-1 min-h-10 w-full rounded-lg border border-border bg-back
 
 // Key the complete request/form lifecycle to the order's handoff, including
 // when its parent is reused while navigating between chats.
-export function IntakePreparationPanel({ handoffId }: Props) {
-  return <PreparationForm key={handoffId} handoffId={handoffId} />;
+export function IntakePreparationPanel({ handoffId, layout = "embedded" }: Props) {
+  return <PreparationForm key={handoffId} handoffId={handoffId} layout={layout} />;
 }
 
-function PreparationForm({ handoffId }: Props) {
+function PreparationForm({ handoffId, layout = "embedded" }: Props) {
   const [form, setForm] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -126,7 +128,10 @@ function PreparationForm({ handoffId }: Props) {
   }
 
   return (
-    <details open className="mx-1 mb-2 max-h-[45vh] shrink-0 overflow-auto rounded-xl border border-border bg-background text-sm">
+    <details open className={cn(
+      "shrink-0 rounded-xl border border-border bg-background text-sm",
+      layout === "page" ? "w-full" : "mx-1 mb-2 max-h-[45vh] overflow-auto",
+    )}>
       <summary className="cursor-pointer px-4 py-3 font-semibold">Комплект и исходные ответы</summary>
       <div className="space-y-3 px-4 pb-4">
         {!form && !error && <p role="status">Загружаем сведения о комплекте…</p>}

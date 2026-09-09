@@ -83,6 +83,7 @@ const DocsPage = lazy(() => import("@/pages/DocsPage"));
 const ClientHelpPage = lazy(() => import("@/pages/ClientHelpPage"));
 const CalcHelpPage = lazy(() => import("@/pages/CalcHelpPage"));
 const CalcOrdersPage = lazy(() => import("@/pages/CalcOrdersPage"));
+const CalcIntakePage = lazy(() => import("@/pages/CalcIntakePage"));
 const CalcDataPage = lazy(() => import("@/pages/CalcDataPage"));
 const EnvPage = lazy(() => import("@/pages/EnvPage"));
 const FilesPage = lazy(() => import("@/pages/FilesPage"));
@@ -541,7 +542,11 @@ export default function App() {
   const builtinRoutes = useMemo(
     () => ({
       ...BUILTIN_ROUTES_CORE,
-      ...(isCalcMode ? { "/orders": CalcOrdersPage, "/rates": CalcDataPage } : {}),
+      ...(isCalcMode ? {
+        "/orders": CalcOrdersPage,
+        "/orders/:orderId/intake": CalcIntakePage,
+        "/rates": CalcDataPage,
+      } : {}),
       ...(!isFleetMode && bubbleChat
         ? { "/chat": BubbleChatPage }
         : !isFleetMode && embeddedChat

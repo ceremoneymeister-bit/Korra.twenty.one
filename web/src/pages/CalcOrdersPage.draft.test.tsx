@@ -4,7 +4,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { fetchJSON } from "@/lib/api";
-import type { IntakeHandoff } from "@/lib/calc-intake-handoff";
 import type { OrderCard } from "@/lib/calc-orders";
 import { $folderUpload } from "@/store/calc-folder-upload";
 import CalcOrdersPage from "./CalcOrdersPage";
@@ -24,12 +23,6 @@ const draft: OrderCard = {
 };
 let container: HTMLDivElement;
 let root: Root;
-const handoff = {
-  handoff_id: `intake_${"a".repeat(40)}`, order_id: draft.order_id, order_name: "Сделка 124",
-  session_id: `intake_${"a".repeat(40)}`, profile: "default", snapshot_id: "snapshot-1",
-  status: "running", initial_run_active: true, chat_blocked: true,
-  session_created: true, received_at: null,
-} satisfies IntakeHandoff;
 function LocationProbe() {
   const location = useLocation();
   return <output data-testid="location">{location.pathname + location.search}</output>;
@@ -42,7 +35,6 @@ beforeEach(() => {
   request.mockReset();
   request.mockImplementation(async (url) => {
     if (url === "/api/calc/orders") return { orders: [draft] };
-    if (url.endsWith("/intake-handoff")) return handoff;
     return draft;
   });
 });
@@ -61,101 +53,36 @@ it("shows a truthful uploaded-document state and a working link to the same orde
   expect(container.textContent).toContain("Состав и готовность к расчёту сотрудник подтверждает отдельно.");
   const documents = container.querySelector('section[aria-label="Документы заказа"]')!;
   expect(documents.textContent).toContain("Файлов: 3 · PDF: 1 · Excel: 1 · другие: 1");
-  const action = documents.querySelector("a")!;
-  expect(action.textContent).toBe("Открыть документы");
-  expect(action.getAttribute("href")).toBe("/c/calc21/files?order=folder-124");
-  expect(documents.textContent).toContain("Передать приёмщику");
+  const actions = [...documents.querySelectorAll("a")];
+  const intake = actions.find((action) => action.textContent === "Приёмка")!;
+  const documentsLink = actions.find((action) => action.textContent === "Открыть документы")!;
+  expect(intake.getAttribute("href")).toBe("/c/calc21/orders/folder-124/intake");
+  expect(documentsLink.getAttribute("href")).toBe("/c/calc21/files?order=folder-124");
   expect(container.textContent).not.toContain("Проверить комплект");
   expect(container.textContent).not.toContain("Открыть у расчётчика");
   expect(container.textContent).not.toContain("Запустить стадию");
   expect(container.textContent?.toLowerCase()).not.toContain("автоматическ");
   expect(request.mock.calls.map(([url]) => url).sort()).toEqual(["/api/calc/orders", "/api/calc/orders/folder-124"]);
-  await act(async () => action.click());
+  await act(async () => documentsLink.click());
   expect(container.querySelector('[data-testid="location"]')?.textContent).toBe(
     "/files?order=folder-124",
   );
 });
 
-it("posts once while pending and opens the durable intake handoff", async () => {
-  let finishHandoff!: (value: typeof handoff) => void;
-  const pendingHandoff = new Promise<typeof handoff>((resolve) => {
-    finishHandoff = resolve;
-  });
-  request.mockImplementation(async (url) => {
-    if (url === "/api/calc/orders") return { orders: [draft] };
-    if (url.endsWith("/intake-handoff")) return pendingHandoff;
-    return draft;
-  });
+it("opens intake by navigation without dispatching from the order card", async () => {
   await act(async () => root.render(
     <MemoryRouter initialEntries={["/orders?order=folder-124"]}>
       <CalcOrdersPage />
       <LocationProbe />
     </MemoryRouter>,
   ));
-  const transfer = Array.from(container.querySelectorAll("button"))
-    .find((button) => button.textContent?.includes("Передать приёмщику"))!;
-  await act(async () => {
-    transfer.click();
-    transfer.click();
-    await Promise.resolve();
-  });
-  const posts = request.mock.calls.filter(([url]) => url.endsWith("/intake-handoff"));
-  expect(posts).toEqual([
-    ["/api/calc/orders/folder-124/intake-handoff", { method: "POST" }],
-  ]);
-  expect(transfer.disabled).toBe(true);
-  expect(transfer.textContent).toContain("Передаём");
-
-  await act(async () => {
-    finishHandoff(handoff);
-    await pendingHandoff;
-  });
+  const intake = [...container.querySelectorAll("a")]
+    .find((action) => action.textContent === "Приёмка")!;
+  await act(async () => intake.click());
   expect(container.querySelector('[data-testid="location"]')?.textContent).toBe(
-    `/agents?agent=default&intake=${handoff.handoff_id}`,
+    "/orders/folder-124/intake",
   );
-});
-
-it("shows a handoff error and lets the user retry", async () => {
-  let attempts = 0;
-  request.mockImplementation(async (url) => {
-    if (url === "/api/calc/orders") return { orders: [draft] };
-    if (url.endsWith("/intake-handoff")) {
-      attempts++;
-      if (attempts === 1) throw new Error("503: Приёмщик временно недоступен.");
-      return handoff;
-    }
-    return draft;
-  });
-  await act(async () => root.render(
-    <MemoryRouter initialEntries={["/orders?order=folder-124"]}>
-      <CalcOrdersPage />
-      <LocationProbe />
-    </MemoryRouter>,
-  ));
-  const transfer = Array.from(container.querySelectorAll("button"))
-    .find((button) => button.textContent?.includes("Передать приёмщику"))!;
-  await act(async () => {
-    transfer.click();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-  expect(attempts).toBe(1);
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-    "Приёмщик временно недоступен",
-  );
-
-  await act(async () => {
-    transfer.click();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-  expect(attempts).toBe(2);
-  const posts = request.mock.calls.filter(([url]) => url.endsWith("/intake-handoff"));
-  expect(posts).toHaveLength(2);
-  expect(posts.every(([, options]) => options?.method === "POST")).toBe(true);
-  expect(container.querySelector('[data-testid="location"]')?.textContent).toBe(
-    `/agents?agent=default&intake=${handoff.handoff_id}`,
-  );
+  expect(request.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
 });
 
 it("refreshes the order list on upload completion and ignores a stale initial response", async () => {
