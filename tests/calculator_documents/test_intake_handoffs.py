@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "calculator/metal_calc"))
 from metal_calc.document_jobs import DocumentJobs
-from metal_calc.errors import Conflict, InvalidState, OrderScopeDenied
+from metal_calc.errors import Conflict, InvalidState, NotFound, OrderScopeDenied
 from metal_calc.folder_intake import FolderIntake
 from metal_calc.intake_handoffs import IntakeHandoffs
 from metal_calc.intake_mcp import build_mcp
@@ -130,6 +130,28 @@ def test_metadata_revision_and_source_change(tmp_path):
     assert newer["handoff_id"] != record["handoff_id"]
     assert newer["document_set_revision"] == 2
     assert store.jobs.list(oid)["jobs"] == []
+
+
+def test_find_uses_order_snapshot_identity_and_reports_stale(tmp_path):
+    oid = order(tmp_path)
+    store = IntakeHandoffs(tmp_path)
+    assert store.find(oid) is None
+    with pytest.raises(NotFound):
+        store.find("missing")
+    other = store.prepare(order(tmp_path))
+    with store.jobs._db() as con:
+        con.execute("INSERT INTO intake_handoffs(handoff_id,order_id,snapshot_id,session_id,"
+                    "order_name,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                    ("intake_" + "x" * 40, oid, other["snapshot_id"], "intake_" + "y" * 40,
+                     "cross-order", 1, 1))
+    assert store.find(oid) is None
+    original = store.prepare(oid)
+    assert store.find(oid) == original
+    Registry(tmp_path / "registry.db").mutate(
+        oid, lambda state: state["folder_intake"]["files"][0].update(sha256="f" * 64))
+    assert store.find(oid)["status"] == "stale"
+    newer = store.prepare(oid)
+    assert store.find(oid) == newer
 
 
 def test_restoring_old_manifest_does_not_revive_historical_handoff(tmp_path):

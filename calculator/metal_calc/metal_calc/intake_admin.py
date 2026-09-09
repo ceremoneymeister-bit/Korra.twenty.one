@@ -10,6 +10,7 @@ from .intake_handoffs import IntakeHandoffs
 
 def register(subparsers):
     subparsers.add_parser("intake-prepare").add_argument("--order-id", required=True)
+    subparsers.add_parser("intake-find").add_argument("--order-id", required=True)
     for command in ("get", "claim", "session-created", "dispatched", "error", "received", "finished"):
         parser = subparsers.add_parser("intake-" + command)
         parser.add_argument("--handoff-id", required=True)
@@ -58,6 +59,9 @@ def run(args, emit):
                     raise InvalidState("Некорректный запрос сохранения начальных ответов")
                 preparation.save(args.handoff_id, **body)
             emit(preparation.view(args.handoff_id, classify=True))
+            return
+        if args.command == "intake-find":
+            emit({"handoff": store.find(args.order_id)})
             return
         method = {"intake-prepare": "prepare", "intake-get": "get", "intake-claim": "claim",
                   "intake-session-created": "mark_session_created", "intake-dispatched": "mark_dispatched",

@@ -188,6 +188,14 @@ async def handoff_order(order_id: str):
     return _public(record)
 
 
+@router.get("/api/calc/orders/{order_id}/intake-handoff")
+async def find_order_handoff(order_id: str):
+    _require_front()
+    result = await _admin("find", None, "--order-id", order_id)
+    record = result["handoff"]
+    return {"handoff": _public(record) if record else None}
+
+
 @router.get("/api/calc/intake-handoffs/{handoff_id}/preparation")
 async def intake_preparation(handoff_id: str):
     _require_front()

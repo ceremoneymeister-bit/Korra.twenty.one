@@ -84,6 +84,18 @@ class IntakeHandoffs:
         with self.jobs._db() as con:
             return self._public(con, self._row(con, handoff_id))
 
+    def find(self, order_id):
+        validate_id(order_id, field="order_id")
+        with self.jobs.registry._connect() as con:
+            if con.execute("SELECT 1 FROM orders WHERE order_id=?", (order_id,)).fetchone() is None:
+                raise NotFound("Заказ не найден")
+            row = con.execute("SELECT h.*,s.document_set_revision,s.manifest_digest "
+                              "FROM intake_handoffs h JOIN document_snapshots s USING(snapshot_id) "
+                              "WHERE h.order_id=? AND s.order_id=h.order_id "
+                              "ORDER BY s.document_set_revision DESC LIMIT 1",
+                              (order_id,)).fetchone()
+            return self._public(con, dict(row)) if row else None
+
     def claim(self, handoff_id):
         with self.jobs._db() as con:
             row = self._row(con, handoff_id)

@@ -75,11 +75,46 @@ def baseline(root):
     return orders, jobs, results
 
 
+def readonly_counts(root):
+    with sqlite3.connect(root / "registry.db") as db:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        return {name: db.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+                for name in ("orders", "document_snapshots", "document_jobs", "document_results",
+                             "intake_handoffs") if name in tables}
+
+
 def test_native_title_keeps_identity_for_long_duplicate_folder_names():
     left = {"order_name": "я" * 200, "handoff_id": "intake_" + "a" * 40}
     right = {**left, "handoff_id": "intake_" + "b" * 40}
     assert len(calc_intake._session_title(left)) <= 100
     assert calc_intake._session_title(left) != calc_intake._session_title(right)
+
+
+def test_order_handoff_lookup_is_read_only_and_preserves_identity(cabinet, monkeypatch):
+    client, config, root, order = cabinet
+    native_calls = install_native(monkeypatch)
+    path = f"/api/calc/orders/{order}/intake-handoff"
+    before = readonly_counts(root)
+    assert client.get(path).json() == {"handoff": None}
+    after_new = readonly_counts(root)
+    assert after_new.get("orders") == before.get("orders")
+    assert all(after_new.get(name, 0) == before.get(name, 0) for name in
+               ("document_snapshots", "document_jobs", "document_results", "intake_handoffs"))
+    assert native_calls == [] and not (root.parent / "state.db").exists()
+
+    created = client.post(path).json()
+    calls_after_create = list(native_calls)
+    rows_after_create = readonly_counts(root)
+    found = client.get(path)
+    assert found.status_code == 200
+    assert found.json()["handoff"] == created
+    assert native_calls == calls_after_create
+    assert readonly_counts(root) == rows_after_create
+    assert not (root.parent / "state.db").exists()
+
+    assert client.get("/api/calc/orders/missing/intake-handoff").status_code == 404
+    config["mcp_servers"]["metal_calc"]["env"]["METAL_CALC_ROLE"] = "tech"
+    assert client.get(path).status_code == 403
 
 
 def test_preparation_answers_http_cli_reload_replay_and_scope(cabinet, monkeypatch):
