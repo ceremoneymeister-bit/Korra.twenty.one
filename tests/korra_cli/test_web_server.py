@@ -3829,7 +3829,7 @@ class TestDiscoverUserThemes:
 class TestThemeBootstrapCSS:
     """Tests for _render_active_theme_bootstrap_css() and its injection
     into index.html via _serve_index() — the critical-CSS shim that kills
-    the default-teal first-paint flash for user YAML themes."""
+    first-paint flash while unknown/custom names fall back to light."""
 
     @staticmethod
     def _write_theme(hermes_home, name="ocean"):
@@ -3849,8 +3849,8 @@ class TestThemeBootstrapCSS:
             encoding="utf-8",
         )
 
-    def test_user_theme_renders_bundle_vars(self, tmp_path, monkeypatch):
-        """Active user theme → style block with ONLY variable names the
+    def test_unknown_user_theme_bootstraps_light_bundle_vars(self, tmp_path, monkeypatch):
+        """Unknown theme → light style block with ONLY variable names the
         bundle actually consumes (layerVars/typographyVars tokens)."""
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         self._write_theme(tmp_path)
@@ -3862,10 +3862,10 @@ class TestThemeBootstrapCSS:
         assert css.startswith('<style id="hermes-theme-bootstrap">')
         assert css.endswith("</style>")
         # Real bundle tokens (web/src/themes/context.tsx + index.css).
-        assert "--background-base:#0a1628;" in css
-        assert "--midground-base:#dbe4f0;" in css
-        assert "--theme-font-sans:Inter, sans-serif;" in css
-        assert "--theme-base-size:17px;" in css
+        assert "--background-base:#e8e8e8;" in css
+        assert "--midground-base:#1f1f1f;" in css
+        assert '--theme-font-sans:"Onest",' in css
+        assert "--theme-base-size:15px;" in css
         # Names that do NOT exist in the bundle must not be emitted.
         for bogus in ("--color-background", "--color-midground",
                       "--font-sans:", "--font-base-size"):
@@ -3911,7 +3911,7 @@ class TestThemeBootstrapCSS:
         resp = client.get("/chat")
         assert resp.status_code == 200
         assert '<style id="hermes-theme-bootstrap">' in resp.text
-        assert "--background-base:#0a1628;" in resp.text
+        assert "--background-base:#e8e8e8;" in resp.text
         # Injected inside <head>, before the closing tag.
         head = resp.text.split("</head>")[0]
         assert "hermes-theme-bootstrap" in head

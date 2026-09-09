@@ -25,6 +25,7 @@ export function withBasePath(url: string): string {
   return `${BASE}${url}`;
 }
 
+import type { ThemePreference } from "@/themes/preference";
 import type { DashboardTheme } from "@/themes/types";
 import {
   attemptDashboardTokenReloadOnce,
@@ -1409,11 +1410,11 @@ export const api = {
   // Dashboard themes
   getThemes: () =>
     fetchJSON<DashboardThemesResponse>("/api/dashboard/themes"),
-  setTheme: (name: string) =>
-    fetchJSON<{ ok: boolean; theme: string }>("/api/dashboard/theme", {
+  setTheme: (name: string, revision?: string) =>
+    fetchJSON<{ ok: boolean; theme: string; preference: ThemePreference }>("/api/dashboard/theme", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, revision }),
     }),
   getFontPref: () =>
     fetchJSON<DashboardFontResponse>("/api/dashboard/font"),
@@ -3114,6 +3115,7 @@ export interface DashboardThemeSummary {
 }
 
 export interface DashboardThemesResponse {
+  preference: ThemePreference;
   active: string;
   themes: DashboardThemeSummary[];
 }

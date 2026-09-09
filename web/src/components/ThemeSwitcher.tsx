@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
  * the sidebar (same idea as a responsive Drawer).
  */
 export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitcherProps) {
-  const { themeName, availableThemes, setTheme, fontId, fontChoices, setFont } = useTheme();
+  const { themeName, availableThemes, setTheme, fontId, fontChoices, setFont, saveState, saveError, retryTheme } = useTheme();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -71,7 +71,7 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
         title={`${t.theme?.switchTheme ?? "Сменить тему"}: ${label}`}
         aria-label={t.theme?.switchTheme ?? "Сменить тему"}
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
       >
         <span className="inline-flex items-center gap-1.5">
           <Palette className="h-3.5 w-3.5" />
@@ -86,6 +86,12 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
         </span>
       </Button>
 
+      {saveState !== "idle" && (
+        <div className="max-w-64 text-xs p-2" data-theme-save-status>
+          {saveState === "error" ? <><p role="alert">{saveError}</p><button className="min-h-11 underline" type="button" onClick={() => void retryTheme()}>Повторить сохранение</button></> :
+            <p role="status">{saveState === "pending" ? "Сохраняем тему…" : "Тема сохранена"}</p>}
+        </div>
+      )}
       {useMobileSheet && (
         <BottomSheet
           backdropDismissLabel={t.common.close}
@@ -114,6 +120,7 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
         const dropdown = (
           <div
             ref={dropdownRef}
+            role="dialog"
             aria-label={sheetTitle}
             className={cn(
               "min-w-[240px] max-h-[70dvh] overflow-y-auto",
@@ -173,6 +180,17 @@ function ThemeSwitcherOptions({
         return (
           <button
             aria-checked={isActive}
+            tabIndex={isActive ? 0 : -1}
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const choices = [...event.currentTarget.parentElement!.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+              const index = choices.indexOf(event.currentTarget);
+              const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1 :
+                (index + (event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1) + choices.length) % choices.length;
+              choices[nextIndex].focus();
+              void setTheme(availableThemes[nextIndex].name);
+            }}
             className={cn(
               "flex min-h-11 items-center justify-center gap-2 neo-button rounded-lg px-3 py-2",
               "text-sm font-medium transition-colors",

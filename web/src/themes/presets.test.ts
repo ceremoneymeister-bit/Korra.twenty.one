@@ -92,7 +92,6 @@ describe("built-in dashboard themes", () => {
 
 describe("migrateThemeName", () => {
   it.each([
-    "default",
     "default-large",
     "large",
     "hermes-teal",
@@ -106,7 +105,7 @@ describe("migrateThemeName", () => {
     expect(migrateThemeName(name)).toBe("dark");
   });
 
-  it.each(["light", "nous-blue", "lens-5i", "custom-theme", "", undefined])(
+  it.each(["default", "light", "nous-blue", "lens-5i", "custom-theme", "", undefined])(
     "maps former light or unknown preset %s to light",
     (name) => {
       expect(migrateThemeName(name)).toBe("light");

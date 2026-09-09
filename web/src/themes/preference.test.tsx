@@ -1,0 +1,23 @@
+// @vitest-environment jsdom
+import { act, type ReactNode } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ThemeProvider, useTheme } from './context';
+const api = vi.hoisted(() => ({getThemes:vi.fn(),setTheme:vi.fn(),getFontPref:vi.fn(async()=>({font:'theme'})),setFontPref:vi.fn()}));
+vi.mock('@/lib/api',()=>({api}));
+let current: ReturnType<typeof useTheme>, root:Root, host:HTMLDivElement;
+let resolveGet:(value:unknown)=>void;
+const pref=(theme='light',revision='r1')=>({version:1,known:true,theme,revision,installation_id:'a'.repeat(32),owner:'owner',base_path:'/c/test'});
+function Probe(){current=useTheme();return <p>{current.themeName}</p>}
+async function mount(children:ReactNode=<Probe/>){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>{root.render(<ThemeProvider>{children}</ThemeProvider>)});}
+beforeEach(()=>{vi.clearAllMocks();localStorage.clear();delete window.__KORRA_THEME_PREF__;Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});api.getThemes.mockImplementation(()=>new Promise(resolve=>{resolveGet=resolve}));api.setTheme.mockImplementation(async(name)=>({ok:true,theme:name,preference:pref(name,'r2')}));});
+afterEach(async()=>{if(root)await act(async()=>root.unmount());host?.remove();vi.restoreAllMocks();});
+it('ignores an unscoped legacy dark cache on a fresh page',async()=>{localStorage.setItem('hermes-dashboard-theme','dark');await mount();expect(current.themeName).toBe('light');expect(api.setTheme).not.toHaveBeenCalled();});
+it('uses explicit authoritative dark before any GET resolves',async()=>{window.__KORRA_THEME_PREF__=pref('dark');await mount();expect(current.themeName).toBe('dark');expect(document.documentElement.style.getPropertyValue('--background-base')).toBe('#212121');});
+it('renders safely when storage is denied',async()=>{vi.spyOn(Storage.prototype,'getItem').mockImplementation(()=>{throw new DOMException('blocked','SecurityError')});vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('full','QuotaExceededError')});await mount();expect(current.themeName).toBe('light');});
+it('never heals legacy defaults with an automatic PUT',async()=>{await mount();await act(async()=>resolveGet({active:'default',preference:pref(),themes:[]}));expect(current.themeName).toBe('light');expect(api.setTheme).not.toHaveBeenCalled();});
+it('late GET cannot undo a user switch',async()=>{window.__KORRA_THEME_PREF__=pref();await mount();await act(async()=>{await current.setTheme('dark')});await act(async()=>resolveGet({active:'light',preference:pref(),themes:[]}));expect(current.themeName).toBe('dark');});
+it('exposes pending, durable ACK, error and explicit retry',async()=>{window.__KORRA_THEME_PREF__=pref();await mount();let reject!:(error:Error)=>void;api.setTheme.mockImplementationOnce(()=>new Promise((_,r)=>{reject=r}));let saving!:Promise<unknown>;await act(async()=>{saving=Promise.resolve(current.setTheme('dark'))});expect(current.saveState).toBe('pending');await act(async()=>{reject(new Error('network'));await saving});expect(current.saveState).toBe('error');expect(current.themeName).toBe('dark');await act(async()=>{api.getThemes.mockResolvedValue({active:'light',preference:pref(),themes:[]});await current.retryTheme()});expect(current.saveState).toBe('saved');});
+it('serializes rapid choices using each previous durable revision',async()=>{window.__KORRA_THEME_PREF__=pref();await mount();let ack!:(value:unknown)=>void;api.setTheme.mockImplementationOnce(()=>new Promise(resolve=>{ack=resolve}));let first!:Promise<unknown>,second!:Promise<unknown>;await act(async()=>{first=Promise.resolve(current.setTheme('dark'));second=Promise.resolve(current.setTheme('light'))});expect(api.setTheme).toHaveBeenCalledTimes(1);await act(async()=>{ack({ok:true,theme:'dark',preference:pref('dark','r2')});await first;await second});expect(api.setTheme.mock.calls[1]).toEqual(['light','r2']);expect(current.themeName).toBe('light');});
+
+it.each(['{', JSON.stringify(pref('dark','stale')), JSON.stringify({...pref('dark'),installation_id:'b'.repeat(32)}), JSON.stringify({...pref('dark'),base_path:'/c/other'})])('rejects malformed or stale/scoped cache %s',async(cache)=>{window.__KORRA_THEME_PREF__=pref();localStorage.setItem('korra-dashboard-v1:'+ 'a'.repeat(32)+':owner:%2Fc%2Ftest:theme',cache);await mount();expect(current.themeName).toBe('light');expect(api.setTheme).not.toHaveBeenCalled();});

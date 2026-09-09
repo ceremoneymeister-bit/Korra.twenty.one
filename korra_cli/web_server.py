@@ -19671,75 +19671,22 @@ def _normalise_prefix(raw: Optional[str]) -> str:
     return normalise_prefix(raw)
 
 
-def _render_active_theme_bootstrap_css() -> str:
-    """Critical-CSS shim for the active user theme.
+def _dashboard_theme_preference(config=None, base_path="") -> dict:
+    from korra_cli.dashboard_theme import preference
+    return preference(
+        load_config() if config is None else config,
+        get_install_id(), str(get_process_hermes_home()), base_path,
+    )
 
-    Returns a ``<style>`` block with the ``:root`` CSS variables that
-    ``ThemeProvider.applyTheme()`` installs once the
-    ``/api/dashboard/themes`` round-trip completes.  The goal is to
-    eliminate the green flash where the first paint shows the bundle's
-    default Hermes Teal canvas before the SPA flips the configured user
-    theme into place.
 
-    Built-in themes return an empty string — their full definitions live
-    in ``web/src/themes/presets.ts`` and are applied by the bundle
-    before paint, so no shim is needed for them.
-    """
+def _render_active_theme_bootstrap_css(preference=None) -> str:
+    """Paint the server's normalized Korra palette before React or an API call."""
+    from korra_cli.dashboard_theme import bootstrap_css
     try:
-        config = load_config()
-        active = cfg_get(config, "dashboard", "theme", default="light")
-        if not active or not isinstance(active, str):
-            return ""
-        # Built-in: the bundle already owns the definition, no flash.
-        if any(b["name"] == active for b in _BUILTIN_DASHBOARD_THEMES):
-            return ""
-        for theme in _discover_user_themes():
-            if theme.get("name") != active:
-                continue
-            palette = theme.get("palette") or {}
-            bg = palette.get("background") or {}
-            mg = palette.get("midground") or {}
-            bg_hex = bg.get("hex", "#0a0a0a") if isinstance(bg, dict) else "#0a0a0a"
-            mg_hex = mg.get("hex", "#e5e5e5") if isinstance(mg, dict) else "#e5e5e5"
-            typo = theme.get("typography") or {}
-            font_sans = typo.get("fontSans") or _THEME_DEFAULT_TYPOGRAPHY["fontSans"]
-            base_size = typo.get("baseSize") or _THEME_DEFAULT_TYPOGRAPHY["baseSize"]
-            # Defensive ``</style>`` escape — current values are well-known
-            # hex/font strings, but this keeps the helper safe if it is
-            # later extended to ship user-authored CSS literals.
-            def _esc(s: str) -> str:
-                return str(s).replace("</", "<\\/")
-            # Variable names MUST match what the bundle actually consumes:
-            #   - ``--background-base`` / ``--midground-base`` come from
-            #     ``layerVars()`` in ``web/src/themes/context.tsx``.
-            #   - ``--theme-font-sans`` / ``--theme-base-size`` come from
-            #     ``typographyVars()`` there, and ``index.css`` applies them
-            #     via ``html{font-family:var(--theme-font-sans);
-            #     font-size:var(--theme-base-size)}``.
-            # The ``html,body`` canvas rule references the SAME variables
-            # instead of literal values so runtime theme switches stay
-            # live: ``applyTheme()`` writes these vars as inline styles on
-            # ``documentElement``, which outrank this stylesheet block in
-            # the cascade — the rule below re-resolves automatically and
-            # never goes stale when the user picks a different theme.
-            return (
-                '<style id="hermes-theme-bootstrap">'
-                ":root{"
-                f"--background-base:{_esc(bg_hex)};"
-                f"--midground-base:{_esc(mg_hex)};"
-                f"--theme-font-sans:{_esc(font_sans)};"
-                f"--theme-base-size:{_esc(base_size)};"
-                "}"
-                "html,body{background-color:var(--background-base);"
-                "color:var(--midground-base);"
-                "font-family:var(--theme-font-sans);"
-                "font-size:var(--theme-base-size);}"
-                "</style>"
-            )
-        return ""
+        return bootstrap_css(preference or _dashboard_theme_preference())
     except Exception:
-        _log.debug("theme bootstrap render failed", exc_info=True)
-        return ""
+        return bootstrap_css({"theme": "light"})
+
 
 
 # Hashed bundle assets (``/assets/<name>-<contenthash>.<ext>``) are immutable
@@ -19932,16 +19879,18 @@ def mount_spa(application: FastAPI):
             html = html.replace('href="/fonts/', f'href="{prefix}/fonts/')
             html = html.replace('href="/ds-assets/', f'href="{prefix}/ds-assets/')
             html = html.replace('src="/ds-assets/', f'src="{prefix}/ds-assets/')
-        # Theme flash mitigation: when the active theme is a user theme
-        # (``HERMES_HOME/dashboard-themes/<name>.yaml``), inject a minimal
-        # critical-CSS block so the first paint uses the target palette.
-        # Without this the SPA paints the default Hermes Teal canvas, then
-        # ``ThemeProvider`` flips the CSS variables once
-        # ``/api/dashboard/themes`` resolves.  Built-in themes are already
-        # in the bundle's ``presets.ts`` so no shim is needed for them.
-        theme_bootstrap = _render_active_theme_bootstrap_css()
-        if theme_bootstrap:
-            html = html.replace("</head>", f"{theme_bootstrap}</head>", 1)
+        try:
+            theme_pref = _dashboard_theme_preference(base_path=prefix)
+        except Exception:
+            theme_pref = {"version": 1, "theme": "light", "known": False,
+                          "installation_id": None, "owner": "", "base_path": prefix,
+                          "revision": ""}
+        theme_bootstrap = _render_active_theme_bootstrap_css(theme_pref)
+        theme_json = json.dumps(theme_pref, separators=(",", ":")).replace("<", "\\u003c")
+        bootstrap_script = bootstrap_script.replace(
+            "</script>", f"window.__KORRA_THEME_PREF__={theme_json};</script>", 1,
+        )
+        html = html.replace("</head>", f"{theme_bootstrap}</head>", 1)
         html = html.replace("</head>", f"{bootstrap_script}</head>", 1)
         return HTMLResponse(
             html,
@@ -20297,7 +20246,7 @@ def _discover_user_themes() -> list:
 
 
 @app.get("/api/dashboard/themes")
-async def get_dashboard_themes():
+async def get_dashboard_themes(request: Request = None):
     """Return available themes and the currently active one.
 
     Built-in entries ship name/label/description only (the frontend owns
@@ -20308,7 +20257,6 @@ async def get_dashboard_themes():
     """
     def _run():
         config = load_config()
-        active = cfg_get(config, "dashboard", "theme", default="light")
         user_themes = _discover_user_themes()
         seen = set()
         themes = []
@@ -20325,22 +20273,33 @@ async def get_dashboard_themes():
                 "definition": t,
             })
             seen.add(t["name"])
-        return {"themes": themes, "active": active}
+        pref = _dashboard_theme_preference(
+            config, _normalise_prefix(request.headers.get("x-forwarded-prefix")) if request else "",
+        )
+        return {"themes": themes, "active": pref["theme"], "preference": pref}
 
     return await asyncio.to_thread(_run)
 
 
 @app.put("/api/dashboard/theme")
-async def set_dashboard_theme(body: ThemeSetBody):
-    """Set the active dashboard theme (persists to config.yaml)."""
+async def set_dashboard_theme(body: ThemeSetBody, request: Request = None):
+    """Persist an explicit choice; optional revision protects concurrent browsers."""
+    from korra_cli.dashboard_theme import normalize_theme
     def _run():
         with _CONFIG_MUTATION_LOCK:
             config = load_config()
-            if "dashboard" not in config:
-                config["dashboard"] = {}
-            config["dashboard"]["theme"] = body.name
+            prefix = _normalise_prefix(request.headers.get("x-forwarded-prefix")) if request else ""
+            before = _dashboard_theme_preference(config, prefix)
+            if body.revision is not None and body.revision != before["revision"]:
+                raise HTTPException(status_code=409, detail="Настройка темы изменилась. Повторите выбор.")
+            dashboard = config.get("dashboard")
+            if not isinstance(dashboard, dict):
+                dashboard = config["dashboard"] = {}
+            dashboard["theme"] = normalize_theme(body.name)
+            dashboard["theme_revision"] = secrets.token_hex(12)
             save_config(config)
-        return {"ok": True, "theme": body.name}
+            pref = _dashboard_theme_preference(config, prefix)
+        return {"ok": True, "theme": pref["theme"], "preference": pref}
 
     return await asyncio.to_thread(_run)
 

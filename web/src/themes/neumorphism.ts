@@ -1,35 +1,10 @@
 import type { ThemeNeumorphism } from "./types";
 
-export const BRAND_LIME = "#9EDE01";
+import data from "../../../korra_cli/data/dashboard-themes.json";
 
-/** Owner-approved palette (canon: projects/Korra 21/UI_PALETTE.md).
- *  Do not derive or visually tune these values. */
-export const lightNeumorphism: ThemeNeumorphism = {
-  background: "#e8e8e8",
-  surface: "#e0e0e0",
-  shadow: "#bebebe",
-  highlight: "#ffffff",
-  textPrimary: "#1f1f1f",
-  textSecondary: "#5c5c5c",
-  accent: BRAND_LIME,
-  /* Владелец: никакого затемнённого «болотного» лайма. Лайм живёт только
-   * заливками; тонкие метки и текст в роли акцента на светлом — чернила. */
-  accentLine: "#1f1f1f",
-  accentForeground: "#1f1f1f",
-};
-
-export const darkNeumorphism: ThemeNeumorphism = {
-  background: "#212121",
-  surface: "#212121",
-  shadow: "#191919",
-  /* Владелец 03.09: на тёмной теме блик был слишком ярким — приглушён. */
-  highlight: "#2e2e2e",
-  textPrimary: "#e8e8e8",
-  textSecondary: "#9a9a9a",
-  accent: BRAND_LIME,
-  accentLine: BRAND_LIME,
-  accentForeground: "#1f1f1f",
-};
+export const BRAND_LIME = data.themes.light.neumorphism.accent;
+export const lightNeumorphism: ThemeNeumorphism = data.themes.light.neumorphism;
+export const darkNeumorphism: ThemeNeumorphism = data.themes.dark.neumorphism;
 
 const TOKEN_TO_VAR: Record<keyof ThemeNeumorphism, `--neo-${string}`> = {
   background: "--neo-background",

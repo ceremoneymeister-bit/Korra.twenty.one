@@ -1,0 +1,164 @@
+{
+  "themes": {
+    "light": {
+      "name": "light",
+      "label": "Светлая",
+      "description": "Светлый нейтральный интерфейс",
+      "palette": {
+        "background": {
+          "hex": "#e8e8e8",
+          "alpha": 1
+        },
+        "midground": {
+          "hex": "#1f1f1f",
+          "alpha": 1
+        },
+        "foreground": {
+          "hex": "#ffffff",
+          "alpha": 0
+        },
+        "warmGlow": "transparent",
+        "noiseOpacity": 0
+      },
+      "typography": {
+        "fontSans": "\"Onest\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+        "fontMono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace",
+        "baseSize": "15px",
+        "lineHeight": "1.55",
+        "letterSpacing": "0"
+      },
+      "layout": {
+        "radius": "1rem",
+        "density": "comfortable"
+      },
+      "neumorphism": {
+        "background": "#e8e8e8",
+        "surface": "#e0e0e0",
+        "shadow": "#bebebe",
+        "highlight": "#ffffff",
+        "textPrimary": "#1f1f1f",
+        "textSecondary": "#5c5c5c",
+        "accent": "#9EDE01",
+        "accentLine": "#1f1f1f",
+        "accentForeground": "#1f1f1f"
+      },
+      "terminalBackground": "#e0e0e0",
+      "terminalForeground": "#1f1f1f",
+      "seriesColors": {
+        "inputTokenAccent": "#1f1f1f",
+        "outputTokenAccent": "#5c5c5c"
+      },
+      "colorOverrides": {
+        "card": "#e0e0e0",
+        "cardForeground": "#1f1f1f",
+        "popover": "#e0e0e0",
+        "popoverForeground": "#1f1f1f",
+        "primary": "#9EDE01",
+        "primaryForeground": "#1f1f1f",
+        "secondary": "#e0e0e0",
+        "secondaryForeground": "#1f1f1f",
+        "muted": "#DCDCDC",
+        "mutedForeground": "#5c5c5c",
+        "accent": "#9EDE01",
+        "accentForeground": "#1f1f1f",
+        "destructive": "#B42318",
+        "destructiveForeground": "#FFFFFF",
+        "success": "#047857",
+        "warning": "#8A5200",
+        "border": "#bebebe",
+        "input": "#bebebe",
+        "ring": "#1f1f1f"
+      },
+      "swatchColors": [
+        "#e8e8e8",
+        "#1f1f1f",
+        "#9EDE01"
+      ]
+    },
+    "dark": {
+      "name": "dark",
+      "label": "Тёмная",
+      "description": "Тёмный нейтральный интерфейс",
+      "palette": {
+        "background": {
+          "hex": "#212121",
+          "alpha": 1
+        },
+        "midground": {
+          "hex": "#e8e8e8",
+          "alpha": 1
+        },
+        "foreground": {
+          "hex": "#2e2e2e",
+          "alpha": 0
+        },
+        "warmGlow": "transparent",
+        "noiseOpacity": 0
+      },
+      "typography": {
+        "fontSans": "\"Onest\", system-ui, -apple-system, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif",
+        "fontMono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace",
+        "baseSize": "15px",
+        "lineHeight": "1.55",
+        "letterSpacing": "0"
+      },
+      "layout": {
+        "radius": "1rem",
+        "density": "comfortable"
+      },
+      "neumorphism": {
+        "background": "#212121",
+        "surface": "#212121",
+        "shadow": "#191919",
+        "highlight": "#2e2e2e",
+        "textPrimary": "#e8e8e8",
+        "textSecondary": "#9a9a9a",
+        "accent": "#9EDE01",
+        "accentLine": "#9EDE01",
+        "accentForeground": "#1f1f1f"
+      },
+      "terminalBackground": "#212121",
+      "terminalForeground": "#e8e8e8",
+      "seriesColors": {
+        "inputTokenAccent": "#9EDE01",
+        "outputTokenAccent": "#9a9a9a"
+      },
+      "colorOverrides": {
+        "card": "#212121",
+        "cardForeground": "#e8e8e8",
+        "popover": "#212121",
+        "popoverForeground": "#e8e8e8",
+        "primary": "#9EDE01",
+        "primaryForeground": "#1f1f1f",
+        "secondary": "#212121",
+        "secondaryForeground": "#e8e8e8",
+        "muted": "#2B2B2B",
+        "mutedForeground": "#9a9a9a",
+        "accent": "#9EDE01",
+        "accentForeground": "#1f1f1f",
+        "destructive": "#FF6B74",
+        "destructiveForeground": "#212121",
+        "success": "#83D95B",
+        "warning": "#F6C453",
+        "border": "#191919",
+        "input": "#191919",
+        "ring": "#9EDE01"
+      },
+      "swatchColors": [
+        "#212121",
+        "#e8e8e8",
+        "#9EDE01"
+      ]
+    }
+  },
+  "legacy_dark": [
+    "default-large",
+    "large",
+    "hermes-teal",
+    "midnight",
+    "ember",
+    "mono",
+    "cyberpunk",
+    "rose"
+  ]
+}

@@ -776,6 +776,7 @@ class RawConfigUpdate(BaseModel):
 
 class ThemeSetBody(BaseModel):
     name: str
+    revision: Optional[str] = None
 
 
 # --- from web_server.py (originally lines 19449-19450) ---

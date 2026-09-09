@@ -3,6 +3,8 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
+  useRef,
   useMemo,
   useState,
   type ReactNode,
@@ -33,10 +35,7 @@ import {
 } from "./semantic-colors";
 import { NEUMORPHISM_CSS_VARS, neumorphismVars } from "./neumorphism";
 import { api } from "@/lib/api";
-
-/** LocalStorage key used to seed the first React render. The static CSS uses
- *  light defaults until ThemeProvider's first effect applies a stored theme. */
-const STORAGE_KEY = "hermes-dashboard-theme";
+import { cachePreference, readBootstrap, safeRead, safeWrite, validPreference, type ThemePreference } from "./preference";
 
 /** LocalStorage key for the font override (independent of theme). Holds a
  *  font id from the catalog in `fonts.ts`, or the `THEME_DEFAULT_FONT_ID`
@@ -300,9 +299,25 @@ function applyFontOverride(fontId: string | undefined) {
 // Apply a full theme to :root
 // ---------------------------------------------------------------------------
 
+let transitionFrame = 0;
 function applyTheme(theme: DashboardTheme) {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  // All palette tokens change in one layout effect. Suppress existing hover /
+  // surface transitions for this frame so intermediate colors never smear.
+  let suppression = document.getElementById("korra-theme-no-transition");
+  if (!suppression) {
+    suppression = document.createElement("style");
+    suppression.id = "korra-theme-no-transition";
+    suppression.textContent = "*,*::before,*::after{transition:none!important}";
+    document.head.append(suppression);
+  }
+  root.style.colorScheme = theme.name === "dark" ? "dark" : "light";
+  cancelAnimationFrame(transitionFrame);
+  transitionFrame = requestAnimationFrame(() => {
+    void root.offsetHeight;
+    transitionFrame = requestAnimationFrame(() => suppression?.remove());
+  });
 
   // Clear any overrides from a previous theme before applying the new set.
   for (const cssVar of COLOR_OVERRIDE_CSS_VARS) {
@@ -368,162 +383,130 @@ function applyTheme(theme: DashboardTheme) {
 // ---------------------------------------------------------------------------
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  /** Name of the currently active light/dark palette. */
-  const [themeName, setThemeName] = useState<string>(() => {
-    if (typeof window === "undefined") return "light";
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    const migrated = migrateThemeName(stored);
-    // Write the migrated name back so future reads converge on the new
-    // key and we eventually retire the alias entry.
-    if (migrated !== stored) {
-      window.localStorage.setItem(STORAGE_KEY, migrated);
-    }
-    return migrated;
-  });
-
-  const availableThemes = BUILTIN_THEME_ENTRIES;
-
-  /** Active font-override id (independent of theme). `THEME_DEFAULT_FONT_ID`
-   *  = no override. Seeded from localStorage before the first effect. */
-  const [fontId, setFontId] = useState<string>(() => {
-    if (typeof window === "undefined") return THEME_DEFAULT_FONT_ID;
-    const stored = window.localStorage.getItem(FONT_STORAGE_KEY);
+  const [preference, setPreference] = useState(readBootstrap);
+  const preferenceRef = useRef(preference);
+  const generation = useRef(0);
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const desiredTheme = useRef(preference?.theme ?? "light");
+  const mounted = useRef(true);
+  const [themeName, setThemeName] = useState<string>(desiredTheme.current);
+  const [saveState, setSaveState] = useState<"idle" | "pending" | "saved" | "error">("idle");
+  const [saveError, setSaveError] = useState("");
+  const [fontId, setFontId] = useState(() => {
+    const stored = safeRead(FONT_STORAGE_KEY);
     const valid = stored && getFontChoice(stored) ? stored : THEME_DEFAULT_FONT_ID;
     _ACTIVE_FONT_OVERRIDE = valid;
     return valid;
   });
+  const resolveTheme = useCallback((name: string): DashboardTheme =>
+    BUILTIN_THEMES[migrateThemeName(name)] ?? defaultTheme, []);
 
-  // Theme names are normalized at every persistence boundary, but keep the
-  // resolver defensive so malformed external state can never break render.
-  const resolveTheme = useCallback(
-    (name: string): DashboardTheme => {
-      return BUILTIN_THEMES[migrateThemeName(name)] ?? defaultTheme;
-    },
-    [],
-  );
-
-  // Apply the active theme (and re-assert the font override at its tail)
-  // whenever the theme, the resolver, OR the font override changes. Folding
-  // font into the same effect means clearing the override re-runs applyTheme,
-  // which restores the theme's own font; setting it re-asserts the override.
-  useEffect(() => {
+  useLayoutEffect(() => {
     _ACTIVE_FONT_OVERRIDE = fontId;
     applyTheme(resolveTheme(themeName));
   }, [themeName, resolveTheme, fontId]);
 
-  // The server remains the cross-browser source of truth for dashboard.theme.
-  // Its old preset ids are collapsed to light/dark and written back once.
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getThemes()
-      .then((resp) => {
-        if (cancelled) return;
-        if (resp.active) {
-          const migratedActive = migrateThemeName(resp.active);
-          if (migratedActive !== themeName) {
-            setThemeName(migratedActive);
-            window.localStorage.setItem(STORAGE_KEY, migratedActive);
-          }
-          // If the server is still persisting the stale key, push the
-          // migrated value back so it converges too — otherwise every
-          // future page load would re-trigger this branch.
-          if (migratedActive !== resp.active) {
-            api.setTheme(migratedActive).catch(() => {});
-          }
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const acceptPreference = useCallback((next: ThemePreference) => {
+    preferenceRef.current = next;
+    cachePreference(next);
+    if (mounted.current) setPreference(next);
   }, []);
 
-  // Load the server-persisted font override once on mount. The server is
-  // the source of truth across browsers; localStorage just avoids the flash.
+  useEffect(() => {
+    mounted.current = true;
+    let cancelled = false;
+    if (preferenceRef.current) cachePreference(preferenceRef.current);
+    const initialGeneration = generation.current;
+    api.getThemes().then((resp) => {
+      // An older GET may arrive after a manual choice or its ACK. Neither the
+      // visible theme nor its CAS revision may regress in that case.
+      if (cancelled || generation.current !== initialGeneration) return;
+      const next = validPreference(resp.preference);
+      if (!next) return;
+      acceptPreference(next);
+      desiredTheme.current = next.theme;
+      setThemeName(next.theme);
+    }).catch(() => { /* Bootstrap remains authoritative; no healing write. */ });
+    return () => { cancelled = true; mounted.current = false; };
+  }, [acceptPreference]);
+
   useEffect(() => {
     let cancelled = false;
-    api
-      .getFontPref()
-      .then((resp) => {
-        if (cancelled) return;
-        const serverId =
-          resp?.font && getFontChoice(resp.font) ? resp.font : THEME_DEFAULT_FONT_ID;
-        if (serverId !== fontId) {
-          setFontId(serverId);
-          if (typeof window !== "undefined") {
-            window.localStorage.setItem(FONT_STORAGE_KEY, serverId);
-          }
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    api.getFontPref().then((resp) => {
+      if (cancelled) return;
+      const next = resp?.font && getFontChoice(resp.font) ? resp.font : THEME_DEFAULT_FONT_ID;
+      setFontId(next);
+      safeWrite(FONT_STORAGE_KEY, next);
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
-  const setTheme = useCallback(
-    (name: string) => {
-      const next = migrateThemeName(name);
-      setThemeName(next);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(STORAGE_KEY, next);
+  const saveTheme = useCallback((name: string, refresh = false): Promise<boolean> => {
+    const next = migrateThemeName(name);
+    const thisGeneration = ++generation.current;
+    desiredTheme.current = next;
+    setThemeName(next);
+    setSaveState("pending");
+    setSaveError("");
+    // Serialize writes: each explicit choice uses the previous durable ACK's
+    // revision. The final user choice wins even with delayed responses.
+    const saving = saveQueue.current.then(async () => {
+      try {
+        if (refresh || !preferenceRef.current) {
+          const latest = validPreference((await api.getThemes()).preference);
+          if (!latest) throw new Error("unknown preference");
+          acceptPreference(latest);
+        }
+        const response = await api.setTheme(next, preferenceRef.current!.revision);
+        const ack = validPreference(response.preference);
+        if (!response.ok || !ack || ack.theme !== next) throw new Error("missing durable ACK");
+        acceptPreference(ack);
+        if (mounted.current && generation.current === thisGeneration) setSaveState("saved");
+        return true;
+      } catch {
+        if (mounted.current && generation.current === thisGeneration) {
+          setSaveState("error");
+          setSaveError("Тема показана на этом экране, но не сохранена. Проверьте соединение и повторите.");
+        }
+        return false;
       }
-      api.setTheme(next).catch(() => {});
-    },
-    [],
-  );
-
+    });
+    saveQueue.current = saving;
+    return saving;
+  }, [acceptPreference]);
+  const setTheme = useCallback((name: string) => saveTheme(name), [saveTheme]);
+  const retryTheme = useCallback(() => saveTheme(desiredTheme.current, true), [saveTheme]);
   const setFont = useCallback((id: string) => {
     const next = getFontChoice(id) ? id : THEME_DEFAULT_FONT_ID;
     setFontId(next);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(FONT_STORAGE_KEY, next);
-    }
+    safeWrite(FONT_STORAGE_KEY, next);
     api.setFontPref(next).catch(() => {});
   }, []);
 
-  const value = useMemo<ThemeContextValue>(
-    () => ({
-      theme: resolveTheme(themeName),
-      themeName,
-      availableThemes,
-      setTheme,
-      fontId,
-      fontChoices: FONT_CHOICES,
-      setFont,
-    }),
-    [themeName, availableThemes, setTheme, resolveTheme, fontId, setFont],
-  );
-
+  const value = useMemo<ThemeContextValue>(() => ({
+    theme: resolveTheme(themeName), themeName, availableThemes: BUILTIN_THEME_ENTRIES,
+    setTheme, preference, saveState, saveError, retryTheme,
+    fontId, fontChoices: FONT_CHOICES, setFont,
+  }), [themeName, setTheme, resolveTheme, preference, saveState, saveError, retryTheme, fontId, setFont]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
-
-export function useTheme(): ThemeContextValue {
-  return useContext(ThemeContext);
-}
-
+export function useTheme(): ThemeContextValue { return useContext(ThemeContext); }
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: defaultTheme,
-  themeName: "light",
-  availableThemes: BUILTIN_THEME_ENTRIES,
-  setTheme: () => {},
-  fontId: THEME_DEFAULT_FONT_ID,
-  fontChoices: FONT_CHOICES,
-  setFont: () => {},
+  theme: defaultTheme, themeName: "light", availableThemes: BUILTIN_THEME_ENTRIES,
+  setTheme: async () => false, preference: null, saveState: "idle", saveError: "",
+  retryTheme: async () => false,
+  fontId: THEME_DEFAULT_FONT_ID, fontChoices: FONT_CHOICES, setFont: () => {},
 });
-
 interface ThemeContextValue {
   availableThemes: ThemeListEntry[];
-  setTheme: (name: string) => void;
+  setTheme: (name: string) => Promise<boolean>;
+  preference: ThemePreference | null;
+  saveState: "idle" | "pending" | "saved" | "error";
+  saveError: string;
+  retryTheme: () => Promise<boolean>;
   theme: DashboardTheme;
   themeName: string;
-  /** Active font-override id (`THEME_DEFAULT_FONT_ID` = no override). */
   fontId: string;
-  /** Curated font catalog for the picker. */
   fontChoices: FontChoice[];
-  /** Set the font override (independent of theme). */
   setFont: (id: string) => void;
 }
