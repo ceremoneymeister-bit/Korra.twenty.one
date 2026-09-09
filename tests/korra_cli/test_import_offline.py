@@ -425,3 +425,44 @@ def test_real_cli_uncertain_active_profile_refuses_before_any_write(tmp_path, is
                            "import", str(path), "--force"], env=env, capture_output=True, timeout=30)
     assert proc.returncode != 0
     assert snapshot(user) == before
+
+
+@pytest.mark.parametrize("scope", ["named", "custom"])
+def test_scoped_import_never_creates_global_alias_for_nested_profiles(tmp_path, isolated, monkeypatch, scope):
+    require_host_proc()
+    user, root = isolated
+    target = root / "profiles" / "coder" if scope == "named" else tmp_path / "custom-data"
+    target.mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(target))
+    import korra_cli.profiles as profiles
+    aliases = []
+    monkeypatch.setattr(profiles, "create_wrapper_script", lambda name: aliases.append(name))
+    monkeypatch.setattr(profiles, "check_alias_collision", lambda name: None)
+    path = archive(tmp_path, {"profiles/helper/config.yaml": "model: restored"})
+    restore(path)
+    assert (target / "profiles/helper/config.yaml").read_text() == "model: restored"
+    assert aliases == []
+
+
+def test_cold_tempdir_inside_data_never_probes_destination(tmp_path, isolated, monkeypatch):
+    require_host_proc()
+    user, target = isolated
+    path = archive(tmp_path, {"config.yaml": "replacement", "state.db": b"not SQLite"})
+    monkeypatch.setenv("TMPDIR", str(target))
+    monkeypatch.setattr(backup.tempfile, "tempdir", None)
+    # Include transient creates, invisible to a final bytes/inode snapshot.
+    writes = []
+    original_open = os.open
+    def watch_open(path, flags, *args, **kwargs):
+        if flags & (os.O_CREAT | os.O_WRONLY | os.O_RDWR):
+            try:
+                if Path(path).resolve().is_relative_to(target):
+                    writes.append(str(path))
+            except TypeError:
+                pass
+        return original_open(path, flags, *args, **kwargs)
+    monkeypatch.setattr(os, "open", watch_open)
+    before_mtime = target.stat().st_mtime_ns
+    rejected(path, user)
+    assert writes == []
+    assert target.stat().st_mtime_ns == before_mtime

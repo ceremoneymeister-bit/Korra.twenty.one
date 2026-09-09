@@ -1580,10 +1580,20 @@ def run_import(args) -> None:
                     return
             # Staging must never be inside any destination, even when TMPDIR
             # points into DATA. No target mkdir/chmod/lock before preflight.
-            stage_parent = Path(tempfile.gettempdir()).resolve()
-            if any(stage_parent.is_relative_to(root) for root in roots):
-                stage_parent = Path("/var/tmp")
-            if any(stage_parent.is_relative_to(root) for root in roots):
+            # gettempdir() probes candidates by creating/writing a file,
+            # so even querying it may violate the zero-write preflight.
+            candidates = [os.environ.get(name) for name in ("TMPDIR", "TEMP", "TMP")]
+            candidates.extend(("/var/tmp", "/tmp"))
+            stage_parent = None
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                parent = Path(candidate).resolve()
+                if (not any(parent.is_relative_to(root) for root in roots)
+                        and parent.is_dir() and os.access(parent, os.W_OK | os.X_OK)):
+                    stage_parent = parent
+                    break
+            if stage_parent is None:
                 raise _ImportRefused("нет staging-каталога вне DATA")
             with tempfile.TemporaryDirectory(prefix="korra-import-", dir=stage_parent) as stage:
                 _stage_import(zf, plan, Path(stage))
@@ -1612,7 +1622,9 @@ def run_import(args) -> None:
     # Post-import: restore profile wrapper scripts
     profiles_dir = hermes_root / "profiles"
     restored_profiles = []
-    if profiles_dir.is_dir():
+    # Wrappers do not pin HERMES_HOME. Only the standard POSIX home can
+    # safely expose global aliases; scoped/custom DATA must stay isolated.
+    if hermes_root == (home_dir / ".hermes").resolve() and profiles_dir.is_dir():
         try:
             from korra_cli.profiles import (
                 create_wrapper_script, check_alias_collision,
