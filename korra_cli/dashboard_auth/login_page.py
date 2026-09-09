@@ -89,7 +89,7 @@ _LOGIN_HTML_TEMPLATE = """\
     min-height: 100svh;
     overflow-x: hidden;
     background:
-      radial-gradient(circle at 14% 10%, #f4f4f4, transparent 38rem),
+      radial-gradient(circle at 50% 22%, #f3f3f3, transparent 34rem),
       var(--canvas);
   }}
 
@@ -98,44 +98,19 @@ _LOGIN_HTML_TEMPLATE = """\
     min-height: 100svh;
     display: grid;
     place-items: center;
-    padding: clamp(1.5rem, 5vw, 5rem);
+    padding: clamp(1.5rem, 5vw, 4rem);
   }}
 
-  .login-shell {{
+  .shell {{
     width: 100%;
-    max-width: 70rem;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(21rem, 26rem);
-    align-items: center;
-    gap: clamp(3rem, 8vw, 8rem);
-    position: relative;
+    max-width: 23.5rem;
+    text-align: center;
     animation: arrive 0.55s cubic-bezier(.2,.8,.2,1) both;
   }}
 
   @keyframes arrive {{
-    from {{ opacity: 0; transform: translateY(14px); }}
+    from {{ opacity: 0; transform: translateY(12px); }}
     to   {{ opacity: 1; transform: translateY(0); }}
-  }}
-
-  @media (prefers-reduced-motion: reduce) {{
-    .login-shell {{ animation: none; }}
-  }}
-
-  .identity {{
-    position: relative;
-    min-width: 0;
-    isolation: isolate;
-  }}
-
-  .edition-backdrop {{
-    position: absolute;
-    z-index: -1;
-    right: -7%;
-    bottom: -15%;
-    width: clamp(13rem, 26vw, 21rem);
-    opacity: 0.08;
-    user-select: none;
-    pointer-events: none;
   }}
 
   /* The lockup is assembled from the brand PNGs. Both carry their own soft
@@ -144,126 +119,33 @@ _LOGIN_HTML_TEMPLATE = """\
      (optically equal heights) and the near-zero gap — the optical gap is
      already baked into the files' padding. */
   .brand-lockup {{
-    --word-h: clamp(2.2rem, 4.4vw, 3.4rem);
+    --word-h: 2.35rem;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.1rem;
-    margin-bottom: clamp(3.5rem, 10vh, 7rem);
+    margin-bottom: clamp(2.4rem, 7vh, 3.6rem);
   }}
 
-  .brand-word {{
-    height: var(--word-h);
-    width: auto;
-  }}
-
-  .brand-number {{
-    height: calc(var(--word-h) * 0.817);
-    width: auto;
-  }}
-
-  .eyebrow {{
-    margin: 0 0 1rem;
-    color: var(--text);
-    font-size: 0.75rem;
-    font-weight: 750;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }}
+  .brand-word {{ height: var(--word-h); width: auto; }}
+  .brand-number {{ height: calc(var(--word-h) * 0.817); width: auto; }}
 
   h1 {{
-    max-width: 13ch;
-    margin: 0;
-    font-size: clamp(2.6rem, 5.6vw, 4.9rem);
-    font-weight: 720;
-    line-height: 0.98;
-    letter-spacing: -0.055em;
-    text-wrap: balance;
-  }}
-
-  .identity-copy {{
-    max-width: 33rem;
-    margin: 1.65rem 0 0;
-    color: var(--text-muted);
-    font-size: clamp(1rem, 1.5vw, 1.15rem);
-    line-height: 1.65;
-    text-wrap: pretty;
-  }}
-
-  .feature-list {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.65rem;
-    margin: 2rem 0 0;
-    padding: 0;
-    list-style: none;
-  }}
-
-  .feature-list li {{
-    padding: 0.58rem 0.8rem;
-    border-radius: 999px;
-    color: var(--text-muted);
-    background: var(--surface);
-    box-shadow: inset 1px 1px 3px var(--shadow), inset -1px -1px 3px var(--highlight);
-    font-size: 0.78rem;
-    font-weight: 560;
-  }}
-
-  .card {{
-    position: relative;
-    padding: clamp(1.6rem, 4vw, 2.5rem);
-    border-radius: 1.9rem;
-    background: var(--surface);
-    box-shadow: 5px 5px 10px var(--shadow), -5px -5px 10px var(--highlight);
-  }}
-
-  .card-kicker {{
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin-bottom: 2.4rem;
-    color: var(--text-muted);
-    font-size: 0.76rem;
-    font-weight: 600;
-  }}
-
-  .status-dot {{
-    width: 0.55rem;
-    height: 0.55rem;
-    flex: 0 0 auto;
-    border-radius: 50%;
-    background: var(--lime);
-    box-shadow: 0 0 0 0.28rem rgba(158, 222, 1, 0.22);
-    animation: breathe 3.2s ease-in-out infinite;
-  }}
-
-  @keyframes breathe {{
-    0%, 100% {{ box-shadow: 0 0 0 0.2rem rgba(158, 222, 1, 0.16); }}
-    50%      {{ box-shadow: 0 0 0 0.42rem rgba(158, 222, 1, 0.3); }}
-  }}
-
-  h2 {{
-    margin: 0;
-    font-size: clamp(1.8rem, 3vw, 2.35rem);
+    margin: 0 0 clamp(1.8rem, 5vh, 2.6rem);
+    font-size: clamp(2rem, 4.6vw, 2.85rem);
     font-weight: 680;
-    line-height: 1.1;
-    letter-spacing: -0.035em;
+    line-height: 1.08;
+    letter-spacing: -0.04em;
     text-wrap: balance;
-  }}
-
-  .subtitle {{
-    margin: 0.8rem 0 2rem;
-    color: var(--text-muted);
-    font-size: 0.95rem;
-    line-height: 1.6;
   }}
 
   .provider-list {{
     display: grid;
-    gap: 1rem;
+    gap: 0.75rem;
   }}
 
   .provider-btn {{
-    min-height: 3.25rem;
+    min-height: 3.35rem;
     display: grid;
     place-items: center;
     width: 100%;
@@ -272,11 +154,11 @@ _LOGIN_HTML_TEMPLATE = """\
     background: var(--lime);
     color: var(--lime-text);
     font: inherit;
-    font-size: 0.92rem;
+    font-size: 0.95rem;
     font-weight: 720;
     text-decoration: none;
     border: 0;
-    border-radius: 0.9rem;
+    border-radius: 1rem;
     cursor: pointer;
     box-shadow: 3px 3px 6px var(--shadow), -3px -3px 6px var(--highlight);
     transition: transform 0.12s ease, filter 0.12s ease, box-shadow 0.12s ease;
@@ -295,45 +177,46 @@ _LOGIN_HTML_TEMPLATE = """\
 
   .provider-btn:disabled {{
     cursor: wait;
-    filter: saturate(0.7) brightness(0.82);
+    filter: saturate(0.7) brightness(0.94);
   }}
 
   .provider-form {{
     display: grid;
-    gap: 1rem;
-    text-align: left;
+    gap: 0.75rem;
+    text-align: start;
   }}
 
-  .form-title {{
-    font-weight: 600;
-    font-size: 0.82rem;
-    color: var(--text-muted);
-  }}
+  .field {{ display: grid; }}
 
-  .field {{
-    display: grid;
-    gap: 0.55rem;
-  }}
-
+  /* Подпись поля остаётся для скринридера, визуально её роль играет
+     placeholder — так устроены входы ИИ-сервисов, к которым владелец
+     попросил приблизиться 09.09.2026. */
   .field-label {{
-    color: var(--text-muted);
-    font-size: 0.8rem;
-    font-weight: 560;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }}
 
   .field-input {{
-    min-height: 3.25rem;
+    min-height: 3.35rem;
     width: 100%;
-    padding: 0.82rem 1rem;
+    padding: 0.85rem 1.1rem;
     background: var(--surface-inset);
     color: var(--text);
     border: 0;
-    border-radius: 0.9rem;
+    border-radius: 1rem;
     font: inherit;
     font-size: 1rem;
     caret-color: var(--text);
     box-shadow: inset 4px 4px 8px #bcbcbc, inset -4px -4px 8px var(--highlight);
   }}
+
+  .field-input::placeholder {{ color: var(--text-muted); opacity: 1; }}
 
   .field-input:focus-visible {{
     outline: none;
@@ -346,39 +229,40 @@ _LOGIN_HTML_TEMPLATE = """\
   }}
 
   .form-error {{
-    padding: 0.75rem 0.85rem;
-    border-radius: 0.7rem;
+    padding: 0.75rem 0.9rem;
+    border-radius: 0.8rem;
     background: var(--surface);
     box-shadow: inset 1px 1px 3px #c6a5a2, inset -1px -1px 3px var(--highlight);
     color: var(--danger);
     font-size: 0.82rem;
     line-height: 1.45;
+    text-align: start;
   }}
 
-  .provider-form .provider-btn {{
-    margin-top: 0.35rem;
-  }}
+  .provider-form .provider-btn {{ margin-top: 0.5rem; }}
 
-  .card-footer {{
+  .foot {{
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-top: 2rem;
+    justify-content: center;
+    gap: 0.55rem;
+    margin: clamp(2.2rem, 6vh, 3rem) 0 0;
     color: var(--text-muted);
     font-size: 0.75rem;
   }}
 
-  .card-footer strong {{
-    color: var(--text);
-    font-weight: 620;
+  .status-dot {{
+    width: 0.42rem;
+    height: 0.42rem;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--lime);
+    animation: breathe 3.2s ease-in-out infinite;
   }}
 
-  .footer-mark {{
-    height: 1.05rem;
-    width: auto;
-    flex: 0 0 auto;
-    opacity: 0.72;
+  @keyframes breathe {{
+    0%, 100% {{ box-shadow: 0 0 0 0.16rem rgba(158, 222, 1, 0.18); }}
+    50%      {{ box-shadow: 0 0 0 0.34rem rgba(158, 222, 1, 0.32); }}
   }}
 
   ::selection {{
@@ -389,56 +273,18 @@ _LOGIN_HTML_TEMPLATE = """\
   @media (hover: hover) {{
     .provider-btn:hover {{
       transform: translateY(-1px);
-      filter: brightness(1.06);
-    }}
-  }}
-
-  @media (max-width: 820px) {{
-    main {{
-      padding: 2rem clamp(1.25rem, 7vw, 4rem);
-    }}
-
-    .login-shell {{
-      max-width: 34rem;
-      grid-template-columns: 1fr;
-      gap: 2.5rem;
-    }}
-
-    .brand-lockup {{
-      margin-bottom: 2.75rem;
-    }}
-
-    .edition-backdrop {{
-      right: -6%;
-      bottom: auto;
-      top: 38%;
-      width: clamp(13rem, 42vw, 20rem);
-      opacity: 0.06;
-    }}
-
-    h1 {{
-      max-width: 14ch;
-      font-size: clamp(2.5rem, 9vw, 4.2rem);
-    }}
-
-    .feature-list {{
-      margin-top: 1.5rem;
+      filter: brightness(1.04);
     }}
   }}
 
   @media (max-width: 480px) {{
-    main {{ padding: 1.4rem 1rem 2rem; }}
-    .login-shell {{ gap: 2rem; }}
-    .brand-lockup {{ margin-bottom: 2.1rem; }}
-    .identity-copy {{ margin-top: 1.15rem; }}
-    .feature-list {{ display: none; }}
-    .card {{ padding: 1.55rem; border-radius: 1.5rem; }}
-    .card-kicker {{ margin-bottom: 1.8rem; }}
-    .card-footer {{ align-items: flex-start; flex-direction: column; gap: 0.5rem; }}
+    main {{ padding: 2rem 1.25rem; }}
+    .shell {{ max-width: 100%; }}
+    .brand-lockup {{ margin-bottom: 2.2rem; }}
   }}
 
   @media (forced-colors: active) {{
-    .provider-btn:focus-visible,
+    .provider-btn,
     .field-input:focus-visible {{
       outline: 2px solid CanvasText;
       outline-offset: 3px;
@@ -446,45 +292,27 @@ _LOGIN_HTML_TEMPLATE = """\
   }}
 
   @media (prefers-reduced-motion: reduce) {{
+    .shell {{ animation: none; }}
+    .status-dot {{ animation: none; }}
     .provider-btn {{ transition: none; }}
     .provider-btn:hover,
     .provider-btn:active {{ transform: none; }}
-    .status-dot {{ animation: none; }}
   }}
 </style>
 </head>
 <body>
 <main>
-  <div class="login-shell">
-    <section class="identity" aria-labelledby="welcome-title">
-      <img class="edition-backdrop" src="{base_path}/brand/korra-21.png" alt="" aria-hidden="true">
-      <div class="brand-lockup">
-        <img class="brand-word" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
-        <img class="brand-number" src="{base_path}/brand/korra-21.png" alt="21" width="364" height="233">
-      </div>
-      <p class="eyebrow">Персональный ИИ-контур</p>
-      <h1 id="welcome-title">Команда уже в курсе дела</h1>
-      <p class="identity-copy">Агент помнит ваши проекты, специалисты ведут свои направления, задачи идут по расписанию. Контур работает на вашем сервере — доступ к нему только у вас.</p>
-      <ul class="feature-list" aria-label="Что внутри контура">
-        <li>Агент и специалисты</li>
-        <li>Память проектов</li>
-        <li>Задачи по расписанию</li>
-        <li>На вашем сервере</li>
-      </ul>
-    </section>
-    <section class="card" aria-labelledby="login-title">
-      <div class="card-kicker"><span class="status-dot" aria-hidden="true"></span>Контур на связи</div>
-      <h2 id="login-title">С возвращением</h2>
-      <p class="subtitle">Логин и пароль — те, что выдали при установке контура.</p>
-      <div class="provider-list">
-{provider_buttons}
-      </div>
-      <footer class="card-footer">
-        <img class="footer-mark" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
-        <span>korra-agent.online</span>
-      </footer>
-    </section>
+  <div class="shell">
+    <div class="brand-lockup">
+      <img class="brand-word" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
+      <img class="brand-number" src="{base_path}/brand/korra-21.png" alt="21" width="364" height="233">
     </div>
+    <h1>С чего начнём?</h1>
+    <div class="provider-list">
+{provider_buttons}
+    </div>
+    <p class="foot"><span class="status-dot" aria-hidden="true"></span>Контур на связи · korra-agent.online</p>
+  </div>
 </main>
 {password_script}
 </body>
@@ -537,30 +365,28 @@ _EMPTY_HTML = """\
       radial-gradient(circle at 15% 12%, #f4f4f4, transparent 34rem),
       var(--canvas);
   }
+  /* Одна центрированная колонна, как и на /login: карточки тут нет, чтобы
+     служебная страница и вход выглядели одним продуктом. */
   main {
-    width: 100%; max-width: 36rem;
-    padding: clamp(1.6rem, 5vw, 2.8rem);
-    border-radius: 1.9rem;
-    background: var(--surface);
-    box-shadow: 5px 5px 10px var(--shadow), -5px -5px 10px var(--highlight);
+    width: 100%; max-width: 30rem;
   }
   /* Тот же лок-ап из PNG, что и на /login: множитель .817 уравнивает
      оптические высоты литер и цифры внутри их кадров. */
   .brand {
-    --word-h: 2rem;
+    --word-h: 2.35rem;
     display: inline-flex;
     align-items: center;
     gap: 0.1rem;
-    margin-bottom: 3rem;
+    margin-bottom: clamp(2.4rem, 7vh, 3.6rem);
   }
   .brand-word { height: var(--word-h); width: auto; }
   .brand-number { height: calc(var(--word-h) * 0.817); width: auto; }
   h1 {
     margin: 0 0 1rem;
-    font-weight: 700;
-    font-size: clamp(2rem, 8vw, 3.2rem);
-    line-height: 1.05;
-    letter-spacing: -0.045em;
+    font-weight: 680;
+    font-size: clamp(2rem, 6vw, 2.85rem);
+    line-height: 1.08;
+    letter-spacing: -0.04em;
   }
   p { margin: 0 0 1rem; color: var(--muted); }
   .next-step { margin-top: 2rem; color: var(--text); }
@@ -749,11 +575,12 @@ def _render_password_form(provider, next_path: str, base_path: str) -> str:
     return (
         f'      <form class="provider-form" data-provider="{pname}" '
         f'action="{base_path}/auth/password-login" autocomplete="on">\n'
-        f'        <div class="form-title">Вход по логину и паролю</div>\n'
         f'        <input type="hidden" name="next" value="{safe_next}">\n'
+        f'        <div class="form-error" id="{error_id}" role="alert" hidden></div>\n'
         f'        <label class="field">\n'
         f'          <span class="field-label">Логин</span>\n'
         f'          <input class="field-input" type="text" name="username" '
+        f'placeholder="Логин" '
         f'aria-describedby="{error_id}" '
         f'autocomplete="username" autocapitalize="none" '
         f'autocorrect="off" spellcheck="false" required>\n'
@@ -761,10 +588,10 @@ def _render_password_form(provider, next_path: str, base_path: str) -> str:
         f'        <label class="field">\n'
         f'          <span class="field-label">Пароль</span>\n'
         f'          <input class="field-input" type="password" name="password" '
+        f'placeholder="Пароль" '
         f'aria-describedby="{error_id}" '
         f'autocomplete="current-password" required>\n'
         f'        </label>\n'
-        f'        <div class="form-error" id="{error_id}" role="alert" hidden></div>\n'
         f'        <button class="provider-btn" type="submit">Войти</button>\n'
         f'      </form>'
     )

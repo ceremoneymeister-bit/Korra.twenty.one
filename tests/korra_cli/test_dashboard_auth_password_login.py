@@ -402,14 +402,18 @@ class TestLoginPageRender:
             html = render_login_html(next_path="/sessions")
             assert '<html lang="ru">' in html
             assert "Korra21" in html
-            assert "С возвращением" in html
+            assert "С чего начнём?" in html
             assert '<form class="provider-form" data-provider="testpw"' in html
             assert 'name="username"' in html
             assert 'name="password"' in html
             assert "Логин" in html
             assert "Пароль" in html
             assert ">Войти</button>" in html
-            assert "Вход по логину и паролю" in html
+            # Подписи-дубля над формой больше нет: минималистичный вход
+            # обходится знаком, заголовком и placeholder-ами полей.
+            assert "Вход по логину и паролю" not in html
+            assert 'placeholder="Логин"' in html
+            assert 'placeholder="Пароль"' in html
             assert "Проверьте логин и пароль" in html
             assert 'aria-describedby="login-error-testpw"' in html
             assert 'id="login-error-testpw" role="alert"' in html
