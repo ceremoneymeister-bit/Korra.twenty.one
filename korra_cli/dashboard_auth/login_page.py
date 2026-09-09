@@ -4,12 +4,17 @@ No React, no JavaScript dependency. Listed providers come from the
 registry; clicking a provider sends a GET to
 ``/auth/login?provider=<name>``.
 
-Visual styling is the Korra21 "tactile threshold": the accepted graphite
-and lime palette, Onest typography, restrained neumorphic depth, and the
-large ``21`` edition mark. Fonts are served out of the SPA's ``/fonts/``
-directory which the dashboard-auth gate already allowlists pre-auth (see
-``_GATE_PUBLIC_PREFIXES`` in ``middleware.py``), so the page renders without
-needing the React bundle loaded.
+Visual styling is the Korra21 "tactile threshold": the accepted light
+palette (``UI_PALETTE.md``), Onest typography, restrained neumorphic
+depth, and the ``21`` edition mark. The page is light-only — the owner's
+09.09.2026 decision is "light by default, always, in every interface", and
+a login screen has no theme switch to honour a stored choice with.
+
+Brand marks (wordmark + ``21``) are images, not a text lockup: same PNGs
+the dashboard header uses. They and the fonts are served out of the SPA's
+``/brand/`` and ``/fonts/`` directories, which the dashboard-auth gate
+allowlists pre-auth (see ``_GATE_PUBLIC_PREFIXES`` in ``middleware.py``),
+so the page renders without needing the React bundle loaded.
 
 Test-stable class names: the existing test suite extracts the
 ``class="provider-btn"`` anchor href to walk the OAuth flow. That
@@ -37,7 +42,7 @@ _LOGIN_HTML_TEMPLATE = """\
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="data:image/png;base64,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b0FxGvp+UR5+VmhMGE58bhm5rov2B7M4tCJqWDG7kQatLLPKWMkUmPJvA4LBo7qARNyXeMITLxnWbBfiaWHdU+J8sTQPgK+NpIL2OeFFDXkvx4Xkt8yaPKCUpACADRVVRQRsWbl5Tokm3bzcDWVyuLYP6xKI2DhUMi94Oc6mvmKosRsVy5Q/Qi7SjyBktwhNyyodUKCppaoI2ACsXbICDtS5XQilRHfiR0YjfVgJuNx0nPPJIxRkghXrhZff99h2QLAW1u80PP2qQTyptGjqRm0TyvzMQGaZ8ocdHRXGGwacMUNh826hpVNItwtb9xr2vWFILXdkjA/5MQhLS1RAgaZgGY22yamBR6a82vmh2gfUNZ10uxCUlOaV8Nw7huaVDlzEST/UrYSBzvWO+/aAYJj0h7ES0h/7jbGGfgS3QqphLZSLYHxhzXZDPC3z9RaYHlGuntK5//dNoNrhfk0fZtK/RabcgacRomEKT333XlQlu1nofExQy1yfEpl3/NmjynCvIjXTrNUJVbASUvDGGYxeZMvUPp4cf4VAikz7o1yJnaS04ib73jS0dQk2/MsyE7h1Rbl2xtIQFUoFXZoC1ToLwrg/QGCKRGyciMYBSJSXs26H6/1aqbcuVABoysD+9zxeeNeQaK29SanTih2TKf82E/4QraUuimaK88mjFJhk3WqDH3EvHwDjQVhWcv0QiUM8DUHZETJLLcFCLwSmyLX4KZJBG/EwQzzMkPcnuHpK2bpPSS13b7zb1+D3ry3dx5RIDBKtMJuH0etQLtbemNxDAUfjdqSXc8kjrC3swBJiDNw4qxw6GJJqE2yojPTB9KhrxwqM9FVmm/qb1CqBGaC0OLygogxFu8lFrhNIGRBUhZE+ZeSP6k4YjFfdJ9wz5vCq1ekDLtUrBUDJzGAlQFQqtRWM5646e7/F4jSQmyMgImPAR6o6Xo9E9XM/KdYKVe0FPgFCULyxqVEqh5Nu4DqwFkhX0rYP5FIsMA2cAN42njnpjmaXFx5ON4KqINIGbAZS/yTTO9N2vgQuichE9Vz4v4g/ASlFZPGB5P9IAAAAFHRFWHR4bXA6Q29sb3JTcGFjZQA2NTUzNTtUTfIAAABEdEVYdHhtcDpDcmVhdG9yVG9vbABDYW52YSBkb2M9REFISlJmYTREancgdXNlcj1VQUZzYnh3UjdyRSBicmFuZD1UIEhBU0RGcgbz3AAAABR0RVh0eG1wOkV4aWZWZXJzaW9uADAyMTCwWRvkAAAAGHRFWHR4bXA6Rmxhc2hQaXhWZXJzaW9uADAxMDCBx9h8AAAAGHRFWHR4bXA6UGl4ZWxYRGltZW5zaW9uADEyMDBXCdQ6AAAAGHRFWHR4bXA6UGl4ZWxZRGltZW5zaW9uADEyMDDu8g/SAAAAAElFTkSuQmCC">
-<meta name="theme-color" content="#212121">
+<meta name="theme-color" content="#e8e8e8">
 <title>Вход — Korra21</title>
 <style>
   /* The login page uses the same accepted type and colour tokens as Korra21. */
@@ -50,17 +55,17 @@ _LOGIN_HTML_TEMPLATE = """\
   }}
 
   :root {{
-    color-scheme: dark;
-    --canvas: #212121;
-    --surface: #212121;
-    --surface-inset: #191919;
-    --text: #e8e8e8;
-    --text-muted: #9a9a9a;
+    color-scheme: light;
+    --canvas: #e8e8e8;
+    --surface: #e0e0e0;
+    --surface-inset: #dcdcdc;
+    --text: #1f1f1f;
+    --text-muted: #5c5c5c;
     --lime: #9ede01;
     --lime-text: #1f1f1f;
-    --shadow: #191919;
-    --highlight: #2e2e2e;
-    --danger: #ff7979;
+    --shadow: #bebebe;
+    --highlight: #ffffff;
+    --danger: #a4231c;
   }}
 
   *, *::before, *::after {{ box-sizing: border-box; }}
@@ -84,7 +89,7 @@ _LOGIN_HTML_TEMPLATE = """\
     min-height: 100svh;
     overflow-x: hidden;
     background:
-      radial-gradient(circle at 12% 8%, rgba(158, 222, 1, 0.08), transparent 31rem),
+      radial-gradient(circle at 14% 10%, #f4f4f4, transparent 38rem),
       var(--canvas);
   }}
 
@@ -125,52 +130,40 @@ _LOGIN_HTML_TEMPLATE = """\
   .edition-backdrop {{
     position: absolute;
     z-index: -1;
-    top: 50%;
-    left: -0.07em;
-    transform: translateY(-52%);
-    color: var(--lime);
-    font-size: clamp(14rem, 28vw, 27rem);
-    font-weight: 900;
-    line-height: 0.74;
-    letter-spacing: -0.13em;
-    opacity: 0.045;
+    right: -7%;
+    bottom: -15%;
+    width: clamp(13rem, 26vw, 21rem);
+    opacity: 0.08;
     user-select: none;
     pointer-events: none;
   }}
 
+  /* The lockup is assembled from the brand PNGs. Both carry their own soft
+     shadow and transparent padding inside the frame: the letters fill 61.7%
+     of their frame height, the numeral 75.5%. Hence the .817 multiplier
+     (optically equal heights) and the near-zero gap — the optical gap is
+     already baked into the files' padding. */
   .brand-lockup {{
+    --word-h: clamp(2.2rem, 4.4vw, 3.4rem);
     display: inline-flex;
     align-items: center;
-    gap: 0.85rem;
+    gap: 0.1rem;
     margin-bottom: clamp(3.5rem, 10vh, 7rem);
   }}
 
   .brand-word {{
-    font-size: clamp(2.1rem, 4.4vw, 3.75rem);
-    font-weight: 850;
-    line-height: 0.9;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
+    height: var(--word-h);
+    width: auto;
   }}
 
   .brand-number {{
-    display: grid;
-    place-items: center;
-    min-width: 2.9rem;
-    min-height: 2.25rem;
-    padding: 0.18rem 0.48rem 0.12rem;
-    border-radius: 0.7rem;
-    background: var(--lime);
-    color: var(--lime-text);
-    font-size: clamp(1.5rem, 3vw, 2.25rem);
-    font-weight: 900;
-    line-height: 1;
-    box-shadow: 3px 3px 6px var(--shadow), -3px -3px 6px var(--highlight);
+    height: calc(var(--word-h) * 0.817);
+    width: auto;
   }}
 
   .eyebrow {{
     margin: 0 0 1rem;
-    color: var(--lime);
+    color: var(--text);
     font-size: 0.75rem;
     font-weight: 750;
     letter-spacing: 0.12em;
@@ -178,9 +171,9 @@ _LOGIN_HTML_TEMPLATE = """\
   }}
 
   h1 {{
-    max-width: 9ch;
+    max-width: 13ch;
     margin: 0;
-    font-size: clamp(2.8rem, 6vw, 5.4rem);
+    font-size: clamp(2.6rem, 5.6vw, 4.9rem);
     font-weight: 720;
     line-height: 0.98;
     letter-spacing: -0.055em;
@@ -239,7 +232,13 @@ _LOGIN_HTML_TEMPLATE = """\
     flex: 0 0 auto;
     border-radius: 50%;
     background: var(--lime);
-    box-shadow: 0 0 0 0.28rem rgba(158, 222, 1, 0.08);
+    box-shadow: 0 0 0 0.28rem rgba(158, 222, 1, 0.22);
+    animation: breathe 3.2s ease-in-out infinite;
+  }}
+
+  @keyframes breathe {{
+    0%, 100% {{ box-shadow: 0 0 0 0.2rem rgba(158, 222, 1, 0.16); }}
+    50%      {{ box-shadow: 0 0 0 0.42rem rgba(158, 222, 1, 0.3); }}
   }}
 
   h2 {{
@@ -285,12 +284,13 @@ _LOGIN_HTML_TEMPLATE = """\
 
   .provider-btn:active {{
     transform: translateY(1px);
-    box-shadow: inset 2px 2px 6px rgba(31, 31, 31, 0.34), inset -2px -2px 6px rgba(255, 255, 255, 0.2);
+    box-shadow: inset 2px 2px 6px rgba(31, 31, 31, 0.28), inset -2px -2px 6px rgba(255, 255, 255, 0.5);
   }}
 
+  /* Активную зону показываем глубиной, а не обводкой (канон палитры, 03.09). */
   .provider-btn:focus-visible {{
     outline: none;
-    box-shadow: inset 0 0 0 3px var(--lime-text), inset 2px 2px 6px rgba(31, 31, 31, 0.34);
+    box-shadow: inset 2px 2px 6px rgba(31, 31, 31, 0.28), inset -2px -2px 6px rgba(255, 255, 255, 0.5);
   }}
 
   .provider-btn:disabled {{
@@ -331,17 +331,25 @@ _LOGIN_HTML_TEMPLATE = """\
     border-radius: 0.9rem;
     font: inherit;
     font-size: 1rem;
-    caret-color: var(--lime);
-    box-shadow: inset 3px 3px 6px #111111, inset -3px -3px 6px #242424;
+    caret-color: var(--text);
+    box-shadow: inset 4px 4px 8px #bcbcbc, inset -4px -4px 8px var(--highlight);
   }}
 
   .field-input:focus-visible {{
     outline: none;
-    background: #1b1b1b;
-    box-shadow: inset 0 0 0 2px var(--text-muted), inset 3px 3px 7px #101010;
+    background: #d6d6d6;
+    box-shadow: inset 5px 5px 10px #b4b4b4, inset -5px -5px 10px var(--highlight);
+  }}
+
+  .field-input[aria-invalid="true"] {{
+    box-shadow: inset 4px 4px 8px #c6a5a2, inset -4px -4px 8px var(--highlight);
   }}
 
   .form-error {{
+    padding: 0.75rem 0.85rem;
+    border-radius: 0.7rem;
+    background: var(--surface);
+    box-shadow: inset 1px 1px 3px #c6a5a2, inset -1px -1px 3px var(--highlight);
     color: var(--danger);
     font-size: 0.82rem;
     line-height: 1.45;
@@ -364,6 +372,13 @@ _LOGIN_HTML_TEMPLATE = """\
   .card-footer strong {{
     color: var(--text);
     font-weight: 620;
+  }}
+
+  .footer-mark {{
+    height: 1.05rem;
+    width: auto;
+    flex: 0 0 auto;
+    opacity: 0.72;
   }}
 
   ::selection {{
@@ -394,15 +409,16 @@ _LOGIN_HTML_TEMPLATE = """\
     }}
 
     .edition-backdrop {{
-      left: auto;
-      right: -0.08em;
-      top: 45%;
-      font-size: clamp(12rem, 48vw, 20rem);
+      right: -6%;
+      bottom: auto;
+      top: 38%;
+      width: clamp(13rem, 42vw, 20rem);
+      opacity: 0.06;
     }}
 
     h1 {{
-      max-width: 11ch;
-      font-size: clamp(2.6rem, 10vw, 4.4rem);
+      max-width: 14ch;
+      font-size: clamp(2.5rem, 9vw, 4.2rem);
     }}
 
     .feature-list {{
@@ -418,7 +434,7 @@ _LOGIN_HTML_TEMPLATE = """\
     .feature-list {{ display: none; }}
     .card {{ padding: 1.55rem; border-radius: 1.5rem; }}
     .card-kicker {{ margin-bottom: 1.8rem; }}
-    .card-footer {{ align-items: flex-start; flex-direction: column; gap: 0.2rem; }}
+    .card-footer {{ align-items: flex-start; flex-direction: column; gap: 0.5rem; }}
   }}
 
   @media (forced-colors: active) {{
@@ -433,6 +449,7 @@ _LOGIN_HTML_TEMPLATE = """\
     .provider-btn {{ transition: none; }}
     .provider-btn:hover,
     .provider-btn:active {{ transform: none; }}
+    .status-dot {{ animation: none; }}
   }}
 </style>
 </head>
@@ -440,29 +457,30 @@ _LOGIN_HTML_TEMPLATE = """\
 <main>
   <div class="login-shell">
     <section class="identity" aria-labelledby="welcome-title">
-      <span class="edition-backdrop" aria-hidden="true">21</span>
+      <img class="edition-backdrop" src="{base_path}/brand/korra-21.png" alt="" aria-hidden="true">
       <div class="brand-lockup">
-        <span class="brand-word">KORRA</span>
-        <span class="brand-number">21</span>
+        <img class="brand-word" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
+        <img class="brand-number" src="{base_path}/brand/korra-21.png" alt="21" width="364" height="233">
       </div>
-      <p class="eyebrow">Персональный ИИ-агент</p>
-      <h1 id="welcome-title">Ваш рабочий контур</h1>
-      <p class="identity-copy">Агент, команда специалистов, проекты и материалы доступны в одном пространстве.</p>
-      <ul class="feature-list" aria-label="Возможности рабочего контура">
+      <p class="eyebrow">Персональный ИИ-контур</p>
+      <h1 id="welcome-title">Команда уже в курсе дела</h1>
+      <p class="identity-copy">Агент помнит ваши проекты, специалисты ведут свои направления, задачи идут по расписанию. Контур работает на вашем сервере — доступ к нему только у вас.</p>
+      <ul class="feature-list" aria-label="Что внутри контура">
         <li>Агент и специалисты</li>
-        <li>Проекты и материалы</li>
-        <li>История работы</li>
+        <li>Память проектов</li>
+        <li>Задачи по расписанию</li>
+        <li>На вашем сервере</li>
       </ul>
     </section>
     <section class="card" aria-labelledby="login-title">
-      <div class="card-kicker"><span class="status-dot" aria-hidden="true"></span>Защищённый доступ</div>
-      <h2 id="login-title">Вход в систему</h2>
-      <p class="subtitle">Используйте данные доступа к вашему кабинету.</p>
+      <div class="card-kicker"><span class="status-dot" aria-hidden="true"></span>Контур на связи</div>
+      <h2 id="login-title">С возвращением</h2>
+      <p class="subtitle">Логин и пароль — те, что выдали при установке контура.</p>
       <div class="provider-list">
 {provider_buttons}
       </div>
       <footer class="card-footer">
-        <strong>Korra21</strong>
+        <img class="footer-mark" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
         <span>korra-agent.online</span>
       </footer>
     </section>
@@ -480,7 +498,7 @@ _EMPTY_HTML = """\
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/png" href="data:image/png;base64,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b0FxGvp+UR5+VmhMGE58bhm5rov2B7M4tCJqWDG7kQatLLPKWMkUmPJvA4LBo7qARNyXeMITLxnWbBfiaWHdU+J8sTQPgK+NpIL2OeFFDXkvx4Xkt8yaPKCUpACADRVVRQRsWbl5Tokm3bzcDWVyuLYP6xKI2DhUMi94Oc6mvmKosRsVy5Q/Qi7SjyBktwhNyyodUKCppaoI2ACsXbICDtS5XQilRHfiR0YjfVgJuNx0nPPJIxRkghXrhZff99h2QLAW1u80PP2qQTyptGjqRm0TyvzMQGaZ8ocdHRXGGwacMUNh826hpVNItwtb9xr2vWFILXdkjA/5MQhLS1RAgaZgGY22yamBR6a82vmh2gfUNZ10uxCUlOaV8Nw7huaVDlzEST/UrYSBzvWO+/aAYJj0h7ES0h/7jbGGfgS3QqphLZSLYHxhzXZDPC3z9RaYHlGuntK5//dNoNrhfk0fZtK/RabcgacRomEKT333XlQlu1nofExQy1yfEpl3/NmjynCvIjXTrNUJVbASUvDGGYxeZMvUPp4cf4VAikz7o1yJnaS04ib73jS0dQk2/MsyE7h1Rbl2xtIQFUoFXZoC1ToLwrg/QGCKRGyciMYBSJSXs26H6/1aqbcuVABoysD+9zxeeNeQaK29SanTih2TKf82E/4QraUuimaK88mjFJhk3WqDH3EvHwDjQVhWcv0QiUM8DUHZETJLLcFCLwSmyLX4KZJBG/EwQzzMkPcnuHpK2bpPSS13b7zb1+D3ry3dx5RIDBKtMJuH0etQLtbemNxDAUfjdqSXc8kjrC3swBJiDNw4qxw6GJJqE2yojPTB9KhrxwqM9FVmm/qb1CqBGaC0OLygogxFu8lFrhNIGRBUhZE+ZeSP6k4YjFfdJ9wz5vCq1ekDLtUrBUDJzGAlQFQqtRWM5646e7/F4jSQmyMgImPAR6o6Xo9E9XM/KdYKVe0FPgFCULyxqVEqh5Nu4DqwFkhX0rYP5FIsMA2cAN42njnpjmaXFx5ON4KqINIGbAZS/yTTO9N2vgQuichE9Vz4v4g/ASlFZPGB5P9IAAAAFHRFWHR4bXA6Q29sb3JTcGFjZQA2NTUzNTtUTfIAAABEdEVYdHhtcDpDcmVhdG9yVG9vbABDYW52YSBkb2M9REFISlJmYTREancgdXNlcj1VQUZzYnh3UjdyRSBicmFuZD1UIEhBU0RGcgbz3AAAABR0RVh0eG1wOkV4aWZWZXJzaW9uADAyMTCwWRvkAAAAGHRFWHR4bXA6Rmxhc2hQaXhWZXJzaW9uADAxMDCBx9h8AAAAGHRFWHR4bXA6UGl4ZWxYRGltZW5zaW9uADEyMDBXCdQ6AAAAGHRFWHR4bXA6UGl4ZWxZRGltZW5zaW9uADEyMDDu8g/SAAAAAElFTkSuQmCC">
-<meta name="theme-color" content="#212121">
+<meta name="theme-color" content="#e8e8e8">
 <title>Настройка входа — Korra21</title>
 <style>
   @font-face {
@@ -491,13 +509,14 @@ _EMPTY_HTML = """\
     src: url('/fonts/Onest-Variable.woff2') format('woff2');
   }
   :root {
-    color-scheme: dark;
-    --canvas: #212121;
-    --text: #e8e8e8;
-    --muted: #9a9a9a;
+    color-scheme: light;
+    --canvas: #e8e8e8;
+    --surface: #e0e0e0;
+    --text: #1f1f1f;
+    --muted: #5c5c5c;
     --lime: #9ede01;
-    --shadow: #191919;
-    --highlight: #2e2e2e;
+    --shadow: #bebebe;
+    --highlight: #ffffff;
   }
   *, *::before, *::after { box-sizing: border-box; }
   html, body {
@@ -515,33 +534,27 @@ _EMPTY_HTML = """\
     place-items: center;
     padding: clamp(1.25rem, 5vw, 4rem);
     background:
-      radial-gradient(circle at 15% 12%, rgba(158, 222, 1, 0.08), transparent 30rem),
+      radial-gradient(circle at 15% 12%, #f4f4f4, transparent 34rem),
       var(--canvas);
   }
   main {
     width: 100%; max-width: 36rem;
     padding: clamp(1.6rem, 5vw, 2.8rem);
     border-radius: 1.9rem;
-    background: var(--canvas);
+    background: var(--surface);
     box-shadow: 5px 5px 10px var(--shadow), -5px -5px 10px var(--highlight);
   }
+  /* Тот же лок-ап из PNG, что и на /login: множитель .817 уравнивает
+     оптические высоты литер и цифры внутри их кадров. */
   .brand {
+    --word-h: 2rem;
     display: inline-flex;
     align-items: center;
-    gap: 0.65rem;
+    gap: 0.1rem;
     margin-bottom: 3rem;
-    font-size: 1.8rem;
-    font-weight: 850;
-    letter-spacing: 0.03em;
   }
-  .brand span {
-    padding: 0.16rem 0.38rem 0.12rem;
-    border-radius: 0.55rem;
-    background: var(--lime);
-    color: #1f1f1f;
-    font-size: 1.2rem;
-    line-height: 1;
-  }
+  .brand-word { height: var(--word-h); width: auto; }
+  .brand-number { height: calc(var(--word-h) * 0.817); width: auto; }
   h1 {
     margin: 0 0 1rem;
     font-weight: 700;
@@ -551,12 +564,15 @@ _EMPTY_HTML = """\
   }
   p { margin: 0 0 1rem; color: var(--muted); }
   .next-step { margin-top: 2rem; color: var(--text); }
+  /* Лайм на светлом фоне читается только заливкой, поэтому встроенный код и
+     ссылка идут чернилами: канон `UI_PALETTE.md`, раздел «Акцент». */
   code {
     display: inline-block;
     padding: 0.18em 0.45em;
     border-radius: 0.45rem;
-    background: #191919;
-    color: var(--lime);
+    background: var(--surface);
+    box-shadow: inset 1px 1px 3px var(--shadow), inset -1px -1px 3px var(--highlight);
+    color: var(--text);
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
     font-size: 0.88em;
   }
@@ -565,7 +581,7 @@ _EMPTY_HTML = """\
     min-height: 2.75rem;
     align-items: center;
     margin-top: 0.5rem;
-    color: var(--lime);
+    color: var(--text);
     font-weight: 650;
     text-underline-offset: 0.24em;
   }
@@ -577,7 +593,10 @@ _EMPTY_HTML = """\
 </head>
 <body>
 <main>
-<div class="brand">KORRA <span>21</span></div>
+<div class="brand">
+  <img class="brand-word" src="/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
+  <img class="brand-number" src="/brand/korra-21.png" alt="21" width="364" height="233">
+</div>
 <h1>Настройте доступ</h1>
 <p>Панель готова принимать подключения. Добавьте провайдер логина и пароля или OAuth-провайдер в конфигурации Korra21.</p>
 <p class="next-step">Для локальной работы привяжите панель к <code>127.0.0.1</code> и откройте её через защищённый туннель: SSH-туннель или Tailscale.</p>
@@ -682,7 +701,7 @@ def render_login_html(*, next_path: str = "", base_path: str = "") -> str:
     if not providers:
         return _EMPTY_HTML.replace(
             "url('/fonts/", f"url('{prefix}/fonts/"
-        )
+        ).replace('src="/brand/', f'src="{prefix}/brand/')
 
     if next_path:
         # URL-encode then HTML-escape. The URL-encode step matches the

@@ -402,7 +402,7 @@ class TestLoginPageRender:
             html = render_login_html(next_path="/sessions")
             assert '<html lang="ru">' in html
             assert "Korra21" in html
-            assert "Вход в систему" in html
+            assert "С возвращением" in html
             assert '<form class="provider-form" data-provider="testpw"' in html
             assert 'name="username"' in html
             assert 'name="password"' in html
@@ -418,6 +418,37 @@ class TestLoginPageRender:
             assert "/auth/password-login" in html
         finally:
             clear_providers()
+
+    def test_login_page_is_light_only_and_wears_the_brand_lockup(self):
+        """Решение владельца 09.09.2026: светлая тема по умолчанию в любом
+        интерфейсе, а «KORRA 21» на входе — наши знаки картинками. Вход не
+        имеет переключателя тем, поэтому тёмных токенов тут быть не должно."""
+        clear_providers()
+        register_provider(PasswordProvider())
+        try:
+            html = render_login_html()
+
+            assert "color-scheme: light" in html
+            assert "--canvas: #e8e8e8" in html
+            assert "color-scheme: dark" not in html
+            assert "--canvas: #212121" not in html
+            assert 'content="#e8e8e8"' in html
+            assert '<img class="brand-word" src="/brand/korra-wordmark.png"' in html
+            assert '<img class="brand-number" src="/brand/korra-21.png"' in html
+            assert '<span class="brand-word">KORRA</span>' not in html
+        finally:
+            clear_providers()
+
+    def test_provider_setup_page_is_light_and_uses_the_same_lockup(self):
+        """Страница «Настройте доступ» (провайдеров нет) — та же светлая тема:
+        именно её видит владелец контура, если конфиг входа ещё не собран."""
+        clear_providers()
+        html = render_login_html()
+
+        assert "Настройте доступ" in html
+        assert "color-scheme: light" in html
+        assert "color-scheme: dark" not in html
+        assert 'src="/brand/korra-wordmark.png"' in html
 
     def test_oauth_only_page_stays_script_free(self):
         clear_providers()

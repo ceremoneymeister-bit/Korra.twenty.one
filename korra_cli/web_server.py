@@ -20035,9 +20035,12 @@ def mount_spa(application: FastAPI):
 # definitions live in the frontend (web/src/themes/presets.ts).
 # Korra: ровно две темы (решение владельца 02.09.2026); фронтовые id и
 # миграция легаси-имён — web/src/themes/presets.ts (migrateThemeName).
+# Светлая идёт первой и остаётся значением по умолчанию (решение владельца
+# 09.09.2026: «по умолчанию светлая всегда»). Описание тёмной приведено к
+# принятой 03.09 графитовой палитре — фиолетовый #150B29 отменён.
 _BUILTIN_DASHBOARD_THEMES = [
     {"name": "light", "label": "Светлая", "description": "Чистая светлая тема Korra"},
-    {"name": "dark",  "label": "Тёмная",  "description": "Чернильно-фиолетовая тема Korra (#150B29)"},
+    {"name": "dark",  "label": "Тёмная",  "description": "Графитовая тема Korra (#212121)"},
 ]
 
 

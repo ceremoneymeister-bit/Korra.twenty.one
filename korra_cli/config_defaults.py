@@ -1689,7 +1689,11 @@ DEFAULT_CONFIG = {
 
     # Web dashboard settings
     "dashboard": {
-        "theme": "default",  # Dashboard visual theme: "default", "midnight", "ember", "mono", "cyberpunk", "rose"
+        # Korra: тем ровно две — "light" и "dark" (решение владельца 02.09.2026),
+        # светлая по умолчанию (09.09.2026). Легаси-имена апстрима ("default",
+        # "midnight", "ember", …) молча съезжают в light/dark через
+        # migrateThemeName в web/src/themes/presets.ts.
+        "theme": "light",
         # Process-isolation rollout controls. Runtime reads these through the
         # raw config loader, so tui_gateway.server also owns explicit defaults.
         "turn_isolation": False,
