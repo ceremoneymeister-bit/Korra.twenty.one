@@ -146,12 +146,12 @@ elif mode == 'bootstrap':
     template = root / 'korra-config.yaml.example'
     assert template.is_file(), 'missing Korra config template'
     cfg = data / 'config.yaml'
-    assert cfg.read_bytes() == template.read_bytes(), 'clean config differs from image template'
+    from korra_cli.config import DEFAULT_CONFIG
     config = yaml.safe_load(cfg.read_text())
-    assert config == {
-        'gateway': {'multiplex_profiles': True},
-        'terminal': {'cwd': '/opt/data/workspace'},
-    }, 'unexpected enabled clean config'
+    assert config.pop('_config_version', None) == DEFAULT_CONFIG['_config_version'], 'fresh schema not stamped'
+    assert config == yaml.safe_load(template.read_text()), 'unexpected enabled clean config'
+    assert all(line in cfg.read_text() for line in template.read_text().splitlines()
+               if line.lstrip().startswith('#')), 'clean config comments were lost'
     env_template = (root / 'korra-env.example').read_text()
     env = (data / '.env').read_text()
     env_without_key = re.sub(r'^API_SERVER_KEY=[^\n]*\n?', '', env, flags=re.M)

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from korra_cli.config import (
+    _raw_config_has_explicit_version,
     check_config_version,
     get_config_path,
     get_env_path,
@@ -18,7 +19,7 @@ from korra_cli.config_migrations import (
     SUPPORT_FLOOR_VERSION,
     support_floor_message,
 )
-from utils import env_var_enabled
+from utils import atomic_roundtrip_yaml_update, env_var_enabled, fast_safe_load
 
 
 def _backup_path(path: Path, stamp: str) -> Path:
@@ -61,6 +62,25 @@ def main() -> int:
 
     current_ver, latest_ver = check_config_version()
     if current_ver >= latest_ver:
+        return 0
+
+    # Native core distinguishes a fresh hand-written seed from an explicit
+    # unsupported version. Validate the raw shape as well: null/scalar/invalid
+    # documents are not empty seeds and must never be replaced with defaults.
+    if not _raw_config_has_explicit_version():
+        config_path = get_config_path()
+        try:
+            raw = fast_safe_load(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return 0  # check_config_version already reports malformed YAML
+        if not isinstance(raw, dict):
+            print("[config-migrate] WARNING: настройки должны быть YAML-словарём; файл сохранён без изменений", file=sys.stderr)
+            return 0
+        # The seed already uses current keys. Reuse the native single-key
+        # round-trip writer so comments, active keys, quoting and modes survive;
+        # the migration ladder's bulk save would materialise unrelated text.
+        atomic_roundtrip_yaml_update(config_path, "_config_version", latest_ver)
+        print(f"[config-migrate] Fresh config schema stamped: {latest_ver}")
         return 0
 
     # Below the auto-migration support floor: migrate_config() refuses (and

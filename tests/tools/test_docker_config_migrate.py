@@ -100,18 +100,42 @@ def test_docker_config_migrate_skips_below_floor_config_untouched(tmp_path: Path
     assert not list(tmp_path.glob("*.bak-*"))
 
 
-def test_docker_config_migrate_skips_unversioned_config_untouched(tmp_path: Path) -> None:
-    """Unversioned configs coerce to version 0 — below the floor, so refused."""
+def test_docker_config_migrate_stamps_minimal_seed_and_preserves_comments(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    original = yaml.safe_dump({"model": {"default": "m", "provider": "openrouter"}})
+    original = (REPO_ROOT / "korra-config.yaml.example").read_text()
     config_path.write_text(original, encoding="utf-8")
+    env_path = tmp_path / ".env"
+    env_path.write_bytes(b"# keep exact formatting\nFAKE_TOKEN = synthetic-value\n")
+    env_before = (env_path.read_bytes(), env_path.stat().st_ino)
+    first = _run_migration(tmp_path)
+    assert first.returncode == 0, first.stderr
+    raw = yaml.safe_load(config_path.read_text())
+    assert raw.pop("_config_version", None) == DEFAULT_CONFIG["_config_version"]
+    assert raw == yaml.safe_load(original)
+    for comment in (line for line in original.splitlines() if line.lstrip().startswith("#")):
+        assert comment in config_path.read_text()
+    assert len(config_path.read_text()) < len(original) + 60
+    assert (env_path.read_bytes(), env_path.stat().st_ino) == env_before
+    stamped = (config_path.read_bytes(), config_path.stat().st_ino)
+    assert _run_migration(tmp_path).returncode == 0
+    assert (config_path.read_bytes(), config_path.stat().st_ino) == stamped
+    assert not list(tmp_path.glob("*.bak-*"))
 
+
+@pytest.mark.parametrize("original", [
+    "null\n", "[]\n", "scalar\n", "", "# comment only\n",
+    "_config_version: null\n", "_config_version: invalid\n", "_config_version: false\n",
+    "_config_version: 11\n", "model: [unterminated\n",
+])
+def test_docker_config_migrate_rejected_shapes_have_zero_writes(tmp_path: Path, original: str) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(original)
+    env_path = tmp_path / ".env"
+    env_path.write_text("FAKE_TOKEN = synthetic-value\n")
+    before = {p.name: (p.read_bytes() if p.is_file() else None, p.stat().st_ino, p.stat().st_mode) for p in (config_path, env_path)}
     proc = _run_migration(tmp_path)
-
     assert proc.returncode == 0, proc.stderr
-    assert "Migrating config schema" not in proc.stdout
-    assert "can no longer be auto-migrated" in proc.stderr
-    assert config_path.read_text(encoding="utf-8") == original
+    assert {p.name: (p.read_bytes() if p.is_file() else None, p.stat().st_ino, p.stat().st_mode) for p in (config_path, env_path)} == before
     assert not list(tmp_path.glob("*.bak-*"))
 
 
@@ -154,6 +178,7 @@ def test_docker_config_migrate_restores_backups_after_failed_migration(
     env_path.write_text(original_env, encoding="utf-8")
 
     monkeypatch.setattr(module, "check_config_version", lambda: (12, DEFAULT_CONFIG["_config_version"]))
+    monkeypatch.setattr(module, "_raw_config_has_explicit_version", lambda: True)
     monkeypatch.setattr(module, "get_config_path", lambda: config_path)
     monkeypatch.setattr(module, "get_env_path", lambda: env_path)
 
@@ -186,6 +211,7 @@ def test_docker_config_migrate_restores_backups_when_version_does_not_advance(
 
     calls = iter([(12, DEFAULT_CONFIG["_config_version"]), (12, DEFAULT_CONFIG["_config_version"])])
     monkeypatch.setattr(module, "check_config_version", lambda: next(calls))
+    monkeypatch.setattr(module, "_raw_config_has_explicit_version", lambda: True)
     monkeypatch.setattr(module, "get_config_path", lambda: config_path)
     monkeypatch.setattr(module, "get_env_path", lambda: env_path)
 
