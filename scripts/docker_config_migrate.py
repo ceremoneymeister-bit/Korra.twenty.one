@@ -67,7 +67,8 @@ def main() -> int:
     # Native core distinguishes a fresh hand-written seed from an explicit
     # unsupported version. Validate the raw shape as well: null/scalar/invalid
     # documents are not empty seeds and must never be replaced with defaults.
-    if not _raw_config_has_explicit_version():
+    explicit_version = _raw_config_has_explicit_version()
+    if not explicit_version:
         config_path = get_config_path()
         try:
             raw = fast_safe_load(config_path.read_text(encoding="utf-8"))
@@ -76,18 +77,21 @@ def main() -> int:
         if not isinstance(raw, dict):
             print("[config-migrate] WARNING: настройки должны быть YAML-словарём; файл сохранён без изменений", file=sys.stderr)
             return 0
-        # The seed already uses current keys. Reuse the native single-key
-        # round-trip writer so comments, active keys, quoting and modes survive;
-        # the migration ladder's bulk save would materialise unrelated text.
-        atomic_roundtrip_yaml_update(config_path, "_config_version", latest_ver)
-        print(f"[config-migrate] Fresh config schema stamped: {latest_ver}")
-        return 0
+        # Only the shipped current seed is known to need no key migrations.
+        # Other versionless mappings can contain legacy STT/compression/etc.
+        # settings and must run the native ladder before receiving a stamp.
+        template = Path(__file__).resolve().parents[1] / "korra-config.yaml.example"
+        current_seed = fast_safe_load(template.read_text(encoding="utf-8"))
+        if raw == current_seed:
+            atomic_roundtrip_yaml_update(config_path, "_config_version", latest_ver)
+            print(f"[config-migrate] Fresh config schema stamped: {latest_ver}")
+            return 0
 
     # Below the auto-migration support floor: migrate_config() refuses (and
     # leaves the file untouched), so don't run the backup/verify dance that
     # would raise "did not advance config version" and block the boot.
     # Warn-and-continue matches the CLI's fail-safe posture.
-    if current_ver < SUPPORT_FLOOR_VERSION:
+    if explicit_version and current_ver < SUPPORT_FLOOR_VERSION:
         print(
             f"[config-migrate] WARNING: {support_floor_message()}",
             file=sys.stderr,

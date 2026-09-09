@@ -281,3 +281,22 @@ def test_docker_config_migrate_second_boot_preserves_env_byte_for_byte(tmp_path:
     # config.yaml is untouched by the second boot, and no new backup is made.
     assert config_path.read_bytes() == config_after_first
     assert sorted(tmp_path.glob("config.yaml.bak-*")) == first_boot_backups
+
+@pytest.mark.parametrize("original,section,key,value", [
+    ({"stt": {"provider": "local", "model": "tiny"}}, "stt", "local", {"model": "tiny"}),
+    ({"compression": {"summary_model": "fixture-summary", "summary_provider": "openai"}},
+     "auxiliary", "compression", {"model": "fixture-summary", "provider": "openai"}),
+])
+def test_unversioned_legacy_keys_still_run_native_migrations(tmp_path, original, section, key, value):
+    """A missing stamp must not retire legacy settings without migrating them."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(original))
+    proc = _run_migration(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    migrated = yaml.safe_load(config_path.read_text())
+    assert migrated[section][key] == value
+    assert migrated["_config_version"] == DEFAULT_CONFIG["_config_version"]
+    assert list(tmp_path.glob("config.yaml.bak-*"))
+    first = config_path.read_bytes()
+    assert _run_migration(tmp_path).returncode == 0
+    assert config_path.read_bytes() == first
