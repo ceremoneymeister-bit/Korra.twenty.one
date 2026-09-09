@@ -410,3 +410,18 @@ def test_failed_rollback_keeps_mapped_original_wal_for_manual_recovery(tmp_path,
     saved_wals = [p for journal in journals for p in journal.glob("sidecar-*") if not p.name.endswith(".json")]
     assert any(p.read_bytes() == wal_before for p in saved_wals)
     assert all(journal.stat().st_mode & 0o777 == 0o700 for journal in journals)
+
+@pytest.mark.parametrize("marker", [b"\xff", b"", b"   \n"])
+def test_real_cli_uncertain_active_profile_refuses_before_any_write(tmp_path, isolated, marker):
+    require_host_proc()
+    user, root = isolated
+    (root / "active_profile").write_bytes(marker)
+    path = archive(tmp_path, {"config.yaml": "model: wrong-root-overwrite\n"})
+    before = snapshot(user)
+    env = os.environ.copy()
+    env.update(HOME=str(user), HERMES_HOME=str(root), HERMES_SKIP_CHMOD="1",
+               PYTHONPATH=str(Path(__file__).resolve().parents[2]))
+    proc = subprocess.run([sys.executable, "-m", "korra_cli.main",
+                           "import", str(path), "--force"], env=env, capture_output=True, timeout=30)
+    assert proc.returncode != 0
+    assert snapshot(user) == before

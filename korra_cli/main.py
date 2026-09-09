@@ -725,13 +725,29 @@ def _apply_profile_override() -> None:
             from korra_constants import get_default_hermes_root
 
             active_path = get_default_hermes_root() / "active_profile"
-            if active_path.exists():
+            importing = _first_positional_argv() == "import"
+            if importing:
+                # exists() may suppress access errors. Only a truly absent
+                # marker authorizes the default target during restoration.
+                try:
+                    active_path.lstat()
+                    active_present = True
+                except FileNotFoundError:
+                    active_present = False
+            else:
+                active_present = active_path.exists()
+            if active_present:
                 name = active_path.read_text(encoding="utf-8").strip()
+                if importing and not name:
+                    raise ValueError("empty active profile")
                 if name and name != "default":
                     profile_name = name
                     consume = 0  # don't strip anything from argv
-        except (UnicodeDecodeError, OSError):
-            pass  # corrupted file, skip
+        except (UnicodeDecodeError, OSError, ValueError):
+            if _first_positional_argv() == "import":
+                print("Ошибка: активный профиль не удалось прочитать; укажите точный профиль через -p.", file=sys.stderr)
+                sys.exit(1)
+            pass  # Other CLI commands retain best-effort startup.
 
     # 3. If we found a profile, resolve and set HERMES_HOME
     if profile_name is not None:
