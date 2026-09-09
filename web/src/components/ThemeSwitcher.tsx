@@ -56,6 +56,28 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
   const current = availableThemes.find((th) => th.name === themeName);
   const label = current?.label ?? themeName;
   const sheetTitle = t.theme?.title ?? "Тема";
+  const resetEvening = preference?.evening?.disabled ? (
+    <button
+      type="button"
+      className="min-h-[44px] p-2 text-xs underline"
+      disabled={saveState === "pending"}
+      onClick={() => void setEvening("enable")}
+    >
+      Разрешить вечернее предложение
+    </button>
+  ) : null;
+  const saveNotice = saveState !== "idle" ? (
+    <div className="max-w-64 text-xs p-2" data-theme-save-status>
+      {saveState === "error" ? <>
+        <p role="alert">{saveError}</p>
+        <button className="min-h-[44px] underline" type="button" onClick={() => void retryTheme()}>
+          Повторить сохранение
+        </button>
+      </> : <p role="status">
+        {saveState === "pending" ? "Сохраняем настройку…" : "Настройка сохранена"}
+      </p>}
+    </div>
+  ) : null;
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -86,13 +108,7 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
         </span>
       </Button>
 
-      {open && preference?.evening?.disabled && <button type="button" className="min-h-11 p-2 text-xs underline" disabled={saveState === "pending"} onClick={() => void setEvening("enable")}>Разрешить вечернее предложение</button>}
-      {saveState !== "idle" && (
-        <div className="max-w-64 text-xs p-2" data-theme-save-status>
-          {saveState === "error" ? <><p role="alert">{saveError}</p><button className="min-h-11 underline" type="button" onClick={() => void retryTheme()}>Повторить сохранение</button></> :
-            <p role="status">{saveState === "pending" ? "Сохраняем настройку…" : "Настройка сохранена"}</p>}
-        </div>
-      )}
+      {!open && saveNotice}
       {useMobileSheet && (
         <BottomSheet
           backdropDismissLabel={t.common.close}
@@ -112,6 +128,8 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
               fontId={fontId}
               setFont={setFont}
             />
+            {saveNotice}
+            {resetEvening}
           </div>
         </BottomSheet>
       )}
@@ -154,6 +172,8 @@ export function ThemeSwitcher({ collapsed = false, dropUp = false }: ThemeSwitch
               fontId={fontId}
               setFont={setFont}
             />
+            {saveNotice}
+            {resetEvening}
           </div>
         );
         return dropUp ? createPortal(dropdown, document.body) : dropdown;
@@ -193,7 +213,7 @@ function ThemeSwitcherOptions({
               void setTheme(availableThemes[nextIndex].name);
             }}
             className={cn(
-              "flex min-h-11 items-center justify-center gap-2 neo-button rounded-lg px-3 py-2",
+              "flex min-h-[44px] items-center justify-center gap-2 neo-button rounded-lg px-3 py-2",
               "text-sm font-medium transition-colors",
               isActive
                 ? "bg-primary text-primary-foreground"
