@@ -572,11 +572,24 @@ Updater сохраняет фактические HostConfig NanoCpus/Memory в 
 `CONTAINER_CPUS=4`, `CONTAINER_MEMORY=4g` считаются намеренным override для
 обновления; rollback всегда возвращает исходные лимиты, даже при заданных env.
 
-После запуска проверяются панель, список профилей, live gateway socket,
-покрытие прежних served_profiles и короткий stateless запрос к модели через
-локальный API. Native readiness ожидается до WAIT_SECONDS: готовая панель
-может опережать запуск gateway и профилей. Смена identity/ресурсов и остановка
-контейнера сразу считаются ошибкой; модель вызывается один раз после readiness.
+До pull/drain updater сохраняет baseline_capability: foundation только при
+нативном AuthError/no_provider_configured; configured при успешном разрешении
+провайдера. Receipt хранит SHA256 идентичности provider/endpoint/API mode без
+ключа или адреса. Отсутствующий ключ явно выбранного провайдера, повреждённая
+авторизация и неопределённость отклоняются до остановки.
+
+После запуска одинаковый smoke для forward и rollback проверяет панель,
+обязательные gateway/dashboard/storage/platforms components и overall=ok,
+точную актуальную config schema, live gateway socket, список и покрытие прежних
+served_profiles. Затем capability должна совпасть с baseline. Foundation
+проверяет stateless SSE с ожидаемым русским missing-provider error и [DONE],
+без model ACK; configured обязан получить KORRA_UPDATE_OK от модели.
+Degraded/malformed/missing health не маскируется успешной моделью.
+Native readiness ожидается до WAIT_SECONDS: готовая панель может опережать
+gateway и профили. Смена identity/ресурсов и остановка контейнера сразу
+считаются ошибкой. Capability probe ограничен 30 секундами, API smoke — 90.
+Старый receipt без baseline_capability не разрешает автоматический rollback:
+оператор проверяет сохранённую операцию отдельно, режим не угадывается.
 Этот запрос не доставляется людям или в каналы. Для CI/стенда
 используется отдельный локальный fake-model endpoint и синтетические ключи.
 Приёмка кандидата на данных клиента выполняется только через sanitizer всех

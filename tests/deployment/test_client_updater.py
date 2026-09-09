@@ -36,6 +36,9 @@ class FakeDockerUpdater(u.Updater):
     def free_space(self, *args):
         pass
 
+    def capability(self, **kwargs):
+        return {"mode": "configured", "provider_hash": "a" * 64}
+
     def docker(self, *args, **kwargs):
         self.calls.append(args)
         if args[0] == "inspect":
@@ -128,6 +131,7 @@ def updater(tmp_path, monkeypatch):
     monkeypatch.setenv("NAME", "updater-fixture")
     instance = FakeDockerUpdater(home)
     instance.initialize("fixture-job", "registry.example/korra:latest")
+    instance.receipt["baseline_capability"] = instance.capability()
     return instance
 
 
@@ -983,7 +987,11 @@ def test_failed_schema_rehearsal_restores_old_state_before_candidate_boot(update
 def real_smoke_context(updater, monkeypatch):
     clock = [0.0]
     models = []
-    settings = {"alias": "HERMES"}
+    settings = {"alias": "HERMES", "status": {
+        "gateway_running": True, "gateway_state": "running", "overall": "ok",
+        "config_version": 37, "latest_config_version": 37,
+        "components": {name: {"status": "ok"} for name in ("gateway", "dashboard", "storage", "platforms")},
+    }}
     monkeypatch.setenv("WAIT_SECONDS", "5")
     monkeypatch.delenv("CONTAINER_CPUS", raising=False)
     monkeypatch.delenv("CONTAINER_MEMORY", raising=False)
@@ -996,7 +1004,7 @@ def real_smoke_context(updater, monkeypatch):
         if url.endswith("/"):
             return io.BytesIO(f'window.__{settings["alias"]}_SESSION_TOKEN__="test-token"'.encode())
         if url.endswith("/api/status"):
-            return io.BytesIO(b'{"gateway_running":true,"gateway_state":"running"}')
+            return io.BytesIO(json.dumps(settings["status"]).encode())
         return io.BytesIO(b'{"profiles":[{"name":"default"},{"name":"secretary"}]}')
     monkeypatch.setattr(u.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(updater, "execute", lambda code, *args, **kwargs: models.append(code))
@@ -1056,3 +1064,143 @@ def test_real_smoke_model_failure_has_safe_specific_reason(real_smoke_context, m
         u.Updater.smoke(updater, OLD)
     assert "private-upstream-response" not in str(caught.value)
     assert updater.receipt["error_code"] == "model_smoke_failed"
+
+
+@pytest.mark.parametrize("damage", ["degraded", "missing", "schema", "malformed", "false_version"])
+def test_degraded_health_never_reaches_model(real_smoke_context, monkeypatch, damage):
+    updater, clock, models, settings = real_smoke_context
+    status = settings["status"]
+    if damage == "degraded":
+        status["components"]["storage"]["status"] = "degraded"
+    elif damage == "missing":
+        del status["components"]["dashboard"]
+    elif damage == "schema":
+        status["config_version"] -= 1
+    elif damage == "false_version":
+        status["config_version"] = True
+    else:
+        status["components"] = []
+    monkeypatch.setattr(updater, "native_states", lambda **kw: [{
+        "home": "/opt/data", "state": {"gateway_state": "running", "served_profiles": ["default", "secretary"]}}])
+    with pytest.raises(u.UpdateError):
+        u.Updater.smoke(updater, OLD)
+    assert models == []
+
+
+@pytest.mark.parametrize("phase", ["smoke", "rollback_recreate"])
+def test_provider_mismatch_rejects_before_model(real_smoke_context, monkeypatch, phase):
+    updater, _, models, _ = real_smoke_context
+    updater.receipt.update(phase=phase, baseline_capability={"mode": "configured", "provider_hash": "a" * 64})
+    monkeypatch.setattr(updater, "capability", lambda **kw: {"mode": "foundation"}, raising=False)
+    monkeypatch.setattr(updater, "native_states", lambda **kw: [{
+        "home": "/opt/data", "state": {"gateway_state": "running", "served_profiles": ["default", "secretary"]}}])
+    with pytest.raises(u.UpdateError, match="capability"):
+        u.Updater.smoke(updater, OLD)
+    assert models == []
+
+
+def test_baseline_capability_recorded_before_any_stop(updater, monkeypatch):
+    calls = []
+    def capture(**kw):
+        assert not any(call[0] == "stop" for call in updater.calls)
+        calls.append(True)
+        return {"mode": "foundation"}
+    monkeypatch.setattr(updater, "capability", capture, raising=False)
+    updater.update("registry.example/korra:latest")
+    assert calls == [True]
+    assert updater.receipt["baseline_capability"] == {"mode": "foundation"}
+
+
+@pytest.mark.parametrize("phase", ["smoke", "rollback_recreate"])
+def test_foundation_checks_expected_api_error_without_model_ack(real_smoke_context, monkeypatch, phase):
+    updater, _, codes, _ = real_smoke_context
+    updater.receipt.update(phase=phase, baseline_capability={"mode": "foundation"})
+    monkeypatch.setattr(updater, "capability", lambda **kw: {"mode": "foundation"})
+    monkeypatch.setattr(updater, "native_states", lambda **kw: [{
+        "home": "/opt/data", "state": {"gateway_state": "running", "served_profiles": ["default", "secretary"]}}])
+    u.Updater.smoke(updater, OLD)
+    assert len(codes) == 1
+    assert "KORRA_UPDATE_OK" not in codes[0]
+    assert codes[0] == u.FOUNDATION_SMOKE_CODE
+    assert updater.receipt["active_capability"] == {"mode": "foundation"}
+
+
+def test_legacy_rollback_without_capability_refuses_before_stop(updater):
+    del updater.receipt["baseline_capability"]
+    with pytest.raises(u.UpdateError, match="capability"):
+        updater.rollback()
+    assert not updater.calls
+
+
+@pytest.mark.parametrize("case,configured", [("fresh", False), ("key", True), ("missing_key", None)])
+def test_capability_probe_uses_real_native_resolver_in_isolated_home(tmp_path, case, configured):
+    home = tmp_path / "user"
+    home.mkdir()
+    data = home / ".hermes"
+    data.mkdir()
+    config = "gateway: {}\n" if case == "fresh" else "model:\n  provider: anthropic\n  default: claude-fixture\n"
+    (data / "config.yaml").write_text(config)
+    (data / ".env").write_text("ANTHROPIC_API_KEY=synthetic-test-key\n" if case == "key" else "")
+    env = {"PATH": os.environ["PATH"], "HOME": str(home), "HERMES_HOME": str(data),
+           "PYTHONPATH": str(SOURCE.parents[2]), "AWS_EC2_METADATA_DISABLED": "true",
+           "HERMES_SKIP_CHMOD": "1", "HERMES_DISABLE_LAZY_INSTALLS": "1"}
+    result = subprocess.run([sys.executable, "-c", u.CAPABILITY_CODE], env=env,
+                            capture_output=True, text=True, timeout=30)
+    if configured is None:
+        assert result.returncode != 0
+        assert not result.stdout.strip()
+    else:
+        assert result.returncode == 0, result.stderr
+        capability = u.validate_capability(json.loads(result.stdout))
+        assert capability["mode"] == ("configured" if configured else "foundation")
+        assert "synthetic-test-key" not in result.stdout
+
+
+@pytest.mark.parametrize("case", ["ok", "no_done", "success", "wrong_error", "malformed"])
+def test_foundation_probe_exercises_stateless_sse_contract(monkeypatch, case):
+    import urllib.request
+    message = "Провайдер ответа не настроен: добавьте ключ в разделе «Ключи»."
+    event = {"choices": [{"delta": {}, "finish_reason": "error"}], "error": {"message": message}}
+    if case == "success":
+        event["choices"][0]["finish_reason"] = "stop"
+    elif case == "wrong_error":
+        event["error"]["message"] = "Ошибка авторизации. Ключи."
+    body = "data: " + json.dumps(event) + "\n\n"
+    if case != "no_done":
+        body += "data: [DONE]\n\n"
+    if case == "malformed":
+        body = "data: {broken}\n\n"
+    calls = []
+    def serve(request, **kw):
+        payload = json.loads(request.data)
+        assert payload["stream"] is True
+        assert "KORRA_UPDATE_OK" not in str(payload)
+        assert request.full_url == "http://127.0.0.1:8642/v1/chat/completions"
+        assert kw["timeout"] == 90
+        calls.append(request)
+        return io.BytesIO(body.encode())
+    monkeypatch.setenv("API_SERVER_KEY", "synthetic-api-key")
+    monkeypatch.setenv("API_SERVER_PORT", "8642")
+    monkeypatch.setattr(urllib.request, "urlopen", serve)
+    if case == "ok":
+        exec(u.FOUNDATION_SMOKE_CODE, {})
+    else:
+        with pytest.raises((RuntimeError, ValueError)):
+            exec(u.FOUNDATION_SMOKE_CODE, {})
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("value", ["{}", "null", '{"mode":"configured"}', '{"mode":"foundation","secret":"bad"}'])
+def test_capability_probe_malformed_output_is_safe(updater, monkeypatch, value):
+    monkeypatch.setattr(updater, "execute", lambda *a, **kw: value)
+    with pytest.raises(u.UpdateError, match="capability cannot be verified"):
+        u.Updater.capability(updater)
+
+
+def test_capability_probe_timeout_is_bounded_and_safe(updater, monkeypatch):
+    def expired(code, *, timeout):
+        assert timeout == 30
+        raise subprocess.TimeoutExpired("synthetic probe", timeout)
+    monkeypatch.setattr(updater, "execute", expired)
+    with pytest.raises(u.UpdateError, match="capability cannot be verified"):
+        u.Updater.capability(updater)

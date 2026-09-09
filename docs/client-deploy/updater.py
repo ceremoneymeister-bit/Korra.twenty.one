@@ -101,8 +101,92 @@ print(json.dumps(result))
 '''
 
 
+
+# Execute only inside the selected container. Provider values and credentials
+# never leave it; a typed native missing-provider error is the sole foundation
+# classification. Invalid/expired configured credentials fail closed.
+CAPABILITY_CODE = r'''
+import hashlib, json
+from dotenv import load_dotenv
+from korra_constants import get_hermes_home
+load_dotenv(get_hermes_home() / '.env', override=False)
+from korra_cli.auth import AuthError
+from korra_cli.runtime_provider import resolve_runtime_provider
+try:
+    runtime = resolve_runtime_provider()
+except AuthError as exc:
+    if exc.code != 'no_provider_configured':
+        raise RuntimeError('Configured provider cannot resolve') from None
+    result = {'mode': 'foundation'}
+else:
+    identity = [runtime.get(key) for key in ('provider', 'base_url', 'api_mode')]
+    if not isinstance(identity[0], str) or not identity[0]:
+        raise RuntimeError('Malformed provider identity')
+    result = {'mode': 'configured', 'provider_hash': hashlib.sha256(
+        json.dumps(identity, sort_keys=True).encode()).hexdigest()}
+print(json.dumps(result))
+'''
+
+FOUNDATION_SMOKE_CODE = r'''
+import json, os, urllib.request
+from dotenv import dotenv_values
+key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env').get('API_SERVER_KEY')
+if not key:
+    raise RuntimeError('API authentication unavailable')
+payload = {'messages': [{'role': 'user', 'content': 'Привет!'}], 'max_tokens': 24, 'stream': True}
+request = urllib.request.Request('http://127.0.0.1:' + os.environ['API_SERVER_PORT'] + '/v1/chat/completions',
+    data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
+with urllib.request.urlopen(request, timeout=90) as response:
+    body = response.read(2 * 1024 * 1024 + 1)
+if len(body) > 2 * 1024 * 1024:
+    raise RuntimeError('Oversized API readiness response')
+chunks, done = [], False
+for line in body.decode().splitlines():
+    if line.startswith('data: '):
+        value = line[6:].strip()
+        if value == '[DONE]':
+            done = True
+        else:
+            if done:
+                raise RuntimeError('Data after terminal SSE event')
+            chunks.append(json.loads(value))
+finals = [item for item in chunks if item.get('choices') and item['choices'][0].get('finish_reason')]
+if not done or len(finals) != 1 or finals[0]['choices'][0]['finish_reason'] != 'error':
+    raise RuntimeError('Expected missing-provider SSE failure')
+message = str((finals[0].get('error') or {}).get('message', ''))
+if 'Провайдер ответа не настроен' not in message or 'Ключи' not in message:
+    raise RuntimeError('Unexpected provider failure')
+print('foundation-smoke-ok')
+'''
+
 class UpdateError(RuntimeError):
     pass
+
+
+def validate_capability(value):
+    if value == {"mode": "foundation"}:
+        return value
+    if (isinstance(value, dict) and set(value) == {"mode", "provider_hash"}
+            and value["mode"] == "configured"
+            and isinstance(value["provider_hash"], str)
+            and re.fullmatch(r"[a-f0-9]{64}", value["provider_hash"])):
+        return value
+    raise UpdateError("Missing or malformed baseline provider capability")
+
+
+def validate_readiness_health(status):
+    if not isinstance(status, dict) or status.get("overall") != "ok":
+        raise UpdateError("Dashboard health is degraded or malformed")
+    components = status.get("components")
+    if not isinstance(components, dict) or any(
+        not isinstance(components.get(name), dict) or components[name].get("status") != "ok"
+        for name in ("gateway", "dashboard", "storage", "platforms")
+    ):
+        raise UpdateError("Mandatory readiness component is unavailable")
+    current, latest = status.get("config_version"), status.get("latest_config_version")
+    if type(current) is not int or type(latest) is not int or current <= 0 or current != latest:
+        raise UpdateError("Configuration schema is not current")
+
 
 
 def utc():
@@ -659,6 +743,13 @@ class Updater:
                     env[key] = os.environ[key]
         return env
 
+    def capability(self, timeout=30):
+        try:
+            value = json.loads(self.execute(CAPABILITY_CODE, timeout=timeout))
+            return validate_capability(value)
+        except (UpdateError, OSError, ValueError, subprocess.SubprocessError):
+            raise UpdateError("Provider capability cannot be verified") from None
+
     def smoke(self, expected):
         wait_seconds = max(1, int(os.environ.get("WAIT_SECONDS", "120")))
         deadline = time.monotonic() + wait_seconds
@@ -695,6 +786,7 @@ class Updater:
                 status, profiles = values
                 if not isinstance(status, dict) or not isinstance(profiles, dict):
                     raise UpdateError("Dashboard JSON is not ready")
+                validate_readiness_health(status)
                 present = {p.get("name") for p in profiles.get("profiles", []) if isinstance(p, dict)}
                 states = self.native_states(timeout=budget())
                 served = set()
@@ -712,6 +804,19 @@ class Updater:
         else:
             self.receipt["error_code"] = "native_readiness_timeout"
             raise UpdateError(f"Native gateway readiness timed out after {wait_seconds}s; see private operation.log")
+        expected_capability = validate_capability(self.receipt.get("baseline_capability"))
+        actual_capability = self.capability()
+        if actual_capability != expected_capability:
+            self.receipt["error_code"] = "provider_capability_mismatch"
+            raise UpdateError("Provider capability differs from the preserved baseline")
+        self.receipt["active_capability"] = actual_capability
+        if actual_capability["mode"] == "foundation":
+            try:
+                self.execute(FOUNDATION_SMOKE_CODE)
+            except (UpdateError, OSError, subprocess.SubprocessError):
+                self.receipt["error_code"] = "foundation_smoke_failed"
+                raise UpdateError("Foundation API readiness failed; see private operation.log") from None
+            return
         # A stateless API turn exercises model resolution and generation without
         # sending to a person/channel. Test fixtures provide a local fake model.
         code = r'''
@@ -955,6 +1060,7 @@ print(json.dumps(changed))
             if dry_run:
                 self.phase("dry_run", status="succeeded", planned_reference=reference)
                 return
+            self.receipt["baseline_capability"] = self.capability()
             self.phase("protect_previous_image")
             self.protect_image(old, "rollback")
             self.phase("fetch")
@@ -1021,6 +1127,7 @@ print(json.dumps(changed))
     def rollback(self, automatic=False):
         if self.receipt.get("status") == "rolled_back":
             return
+        validate_capability(self.receipt.get("baseline_capability"))
         self.launch_resource_env(rollback=True)  # validate before stopping an older job's healthy container
         self.verify_backup()  # validate before quiescing a healthy newer gateway
         allowed = {self.receipt.get("old_image_id"), self.receipt.get("target_image_id")}
