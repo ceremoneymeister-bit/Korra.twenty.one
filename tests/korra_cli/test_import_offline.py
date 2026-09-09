@@ -374,3 +374,39 @@ def test_real_cli_version_flag_does_not_restore(tmp_path, isolated):
                            "import", str(path), "--force"], env=env, capture_output=True, timeout=30)
     assert proc.returncode == 0
     assert snapshot(user) == before
+
+
+def test_failed_rollback_keeps_mapped_original_wal_for_manual_recovery(tmp_path, isolated, monkeypatch, capsys):
+    require_host_proc()
+    import json
+    user, target = isolated
+    db = target / "state.db"
+    database(db, "original")
+    # A crashed but now offline writer leaves a real committed WAL bundle.
+    proc = subprocess.run([sys.executable, "-c",
+        "import os,sqlite3,sys; c=sqlite3.connect(sys.argv[1]); "
+        "c.execute('PRAGMA journal_mode=WAL'); "
+        "c.execute(\"INSERT INTO sample VALUES ('committed WAL fixture')\"); "
+        "c.commit(); os._exit(0)", str(db)], capture_output=True, timeout=10)
+    assert proc.returncode == 0
+    wal_before = Path(str(db) + "-wal").read_bytes()
+    path = archive(tmp_path, {"config.yaml": "new", "state.db": database(tmp_path / "source.db")})
+    original_replace = os.replace
+    def fail(src, dst, *args, **kwargs):
+        src, dst = Path(src), Path(dst)
+        if src.name == "state.db-shm" and dst.parent.name.startswith(".korra-import-"):
+            raise OSError("synthetic forward failure")
+        if src.name.startswith("sidecar-") and dst.name == "state.db-wal":
+            raise OSError("synthetic rollback failure")
+        return original_replace(src, dst, *args, **kwargs)
+    monkeypatch.setattr(os, "replace", fail)
+    with pytest.raises(SystemExit):
+        restore(path)
+    assert "откат неполный" in capsys.readouterr().out
+    journals = list(target.glob(".korra-import-*"))
+    assert journals
+    mappings = [json.loads(p.read_text()) for journal in journals for p in journal.glob("*.json")]
+    assert any(entry["target"] == "state.db-wal" for entry in mappings)
+    saved_wals = [p for journal in journals for p in journal.glob("sidecar-*") if not p.name.endswith(".json")]
+    assert any(p.read_bytes() == wal_before for p in saved_wals)
+    assert all(journal.stat().st_mode & 0o777 == 0o700 for journal in journals)

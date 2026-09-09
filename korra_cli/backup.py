@@ -1461,6 +1461,15 @@ def _publish_import(plan, root, home):
             journals[parent] = Path(tempfile.mkdtemp(prefix=".korra-import-", dir=parent))
         return journals[parent]
 
+    def record_recovery(slot, target, existed):
+        # Map every original, including SQLite sidecars, before moving it.
+        # A failed rollback must leave enough metadata for manual recovery.
+        with slot.with_name(slot.name + ".json").open("x", encoding="utf-8") as receipt:
+            os.chmod(receipt.name, 0o600)
+            json.dump({"target": target.name, "original": existed}, receipt)
+            receipt.flush()
+            os.fsync(receipt.fileno())
+
     try:
         for index, entry in enumerate(plan):
             if entry["skipped"]:
@@ -1493,13 +1502,7 @@ def _publish_import(plan, root, home):
             os.chmod(new, mode)
             with new.open("rb") as stream:
                 os.fsync(stream.fileno())
-            # Private recovery mapping is fsynced before moving the original.
-            # If rollback itself fails, an operator can identify every .old.
-            with (journal / f"{index}.json").open("x", encoding="utf-8") as receipt:
-                os.chmod(receipt.name, 0o600)
-                json.dump({"target": target.name, "original": bool(existing)}, receipt)
-                receipt.flush()
-                os.fsync(receipt.fileno())
+            record_recovery(old, target, bool(existing))
             if existing:
                 os.replace(target, old)
             moves.append((target, old if existing else None))
@@ -1513,6 +1516,7 @@ def _publish_import(plan, root, home):
                 sidecar = Path(str(entry["target"]) + suffix)
                 if sidecar.exists():
                     old = journal_for(sidecar.parent) / f"sidecar-{len(moves)}"
+                    record_recovery(old, sidecar, True)
                     os.replace(sidecar, old)
                     moves.append((sidecar, old))
     except BaseException as exc:
