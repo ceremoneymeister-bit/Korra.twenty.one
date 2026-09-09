@@ -89,7 +89,7 @@ _LOGIN_HTML_TEMPLATE = """\
     min-height: 100svh;
     overflow-x: hidden;
     background:
-      radial-gradient(circle at 50% 22%, #f3f3f3, transparent 34rem),
+      radial-gradient(circle at 16% 12%, #f4f4f4, transparent 38rem),
       var(--canvas);
   }}
 
@@ -101,12 +101,18 @@ _LOGIN_HTML_TEMPLATE = """\
     padding: clamp(1.5rem, 5vw, 4rem);
   }}
 
-  .shell {{
+  .login-shell {{
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(21rem, 25rem);
+    align-items: center;
+    gap: clamp(3rem, 8vw, 7rem);
     width: 100%;
-    max-width: 23.5rem;
-    text-align: center;
+    max-width: 66rem;
     animation: arrive 0.55s cubic-bezier(.2,.8,.2,1) both;
   }}
+
+  .identity {{ min-width: 0; }}
 
   @keyframes arrive {{
     from {{ opacity: 0; transform: translateY(12px); }}
@@ -119,28 +125,45 @@ _LOGIN_HTML_TEMPLATE = """\
      (optically equal heights) and the near-zero gap — the optical gap is
      already baked into the files' padding. */
   .brand-lockup {{
-    --word-h: 2.35rem;
-    display: inline-flex;
+    --word-h: clamp(2.2rem, 4.2vw, 3.2rem);
+    display: flex;
     align-items: center;
-    justify-content: center;
     gap: 0.1rem;
-    margin-bottom: clamp(2.4rem, 7vh, 3.6rem);
+    margin-bottom: clamp(2.6rem, 8vh, 4.5rem);
   }}
 
   .brand-word {{ height: var(--word-h); width: auto; }}
   .brand-number {{ height: calc(var(--word-h) * 0.817); width: auto; }}
 
   h1 {{
-    margin: 0 0 0.55rem;
-    font-size: clamp(2rem, 4.6vw, 2.85rem);
+    max-width: 17ch;
+    margin: 0;
+    font-size: clamp(2.2rem, 4.2vw, 3.6rem);
+    font-weight: 700;
+    line-height: 1.06;
+    letter-spacing: -0.05em;
+    text-wrap: balance;
+  }}
+
+  .card {{
+    position: relative;
+    padding: clamp(1.6rem, 4vw, 2.4rem);
+    border-radius: 1.9rem;
+    background: var(--surface);
+    box-shadow: 5px 5px 10px var(--shadow), -5px -5px 10px var(--highlight);
+  }}
+
+  h2 {{
+    margin: 0;
+    font-size: clamp(1.7rem, 2.8vw, 2.15rem);
     font-weight: 680;
-    line-height: 1.08;
-    letter-spacing: -0.04em;
+    line-height: 1.1;
+    letter-spacing: -0.035em;
     text-wrap: balance;
   }}
 
   .sub {{
-    margin: 0 0 clamp(1.8rem, 5vh, 2.5rem);
+    margin: 0.5rem 0 1.9rem;
     color: var(--text-muted);
     font-size: 0.95rem;
   }}
@@ -250,9 +273,8 @@ _LOGIN_HTML_TEMPLATE = """\
   .foot {{
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 0.55rem;
-    margin: clamp(2.2rem, 6vh, 3rem) 0 0;
+    margin: 1.8rem 0 0;
     color: var(--text-muted);
     font-size: 0.75rem;
   }}
@@ -283,10 +305,22 @@ _LOGIN_HTML_TEMPLATE = """\
     }}
   }}
 
+  @media (max-width: 860px) {{
+    main {{ padding: 2.5rem clamp(1.25rem, 7vw, 4rem); }}
+    .login-shell {{
+      max-width: 32rem;
+      grid-template-columns: 1fr;
+      gap: 2.6rem;
+    }}
+    .brand-lockup {{ margin-bottom: 1.6rem; }}
+    h1 {{ max-width: 20ch; font-size: clamp(2rem, 7vw, 3rem); }}
+  }}
+
   @media (max-width: 480px) {{
-    main {{ padding: 2rem 1.25rem; }}
-    .shell {{ max-width: 100%; }}
-    .brand-lockup {{ margin-bottom: 2.2rem; }}
+    main {{ padding: 1.75rem 1.15rem 2.5rem; }}
+    .login-shell {{ gap: 2rem; }}
+    .card {{ padding: 1.5rem; border-radius: 1.5rem; }}
+    .sub {{ margin-bottom: 1.5rem; }}
   }}
 
   @media (forced-colors: active) {{
@@ -298,7 +332,7 @@ _LOGIN_HTML_TEMPLATE = """\
   }}
 
   @media (prefers-reduced-motion: reduce) {{
-    .shell {{ animation: none; }}
+    .login-shell {{ animation: none; }}
     .status-dot {{ animation: none; }}
     .provider-btn {{ transition: none; }}
     .provider-btn:hover,
@@ -308,17 +342,22 @@ _LOGIN_HTML_TEMPLATE = """\
 </head>
 <body>
 <main>
-  <div class="shell">
-    <div class="brand-lockup">
-      <img class="brand-word" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
-      <img class="brand-number" src="{base_path}/brand/korra-21.png" alt="21" width="364" height="233">
-    </div>
-    <h1>{greeting}</h1>
-    <p class="sub">Контур на связи.</p>
-    <div class="provider-list">
+  <div class="login-shell">
+    <section class="identity">
+      <div class="brand-lockup">
+        <img class="brand-word" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
+        <img class="brand-number" src="{base_path}/brand/korra-21.png" alt="21" width="364" height="233">
+      </div>
+      <h1>Партнёр для больших замыслов</h1>
+    </section>
+    <section class="card" aria-labelledby="greeting">
+      <h2 id="greeting">{greeting}</h2>
+      <p class="sub">Контур на связи.</p>
+      <div class="provider-list">
 {provider_buttons}
-    </div>
-    <p class="foot"><span class="status-dot" aria-hidden="true"></span>korra-agent.online</p>
+      </div>
+      <p class="foot"><span class="status-dot" aria-hidden="true"></span>korra-agent.online</p>
+    </section>
   </div>
 </main>
 {password_script}

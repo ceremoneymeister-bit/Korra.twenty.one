@@ -405,6 +405,12 @@ class TestLoginPageRender:
             from korra_cli.dashboard_auth.login_page import current_greeting
             assert current_greeting() in html
             assert "Контур на связи." in html
+            # Слева знак и одна строка о продукте, справа область входа —
+            # композиция входа Claude, к которой владелец вернулся 09.09.2026.
+            assert "Партнёр для больших замыслов" in html
+            assert 'class="login-shell"' in html
+            assert 'class="identity"' in html
+            assert 'class="card"' in html
             assert '<form class="provider-form" data-provider="testpw"' in html
             assert 'name="username"' in html
             assert 'name="password"' in html
