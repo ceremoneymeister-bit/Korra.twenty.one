@@ -402,7 +402,9 @@ class TestLoginPageRender:
             html = render_login_html(next_path="/sessions")
             assert '<html lang="ru">' in html
             assert "Korra21" in html
-            assert "С чего начнём?" in html
+            from korra_cli.dashboard_auth.login_page import current_greeting
+            assert current_greeting() in html
+            assert "Контур на связи." in html
             assert '<form class="provider-form" data-provider="testpw"' in html
             assert 'name="username"' in html
             assert 'name="password"' in html
@@ -500,3 +502,64 @@ class TestLoginPageRender:
             assert resolved.netloc == "korra.example"
         finally:
             clear_providers()
+
+
+# ---------------------------------------------------------------------------
+# Приветствие по времени суток (выбор владельца 09.09.2026)
+# ---------------------------------------------------------------------------
+
+
+class TestGreeting:
+    @pytest.mark.parametrize(
+        ("hour", "expected"),
+        [
+            (0, "Доброй ночи"), (4, "Доброй ночи"),
+            (5, "Доброе утро"), (11, "Доброе утро"),
+            (12, "Добрый день"), (17, "Добрый день"),
+            (18, "Добрый вечер"), (22, "Добрый вечер"),
+            (23, "Доброй ночи"),
+        ],
+    )
+    def test_boundaries(self, hour, expected):
+        from korra_cli.dashboard_auth.login_page import greeting_for_hour
+
+        assert greeting_for_hour(hour) == expected
+
+    def test_greeting_follows_the_contour_timezone_not_the_container_clock(
+        self, monkeypatch
+    ):
+        """Контейнер живёт в UTC, а владелец — в своём поясе. Приветствие обязано
+        идти от korra_time (HERMES_TIMEZONE / timezone в конфиге), иначе рабочее
+        утро клиента встречает «Доброй ночи»."""
+        import korra_time
+        from korra_cli.dashboard_auth import login_page
+
+        monkeypatch.setenv("HERMES_TIMEZONE", "Asia/Novosibirsk")
+        korra_time.reset_cache()
+        try:
+            from datetime import datetime, timezone
+
+            # 23:30 UTC — 06:30 следующего дня в Новосибирске.
+            monkeypatch.setattr(
+                korra_time,
+                "now",
+                lambda: datetime(2026, 9, 9, 23, 30, tzinfo=timezone.utc).astimezone(
+                    korra_time.get_timezone()
+                ),
+            )
+            assert login_page.current_greeting() == "Доброе утро"
+        finally:
+            korra_time.reset_cache()
+
+    def test_broken_clock_never_breaks_the_login(self, monkeypatch):
+        import korra_time
+        from korra_cli.dashboard_auth import login_page
+
+        def boom():
+            raise RuntimeError("clock unavailable")
+
+        monkeypatch.setattr(korra_time, "now", boom)
+
+        assert login_page.current_greeting() in {
+            "Доброе утро", "Добрый день", "Добрый вечер", "Доброй ночи",
+        }

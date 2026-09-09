@@ -131,12 +131,18 @@ _LOGIN_HTML_TEMPLATE = """\
   .brand-number {{ height: calc(var(--word-h) * 0.817); width: auto; }}
 
   h1 {{
-    margin: 0 0 clamp(1.8rem, 5vh, 2.6rem);
+    margin: 0 0 0.55rem;
     font-size: clamp(2rem, 4.6vw, 2.85rem);
     font-weight: 680;
     line-height: 1.08;
     letter-spacing: -0.04em;
     text-wrap: balance;
+  }}
+
+  .sub {{
+    margin: 0 0 clamp(1.8rem, 5vh, 2.5rem);
+    color: var(--text-muted);
+    font-size: 0.95rem;
   }}
 
   .provider-list {{
@@ -307,11 +313,12 @@ _LOGIN_HTML_TEMPLATE = """\
       <img class="brand-word" src="{base_path}/brand/korra-wordmark.png" alt="Korra" width="740" height="149">
       <img class="brand-number" src="{base_path}/brand/korra-21.png" alt="21" width="364" height="233">
     </div>
-    <h1>С чего начнём?</h1>
+    <h1>{greeting}</h1>
+    <p class="sub">Контур на связи.</p>
     <div class="provider-list">
 {provider_buttons}
     </div>
-    <p class="foot"><span class="status-dot" aria-hidden="true"></span>Контур на связи · korra-agent.online</p>
+    <p class="foot"><span class="status-dot" aria-hidden="true"></span>korra-agent.online</p>
   </div>
 </main>
 {password_script}
@@ -503,6 +510,41 @@ _PASSWORD_FORM_SCRIPT = """\
 """
 
 
+def greeting_for_hour(hour: int) -> str:
+    """Приветствие по часу суток.
+
+    Ночь тянется до пяти утра осознанно: владельцы контуров работают и ночами,
+    а «Доброе утро» в три часа читается как сбой, не как приветствие.
+    """
+    if 5 <= hour < 12:
+        return "Доброе утро"
+    if 12 <= hour < 18:
+        return "Добрый день"
+    if 18 <= hour < 23:
+        return "Добрый вечер"
+    return "Доброй ночи"
+
+
+def current_greeting() -> str:
+    """Приветствие в часовом поясе контура.
+
+    Берём ``korra_time.now()`` — тот же источник, что и расписание агента
+    (``HERMES_TIMEZONE`` → ``timezone`` в конфиге → локальное время). Контейнер
+    обычно живёт в UTC, поэтому спрашивать системные часы напрямую нельзя:
+    владелец получил бы «Доброй ночи» в своё рабочее утро. Уточнять время
+    скриптом здесь не годится — OAuth-вариант страницы обязан оставаться
+    без JavaScript.
+    """
+    try:
+        from korra_time import now as korra_now
+
+        return greeting_for_hour(korra_now().hour)
+    except Exception:  # pragma: no cover — часы никогда не ломают вход
+        from datetime import datetime
+
+        return greeting_for_hour(datetime.now().astimezone().hour)
+
+
 def render_login_html(*, next_path: str = "", base_path: str = "") -> str:
     """Return the full HTML for ``GET /login``.
 
@@ -555,6 +597,7 @@ def render_login_html(*, next_path: str = "", base_path: str = "") -> str:
         provider_buttons="\n".join(buttons),
         password_script=script,
         base_path=prefix,
+        greeting=current_greeting(),
     )
 
 
