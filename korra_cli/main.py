@@ -84,6 +84,45 @@ if _bootstrap_root not in sys.path:
     sys.path.insert(0, _bootstrap_root)
 from korra_cli import _startup_fast  # noqa: E402
 
+def _first_positional_argv() -> str | None:
+    """Return the first non-flag, non-flag-value token in ``sys.argv[1:]``.
+
+    Used by ``main()`` to decide whether plugin discovery has to run at
+    argparse-setup time. Handles common invocations like
+    ``hermes -m gpt5 --provider openai chat "msg"`` by skipping the
+    values attached to known top-level flags.
+
+    Does NOT fully simulate argparse — unknown ``--foo=bar`` / ``--foo
+    bar`` flags degrade gracefully (``bar`` may be wrongly classified as
+    a positional, which at worst forces a one-time plugin discovery).
+    """
+    from korra_cli._parser import top_level_value_flag_sets
+
+    required_value_flags, optional_value_flags = top_level_value_flag_sets()
+    value_flags = required_value_flags | optional_value_flags | {"-p", "--profile"}
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--":
+            # Everything after ``--`` is positional.
+            if i + 1 < len(argv):
+                return argv[i + 1]
+            return None
+        if tok.startswith("-"):
+            # ``--flag=value`` carries its value inline — single token.
+            if "=" in tok:
+                i += 1
+                continue
+            if tok in value_flags and i + 1 < len(argv):
+                i += 2
+                continue
+            i += 1
+            continue
+        return tok
+    return None
+
+
 # Early venv self-heal — MUST run before any third-party import below.  When
 # a prior ``hermes update`` left a recovery marker and a core package's import
 # files were wiped (#57828 — failed lazy backend refresh), the module-level
@@ -99,7 +138,8 @@ from korra_cli import _startup_fast  # noqa: E402
 from korra_cli import _early_recovery as _early_recovery_mod
 
 try:
-    _early_recovery_mod.recover_if_needed()
+    if _first_positional_argv() != "import":
+        _early_recovery_mod.recover_if_needed()
 except Exception:
     pass
 
@@ -708,6 +748,11 @@ def _apply_profile_override() -> None:
             print(f'Ошибка: {exc}', file=sys.stderr)
             sys.exit(1)
         except Exception as exc:
+            # Import cannot fall back to a different DATA on uncertain profile
+            # resolution: that would restore into the wrong installation.
+            if _first_positional_argv() == "import":
+                print("Ошибка: не удалось однозначно выбрать профиль восстановления.", file=sys.stderr)
+                sys.exit(1)
             # A bug in profiles.py must NEVER prevent hermes from starting
             print(
                 f'Не удалось выбрать профиль: {exc}. Используется профиль по умолчанию.',
@@ -722,6 +767,25 @@ def _apply_profile_override() -> None:
 
 
 _apply_profile_override()
+
+# Offline import must dispatch before dotenv/config/logging bootstrap creates
+# DATA files or opens this process's log handles. Reuse the native parser and
+# importer, including global flags and the profile contract applied above.
+if _first_positional_argv() == "import":
+    from korra_cli._parser import build_top_level_parser as _import_top_parser
+    from korra_cli.backup import run_import as _offline_import
+
+    _import_parser, _import_subparsers, _ = _import_top_parser()
+    build_import_cmd_parser(_import_subparsers, cmd_import=_offline_import)
+    _import_args = _import_parser.parse_args()
+    if _import_args.version:
+        # The normal version formatter self-heals install-method/config stamps.
+        # An import invocation must keep even its version-only path read-only.
+        from korra_cli import __release_date__, __version__
+        print(f"Korra v{__version__} ({__release_date__})")
+        raise SystemExit(0)
+    _offline_import(_import_args)
+    raise SystemExit(0)
 
 # Windows launcher self-heal — the ``hermes`` command users run is a COPY of
 # the venv console script, staged into the managed binary dir (the default
@@ -12281,43 +12345,6 @@ _BUILTIN_SUBCOMMANDS = frozenset(
 )
 
 
-def _first_positional_argv() -> str | None:
-    """Return the first non-flag, non-flag-value token in ``sys.argv[1:]``.
-
-    Used by ``main()`` to decide whether plugin discovery has to run at
-    argparse-setup time. Handles common invocations like
-    ``hermes -m gpt5 --provider openai chat "msg"`` by skipping the
-    values attached to known top-level flags.
-
-    Does NOT fully simulate argparse — unknown ``--foo=bar`` / ``--foo
-    bar`` flags degrade gracefully (``bar`` may be wrongly classified as
-    a positional, which at worst forces a one-time plugin discovery).
-    """
-    from korra_cli._parser import top_level_value_flag_sets
-
-    required_value_flags, optional_value_flags = top_level_value_flag_sets()
-    value_flags = required_value_flags | optional_value_flags
-    argv = sys.argv[1:]
-    i = 0
-    while i < len(argv):
-        tok = argv[i]
-        if tok == "--":
-            # Everything after ``--`` is positional.
-            if i + 1 < len(argv):
-                return argv[i + 1]
-            return None
-        if tok.startswith("-"):
-            # ``--flag=value`` carries its value inline — single token.
-            if "=" in tok:
-                i += 1
-                continue
-            if tok in value_flags and i + 1 < len(argv):
-                i += 2
-                continue
-            i += 1
-            continue
-        return tok
-    return None
 
 
 def _plugin_cli_discovery_needed() -> bool:

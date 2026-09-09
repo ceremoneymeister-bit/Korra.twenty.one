@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import stat
+import sys
 import zipfile
 from argparse import Namespace
 from pathlib import Path
@@ -18,9 +19,15 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _no_real_gateway_service(monkeypatch):
-    """run_import() auto-installs the gateway service post-restore; tests must
-    never touch the host's systemd/launchd. Individual tests re-patch these to
-    assert the wiring."""
+    """Keep extraction unit tests independent of host service/proc access.
+
+    Full Linux process-holder acceptance lives in test_import_offline.py.
+    This file also runs on Windows/non-root CI, where production import
+    intentionally refuses because complete host visibility is unavailable.
+    """
+    if (sys.platform != "linux" or os.geteuid() != 0
+            or os.readlink("/proc/1/ns/pid") != "pid:[4026531836]"):
+        monkeypatch.setattr("korra_cli.backup._assert_import_offline", lambda *a, **kw: {})
     import korra_cli.gateway as gateway_mod
 
     monkeypatch.setattr(gateway_mod, "ensure_gateway_service", lambda **kw: False)
@@ -115,6 +122,15 @@ def _symlink_file_or_skip(link: Path, target: Path) -> None:
         link.symlink_to(target)
     except OSError as exc:
         pytest.skip(f"symlinks unavailable in test environment: {exc}")
+
+
+def _valid_sqlite_bytes() -> bytes:
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("CREATE TABLE fixture(value TEXT)")
+        return conn.serialize()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -334,10 +350,8 @@ class TestImport:
                 else:
                     zf.writestr(name, content)
 
-    def test_import_auto_installs_gateway_service(self, tmp_path, monkeypatch):
-        """After a restore, run_import brings the gateway service up without
-        prompting — restored cron jobs and bot tokens must not sit dormant
-        (the install-then-import dead-gateway bug)."""
+    def test_import_leaves_gateway_offline(self, tmp_path, monkeypatch):
+        """Successful offline restore never installs or starts a service."""
         import korra_cli.gateway as gateway_mod
 
         hermes_home = tmp_path / ".hermes"
@@ -358,7 +372,7 @@ class TestImport:
         from korra_cli.backup import run_import
         run_import(Namespace(zipfile=str(zip_path), force=True))
 
-        assert calls and calls[0].get("context") == "import"
+        assert not calls
 
     def test_import_skips_service_when_already_running(self, tmp_path, monkeypatch):
         """A live gateway is left alone — no reinstall churn during import."""
@@ -494,7 +508,7 @@ class TestImport:
             "config.yaml": "model: openrouter\n",
             ".env": "OPENROUTER_API_KEY=sk-secret\n",
             "auth.json": '{"providers": {"nous": "token"}}',
-            "state.db": b"SQLite format 3\x00",
+            "state.db": _valid_sqlite_bytes(),
             "profiles/coder/.env": "ANTHROPIC_API_KEY=sk-ant-secret\n",
         })
 
@@ -770,11 +784,12 @@ class TestImportAtomicWrites:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         zip_path = tmp_path / "backup.zip"
-        self._zip(zip_path, {"config.yaml": "model: replacement\n", "state.db": ""})
+        self._zip(zip_path, {"config.yaml": "model: replacement\n", "state.db": _valid_sqlite_bytes()})
         _break_member(monkeypatch, "config.yaml")
 
         from korra_cli.backup import run_import
-        run_import(Namespace(zipfile=str(zip_path), force=True))
+        with pytest.raises(SystemExit):
+            run_import(Namespace(zipfile=str(zip_path), force=True))
 
         # Pre-fix this file is 0 bytes: the truncate landed, the write did not.
         assert (hermes_home / "config.yaml").read_text() == original
@@ -803,7 +818,8 @@ class TestImportAtomicWrites:
         _break_member(monkeypatch, "_external/.honcho/config.json")
 
         from korra_cli.backup import run_import
-        run_import(Namespace(zipfile=str(zip_path), force=True))
+        with pytest.raises(SystemExit):
+            run_import(Namespace(zipfile=str(zip_path), force=True))
 
         assert (honcho / "config.json").read_text() == original
         assert list(honcho.glob(".config.json.*")) == []
@@ -829,7 +845,7 @@ class TestImportAtomicWrites:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         zip_path = tmp_path / "backup.zip"
-        self._zip(zip_path, {"config.yaml": "model: restored\n", "state.db": ""})
+        self._zip(zip_path, {"config.yaml": "model: restored\n", "state.db": _valid_sqlite_bytes()})
 
         from korra_cli.backup import run_import
         run_import(Namespace(zipfile=str(zip_path), force=True))
@@ -885,7 +901,7 @@ class TestImportAtomicWrites:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         zip_path = tmp_path / "backup.zip"
-        self._zip(zip_path, {"config.yaml": "model: restored\n", "state.db": ""})
+        self._zip(zip_path, {"config.yaml": "model: restored\n", "state.db": _valid_sqlite_bytes()})
 
         from korra_cli.backup import run_import
         run_import(Namespace(zipfile=str(zip_path), force=True))
@@ -910,25 +926,13 @@ class TestImportAtomicWrites:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         zip_path = tmp_path / "backup.zip"
-        self._zip(zip_path, {"config.yaml": "model: restored\n", "state.db": ""})
+        self._zip(zip_path, {"config.yaml": "model: restored\n", "state.db": _valid_sqlite_bytes()})
 
-        chown_calls: list[tuple[Path, int, int]] = []
-        monkeypatch.setattr(
-            "korra_cli.backup._preserve_file_owner",
-            lambda p: (123, 456) if Path(p).exists() else None,
-        )
-        monkeypatch.setattr(
-            "utils.os.chown",
-            lambda path, uid, gid: chown_calls.append((Path(path), uid, gid)),
-        )
-
+        owner_before = (target.stat().st_uid, target.stat().st_gid)
         from korra_cli.backup import run_import
         run_import(Namespace(zipfile=str(zip_path), force=True))
-
         assert target.read_text() == "model: restored\n"
-        # config.yaml pre-existed, so its owner is captured and re-applied;
-        # state.db is newly created, so there is no prior owner to restore.
-        assert chown_calls == [(target, 123, 456)]
+        assert (target.stat().st_uid, target.stat().st_gid) == owner_before
 
     @pytest.mark.skipif(not hasattr(os, "fchmod"), reason="needs fchmod present to remove it")
     def test_mode_is_applied_before_the_replace_without_fchmod(self, tmp_path, monkeypatch):
@@ -949,7 +953,7 @@ class TestImportAtomicWrites:
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         zip_path = tmp_path / "backup.zip"
-        self._zip(zip_path, {"config.yaml": "model: restored\n", "state.db": ""})
+        self._zip(zip_path, {"config.yaml": "model: restored\n", "state.db": _valid_sqlite_bytes()})
 
         import korra_cli.backup as backup_mod
 
@@ -1003,7 +1007,7 @@ class TestImportAtomicWrites:
         zip_path = tmp_path / "backup.zip"
         self._zip(
             zip_path,
-            {"helper.sh": "#!/bin/sh\necho attacker\n", "state.db": ""},
+            {"helper.sh": "#!/bin/sh\necho attacker\n", "state.db": _valid_sqlite_bytes()},
         )
 
         import korra_cli.backup as backup_mod
@@ -1850,7 +1854,7 @@ class TestMemoryProviderExternalPaths:
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("config.yaml", "model: {}\n")
             zf.writestr(".env", "X=1\n")
-            zf.writestr("state.db", "")
+            zf.writestr("state.db", _valid_sqlite_bytes())
             zf.writestr("_external/.honcho/config.json", '{"peer":"bob"}')
 
         monkeypatch.setenv("HERMES_HOME", str(hermes_home))

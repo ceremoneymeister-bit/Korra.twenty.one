@@ -19,7 +19,7 @@ import tempfile
 import threading
 import time
 import zipfile
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -161,6 +161,18 @@ _IMPORT_SKIP_NAMES = {
     "cron.pid",
     "gateway.lock",
     "processes.json",
+    "gateway.sock",
+    "gateway.drain",
+    "gateway.sock.path",
+    ".drain_request.json",
+    ".restart_notify.json",
+    ".restart_pending.json",
+    ".restart_last_processed.json",
+    ".gateway-takeover.json",
+    ".gateway-planned-stop.json",
+    "gateway-starts.log",
+    "restart_loop.json",
+    ".backup.lock",
 }
 
 # zipfile.open() drops Unix mode bits on extract; restore tightens these to 0600.
@@ -1200,241 +1212,456 @@ def _extract_member_atomically(
         raise
 
 
-def run_import(args) -> None:
-    """Restore a Hermes backup from a zip file."""
-    zip_path = Path(args.zipfile).expanduser().resolve()
+# Limits apply to every ZIP entry, including excluded runtime/identity files.
+_IMPORT_MAX_FILES = 100_000
+_IMPORT_MAX_FILE_BYTES = 4 * 1024**3
+_IMPORT_MAX_TOTAL_BYTES = 32 * 1024**3
+_IMPORT_MAX_RATIO = 1000
+_IMPORT_SCAN_SECONDS = 10.0
+_IMPORT_IDENTITY_NAMES = {"install_id", ".install_id.lock"}
 
-    if not zip_path.is_file():
-        print(f"Ошибка: файл не найден: {zip_path}")
-        sys.exit(1)
 
-    if not zipfile.is_zipfile(zip_path):
-        print(f"Ошибка: это не ZIP-архив: {zip_path}")
-        sys.exit(1)
+class _ImportRefused(RuntimeError):
+    """The offline precondition or archive preflight could not be proved."""
 
-    hermes_root = get_default_hermes_root()
 
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        # Validate
-        ok, reason = _validate_backup_zip(zf)
-        if not ok:
-            print(f"Ошибка: {reason}")
-            sys.exit(1)
+def _assert_import_offline(roots: list[Path], *, importer_fd: int | None = None) -> dict:
+    """Inspect all holders, irrespective of service names or mount spelling.
 
-        prefix = _detect_prefix(zf)
-        members = [n for n in zf.namelist() if not n.endswith("/")]
-        file_count = len(members)
-
-        print(f"В резервной копии файлов: {file_count}")
-        print(f"Папка восстановления: {display_hermes_home()}")
-
-        if prefix:
-            print(f"Обнаружен префикс архива {prefix!r}; при восстановлении он будет удалён.")
-
-        # Check for existing installation
-        has_config = (hermes_root / "config.yaml").exists()
-        has_env = (hermes_root / ".env").exists()
-
-        if (has_config or has_env) and not args.force:
-            print()
-            print("Внимание: в целевой папке уже есть настройки Korra.")
-            print("Восстановление заменит существующие файлы содержимым копии.")
-            print()
-            try:
-                answer = input("Продолжить? [д/Н] ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                print("\nОтменено.")
-                sys.exit(1)
-            if answer not in {"y", "yes", "д", "да"}:
-                print("Отменено.")
-                return
-
-        # Extract
-        print(f"\nВосстанавливаю файлы: {file_count}…")
-        hermes_root.mkdir(parents=True, exist_ok=True)
-
-        errors = []
-        restored = 0
-        restored_external = 0
-        skipped_runtime: list[str] = []
-        home_dir = Path.home().resolve()
-        # Resolved once: every member is published via a temp file, and mkstemp
-        # would otherwise create newly restored files as 0600.
-        new_file_mode = _default_new_file_mode()
-        t0 = time.monotonic()
-
-        for member in members:
-            # External memory-provider state captured under the reserved
-            # ``_external/`` arc prefix restores to its original home-relative
-            # location (e.g. ~/.honcho/config.json), NOT under HERMES_HOME.
-            if member.startswith(_EXTERNAL_PREFIX):
-                ext_rel = member[len(_EXTERNAL_PREFIX):]
-                if not ext_rel:
-                    continue
-                target = home_dir / ext_rel
-                # Security: the resolved target must stay under the home dir.
+    Linux's initial PID namespace has reserved inode PROC_PID_INIT_INO. A
+    private container /proc cannot prove that another container is offline.
+    Unknown namespace/access/timeout therefore refuses; no bypass flag exists.
+    Stat identities also catch file descriptors using another bind-mount path.
+    """
+    deadline = time.monotonic() + _IMPORT_SCAN_SECONDS
+    roots = [root.resolve() for root in roots]
+    try:
+        if sys.platform != "linux" or os.readlink("/proc/1/ns/pid") != "pid:[4026531836]":
+            raise _ImportRefused("нужен полный /proc хоста (initial PID namespace)")
+        identities = set()
+        directories = set()
+        fingerprint = {}
+        for root in roots:
+            paths = [root]
+            if root.is_dir():
+                # os.walk's default ignores errors, which is unsafe here.
+                def fail_walk(exc):
+                    raise exc
+                for directory, dirs, files in os.walk(root, followlinks=False, onerror=fail_walk):
+                    paths.extend(Path(directory) / name for name in dirs + files)
+                    if time.monotonic() > deadline:
+                        raise _ImportRefused("таймаут проверки DATA")
+            for path in paths:
                 try:
-                    target.resolve().relative_to(home_dir)
-                except ValueError:
-                    errors.append(f"  {member}: path traversal blocked")
+                    info = path.stat()
+                except FileNotFoundError:
                     continue
-                try:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    _extract_member_atomically(zf, member, target, new_file_mode)
-                    # External provider configs commonly hold credentials.
-                    if target.suffix in {".json", ".env", ".conf"} or target.name in _SECRET_FILE_NAMES:
-                        try:
-                            os.chmod(target, 0o600)
-                        except OSError:
-                            pass
-                    restored += 1
-                    restored_external += 1
-                except (PermissionError, OSError) as exc:
-                    errors.append(f"  {member}: {exc}")
-                if restored % 500 == 0:
-                    print(f"  Файлов: {restored}/{file_count}…")
-                continue
-
-            # Strip prefix if detected
-            if prefix and member.startswith(prefix):
-                rel = member[len(prefix):]
-            else:
-                rel = member
-
-            if not rel:
-                continue
-
-            # Never overwrite volatile gateway/process runtime state. These are
-            # namespaced to the machine/container the backup was taken on;
-            # clobbering them (especially gateway_state.json) breaks the gateway
-            # reconciler on the target and disconnects hosted instances from the
-            # Nous portal. Matched by basename so both the root profile and
-            # named profiles (profiles/<name>/gateway_state.json) are covered.
-            if Path(rel).name in _IMPORT_SKIP_NAMES:
-                skipped_runtime.append(rel)
-                continue
-
-            target = hermes_root / rel
-
-            # Security: reject absolute paths and traversals
-            try:
-                target.resolve().relative_to(hermes_root.resolve())
-            except ValueError:
-                errors.append(f"  {rel}: path traversal blocked")
-                continue
-
-            try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                _extract_member_atomically(zf, member, target, new_file_mode)
-                if target.name in _SECRET_FILE_NAMES:
-                    os.chmod(target, 0o600)
-                restored += 1
-            except (PermissionError, OSError) as exc:
-                errors.append(f"  {rel}: {exc}")
-
-            if restored % 500 == 0:
-                print(f"  Файлов: {restored}/{file_count}…")
-
-        elapsed = time.monotonic() - t0
-
-        # Summary
-        print()
-        print(f"Восстановление завершено: файлов {restored}, время {elapsed:.1f} с")
-        print(f"  Папка: {display_hermes_home()}")
-
-        if restored_external:
-            print(
-                f"\n  Восстановлено внешних файлов провайдера памяти: {restored_external}; "
-                f"они возвращены на исходные места вне {display_hermes_home()}."
-            )
-
-        if errors:
-            print(f"\n  Предупреждения; пропущено файлов: {len(errors)}:")
-            for e in errors[:10]:
-                print(e)
-            if len(errors) > 10:
-                print(f"  … и ещё {len(errors) - 10}")
-
-        if skipped_runtime:
-            print(
-                f"\n  Сохранено файлов рабочего состояния этой машины: {len(skipped_runtime)}; "
-                "версии из резервной копии не применялись:"
-            )
-            for rel in sorted(skipped_runtime)[:10]:
-                print(f"    {rel}")
-            if len(skipped_runtime) > 10:
-                print(f"    … и ещё {len(skipped_runtime) - 10}")
-
-        # Post-import: restore profile wrapper scripts
-        profiles_dir = hermes_root / "profiles"
-        restored_profiles = []
-        if profiles_dir.is_dir():
-            try:
-                from korra_cli.profiles import (
-                    create_wrapper_script, check_alias_collision,
-                    _is_wrapper_dir_in_path, _get_wrapper_dir,
+                link_info = path.lstat()
+                fingerprint[str(path)] = (
+                    info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+                    info.st_size, info.st_mtime_ns, link_info.st_ino,
                 )
-                for entry in sorted(profiles_dir.iterdir()):
-                    if not entry.is_dir():
+                identities.add((info.st_dev, info.st_ino))
+                if stat.S_ISDIR(info.st_mode):
+                    directories.add((info.st_dev, info.st_ino))
+
+        def named_holder(name, proc):
+            name = name.removesuffix(" (deleted)")
+            if not name.startswith("/"):
+                return False
+            path = Path(name)
+            if any(path == root or path.is_relative_to(root) for root in roots):
+                return True
+            # A deleted file has no inode in the target walk. Its containing
+            # directory, resolved in the holder's mount namespace, still does.
+            try:
+                parent = (proc / "root" / str(path.parent).lstrip("/")).stat()
+            except FileNotFoundError:
+                return False
+            return (parent.st_dev, parent.st_ino) in directories
+
+        own_pid = os.getpid()
+        for proc in Path("/proc").iterdir():
+            if not proc.name.isdigit():
+                continue
+            if time.monotonic() > deadline:
+                raise _ImportRefused("таймаут проверки процессов")
+            pid = int(proc.name)
+            try:
+                # The importing CLI may legitimately be run from DATA. Its
+                # own DB/file handles still block; only its known ZIP fd skips.
+                handles = list((proc / "fd").iterdir())
+                if pid != own_pid:
+                    handles.append(proc / "cwd")
+                for handle in handles:
+                    if pid == own_pid and handle.name == str(importer_fd):
                         continue
-                    profile_name = entry.name
-                    # Only create wrappers for directories with config
-                    if not (entry / "config.yaml").exists() and not (entry / ".env").exists():
+                    try:
+                        info = handle.stat()
+                        held_name = os.readlink(handle)
+                    except FileNotFoundError:  # fd closed/process exited
                         continue
-                    collision = check_alias_collision(profile_name)
-                    if collision:
-                        print(f"  Псевдоним '{profile_name}' пропущен: {collision}")
-                        restored_profiles.append((profile_name, False))
-                    else:
-                        wrapper = create_wrapper_script(profile_name)
-                        restored_profiles.append((profile_name, wrapper is not None))
+                    if (info.st_dev, info.st_ino) in identities or named_holder(held_name, proc):
+                        raise _ImportRefused(f"DATA удерживает процесс PID {pid}")
+                # mmap can outlive the last fd, including a SQLite WAL map.
+                for line in (proc / "maps").read_text().splitlines():
+                    fields = line.split(None, 5)
+                    major, minor = (int(n, 16) for n in fields[3].split(":"))
+                    identity = (os.makedev(major, minor), int(fields[4]))
+                    if identity in identities or (len(fields) == 6 and named_holder(fields[5], proc)):
+                        raise _ImportRefused(f"DATA отображён в память процесса PID {pid}")
+            except FileNotFoundError:
+                if proc.exists():
+                    raise _ImportRefused(f"неполная видимость процесса PID {pid}")
+                continue
+        return fingerprint
+    except (OSError, ValueError, IndexError) as exc:
+        raise _ImportRefused("не удалось проверить всех держателей DATA; нужен root и доступ к /proc хоста") from exc
 
-                if restored_profiles:
-                    created = [n for n, ok in restored_profiles if ok]
-                    skipped = [n for n, ok in restored_profiles if not ok]
-                    if created:
-                        print(f"\n  Восстановлены псевдонимы профилей: {', '.join(created)}")
-                    if skipped:
-                        print(f"  Пропущены псевдонимы профилей: {', '.join(skipped)}")
-                    if not _is_wrapper_dir_in_path():
-                        print(f"\n  Примечание: {_get_wrapper_dir()} отсутствует в PATH.")
-                        print('  Добавьте в настройки оболочки ~/.bashrc или ~/.zshrc:')
-                        print('    export PATH="$HOME/.local/bin:$PATH"')
-            except ImportError:
-                # korra_cli.profiles might not be available (fresh install)
-                if any(profiles_dir.iterdir()):
-                    print("\n  Профили найдены, но создать псевдонимы не удалось.")
-                    print("  После установки Korra выполните: korra profile list")
 
-        # Guidance
-        print()
-        if not (hermes_root / "hermes-agent").is_dir():
-            print("Примечание: код Korra из папки hermes-agent не входил в резервную копию.")
-            print("  Для новой установки выполните: korra update")
+def _import_archive_plan(zf, root, home, *, same_host_restore=False):
+    """Validate the complete central directory before creating any target."""
+    infos = zf.infolist()
+    if len(infos) > _IMPORT_MAX_FILES:
+        raise _ImportRefused("слишком много файлов в ZIP")
+    if sum(info.file_size for info in infos) > _IMPORT_MAX_TOTAL_BYTES:
+        raise _ImportRefused("превышен суммарный размер ZIP после распаковки")
+    prefix = _detect_prefix(zf)
+    seen = set()
+    plan = []
+    physical_root = get_default_hermes_root().resolve()
+    for info in infos:
+        name = info.filename
+        parts = name.rstrip("/").split("/")
+        if (not name or name != info.orig_filename or name.startswith("/") or "\\" in name
+                or any(part in {"", ".", ".."} for part in parts)
+                or ":" in parts[0]):
+            raise _ImportRefused("небезопасный путь в ZIP")
+        mode = info.external_attr >> 16
+        kind = stat.S_IFMT(mode)
+        if kind not in (0, stat.S_IFREG, stat.S_IFDIR) or info.flag_bits & 1:
+            raise _ImportRefused("ZIP содержит ссылку, специальный или зашифрованный файл")
+        if info.file_size > _IMPORT_MAX_FILE_BYTES:
+            raise _ImportRefused("превышен размер файла в ZIP")
+        if info.file_size > max(info.compress_size, 1) * _IMPORT_MAX_RATIO:
+            raise _ImportRefused("слишком высокое сжатие ZIP")
+        external = name.startswith(_EXTERNAL_PREFIX)
+        rel = name[len(_EXTERNAL_PREFIX):] if external else name[len(prefix):] if prefix and name.startswith(prefix) else name
+        if not rel.rstrip("/"):
+            continue
+        base = home if external else root
+        relative = Path(rel)
+        target = (base / relative).resolve()
+        if not target.is_relative_to(base):
+            raise _ImportRefused("путь ZIP выходит из целевой папки")
+        if external and target.is_relative_to(physical_root) and not target.is_relative_to(root):
+            raise _ImportRefused("внешний файл ZIP пытается изменить другой профиль")
+        if target in seen:
+            raise _ImportRefused("повторяющийся целевой путь ZIP")
+        seen.add(target)
+        if info.is_dir():
+            if info.file_size or info.CRC:
+                raise _ImportRefused("каталог ZIP содержит неожиданные данные")
+            if target.exists() and not target.is_dir():
+                raise _ImportRefused("конфликт файла и каталога в ZIP")
+            continue
+        if target.exists() and not target.is_file():
+            raise _ImportRefused("целевой путь не является обычным файлом")
+        for parent in target.parents:
+            if parent.exists() and not parent.is_dir():
+                raise _ImportRefused("целевой родитель не является каталогом")
+        target_rel = target.relative_to(base)
+        identity = (".ssh" in relative.parts or ".ssh" in target_rel.parts
+                    or relative.name in _IMPORT_IDENTITY_NAMES or target.name in _IMPORT_IDENTITY_NAMES)
+        skipped = (relative.name in _IMPORT_SKIP_NAMES or target.name in _IMPORT_SKIP_NAMES
+                   or (relative.name.startswith("gateway.loop-tick.") and relative.name.endswith(".sock"))
+                   or relative.name.endswith((".db-wal", ".db-shm", ".db-journal"))
+                   or (not same_host_restore and identity))
+        # Locks never transfer, even in explicit same-host recovery.
+        skipped = skipped or relative.name == ".install_id.lock"
+        plan.append({"info": info, "target": target, "relative": relative,
+                     "external": external, "skipped": skipped, "base": base,
+                     "ssh": ".ssh" in relative.parts or ".ssh" in target_rel.parts})
+    destinations = {entry["target"] for entry in plan if not entry["skipped"]}
+    if any(parent in destinations for dest in destinations for parent in dest.parents):
+        raise _ImportRefused("конфликт файлов и каталогов ZIP")
+    return plan
 
-        if restored_profiles:
-            gw_profiles = [n for n, _ in restored_profiles]
-            print("\nЧтобы снова включить службы шлюза профилей:")
-            for pname in gw_profiles:
-                print(f"  korra -p {pname} gateway install")
 
-        # Bring the restored install to life: the backup may contain bot
-        # tokens and registered cron jobs, but they're inert without a
-        # gateway process. Install/start the service automatically (a
-        # platform-less gateway is a supported mode, so this is safe even
-        # for backups with no messaging config). Best-effort and prompt-free;
-        # failures print a manual fallback and never fail the import.
+def _stage_import(zf, plan, stage):
+    """Read every member to EOF (CRC) and quick_check only staged SQLite."""
+    # Directory records carry no payload, but still have local ZIP headers
+    # whose names/offsets must agree with the central directory.
+    for info in zf.infolist():
+        if info.is_dir():
+            with zf.open(info) as stream:
+                if stream.read(1):
+                    raise _ImportRefused("каталог ZIP содержит данные")
+    for index, entry in enumerate(plan):
+        staged = stage / str(index)
+        _extract_member_atomically(zf, entry["info"], staged, 0o600)
+        # Do not trust the suffix alone: plugins also use extensionless SQLite.
+        with staged.open("rb") as stream:
+            magic = stream.read(16)
+        is_db = (entry["target"].suffix.lower() in {".db", ".sqlite", ".sqlite3"}
+                 or magic == b"SQLite format 3\x00")
+        if is_db and not entry["skipped"]:
+            if magic != b"SQLite format 3\x00":
+                raise _ImportRefused("архив содержит пустую или повреждённую SQLite")
+            deadline = time.monotonic() + 10
+            conn = sqlite3.connect(staged.as_uri() + "?mode=ro&immutable=1", uri=True, timeout=0)
+            try:
+                conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 10_000)
+                if conn.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                    raise _ImportRefused("SQLite quick_check не пройден")
+            finally:
+                conn.close()
+        entry.update(staged=staged, database=is_db)
+    # Extensionless/plugin DBs have the same foreign-sidecar exclusion as
+    # native *.db snapshots; detect their companions after header inspection.
+    sidecars = {Path(str(entry["target"]) + suffix) for entry in plan if entry["database"]
+                for suffix in ("-wal", "-shm", "-journal")}
+    for entry in plan:
+        if entry["target"] in sidecars:
+            entry["skipped"] = True
+
+
+def _publish_import(plan, root, home):
+    """Overlay with same-filesystem rollback copies retaining original inodes.
+
+    Native atomic_replace publishes fully staged files. Originals are first
+    renamed into private per-directory journals; any exception reverses every
+    publish and removes only directories created by this import.
+    """
+    journals = {}
+    moves = []
+    created = []
+    changed_dirs = {}
+    default_mode = _default_new_file_mode() or 0o600
+
+    def owner_for(base):
+        ancestor = base
+        while not ancestor.exists():
+            ancestor = ancestor.parent
+        info = ancestor.stat()
+        return info.st_uid, info.st_gid
+
+    owners = {root: owner_for(root), home: owner_for(home)}
+
+    def ensure_parent(path, base):
+        if path.exists():
+            return
+        ensure_parent(path.parent, base)
+        path.mkdir(mode=0o700 if ".ssh" in path.parts else 0o755)
+        created.append(path)
+        os.chown(path, *owners[base])
+
+    def journal_for(parent):
+        if parent not in journals:
+            journals[parent] = Path(tempfile.mkdtemp(prefix=".korra-import-", dir=parent))
+        return journals[parent]
+
+    try:
+        for index, entry in enumerate(plan):
+            if entry["skipped"]:
+                continue
+            target, base = entry["target"], entry["base"]
+            ensure_parent(target.parent, base)
+            if entry["ssh"]:
+                ssh_parts = (entry["relative"].parts if ".ssh" in entry["relative"].parts
+                             else target.relative_to(base).parts)
+                ssh_root = base.joinpath(*ssh_parts[:ssh_parts.index(".ssh") + 1]).resolve()
+                for directory in [target.parent, *target.parent.parents]:
+                    if directory not in changed_dirs and directory not in created:
+                        changed_dirs[directory] = directory.stat()
+                    os.chown(directory, *owners[base])
+                    os.chmod(directory, 0o700)
+                    if directory == ssh_root:
+                        break
+            journal = journal_for(target.parent)
+            new = journal / f"{index}.new"
+            old = journal / f"{index}.old"
+            existing = target.stat() if target.exists() else None
+            mode = stat.S_IMODE(existing.st_mode) & 0o777 if existing else default_mode
+            sensitive = (entry["ssh"] or target.name in _SECRET_FILE_NAMES
+                         or entry["database"] or entry["external"] and target.suffix in {".json", ".env", ".conf"})
+            if sensitive:
+                mode = 0o600
+            shutil.copyfile(entry["staged"], new)
+            os.chown(new, *(owners[base] if not existing or entry["ssh"]
+                            else (existing.st_uid, existing.st_gid)))
+            os.chmod(new, mode)
+            with new.open("rb") as stream:
+                os.fsync(stream.fileno())
+            # Private recovery mapping is fsynced before moving the original.
+            # If rollback itself fails, an operator can identify every .old.
+            with (journal / f"{index}.json").open("x", encoding="utf-8") as receipt:
+                os.chmod(receipt.name, 0o600)
+                json.dump({"target": target.name, "original": bool(existing)}, receipt)
+                receipt.flush()
+                os.fsync(receipt.fileno())
+            if existing:
+                os.replace(target, old)
+            moves.append((target, old if existing else None))
+            atomic_replace(new, target)
+        # Foreign archived sidecars never publish; existing offline sidecars
+        # must leave with the DB they belong to, and are journalled too.
+        for entry in plan:
+            if entry["skipped"] or not entry["database"]:
+                continue
+            for suffix in ("-wal", "-shm", "-journal"):
+                sidecar = Path(str(entry["target"]) + suffix)
+                if sidecar.exists():
+                    old = journal_for(sidecar.parent) / f"sidecar-{len(moves)}"
+                    os.replace(sidecar, old)
+                    moves.append((sidecar, old))
+    except BaseException as exc:
+        rollback_errors = []
+        for target, old in reversed(moves):
+            try:
+                if old is not None:
+                    os.replace(old, target)
+                else:
+                    target.unlink(missing_ok=True)
+            except OSError:
+                rollback_errors.append(target)
+        for directory, info in changed_dirs.items():
+            try:
+                os.chown(directory, info.st_uid, info.st_gid)
+                os.chmod(directory, stat.S_IMODE(info.st_mode))
+            except OSError:
+                rollback_errors.append(directory)
+        if rollback_errors:
+            # Preserve recovery files instead of destroying the only originals.
+            locations = ", ".join(str(path) for path in journals.values())
+            raise _ImportRefused(f"откат неполный; не запускайте сервисы; recovery-каталоги: {locations}") from exc
+        for journal in journals.values():
+            shutil.rmtree(journal)
+        for directory in reversed(created):
+            directory.rmdir()
+        raise _ImportRefused("восстановление отменено; все опубликованные файлы возвращены в исходное состояние") from exc
+    else:
+        for journal in journals.values():
+            shutil.rmtree(journal)
+
+
+def run_import(args) -> None:
+    """Restore a native ZIP only after complete offline and archive preflight."""
+    zip_path = Path(args.zipfile).expanduser().resolve()
+    hermes_root = get_hermes_home().resolve()
+    home_dir = Path.home().resolve()
+    try:
+        if not zip_path.is_file() or not zipfile.is_zipfile(zip_path):
+            raise _ImportRefused("файл не найден или не является ZIP")
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            ok, reason = _validate_backup_zip(zf)
+            if not ok:
+                raise _ImportRefused(reason)
+            plan = _import_archive_plan(zf, hermes_root, home_dir,
+                                       same_host_restore=getattr(args, "same_host_restore", False))
+            if any(entry["target"] == zip_path and not entry["skipped"] for entry in plan):
+                raise _ImportRefused("архив не может перезаписать сам себя")
+            roots = [hermes_root]
+            roots.extend(home_dir / entry["relative"].parts[0] for entry in plan
+                         if entry["external"] and not entry["skipped"])
+            roots = list(dict.fromkeys(roots))
+            before = _assert_import_offline(roots, importer_fd=zf.fp.fileno())
+            print(f"Папка восстановления: {hermes_root}")
+            if ((hermes_root / "config.yaml").exists() or (hermes_root / ".env").exists()) and not args.force:
+                try:
+                    answer = input("Заменить файлы выбранной offline-папки? [д/Н] ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    raise _ImportRefused("отменено")
+                if answer not in {"y", "yes", "д", "да"}:
+                    return
+            # Staging must never be inside any destination, even when TMPDIR
+            # points into DATA. No target mkdir/chmod/lock before preflight.
+            stage_parent = Path(tempfile.gettempdir()).resolve()
+            if any(stage_parent.is_relative_to(root) for root in roots):
+                stage_parent = Path("/var/tmp")
+            if any(stage_parent.is_relative_to(root) for root in roots):
+                raise _ImportRefused("нет staging-каталога вне DATA")
+            with tempfile.TemporaryDirectory(prefix="korra-import-", dir=stage_parent) as stage:
+                _stage_import(zf, plan, Path(stage))
+                from korra_cli.sqlite_safe_read import offline_file_access
+                with ExitStack() as stack:
+                    # Hold the native connection lifecycle fence even when a
+                    # ZIP only replaces config: another thread must not open a
+                    # new tracked SQLite connection after the final scan.
+                    for entry in plan:
+                        if not entry["skipped"]:
+                            stack.enter_context(offline_file_access(entry["target"], what="restore"))
+                    if _assert_import_offline(roots, importer_fd=zf.fp.fileno()) != before:
+                        raise _ImportRefused("DATA изменился во время проверки архива")
+                    _publish_import(plan, hermes_root, home_dir)
+    except Exception as exc:
+        # No secret/member content or raw SQLite errors in CLI output.
+        reason = str(exc) if isinstance(exc, _ImportRefused) else type(exc).__name__
+        print(f"Ошибка восстановления: {reason}.")
+        print("Остановите gateway, dashboard/API, cron и все процессы выбранного DATA; повторите offline import.")
+        print("Docker: отдельный --pid=host --cap-add SYS_PTRACE --user 0 контейнер без gateway; либо root CLI на хосте.")
+        raise SystemExit(1) from exc
+
+    restored = sum(not entry["skipped"] for entry in plan)
+    print(f"Восстановление завершено: файлов {restored}.")
+    # Keep native successful profile-alias restoration, with no service start.
+    # Post-import: restore profile wrapper scripts
+    profiles_dir = hermes_root / "profiles"
+    restored_profiles = []
+    if profiles_dir.is_dir():
         try:
-            from korra_cli.gateway import ensure_gateway_service, _is_service_running
+            from korra_cli.profiles import (
+                create_wrapper_script, check_alias_collision,
+                _is_wrapper_dir_in_path, _get_wrapper_dir,
+            )
+            for entry in sorted(profiles_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                profile_name = entry.name
+                # Only create wrappers for directories with config
+                if not (entry / "config.yaml").exists() and not (entry / ".env").exists():
+                    continue
+                collision = check_alias_collision(profile_name)
+                if collision:
+                    print(f"  Псевдоним '{profile_name}' пропущен: {collision}")
+                    restored_profiles.append((profile_name, False))
+                else:
+                    wrapper = create_wrapper_script(profile_name)
+                    restored_profiles.append((profile_name, wrapper is not None))
 
-            if not _is_service_running():
-                print()
-                ensure_gateway_service(context="import")
-        except Exception:
-            print("\nЗапустите шлюз для расписания и сообщений:")
-            print("  korra gateway install")
+            if restored_profiles:
+                created = [n for n, ok in restored_profiles if ok]
+                skipped = [n for n, ok in restored_profiles if not ok]
+                if created:
+                    print(f"\n  Восстановлены псевдонимы профилей: {', '.join(created)}")
+                if skipped:
+                    print(f"  Пропущены псевдонимы профилей: {', '.join(skipped)}")
+                if not _is_wrapper_dir_in_path():
+                    print(f"\n  Примечание: {_get_wrapper_dir()} отсутствует в PATH.")
+                    print('  Добавьте в настройки оболочки ~/.bashrc или ~/.zshrc:')
+                    print('    export PATH="$HOME/.local/bin:$PATH"')
+        except ImportError:
+            # korra_cli.profiles might not be available (fresh install)
+            if any(profiles_dir.iterdir()):
+                print("\n  Профили найдены, но создать псевдонимы не удалось.")
+                print("  После установки Korra выполните: korra profile list")
 
-        print("Готово. Настройки Korra восстановлены.")
+    # Guidance
+    print()
+    if not (hermes_root / "hermes-agent").is_dir():
+        print("Примечание: код Korra из папки hermes-agent не входил в резервную копию.")
+        print("  Для новой установки выполните: korra update")
+
+    if restored_profiles:
+        gw_profiles = [n for n, _ in restored_profiles]
+        print("\nЧтобы снова включить службы шлюза профилей:")
+        for pname in gw_profiles:
+            print(f"  korra -p {pname} gateway install")
+
+    print("\nСервисы оставлены выключенными. После проверки данных запустите их вручную:")
+    print("  korra gateway install")
+
+    print("Готово. Настройки Korra восстановлены.")
 
 
 # ---------------------------------------------------------------------------
