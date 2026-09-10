@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-_DATA = json.loads((Path(__file__).parent / "data/dashboard-themes.json").read_text())
+_DATA = json.loads((Path(__file__).parent / "data/dashboard-themes.json").read_text(encoding="utf-8"))
 THEMES = _DATA["themes"]
 
 

@@ -211,7 +211,7 @@ class TestConfigMutationLock:
         results = []
 
         def _put_theme():
-            resp = client.put("/api/dashboard/theme", json={"name": "midnight"})
+            resp = client.put("/api/dashboard/theme", json={"name": "dark"})
             results.append(("theme", resp.status_code))
 
         def _put_font():
@@ -240,11 +240,11 @@ class TestConfigMutationLock:
                 t.join()
             web_server.save_config = real_save
 
-        assert all(code == 200 for _, code in results), results
+        assert sorted(results) == [("font", 200), ("theme", 200)], results
         cfg = load_config()
         dashboard = cfg.get("dashboard") or {}
         # Both writes must be present — a lost update drops exactly one.
-        assert dashboard.get("theme") == "midnight", (
+        assert dashboard.get("theme") == "dark", (
             "theme write lost to a concurrent font write — "
             "read-modify-write span is not serialized"
         )
@@ -278,7 +278,7 @@ class TestConfigMutationLock:
             results.append(("engine", resp.status_code))
 
         def _put_theme():
-            resp = client.put("/api/dashboard/theme", json={"name": "midnight"})
+            resp = client.put("/api/dashboard/theme", json={"name": "dark"})
             results.append(("theme", resp.status_code))
 
         # Slow down the engine writer's save (resolved at call time from
@@ -306,12 +306,12 @@ class TestConfigMutationLock:
                 t.join()
             config_mod.save_config = real_save
 
-        assert all(code == 200 for _, code in results), results
+        assert sorted(results) == [("engine", 200), ("theme", 200)], results
         cfg = load_config()
         assert (cfg.get("context") or {}).get("engine") == "builtin", (
             "context.engine write lost — plugin-providers RMW not serialized"
         )
-        assert (cfg.get("dashboard") or {}).get("theme") == "midnight", (
+        assert (cfg.get("dashboard") or {}).get("theme") == "dark", (
             "theme write lost to a concurrent plugin-providers write — "
             "PUT /api/dashboard/plugin-providers is not holding "
             "_CONFIG_MUTATION_LOCK around its read-modify-write span"
