@@ -20041,7 +20041,7 @@ def test_prompt_submit_passes_persist_user_message_to_agent(monkeypatch):
         server._sessions.pop("sid", None)
 
 
-def test_prompt_submit_releases_old_history_before_heap_trim(monkeypatch):
+def test_prompt_submit_releases_old_history_before_heap_trim(monkeypatch, tmp_path):
     """The trim boundary must not retain the just-pruned history snapshots."""
     observed = {}
     cleanup_order = []
@@ -20080,7 +20080,7 @@ def test_prompt_submit_releases_old_history_before_heap_trim(monkeypatch):
         observed["run_kwargs"] = caller_locals.get("run_kwargs")
 
     session = _session(agent=_Agent())
-    session["profile_home"] = "/tmp/test-profile"
+    session["profile_home"] = str(tmp_path / "profile")
     session["history"] = [
         {"role": "tool", "tool_call_id": "old", "content": "x" * 20_000}
     ]

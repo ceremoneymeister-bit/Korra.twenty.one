@@ -117,7 +117,14 @@ jobs:
         # ghrunner через setpriv. CI/GITHUB_ACTIONS прокинуты — часть
         # сьютов калибрует таймауты по ним, как на hosted-раннерах.
         run: |
-          sudo unshare -m -p -f --mount-proc sh -c "
+          # PID 1 must reap orphaned descendants after the process-tree tests.
+          # Reuse the host's native Tini/Docker init; never install during a test.
+          KORRA_TEST_INIT=
+          for KORRA_INIT_PATH in /usr/bin/tini /usr/bin/docker-init /usr/libexec/docker/docker-init; do
+            if [ -x "$KORRA_INIT_PATH" ]; then KORRA_TEST_INIT="$KORRA_INIT_PATH"; break; fi
+          done
+          test -n "$KORRA_TEST_INIT" || { echo "::error::Native reaping init unavailable"; exit 1; }
+          sudo unshare --kill-child=TERM -m -p -f --mount-proc "$KORRA_TEST_INIT" -- sh -c "
             exec setpriv \
               --reuid=$(id -u) --regid=$(id -g) --init-groups \
               env HOME='$HOME' PATH='$PATH' \
