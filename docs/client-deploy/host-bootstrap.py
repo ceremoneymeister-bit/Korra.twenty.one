@@ -212,11 +212,10 @@ class HostBootstrap:
         finally:
             os.environ.clear()
             os.environ.update(before)
-        environment = dict(entry.split("=", 1) for entry in info["Config"].get("Env", []) if "=" in entry)
-        if environment.get("KORRA_AGENT_SUDO", environment.get("HERMES_AGENT_SUDO", "1")) != ("1" if self.o.admin else "0"):
+        runtime = native.runtime_env_from_info(info)
+        if runtime["AGENT_SUDO"] != ("1" if self.o.admin else "0"):
             raise HostError("Existing container admin mode differs; use controlled recreation")
-        if (environment.get("KORRA_UID", environment.get("HERMES_UID", "10000")) != str(self.o.uid)
-                or environment.get("KORRA_GID", environment.get("HERMES_GID", "10000")) != str(self.o.gid)):
+        if (runtime["ENGINE_UID"], runtime["ENGINE_GID"]) != (str(self.o.uid), str(self.o.gid)):
             raise HostError("Container runtime UID/GID differs from DATA ownership")
         image = json.loads(self.run(["docker", "image", "inspect", self.o.image]).stdout)[0]
         if image.get("Id") != info["Image"]:
@@ -225,7 +224,7 @@ class HostBootstrap:
 
     def identity(self):
         self.checked_container()
-        value = self.run(["docker", "exec", "-u", str(self.o.uid), self.o.name,
+        value = self.run(["docker", "exec", "-u", f"{self.o.uid}:{self.o.gid}", self.o.name,
                           "/opt/hermes/.venv/bin/python", "-c", ID_CODE]).stdout.strip()
         if not IDENTITY.fullmatch(value):
             raise HostError("Native installation identity unavailable")
@@ -471,7 +470,7 @@ PermitTTY yes
         self.checked_container()
         for args in (["sudo", "-n", "id", "-u"],
                      ["/usr/bin/ssh", "-F", "/opt/data/.ssh/korra-host.conf", "host", "id", "-u"]):
-            value = self.run(["docker", "exec", "-u", str(self.o.uid), self.o.name, *args]).stdout.strip()
+            value = self.run(["docker", "exec", "-u", f"{self.o.uid}:{self.o.gid}", self.o.name, *args]).stdout.strip()
             if value != "0":
                 raise HostError("Admin mode must yield container root and pinned host root")
 

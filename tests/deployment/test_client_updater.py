@@ -1257,3 +1257,64 @@ def test_smoke_refuses_wrong_root_mode_before_model(real_smoke_context):
     with pytest.raises(u.UpdateError, match="root/ownership"):
         u.Updater.smoke(updater, OLD)
     assert clock[0] == 0 and models == []
+
+
+@pytest.mark.parametrize("phase", ["preflight", "smoke", "rollback_recreate"])
+def test_native_exec_uses_receipt_ownership(updater, monkeypatch, phase):
+    updater.receipt.update(phase=phase, old_runtime={
+        "ENGINE_UID": "12345", "ENGINE_GID": "12346", "AGENT_SUDO": "0"})
+    calls = []
+    monkeypatch.setattr(updater, "docker", lambda *a, **kw: calls.append(a) or "ok")
+    assert u.Updater.execute(updater, "print('synthetic')") == "ok"
+    assert calls[0][:3] == ("exec", "-u", "12345:12346")
+
+
+def test_credential_overlay_runs_with_original_data_ownership(updater, monkeypatch, tmp_path):
+    updater.receipt["old_runtime"] = {
+        "ENGINE_UID": "12345", "ENGINE_GID": "12346", "AGENT_SUDO": "0"}
+    calls = []
+    monkeypatch.setattr(updater, "docker", lambda *a, **kw: calls.append(a) or "[]")
+    u.Updater.preserve_config_credentials(updater, tmp_path / "latest", tmp_path / "stage")
+    assert calls[0][calls[0].index("--user") + 1] == "12345:12346"
+
+
+def test_native_exec_can_read_private_data_as_selected_uid(updater, monkeypatch, tmp_path):
+    if os.geteuid() != 0:
+        pytest.skip("requires isolated root fixture for real setuid file permission proof")
+    data = tmp_path / "ownership-proof"
+    data.mkdir(mode=0o750)
+    secret = data / ".env"
+    secret.write_text("synthetic-private-config")
+    os.chown(data, 12345, 12346)
+    os.chown(secret, 12345, 12346)
+    secret.chmod(0o600)
+    descriptor = os.open(data, os.O_RDONLY | os.O_DIRECTORY)
+    updater.receipt["old_runtime"] = {
+        "ENGINE_UID": "12345", "ENGINE_GID": "12346", "AGENT_SUDO": "0"}
+    def execute(*args, **kwargs):
+        selected = args[args.index("-u") + 1]
+        ids = selected.split(":")
+        uid, gid = int(ids[0]), int(ids[1]) if len(ids) == 2 else 0
+        code = "import os; f=os.open('.env',os.O_RDONLY,dir_fd=" + str(descriptor) + "); assert os.read(f,100)==b'synthetic-private-config'; os.close(f); print(str(os.getuid())+':'+str(os.getgid()))"
+        result = subprocess.run(["/usr/bin/python3", "-c", code], user=uid, group=gid,
+            extra_groups=[], pass_fds=(descriptor,), cwd="/", capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+    monkeypatch.setattr(updater, "docker", execute)
+    try:
+        assert u.Updater.execute(updater, "synthetic probe") == "12345:12346"
+    finally:
+        os.close(descriptor)
+
+
+@pytest.mark.parametrize("environment,expected", [
+    (["PUID=12345", "PGID=12346"], ("12345", "12346", "1")),
+    (["KORRA_UID=", "HERMES_UID=12345", "PUID=999", "KORRA_GID=", "PGID=12346"], ("12345", "12346", "1")),
+    (["KORRA_UID=12345", "HERMES_UID=999", "KORRA_GID=12346", "PGID=999"], ("12345", "12346", "1")),
+    (["HERMES_AGENT_SUDO=0"], ("10000", "10000", "1")),
+    (["KORRA_AGENT_SUDO="], ("10000", "10000", "1")),
+    (["KORRA_AGENT_SUDO=FaLsE"], ("10000", "10000", "1")),
+])
+def test_runtime_identity_follows_native_stage2_environment(environment, expected):
+    result = u.runtime_env_from_info({"Config": {"Env": environment}})
+    assert tuple(result[key] for key in ("ENGINE_UID", "ENGINE_GID", "AGENT_SUDO")) == expected

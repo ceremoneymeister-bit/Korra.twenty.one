@@ -203,14 +203,16 @@ def validate_runtime_env(value):
 
 def runtime_env_from_info(info):
     environment = dict(item.split("=", 1) for item in info["Config"].get("Env", []) if "=" in item)
-    sudo = environment.get("KORRA_AGENT_SUDO", environment.get("HERMES_AGENT_SUDO", "1")).lower()
-    if sudo in {"false", "no", "off"}:
-        sudo = "0"
-    elif sudo in {"true", "yes", "on"}:
-        sudo = "1"
+    # Match the shipped stage2 shell's nonempty alias precedence and exact
+    # opt-out spellings. HERMES_AGENT_SUDO is not a native stage2 setting.
+    def first(*names):
+        return next((environment[name] for name in names if environment.get(name)), "10000")
+    sudo = "0" if environment.get("KORRA_AGENT_SUDO") in {
+        "0", "false", "FALSE", "False", "no", "NO", "No", "off", "OFF", "Off",
+    } else "1"
     return validate_runtime_env({
-        "ENGINE_UID": environment.get("KORRA_UID", environment.get("HERMES_UID", "10000")),
-        "ENGINE_GID": environment.get("KORRA_GID", environment.get("HERMES_GID", "10000")),
+        "ENGINE_UID": first("KORRA_UID", "HERMES_UID", "PUID"),
+        "ENGINE_GID": first("KORRA_GID", "HERMES_GID", "PGID"),
         "AGENT_SUDO": sudo,
     })
 
@@ -549,8 +551,12 @@ class Updater:
     def docker(self, *args, **kwargs):
         return self.command(["docker", *map(str, args)], **kwargs)
 
+    def runtime_user(self):
+        value = validate_runtime_env(self.receipt.get("old_runtime"))
+        return value["ENGINE_UID"] + ":" + value["ENGINE_GID"]
+
     def execute(self, code, *args, timeout=120):
-        return self.docker("exec", "-u", "10000", "-w", "/opt/hermes", self.name,
+        return self.docker("exec", "-u", self.runtime_user(), "-w", "/opt/hermes", self.name,
                            PYTHON, "-c", code, *args, timeout=timeout)
 
     def inspect_target(self, expected=None, running=True, timeout=120):
@@ -1013,7 +1019,7 @@ for path in [root / 'config.yaml', *sorted((root/'profiles').glob('*/config.yaml
 print(json.dumps(changed))
 '''
         output = self.docker("run", "--rm", "--network", "none", "--cpus", "1", "--memory", "768m",
-                             "--user", "10000", "--entrypoint", PYTHON,
+                             "--user", self.runtime_user(), "--entrypoint", PYTHON,
                              "-v", str(stage) + ":/opt/data", "-v", str(latest) + ":/latest:ro",
                              self.receipt["old_image_id"], "-c", code)
         return json.loads(output.splitlines()[-1])
@@ -1242,7 +1248,7 @@ for package in packages:
 print('Pinned dependencies verified')
 '''
     args = ["docker", "run", "--rm", "--network", "host", "--cpus", "1", "--memory", "2g",
-            "--user", os.environ.get("ENGINE_UID", "10000"), "-w", "/opt/hermes",
+            "--user", os.environ.get("ENGINE_UID", "10000") + ":" + os.environ.get("ENGINE_GID", "10000"), "-w", "/opt/hermes",
             "--entrypoint", PYTHON, "-v", os.environ.get("DATA", "/opt/korra/data") + ":/opt/data",
             image, "-c", code, json.dumps(packages)]
     subprocess.run(args, check=True, timeout=1000)
