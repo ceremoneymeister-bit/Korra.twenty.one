@@ -1318,3 +1318,11 @@ def test_native_exec_can_read_private_data_as_selected_uid(updater, monkeypatch,
 def test_runtime_identity_follows_native_stage2_environment(environment, expected):
     result = u.runtime_env_from_info({"Config": {"Env": environment}})
     assert tuple(result[key] for key in ("ENGINE_UID", "ENGINE_GID", "AGENT_SUDO")) == expected
+
+
+@pytest.mark.parametrize("field", ["ENGINE_UID", "ENGINE_GID"])
+def test_recorded_runtime_requires_native_remappable_identity(field):
+    value = {"ENGINE_UID": "10000", "ENGINE_GID": "10000", "AGENT_SUDO": "1"}
+    value[field] = "65535"
+    with pytest.raises(u.UpdateError, match="UID|GID"):
+        u.validate_runtime_env(value)

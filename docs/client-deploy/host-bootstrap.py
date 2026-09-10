@@ -274,7 +274,7 @@ class HostBootstrap:
         ports = (o.panel_port, o.api_port, o.admin_port, o.ssh_port)
         if any(not 1 <= port <= 65535 for port in ports) or len(set(ports)) != len(ports):
             raise HostError("Panel/API/admin/operator SSH ports must be distinct and valid")
-        if min(o.panel_port, o.api_port, o.admin_port) < 1024 or min(o.uid, o.gid) < 1:
+        if min(o.panel_port, o.api_port, o.admin_port) < 1024 or min(o.uid, o.gid) < 1 or max(o.uid, o.gid) > 65534:
             raise HostError("Invalid engine UID/GID or service ports")
         if any(path.resolve() != path for path in (self.home, self.data)):
             raise HostError("Refusing symlinked control/DATA paths")

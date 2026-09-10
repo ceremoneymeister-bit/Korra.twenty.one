@@ -733,3 +733,15 @@ def test_legacy_dump_cannot_witness_native_nft_rules(host, monkeypatch):
     item.run = run
     with pytest.raises(h.HostError, match="mirror"):
         item.firewall_preflight()
+
+
+@pytest.mark.parametrize("field", ["uid", "gid"])
+def test_native_remap_ceiling_refuses_before_provisioning(host, field):
+    item, fake = host
+    setattr(item.o, field, 65535)
+    # Keep the selected DATA ownership consistent: refusal is for the native
+    # remap limit, not a coincidental ownership mismatch.
+    os.chown(item.data, item.o.uid, item.o.gid)
+    with pytest.raises(h.HostError, match="UID|GID"):
+        item.preflight()
+    assert not any(call[:2] == ["systemctl", "enable"] for call in fake.calls)

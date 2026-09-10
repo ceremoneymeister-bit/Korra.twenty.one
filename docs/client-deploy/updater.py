@@ -194,7 +194,7 @@ def validate_runtime_env(value):
         raise UpdateError("Missing original container root/ownership contract")
     for key in ("ENGINE_UID", "ENGINE_GID"):
         if (not isinstance(value[key], str) or not value[key].isdigit()
-                or not 1 <= int(value[key]) < 2**31):
+                or not 1 <= int(value[key]) <= 65534):
             raise UpdateError("Invalid original container UID/GID")
     if value["AGENT_SUDO"] not in {"0", "1"}:
         raise UpdateError("Invalid original container admin mode")
