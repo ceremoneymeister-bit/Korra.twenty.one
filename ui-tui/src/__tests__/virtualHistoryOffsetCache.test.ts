@@ -528,28 +528,25 @@ describe('useVirtualHistory offset cache reuse', () => {
     })
 
     try {
-      await delay(20)
+      await vi.waitFor(() => {
+        expect(expose.current?.scroll?.getViewportHeight()).toBe(10)
+        expect(viewportIsMounted(items, expose.current!.virtualHistory, expose.current!.scroll!)).toBe(true)
+      })
       const scroll = expose.current!.scroll!
 
       scroll.scrollTo(0)
-      await delay(20)
+      // Row zero must be committed before the next scroll unmounts it.
+      await vi.waitFor(() => {
+        expect(scroll.getScrollTop()).toBe(0)
+        expect(expose.current!.virtualHistory.start).toBe(0)
+      })
       scroll.scrollTo(5)
       const adjustScrollTop = vi.spyOn(scroll, 'adjustScrollTop')
       const staleHeights = new Map(initialHeights)
 
       staleHeights.set(items[0]!.key, 1)
       instance.rerender(React.createElement(Harness, { expose, initialHeights: staleHeights, items }))
-      // Korra: фиксированные 40 мс реального таймера флакали на загруженном
-      // self-hosted раннере — ждём сам факт компенсации, не тик часов.
-      // Проверяется факт вызова, а не его скорость. Запас поднят с 2 до 15
-      // секунд: наш раннер живёт на машине с боевыми контурами, и под общей
-      // нагрузкой планировщик отдаёт этому потоку время не сразу. Прошлый
-      // подъём (21286ba456) до двух секунд нагрузку сборки образа пережил,
-      // а полный прогон CI — уже нет.
-      await vi.waitFor(
-        () => expect(adjustScrollTop).toHaveBeenCalledOnce(),
-        { timeout: 15000, interval: 10 },
-      )
+      await vi.waitFor(() => expect(adjustScrollTop).toHaveBeenCalledOnce())
       expect(adjustScrollTop).toHaveBeenCalledWith(1)
       expect(scroll.getScrollTop()).toBe(6)
       expect(scroll.isSticky()).toBe(false)
