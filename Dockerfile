@@ -359,6 +359,18 @@ print("whisper loaded offline from " + path)'; \
 COPY web/ web/
 COPY ui-tui/ ui-tui/
 COPY apps/shared/ apps/shared/
+# ---------- Дельта Korra 21: палитра панели живёт в одном файле с бэкендом ----
+# web/src/themes/{presets,neumorphism}.ts импортируют
+# korra_cli/data/dashboard-themes.json — тот же файл, из которого палитру берёт
+# korra_cli/web_server.py. Единый источник тем сознательный (K21-013/014), но он
+# перевёл frontend build через границу пакета: полный korra_cli/ приходит ниже,
+# в `COPY . .`, то есть УЖЕ ПОСЛЕ `npm run build`. Без этой строки образ вообще
+# не собирается — `tsc -b` падает с TS2307 «Cannot find module
+# '../../../korra_cli/data/dashboard-themes.json'», хотя локальная сборка из
+# полного рабочего дерева проходит и обычный CI разницы не видит (K21-021).
+# Копируется ровно один нужный файл: каталог данных целиком тянуть незачем, а
+# поздний `COPY . .` всё равно положит поверх ту же версию.
+COPY korra_cli/data/dashboard-themes.json korra_cli/data/
 RUN cd web && npm run build && \
     cd ../ui-tui && npm run build
 
