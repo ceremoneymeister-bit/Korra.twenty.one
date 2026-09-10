@@ -9,4 +9,17 @@ it('requires known light state, respects durable opt-out and fourteen-day snooze
 it('deduplicates reloads and scope-isolates another cabinet',async()=>{const now=new Date(2026,8,9,20);expect(await claimEvening(preference,now)).toBe(true);expect(await claimEvening(preference,now)).toBe(false);expect(await claimEvening({...preference,base_path:'/c/other'},now)).toBe(true);});
 it('does not repeat after backward clock changes',async()=>{expect(await claimEvening(preference,new Date(2026,8,9,20))).toBe(true);expect(await claimEvening(preference,new Date(2026,8,8,20))).toBe(false);});
 it.each(['{',JSON.stringify({at:'invalid',day:'bad'})])('skips malformed episode storage %s',async(raw)=>{localStorage.setItem(episodeKey(preference),raw);expect(await claimEvening(preference,new Date(2026,8,9,20))).toBe(false);});
-it('skips without storage capacity or atomic cross-tab locking',async()=>{vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('full','QuotaExceededError')});expect(await claimEvening(preference,new Date(2026,8,9,20))).toBe(false);Object.defineProperty(navigator,'locks',{value:undefined});expect(await claimEvening(preference,new Date(2026,8,9,20))).toBe(false);});
+it('skips without storage capacity or atomic cross-tab locking', async () => {
+  // Node 26's test setup replaces its unavailable storage with MemoryStorage.
+  const storagePrototype = Object.getPrototypeOf(localStorage) as Storage;
+  const setItem = vi.spyOn(storagePrototype, 'setItem').mockImplementation(() => {
+    throw new DOMException('full', 'QuotaExceededError');
+  });
+  try {
+    expect(await claimEvening(preference, new Date(2026, 8, 9, 20))).toBe(false);
+  } finally {
+    setItem.mockRestore();
+  }
+  Object.defineProperty(navigator, 'locks', {value: undefined});
+  expect(await claimEvening(preference, new Date(2026, 8, 9, 20))).toBe(false);
+});
