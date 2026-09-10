@@ -228,7 +228,7 @@ def test_workflow_dag_blocks_all_publication_after_failed_acceptance(gate_result
     # YAML is executable CI configuration. Evaluate dependency propagation;
     # no Python/source-text regex checks or mirrored implementation strings.
     jobs = yaml.safe_load((ROOT / ".github/workflows/docker.yml").read_text())["jobs"]
-    results = {"detect": "success", "build": "success", "acceptance": gate_result}
+    results = {"detect": "success", "build": "success", "acceptance": gate_result, "full-ci": "success"}
     for name in ("publish", "merge"):
         job = jobs[name]
         assert not any(override in job.get("if", "") for override in ("always()", "failure()", "!cancelled()"))
@@ -281,3 +281,33 @@ def test_publish_shell_refuses_missing_or_ambiguous_receipts(tmp_path, count):
     assert result.returncode != 0
     assert "Expected exactly one acceptance receipt" in result.stdout
     assert not output.exists()
+
+
+def test_publish_requires_full_ci_predecessor_before_job_start():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/docker.yml").read_text())
+    assert "full-ci" in workflow["jobs"]["publish"]["needs"]
+    gate = workflow["jobs"]["full-ci"]
+    assert gate["permissions"]["actions"] == "read"
+    assert any("release_gate.py verify-ci" in step.get("run", "") for step in gate["steps"])
+
+
+def test_ci_and_docker_share_non_cancelling_resource_admission():
+    ci_workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yaml").read_text())
+    docker_workflow = yaml.safe_load((ROOT / ".github/workflows/docker.yml").read_text())
+    assert ci_workflow["concurrency"] == docker_workflow["concurrency"]
+    assert ci_workflow["concurrency"]["cancel-in-progress"] is False
+    for workflow in (ci_workflow, docker_workflow):
+        assert any("release_gate.py admission" in step.get("run", "")
+                   for step in workflow["jobs"]["detect"]["steps"])
+
+
+@pytest.mark.parametrize("result", ["cancelled", "skipped"])
+def test_actual_full_ci_aggregate_rejects_incomplete_python_lane(tmp_path, result):
+    jobs = yaml.safe_load((ROOT / ".github/workflows/ci.yaml").read_text())["jobs"]
+    step = next(step for step in jobs["all-checks-pass"]["steps"] if step.get("id") == "evaluate")
+    needs = {name: {"result": "success"} for name in jobs["all-checks-pass"]["needs"]}
+    needs["tests"]["result"] = result
+    env = {**os.environ, "NEEDS": json.dumps(needs), "GITHUB_EVENT_NAME": "workflow_dispatch",
+           "GITHUB_OUTPUT": str(tmp_path / "output")}
+    completed = subprocess.run(["bash", "-c", step["run"]], cwd=ROOT, env=env, capture_output=True, text=True)
+    assert completed.returncode != 0

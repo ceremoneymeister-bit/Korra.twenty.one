@@ -19,13 +19,12 @@ permissions:
   contents: read
   packages: read
 
-# Concurrency: push/release runs are NEVER cancelled so every merge gets
-# its own image.  PR runs reuse a PR-scoped group with
-# cancel-in-progress: true so rapid pushes to the same PR collapse to
-# the latest commit.
+# Shared with ci.yaml across every ref. Release and tests cannot overlap on A.
+# Do not cancel running work to admit a newer PR. If full CI is absent, fail
+# immediately; never wait for another workflow while holding this lease.
 concurrency:
-  group: korra-docker-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: korra-self-hosted-a-heavy
+  cancel-in-progress: false
 
 env:
   # Korra: свой пакет в GHCR, не образ апстрима в Docker Hub.
@@ -44,6 +43,9 @@ jobs:
       build: ${{ steps.gate.outputs.build }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Shared host resource admission
+        run: python3 scripts/ci/release_gate.py admission
 
       - name: Detect affected areas
         id: classify
@@ -280,9 +282,33 @@ jobs:
   # Ручной запуск и ночное расписание публикуют так же, но только с main —
   # ветку в реестр не пускаем.
   # ---------------------------------------------------------------------------
+  # A prerequisite job, before the publish job can receive registry credentials.
+  full-ci:
+    name: Verify exact-SHA full CI
+    needs: [detect]
+    if: github.repository == 'ceremoneymeister-bit/Korra.twenty.one' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main')
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Require successful full CI for this exact source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: python3 scripts/ci/release_gate.py verify-ci --revision "$SOURCE_REVISION" --receipt "$RUNNER_TEMP/full-ci-receipt.json"
+      - name: Retain full CI witness
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: full-ci-receipt
+          path: ${{ runner.temp }}/full-ci-receipt.json
+          if-no-files-found: error
+
   publish:
     if: github.repository == 'ceremoneymeister-bit/Korra.twenty.one' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main')
-    needs: [build, acceptance]
+    needs: [build, acceptance, full-ci]
     permissions:
       contents: read
       packages: write

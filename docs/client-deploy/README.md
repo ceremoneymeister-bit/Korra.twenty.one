@@ -665,3 +665,30 @@ docker rm -f korra
 - Скорость локального распознавания речи на конкретном железе клиента.
 - Реальный объём архива и время выгрузки в облако клиента.
 - Восстановление из архива на чистом каталоге.
+
+
+## Release gate: exact-SHA full CI
+
+Publish зависит от отдельного job full-ci: registry credentials недоступны
+publish job, пока GitHub Actions API не подтвердит completed/success полного
+ci.yaml на том же SHA. Учитывается последний manual/scheduled run, его exact
+attempt и все обязательные native jobs, включая Python, JS, lint, Rust,
+lockfile и итоговый aggregate. PR, missing/red/cancelled, skipped mandatory
+lane, иной SHA/fork/workflow и неполный rerun не дают разрешения. Старый green
+не заменяет более новый red. Receipt сохраняется в artifact full-ci-receipt.
+Новый runtime updater/image через этот gate не собирается: build → accepted
+archive SHA/image ID/source revision → load/publish остаются одной цепочкой.
+
+CI и Docker используют общий repository-wide concurrency group с
+cancel-in-progress=false. Они не ждут друг друга внутри lease: без готового
+CI release gate сразу отказывает. Перед началом detect общий read-only
+admission требует load1 ≤ 6, MemAvailable ≥ 6 GiB и диск ≥ 20 GiB.
+Оператор запускает полный CI первым, затем отдельный Docker workflow.
+Обновление групп начинает защищать оба workflow после доставки новой CI
+конфигурации в соответствующие refs; старые runs по прежнему YAML нужно
+дождаться до ручного прогона. Внутри CI сохраняются нативные лимиты workers.
+
+Семантика опирается на [GitHub workflow runs API](https://docs.github.com/en/rest/actions/workflow-runs),
+[jobs конкретной попытки](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt)
+и [workflow concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+Никакие registry/deploy действия не выполняются самим release_gate.py.
