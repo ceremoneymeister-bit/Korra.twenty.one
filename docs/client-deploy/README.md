@@ -12,6 +12,7 @@
 | Файл | Что это |
 |---|---|
 | `up.sh` | первый запуск и launcher для host updater |
+| `host-bootstrap.py` | подготовка хоста, root-доступ, проверка, ротация и отзыв |
 | `update.sh`, `updater.py` | host update/rollback с сохранённой операцией |
 | `dependencies.lock.json` | точные версии общего документного стека |
 | `env.template` | заготовка `.env` клиента (ключи и токены) |
@@ -33,58 +34,22 @@
 - Токен Telegram-бота от BotFather и числовой Telegram ID клиента.
 - Куда бэкапить: облако **клиента** (его S3, его диск). На наш сервер
   клиентские данные не кладутся — это жёсткое правило, а не предпочтение.
-- Решение владельца по двум пунктам: `KORRA_AGENT_SUDO` (шаг 6) и доступ
-  агента к хост-системе (`docs/host-admin-setup.md`, по умолчанию не даём).
+- Режим установки: штатный host CLI включает администрирование контейнера
+  и хоста. Для установки без этих прав используйте флаг --no-admin.
+  Подробности и границы отзыва: [host-admin-setup.md](../host-admin-setup.md).
 
-## Шаг 1 [клиент]. Базовая подготовка сервера
+## Шаги 1–2 [клиент]. Подготовка хоста
 
-```bash
-apt-get update && apt-get install -y ca-certificates curl gnupg ufw unzip rclone
-timedatectl set-timezone Europe/Moscow
-```
+Подготовку выполняет host-bootstrap.py на шаге 6, после копирования проверенного
+host kit и выбора неизменяемого образа. CLI использует пакеты Ubuntu/Debian:
+Docker, UFW, fail2ban и OpenSSH. Существующий Docker и активный swap сохраняются;
+собственный swap создаётся только при отсутствии активного. Повторная установка
+с теми же параметрами сохраняет ключ контура.
 
-(`flock`, который использует скрипт бэкапа, ставить не нужно — он входит в
-`util-linux` и есть на любой машине.)
-
-Своп, если памяти 8 ГБ или меньше — распознавание речи и сборка зависимостей
-пиково берут больше, чем кажется:
-
-```bash
-fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile \
-  && swapon /swapfile
-grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-```
-
-Межсетевой экран. Наружу контур не слушает ничего: панель и служебный API
-живут на петле, вход к ним — только через SSH-туннель кабинета.
-
-```bash
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow OpenSSH
-ufw --force enable
-```
-
-**Проверка:**
-
-```bash
-free -h | grep -i swap        # ожидается ненулевой Swap
-ufw status | head -5          # ожидается Status: active и правило OpenSSH
-timedatectl | grep 'Time zone'
-```
-
-## Шаг 2 [клиент]. Docker
-
-```bash
-curl -fsSL https://get.docker.com | sh
-systemctl enable --now docker
-```
-
-**Проверка:**
-
-```bash
-docker run --rm hello-world | grep -q 'working correctly' && echo "docker ок"
-```
+Перед включением UFW CLI разрешает указанный операторский SSH-порт. Передайте
+реальный порт через --ssh-port, если он отличается от 22. Панель, служебный API
+и отдельный административный SSH слушают loopback. CLI не меняет часовой пояс
+хоста: при необходимости настройте его отдельно.
 
 ## Шаг 3 [клиент]. Каталог данных
 
@@ -115,10 +80,10 @@ stat -c '%u:%g %a %n' /opt/korra/data   # ожидается 10000:10000 750
 Туда же кладём комплект — с нашей машины, из этого каталога репозитория:
 
 ```bash
-scp up.sh update.sh updater.py backup.sh dependencies.lock.json env.template \
+scp up.sh update.sh updater.py host-bootstrap.py backup.sh dependencies.lock.json env.template \
   root@<ip-клиента>:/opt/korra/
-ssh root@<ip-клиента> 'chown root:root /opt/korra /opt/korra/{up.sh,update.sh,updater.py,backup.sh,dependencies.lock.json,env.template}'
-ssh root@<ip-клиента> 'chmod 755 /opt/korra /opt/korra/{up.sh,update.sh,updater.py,backup.sh}; chmod 644 /opt/korra/{dependencies.lock.json,env.template}'
+ssh root@<ip-клиента> 'chown root:root /opt/korra /opt/korra/{up.sh,update.sh,updater.py,host-bootstrap.py,backup.sh,dependencies.lock.json,env.template}'
+ssh root@<ip-клиента> 'chmod 755 /opt/korra /opt/korra/{up.sh,update.sh,updater.py,host-bootstrap.py,backup.sh}; chmod 644 /opt/korra/{dependencies.lock.json,env.template}'
 ssh root@<ip-клиента> '/opt/korra/update.sh --capabilities'
 ```
 
@@ -206,44 +171,43 @@ grep -c '^[A-Z_]*=..' /opt/korra/data/.env  # число заполненных 
 
 ## Шаг 6 [клиент]. Первый запуск
 
-Открыть `/opt/korra/up.sh` и сверить блок параметров сверху: имя контейнера,
-порт панели, порт служебного API, путь данных, часовой пояс, `AGENT_SUDO`.
-
-**Порт панели по умолчанию 9119 — менять без причины не надо.** Ключ кабинета
-выдаётся с ограничением `permitopen="127.0.0.1:9119"`, и другой порт требует
-руками дописать второе разрешение в ключе на контуре (см. шаг 9).
-
-**`AGENT_SUDO` — решение владельца.** В образе право `sudo` без пароля у агента
-включено по умолчанию: это осознанный выбор для контура владельца, который сам
-администрирует свою машину из панели. Шаблон ставит `AGENT_SUDO=0`, и это
-верный дефолт для клиента: внутри контейнера агент теряет root, а значит не
-может переписать сам движок. Включать обратно — только если владелец решил,
-что клиенту это нужно, и понимает цену.
-
-Сухой прогон печатает команду, ничего не запуская:
+Установите параметры один раз и сначала получите план без изменений.
+Имя контейнера, DATA и порты должны совпадать с будущим маршрутом кабинета.
+Образ уже закреплён на шаге 4; CLI проверяет Linux/amd64.
 
 ```bash
-/opt/korra/up.sh --dry-run
+python3 /opt/korra/host-bootstrap.py bootstrap --plan \
+  --home /opt/korra --data /opt/korra/data --name korra \
+  --image "$(cat /opt/korra/IMAGE)" --ssh-port 22
+
+python3 /opt/korra/host-bootstrap.py bootstrap \
+  --home /opt/korra --data /opt/korra/data --name korra \
+  --image "$(cat /opt/korra/IMAGE)" --ssh-port 22
 ```
 
-Запуск:
+Штатный режим передаёт launcher значение AGENT_SUDO=1 и создаёт отдельный
+ключ хоста для native install_id. Host key берётся оператором локально и
+закрепляется до первого соединения. Успех требует root-проверки внутри
+контейнера и через SSH из контейнера. Заблокированная учётная запись root
+останавливает preflight: CLI не меняет глобальную политику root.
+
+Для режима без администрирования добавьте --no-admin к обеим командам:
+launcher получит AGENT_SUDO=0, host grant не создаётся. Непосредственный up.sh
+сохраняет прежний дефолт AGENT_SUDO=0. Режим существующего контейнера CLI
+не меняет незаметным recreate; используйте контролируемое обновление.
+
+**Проверка** административной установки:
 
 ```bash
-/opt/korra/up.sh
-```
-
-Скрипт сам дождётся панели и скажет, поднялась она или нет.
-
-**Проверка:**
-
-```bash
+python3 /opt/korra/host-bootstrap.py verify \
+  --home /opt/korra --data /opt/korra/data --name korra \
+  --image "$(cat /opt/korra/IMAGE)" --ssh-port 22
 docker ps --filter name=korra --format '{{.Names}} {{.Status}} {{.Image}}'
-curl -fsS http://127.0.0.1:9119/api/status | head -c 200; echo
-docker exec -u 10000 korra sh -c 'korra --help' | head -3
-docker exec -u 10000 korra sh -c 'sudo -n id -u' 2>&1 | head -1
 ```
 
-Последняя строка при `AGENT_SUDO=0` обязана ответить отказом, а не `0`.
+Порт панели по умолчанию 9119. Изменение требует согласовать ограничение
+permitopen ключа кабинета на шаге 9. Ротация и отзыв root-доступа, включая
+уже открытые SSH-сессии, описаны в [host-admin-setup.md](../host-admin-setup.md).
 
 ### Почему host-сеть, а не мост
 
@@ -260,10 +224,11 @@ docker exec -u 10000 korra sh -c 'sudo -n id -u' 2>&1 | head -1
 порт не достучится до петли контейнера. То есть «мост» и «кабинет» несовместимы
 без отдельной авторизации панели, которой у клиентских контуров нет.
 
-Чем платим: в host-сети агент видит петлю хоста, то есть все локальные службы
-машины. Поэтому контур клиента ставится на **выделенный** сервер, `sudo` внутри
-контейнера выключен, а доступ к хосту по SSH не выдаётся (шаг 6 и
-`docs/host-admin-setup.md`).
+В host-сети агент видит loopback хоста и локальные службы. Контур устанавливают
+на выделенный сервер. Режим администрирования задаёт оператор на шаге 6;
+полные root-права дают агенту возможность менять хост и создавать независимые
+способы доступа. Отзыв штатного ключа закрывает управляемые SSH-сессии,
+но не отменяет действия уже скомпрометированного root.
 
 Наружу host-сеть ничего не открывает: панель и служебный API привязаны к
 `127.0.0.1`, а межсетевой экран из шага 1 закрывает остальное.
