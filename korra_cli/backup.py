@@ -1304,7 +1304,7 @@ def _assert_import_offline(roots: list[Path], *, importer_fd: int | None = None)
                     if (info.st_dev, info.st_ino) in identities or named_holder(held_name, proc):
                         raise _ImportRefused(f"DATA удерживает процесс PID {pid}")
                 # mmap can outlive the last fd, including a SQLite WAL map.
-                for line in (proc / "maps").read_text().splitlines():
+                for line in (proc / "maps").read_text(encoding="utf-8").splitlines():
                     fields = line.split(None, 5)
                     major, minor = (int(n, 16) for n in fields[3].split(":"))
                     identity = (os.makedev(major, minor), int(fields[4]))
