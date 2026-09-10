@@ -250,7 +250,11 @@ def test_pinned_plugin_update_refuses_to_drift(monkeypatch, tmp_path, capsys):
         cmd_update("demo")
 
     assert exc.value.code == 1
-    assert "pinned" in capsys.readouterr().out.lower()
+    output = capsys.readouterr().out
+    # Check the actual localized diagnostic; "pinned" also occurs in the
+    # fixture path and can be split by terminal line wrapping.
+    assert "закреплён" in output
+    assert old_sha in output
     assert _git(home / "plugins" / "demo", "rev-parse", "HEAD") == old_sha
 
 
