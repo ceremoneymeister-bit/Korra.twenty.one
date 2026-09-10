@@ -124,10 +124,15 @@ jobs:
             if [ -x "$KORRA_INIT_PATH" ]; then KORRA_TEST_INIT="$KORRA_INIT_PATH"; break; fi
           done
           test -n "$KORRA_TEST_INIT" || { echo "::error::Native reaping init unavailable"; exit 1; }
+          # Create these as the runner user before sudo; HOME and global /tmp
+          # may contain another process's files. Keep socket paths short.
+          KORRA_TEST_ROOT=$(mktemp -d /tmp/k21.XXXXXX)
+          trap 'rm -rf -- "$KORRA_TEST_ROOT"' EXIT
+          mkdir -m 700 "$KORRA_TEST_ROOT/home" "$KORRA_TEST_ROOT/tmp"
           sudo unshare --kill-child=TERM -m -p -f --mount-proc "$KORRA_TEST_INIT" -- sh -c "
             exec setpriv \
               --reuid=$(id -u) --regid=$(id -g) --init-groups \
-              env HOME='$HOME' PATH='$PATH' \
+              env HOME='$KORRA_TEST_ROOT/home' TMPDIR='$KORRA_TEST_ROOT/tmp' PATH='$PATH' \
                   CI='$CI' GITHUB_ACTIONS='$GITHUB_ACTIONS' \
                   HERMES_TEST_WORKERS='$HERMES_TEST_WORKERS' \
                   OPENROUTER_API_KEY= OPENAI_API_KEY= NOUS_API_KEY= \

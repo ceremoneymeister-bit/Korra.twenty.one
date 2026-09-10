@@ -740,6 +740,8 @@ def test_room_log_pages_are_bounded_by_serialized_event_bytes(tmp_path, monkeypa
             kind="message.user",
             actor=USER,
             payload={"text": "x" * 180, "index": index},
+            # Keep JSON timestamp widths equal so this measures page limits.
+            now=20 + index,
         )
 
     one_event = rooms.read_events(db, room_id="room-1", limit=1)

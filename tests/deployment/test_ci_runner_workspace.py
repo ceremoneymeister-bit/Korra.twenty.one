@@ -78,3 +78,56 @@ else:
         assert "SYNTHETIC_FAILURE_TAIL" in result.stdout
         assert "=== summary ===" in result.stdout
         assert "synthetic-web :: check failed" in result.stderr
+
+
+@pytest.mark.parametrize("child_exit", [0, 37])
+def test_python_ci_uses_private_home_and_tmp_and_preserves_exit(tmp_path, child_exit):
+    """Execute the actual workflow; replace only its privilege/namespace boundary."""
+    if not any(os.access(path, os.X_OK) for path in (
+        "/usr/bin/tini", "/usr/bin/docker-init", "/usr/libexec/docker/docker-init"
+    )):
+        pytest.skip("Native reaping init is installed on the Linux CI runner")
+    bindir = tmp_path / "bin"
+    for name, boundary in (("sudo", "sh"), ("setpriv", "env")):
+        executable(bindir / name, "#!/bin/sh\n"
+                   f'while [ "$1" != "{boundary}" ]; do shift; done\nexec "$@"\n')
+    repo = tmp_path / "repo"
+    (repo / ".venv/bin").mkdir(parents=True)
+    (repo / ".venv/bin/activate").write_text("", encoding="utf-8")
+    executable(repo / "scripts/run_tests.sh", """#!/usr/bin/env python3
+import json, os, pathlib, tempfile
+home = pathlib.Path(os.environ["HOME"])
+tmp = pathlib.Path(tempfile.gettempdir())
+voice = tmp / "hermes_voice" / "synthetic.ogg"
+voice.parent.mkdir(exist_ok=True)
+voice.write_bytes(b"synthetic")
+print(json.dumps(dict(home=str(home), tmp=str(tmp), uid=os.getuid(),
+                     owner=home.parent.stat().st_uid,
+                     mode=home.parent.stat().st_mode & 0o777,
+                     voice=voice.read_bytes().decode())))
+raise SystemExit(int(os.environ["SYNTHETIC_CHILD_EXIT"]))
+""")
+    inherited_home = tmp_path / "inherited-home"
+    inherited_tmp = tmp_path / "inherited-tmp"
+    inherited_home.mkdir()
+    inherited_tmp.mkdir()
+    env = {**os.environ, "HOME": str(inherited_home), "TMPDIR": str(inherited_tmp),
+           "PATH": str(bindir) + ":" + os.environ["PATH"], "CI": "true",
+           "GITHUB_ACTIONS": "true", "HERMES_TEST_WORKERS": "8",
+           "SYNTHETIC_CHILD_EXIT": str(child_exit)}
+    body = workflow_step("tests.yml", "test", "Run tests")
+    result = subprocess.run(["bash", "-eu", "-o", "pipefail", "-c", body],
+                            cwd=repo, env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == child_exit, result.stderr
+    observed = json.loads(result.stdout)
+    private_home, private_tmp = Path(observed["home"]), Path(observed["tmp"])
+    assert private_home != inherited_home
+    assert private_tmp != inherited_tmp
+    assert private_home.parent == private_tmp.parent
+    assert observed["owner"] == observed["uid"]
+    assert observed["mode"] == 0o700
+    assert observed["voice"] == "synthetic"
+    # The step removes only its newly created private root, even on test failure.
+    assert not private_home.parent.exists()
+    assert list(inherited_home.iterdir()) == []
+    assert list(inherited_tmp.iterdir()) == []
