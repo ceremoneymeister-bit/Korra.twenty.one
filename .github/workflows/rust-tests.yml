@@ -73,4 +73,10 @@ jobs:
       # --lib only: the integration/bin targets would need a built frontend
       # (vite dist) that this lane deliberately does not produce.
       - name: cargo test
-        run: cargo test --lib
+        run: |
+          # Runner services use a non-login shell; load the existing rustup
+          # PATH without modifying a shared service or installing a toolchain.
+          if [ -r "$HOME/.cargo/env" ]; then
+            . "$HOME/.cargo/env"
+          fi
+          cargo test --lib

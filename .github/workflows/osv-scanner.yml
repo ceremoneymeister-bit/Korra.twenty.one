@@ -47,19 +47,32 @@ jobs:
     # тот же список уязвимостей в логе джоба, без code-scanning.
     # Джоб информационный, как и был: fail-on-vuln у апстрима выключен.
     runs-on: [self-hosted, linux, x64]
-    container:
-      image: ghcr.io/google/osv-scanner:v2.3.8
+    # Checkout runs as the host runner. A root job-container checkout leaves
+    # root-owned .git objects and breaks every later job on a persistent runner.
+    # Only the scanner runs in Docker, with a read-only workspace and caller UID.
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Scan lockfiles (advisory)
         run: |
-          /osv-scanner scan source \
+          scan_status=0
+          docker run --rm --user "$(id -u):$(id -g)" --env HOME=/tmp \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/workspace,readonly" \
+            --workdir /workspace --entrypoint /osv-scanner \
+            ghcr.io/google/osv-scanner:v2.3.8 scan source \
             --lockfile=uv.lock \
             --lockfile=package-lock.json \
             --lockfile=plugins/platforms/photon/sidecar/package-lock.json \
             --lockfile=scripts/whatsapp-bridge/package-lock.json \
-            || echo "::warning::OSV нашёл известные уязвимости в пинах — список в логе выше. Джоб информационный."
+            || scan_status=$?
+          # Preserve hard failure of the former job-container startup. Only
+          # scanner outcomes are advisory; a missing daemon/image/program is not.
+          if [ "$scan_status" -ge 125 ]; then
+            exit "$scan_status"
+          fi
+          if [ "$scan_status" -ne 0 ]; then
+            echo "::warning::OSV нашёл известные уязвимости в пинах — список в логе выше. Джоб информационный."
+          fi
 
   emit-status:
     name: Emit review status
