@@ -189,13 +189,39 @@ def validate_readiness_health(status):
 
 
 
+def validate_runtime_env(value):
+    if not isinstance(value, dict) or set(value) != {"ENGINE_UID", "ENGINE_GID", "AGENT_SUDO"}:
+        raise UpdateError("Missing original container root/ownership contract")
+    for key in ("ENGINE_UID", "ENGINE_GID"):
+        if (not isinstance(value[key], str) or not value[key].isdigit()
+                or not 1 <= int(value[key]) < 2**31):
+            raise UpdateError("Invalid original container UID/GID")
+    if value["AGENT_SUDO"] not in {"0", "1"}:
+        raise UpdateError("Invalid original container admin mode")
+    return dict(value)
+
+
+def runtime_env_from_info(info):
+    environment = dict(item.split("=", 1) for item in info["Config"].get("Env", []) if "=" in item)
+    sudo = environment.get("KORRA_AGENT_SUDO", environment.get("HERMES_AGENT_SUDO", "1")).lower()
+    if sudo in {"false", "no", "off"}:
+        sudo = "0"
+    elif sudo in {"true", "yes", "on"}:
+        sudo = "1"
+    return validate_runtime_env({
+        "ENGINE_UID": environment.get("KORRA_UID", environment.get("HERMES_UID", "10000")),
+        "ENGINE_GID": environment.get("KORRA_GID", environment.get("HERMES_GID", "10000")),
+        "AGENT_SUDO": sudo,
+    })
+
+
 def utc():
     return datetime.now(timezone.utc).isoformat()
 
 
 def process_epoch(pid):
     try:
-        return Path(f"/proc/{int(pid)}/stat").read_text().rsplit(")", 1)[1].split()[19]
+        return Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[19]
     except (OSError, IndexError, TypeError, ValueError):
         return None
 
@@ -715,11 +741,12 @@ class Updater:
     def start_image(self, image):
         rollback = self.receipt["phase"] == "rollback_recreate"
         resources = self.launch_resource_env(rollback=rollback)
+        runtime = self.launch_runtime_env(rollback=rollback)
         (self.home / "IMAGE").write_text(image + "\n")
         env = {**os.environ, "NAME": self.name, "DATA": str(self.data),
                "PANEL_PORT": str(self.panel), "API_PORT": str(self.api),
                "KORRA_UPDATER_JOB": self.receipt["job_id"],
-               "KORRA_UPDATER_ROLLBACK": "1" if rollback else "0", **resources}
+               "KORRA_UPDATER_ROLLBACK": "1" if rollback else "0", **resources, **runtime}
         result = subprocess.run(["bash", str(self.home / "up.sh")], env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=1500)
@@ -742,6 +769,16 @@ class Updater:
                 if os.environ.get(key):
                     env[key] = os.environ[key]
         return env
+
+    def launch_runtime_env(self, rollback=False):
+        value = validate_runtime_env(self.receipt.get("old_runtime"))
+        if not rollback:
+            for key in ("ENGINE_UID", "ENGINE_GID"):
+                if os.environ.get(key) and os.environ[key] != value[key]:
+                    raise UpdateError("Changing DATA UID/GID requires separate operator preparation")
+            if "AGENT_SUDO" in os.environ:
+                value["AGENT_SUDO"] = os.environ["AGENT_SUDO"]
+        return validate_runtime_env(value)
 
     def capability(self, timeout=30):
         try:
@@ -767,6 +804,8 @@ class Updater:
                 if key in baseline and (rollback or not os.environ.get(environment)) and actual[key] != baseline[key]:
                     raise UpdateError("Container resource limits differ from the preserved baseline")
             self.receipt["active_resources"] = actual
+            if runtime_env_from_info(info) != self.launch_runtime_env(rollback=rollback):
+                raise UpdateError("Container root/ownership differs from the preserved contract")
             try:
                 def budget():
                     remaining = deadline - time.monotonic()
@@ -1048,6 +1087,8 @@ print(json.dumps(changed))
                 "nano_cpus": int(initial["HostConfig"].get("NanoCpus", 0)),
                 "memory_bytes": int(initial["HostConfig"].get("Memory", 0)),
             }
+            self.receipt["old_runtime"] = runtime_env_from_info(initial)
+            self.launch_runtime_env()  # invalid ownership/admin overrides fail before pull/drain
             if self.receipt.get("expected_current") not in (None, old):
                 self.receipt["error_code"] = "expected_current_mismatch"
                 raise UpdateError("Expected current image differs from the running container; refresh installation state")
@@ -1128,6 +1169,7 @@ print(json.dumps(changed))
         if self.receipt.get("status") == "rolled_back":
             return
         validate_capability(self.receipt.get("baseline_capability"))
+        self.launch_runtime_env(rollback=True)
         self.launch_resource_env(rollback=True)  # validate before stopping an older job's healthy container
         self.verify_backup()  # validate before quiescing a healthy newer gateway
         allowed = {self.receipt.get("old_image_id"), self.receipt.get("target_image_id")}

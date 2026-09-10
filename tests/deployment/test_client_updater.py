@@ -132,6 +132,7 @@ def updater(tmp_path, monkeypatch):
     instance = FakeDockerUpdater(home)
     instance.initialize("fixture-job", "registry.example/korra:latest")
     instance.receipt["baseline_capability"] = instance.capability()
+    instance.receipt["old_runtime"] = {"ENGINE_UID": "10000", "ENGINE_GID": "10000", "AGENT_SUDO": "1"}
     return instance
 
 
@@ -1204,3 +1205,55 @@ def test_capability_probe_timeout_is_bounded_and_safe(updater, monkeypatch):
     monkeypatch.setattr(updater, "execute", expired)
     with pytest.raises(u.UpdateError, match="capability cannot be verified"):
         u.Updater.capability(updater)
+
+
+@pytest.mark.parametrize("phase,override,expected", [
+    ("recreate", None, "1"), ("recreate", "0", "0"), ("rollback_recreate", "0", "1")])
+def test_native_launcher_preserves_uid_gid_and_admin_mode(updater, monkeypatch, phase, override, expected):
+    updater.receipt.update(phase=phase, old_resources={"nano_cpus": 0, "memory_bytes": 0},
+        old_runtime={"ENGINE_UID": "12345", "ENGINE_GID": "12346", "AGENT_SUDO": "1"})
+    for key in ("ENGINE_UID", "ENGINE_GID", "AGENT_SUDO"):
+        monkeypatch.delenv(key, raising=False)
+    if override is not None:
+        monkeypatch.setenv("AGENT_SUDO", override)
+    launches = []
+    def launch(args, **kwargs):
+        launches.append(kwargs["env"])
+        return types.SimpleNamespace(returncode=0, stdout="synthetic native launcher")
+    monkeypatch.setattr(u.subprocess, "run", launch)
+    u.Updater.start_image(updater, OLD)
+    assert launches[0].get("ENGINE_UID") == "12345"
+    assert launches[0].get("ENGINE_GID") == "12346"
+    assert launches[0].get("AGENT_SUDO") == expected
+
+
+def test_update_records_original_runtime_root_contract(updater, monkeypatch):
+    native = updater.docker
+    def docker(*args, **kwargs):
+        result = native(*args, **kwargs)
+        if args[0] == "inspect":
+            value = json.loads(result)
+            value[0]["Config"]["Env"] += ["KORRA_UID=12345", "KORRA_GID=12346", "KORRA_AGENT_SUDO=0"]
+            return json.dumps(value)
+        return result
+    monkeypatch.setattr(updater, "docker", docker)
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["old_runtime"] == {"ENGINE_UID": "12345", "ENGINE_GID": "12346", "AGENT_SUDO": "0"}
+
+
+@pytest.mark.parametrize("key,value", [("ENGINE_UID", "12345"), ("ENGINE_GID", "12346"), ("AGENT_SUDO", "unknown")])
+def test_invalid_runtime_override_refuses_before_fetch_or_stop(updater, monkeypatch, key, value):
+    monkeypatch.setenv(key, value)
+    before = u.tree_manifest(updater.data)
+    with pytest.raises(u.UpdateError):
+        updater.update("registry.example/korra:latest")
+    assert u.tree_manifest(updater.data) == before
+    assert not any(call[0] in {"pull", "stop", "start_image"} for call in updater.calls)
+
+
+def test_smoke_refuses_wrong_root_mode_before_model(real_smoke_context):
+    updater, clock, models, _ = real_smoke_context
+    updater.receipt["old_runtime"]["AGENT_SUDO"] = "0"
+    with pytest.raises(u.UpdateError, match="root/ownership"):
+        u.Updater.smoke(updater, OLD)
+    assert clock[0] == 0 and models == []

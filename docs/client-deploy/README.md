@@ -572,6 +572,12 @@ Updater сохраняет фактические HostConfig NanoCpus/Memory в 
 `CONTAINER_CPUS=4`, `CONTAINER_MEMORY=4g` считаются намеренным override для
 обновления; rollback всегда возвращает исходные лимиты, даже при заданных env.
 
+UID/GID и AGENT_SUDO тоже фиксируются по фактическому контейнеру. Обновление
+сохраняет их; только явный AGENT_SUDO меняет forward mode, rollback возвращает
+исходный. Изменение UID/GID через env отклоняется до pull/drain. Для снятия
+managed host-root сначала используйте host-bootstrap.py revoke; снятие sudo
+внутри контейнера и отзыв host key — отдельные границы.
+
 До pull/drain updater сохраняет baseline_capability: foundation только при
 нативном AuthError/no_provider_configured; configured при успешном разрешении
 провайдера. Receipt хранит SHA256 идентичности provider/endpoint/API mode без
