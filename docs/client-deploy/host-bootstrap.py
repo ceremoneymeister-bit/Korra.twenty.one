@@ -12,6 +12,8 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import shlex
+import struct
 import socket
 import stat
 import subprocess
@@ -134,6 +136,103 @@ def write_at(fd, name, value, uid, gid, mode=0o600):
             os.unlink(temp, dir_fd=fd)
 
 
+def require_empty_nft_tables():
+    """Presence-only kernel witness when nft is absent; never writes rules."""
+    try:
+        with socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, 12) as channel:
+            channel.settimeout(2)
+            channel.bind((0, 0))
+            sequence = 1
+            # NETLINK_NETFILTER / NFT_MSG_GETTABLE, REQUEST|ROOT|MATCH.
+            request = struct.pack("=IHHII", 20, (10 << 8) | 1, 0x301, sequence, 0) + bytes(4)
+            channel.sendto(request, (0, 0))
+            for _ in range(64):
+                data, _, flags, peer = channel.recvmsg(65536)
+                if flags & socket.MSG_TRUNC or not data or peer[0] != 0:
+                    raise HostError("Uncertain firewall inventory")
+                offset = 0
+                while offset < len(data):
+                    if len(data) - offset < 16:
+                        raise HostError("Malformed firewall inventory")
+                    length, kind, message_flags, seq, _pid = struct.unpack_from("=IHHII", data, offset)
+                    if length < 16 or offset + length > len(data) or seq != sequence or message_flags & 0x10:
+                        raise HostError("Incomplete firewall inventory")
+                    payload = data[offset + 16:offset + length]
+                    if kind == 3:  # NLMSG_DONE: only a successful empty dump.
+                        if (payload and (len(payload) < 4 or struct.unpack_from("=i", payload)[0] != 0)
+                                or offset + ((length + 3) & ~3) != len(data)):
+                            raise HostError("Incomplete firewall inventory")
+                        return
+                    if kind != 2 or len(payload) < 4 or struct.unpack_from("=i", payload)[0] != 0:
+                        raise HostError("Existing/unknown nft firewall requires nft inspection")
+                    offset += (length + 3) & ~3
+            raise HostError("Firewall inventory exceeded its bound")
+    except (OSError, ValueError, struct.error) as exc:
+        raise HostError("Cannot verify existing nft firewall without nft") from exc
+
+
+def iptables_inventory(text, active, ssh_port):
+    """Recognize only existing UFW, fail2ban SSH, Docker forwarding/NAT."""
+    tables, chains, counts = set(), {}, {}
+    table = None
+    linked_ufw = all(re.search(r"(?m)^-A " + chain + r" (?:.* )?-j ufw-", text)
+                     for chain in ("INPUT", "OUTPUT"))
+    for line in text.splitlines():
+        if not line or line.startswith("#") or line == "COMMIT":
+            continue
+        if line.startswith("*"):
+            table = line[1:]
+            if table not in {"filter", "nat", "mangle", "raw", "security"}:
+                raise HostError("Unknown firewall table")
+            tables.add(table)
+            continue
+        if line.startswith(":"):
+            parts = line[1:].split()
+            if not table or len(parts) != 3:
+                raise HostError("Malformed firewall chain inventory")
+            chain, policy = parts[:2]
+            chains[(table, chain)] = policy
+            allowed_policies = {"ACCEPT"}
+            if active and linked_ufw and table == "filter" and chain == "INPUT":
+                allowed_policies.add("DROP")
+            if table == "filter" and chain == "FORWARD" and (active or
+                    re.search(r"(?m)^-A FORWARD -j DOCKER-(?:USER|FORWARD|INGRESS)(?:\s|$)", text)):
+                allowed_policies.add("DROP")
+            if chain in {"INPUT", "OUTPUT", "FORWARD", "PREROUTING", "POSTROUTING"} and policy not in allowed_policies:
+                raise HostError("Existing firewall kernel policy conflicts with UFW/host defaults")
+            continue
+        words = shlex.split(line)
+        if not table or len(words) < 4 or words[0] != "-A":
+            raise HostError("Unrepresentable firewall rule")
+        chain = words[1]
+        counts[(table, chain)] = counts.get((table, chain), 0) + 1
+        target = words[words.index("-j") + 1] if "-j" in words else ""
+        allowed = active and table == "filter" and (
+            chain.startswith("ufw-") or chain in {"INPUT", "OUTPUT", "FORWARD"} and target.startswith("ufw-"))
+        if table == "filter":
+            if chain.startswith("f2b-") and target in {"RETURN", "REJECT", "DROP"}:
+                allowed = True
+            if chain == "INPUT" and target == "f2b-sshd":
+                port_arg = next((key for key in ("--dport", "--dports") if key in words), None)
+                allowed = bool(port_arg and str(ssh_port) in words[words.index(port_arg) + 1].split(","))
+            if chain == "FORWARD" and target in {"DOCKER-USER", "DOCKER-FORWARD", "DOCKER-INGRESS"}:
+                allowed = True
+            if chain.startswith("DOCKER") and (target in {"ACCEPT", "DROP", "RETURN"} or target.startswith("DOCKER")):
+                allowed = True
+        elif table == "nat":
+            if chain in {"PREROUTING", "OUTPUT"} and target == "DOCKER" and "--dst-type" in words:
+                allowed = words[words.index("--dst-type") + 1] == "LOCAL"
+            if chain == "DOCKER" and target in {"DNAT", "RETURN"}:
+                allowed = True
+            if chain == "POSTROUTING" and target == "MASQUERADE" and "-s" in words and "-o" in words:
+                index = words.index("-o")
+                bridge = words[index + 1]
+                allowed = words[index - 1] == "!" and (bridge == "docker0" or bridge.startswith("br-"))
+        if not allowed:
+            raise HostError("Existing firewall rule requires operator integration")
+    return tables, chains, counts
+
+
 class HostBootstrap:
     def __init__(self, options, *, system_root=Path("/"), run=command):
         self.o, self.root, self.run = options, Path(system_root), run
@@ -192,6 +291,11 @@ class HostBootstrap:
                     raise HostError("Existing DATA has unexpected ownership")
         if shutil.disk_usage(parent).free < 24 * 1024**3:
             raise HostError("At least 24 GiB free is required before host provisioning")
+        memory = self.memory_kib()
+        if (os.cpu_count() or 0) < 4 or memory < 7 * 1024**2:
+            raise HostError("Require at least 4 CPUs and an 8 GiB-class host (7 GiB reported RAM)")
+        if not o.plan and o.action == "bootstrap":
+            self.firewall_preflight()
         return {"name": o.name, "data": str(self.data), "image": o.image, "admin": o.admin,
                 "panel_port": o.panel_port, "api_port": o.api_port, "admin_port": o.admin_port,
                 "host_components": ["Docker", "swap", "UFW", "fail2ban", "OpenSSH"],
@@ -230,8 +334,106 @@ class HostBootstrap:
             raise HostError("Native installation identity unavailable")
         return value
 
+    def memory_kib(self):
+        fields = dict(line.split(":", 1) for line in
+                      (self.root / "proc/meminfo").read_text(encoding="ascii").splitlines() if ":" in line)
+        return int(fields.get("MemTotal", "0").split()[0])
+
+    def firewall_preflight(self):
+        """Read-only native policy inventory. Unknown policies require an operator."""
+        for manager in ("nftables", "firewalld"):
+            result = self.run(["systemctl", "is-active", manager], check=False)
+            if result.stdout.strip() == "active":
+                raise HostError("Existing firewall manager requires operator integration")
+            if result.returncode not in {3, 4}:
+                raise HostError("Cannot verify existing firewall manager")
+        active = False
+        locale = {**os.environ, "LC_ALL": "C"}
+        if shutil.which("ufw"):
+            status = self.run(["ufw", "status", "verbose"], env=locale).stdout
+            if status.startswith("Status: active"):
+                active = True
+                allow = rf"(?m)^{self.o.ssh_port}(?:/tcp)?\s+ALLOW IN\s+Anywhere\s*$"
+                if ("Default: deny (incoming), allow (outgoing)" not in status
+                        or not re.search(allow, status)):
+                    raise HostError("Existing UFW policy conflicts or operator SSH allowance is unverified")
+            elif status.strip() != "Status: inactive":
+                raise HostError("Cannot verify existing UFW policy")
+            elif any(line.strip().startswith("ufw ") for line in
+                     self.run(["ufw", "show", "added"], env=locale).stdout.splitlines()):
+                raise HostError("Inactive UFW contains existing firewall rules")
+        # A native nft table must be completely representable by iptables.
+        # Arbitrary sets/inet tables are deliberately left to the operator.
+        nft_tables = {"ip": set(), "ip6": set()}
+        nft_chains = {"ip": {}, "ip6": {}}
+        nft_counts = {"ip": {}, "ip6": {}}
+        hooks = {"INPUT": "input", "OUTPUT": "output", "FORWARD": "forward",
+                 "PREROUTING": "prerouting", "POSTROUTING": "postrouting"}
+        if shutil.which("nft"):
+            dump = json.loads(self.run(["nft", "--json", "list", "ruleset"]).stdout)
+            entries = dump.get("nftables") if isinstance(dump, dict) else None
+            if not isinstance(entries, list):
+                raise HostError("Malformed nft firewall inventory")
+            for entry in entries:
+                if not isinstance(entry, dict) or len(entry) != 1:
+                    raise HostError("Malformed nft firewall entry")
+                kind, value = next(iter(entry.items()))
+                if not isinstance(value, dict):
+                    raise HostError("Malformed nft firewall object")
+                if kind == "metainfo":
+                    continue
+                family = value.get("family")
+                table = value.get("name") if kind == "table" else value.get("table")
+                if family not in nft_tables or table not in {"filter", "nat", "mangle", "raw", "security"}:
+                    raise HostError("Unknown nft firewall table/hook requires operator integration")
+                nft_tables[family].add(table)
+                if kind == "chain":
+                    name = value.get("name", "")
+                    if name not in hooks and not name.startswith(("DOCKER", "ufw-", "f2b-")):
+                        raise HostError("Unknown nft firewall chain")
+                    if value.get("hook") and value["hook"] != hooks.get(name):
+                        raise HostError("Unknown nft firewall base hook")
+                    nft_chains[family][(table, name)] = value.get("policy", "-").upper()
+                elif kind == "rule":
+                    key = (table, value.get("chain"))
+                    nft_counts[family][key] = nft_counts[family].get(key, 0) + 1
+                elif kind != "table":
+                    raise HostError("Native nft objects require explicit operator integration")
+        else:
+            require_empty_nft_tables()
+        ufw_kernel_verified = False
+        for family, prefix in (("ip", "iptables"), ("ip6", "ip6tables")):
+            legacy = self.root / "proc/net" / (family + "_tables_names")
+            legacy_binary = prefix + "-legacy-save"
+            if legacy.exists() and legacy.read_text(encoding="ascii").strip() and not shutil.which(legacy_binary):
+                raise HostError("Legacy firewall tables require their native inspection tool")
+            mirrors = []
+            for binary in (prefix + "-save", prefix + "-nft-save", legacy_binary):
+                if not shutil.which(binary):
+                    continue
+                result = self.run([binary], env=locale)
+                if getattr(result, "stderr", "").strip():
+                    raise HostError("Firewall inspection diagnostic requires operator attention")
+                inventory = iptables_inventory(result.stdout, active, self.o.ssh_port)
+                if binary == prefix + "-nft-save":
+                    mirrors.append(inventory)
+                if family == "ip" and inventory[1].get(("filter", "INPUT")) == "DROP":
+                    ufw_kernel_verified = True
+            if nft_tables[family] and not any(
+                nft_tables[family] <= tables
+                and {key: policy for key, policy in chains.items() if key[0] in nft_tables[family]} == nft_chains[family]
+                and all(counts.get(key, 0) == count for key, count in nft_counts[family].items())
+                and all(nft_counts[family].get(key, 0) == count for key, count in counts.items() if key[0] in nft_tables[family])
+                for tables, chains, counts in mirrors
+            ):
+                raise HostError("Native nft firewall has no complete iptables inspection mirror")
+        if active and not ufw_kernel_verified:
+            raise HostError("UFW status has no verified active kernel policy")
+        return active
+
     def prepare(self):
-        packages = ["ca-certificates", "openssh-server", "ufw", "fail2ban"]
+        firewall_ready = self.firewall_preflight()
+        packages = ["ca-certificates", "curl", "unzip", "rclone", "openssh-server", "ufw", "fail2ban"]
         if not shutil.which("docker"):
             packages.append("docker.io")
         missing = [name for name in packages if self.run(
@@ -241,7 +443,7 @@ class HostBootstrap:
             self.run(["apt-get", "install", "-y", *missing], timeout=900)
         self.run(["systemctl", "enable", "--now", "docker"])
         swap_lines = (self.root / "proc/swaps").read_text(encoding="ascii").splitlines()
-        if len(swap_lines) < 2:
+        if len(swap_lines) < 2 and self.memory_kib() <= 8 * 1024**2:
             directory = self.root / "var/lib/korra-host-admin"
             mkdir(directory)
             swap = directory / "swapfile"
@@ -256,10 +458,13 @@ class HostBootstrap:
             entry = str(swap) + " none swap sw 0 0"
             if entry not in text.splitlines():
                 publish(fstab, text.rstrip() + "\n" + entry + "\n", 0o644)
-        self.run(["ufw", "allow", f"{self.o.ssh_port}/tcp"])
-        self.run(["ufw", "default", "deny", "incoming"])
-        self.run(["ufw", "default", "allow", "outgoing"])
-        self.run(["ufw", "--force", "enable"])
+        if not firewall_ready:
+            self.run(["ufw", "allow", f"{self.o.ssh_port}/tcp"])
+            self.run(["ufw", "default", "deny", "incoming"])
+            self.run(["ufw", "default", "allow", "outgoing"])
+            self.run(["ufw", "--force", "enable"])
+            if not self.firewall_preflight():
+                raise HostError("UFW did not become active")
         jail_dir = self.root / "etc/fail2ban/jail.d"
         mkdir(jail_dir, 0o755)
         changed = publish(jail_dir / "korra-sshd.local",
@@ -267,6 +472,9 @@ class HostBootstrap:
         self.run(["systemctl", "enable", "--now", "fail2ban"])
         if changed:
             self.run(["fail2ban-client", "reload"])
+        jail = self.run(["fail2ban-client", "status", "sshd"]).stdout
+        if "Status for the jail: sshd" not in jail:
+            raise HostError("The fail2ban sshd jail could not be verified")
         self.data.mkdir(parents=True, exist_ok=True)
         os.chown(self.data, self.o.uid, self.o.gid, follow_symlinks=False)
         self.data.chmod(0o750)

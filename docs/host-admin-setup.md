@@ -14,7 +14,8 @@ Web-installer отсутствует. Bootstrap включает admin mode: sud
 
 Поддерживаются Linux x86_64, Ubuntu/Debian с systemd. Control kit принадлежит
 root, расположен вне DATA и не доступен агенту на запись. До изменяющих команд
-проверяются root, ОС/архитектура, immutable digest, пути/владелец DATA, диск
+проверяются root, ОС/архитектура, immutable digest, пути/владелец DATA, минимум
+4 CPU, 8 GiB-class RAM (не менее 7 GiB видимой памяти), 24 GiB свободного диска
 и отдельные panel/API/admin/operator-SSH порты. Root account должен допускать
 public-key login без PAM: locked/unknown account останавливает bootstrap.
 Скрипт не меняет глобальную политику root account. Настройте её через
@@ -33,12 +34,26 @@ Plan только читает preflight. Уберите --plan для выпо�
 добавьте --no-admin. Второй контур получает свои DATA/name и свободные порты.
 UUID создаёт нативный korra_cli.install_identity; новый формат identity не вводится.
 
-Host provisioning устанавливает отсутствующие пакеты через apt: OpenSSH, UFW,
-fail2ban и Docker при его отсутствии. Docker CE не заменяется docker.io.
-Активный swap сохраняется; без него создаются managed swap 4 GiB и запись
-fstab. UFW сначала разрешает указанный операторский SSH-порт, затем включает
-deny incoming/allow outgoing. Fail2ban защищает внешний SSH через systemd
-backend. Эти компоненты принадлежат хосту, а не image.
+Host provisioning устанавливает отсутствующие пакеты через apt: curl,
+unzip/rclone для штатного launcher/backup, OpenSSH, UFW, fail2ban и Docker
+при его отсутствии. Docker CE не заменяется docker.io. Активный swap
+сохраняется; без него на хосте до 8 GiB создаётся managed swap 4 GiB.
+
+До apt/swap/firewall mutation CLI читает UFW, native nft/iptables и legacy
+backend. Совместимый активный UFW с подтверждёнными kernel policy и правилом
+операторского SSH полностью сохраняется. Свежий firewall сначала получает
+SSH allow, затем deny incoming/allow outgoing; результат проверяется.
+Иные managers, конфликтующие/непрочитанные rules/hooks и неподдерживаемые
+native nft objects останавливают подготовку. Docker forwarding/NAT сохраняются
+только для распознанного штатного iptables contract. Произвольные nft sets,
+inet tables и чужие схемы, включая отдельный nft fail2ban table, требуют
+предварительной операторской интеграции: CLI их не переписывает. При отсутствии
+nft допускается только подтверждённый пустой kernel table dump; ошибки и
+неполные dumps дают отказ. Это намеренно консервативный preflight.
+
+После enable/reload fail2ban проверяется реально доступный jail sshd.
+Его поздний override/отключение не считается успешной установкой. Эти компоненты
+принадлежат хосту, а не image.
 
 Далее загружается immutable image, проверяется linux/amd64 и запускается
 нативный up.sh с явными UID/GID/admin mode. Существующий контейнер проверяется

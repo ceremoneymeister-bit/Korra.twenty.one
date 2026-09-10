@@ -43,6 +43,13 @@ class HostFixture:
         self.launch_env = None
         self.launch_output = ""
         self.missing = set()
+        self.firewall_active = False
+        self.firewall_policy = "deny (incoming), allow (outgoing)"
+        self.custom_nft = False
+        self.custom_iptables = False
+        self.pending_rules = False
+        self.firewall_manager = False
+        self.jail_ready = True
 
     def __call__(self, args, **kwargs):
         args = list(map(str, args))
@@ -72,6 +79,8 @@ class HostFixture:
         elif args[:2] == ["docker", "exec"]:
             output = self.identity if "-c" in args else "0"
         elif args[0] == "systemctl":
+            if args[1] == "is-active":
+                return SimpleNamespace(stdout="active" if self.firewall_manager else "inactive", returncode=0 if self.firewall_manager else 3)
             if args[1] == "stop":
                 if self.failed_stop:
                     raise h.HostError("synthetic stop failure")
@@ -86,8 +95,27 @@ class HostFixture:
         elif args[0] == "/usr/sbin/sshd":
             assert args[1] == "-t"
             return h.command(args, **kwargs)
-        elif args[0] in {"ufw", "fail2ban-client"}:
-            pass
+        elif args[0] == "ufw":
+            if args[1:] == ["status", "verbose"]:
+                output = ("Status: active\nDefault: " + self.firewall_policy + "\n22/tcp ALLOW IN Anywhere\n") if self.firewall_active else "Status: inactive\n"
+            elif args[1:] == ["show", "added"]:
+                output = "Added user rules (see 'ufw status' for running firewall):\n"
+                if self.pending_rules:
+                    output += "ufw allow 1234/tcp\n"
+            elif args[1:] == ["--force", "enable"]:
+                self.firewall_active = True
+        elif args[0] == "nft":
+            output = json.dumps({"nftables": [{"chain": {"family": "inet", "table": "foreign", "name": "input", "hook": "input"}}] if self.custom_nft else []})
+        elif args[0] in {"iptables-save", "ip6tables-save", "iptables-nft-save", "ip6tables-nft-save", "iptables-legacy-save", "ip6tables-legacy-save"}:
+            output = "*filter\n:INPUT " + ("DROP" if self.firewall_active else "ACCEPT") + " [0:0]\n:OUTPUT ACCEPT [0:0]\n:FORWARD " + ("DROP" if self.firewall_active else "ACCEPT") + " [0:0]\n"
+            if self.firewall_active:
+                output += ":ufw-before-input - [0:0]\n:ufw-before-output - [0:0]\n-A INPUT -j ufw-before-input\n-A OUTPUT -j ufw-before-output\n"
+            if self.custom_iptables:
+                output += "-A INPUT -s 192.0.2.1 -j DROP\n"
+            output += "COMMIT\n"
+        elif args[0] == "fail2ban-client":
+            if args[1:] == ["status", "sshd"]:
+                output = "Status for the jail: sshd\n" if self.jail_ready else "Status unavailable"
         elif args[0] == "fallocate":
             Path(args[-1]).write_bytes(b"synthetic swap")
         elif args[0] == "mkswap":
@@ -107,6 +135,7 @@ def host(tmp_path, monkeypatch):
     for name in ("etc/ssh", "etc/systemd/system", "proc", "run", "var/lib", "kit", "data"):
         (root / name).mkdir(parents=True, exist_ok=True)
     (root / "etc/os-release").write_text('ID=ubuntu\n')
+    (root / "proc/meminfo").write_text("MemTotal: 8388608 kB\n")
     (root / "proc/swaps").write_text("Filename Type Size Used Priority\nexisting file 4 0 -2\n")
     (root / "etc/fstab").write_text("# preserved fixture\n")
     (root / "kit/up.sh").write_bytes((SOURCE.parent / "up.sh").read_bytes())
@@ -116,6 +145,8 @@ def host(tmp_path, monkeypatch):
     o = SimpleNamespace(action="grant", home=root / "kit", data=root / "data", name="synthetic",
         image="sha256:" + "a" * 64, panel_port=29119, api_port=28650, admin_port=22021,
         ssh_port=22, uid=10000, gid=10000, admin=True, plan=False)
+    original_which = h.shutil.which
+    monkeypatch.setattr(h.shutil, "which", lambda name: "/synthetic/" + name if name in {"ufw", "nft", "iptables-save", "ip6tables-save", "iptables-nft-save", "ip6tables-nft-save", "iptables-legacy-save", "ip6tables-legacy-save"} else original_which(name))
     fake = HostFixture(root)
     item = h.HostBootstrap(o, system_root=root, run=fake)
     monkeypatch.setattr(item, "checked_container", lambda: {})
@@ -256,7 +287,7 @@ def test_prepare_reuses_existing_docker_swap_and_is_idempotent(host):
     fake.calls.clear()
     item.prepare()
     assert files(item.root) == before
-    assert not any(call[0] in {"apt-get", "fallocate", "mkswap", "swapon", "fail2ban-client"} for call in fake.calls)
+    assert not any((call[0] in {"apt-get", "fallocate", "mkswap", "swapon"} or call[:2] == ["fail2ban-client", "reload"]) for call in fake.calls)
 
 
 def test_prepare_managed_swap_persists_once(host):
@@ -467,3 +498,238 @@ def test_plan_accepts_documented_control_home_without_writes(tmp_path):
         "--image", "sha256:" + "a" * 64], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     assert not target.exists()
+
+
+@pytest.mark.parametrize("conflict", ["ufw_policy", "nft", "iptables", "pending_rules", "manager"])
+def test_firewall_conflict_refuses_before_host_mutation(host, conflict):
+    item, fake = host
+    if conflict == "ufw_policy":
+        fake.firewall_active = True
+        fake.firewall_policy = "deny (incoming), deny (outgoing)"
+    else:
+        setattr(fake, {"nft": "custom_nft", "iptables": "custom_iptables",
+                      "pending_rules": "pending_rules", "manager": "firewall_manager"}[conflict], True)
+    before = files(item.root)
+    with pytest.raises(h.HostError, match="firewall|Firewall|UFW"):
+        item.prepare()
+    assert files(item.root) == before
+    assert not any(call[0] in {"apt-get", "fallocate", "mkswap", "swapon"}
+                   or call[:2] == ["systemctl", "enable"] for call in fake.calls)
+
+
+def test_compatible_active_firewall_is_preserved(host):
+    item, fake = host
+    fake.firewall_active = True
+    item.prepare()
+    assert not any(call[0] == "ufw" and call[1] not in {"status", "show"} for call in fake.calls)
+
+
+def test_bootstrap_requires_verified_sshd_jail(host):
+    item, fake = host
+    fake.jail_ready = False
+    with pytest.raises(h.HostError, match="jail"):
+        item.bootstrap()
+    assert fake.launch_env is None
+
+
+@pytest.mark.parametrize("low", ["cpu", "ram"])
+def test_host_resources_refuse_before_provisioning(host, monkeypatch, low):
+    item, fake = host
+    if low == "cpu":
+        monkeypatch.setattr(h.os, "cpu_count", lambda: 2)
+    else:
+        (item.root / "proc/meminfo").write_text("MemTotal: 1048576 kB\n")
+    before = files(item.root)
+    with pytest.raises(h.HostError, match="CPU|RAM"):
+        item.preflight()
+    assert files(item.root) == before
+
+
+def test_host_installs_native_launcher_and_backup_dependencies(host):
+    item, fake = host
+    fake.missing = {"curl", "unzip", "rclone"}
+    item.prepare()
+    assert not fake.missing
+
+
+@pytest.mark.parametrize("case", ["empty", "ack_empty", "table", "error", "truncated",
+    "short", "bad_length", "wrong_seq", "interrupted", "timeout", "foreign_peer", "done_error"])
+def test_missing_nft_requires_complete_empty_kernel_witness(monkeypatch, case):
+    import struct
+    def packet(kind=3, flags=2, seq=1, body=b""):
+        return struct.pack("=IHHII", 16 + len(body), kind, flags, seq, 0) + body
+    data, flags, peer = packet(), 0, (0, 0)
+    if case == "ack_empty":
+        data = packet(2, body=bytes(4)) + data
+    elif case == "table":
+        data = packet(10 << 8, body=bytes(4)) + data
+    elif case == "error":
+        data = packet(2, body=struct.pack("=i", -1))
+    elif case == "truncated":
+        flags = h.socket.MSG_TRUNC
+    elif case == "short":
+        data = b"short"
+    elif case == "bad_length":
+        data = struct.pack("=IHHII", 100, 3, 2, 1, 0)
+    elif case == "wrong_seq":
+        data = packet(seq=5)
+    elif case == "interrupted":
+        data = packet(flags=0x12)
+    elif case == "foreign_peer":
+        peer = (999, 0)
+    elif case == "done_error":
+        data = packet(body=struct.pack("=i", -1))
+    class Channel:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def bind(self, address): assert address == (0, 0)
+        def settimeout(self, seconds): assert 0 < seconds <= 2
+        def sendto(self, message, address):
+            header = struct.unpack("=IHHII", message[:16])
+            assert header[1:3] == ((10 << 8) | 1, 0x301)  # GETTABLE dump; never a mutation.
+            assert address == (0, 0)
+        def recvmsg(self, limit):
+            if case == "timeout":
+                raise TimeoutError()
+            return data, [], flags, peer
+    monkeypatch.setattr(h.socket, "socket", lambda *args: Channel())
+    if case in {"empty", "ack_empty"}:
+        h.require_empty_nft_tables()
+    else:
+        with pytest.raises(h.HostError):
+            h.require_empty_nft_tables()
+
+
+@pytest.mark.parametrize("hook", ["ingress", "prerouting", "output"])
+def test_foreign_nft_hooks_refuse_before_mutation(host, hook):
+    item, fake = host
+    original = item.run
+    def run(args, **kwargs):
+        if args[0] == "nft":
+            return SimpleNamespace(stdout=json.dumps({"nftables": [
+                {"chain": {"family": "inet", "table": "foreign", "name": "traffic", "hook": hook}}]}))
+        return original(args, **kwargs)
+    item.run = run
+    with pytest.raises(h.HostError, match="firewall"):
+        item.prepare()
+    assert not any(call[:2] == ["systemctl", "enable"] for call in fake.calls)
+
+
+def test_more_than_eight_gib_does_not_create_unneeded_swap(host):
+    item, fake = host
+    (item.root / "proc/swaps").write_text("Filename Type Size Used Priority\n")
+    (item.root / "proc/meminfo").write_text("MemTotal: 16777216 kB\n")
+    item.prepare()
+    assert not any(call[0] in {"fallocate", "mkswap", "swapon"} for call in fake.calls)
+
+
+@pytest.mark.parametrize("case", ["docker_input", "kernel_output", "mismatched_hook"])
+def test_firewall_recognized_names_do_not_hide_foreign_policy(host, case):
+    item, fake = host
+    fake.firewall_active = case == "kernel_output"
+    original = item.run
+    def run(args, **kwargs):
+        if args[0] in {"iptables-save", "ip6tables-save", "iptables-nft-save", "ip6tables-nft-save", "iptables-legacy-save", "ip6tables-legacy-save"}:
+            policy = "DROP" if case == "kernel_output" else "ACCEPT"
+            extra = "-A INPUT -j DOCKER-USER\n-A DOCKER-USER -j DROP\n" if case == "docker_input" else ""
+            return SimpleNamespace(stdout="*filter\n:INPUT " + ("DROP" if fake.firewall_active else "ACCEPT")
+                + " [0:0]\n:OUTPUT " + policy + " [0:0]\n" + extra + "COMMIT\n", stderr="")
+        if args[0] == "nft" and case == "mismatched_hook":
+            return SimpleNamespace(stdout=json.dumps({"nftables": [
+                {"chain": {"family": "ip", "table": "filter", "name": "INPUT", "hook": "prerouting"}}]}))
+        return original(args, **kwargs)
+    item.run = run
+    with pytest.raises(h.HostError):
+        item.prepare()
+    assert not any(call[:2] == ["systemctl", "enable"] for call in fake.calls)
+
+
+def test_native_docker_rules_are_accepted_only_on_forwarding_and_nat_paths():
+    rules = """*filter
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:FORWARD DROP [0:0]
+:DOCKER-USER - [0:0]
+:DOCKER-FORWARD - [0:0]
+-A FORWARD -j DOCKER-USER
+-A FORWARD -j DOCKER-FORWARD
+-A DOCKER-USER -j RETURN
+-A DOCKER-FORWARD -j ACCEPT
+COMMIT
+*nat
+:PREROUTING ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+:DOCKER - [0:0]
+-A PREROUTING -m addrtype --dst-type LOCAL -j DOCKER
+-A OUTPUT -m addrtype --dst-type LOCAL -j DOCKER
+-A POSTROUTING -s 172.17.0.0/16 ! -o docker0 -j MASQUERADE
+-A DOCKER -j RETURN
+COMMIT
+"""
+    tables, chains, counts = h.iptables_inventory(rules, False, 22)
+    assert tables == {"filter", "nat"}
+    assert chains[("filter", "INPUT")] == "ACCEPT"
+    assert counts[("filter", "FORWARD")] == 2
+
+
+@pytest.mark.parametrize("case", ["legacy_drop", "nft_missing_mirror", "ufw_missing_kernel"])
+def test_all_firewall_backends_must_be_accounted_for(host, case):
+    item, fake = host
+    fake.firewall_active = case == "ufw_missing_kernel"
+    original = item.run
+    def run(args, **kwargs):
+        if case == "legacy_drop" and args[0] == "iptables-legacy-save":
+            return SimpleNamespace(stdout="*filter\n:INPUT DROP [0:0]\nCOMMIT\n", stderr="")
+        if case == "nft_missing_mirror" and args[0] == "nft":
+            return SimpleNamespace(stdout=json.dumps({"nftables": [
+                {"table": {"family": "ip", "name": "raw"}},
+                {"chain": {"family": "ip", "table": "raw", "name": "PREROUTING", "hook": "prerouting", "policy": "accept"}},
+                {"rule": {"family": "ip", "table": "raw", "chain": "PREROUTING", "expr": [{"drop": None}]}}
+            ]}))
+        if case == "ufw_missing_kernel" and "tables" in args[0]:
+            return SimpleNamespace(stdout="*filter\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [0:0]\nCOMMIT\n", stderr="")
+        return original(args, **kwargs)
+    item.run = run
+    with pytest.raises(h.HostError, match="firewall|Firewall|UFW"):
+        item.prepare()
+    assert not any(call[:2] == ["systemctl", "enable"] for call in fake.calls)
+
+
+def test_active_ufw_can_coexist_with_empty_legacy_backend(host):
+    item, fake = host
+    fake.firewall_active = True
+    original = item.run
+    def run(args, **kwargs):
+        if args[0].endswith("legacy-save"):
+            return SimpleNamespace(stdout="*filter\n:INPUT ACCEPT [0:0]\n:OUTPUT ACCEPT [0:0]\nCOMMIT\n", stderr="")
+        return original(args, **kwargs)
+    item.run = run
+    item.prepare()
+    assert not any(call[0] == "ufw" and call[1] not in {"status", "show"} for call in fake.calls)
+
+
+@pytest.mark.parametrize("hook", ["PREROUTING", "POSTROUTING"])
+def test_foreign_legacy_hook_policy_is_not_accepted(hook):
+    with pytest.raises(h.HostError):
+        h.iptables_inventory("*mangle\n:" + hook + " DROP [0:0]\nCOMMIT\n", False, 22)
+
+
+def test_legacy_dump_cannot_witness_native_nft_rules(host, monkeypatch):
+    item, fake = host
+    which = h.shutil.which
+    monkeypatch.setattr(h.shutil, "which", lambda name: None if name.endswith("-nft-save") else which(name))
+    original = item.run
+    def run(args, **kwargs):
+        if args[0] == "nft":
+            return SimpleNamespace(stdout=json.dumps({"nftables": [
+                {"table": {"family": "ip", "name": "filter"}},
+                {"chain": {"family": "ip", "table": "filter", "name": "INPUT", "hook": "input", "policy": "accept"}},
+                {"rule": {"family": "ip", "table": "filter", "chain": "INPUT", "expr": [{"drop": None}]}}
+            ]}))
+        if args[0].startswith("iptables"):
+            return SimpleNamespace(stdout="*filter\n:INPUT ACCEPT [0:0]\n:f2b-sshd - [0:0]\n-A INPUT -p tcp --dport 22 -j f2b-sshd\nCOMMIT\n", stderr="")
+        return original(args, **kwargs)
+    item.run = run
+    with pytest.raises(h.HostError, match="mirror"):
+        item.firewall_preflight()
