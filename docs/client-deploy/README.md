@@ -266,7 +266,54 @@ docker exec -u 10000 korra sh -c 'korra doctor' | tail -20
 модели, а не карточку про ненастроенного провайдера. Если карточка осталась,
 смотрите `PROVIDER.md`, раздел «Если ответа нет».
 
-## Шаг 8 [клиент]. Telegram-бот
+## Шаг 8 [наш + клиент]. Google Workspace
+
+В образ входит код Google Workspace, а OAuth-приложение хранится только в DATA
+конкретной установки. Один проверенный client credential Ceremoneymeister можно
+использовать на нескольких установках; каждый владелец и каждый профиль всё
+равно получают собственный grant и собственный token. JSON приложения нельзя
+класть в git, Docker image, registry, shell history или отчёты.
+
+Оператор устанавливает credential до передачи кабинета. Числовой UID/GID
+задаётся отдельным `chown`: на чистом сервере пользователя с именем `10000`
+может не быть, и `install -o 10000` там откажет.
+
+```bash
+google_oauth_source=/root/secrets/google-oauth-client.json
+google_data=/opt/korra/data
+google_target="$google_data/google/oauth_client.json"
+
+test -f "$google_oauth_source" && test ! -L "$google_oauth_source"
+install -d -m 0700 "$google_data/google"
+chown 10000:10000 "$google_data/google"
+test ! -L "$google_target"
+if test -e "$google_target"; then
+  cmp -s "$google_oauth_source" "$google_target"
+else
+  install -m 0600 "$google_oauth_source" "$google_target.tmp"
+  chown 10000:10000 "$google_target.tmp"
+  mv "$google_target.tmp" "$google_target"
+fi
+test "$(stat -c '%a:%u:%g' "$google_target")" = "600:10000:10000"
+```
+
+Для другой установки подставляются её точный DATA и runtime UID/GID. Существующий
+отличающийся credential автоматически не заменяется: его ротация оформляется
+отдельно с backup и повторным входом владельцев. В rollout-receipt сохраняются
+только SHA-256 и права файла, без JSON-содержимого.
+
+После этого владелец открывает **Настройки → Ключи → Google Workspace**, выбирает
+Gmail, Calendar, Drive, Contacts, Sheets или Docs и подтверждает вход. С текущим
+Desktop OAuth-клиентом Google перенаправит браузер на `http://localhost`; полный
+адрес из строки браузера вставляется в ту же карточку. Код и токены в чат агенту
+не передаются. Агент может по просьбе владельца начать этот же flow и вернуть
+ссылку Google, а завершение всё равно выполняется в «Ключах».
+
+**Проверка:** карточка показывает «Подключено», выбранные сервисы проходят свои
+кнопки проверки, а другой профиль остаётся «Не подключено» до собственного
+согласия. Токен хранится с правами `0600` внутри Google-каталога профиля.
+
+## Шаг 9 [клиент]. Telegram-бот
 
 Если шли путём А, токен и список разрешённых уже в `.env`; по пути Б впишите
 их сейчас, руками или через раздел «Ключи» в панели. Адаптер включается самим
@@ -288,7 +335,7 @@ docker restart korra
 docker logs --tail 30 korra | grep -i telegram
 ```
 
-## Шаг 9 [наш]. Маршрут в кабинете
+## Шаг 10 [наш]. Маршрут в кабинете
 
 Выполняется на нашем сервере, где живёт кабинет (`/opt/korra-cabinet`).
 
@@ -334,7 +381,7 @@ CLI напечатает логин и пароль один раз. Уложи�
 Затем — вход браузером на `https://korra.ceremoneymeister.xyz/c/ivanov/` с
 выданным паролем.
 
-## Шаг 10 [клиент]. Бэкап в облако клиента
+## Шаг 11 [клиент]. Бэкап в облако клиента
 
 Настроить `rclone` на облако клиента (его учётка, не наша):
 
@@ -371,7 +418,7 @@ rclone ls client-cloud:korra-backup | tail -5
 Переносимый ZIP хранит пользовательские данные; полный offline snapshot
 updater дополнительно сохраняет зависимости для отката того же контура.
 
-## Шаг 11. Как убедиться, что всё работает
+## Шаг 12. Как убедиться, что всё работает
 
 Сводная проверка, по ней и передаём контур:
 
@@ -466,7 +513,7 @@ NAME=korra-restore DATA=/opt/korra-restore/data PANEL_PORT=9129 API_PORT=8660 \
 Проверьте панель, историю и список агентов. Сам `korra import` не запускает
 сервисы ни после успешного восстановления, ни после ошибки.
 
-## Шаг 12. Обновление установленной Korra
+## Шаг 13. Обновление установленной Korra
 
 Рядом с `up.sh` установите root-owned `update.sh`, `updater.py`,
 `dependencies.lock.json` и `backup.sh`. Каталог управления принадлежит root,
@@ -599,7 +646,7 @@ gateway и профили. Смена identity/ресурсов и остано�
 Статусы: pending, running, succeeded, failed, rolled_back, rollback_failed.
 Не выгружайте внутренние снимки и журналы в браузер: они содержат данные клиента.
 
-## Шаг 13. Откат выпуска
+## Шаг 14. Откат выпуска
 
 ```bash
 /opt/korra/update.sh --rollback release-20260907 --detach
