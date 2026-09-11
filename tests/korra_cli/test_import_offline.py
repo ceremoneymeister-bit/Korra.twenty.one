@@ -79,7 +79,7 @@ def require_host_proc():
 
 @contextmanager
 def holder(path, kind="fd"):
-    code = """import os, sqlite3, sys
+    code = """import ctypes, os, sqlite3, sys
 p, kind = sys.argv[1:]
 if kind == 'cwd':
     os.chdir(p)
@@ -88,6 +88,16 @@ elif kind == 'sqlite':
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('BEGIN IMMEDIATE')
     conn.execute("INSERT INTO sample VALUES ('uncommitted')")
+elif kind == 'libc_mmap_deleted':
+    size = os.path.getsize(p)
+    fd = os.open(p, os.O_RDONLY)
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mmap.restype = ctypes.c_void_p
+    address = libc.mmap(None, size, 1, 2, fd, 0)
+    if address == ctypes.c_void_p(-1).value:
+        raise OSError(ctypes.get_errno(), 'mmap failed')
+    os.close(fd)
+    os.unlink(p)
 else:
     handle=open(p, 'rb')
 print('ready', flush=True)
@@ -340,6 +350,91 @@ def test_private_pid_namespace_is_not_an_offline_witness(tmp_path, isolated, mon
     rejected(path, user)
 
 
+def test_default_apparmor_proc_denial_has_actionable_one_shot_contract(
+        tmp_path, monkeypatch):
+    def denied(path):
+        assert path == "/proc/1/ns/pid"
+        raise PermissionError("synthetic default AppArmor denial")
+
+    monkeypatch.setattr(os, "readlink", denied)
+    with pytest.raises(backup._ImportRefused) as exc:
+        backup._assert_host_proc_contract()
+    message = str(exc.value)
+    assert "--pid=host" in message
+    assert "--cap-add SYS_PTRACE" in message
+    assert "--security-opt apparmor=unconfined" in message
+    assert "--user 0" in message
+    assert "однораз" in message
+
+
+def test_required_docker_proc_contract_accepts_initial_namespace(monkeypatch):
+    monkeypatch.setattr(
+        os, "readlink",
+        lambda path: "pid:[4026531836]" if path == "/proc/1/ns/pid" else "",
+    )
+    backup._assert_host_proc_contract()
+
+
+def test_cli_refusal_repeats_exact_docker_proc_contract(
+        tmp_path, isolated, monkeypatch, capsys):
+    path = archive(tmp_path, {"config.yaml": "restored"})
+
+    def refuse(*args, **kwargs):
+        raise backup._ImportRefused("synthetic hidden proc")
+
+    monkeypatch.setattr(backup, "_assert_import_offline", refuse)
+    with pytest.raises(SystemExit):
+        restore(path)
+
+    output = capsys.readouterr().out
+    assert backup._DOCKER_HOST_PROC_CONTRACT in output
+
+
+def _directory_identities(root):
+    info = root.stat()
+    return {(info.st_dev, info.st_ino)}
+
+
+def test_same_container_path_with_different_host_data_is_not_a_holder(tmp_path):
+    target = tmp_path / "target-data"
+    other = tmp_path / "other-data"
+    proc = tmp_path / "proc-other"
+    target.mkdir()
+    other.mkdir()
+    (proc / "root/opt").mkdir(parents=True)
+    (proc / "root/opt/data").symlink_to(other, target_is_directory=True)
+    target_ids = _directory_identities(target)
+
+    assert not backup._named_holder_matches_roots(
+        "/opt/data", proc, target_ids, target_ids
+    )
+
+
+def test_same_host_data_under_container_path_is_a_holder(tmp_path):
+    target = tmp_path / "target-data"
+    proc = tmp_path / "proc-target"
+    target.mkdir()
+    (proc / "root/opt").mkdir(parents=True)
+    (proc / "root/opt/data").symlink_to(target, target_is_directory=True)
+    target_ids = _directory_identities(target)
+
+    assert backup._named_holder_matches_roots(
+        "/opt/data", proc, target_ids, target_ids
+    )
+
+
+def test_proc_maps_newline_escape_checks_both_ambiguous_spellings():
+    assert set(backup._proc_maps_path_variants("/opt/data/dir\\012line/file")) == {
+        "/opt/data/dir\\012line/file",
+        "/opt/data/dir\nline/file",
+    }
+
+
+def test_excessive_proc_maps_escape_ambiguity_refuses():
+    with pytest.raises(backup._ImportRefused, match="неоднозначное имя"):
+        backup._proc_maps_path_variants("/opt/data/" + "\\012" * 9)
+
+
 def test_timeout_is_not_an_offline_witness(tmp_path, isolated, monkeypatch):
     require_host_proc()
     user, target = isolated
@@ -361,6 +456,44 @@ def test_mmap_holder_survives_closed_original_fd(tmp_path, isolated):
         rejected(path, user)
     finally:
         mapping.close()
+
+
+def test_deleted_mmap_with_newline_path_remains_a_data_holder(tmp_path, isolated):
+    require_host_proc()
+    user, target = isolated
+    held_dir = target / "dir\nline"
+    held_dir.mkdir()
+    held = held_dir / "mapped.data"
+    held.write_bytes(b"mapped fixture")
+    path = archive(tmp_path, {"config.yaml": "restored"})
+    with holder(held, "libc_mmap_deleted"):
+        rejected(path, user)
+
+
+def test_real_cli_import_dispatches_before_data_logging(tmp_path, isolated):
+    require_host_proc()
+    user, target = isolated
+    path = archive(tmp_path, {"config.yaml": "model: restored\n"})
+    env = os.environ.copy()
+    env.pop("HERMES_HOME", None)
+    env.update(
+        HOME=str(user),
+        KORRA_HOME=str(target),
+        HERMES_SKIP_CHMOD="1",
+        PYTHONPATH=str(Path(__file__).resolve().parents[2]),
+    )
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "korra_cli.main", "import", str(path), "--force"],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stderr.decode(errors="replace")
+    assert (target / "config.yaml").read_text() == "model: restored\n"
+    assert not (target / "logs").exists()
 
 
 def test_real_cli_version_flag_does_not_restore(tmp_path, isolated):

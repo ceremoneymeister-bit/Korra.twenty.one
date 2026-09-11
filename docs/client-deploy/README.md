@@ -405,13 +405,31 @@ mmap через полный Linux `/proc` хоста; неизвестная в
 ```bash
 # IMAGE — проверенный точный digest; архив держим вне целевого DATA.
 install -d -o 10000 -g 10000 -m 750 /opt/korra-restore/data
-docker run --rm --network none --pid=host --cap-add SYS_PTRACE --user 0 \
+docker run --rm --network none --pid=host --cap-add SYS_PTRACE \
+  --security-opt apparmor=unconfined --user 0 \
   --entrypoint /opt/hermes/.venv/bin/python \
   -e KORRA_HOME=/opt/data -e HOME=/tmp/korra-restore-home \
   -v /opt/korra-restore/data:/opt/data \
   -v /opt/korra/incoming/backup.zip:/backup.zip:ro \
   "$IMAGE" -m korra_cli.main import /backup.zip --force
 ```
+
+Все пять ограничений в строке запуска обязательны: `--network none` изолирует
+одноразовый importer от сети, `--pid=host` открывает полный список процессов,
+`--cap-add SYS_PTRACE` и `--security-opt apparmor=unconfined` дают root-процессу
+прочитать их `/proc`, а `--user 0` разрешает проверить владельцев DATA. Профиль
+AppArmor отключается только у этого одноразового контейнера; у постоянного
+gateway остаётся штатный профиль. При недостаточной видимости `/proc` import
+отказывает с готовой строкой обязательных флагов и не меняет DATA;
+`--network none` остаётся обязательной операторской изоляцией этого запуска.
+
+Путь `/opt/data` внутри importer может совпадать с путём в другом контейнере:
+import сравнивает каждый путь через `/proc/<pid>/root` по device/inode с
+целевым bind mount. Другой host-каталог, смонтированный под тем же `/opt/data`,
+не считается держателем. Процесс, который держит тот же host-каталог через
+любой bind mount, запрещает import. Неоднозначное `\012` из `/proc/*/maps`
+проверяется и как буквальное имя, и как закодированный перевод строки; слишком
+сложное неоднозначное имя приводит к безопасному отказу.
 
 Импорт проверяет структуру, пути, CRC и лимиты всего ZIP (100 тысяч записей,
 4 ГиБ на файл, 32 ГиБ суммарно, сжатие до 1000:1), затем все SQLite через

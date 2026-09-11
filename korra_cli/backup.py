@@ -1225,6 +1225,78 @@ class _ImportRefused(RuntimeError):
     """The offline precondition or archive preflight could not be proved."""
 
 
+_DOCKER_HOST_PROC_CONTRACT = (
+    "--network none --pid=host --cap-add SYS_PTRACE "
+    "--security-opt apparmor=unconfined --user 0"
+)
+
+
+def _assert_host_proc_contract() -> None:
+    """Require a readable initial PID namespace, with an actionable Docker remedy."""
+    if sys.platform != "linux":
+        raise _ImportRefused("проверка держателей DATA поддерживается только на Linux")
+    try:
+        namespace = os.readlink("/proc/1/ns/pid")
+    except OSError as exc:
+        raise _ImportRefused(
+            "AppArmor или ограничения контейнера закрыли /proc/1/ns/pid; "
+            "запустите только одноразовый importer "
+            f"с `{_DOCKER_HOST_PROC_CONTRACT}`; постоянный gateway не ослабляйте"
+        ) from exc
+    if namespace != "pid:[4026531836]":
+        raise _ImportRefused(
+            "нужен полный /proc хоста (initial PID namespace); для одноразового "
+            f"Docker importer используйте `{_DOCKER_HOST_PROC_CONTRACT}`"
+        )
+
+
+def _named_holder_matches_roots(
+    name: str,
+    proc: Path,
+    identities: set[tuple[int, int]],
+    directories: set[tuple[int, int]],
+) -> bool:
+    """Compare a holder path in its mount namespace by device/inode identity."""
+    deleted = name.endswith(" (deleted)")
+    name = name.removesuffix(" (deleted)")
+    if not name.startswith("/"):
+        return False
+    holder_path = proc / "root" / name.lstrip("/")
+    try:
+        if not deleted:
+            info = holder_path.stat()
+            if (info.st_dev, info.st_ino) in identities:
+                return True
+        parent = holder_path.parent.stat()
+    except FileNotFoundError:
+        return False
+    return (parent.st_dev, parent.st_ino) in directories
+
+
+def _proc_maps_path_variants(name: str) -> tuple[str, ...]:
+    """Return both meanings of Linux ``/proc/<pid>/maps`` newline escapes.
+
+    The kernel renders a newline in a mapped pathname as the four printable
+    characters ``\\012`` but does not escape a literal backslash.  The text is
+    therefore ambiguous.  Check every literal/newline combination so neither
+    spelling can hide a DATA holder.  Bound the expansion and refuse unusual
+    names rather than turning an attacker-controlled pathname into unbounded
+    work during the offline proof.
+    """
+    parts = name.split("\\012")
+    escape_count = len(parts) - 1
+    if escape_count > 8:
+        raise _ImportRefused("неоднозначное имя файла в /proc maps")
+    variants = [parts[0]]
+    for part in parts[1:]:
+        variants = [
+            prefix + separator + part
+            for prefix in variants
+            for separator in ("\\012", "\n")
+        ]
+    return tuple(variants)
+
+
 def _assert_import_offline(roots: list[Path], *, importer_fd: int | None = None) -> dict:
     """Inspect all holders, irrespective of service names or mount spelling.
 
@@ -1236,8 +1308,7 @@ def _assert_import_offline(roots: list[Path], *, importer_fd: int | None = None)
     deadline = time.monotonic() + _IMPORT_SCAN_SECONDS
     roots = [root.resolve() for root in roots]
     try:
-        if sys.platform != "linux" or os.readlink("/proc/1/ns/pid") != "pid:[4026531836]":
-            raise _ImportRefused("нужен полный /proc хоста (initial PID namespace)")
+        _assert_host_proc_contract()
         identities = set()
         directories = set()
         fingerprint = {}
@@ -1265,21 +1336,6 @@ def _assert_import_offline(roots: list[Path], *, importer_fd: int | None = None)
                 if stat.S_ISDIR(info.st_mode):
                     directories.add((info.st_dev, info.st_ino))
 
-        def named_holder(name, proc):
-            name = name.removesuffix(" (deleted)")
-            if not name.startswith("/"):
-                return False
-            path = Path(name)
-            if any(path == root or path.is_relative_to(root) for root in roots):
-                return True
-            # A deleted file has no inode in the target walk. Its containing
-            # directory, resolved in the holder's mount namespace, still does.
-            try:
-                parent = (proc / "root" / str(path.parent).lstrip("/")).stat()
-            except FileNotFoundError:
-                return False
-            return (parent.st_dev, parent.st_ino) in directories
-
         own_pid = os.getpid()
         for proc in Path("/proc").iterdir():
             if not proc.name.isdigit():
@@ -1301,14 +1357,24 @@ def _assert_import_offline(roots: list[Path], *, importer_fd: int | None = None)
                         held_name = os.readlink(handle)
                     except FileNotFoundError:  # fd closed/process exited
                         continue
-                    if (info.st_dev, info.st_ino) in identities or named_holder(held_name, proc):
+                    if (info.st_dev, info.st_ino) in identities or _named_holder_matches_roots(
+                        held_name, proc, identities, directories
+                    ):
                         raise _ImportRefused(f"DATA удерживает процесс PID {pid}")
                 # mmap can outlive the last fd, including a SQLite WAL map.
                 for line in (proc / "maps").read_text(encoding="utf-8").splitlines():
                     fields = line.split(None, 5)
                     major, minor = (int(n, 16) for n in fields[3].split(":"))
                     identity = (os.makedev(major, minor), int(fields[4]))
-                    if identity in identities or (len(fields) == 6 and named_holder(fields[5], proc)):
+                    if identity in identities or (
+                        len(fields) == 6
+                        and any(
+                            _named_holder_matches_roots(
+                                name, proc, identities, directories
+                            )
+                            for name in _proc_maps_path_variants(fields[5])
+                        )
+                    ):
                         raise _ImportRefused(f"DATA отображён в память процесса PID {pid}")
             except FileNotFoundError:
                 if proc.exists():
@@ -1613,7 +1679,10 @@ def run_import(args) -> None:
         reason = str(exc) if isinstance(exc, _ImportRefused) else type(exc).__name__
         print(f"Ошибка восстановления: {reason}.")
         print("Остановите gateway, dashboard/API, cron и все процессы выбранного DATA; повторите offline import.")
-        print("Docker: отдельный --pid=host --cap-add SYS_PTRACE --user 0 контейнер без gateway; либо root CLI на хосте.")
+        print(
+            "Docker: одноразовый контейнер без gateway с "
+            f"{_DOCKER_HOST_PROC_CONTRACT}; либо root CLI на хосте."
+        )
         raise SystemExit(1) from exc
 
     restored = sum(not entry["skipped"] for entry in plan)
