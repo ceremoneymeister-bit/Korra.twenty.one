@@ -59,9 +59,7 @@ def installation_google_dir(root: Path | None = None) -> Path:
     return _confined_child(root or get_default_hermes_root(), "google")
 
 
-def app_credentials_path(root: Path | None = None) -> Path:
-    if root is not None:
-        return installation_google_dir(root) / "oauth_client.json"
+def app_credentials_path() -> Path:
     configured = korra_env("KORRA_GOOGLE_OAUTH_CLIENT_PATH", "").strip()
     return Path(configured) if configured else DEFAULT_APP_MOUNT_PATH
 
@@ -159,6 +157,15 @@ def _reject_symlink(path: Path) -> None:
         ) from exc
 
 
+def _reject_symlink_components(path: Path) -> None:
+    current = path
+    while True:
+        _reject_symlink(current)
+        if current.parent == current:
+            return
+        current = current.parent
+
+
 def _atomic_private_json(path: Path, payload: dict[str, Any]) -> None:
     _private_dir(path.parent)
     _reject_symlink(path)
@@ -230,10 +237,19 @@ def _is_exact_read_only_mount(path: Path) -> bool:
     return False
 
 
-def _validate_operator_app_permissions(root: Path | None = None) -> None:
+def _operator_app_file_is_safe(app_stat: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(app_stat.st_mode)
+        and app_stat.st_uid == 0
+        and app_stat.st_gid == os.getegid()
+        and stat.S_IMODE(app_stat.st_mode) == 0o640
+    )
+
+
+def _validate_operator_app_permissions() -> None:
     """Require root ownership and an exact read-only runtime mount."""
-    path = app_credentials_path(root)
-    _reject_symlink(path)
+    path = app_credentials_path()
+    _reject_symlink_components(path)
     try:
         app_stat = path.stat()
     except FileNotFoundError:
@@ -248,24 +264,11 @@ def _validate_operator_app_permissions(root: Path | None = None) -> None:
             status_code=409,
         ) from exc
 
-    runtime_gid = os.getegid()
     app_ok = (
-        stat.S_ISREG(app_stat.st_mode)
-        and app_stat.st_uid == 0
-        and app_stat.st_gid == runtime_gid
-        and stat.S_IMODE(app_stat.st_mode) == 0o640
+        _operator_app_file_is_safe(app_stat)
+        and path.is_absolute()
+        and _is_exact_read_only_mount(path)
     )
-    if root is not None:
-        directory = installation_google_dir(root)
-        directory_stat = directory.stat()
-        app_ok = app_ok and (
-            stat.S_ISDIR(directory_stat.st_mode)
-            and directory_stat.st_uid == 0
-            and directory_stat.st_gid == runtime_gid
-            and stat.S_IMODE(directory_stat.st_mode) == 0o750
-        )
-    elif not path.is_absolute() or not _is_exact_read_only_mount(path):
-        app_ok = False
     if not app_ok:
         raise GoogleWorkspaceError(
             "app_permissions",
@@ -275,9 +278,9 @@ def _validate_operator_app_permissions(root: Path | None = None) -> None:
         )
 
 
-def _load_app(root: Path | None = None) -> tuple[str, dict[str, Any]]:
-    _validate_operator_app_permissions(root)
-    payload = _read_json(app_credentials_path(root), label="app")
+def _load_app() -> tuple[str, dict[str, Any]]:
+    _validate_operator_app_permissions()
+    payload = _read_json(app_credentials_path(), label="app")
     return _app_block(payload)
 
 
@@ -393,12 +396,12 @@ def _token_status(profile_home: Path | None = None) -> dict[str, Any]:
     return {"state": "not_connected", "services": [], "action": "connect"}
 
 
-def status(*, profile_home: Path | None = None, root: Path | None = None) -> dict[str, Any]:
+def status(*, profile_home: Path | None = None) -> dict[str, Any]:
     try:
-        kind, _ = _load_app(root)
+        kind, _ = _load_app()
         app = {"configured": True, "credential_type": kind, "redirect_uri": REDIRECT_URI}
     except GoogleWorkspaceError as exc:
-        operator_path = app_credentials_path(root)
+        operator_path = app_credentials_path()
         app = {
             "configured": False,
             "reason": exc.code,
@@ -431,11 +434,10 @@ def start(
     services: str | tuple[str, ...],
     *,
     profile_home: Path | None = None,
-    root: Path | None = None,
 ) -> dict[str, Any]:
     selected = parse_services(services) if isinstance(services, str) else services
     scopes = scopes_for_services(selected)
-    _, app = _load_app(root)
+    _, app = _load_app()
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
@@ -545,11 +547,10 @@ def complete(
     callback_url: str,
     *,
     profile_home: Path | None = None,
-    root: Path | None = None,
     exchange: Callable[[str, dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     code, returned_state, callback_scopes = _parse_callback(callback_url)
-    _, app = _load_app(root)
+    _, app = _load_app()
     consumed: dict[str, Any]
     with _state_lock(profile_home):
         pending = _pending_record(profile_home)
@@ -658,11 +659,11 @@ def revoke(
     return {"status": "revoked", "remote_revoked": remote_ok}
 
 
-def _credentials(profile_home: Path | None, root: Path | None):
+def _credentials(profile_home: Path | None):
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
 
-    _, app = _load_app(root)
+    _, app = _load_app()
     path = _active_token_path(profile_home)
     payload = _read_json(path, label="token")
     try:
@@ -731,7 +732,6 @@ def check_service(
     service: str,
     *,
     profile_home: Path | None = None,
-    root: Path | None = None,
     probe: Callable[[str, Any], None] | None = None,
 ) -> dict[str, Any]:
     if service not in SERVICE_SCOPES:
@@ -747,7 +747,7 @@ def check_service(
         ) from exc
     if services != ("all",) and service not in services:
         raise GoogleWorkspaceError("service_not_selected", f"Google service '{service}' was not authorized", status_code=403)
-    creds = _credentials(profile_home, root)
+    creds = _credentials(profile_home)
     if probe is not None:
         probe(service, creds)
     else:

@@ -83,6 +83,10 @@ fi
 
 GOOGLE_OAUTH_ARGS=()
 if [ -e "$GOOGLE_OAUTH_CLIENT" ]; then
+    if [ "$AGENT_SUDO" != 0 ]; then
+        echo "Google OAuth requires the client --no-admin contour (AGENT_SUDO=0) so the agent holds no host-root grant." >&2
+        exit 2
+    fi
     if [ -L "$GOOGLE_OAUTH_CLIENT" ] || [ ! -f "$GOOGLE_OAUTH_CLIENT" ]; then
         echo "Google OAuth credential must be a regular, non-symlink file: $GOOGLE_OAUTH_CLIENT" >&2
         exit 2

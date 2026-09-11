@@ -47,6 +47,10 @@ mount: the runtime can read it and cannot install or replace it. Each profile
 has its own mutable grant at `$HERMES_HOME/google-workspace/token.json` (mode
 `0600`), outside the operator-owned installation directory.
 
+Client rollout must use the no-admin host policy so the agent has no host-root
+grant capable of changing the bind-mount source. The launcher rejects the
+Google mount when the coupled client `AGENT_SUDO=1` mode is active.
+
 Unknown names, empty items, duplicates, and combining `all` with another name
 are rejected before an OAuth URL is created. `all` expands to the same six
 least-privilege service scopes listed below:

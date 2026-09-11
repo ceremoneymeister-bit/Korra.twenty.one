@@ -5,6 +5,7 @@ import os
 import stat
 import builtins
 import asyncio
+import inspect
 import shutil
 import subprocess
 import sys
@@ -29,12 +30,14 @@ from korra_cli.google_workspace_scopes import (
 
 @pytest.fixture(autouse=True)
 def _non_root_functional_app_fixture(monkeypatch):
-    """Keep functional tests portable; the root-only test exercises ownership."""
+    """Use a temporary path seam; production public APIs have no root override."""
+    monkeypatch.setenv("KORRA_GOOGLE_OAUTH_CLIENT_PATH", "")
+    monkeypatch.setattr(google, "_is_exact_read_only_mount", lambda _path: True)
     if os.geteuid() != 0:
         monkeypatch.setattr(
             google,
-            "_validate_operator_app_permissions",
-            lambda _root=None: None,
+            "_operator_app_file_is_safe",
+            lambda _stat: True,
         )
 
 
@@ -58,11 +61,16 @@ def _write_app(root: Path, *, gid: int | None = None) -> None:
     directory.chmod(0o750)
     if os.geteuid() == 0:
         os.chown(directory, 0, runtime_gid)
-    path = google.app_credentials_path(root)
+    path = directory / "oauth_client.json"
     path.write_text(json.dumps(_app()), encoding="utf-8")
     path.chmod(0o640)
     if os.geteuid() == 0:
         os.chown(path, 0, runtime_gid)
+    os.environ["KORRA_GOOGLE_OAUTH_CLIENT_PATH"] = str(path)
+
+
+def _app_path(root: Path) -> Path:
+    return google.installation_google_dir(root) / "oauth_client.json"
 
 
 def _callback(auth_url: str, *, code: str = "one-time-code", scopes: list[str] | None = None) -> str:
@@ -110,17 +118,16 @@ def test_one_installation_app_and_profile_tokens_are_isolated(tmp_path):
     second = root / "profiles" / "second"
     _write_app(root)
 
-    first_flow = google.start("drive", root=root, profile_home=first)
-    second_flow = google.start("calendar", root=root, profile_home=second)
+    first_flow = google.start("drive", profile_home=first)
+    second_flow = google.start("calendar", profile_home=second)
     assert first_flow["authorization_url"] != second_flow["authorization_url"]
-    assert google.app_credentials_path(root).exists()
+    assert _app_path(root).exists()
     assert not (first / "google-workspace" / "oauth_client.json").exists()
     assert not (second / "google-workspace" / "oauth_client.json").exists()
 
     drive_scopes = scopes_for_services(("drive",))
     google.complete(
         _callback(first_flow["authorization_url"], scopes=drive_scopes),
-        root=root,
         profile_home=first,
         exchange=_exchange_for(drive_scopes),
     )
@@ -133,14 +140,14 @@ def test_one_installation_app_and_profile_tokens_are_isolated(tmp_path):
 def test_default_profile_state_is_separate_from_operator_app_directory(tmp_path):
     root = tmp_path / "install"
     _write_app(root)
-    app_before = google.app_credentials_path(root).read_bytes()
+    app_before = _app_path(root).read_bytes()
 
-    result = google.start("drive", root=root, profile_home=root)
+    result = google.start("drive", profile_home=root)
 
     assert result["status"] == "pending"
     assert google.pending_path(root) == root / "google-workspace" / "pending.json"
     assert google.pending_path(root).is_file()
-    assert google.app_credentials_path(root).read_bytes() == app_before
+    assert _app_path(root).read_bytes() == app_before
     assert stat.S_IMODE(google.installation_google_dir(root).stat().st_mode) == 0o750
 
 
@@ -160,20 +167,20 @@ def test_state_mismatch_does_not_consume_but_success_is_single_consume(tmp_path)
     root = tmp_path / "install"
     profile = root / "profiles" / "finance"
     _write_app(root)
-    flow = google.start("drive,sheets", root=root, profile_home=profile)
+    flow = google.start("drive,sheets", profile_home=profile)
     scopes = scopes_for_services(("drive", "sheets"))
     good = _callback(flow["authorization_url"], scopes=scopes)
     bad = good.replace("state=", "state=wrong")
 
     with pytest.raises(google.GoogleWorkspaceError, match="state") as mismatch:
-        google.complete(bad, root=root, profile_home=profile, exchange=_exchange_for(scopes))
+        google.complete(bad, profile_home=profile, exchange=_exchange_for(scopes))
     assert mismatch.value.code == "state_mismatch"
     assert google.pending_path(profile).exists()
 
-    google.complete(good, root=root, profile_home=profile, exchange=_exchange_for(scopes))
+    google.complete(good, profile_home=profile, exchange=_exchange_for(scopes))
     assert not google.pending_path(profile).exists()
     with pytest.raises(google.GoogleWorkspaceError) as replay:
-        google.complete(good, root=root, profile_home=profile, exchange=_exchange_for(scopes))
+        google.complete(good, profile_home=profile, exchange=_exchange_for(scopes))
     assert replay.value.code == "flow_missing"
 
 
@@ -183,13 +190,12 @@ def test_expired_pending_flow_fails_closed(tmp_path, monkeypatch):
     _write_app(root)
     now = int(time.time())
     monkeypatch.setattr(google.time, "time", lambda: now)
-    flow = google.start("calendar", root=root, profile_home=profile)
+    flow = google.start("calendar", profile_home=profile)
     monkeypatch.setattr(google.time, "time", lambda: now + google.PENDING_TTL_SECONDS + 1)
     scopes = scopes_for_services(("calendar",))
     with pytest.raises(google.GoogleWorkspaceError) as expired:
         google.complete(
             _callback(flow["authorization_url"], scopes=scopes),
-            root=root,
             profile_home=profile,
             exchange=_exchange_for(scopes),
         )
@@ -204,7 +210,7 @@ def test_deployed_nine_scope_legacy_token_stays_bounded_and_requires_reconnect(t
     google.legacy_token_path(profile).write_text(json.dumps(legacy), encoding="utf-8")
 
     inventory = legacy_scope_inventory(legacy)
-    current = google.status(profile_home=profile, root=tmp_path / "missing-install")
+    current = google.status(profile_home=profile)
     assert inventory["kind"] == "legacy_broad"
     assert inventory["scope_count"] == 9
     assert current["connection"] == {
@@ -239,23 +245,21 @@ def test_recognized_mail_and_contacts_legacy_grant_keeps_only_actual_services(tm
 
     assert google.check_service(
         "email",
-        root=root,
         profile_home=profile,
         probe=lambda name, credentials: observed.append((name, credentials)),
     )["status"] == "ok"
     assert google.check_service(
         "contacts",
-        root=root,
         profile_home=profile,
         probe=lambda name, credentials: observed.append((name, credentials)),
     )["status"] == "ok"
     with pytest.raises(google.GoogleWorkspaceError) as denied:
-        google.check_service("drive", root=root, profile_home=profile, probe=lambda *_: None)
+        google.check_service("drive", profile_home=profile, probe=lambda *_: None)
     assert denied.value.code == "service_not_selected"
     assert observed == [("email", marker), ("contacts", marker)]
 
     with pytest.raises(google.GoogleWorkspaceError) as expansion:
-        google.start("drive", root=root, profile_home=profile)
+        google.start("drive", profile_home=profile)
     assert expansion.value.code == "revoke_required"
 
 
@@ -337,7 +341,7 @@ def test_refresh_ignores_identity_scope_drift_and_preserves_legacy_inventory(
     monkeypatch.setitem(sys.modules, "google.oauth2.credentials", credentials_module)
     monkeypatch.setitem(sys.modules, "google.auth.transport.requests", request_module)
 
-    credentials = google._credentials(profile, root)
+    credentials = google._credentials(profile)
 
     assert credentials.token == "refreshed"
     saved = json.loads(google.legacy_token_path(profile).read_text(encoding="utf-8"))
@@ -348,9 +352,9 @@ def test_private_state_is_atomic_and_has_strict_modes(tmp_path):
     root = tmp_path / "install"
     profile = root / "profiles" / "finance"
     _write_app(root)
-    google.start("drive", root=root, profile_home=profile)
+    google.start("drive", profile_home=profile)
     assert stat.S_IMODE(os.stat(google.installation_google_dir(root)).st_mode) == 0o750
-    assert stat.S_IMODE(os.stat(google.app_credentials_path(root)).st_mode) == 0o640
+    assert stat.S_IMODE(os.stat(_app_path(root)).st_mode) == 0o640
     assert stat.S_IMODE(os.stat(google.profile_google_dir(profile)).st_mode) == 0o700
     assert stat.S_IMODE(os.stat(google.pending_path(profile)).st_mode) == 0o600
     assert not list(google.profile_google_dir(profile).glob(".*.tmp"))
@@ -366,7 +370,7 @@ def test_profile_google_directory_symlink_fails_closed(tmp_path):
     _write_app(root)
 
     with pytest.raises(google.GoogleWorkspaceError) as denied:
-        google.start("drive", root=root, profile_home=profile)
+        google.start("drive", profile_home=profile)
     assert denied.value.code == "state_path_unsafe"
     assert not (outside / "pending.json").exists()
 
@@ -377,9 +381,10 @@ def test_installation_google_directory_symlink_is_not_followed(tmp_path):
     root.mkdir()
     outside.mkdir()
     (root / "google").symlink_to(outside, target_is_directory=True)
+    os.environ["KORRA_GOOGLE_OAUTH_CLIENT_PATH"] = str(root / "google" / "oauth_client.json")
 
     with pytest.raises(google.GoogleWorkspaceError) as denied:
-        google._load_app(root)
+        google._load_app()
     assert denied.value.code == "state_path_unsafe"
     assert not (outside / "oauth_client.json").exists()
 
@@ -391,9 +396,10 @@ def test_installation_app_file_symlink_is_not_followed(tmp_path):
     outside = tmp_path / "outside.json"
     outside.write_text('{"sentinel": true}', encoding="utf-8")
     (state_dir / "oauth_client.json").symlink_to(outside)
+    os.environ["KORRA_GOOGLE_OAUTH_CLIENT_PATH"] = str(state_dir / "oauth_client.json")
 
     with pytest.raises(google.GoogleWorkspaceError) as denied:
-        google._load_app(root)
+        google._load_app()
     assert denied.value.code == "state_path_unsafe"
     assert json.loads(outside.read_text(encoding="utf-8")) == {"sentinel": True}
 
@@ -409,12 +415,12 @@ def test_runtime_has_no_app_install_api_and_can_only_read_operator_credential():
         base.chmod(0o755)
         _write_app(base, gid=runtime_gid)
         script = """
+import json
 from pathlib import Path
 from korra_cli import google_workspace as google
-root = Path(__import__('sys').argv[1])
-kind, _ = google._load_app(root)
+path = Path(__import__('sys').argv[1]) / 'google' / 'oauth_client.json'
+kind, _ = google._app_block(json.loads(path.read_text(encoding='utf-8')))
 print(kind)
-path = google.app_credentials_path(root)
 try:
     path.write_text('{}', encoding='utf-8')
 except PermissionError:
@@ -452,6 +458,18 @@ def test_client_launcher_uses_exact_read_only_google_app_mount():
     assert '"0:$ENGINE_GID:640"' in launcher
     assert "dst=/run/korra-secrets/google-oauth-client.json,readonly" in launcher
     assert "KORRA_GOOGLE_OAUTH_CLIENT_PATH=/run/korra-secrets/google-oauth-client.json" in launcher
+    assert 'if [ "$AGENT_SUDO" != 0 ]' in launcher
+    assert "agent holds no host-root grant" in launcher
+
+
+def test_public_runtime_api_has_no_oauth_app_root_override():
+    for operation in (
+        google.status,
+        google.start,
+        google.complete,
+        google.check_service,
+    ):
+        assert "root" not in inspect.signature(operation).parameters
 
 
 def test_runtime_default_path_requires_exact_read_only_mount(tmp_path, monkeypatch):
@@ -459,7 +477,7 @@ def test_runtime_default_path_requires_exact_read_only_mount(tmp_path, monkeypat
         pytest.skip("exact root-owned mount contract requires root")
     root = tmp_path / "operator"
     _write_app(root)
-    path = google.app_credentials_path(root)
+    path = _app_path(root)
     monkeypatch.setenv("KORRA_GOOGLE_OAUTH_CLIENT_PATH", str(path))
     monkeypatch.setattr(google, "_is_exact_read_only_mount", lambda _path: False)
 
@@ -481,7 +499,7 @@ def test_profile_state_file_symlink_fails_closed_without_touching_target(tmp_pat
     (state_dir / name).symlink_to(outside)
 
     with pytest.raises(google.GoogleWorkspaceError) as denied:
-        google.status(profile_home=profile, root=tmp_path / "missing-install")
+        google.status(profile_home=profile)
     assert denied.value.code == "state_path_unsafe"
     assert json.loads(outside.read_text(encoding="utf-8")) == {"sentinel": True}
 
@@ -498,7 +516,6 @@ def test_each_service_has_an_exact_live_check(service, tmp_path, monkeypatch):
 
     result = google.check_service(
         service,
-        root=root,
         profile_home=profile,
         probe=lambda name, credentials: observed.append((name, credentials)),
     )

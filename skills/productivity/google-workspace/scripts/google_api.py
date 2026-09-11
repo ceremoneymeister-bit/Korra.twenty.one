@@ -240,7 +240,7 @@ def get_credentials():
     from google.auth.transport.requests import Request
 
     try:
-        return _native_google._credentials(HERMES_HOME, None)
+        return _native_google._credentials(HERMES_HOME)
     except _native_google.GoogleWorkspaceError as native_error:
         # Compatibility for a pre-native profile whose token still embeds the
         # old app credential. New grants never duplicate that secret here.

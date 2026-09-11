@@ -34,8 +34,8 @@ def setup_module(tmp_path, monkeypatch):
     if os.geteuid() != 0:
         monkeypatch.setattr(
             module._native_google,
-            "_validate_operator_app_permissions",
-            lambda _root=None: None,
+            "_operator_app_file_is_safe",
+            lambda _stat: True,
         )
     return module
 
@@ -47,7 +47,7 @@ def _provision_operator_app(setup_module, monkeypatch):
     directory.chmod(0o750)
     if os.geteuid() == 0:
         os.chown(directory, 0, os.getegid())
-    path = setup_module._native_google.app_credentials_path(root)
+    path = directory / "oauth_client.json"
     path.write_text(
         json.dumps(
             {

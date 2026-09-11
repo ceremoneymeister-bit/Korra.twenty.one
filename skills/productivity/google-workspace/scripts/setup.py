@@ -218,7 +218,7 @@ def check_auth(quiet: bool = False):
     from google.auth.transport.requests import Request
 
     try:
-        native_creds = _native_google._credentials(HERMES_HOME, None)
+        native_creds = _native_google._credentials(HERMES_HOME)
     except _native_google.GoogleWorkspaceError:
         native_creds = None
     if native_creds is not None:
