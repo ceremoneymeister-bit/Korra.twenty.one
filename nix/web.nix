@@ -7,6 +7,9 @@ hermesNpmLib.buildNpmPackage {
     # @hermes/shared ships as a file: workspace dep of web, so its source
     # must be in the filtered src tree too.
     "apps/shared"
+
+    # Built-in dashboard palettes are imported directly by web/src/themes/.
+    "korra_cli/data/dashboard-themes.json"
   ];
 
   doCheck = false;
