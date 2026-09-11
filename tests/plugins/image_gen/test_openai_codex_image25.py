@@ -20,6 +20,10 @@ def _image_b64(fmt: str = "PNG") -> str:
     return base64.b64encode(out.getvalue()).decode("ascii")
 
 
+def _write_image(path: Path, *, size=(8, 8), color=(10, 20, 30, 255)):
+    Image.new("RGBA", size, color).save(path, format="PNG")
+
+
 def test_payload_supports_image25_controls_without_tool_choice():
     payload = provider_mod._build_responses_payload(
         prompt="poster",
@@ -44,6 +48,77 @@ def test_payload_supports_image25_controls_without_tool_choice():
         "partial_images": 0,
         "output_compression": 82,
     }]
+
+
+def test_reference_roles_and_presets_are_bounded_and_ordered():
+    prompt = provider_mod._build_guided_prompt(
+        "Make a campaign portrait",
+        input_count=3,
+        has_edit_base=True,
+        reference_roles=["identity", "style"],
+        presets=["portrait", "russian-text"],
+        preserve=["eye color", "logo spelling"],
+    )
+
+    assert "Image 1 [edit_base]" in prompt
+    assert "Image 2 [identity]" in prompt
+    assert "Image 3 [style]" in prompt
+    assert "eye color" in prompt
+    assert "Cyrillic" in prompt
+
+    try:
+        provider_mod._build_guided_prompt(
+            "bad combination",
+            input_count=0,
+            has_edit_base=False,
+            reference_roles=None,
+            presets=["no-text", "russian-text"],
+            preserve=None,
+        )
+    except ValueError as exc:
+        assert "cannot be combined" in str(exc)
+    else:
+        raise AssertionError("conflicting presets were accepted")
+
+
+def test_mask_requires_alpha_png_matching_edit_base(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    base = tmp_path / "base.png"
+    mask = tmp_path / "mask.png"
+    wrong_size = tmp_path / "wrong-size.png"
+    _write_image(base)
+    _write_image(mask, color=(0, 0, 0, 0))
+    _write_image(wrong_size, size=(16, 8), color=(0, 0, 0, 0))
+
+    part = provider_mod._mask_tool_part(str(mask), str(base))
+    assert part["image_url"].startswith("data:image/png;base64,")
+
+    try:
+        provider_mod._mask_tool_part(str(wrong_size), str(base))
+    except ValueError as exc:
+        assert "matching dimensions" in str(exc)
+    else:
+        raise AssertionError("mismatched mask dimensions were accepted")
+
+
+def test_local_reference_read_is_confined_to_profile_or_workspace(tmp_path):
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+
+    profile_home = tmp_path / "profile"
+    outside = tmp_path / "outside.png"
+    profile_home.mkdir()
+    _write_image(outside)
+
+    token = set_hermes_home_override(profile_home)
+    try:
+        try:
+            provider_mod._local_image_to_data_url(str(outside))
+        except ValueError as exc:
+            assert "active Korra profile or current workspace" in str(exc)
+        else:
+            raise AssertionError("reference outside the allowed roots was accepted")
+    finally:
+        reset_hermes_home_override(token)
 
 
 def test_invalid_model_fails_instead_of_falling_back(monkeypatch):
@@ -85,6 +160,22 @@ def test_atomic_writer_validates_decoded_format_and_preserves_existing(tmp_path)
         raise AssertionError("PNG payload was accepted as WEBP")
 
     assert target.read_bytes() == b"existing"
+
+
+def test_generate_rejects_invalid_base64_before_publishing(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(provider_mod, "_read_codex_access_token", lambda: "token")
+    monkeypatch.setattr(
+        provider_mod,
+        "_collect_image_b64",
+        lambda *args, **kwargs: {"b64": "not@@base64", "source": "final"},
+    )
+
+    result = provider_mod.OpenAICodexImageGenProvider().generate("poster")
+
+    assert result["success"] is False
+    assert result["error_type"] == "invalid_image_output"
+    assert not list((tmp_path / "cache" / "images").glob("*"))
 
 
 def test_generate_saves_decoded_image_and_sanitized_receipt(monkeypatch, tmp_path):
@@ -207,6 +298,7 @@ def test_dynamic_schema_advertises_only_native_image25_options(monkeypatch):
     assert props["quality"]["enum"] == ["low", "medium", "high", "xhigh", "max", "auto"]
     assert {"size", "background", "output_format", "output_compression"} <= set(props)
     assert {"action", "reference_roles", "preserve", "mask", "presets", "receipt"} <= set(props)
+    assert props["reference_roles"]["maxItems"] == 5
     assert "upscale" not in props
 
     image_gen_registry._reset_for_tests()

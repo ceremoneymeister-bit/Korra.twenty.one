@@ -2204,7 +2204,9 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
         properties["reference_roles"] = {
             "type": "array",
             "items": {"type": "string", "enum": list(info["reference_roles"])},
-            "maxItems": max(0, max_refs - 1),
+            # The optional edit base does not consume a role. A generation
+            # request may therefore assign roles to all allowed references.
+            "maxItems": max_refs,
             "description": (
                 "One role per reference_image_urls item, in order. image_url "
                 "is always the edit base and is not included in this list."
