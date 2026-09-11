@@ -1,0 +1,21 @@
+GPT Image 2.5 workflow attribution
+==================================
+
+This Korra plugin selectively adapts request validation, prompt presets,
+reference-role guidance, final-result validation, atomic output, and sanitized
+receipt concepts from GPT Image 2.5 Agent Kit v0.3.1.
+
+Canonical source: https://github.com/AlekseiUL/gpt-image-2-5-agent-kit
+Exact source revision: cc52564687907194c8db02e95996757fb5d19b86
+Copyright (c) 2026 Aleksei Ulianov / Sprut_AI
+License: MIT (see LICENSE in this directory)
+
+Korra does not vendor the source package or install its CLI/runtime. The native
+image_generate tool uses only the active Korra profile's canonical Codex OAuth
+broker. The source kit's environment, file, and command token providers are not
+included. Korra also preserves its verified no-tool_choice request shape.
+
+Features intentionally not ported are the standalone CLI, dry-run/review
+renderer, arbitrary output roots and overwrite mode, and named identity/style
+library commands. Korra's bundled gpt-image-2-5 skill provides the corresponding
+profile-local reference and style workflow.

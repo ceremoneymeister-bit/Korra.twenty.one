@@ -1,5 +1,8 @@
 name: openai-codex
-version: 1.0.0
-description: "OpenAI image generation backed by ChatGPT/Codex OAuth (gpt-image-2 via the Responses image_generation tool). Saves generated images to $HERMES_HOME/cache/images/."
-author: NousResearch
+version: 2.0.0
+description: "GPT Image 2.5 Sunburst/Flare through profile-local ChatGPT/Codex OAuth."
+author: Korra contributors; portions adapted from Aleksei Ulianov / Sprut_AI
+license: MIT
+source: https://github.com/AlekseiUL/gpt-image-2-5-agent-kit
+source_revision: cc52564687907194c8db02e95996757fb5d19b86
 kind: backend
