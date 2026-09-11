@@ -1,7 +1,7 @@
 ---
 name: google-workspace
 description: "Gmail, Calendar, Drive, Docs, Sheets via gws CLI or Python."
-version: 1.2.0
+version: 1.3.0
 author: Nous Research
 license: MIT
 platforms: [linux, macos, windows]
@@ -69,8 +69,22 @@ Calendar/Drive/Sheets/Docs?"**
 - **Calendar/Drive/Sheets/Docs only** → Continue with this skill and use a
   narrower `--services` set like `calendar,drive,sheets,docs`.
 
-- **Full Workspace access** → Continue with this skill and use the default
-  `all` service set.
+- **Full Workspace access** → Continue with this skill and explicitly select
+  `--services all`.
+
+`--services` has no default. Unknown names, empty items, duplicates, and
+combining `all` with another name are rejected before an OAuth URL is created.
+Each service requests only its mapped scopes:
+
+| Service | OAuth scopes |
+|---------|--------------|
+| `email` | `https://www.googleapis.com/auth/gmail.modify` |
+| `calendar` | `https://www.googleapis.com/auth/calendar.events` |
+| `drive` | `https://www.googleapis.com/auth/drive` |
+| `contacts` | `https://www.googleapis.com/auth/contacts.readonly` |
+| `sheets` | `https://www.googleapis.com/auth/spreadsheets` |
+| `docs` | `https://www.googleapis.com/auth/documents` |
+| `all` | The exact former eight-scope set (`https://www.googleapis.com/auth/` + each of `gmail.readonly`, `gmail.send`, `gmail.modify`, `calendar`, `drive`, `contacts.readonly`, `spreadsheets`, `documents`) |
 
 **Question 2: "Does your Google account use Advanced Protection (hardware
 security keys required to sign in)? If you're not sure, you probably don't
@@ -88,10 +102,11 @@ Tell the user:
 >
 > 1. Create or select a project:
 >    https://console.cloud.google.com/projectselector2/home/dashboard
-> 2. Enable the required APIs from the API Library:
+> 2. Enable the APIs for the services selected in Step 1 from the API Library:
 >    https://console.cloud.google.com/apis/library
->    Enable: Gmail API, Google Calendar API, Google Drive API,
->    Google Sheets API, Google Docs API, People API
+>    Gmail API (`email`), Google Calendar API (`calendar`), Google Drive API
+>    (`drive`), Google Sheets API (`sheets`), Google Docs API (`docs`), and/or
+>    People API (`contacts`).
 > 3. Create the OAuth client here:
 >    https://console.cloud.google.com/apis/credentials
 >    Credentials → Create Credentials → OAuth 2.0 Client ID
@@ -120,16 +135,17 @@ explicit (for example `~/Downloads/korra-google-client-secret.json`), then run
 Use the service set chosen in Step 1. Examples:
 
 ```bash
-$GSETUP --auth-url --services email,calendar --format json
-$GSETUP --auth-url --services calendar,drive,sheets,docs --format json
-$GSETUP --auth-url --services all --format json
+$GSETUP --auth-url --services email,calendar
+$GSETUP --auth-url --services calendar,drive,sheets,docs
+$GSETUP --auth-url --services all
 ```
 
-This returns JSON with an `auth_url` field and also saves the exact URL to
-`$HERMES_HOME/google_oauth_last_url.txt`.
+This prints the exact authorization URL and saves its service/scope contract
+with the pending PKCE session in
+`$HERMES_HOME/google_oauth_pending.json`.
 
 Agent rules for this step:
-- Extract the `auth_url` field and send that exact URL to the user as a single line.
+- Send the printed URL to the user as a single line.
 - Tell the user that the browser will likely fail on `http://localhost:1` after approval, and that this is expected.
 - Tell them to copy the ENTIRE redirected URL from the browser address bar.
 - If the user gets `Error 403: access_denied`, send them directly to `https://console.cloud.google.com/auth/audience` to add themselves as a test user.
@@ -142,13 +158,12 @@ pending OAuth session locally so `--auth-code` can complete the PKCE exchange
 later, even on headless systems:
 
 ```bash
-$GSETUP --auth-code "THE_URL_OR_CODE_THE_USER_PASTED" --format json
+$GSETUP --auth-code "THE_URL_OR_CODE_THE_USER_PASTED"
 ```
 
 If `--auth-code` fails because the code expired, was already used, or came from
-an older browser tab, it now returns a fresh `fresh_auth_url`. In that case,
-immediately send the new URL to the user and have them retry with the newest
-browser redirect only.
+an older browser tab, run `--auth-url --services ...` again with the same
+service set and have the user retry with the newest browser redirect only.
 
 ### Step 5: Verify
 
@@ -161,6 +176,14 @@ Should print `AUTHENTICATED`. Setup is complete — token refreshes automaticall
 ### Notes
 
 - Token is stored at `$HERMES_HOME/google_token.json` and auto-refreshes.
+- The selected service names and exact requested scopes are stored with the
+  token. `--check`, refresh, repeat authorization, and `--revoke` use this
+  contract. To change the service set, revoke the old token first and start a
+  new authorization with the new explicit `--services` value.
+- `google_api.py` and `gws_bridge.py` reject commands for services outside the
+  stored selection before API or subprocess dispatch. Keep the token private:
+  Google's full Drive scope can also authorize some Docs API calls at the raw
+  OAuth layer, so the Korra service gate is part of the least-privilege contract.
 - Pending OAuth session state/verifier are stored temporarily at `$HERMES_HOME/google_oauth_pending.json` until exchange completes.
 - If `gws` is installed, `google_api.py` points it at the same `$HERMES_HOME/google_token.json` credentials file. Users do not need to run a separate `gws auth login` flow.
 - To revoke: `$GSETUP --revoke`
@@ -324,7 +347,7 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 | `NOT_AUTHENTICATED` | Run setup Steps 2-5 above |
 | `REFRESH_FAILED` | Token revoked or expired — redo Steps 3-5 |
 | `HttpError 403: Insufficient Permission` | Missing API scope — `$GSETUP --revoke` then redo Steps 3-5 |
-| `AUTHENTICATED (partial)` or "Token missing scopes" | New write capabilities (Drive write/delete, Docs create/edit) require re-authorization. `$GSETUP --revoke` then redo Steps 3-5 to grant the upgraded scopes. |
+| `TOKEN_SCOPE_CONTRACT_INVALID` | The token does not exactly match its selected services. `$GSETUP --revoke` then redo Steps 3-5 with an explicit service set. |
 | `HttpError 403: Access Not Configured` | API not enabled — user needs to enable it in Google Cloud Console |
 | `ModuleNotFoundError` | Run `$GSETUP --install-deps` |
 | Advanced Protection blocks auth | Workspace admin must allowlist the OAuth client ID |
