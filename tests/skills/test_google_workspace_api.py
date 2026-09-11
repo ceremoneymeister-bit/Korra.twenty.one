@@ -4,6 +4,8 @@ import importlib.util
 import json
 import subprocess
 import sys
+import threading
+import time
 import types
 from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
@@ -244,6 +246,119 @@ def test_gws_token_mutation_is_detected_without_rewriting_it(api_module, monkeyp
     assert "korra_requested_scopes" not in payload
 
 
+def test_native_refresh_precedes_gws_snapshot_and_private_runtime(api_module, monkeypatch):
+    selected_scopes = ["https://www.googleapis.com/auth/calendar.events"]
+    _write_token(
+        api_module.TOKEN_PATH,
+        token="ya29.expired",
+        scopes=selected_scopes,
+        korra_services=["calendar"],
+        korra_requested_scopes=selected_scopes,
+    )
+    captured = {}
+
+    def refresh_before_snapshot(*_args, **_kwargs):
+        payload = json.loads(api_module.TOKEN_PATH.read_text(encoding="utf-8"))
+        payload["token"] = "ya29.refreshed"
+        api_module.TOKEN_PATH.write_text(json.dumps(payload), encoding="utf-8")
+        return SimpleNamespace(token="ya29.refreshed")
+
+    def successful_gws(_cmd, **kwargs):
+        env = kwargs["env"]
+        home = Path(env["HOME"])
+        captured.update(env=env, cwd=kwargs["cwd"], home=home)
+        assert kwargs["cwd"] == home
+        assert home.is_dir()
+        assert env["GOOGLE_WORKSPACE_CLI_TOKEN"] == "ya29.refreshed"
+        for variable in (
+            "XDG_CACHE_HOME",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_RUNTIME_DIR",
+            "XDG_STATE_HOME",
+        ):
+            path = Path(env[variable])
+            assert path.parent == home
+            assert path.is_dir()
+        assert "HERMES_HOME" not in env
+        assert "KORRA_HOME" not in env
+        assert "KORRA_GOOGLE_OAUTH_CLIENT_PATH" not in env
+        return MagicMock(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(api_module._native_google, "_credentials", refresh_before_snapshot)
+    monkeypatch.setattr(api_module.subprocess, "run", successful_gws)
+
+    assert api_module._run_gws(["calendar", "events", "list"]) == {}
+    assert json.loads(api_module.TOKEN_PATH.read_text(encoding="utf-8"))["token"] == "ya29.refreshed"
+    assert not captured["home"].exists()
+
+
+def test_revoke_waits_for_inflight_gws_execution(api_module, monkeypatch):
+    selected_scopes = ["https://www.googleapis.com/auth/calendar.events"]
+    _write_token(
+        api_module.TOKEN_PATH,
+        token="ya29.active",
+        scopes=selected_scopes,
+        korra_services=["calendar"],
+        korra_requested_scopes=selected_scopes,
+    )
+    gws_entered = threading.Event()
+    release_gws = threading.Event()
+    errors = []
+    gws_result = {}
+    revoke_result = {}
+    remote_values = []
+
+    monkeypatch.setattr(
+        api_module._native_google,
+        "_credentials",
+        lambda *_args, **_kwargs: SimpleNamespace(token="ya29.active"),
+    )
+
+    def blocking_gws(*_args, **_kwargs):
+        gws_entered.set()
+        assert release_gws.wait(2)
+        return MagicMock(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(api_module.subprocess, "run", blocking_gws)
+
+    def run_gws():
+        try:
+            gws_result.update(api_module._run_gws(["calendar", "events", "list"]))
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_revoke():
+        try:
+            revoke_result.update(
+                api_module._native_google.revoke(
+                    profile_home=api_module.HERMES_HOME,
+                    remote_revoke=lambda value: remote_values.append(value),
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    gws_thread = threading.Thread(target=run_gws)
+    revoke_thread = threading.Thread(target=run_revoke)
+    gws_thread.start()
+    assert gws_entered.wait(2)
+    revoke_thread.start()
+    time.sleep(0.05)
+    assert revoke_thread.is_alive()
+    release_gws.set()
+    gws_thread.join(2)
+    revoke_thread.join(2)
+
+    assert not gws_thread.is_alive()
+    assert not revoke_thread.is_alive()
+    assert errors == []
+    assert gws_result == {}
+    assert revoke_result == {"status": "revoked", "remote_revoked": True}
+    assert remote_values == ["1//refresh"]
+    assert not api_module.TOKEN_PATH.exists()
+
+
 
 
 
@@ -281,7 +396,7 @@ def test_api_get_credentials_delegates_to_native_writer(api_module, monkeypatch)
 
     saved = json.loads(token_path.read_text())
     assert creds is marker
-    assert calls == [((api_module.HERMES_HOME, None), {})]
+    assert calls == [((api_module.HERMES_HOME,), {})]
     assert saved["token"] == "ya29.old"
 
 

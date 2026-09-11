@@ -27,6 +27,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -93,9 +94,34 @@ def _gws_binary() -> str | None:
     return shutil.which("gws")
 
 
-def _gws_env() -> dict[str, str]:
+def _gws_env(access_token: str, private_home: Path) -> dict[str, str]:
     env = os.environ.copy()
-    env["GOOGLE_WORKSPACE_CLI_TOKEN"] = get_credentials().token
+    # The gws process needs only the short-lived access token. Keep its own
+    # config/cache state away from the Korra profile and do not disclose the
+    # paths of Korra's mutable grant or operator-managed OAuth application.
+    for variable in (
+        "HERMES_HOME",
+        "KORRA_HOME",
+        "KORRA_GOOGLE_OAUTH_CLIENT_PATH",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_RUNTIME_DIR",
+        "XDG_STATE_HOME",
+    ):
+        env.pop(variable, None)
+    homes = {
+        "HOME": private_home,
+        "XDG_CACHE_HOME": private_home / "cache",
+        "XDG_CONFIG_HOME": private_home / "config",
+        "XDG_DATA_HOME": private_home / "data",
+        "XDG_RUNTIME_DIR": private_home / "runtime",
+        "XDG_STATE_HOME": private_home / "state",
+    }
+    for variable, path in homes.items():
+        path.mkdir(mode=0o700, exist_ok=True)
+        env[variable] = str(path)
+    env["GOOGLE_WORKSPACE_CLI_TOKEN"] = access_token
     return env
 
 
@@ -109,7 +135,9 @@ def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None 
         print("ERROR: Missing gws service name.", file=sys.stderr)
         sys.exit(1)
     _require_selected_service(parts[0])
-    original_token_bytes = TOKEN_PATH.read_bytes()
+    # Native auth is the only token writer. Let it refresh first, before the
+    # immutable snapshot used to detect unexpected gws-side mutation.
+    credentials = get_credentials()
 
     cmd = [binary, *parts]
     if params is not None:
@@ -117,20 +145,30 @@ def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None 
     if body is not None:
         cmd.extend(["--json", json.dumps(body)])
 
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True, encoding='utf-8', errors='replace',
-        env=_gws_env(),
-    )
-    try:
-        current_token_bytes = TOKEN_PATH.read_bytes()
-    except OSError as exc:
-        print(f"ERROR: Google token changed while gws was running: {exc}", file=sys.stderr)
-        sys.exit(1)
-    if current_token_bytes != original_token_bytes:
-        print("ERROR: gws changed the Korra-managed Google token; reconnect is required.", file=sys.stderr)
-        sys.exit(1)
+    with tempfile.TemporaryDirectory(prefix="korra-gws-") as private_home_value:
+        private_home = Path(private_home_value)
+        env = _gws_env(credentials.token, private_home)
+        # Hold the same profile lifecycle lock used by refresh/revoke. Recheck
+        # the selected service after taking it so a revoke/reconnect between
+        # native refresh and this block cannot dispatch with stale authority.
+        with _native_google._state_lock(HERMES_HOME):
+            _require_selected_service(parts[0])
+            original_token_bytes = TOKEN_PATH.read_bytes()
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True, encoding='utf-8', errors='replace',
+                env=env,
+                cwd=private_home,
+            )
+            try:
+                current_token_bytes = TOKEN_PATH.read_bytes()
+            except OSError as exc:
+                print(f"ERROR: Google token changed while gws was running: {exc}", file=sys.stderr)
+                sys.exit(1)
+            if current_token_bytes != original_token_bytes:
+                print("ERROR: gws changed the Korra-managed Google token; reconnect is required.", file=sys.stderr)
+                sys.exit(1)
     if result.returncode != 0:
         err = result.stderr.strip() or result.stdout.strip() or "Unknown gws error"
         print(err, file=sys.stderr)
