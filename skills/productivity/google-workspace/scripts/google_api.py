@@ -38,15 +38,9 @@ if _SCRIPTS_DIR not in sys.path:
 
 from _hermes_home import get_hermes_home
 from korra_cli import google_workspace as _native_google
-from utils import atomic_json_write
 from google_oauth_scopes import (
     MINIMUM_SCOPES,
-    TOKEN_REQUESTED_SCOPES_KEY,
-    TOKEN_SERVICES_KEY,
-    granted_scopes_from_payload,
     require_selected_service,
-    scope_difference,
-    tracked_scope_contract,
     validate_scope_contract,
 )
 
@@ -61,16 +55,6 @@ TOKEN_PATH = (
 _native_google._private_dir(_native_google.profile_google_dir(HERMES_HOME))
 
 SCOPES = list(MINIMUM_SCOPES)
-SCOPE_CONTRACT_KEYS = ("scopes", "korra_services", "korra_requested_scopes")
-
-
-def _normalize_authorized_user_payload(payload: dict) -> dict:
-    normalized = dict(payload)
-    if not normalized.get("type"):
-        normalized["type"] = "authorized_user"
-    return normalized
-
-
 def _ensure_authenticated():
     if not TOKEN_PATH.exists():
         print("Not authenticated. Run the setup script first:", file=sys.stderr)
@@ -102,31 +86,6 @@ def _require_selected_service(api_name: str) -> None:
         sys.exit(1)
 
 
-def _restore_scope_contract_after_gws(original_payload: dict) -> None:
-    """Preserve Korra metadata if gws refreshes and rewrites its credential file."""
-    tracked = tracked_scope_contract(original_payload)
-    if tracked is None:
-        return
-    services, expected_scopes = tracked
-    try:
-        refreshed = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
-    except Exception as e:
-        print(f"ERROR: gws damaged the Google token file: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    granted = granted_scopes_from_payload(refreshed)
-    missing, extra = scope_difference(granted, expected_scopes)
-    if missing or extra:
-        print("ERROR: gws changed the selected Google scope contract.", file=sys.stderr)
-        sys.exit(1)
-
-    refreshed.pop("scope", None)
-    refreshed["scopes"] = expected_scopes
-    refreshed[TOKEN_SERVICES_KEY] = list(services)
-    refreshed[TOKEN_REQUESTED_SCOPES_KEY] = expected_scopes
-    atomic_json_write(TOKEN_PATH, refreshed, mode=0o600)
-
-
 def _gws_binary() -> str | None:
     override = os.getenv("HERMES_GWS_BIN")
     if override:
@@ -150,7 +109,7 @@ def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None 
         print("ERROR: Missing gws service name.", file=sys.stderr)
         sys.exit(1)
     _require_selected_service(parts[0])
-    original_payload = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
+    original_token_bytes = TOKEN_PATH.read_bytes()
 
     cmd = [binary, *parts]
     if params is not None:
@@ -164,7 +123,14 @@ def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None 
         text=True, encoding='utf-8', errors='replace',
         env=_gws_env(),
     )
-    _restore_scope_contract_after_gws(original_payload)
+    try:
+        current_token_bytes = TOKEN_PATH.read_bytes()
+    except OSError as exc:
+        print(f"ERROR: Google token changed while gws was running: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if current_token_bytes != original_token_bytes:
+        print("ERROR: gws changed the Korra-managed Google token; reconnect is required.", file=sys.stderr)
+        sys.exit(1)
     if result.returncode != 0:
         err = result.stderr.strip() or result.stdout.strip() or "Unknown gws error"
         print(err, file=sys.stderr)
@@ -235,48 +201,11 @@ def _datetime_with_timezone(value: str) -> str:
 def get_credentials():
     """Load and refresh credentials from token file."""
     _ensure_authenticated()
-
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
-
     try:
         return _native_google._credentials(HERMES_HOME, None)
     except _native_google.GoogleWorkspaceError as native_error:
-        # Compatibility for a pre-native profile whose token still embeds the
-        # old app credential. New grants never duplicate that secret here.
-        stored = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
-        if not all(stored.get(key) for key in ("client_id", "client_secret")):
-            print(str(native_error), file=sys.stderr)
-            sys.exit(1)
-
-    creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), _stored_token_scopes())
-    if creds.expired and creds.refresh_token:
-        stored_payload = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
-        creds.refresh(Request())
-        refreshed_payload = _normalize_authorized_user_payload(json.loads(creds.to_json()))
-        refreshed_scopes = refreshed_payload.get("scopes")
-        selected_scopes = stored_payload.get("scopes")
-        if "scopes" in refreshed_payload:
-            valid_refreshed_scopes = (
-                isinstance(refreshed_scopes, list)
-                and bool(refreshed_scopes)
-                and all(isinstance(scope, str) and scope for scope in refreshed_scopes)
-            )
-            if not valid_refreshed_scopes or set(refreshed_scopes) != set(selected_scopes):
-                print(
-                    "ERROR: Refreshed Google token changed the selected scope contract. Re-run setup.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-        for key in SCOPE_CONTRACT_KEYS:
-            if key in stored_payload:
-                refreshed_payload[key] = stored_payload[key]
-        refreshed_payload.pop("scope", None)
-        atomic_json_write(TOKEN_PATH, refreshed_payload, mode=0o600)
-    if not creds.valid:
-        print("Token is invalid. Re-run setup.", file=sys.stderr)
+        print(str(native_error), file=sys.stderr)
         sys.exit(1)
-    return creds
 
 
 def build_service(api, version):

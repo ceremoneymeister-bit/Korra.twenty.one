@@ -299,48 +299,25 @@ def test_check_refresh_preserves_selected_scope_contract(setup_module, monkeypat
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(setup_module, "_ensure_deps", lambda: None)
-
     class FakeCredentials:
-        valid = False
-        expired = True
-        refresh_token = "1//refresh"
+        valid = True
 
-        def refresh(self, request):
-            self.valid = True
-            self.expired = False
-
-        def to_json(self):
-            return json.dumps(
-                {
-                    "token": "ya29.refreshed",
-                    "refresh_token": "1//refresh",
-                }
-            )
-
-    class FakeCredentialsModule:
-        @staticmethod
-        def from_authorized_user_file(path):
-            return FakeCredentials()
-
-    credentials_module = types.ModuleType("google.oauth2.credentials")
-    credentials_module.Credentials = FakeCredentialsModule
-    oauth2_module = types.ModuleType("google.oauth2")
-    oauth2_module.credentials = credentials_module
-    google_module = types.ModuleType("google")
-    google_module.oauth2 = oauth2_module
-    request_module = types.ModuleType("google.auth.transport.requests")
-    request_module.Request = lambda: object()
-    monkeypatch.setitem(sys.modules, "google", google_module)
-    monkeypatch.setitem(sys.modules, "google.oauth2", oauth2_module)
-    monkeypatch.setitem(sys.modules, "google.oauth2.credentials", credentials_module)
-    monkeypatch.setitem(sys.modules, "google.auth.transport.requests", request_module)
+    captured = []
+    monkeypatch.setattr(
+        setup_module._native_google,
+        "_credentials",
+        lambda *args, **kwargs: (
+            captured.append((args, kwargs)) or FakeCredentials()
+        ),
+    )
 
     assert setup_module.check_auth() is True
-    refreshed = json.loads(setup_module.TOKEN_PATH.read_text(encoding="utf-8"))
-    assert refreshed["scopes"] == scopes
-    assert refreshed["korra_services"] == list(selected)
-    assert refreshed["korra_requested_scopes"] == scopes
+    assert captured == [((setup_module.HERMES_HOME, None), {})]
+    unchanged = json.loads(setup_module.TOKEN_PATH.read_text(encoding="utf-8"))
+    assert unchanged["token"] == "ya29.old"
+    assert unchanged["scopes"] == scopes
+    assert unchanged["korra_services"] == list(selected)
+    assert unchanged["korra_requested_scopes"] == scopes
 
 
 def test_revoke_uses_refresh_token_and_clears_token_and_pending(

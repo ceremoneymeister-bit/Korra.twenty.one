@@ -34,15 +34,10 @@ if _SCRIPTS_DIR not in sys.path:
 
 from _hermes_home import display_hermes_home, get_hermes_home
 from korra_cli import google_workspace as _native_google
-from utils import atomic_json_write
 from google_oauth_scopes import (
     MINIMUM_SCOPES,
     SERVICE_SCOPES,
-    TOKEN_REQUESTED_SCOPES_KEY,
-    TOKEN_SERVICES_KEY,
-    granted_scopes_from_payload as _granted_scopes_from_payload,
     parse_services as _parse_services,
-    scope_difference as _scope_difference,
     scopes_for_services as _scopes_for_services,
     validate_scope_contract as _validate_scope_contract,
 )
@@ -75,13 +70,6 @@ REQUIRED_PACKAGES = [
 # Google deprecated OOB, so we use a localhost redirect and tell the user to
 # copy the code from the browser's URL bar (or the page body).
 REDIRECT_URI = _native_google.REDIRECT_URI
-
-
-def _normalize_authorized_user_payload(payload: dict) -> dict:
-    normalized = dict(payload)
-    if not normalized.get("type"):
-        normalized["type"] = "authorized_user"
-    return normalized
 
 
 def _load_token_payload(path: Path = TOKEN_PATH) -> dict:
@@ -208,88 +196,25 @@ def check_auth(quiet: bool = False):
 
     payload = _load_token_payload(TOKEN_PATH)
     try:
-        services, expected_scopes = _validate_scope_contract(payload)
+        services, _ = _validate_scope_contract(payload)
     except ValueError as e:
         print(f"TOKEN_SCOPE_CONTRACT_INVALID: {e}")
         return False
 
-    _ensure_deps()
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
-
     try:
         native_creds = _native_google._credentials(HERMES_HOME, None)
-    except _native_google.GoogleWorkspaceError:
-        native_creds = None
-    if native_creds is not None:
-        if not native_creds.valid:
-            print("TOKEN_INVALID: Re-run setup.")
-            return False
-        if not quiet:
-            print(
-                f"AUTHENTICATED: Token valid at {TOKEN_PATH} "
-                f"(services: {','.join(services)})"
-            )
-        return True
-
-    try:
-        # Don't pass scopes — user may have authorized only a subset.
-        # Passing scopes forces google-auth to validate them on refresh,
-        # which fails with invalid_scope if the token has fewer scopes
-        # than requested.
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH))
-    except Exception as e:
-        print(f"TOKEN_CORRUPT: {e}")
+    except _native_google.GoogleWorkspaceError as e:
+        print(f"TOKEN_INVALID: {e}")
         return False
-
-    if creds.valid:
-        if services is None:
-            print("AUTHENTICATED_LEGACY: Token is valid; choose --services on next authorization.")
-        if not quiet:
-            label = ",".join(services) if services is not None else "legacy-untracked"
-            print(f"AUTHENTICATED: Token valid at {TOKEN_PATH} (services: {label})")
-        return True
-
-    if creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            refreshed = _normalize_authorized_user_payload(json.loads(creds.to_json()))
-            refreshed_scopes = _granted_scopes_from_payload(refreshed)
-            if refreshed_scopes:
-                missing, extra = _scope_difference(refreshed_scopes, expected_scopes)
-                if missing or extra:
-                    print("REFRESH_SCOPE_CONTRACT_INVALID: Google returned a different scope set.")
-                    return False
-            refreshed.pop("scope", None)
-            refreshed["scopes"] = expected_scopes
-            if services is not None:
-                refreshed[TOKEN_SERVICES_KEY] = list(services)
-                refreshed[TOKEN_REQUESTED_SCOPES_KEY] = expected_scopes
-            atomic_json_write(TOKEN_PATH, refreshed, mode=0o600)
-            if not quiet:
-                label = ",".join(services) if services is not None else "legacy-untracked"
-                print(f"AUTHENTICATED: Token refreshed at {TOKEN_PATH} (services: {label})")
-            return True
-        except Exception as e:
-            err_str = str(e).lower()
-            if "disabled_client" in err_str or "invalid_client" in err_str:
-                print(f"OAUTH_CLIENT_DISABLED: {e}")
-                print("  The OAuth client or Google account has been disabled.")
-                print("  Steps to resolve:")
-                print("    1. Check your Google Cloud Console — verify the OAuth client is not disabled")
-                print("    2. Check if your Google account itself has been disabled at myaccount.google.com")
-                print("    3. If the account is disabled, you can appeal at accounts.google.com/signin/recovery")
-                print("    4. Do NOT retry API calls with a disabled account — this may worsen the situation")
-                print("    5. If the OAuth client is disabled, create a new one in Google Cloud Console")
-            elif "token_revoked" in err_str or "invalid_grant" in err_str:
-                print(f"TOKEN_REVOKED: {e}")
-                print("  Re-run setup to re-authenticate.")
-            else:
-                print(f"REFRESH_FAILED: {e}")
-            return False
-
-    print("TOKEN_INVALID: Re-run setup.")
-    return False
+    if not native_creds.valid:
+        print("TOKEN_INVALID: Re-run setup.")
+        return False
+    if not quiet:
+        print(
+            f"AUTHENTICATED: Token valid at {TOKEN_PATH} "
+            f"(services: {','.join(services)})"
+        )
+    return True
 
 
 def get_auth_url(services: tuple[str, ...]):

@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import types
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -32,6 +33,9 @@ def bridge_module(monkeypatch, tmp_path):
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
+    module._native_google._credentials = lambda *_args, **_kwargs: SimpleNamespace(
+        token=json.loads(module.get_token_path().read_text(encoding="utf-8"))["token"]
+    )
     return module
 
 
@@ -50,6 +54,9 @@ def api_module(monkeypatch, tmp_path):
     # Python SDK path which imports ``googleapiclient`` — not in deps.
     module._gws_binary = lambda: "/usr/bin/gws"
     _write_token(module.TOKEN_PATH, scopes=module.SCOPES)
+    module._native_google._credentials = lambda *_args, **_kwargs: SimpleNamespace(
+        token=json.loads(module.TOKEN_PATH.read_text(encoding="utf-8"))["token"]
+    )
     return module
 
 
@@ -215,7 +222,7 @@ def test_tracked_drive_sheets_calendar_token_blocks_docs_dispatch(
         api_module._run_gws(["docs", "documents", "get"])
 
 
-def test_gws_refresh_cannot_drop_tracked_service_metadata(api_module, monkeypatch):
+def test_gws_token_mutation_is_detected_without_rewriting_it(api_module, monkeypatch):
     selected_scopes = ["https://www.googleapis.com/auth/calendar.events"]
     _write_token(
         api_module.TOKEN_PATH,
@@ -230,10 +237,11 @@ def test_gws_refresh_cannot_drop_tracked_service_metadata(api_module, monkeypatc
 
     monkeypatch.setattr(api_module.subprocess, "run", rewrite_token)
 
-    assert api_module._run_gws(["calendar", "events", "list"]) == {}
+    with pytest.raises(SystemExit):
+        api_module._run_gws(["calendar", "events", "list"])
     payload = json.loads(api_module.TOKEN_PATH.read_text(encoding="utf-8"))
-    assert payload["korra_services"] == ["calendar"]
-    assert payload["korra_requested_scopes"] == selected_scopes
+    assert "korra_services" not in payload
+    assert "korra_requested_scopes" not in payload
 
 
 
@@ -246,7 +254,7 @@ def test_gws_refresh_cannot_drop_tracked_service_metadata(api_module, monkeypatc
 
 
 
-def test_api_get_credentials_refresh_persists_authorized_user_type(api_module, monkeypatch):
+def test_api_get_credentials_delegates_to_native_writer(api_module, monkeypatch):
     token_path = api_module.TOKEN_PATH
     selected_scopes = [
         "https://www.googleapis.com/auth/calendar.events",
@@ -261,54 +269,20 @@ def test_api_get_credentials_refresh_persists_authorized_user_type(api_module, m
         korra_requested_scopes=selected_scopes,
     )
 
-    class FakeCredentials:
-        def __init__(self):
-            self.expired = True
-            self.refresh_token = "1//refresh"
-            self.valid = True
-
-        def refresh(self, request):
-            self.expired = False
-
-        def to_json(self):
-            return json.dumps({
-                "token": "ya29.refreshed",
-                "refresh_token": "1//refresh",
-                "client_id": "123.apps.googleusercontent.com",
-                "client_secret": "secret",
-                "token_uri": "https://oauth2.googleapis.com/token",
-            })
-
-    class FakeCredentialsModule:
-        @staticmethod
-        def from_authorized_user_file(filename, scopes):
-            assert filename == str(token_path)
-            assert scopes == selected_scopes
-            return FakeCredentials()
-
-    google_module = types.ModuleType("google")
-    oauth2_module = types.ModuleType("google.oauth2")
-    credentials_module = types.ModuleType("google.oauth2.credentials")
-    credentials_module.Credentials = FakeCredentialsModule
-    transport_module = types.ModuleType("google.auth.transport")
-    requests_module = types.ModuleType("google.auth.transport.requests")
-    requests_module.Request = lambda: object()
-
-    monkeypatch.setitem(sys.modules, "google", google_module)
-    monkeypatch.setitem(sys.modules, "google.oauth2", oauth2_module)
-    monkeypatch.setitem(sys.modules, "google.oauth2.credentials", credentials_module)
-    monkeypatch.setitem(sys.modules, "google.auth.transport", transport_module)
-    monkeypatch.setitem(sys.modules, "google.auth.transport.requests", requests_module)
+    marker = SimpleNamespace(token="ya29.native")
+    calls = []
+    monkeypatch.setattr(
+        api_module._native_google,
+        "_credentials",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or marker,
+    )
 
     creds = api_module.get_credentials()
 
     saved = json.loads(token_path.read_text())
-    assert isinstance(creds, FakeCredentials)
-    assert saved["token"] == "ya29.refreshed"
-    assert saved["type"] == "authorized_user"
-    assert saved["scopes"] == selected_scopes
-    assert saved["korra_services"] == ["calendar", "drive", "sheets"]
-    assert saved["korra_requested_scopes"] == selected_scopes
+    assert creds is marker
+    assert calls == [((api_module.HERMES_HOME, None), {})]
+    assert saved["token"] == "ya29.old"
 
 
 @pytest.mark.parametrize(
@@ -344,41 +318,14 @@ def test_api_refresh_rejects_scope_expansion(api_module, monkeypatch):
         korra_requested_scopes=selected_scopes,
     )
 
-    class FakeCredentials:
-        expired = True
-        refresh_token = "1//refresh"
-        valid = True
-
-        def refresh(self, request):
-            return None
-
-        def to_json(self):
-            return json.dumps(
-                {
-                    "token": "ya29.expanded",
-                    "refresh_token": "1//refresh",
-                    "scopes": selected_scopes
-                    + ["https://www.googleapis.com/auth/gmail.send"],
-                }
-            )
-
-    class FakeCredentialsModule:
-        @staticmethod
-        def from_authorized_user_file(filename, scopes):
-            return FakeCredentials()
-
-    google_module = types.ModuleType("google")
-    oauth2_module = types.ModuleType("google.oauth2")
-    credentials_module = types.ModuleType("google.oauth2.credentials")
-    credentials_module.Credentials = FakeCredentialsModule
-    transport_module = types.ModuleType("google.auth.transport")
-    requests_module = types.ModuleType("google.auth.transport.requests")
-    requests_module.Request = lambda: object()
-    monkeypatch.setitem(sys.modules, "google", google_module)
-    monkeypatch.setitem(sys.modules, "google.oauth2", oauth2_module)
-    monkeypatch.setitem(sys.modules, "google.oauth2.credentials", credentials_module)
-    monkeypatch.setitem(sys.modules, "google.auth.transport", transport_module)
-    monkeypatch.setitem(sys.modules, "google.auth.transport.requests", requests_module)
+    error_type = api_module._native_google.GoogleWorkspaceError
+    monkeypatch.setattr(
+        api_module._native_google,
+        "_credentials",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            error_type("scope_mismatch", "expanded scope", status_code=409)
+        ),
+    )
 
     with pytest.raises(SystemExit):
         api_module.get_credentials()
