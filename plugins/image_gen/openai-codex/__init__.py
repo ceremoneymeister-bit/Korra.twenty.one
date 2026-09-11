@@ -1,21 +1,19 @@
 """OpenAI image generation backend — ChatGPT/Codex OAuth variant.
 
-Identical model catalog and tier semantics to the ``openai`` image-gen plugin
-(``gpt-image-2`` at low/medium/high quality), but routes the request through
-the Codex Responses API ``image_generation`` tool instead of the
-``images.generate`` REST endpoint. This lets users who are already
-authenticated with Codex/ChatGPT generate images without configuring a
-separate ``OPENAI_API_KEY``.
+Uses the GPT Image 2.5 Sunburst/Flare catalog through the Codex Responses API
+``image_generation`` tool. This lets users who are already authenticated with
+Codex/ChatGPT generate images without configuring a separate API key.
 
-Selection precedence for the tier (first hit wins):
+Selection precedence for the image model (first hit wins):
 
-1. ``OPENAI_IMAGE_MODEL`` env var (escape hatch for scripts / tests)
-2. ``image_gen.openai-codex.model`` in ``config.yaml``
-3. ``image_gen.model`` in ``config.yaml`` (when it's one of our tier IDs)
-4. :data:`DEFAULT_MODEL` — ``gpt-image-2-medium``
+1. Exact model requested by ``image_generate``
+2. ``image_gen.openai-codex.model`` in the active profile's ``config.yaml``
+3. ``image_gen.model`` in the active profile's ``config.yaml``
+4. :data:`DEFAULT_MODEL` — ``gpt-image-2.5-sunburst``
 
-Output is saved as PNG under ``$HERMES_HOME/cache/images/``. Source images for
-image-to-image/editing are sent as Responses ``input_image`` content parts.
+Output is decoded and saved atomically under the active profile's
+``cache/images/``. Source images for generation/editing are sent as Responses
+``input_image`` content parts.
 """
 
 from __future__ import annotations
@@ -146,7 +144,7 @@ _CODEX_INSTRUCTIONS = (
 
 _MAX_REFERENCE_IMAGES = 5
 _MAX_INPUT_IMAGE_BYTES = 25 * 1024 * 1024
-# gpt-image-2's Responses ``input_image`` accepts raster formats only. The
+# GPT Image 2.5's Responses ``input_image`` accepts raster formats only. The
 # shared magic-byte sniffer also recognizes SVG/TIFF/ICO, which the API
 # rejects server-side — gate to this allowlist so unsupported inputs fail
 # locally with a clear error instead of an opaque HTTP 400.
@@ -239,7 +237,7 @@ def _sniff_image_mime(raw: bytes) -> Optional[str]:
 
     Delegates magic-byte detection to the shared sniffer in
     ``agent.image_routing`` (single source of truth), then gates the result
-    to :data:`_ACCEPTED_INPUT_MIME` — the raster formats gpt-image-2's
+    to :data:`_ACCEPTED_INPUT_MIME` — the raster formats GPT Image 2.5's
     ``input_image`` actually accepts. SVG/TIFF/ICO (which the shared sniffer
     also recognizes) are rejected here so they fail locally with a clear
     error instead of an opaque server-side HTTP 400.
@@ -548,13 +546,8 @@ def _build_guided_prompt(
 
 
 # Progressive preview frames (partial_image_b64) are intermediate renders.
-# Saving them as finals produced the long-running "smear" failure mode on the
-# Codex Responses path. Defense in depth:
-#   1) request layer prefers no progressive frames when the backend honors it
-#   2) extractor never lets a partial overwrite a final result
-#   3) generate() only delivers source=final; partial-only / empty are not success
-# Live streams sometimes still emit a partial event even with 0; that is fine as
-# long as only a final ``result`` can be saved.
+# Request none and accept output only from the terminal response.completed
+# object; generate() additionally refuses every source except ``final``.
 _PARTIAL_IMAGES_REQUESTED = 0
 def _build_responses_payload(
     *,
@@ -727,11 +720,8 @@ def _collect_image_b64(
 ) -> Optional[Dict[str, str]]:
     """Stream a Codex Responses image_generation call.
 
-    Returns ``{\"b64\": ..., \"source\": \"final\"|\"partial\"}`` or ``None``.
-
-    Final ``result`` frames are preferred across the whole stream. A progressive
-    ``partial_image_b64`` is retained only when no final result ever arrives;
-    callers must not treat partial-only as an unconditional success.
+    Return one final result only after ``response.completed``. Preview frames,
+    early output-item events, truncated streams, and multiple calls are errors.
     """
     import httpx
     from agent.codex_headers import codex_cloudflare_headers
@@ -756,9 +746,7 @@ def _collect_image_b64(
     )
     timeout = httpx.Timeout(300.0, connect=30.0, read=300.0, write=30.0, pool=30.0)
 
-    final_b64: Optional[str] = None
-    partial_b64: Optional[str] = None
-    completed = False
+    completed_response: Optional[Dict[str, Any]] = None
     with httpx.Client(timeout=timeout, headers=headers) as http:
         with http.stream("POST", f"{_CODEX_BASE_URL}/responses", json=payload) as response:
             try:
@@ -774,18 +762,41 @@ def _collect_image_b64(
                     terminal = event.get("response")
                     if not isinstance(terminal, dict) or terminal.get("status") != "completed":
                         raise RuntimeError("Codex image response did not complete successfully")
-                    completed = True
-                result_b64, event_partial = _extract_image_candidates(event)
-                if result_b64:
-                    final_b64 = result_b64
-                if event_partial:
-                    partial_b64 = event_partial
+                    completed_response = terminal
 
-    if completed and final_b64:
-        return {"b64": final_b64, "source": "final"}
-    if partial_b64:
-        return {"b64": partial_b64, "source": "partial"}
-    return None
+    if completed_response is None:
+        raise RuntimeError("Codex image stream ended without response.completed")
+
+    calls = [
+        node
+        for node in _walk_objects(completed_response.get("output", []))
+        if node.get("type") == "image_generation_call"
+    ]
+    call_ids = {
+        call.get("id") for call in calls
+        if isinstance(call.get("id"), str) and call.get("id")
+    }
+    if len(call_ids) > 1 or len(calls) > 1:
+        raise RuntimeError("Codex returned multiple image_generation calls")
+    if not calls:
+        return None
+    call = calls[0]
+    if call.get("status") != "completed":
+        raise RuntimeError("Codex returned a non-completed image_generation call")
+    result_b64 = call.get("result")
+    if not isinstance(result_b64, str) or not result_b64:
+        return None
+    return {"b64": result_b64, "source": "final"}
+
+
+def _walk_objects(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_objects(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_objects(child)
 
 
 # ---------------------------------------------------------------------------
