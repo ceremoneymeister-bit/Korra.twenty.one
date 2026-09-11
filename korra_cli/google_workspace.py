@@ -482,7 +482,6 @@ def complete(
 ) -> dict[str, Any]:
     code, returned_state, callback_scopes = _parse_callback(callback_url)
     _, app = _load_app(root)
-    consumed: dict[str, Any]
     with _state_lock(profile_home):
         pending = _pending_record(profile_home)
         if pending is None:
@@ -494,46 +493,49 @@ def complete(
             raise GoogleWorkspaceError("flow_expired", "Authorization flow expired; start again", status_code=409)
         consumed_path = profile_google_dir(profile_home) / f".consumed-{secrets.token_hex(8)}.json"
         os.replace(pending_path(profile_home), consumed_path)
-        consumed = pending
-    try:
-        result = (exchange or _exchange_token)(code, consumed, app)
-        reported = granted_scopes_from_payload(result) or callback_scopes or []
-        # Google identity scopes may be returned implicitly.  They are harmless
-        # metadata, but Workspace scopes must match the request exactly.
-        workspace_reported = [scope for scope in reported if scope not in GOOGLE_IDENTITY_SCOPES]
-        missing, extra = scope_difference(workspace_reported, consumed["scopes"])
-        if missing or extra:
-            raise GoogleWorkspaceError(
-                "scope_mismatch",
-                f"Google returned a different Workspace scope set (missing {len(missing)}, unexpected {len(extra)})",
-            )
-        access_token = str(result.get("access_token") or "").strip()
-        refresh_token = str(result.get("refresh_token") or "").strip()
-        if not access_token or not refresh_token:
-            raise GoogleWorkspaceError("token_exchange_failed", "Google did not return a complete offline grant")
-        expires_in = int(result.get("expires_in") or 0)
-        now = int(time.time())
-        payload = {
-            "version": 1,
-            "type": "authorized_user",
-            "token": access_token,
-            "refresh_token": refresh_token,
-            "token_uri": TOKEN_ENDPOINT,
-            "scopes": list(consumed["scopes"]),
-            TOKEN_SERVICES_KEY: list(consumed["services"]),
-            TOKEN_REQUESTED_SCOPES_KEY: list(consumed["scopes"]),
-            "expires_at": now + max(0, expires_in),
-        }
-        _atomic_private_json(token_path(profile_home), payload)
-        _safe_unlink(legacy_token_path(profile_home))
-        profile_google_dir(profile_home).chmod(0o700)
-        return {"status": "connected", "services": list(consumed["services"])}
-    except (TypeError, ValueError) as exc:
-        if isinstance(exc, GoogleWorkspaceError):
-            raise
-        raise GoogleWorkspaceError("token_exchange_failed", "Google returned an invalid token response") from exc
-    finally:
-        _safe_unlink(consumed_path)
+        try:
+            # Keep the profile lifecycle lock through the remote exchange and
+            # local token commit.  Otherwise revoke/start can observe the
+            # consumed marker as an idle profile and race a token back into
+            # existence after reporting success.
+            result = (exchange or _exchange_token)(code, pending, app)
+            reported = granted_scopes_from_payload(result) or callback_scopes or []
+            # Google identity scopes may be returned implicitly.  They are harmless
+            # metadata, but Workspace scopes must match the request exactly.
+            workspace_reported = [scope for scope in reported if scope not in GOOGLE_IDENTITY_SCOPES]
+            missing, extra = scope_difference(workspace_reported, pending["scopes"])
+            if missing or extra:
+                raise GoogleWorkspaceError(
+                    "scope_mismatch",
+                    f"Google returned a different Workspace scope set (missing {len(missing)}, unexpected {len(extra)})",
+                )
+            access_token = str(result.get("access_token") or "").strip()
+            refresh_token = str(result.get("refresh_token") or "").strip()
+            if not access_token or not refresh_token:
+                raise GoogleWorkspaceError("token_exchange_failed", "Google did not return a complete offline grant")
+            expires_in = int(result.get("expires_in") or 0)
+            now = int(time.time())
+            payload = {
+                "version": 1,
+                "type": "authorized_user",
+                "token": access_token,
+                "refresh_token": refresh_token,
+                "token_uri": TOKEN_ENDPOINT,
+                "scopes": list(pending["scopes"]),
+                TOKEN_SERVICES_KEY: list(pending["services"]),
+                TOKEN_REQUESTED_SCOPES_KEY: list(pending["scopes"]),
+                "expires_at": now + max(0, expires_in),
+            }
+            _atomic_private_json(token_path(profile_home), payload)
+            _safe_unlink(legacy_token_path(profile_home))
+            profile_google_dir(profile_home).chmod(0o700)
+            return {"status": "connected", "services": list(pending["services"])}
+        except (TypeError, ValueError) as exc:
+            if isinstance(exc, GoogleWorkspaceError):
+                raise
+            raise GoogleWorkspaceError("token_exchange_failed", "Google returned an invalid token response") from exc
+        finally:
+            _safe_unlink(consumed_path)
 
 
 def cancel(*, profile_home: Path | None = None) -> dict[str, Any]:
@@ -565,29 +567,29 @@ def revoke(
     profile_home: Path | None = None,
     remote_revoke: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    path = token_path(profile_home)
-    old_path = legacy_token_path(profile_home)
-    payload: dict[str, Any] = {}
-    target = path if path.exists() else old_path
-    target_exists = target.exists()
-    remote_ok = not target_exists
-    if target_exists:
-        try:
-            payload = _read_json(target, label="token")
-        except GoogleWorkspaceError:
-            payload = {}
-    value = str(payload.get("refresh_token") or payload.get("token") or "").strip()
-    if value:
-        try:
-            (remote_revoke or _revoke_remote)(value)
-            remote_ok = True
-        except Exception:
-            remote_ok = False
     with _state_lock(profile_home):
+        path = token_path(profile_home)
+        old_path = legacy_token_path(profile_home)
+        payload: dict[str, Any] = {}
+        target = path if path.exists() else old_path
+        target_exists = target.exists()
+        remote_ok = not target_exists
+        if target_exists:
+            try:
+                payload = _read_json(target, label="token")
+            except GoogleWorkspaceError:
+                payload = {}
+        value = str(payload.get("refresh_token") or payload.get("token") or "").strip()
+        if value:
+            try:
+                (remote_revoke or _revoke_remote)(value)
+                remote_ok = True
+            except Exception:
+                remote_ok = False
         _safe_unlink(path)
         _safe_unlink(old_path)
         _safe_unlink(pending_path(profile_home))
-    return {"status": "revoked", "remote_revoked": remote_ok}
+        return {"status": "revoked", "remote_revoked": remote_ok}
 
 
 def _credentials(profile_home: Path | None, root: Path | None):

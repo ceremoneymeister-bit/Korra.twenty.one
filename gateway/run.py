@@ -18194,14 +18194,21 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     pairing_store._record_rate_limit(platform_name, source.user_id)
             return None
 
-        # Credential-management tools require a narrower capability than a
-        # session id. Bind it only after this identified sender has cleared the
-        # gateway's authoritative authorization path. Internal notifications
-        # and anonymous/chat-only grants deliberately remain incapable.
+        # Credential-management tools require a narrower capability than
+        # ordinary gateway access. Pairing, roles, and allow-all never imply
+        # ownership: the active profile must name this exact platform principal
+        # under gateway.credential_management.owners.
+        from gateway.credential_management import owner_matches
+
         source._credential_management_authorized = bool(
             not is_internal
             and str(source.user_id or "").strip()
             and source.chat_type == "dm"
+            and owner_matches(
+                _load_gateway_config(),
+                getattr(source.platform, "value", source.platform),
+                str(source.user_id),
+            )
         )
 
         # Global emergency stop (`hermes pause`): give new turns a brief

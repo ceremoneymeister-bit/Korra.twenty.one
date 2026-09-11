@@ -6,6 +6,7 @@ import stat
 import builtins
 import asyncio
 import sys
+import threading
 import time
 import types
 import urllib.parse
@@ -136,6 +137,122 @@ def test_state_mismatch_does_not_consume_but_success_is_single_consume(tmp_path)
     with pytest.raises(google.GoogleWorkspaceError) as replay:
         google.complete(good, root=root, profile_home=profile, exchange=_exchange_for(scopes))
     assert replay.value.code == "flow_missing"
+
+
+def test_revoke_waits_for_inflight_completion_and_removes_committed_token(tmp_path):
+    root = tmp_path / "install"
+    profile = root / "profiles" / "finance"
+    _write_app(root)
+    flow = google.start("drive", root=root, profile_home=profile)
+    scopes = scopes_for_services(("drive",))
+    exchange_entered = threading.Event()
+    release_exchange = threading.Event()
+    complete_result: dict = {}
+    revoke_result: dict = {}
+    errors: list[BaseException] = []
+    remote_values: list[str] = []
+
+    def blocking_exchange(*_args):
+        exchange_entered.set()
+        assert release_exchange.wait(2)
+        return _exchange_for(scopes)(*_args)
+
+    def run_complete():
+        try:
+            complete_result.update(
+                google.complete(
+                    _callback(flow["authorization_url"], scopes=scopes),
+                    root=root,
+                    profile_home=profile,
+                    exchange=blocking_exchange,
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_revoke():
+        try:
+            revoke_result.update(
+                google.revoke(
+                    profile_home=profile,
+                    remote_revoke=lambda value: remote_values.append(value),
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    complete_thread = threading.Thread(target=run_complete)
+    revoke_thread = threading.Thread(target=run_revoke)
+    complete_thread.start()
+    assert exchange_entered.wait(2)
+    revoke_thread.start()
+    time.sleep(0.05)
+    assert revoke_thread.is_alive()
+    release_exchange.set()
+    complete_thread.join(2)
+    revoke_thread.join(2)
+
+    assert not complete_thread.is_alive()
+    assert not revoke_thread.is_alive()
+    assert errors == []
+    assert complete_result == {"status": "connected", "services": ["drive"]}
+    assert revoke_result == {"status": "revoked", "remote_revoked": True}
+    assert remote_values == ["refresh-value"]
+    assert not google.token_path(profile).exists()
+
+
+def test_start_waits_for_inflight_completion_and_cannot_replace_flow(tmp_path):
+    root = tmp_path / "install"
+    profile = root / "profiles" / "finance"
+    _write_app(root)
+    flow = google.start("drive", root=root, profile_home=profile)
+    scopes = scopes_for_services(("drive",))
+    exchange_entered = threading.Event()
+    release_exchange = threading.Event()
+    complete_errors: list[BaseException] = []
+    start_errors: list[BaseException] = []
+
+    def blocking_exchange(*_args):
+        exchange_entered.set()
+        assert release_exchange.wait(2)
+        return _exchange_for(scopes)(*_args)
+
+    def run_complete():
+        try:
+            google.complete(
+                _callback(flow["authorization_url"], scopes=scopes),
+                root=root,
+                profile_home=profile,
+                exchange=blocking_exchange,
+            )
+        except BaseException as exc:
+            complete_errors.append(exc)
+
+    def run_start():
+        try:
+            google.start("calendar", root=root, profile_home=profile)
+        except BaseException as exc:
+            start_errors.append(exc)
+
+    complete_thread = threading.Thread(target=run_complete)
+    start_thread = threading.Thread(target=run_start)
+    complete_thread.start()
+    assert exchange_entered.wait(2)
+    start_thread.start()
+    time.sleep(0.05)
+    assert start_thread.is_alive()
+    release_exchange.set()
+    complete_thread.join(2)
+    start_thread.join(2)
+
+    assert not complete_thread.is_alive()
+    assert not start_thread.is_alive()
+    assert complete_errors == []
+    assert len(start_errors) == 1
+    assert isinstance(start_errors[0], google.GoogleWorkspaceError)
+    assert start_errors[0].code == "revoke_required"
+    assert google.token_path(profile).exists()
+    assert not google.pending_path(profile).exists()
 
 
 def test_expired_pending_flow_fails_closed(tmp_path, monkeypatch):

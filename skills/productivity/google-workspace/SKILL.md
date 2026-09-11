@@ -33,6 +33,17 @@ Connection management is native and self-service. The agent may call
 message. It must never ask the user to paste a callback URL, authorization
 code, access token, refresh token, client ID, or client secret into chat.
 
+Chat-based connection is disabled until the host operator names exact owners
+in that profile's `config.yaml`; ordinary allowlists and pairing do not grant
+this capability:
+
+```yaml
+gateway:
+  credential_management:
+    owners:
+      telegram: ["123456789"]
+```
+
 First call `google_workspace_auth` with `action=status`. If the installation
 OAuth app is configured, ask which services the user needs and call
 `action=start` with that exact service list. Send the returned Google URL. The
