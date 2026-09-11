@@ -21,9 +21,15 @@ image-to-image/editing are sent as Responses ``input_image`` content parts.
 from __future__ import annotations
 
 import base64
+import datetime
+import hashlib
+import io
 import json
 import logging
 import os
+import re
+import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -33,7 +39,6 @@ from agent.image_gen_provider import (
     error_response,
     normalize_reference_images,
     resolve_aspect_ratio,
-    save_b64_image,
     success_response,
 )
 
@@ -72,41 +77,56 @@ def _summarize_error_body(body: str) -> str:
         error = payload.get("error") if isinstance(payload, dict) else None
         message = error.get("message") if isinstance(error, dict) else None
         if isinstance(message, str) and message.strip():
-            return message.strip()[:_MAX_ERROR_BODY_CHARS]
+            return _sanitize_error_text(message.strip())
     except (TypeError, ValueError):
         pass
-    return text[:_MAX_ERROR_BODY_CHARS]
+    return _sanitize_error_text(text)
 
 
 
 # ---------------------------------------------------------------------------
-# Model catalog — mirrors the ``openai`` plugin so the picker UX is identical.
+# GPT Image 2.5 contract selectively ported from gpt-image-2-5-agent-kit
+# v0.3.1 at cc52564687907194c8db02e95996757fb5d19b86.  The kit's CLI,
+# alternate token sources, and required tool_choice shape are intentionally
+# not embedded in Korra; this provider remains a native image_generate backend.
 # ---------------------------------------------------------------------------
-
-API_MODEL = "gpt-image-2"
 
 _MODELS: Dict[str, Dict[str, Any]] = {
-    "gpt-image-2-low": {
-        "display": "GPT Image 2 (Low)",
-        "speed": "~15s",
-        "strengths": "Fast iteration, lowest cost",
-        "quality": "low",
+    "gpt-image-2.5-sunburst": {
+        "display": "GPT Image 2.5 Sunburst",
+        "speed": "precise",
+        "strengths": "Precise generation, editing and identity work",
     },
-    "gpt-image-2-medium": {
-        "display": "GPT Image 2 (Medium)",
-        "speed": "~40s",
-        "strengths": "Balanced — default",
-        "quality": "medium",
-    },
-    "gpt-image-2-high": {
-        "display": "GPT Image 2 (High)",
-        "speed": "~2min",
-        "strengths": "Highest fidelity, strongest prompt adherence",
-        "quality": "high",
+    "gpt-image-2.5-flare": {
+        "display": "GPT Image 2.5 Flare",
+        "speed": "fast",
+        "strengths": "Fast everyday generation and iteration",
     },
 }
 
-DEFAULT_MODEL = "gpt-image-2-medium"
+DEFAULT_MODEL = "gpt-image-2.5-sunburst"
+_QUALITIES = ("low", "medium", "high", "xhigh", "max", "auto")
+_BACKGROUNDS = ("opaque", "transparent", "auto")
+_OUTPUT_FORMATS = ("png", "jpeg", "webp")
+_ACTIONS = ("auto", "generate", "edit")
+_REFERENCE_ROLES = ("identity", "style", "logo", "layout", "general")
+_PRESETS = {
+    "portrait": "Compose an intentional portrait with clear facial structure and controlled lighting.",
+    "likeness": "Preserve the referenced person's distinguishing features and proportions; do not copy unrelated pose or background details.",
+    "thumbnail": "Use one clear focal point, strong contrast, and readable hierarchy at export size.",
+    "product": "Keep the product recognizable with clear subject separation and useful layout space.",
+    "no-text": "Do not include lettering, captions, labels, logos, UI text, or watermarks.",
+    "russian-text": "Render supplied Cyrillic copy verbatim, preserving spelling, case, punctuation, and line breaks.",
+    "edit": "Apply only the requested changes to the first image and preserve all other content unless explicitly changed.",
+    "brand-style": "Apply the requested brand palette, materials, lighting, typography direction, and visual density consistently.",
+}
+_ROLE_GUIDANCE = {
+    "identity": "identity anchor only; preserve distinguishing features without copying unrelated pose or background",
+    "style": "style anchor only; borrow palette, materials, lighting, and visual density",
+    "logo": "logo anchor; preserve mark geometry, colors, proportions, and exact lettering",
+    "layout": "layout anchor only; borrow spatial arrangement and scale",
+    "general": "use only for the purpose stated in the request",
+}
 
 _SIZES = {
     "landscape": "1536x1024",
@@ -124,7 +144,7 @@ _CODEX_INSTRUCTIONS = (
     "requests by using the image_generation tool when provided."
 )
 
-_MAX_REFERENCE_IMAGES = 16
+_MAX_REFERENCE_IMAGES = 5
 _MAX_INPUT_IMAGE_BYTES = 25 * 1024 * 1024
 # gpt-image-2's Responses ``input_image`` accepts raster formats only. The
 # shared magic-byte sniffer also recognizes SVG/TIFF/ICO, which the API
@@ -132,6 +152,15 @@ _MAX_INPUT_IMAGE_BYTES = 25 * 1024 * 1024
 # locally with a clear error instead of an opaque HTTP 400.
 _ACCEPTED_INPUT_MIME = frozenset(
     {"image/png", "image/jpeg", "image/gif", "image/webp"}
+)
+
+_FORMAT_EXTENSIONS = {"png": "png", "jpeg": "jpg", "webp": "webp"}
+_PIL_FORMATS = {"png": "PNG", "jpeg": "JPEG", "webp": "WEBP"}
+_SENSITIVE_PATTERNS = (
+    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
+    re.compile(r"(authorization\s*[:=]\s*)[^,;\n]+", re.IGNORECASE),
+    re.compile(r"(cookie\s*[:=]\s*)[^\n]+", re.IGNORECASE),
+    re.compile(r"([\"']?(?:access|refresh|id)_token[\"']?\s*[:=]\s*)[\"']?[^,}\]\s\"']+", re.IGNORECASE),
 )
 
 
@@ -153,27 +182,35 @@ def _load_image_gen_config() -> Dict[str, Any]:
         return {}
 
 
-def _resolve_model() -> Tuple[str, Dict[str, Any]]:
-    """Decide which tier to use and return ``(model_id, meta)``."""
-    import os
-
-    env_override = os.environ.get("OPENAI_IMAGE_MODEL")
-    if env_override and env_override in _MODELS:
-        return env_override, _MODELS[env_override]
+def _resolve_model(requested: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
+    """Resolve one exact GPT Image 2.5 model without legacy fallback."""
+    if requested is not None:
+        candidate = requested.strip() if isinstance(requested, str) else ""
+        if candidate not in _MODELS:
+            raise ValueError(
+                f"Unsupported Codex image model: {requested!r}. Choose from "
+                f"{', '.join(_MODELS)}."
+            )
+        return candidate, _MODELS[candidate]
 
     cfg = _load_image_gen_config()
     sub = cfg.get("openai-codex") if isinstance(cfg.get("openai-codex"), dict) else {}
     candidate: Optional[str] = None
     if isinstance(sub, dict):
         value = sub.get("model")
-        if isinstance(value, str) and value in _MODELS:
-            candidate = value
+        if isinstance(value, str) and value.strip():
+            candidate = value.strip()
     if candidate is None:
         top = cfg.get("model")
-        if isinstance(top, str) and top in _MODELS:
-            candidate = top
+        if isinstance(top, str) and top.strip():
+            candidate = top.strip()
 
     if candidate is not None:
+        if candidate not in _MODELS:
+            raise ValueError(
+                f"Configured image_gen model {candidate!r} is not supported by "
+                "the openai-codex provider. Select Sunburst or Flare."
+            )
         return candidate, _MODELS[candidate]
 
     return DEFAULT_MODEL, _MODELS[DEFAULT_MODEL]
@@ -215,6 +252,126 @@ def _sniff_image_mime(raw: bytes) -> Optional[str]:
     return None
 
 
+def _sanitize_error_text(value: Any, *, limit: int = _MAX_ERROR_BODY_CHARS) -> str:
+    text = str(value or "")[:limit]
+    for pattern in _SENSITIVE_PATTERNS:
+        text = pattern.sub(
+            lambda match: f"{match.group(1)}[REDACTED]" if match.groups() else "Bearer [REDACTED]",
+            text,
+        )
+    return text
+
+
+def _decoded_image(raw: bytes, *, label: str, expected_format: Optional[str] = None):
+    """Fully decode raster bytes with Pillow and return a detached image."""
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(raw)) as probe:
+            actual = (probe.format or "").upper()
+            if expected_format and actual != _PIL_FORMATS[expected_format]:
+                raise ValueError(
+                    f"{label} decoded as {actual or 'unknown'}, expected "
+                    f"{_PIL_FORMATS[expected_format]}."
+                )
+            probe.verify()
+        with Image.open(io.BytesIO(raw)) as decoded:
+            decoded.load()
+            return decoded.copy()
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"{label} is not a valid, fully decodable image.") from exc
+
+
+def _assert_local_input_root(path: Path) -> Path:
+    """Confine local reads to the active profile or current workspace root."""
+    from korra_constants import get_hermes_home
+
+    resolved = path.expanduser().resolve()
+    roots = (get_hermes_home().resolve(), Path.cwd().resolve())
+    if not any(resolved == root or root in resolved.parents for root in roots):
+        raise ValueError(
+            "Local image input must be inside the active Korra profile or "
+            "current workspace."
+        )
+    return resolved
+
+
+def _atomic_publish(path: Path, data: bytes) -> None:
+    """Publish bytes atomically and refuse to replace an existing target."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError as exc:
+            raise ValueError(f"Refusing to overwrite existing output: {path}") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _atomic_write_validated_image(path: Path, raw: bytes, output_format: str) -> Dict[str, Any]:
+    image = _decoded_image(raw, label="Generated payload", expected_format=output_format)
+    try:
+        metadata = {
+            "width": image.width,
+            "height": image.height,
+            "format": (image.format or _PIL_FORMATS[output_format]).lower(),
+            "mode": image.mode,
+            "bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+    finally:
+        image.close()
+    _atomic_publish(path, raw)
+    return metadata
+
+
+def _validate_size(size: str) -> str:
+    if size == "auto":
+        return size
+    if not re.fullmatch(r"[0-9]+x[0-9]+", size):
+        raise ValueError("Size must be auto or WIDTHxHEIGHT.")
+    width, height = (int(edge) for edge in size.split("x"))
+    if width <= 0 or height <= 0 or width % 16 or height % 16:
+        raise ValueError("Size edges must be positive multiples of 16.")
+    if max(width, height) > 3840 or max(width, height) > 3 * min(width, height):
+        raise ValueError("Size exceeds the 3840px edge or 3:1 aspect-ratio bound.")
+    if not 655_360 <= width * height <= 8_294_400:
+        raise ValueError("Size must contain between 655360 and 8294400 pixels.")
+    return size
+
+
+def _validate_options(
+    *, quality: str, size: str, background: str, output_format: str,
+    output_compression: Optional[int], action: str,
+) -> None:
+    if quality not in _QUALITIES:
+        raise ValueError(f"Unsupported quality: {quality!r}.")
+    _validate_size(size)
+    if background not in _BACKGROUNDS:
+        raise ValueError(f"Unsupported background: {background!r}.")
+    if output_format not in _OUTPUT_FORMATS:
+        raise ValueError(f"Unsupported output format: {output_format!r}.")
+    if background == "transparent" and output_format == "jpeg":
+        raise ValueError("Transparent backgrounds require PNG or WebP output.")
+    if output_compression is not None:
+        if type(output_compression) is not int or not 0 <= output_compression <= 100:
+            raise ValueError("Output compression must be an integer from 0 to 100.")
+        if output_format not in {"jpeg", "webp"}:
+            raise ValueError("Output compression is supported only for JPEG or WebP.")
+    if action not in _ACTIONS:
+        raise ValueError(f"Unsupported action: {action!r}.")
+
+
 def _data_url_to_input_image_url(value: str) -> str:
     """Validate and canonicalize a data:image URL for Responses input_image."""
     if "," not in value:
@@ -229,6 +386,8 @@ def _data_url_to_input_image_url(value: str) -> str:
     mime = _sniff_image_mime(raw)
     if mime is None:
         raise ValueError("Image data URL does not contain supported image bytes")
+    decoded = _decoded_image(raw, label="Image data URL")
+    decoded.close()
     encoded = base64.b64encode(raw).decode("ascii")
     return f"data:{mime};base64,{encoded}"
 
@@ -246,7 +405,7 @@ def _local_image_to_data_url(value: str) -> str:
     except Exception as exc:
         logger.debug("Codex image input read guard unavailable: %s", exc)
 
-    path = Path(os.path.expanduser(value)).resolve()
+    path = _assert_local_input_root(Path(value))
     if not path.is_file():
         raise ValueError(f"Image input path does not exist or is not a file: {value}")
     size = path.stat().st_size
@@ -258,6 +417,8 @@ def _local_image_to_data_url(value: str) -> str:
     mime = _sniff_image_mime(raw)
     if mime is None:
         raise ValueError(f"Image input path is not a supported image: {value}")
+    decoded = _decoded_image(raw, label="Image input")
+    decoded.close()
     encoded = base64.b64encode(raw).decode("ascii")
     return f"data:{mime};base64,{encoded}"
 
@@ -287,8 +448,103 @@ def _normalize_input_images(
         values.append(image_url.strip())
     for ref in (normalize_reference_images(reference_image_urls) or []):
         values.append(ref)
-    values = values[:_MAX_REFERENCE_IMAGES]
+    if len(values) > _MAX_REFERENCE_IMAGES:
+        raise ValueError(f"At most {_MAX_REFERENCE_IMAGES} combined image inputs are supported.")
     return [_to_input_image_part(value) for value in values]
+
+
+def _data_url_bytes(value: str, *, label: str) -> bytes:
+    if "," not in value:
+        raise ValueError(f"{label} data URL is missing a comma separator.")
+    header, data = value.split(",", 1)
+    if ";base64" not in header.lower():
+        raise ValueError(f"{label} must be a base64 data URL.")
+    try:
+        return base64.b64decode(data, validate=True)
+    except Exception as exc:
+        raise ValueError(f"{label} contains invalid base64 data.") from exc
+
+
+def _source_bytes(value: str, *, label: str) -> bytes:
+    candidate = (value or "").strip()
+    if candidate.lower().startswith("data:"):
+        return _data_url_bytes(candidate, label=label)
+    if candidate.lower().startswith(("http://", "https://")):
+        raise ValueError(f"{label} must be a profile/workspace file or data URL.")
+    path = _assert_local_input_root(Path(candidate))
+    if not path.is_file():
+        raise ValueError(f"{label} does not exist: {candidate}")
+    if path.stat().st_size > _MAX_INPUT_IMAGE_BYTES:
+        raise ValueError(f"{label} exceeds 25MB cap.")
+    return path.read_bytes()
+
+
+def _mask_tool_part(mask: str, edit_base: str) -> Dict[str, str]:
+    mask_raw = _source_bytes(mask, label="Mask")
+    base_raw = _source_bytes(edit_base, label="Edit base")
+    mask_image = _decoded_image(mask_raw, label="Mask", expected_format="png")
+    base_image = _decoded_image(base_raw, label="Edit base")
+    try:
+        if mask_image.size != base_image.size:
+            raise ValueError("Mask and edit base must have matching dimensions.")
+        if "A" not in mask_image.getbands() and "transparency" not in mask_image.info:
+            raise ValueError("Mask PNG must contain an alpha channel.")
+        if mask_image.convert("RGBA").getchannel("A").getextrema()[0] == 255:
+            raise ValueError("Mask PNG must contain transparent pixels.")
+    finally:
+        mask_image.close()
+        base_image.close()
+    encoded = base64.b64encode(mask_raw).decode("ascii")
+    return {"image_url": f"data:image/png;base64,{encoded}"}
+
+
+def _build_guided_prompt(
+    prompt: str, *, input_count: int, has_edit_base: bool,
+    reference_roles: Optional[List[str]], presets: Optional[List[str]],
+    preserve: Optional[List[str]],
+) -> str:
+    selected_presets = list(dict.fromkeys(presets or []))
+    unknown_presets = [item for item in selected_presets if item not in _PRESETS]
+    if unknown_presets:
+        raise ValueError(f"Unsupported preset: {unknown_presets[0]!r}.")
+    if "no-text" in selected_presets and "russian-text" in selected_presets:
+        raise ValueError("no-text and russian-text presets cannot be combined.")
+
+    roles = reference_roles or ["general"] * (input_count - int(has_edit_base))
+    if len(roles) != input_count - int(has_edit_base):
+        raise ValueError("reference_roles must match reference_image_urls.")
+    if any(role not in _REFERENCE_ROLES for role in roles):
+        raise ValueError("reference_roles contains an unsupported role.")
+    preserved = preserve or []
+    if preserved and not has_edit_base:
+        raise ValueError("preserve instructions require an edit base image.")
+    if any(not isinstance(item, str) or not item.strip() for item in preserved):
+        raise ValueError("preserve instructions must be non-empty strings.")
+
+    parts = [prompt.strip()]
+    if has_edit_base and "edit" not in selected_presets:
+        parts.append(_PRESETS["edit"])
+    parts.extend(_PRESETS[item] for item in selected_presets)
+    if input_count:
+        role_lines = []
+        if has_edit_base:
+            role_lines.append("Image 1 [edit_base]: base image to modify.")
+        offset = 2 if has_edit_base else 1
+        role_lines.extend(
+            f"Image {index + offset} [{role}]: {_ROLE_GUIDANCE[role]}."
+            for index, role in enumerate(roles)
+        )
+        parts.append("Reference roles in attachment order:\n" + "\n".join(role_lines))
+    if preserved:
+        parts.append(
+            "Preserve unchanged:\n"
+            + "\n".join(f"- {item.strip()}" for item in preserved)
+        )
+    parts.append(
+        "Honor the requested medium, composition, literal text, and crop. "
+        "Use each reference only for its assigned role."
+    )
+    return "\n\n".join(parts)
 
 
 # Progressive preview frames (partial_image_b64) are intermediate renders.
@@ -300,22 +556,38 @@ def _normalize_input_images(
 # Live streams sometimes still emit a partial event even with 0; that is fine as
 # long as only a final ``result`` can be saved.
 _PARTIAL_IMAGES_REQUESTED = 0
-# Content-agnostic retries when the stream does not yield a final result
-# (empty stream or progressive-only). No prompt-class branching.
-_NONFINAL_RETRIES = 1
-
-
 def _build_responses_payload(
     *,
     prompt: str,
     size: str,
     quality: str,
     input_images: Optional[List[Dict[str, str]]] = None,
+    image_model: str = DEFAULT_MODEL,
+    background: str = "opaque",
+    output_format: str = "png",
+    output_compression: Optional[int] = None,
+    action: str = "auto",
+    mask_part: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Build the Codex Responses request body for an image_generation call."""
     content: List[Dict[str, Any]] = [{"type": "input_text", "text": prompt}]
     if input_images:
         content.extend(input_images)
+    tool: Dict[str, Any] = {
+        "type": "image_generation",
+        "model": image_model,
+        "size": size,
+        "quality": quality,
+        "output_format": output_format,
+        "background": background,
+        "action": action,
+        "partial_images": _PARTIAL_IMAGES_REQUESTED,
+    }
+    if output_compression is not None:
+        tool["output_compression"] = output_compression
+    if mask_part is not None:
+        tool["input_image_mask"] = mask_part
+
     return {
         "model": _CODEX_CHAT_MODEL,
         "store": False,
@@ -325,20 +597,7 @@ def _build_responses_payload(
             "role": "user",
             "content": content,
         }],
-        "tools": [{
-            "type": "image_generation",
-            "model": API_MODEL,
-            "size": size,
-            "quality": quality,
-            "output_format": "png",
-            "background": "opaque",
-            # Prefer 0 progressive preview frames. Preview frames can arrive
-            # without a later final ``result`` and look like smeared /
-            # unfinished images if saved as the deliverable. Even when the
-            # backend still emits a partial event, generate() refuses to
-            # deliver anything except source=final.
-            "partial_images": _PARTIAL_IMAGES_REQUESTED,
-        }],
+        "tools": [tool],
         # No ``tool_choice`` is sent: the chatgpt.com/backend-api/codex backend
         # rejects every shape we have for forcing the hosted ``image_generation``
         # tool. ``{"type": "allowed_tools", "mode": "required", "tools": [{"type":
@@ -459,6 +718,12 @@ def _collect_image_b64(
     size: str,
     quality: str,
     input_images: Optional[List[Dict[str, str]]] = None,
+    image_model: str = DEFAULT_MODEL,
+    background: str = "opaque",
+    output_format: str = "png",
+    output_compression: Optional[int] = None,
+    action: str = "auto",
+    mask_part: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, str]]:
     """Stream a Codex Responses image_generation call.
 
@@ -482,11 +747,18 @@ def _collect_image_b64(
         size=size,
         quality=quality,
         input_images=input_images,
+        image_model=image_model,
+        background=background,
+        output_format=output_format,
+        output_compression=output_compression,
+        action=action,
+        mask_part=mask_part,
     )
     timeout = httpx.Timeout(300.0, connect=30.0, read=300.0, write=30.0, pool=30.0)
 
     final_b64: Optional[str] = None
     partial_b64: Optional[str] = None
+    completed = False
     with httpx.Client(timeout=timeout, headers=headers) as http:
         with http.stream("POST", f"{_CODEX_BASE_URL}/responses", json=payload) as response:
             try:
@@ -498,13 +770,18 @@ def _collect_image_b64(
                     f"{_summarize_error_body(exc.response.text)}"
                 ) from exc
             for event in _iter_sse_json(response):
+                if event.get("type") == "response.completed":
+                    terminal = event.get("response")
+                    if not isinstance(terminal, dict) or terminal.get("status") != "completed":
+                        raise RuntimeError("Codex image response did not complete successfully")
+                    completed = True
                 result_b64, event_partial = _extract_image_candidates(event)
                 if result_b64:
                     final_b64 = result_b64
                 if event_partial:
                     partial_b64 = event_partial
 
-    if final_b64:
+    if completed and final_b64:
         return {"b64": final_b64, "source": "final"}
     if partial_b64:
         return {"b64": partial_b64, "source": "partial"}
@@ -517,7 +794,7 @@ def _collect_image_b64(
 
 
 class OpenAICodexImageGenProvider(ImageGenProvider):
-    """gpt-image-2 routed through ChatGPT/Codex OAuth instead of an API key."""
+    """GPT Image 2.5 routed through the active profile's Codex OAuth."""
 
     @property
     def name(self) -> str:
@@ -554,8 +831,8 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
     def get_setup_schema(self) -> Dict[str, Any]:
         return {
             "name": "OpenAI (Codex auth)",
-            "badge": "free",
-            "tag": "gpt-image-2 via ChatGPT/Codex OAuth — no API key required; supports text and image inputs",
+            "badge": "ChatGPT subscription",
+            "tag": "Sunburst/Flare via profile-local ChatGPT/Codex OAuth",
             "env_vars": [],
             "post_setup_hint": (
                 "Sign in with `hermes auth codex` (or `hermes setup` → Codex) "
@@ -568,7 +845,21 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
         # images as `input_image` message content parts. Keep this capability
         # honest so the dynamic `image_generate` schema encourages identity-
         # preserving edits instead of unrelated text-to-image redraws.
-        return {"modalities": ["text", "image"], "max_reference_images": _MAX_REFERENCE_IMAGES}
+        return {
+            "modalities": ["text", "image"],
+            "max_reference_images": _MAX_REFERENCE_IMAGES,
+            "image_models": list(_MODELS),
+            "qualities": list(_QUALITIES),
+            "sizes": True,
+            "backgrounds": list(_BACKGROUNDS),
+            "output_formats": list(_OUTPUT_FORMATS),
+            "output_compression": True,
+            "actions": list(_ACTIONS),
+            "reference_roles": list(_REFERENCE_ROLES),
+            "presets": list(_PRESETS),
+            "mask": True,
+            "receipts": True,
+        }
 
     def generate(
         self,
@@ -590,17 +881,6 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 aspect_ratio=aspect,
             )
 
-        if not _read_codex_access_token():
-            return error_response(
-                error=(
-                    "No Codex/ChatGPT OAuth credentials available. Run "
-                    "`hermes auth codex` (or `hermes setup` → Codex) to sign in."
-                ),
-                error_type="auth_required",
-                provider="openai-codex",
-                aspect_ratio=aspect,
-            )
-
         try:
             import httpx  # noqa: F401
         except ImportError:
@@ -611,8 +891,38 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 aspect_ratio=aspect,
             )
 
-        tier_id, meta = _resolve_model()
-        size = _SIZES.get(aspect, _SIZES["square"])
+        try:
+            model_id, _meta = _resolve_model(kwargs.get("model"))
+            quality = str(kwargs.get("quality") or "medium").strip().lower()
+            size = str(kwargs.get("size") or _SIZES.get(aspect, _SIZES["square"])).strip().lower()
+            background = str(kwargs.get("background") or "opaque").strip().lower()
+            output_format = str(kwargs.get("output_format") or "png").strip().lower()
+            output_compression = kwargs.get("output_compression")
+            action = str(
+                kwargs.get("action") or ("edit" if image_url else "auto")
+            ).strip().lower()
+            _validate_options(
+                quality=quality,
+                size=size,
+                background=background,
+                output_format=output_format,
+                output_compression=output_compression,
+                action=action,
+            )
+            if action == "edit" and not image_url:
+                raise ValueError("The edit action requires image_url as its base image.")
+            if action == "generate" and image_url:
+                raise ValueError("The generate action cannot include an edit base image.")
+            if kwargs.get("mask") and (not image_url or action != "edit"):
+                raise ValueError("A mask requires image_url and action='edit'.")
+        except Exception as exc:
+            return error_response(
+                error=str(exc),
+                error_type="invalid_argument",
+                provider="openai-codex",
+                prompt=prompt,
+                aspect_ratio=aspect,
+            )
 
         token = _read_codex_access_token()
         if not token:
@@ -623,57 +933,59 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 ),
                 error_type="auth_required",
                 provider="openai-codex",
-                model=tier_id,
+                model=model_id,
                 prompt=prompt,
                 aspect_ratio=aspect,
             )
 
         try:
             input_images = _normalize_input_images(image_url, reference_image_urls)
+            explicit_refs = normalize_reference_images(reference_image_urls) or []
+            guided_prompt = _build_guided_prompt(
+                prompt,
+                input_count=len(input_images),
+                has_edit_base=bool(image_url),
+                reference_roles=kwargs.get("reference_roles"),
+                presets=kwargs.get("presets"),
+                preserve=kwargs.get("preserve"),
+            )
+            mask_part = None
+            if kwargs.get("mask"):
+                mask_part = _mask_tool_part(str(kwargs["mask"]), str(image_url))
         except Exception as exc:
             return error_response(
                 error=f"Invalid image input for Codex image editing: {exc}",
                 error_type="invalid_image_input",
                 provider="openai-codex",
-                model=tier_id,
+                model=model_id,
                 prompt=prompt,
                 aspect_ratio=aspect,
             )
 
         try:
-            collected: Optional[Dict[str, str]] = None
-            for attempt in range(_NONFINAL_RETRIES + 1):
-                collected = _collect_image_b64(
-                    token,
-                    prompt=prompt,
-                    size=size,
-                    quality=meta["quality"],
-                    input_images=input_images or None,
-                )
-                if collected and collected.get("source") == "final" and collected.get("b64"):
-                    break
-                if attempt < _NONFINAL_RETRIES:
-                    kind = (
-                        "progressive-only partial frame"
-                        if collected and collected.get("source") == "partial"
-                        else "no image_generation_call result"
-                    )
-                    logger.warning(
-                        "Codex image stream ended with %s (attempt %s/%s); "
-                        "retrying once before failing closed.",
-                        kind,
-                        attempt + 1,
-                        _NONFINAL_RETRIES + 1,
-                    )
-                    continue
-                break
+            collected = _collect_image_b64(
+                token,
+                prompt=guided_prompt,
+                size=size,
+                quality=quality,
+                input_images=input_images or None,
+                image_model=model_id,
+                background=background,
+                output_format=output_format,
+                output_compression=output_compression,
+                action=action,
+                mask_part=mask_part,
+            )
         except Exception as exc:
             logger.debug("Codex image generation failed", exc_info=True)
             return error_response(
-                error=f"OpenAI image generation via Codex auth failed: {exc}",
+                error=(
+                    "OpenAI image generation via Codex auth failed: "
+                    f"{_sanitize_error_text(exc)}"
+                ),
                 error_type="api_error",
                 provider="openai-codex",
-                model=tier_id,
+                model=model_id,
                 prompt=prompt,
                 aspect_ratio=aspect,
             )
@@ -681,12 +993,11 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
         if not collected or not collected.get("b64"):
             return error_response(
                 error=(
-                    "Codex response contained no image_generation_call result "
-                    f"after {_NONFINAL_RETRIES + 1} attempt(s)"
+                    "Codex response contained no completed image_generation_call result"
                 ),
                 error_type="empty_response",
                 provider="openai-codex",
-                model=tier_id,
+                model=model_id,
                 prompt=prompt,
                 aspect_ratio=aspect,
             )
@@ -706,9 +1017,8 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
             except Exception:
                 pixel_hint = None
             detail = (
-                "Codex returned only a progressive partial image frame after "
-                f"{_NONFINAL_RETRIES + 1} attempt(s); refusing to save it "
-                "as a final deliverable."
+                "Codex returned only a progressive partial image frame; "
+                "refusing to save it as a final deliverable."
             )
             if pixel_hint:
                 detail = f"{detail} partial_pixel_size={pixel_hint}."
@@ -716,46 +1026,83 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 error=detail,
                 error_type="incomplete_image",
                 provider="openai-codex",
-                model=tier_id,
+                model=model_id,
                 prompt=prompt,
                 aspect_ratio=aspect,
             )
             err["image_source"] = image_source
             err["requested_size"] = size
             err["partial_pixel_size"] = pixel_hint
-            err["nonfinal_retries"] = _NONFINAL_RETRIES
             return err
 
         try:
-            import base64 as _b64mod
+            raw_bytes = base64.b64decode(b64, validate=True)
+            from korra_constants import get_hermes_home
 
-            raw_bytes = _b64mod.b64decode(b64)
-            pixel_size = _png_pixel_size(raw_bytes)
-            saved_path = save_b64_image(b64, prefix=f"openai_codex_{tier_id}")
+            output_dir = get_hermes_home().resolve() / "cache" / "images"
+            extension = _FORMAT_EXTENSIONS[output_format]
+            filename = f"openai_codex_{model_id}_{uuid.uuid4().hex}.{extension}"
+            saved_path = output_dir / filename
+            output_meta = _atomic_write_validated_image(
+                saved_path, raw_bytes, output_format
+            )
+            receipt_path = None
+            if kwargs.get("receipt") is True:
+                receipt_path = saved_path.with_suffix(saved_path.suffix + ".receipt.json")
+                receipt = {
+                    "schema": "korra.image-generation.receipt.v1",
+                    "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "provider": "openai-codex",
+                    "source": {
+                        "repository": "AlekseiUL/gpt-image-2-5-agent-kit",
+                        "revision": "cc52564687907194c8db02e95996757fb5d19b86",
+                    },
+                    "image_model": model_id,
+                    "host_model": _CODEX_CHAT_MODEL,
+                    "quality": quality,
+                    "size": size,
+                    "background": background,
+                    "output_format": output_format,
+                    "output_compression": output_compression,
+                    "action": action,
+                    "prompt_sha256": hashlib.sha256(guided_prompt.encode("utf-8")).hexdigest(),
+                    "input_image_count": len(input_images),
+                    "reference_roles": list(kwargs.get("reference_roles") or ["general"] * len(explicit_refs)),
+                    "output": output_meta,
+                }
+                _atomic_publish(
+                    receipt_path,
+                    (json.dumps(receipt, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                )
         except Exception as exc:
             return error_response(
-                error=f"Could not save image to cache: {exc}",
-                error_type="io_error",
+                error=f"Could not validate/save image to profile cache: {_sanitize_error_text(exc)}",
+                error_type="invalid_image_output",
                 provider="openai-codex",
-                model=tier_id,
+                model=model_id,
                 prompt=prompt,
                 aspect_ratio=aspect,
             )
 
         return success_response(
             image=str(saved_path),
-            model=tier_id,
+            model=model_id,
             prompt=prompt,
             aspect_ratio=aspect,
             provider="openai-codex",
             modality="image" if input_images else "text",
             extra={
                 "size": size,
-                "quality": meta["quality"],
+                "quality": quality,
+                "background": background,
+                "output_format": output_format,
+                "output_compression": output_compression,
+                "action": action,
                 "input_image_count": len(input_images),
                 "image_source": image_source,
                 "requested_size": size,
-                "pixel_size": pixel_size,
+                "pixel_size": f"{output_meta['width']}x{output_meta['height']}",
+                "receipt": str(receipt_path) if receipt_path else None,
             },
         )
 
