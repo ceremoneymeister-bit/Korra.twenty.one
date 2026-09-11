@@ -1152,15 +1152,43 @@ json.dump(sorted(leaf_paths(DEFAULT_CONFIG)), sys.stdout, indent=2)
         managed-guard = pkgs.runCommand "hermes-managed-guard" { } ''
           set -e
           export HOME=$(mktemp -d)
+          export HERMES_HOME="$HOME/.hermes"
+          MANAGED_SYSTEM="nixos"
+
+          mkdir -p "$HERMES_HOME"
+          CONFIG_FILE="$HERMES_HOME/config.yaml"
+          CONFIG_BASELINE="$HOME/config.before"
+          printf '%s\n' 'model:' '  default: sentinel-before' > "$CONFIG_FILE"
+          cp "$CONFIG_FILE" "$CONFIG_BASELINE"
+
+          # An unguarded `config edit` must leave observable evidence even if
+          # the editor itself exits successfully.
+          EDITOR_CALLED="$HOME/editor-called"
+          EDITOR_PROBE="$HOME/editor-probe"
+          printf '%s\n' '#!/bin/sh' 'touch "$EDITOR_CALLED"' > "$EDITOR_PROBE"
+          chmod +x "$EDITOR_PROBE"
+          export EDITOR="$EDITOR_PROBE" EDITOR_CALLED
 
           check_blocked() {
             local label="$1"
             shift
-            OUTPUT=$(HERMES_MANAGED=true "$@" 2>&1 || true)
-            # Case-insensitive: the message names the managing system as the
-            # identifier it is keyed by, and the display form is not the
-            # property under test here.
-            echo "$OUTPUT" | grep -qi "managed by nixos" || (echo "FAIL: $label not guarded"; echo "$OUTPUT"; exit 1)
+            set +e
+            OUTPUT=$(HERMES_MANAGED="$MANAGED_SYSTEM" "$@" 2>&1)
+            STATUS=$?
+            set -e
+
+            if [ "$STATUS" -ne 0 ]; then
+              echo "FAIL: $label returned $STATUS instead of the managed-refusal status"
+              echo "$OUTPUT"
+              exit 1
+            fi
+            if ! printf '%s\n' "$OUTPUT" | grep -Eqi -- "(^|[^[:alnum:]_-])$MANAGED_SYSTEM([^[:alnum:]_-]|$)"; then
+              echo "FAIL: $label did not attribute the refusal to $MANAGED_SYSTEM"
+              echo "$OUTPUT"
+              exit 1
+            fi
+            cmp -s "$CONFIG_BASELINE" "$CONFIG_FILE" || (echo "FAIL: $label changed managed configuration"; exit 1)
+            test ! -e "$EDITOR_CALLED" || (echo "FAIL: $label invoked the configured editor"; exit 1)
             echo "PASS: $label blocked in managed mode"
           }
 
