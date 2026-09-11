@@ -3,6 +3,13 @@
 PR #9931 accidentally removed the required_credential_files header, which broke
 credential file mounting in Docker/Modal remote backends (#16452). This test
 prevents the regression from silently reappearing.
+
+Korra 0.21.1 moved the grant from the two flat ``$HERMES_HOME`` files
+(``google_token.json`` + ``google_client_secret.json``) to a profile-local
+``google-workspace/token.json``, with the operator's OAuth app on a read-only
+host mount outside ``HERMES_HOME``. The passthrough contract survives the move:
+the profile grant is still declared, the operator app file deliberately is not
+— a sandbox never receives the installation's client secret.
 """
 
 from __future__ import annotations
@@ -17,7 +24,10 @@ SKILL_MD = (
     / "skills/productivity/google-workspace/SKILL.md"
 )
 
-_EXPECTED_PATHS = {"google_token.json", "google_client_secret.json"}
+_EXPECTED_PATHS = {"google-workspace/token.json"}
+# The operator app credential is host state on a read-only mount; declaring it
+# here would copy the installation's client secret into every remote sandbox.
+_FORBIDDEN_PATHS = {"google_client_secret.json"}
 
 
 def _parse_frontmatter(content: str) -> dict:
@@ -27,6 +37,11 @@ def _parse_frontmatter(content: str) -> dict:
     return fm
 
 
+def _declared_paths(fm: dict) -> set:
+    entries = fm.get("required_credential_files") or []
+    return {(e["path"] if isinstance(e, dict) else e) for e in entries}
+
+
 class TestGoogleWorkspaceCredentialFiles:
     def test_required_credential_files_present_in_skill_md(self):
         content = SKILL_MD.read_text(encoding="utf-8")
@@ -34,19 +49,20 @@ class TestGoogleWorkspaceCredentialFiles:
         entries = fm.get("required_credential_files")
         assert entries, "required_credential_files missing from google-workspace SKILL.md"
         assert isinstance(entries, list), "required_credential_files must be a list"
-        paths = {
-            (e["path"] if isinstance(e, dict) else e)
-            for e in entries
-        }
+        paths = _declared_paths(fm)
         assert _EXPECTED_PATHS <= paths, (
             f"Missing entries in required_credential_files: {_EXPECTED_PATHS - paths}"
+        )
+        leaked = _FORBIDDEN_PATHS & paths
+        assert not leaked, (
+            "operator-managed OAuth app must not be passed through to sandboxes: "
+            f"{leaked}"
         )
 
     def test_entries_are_registered_when_files_exist(self, tmp_path):
         hermes_home = tmp_path / ".hermes"
-        hermes_home.mkdir()
-        (hermes_home / "google_token.json").write_text("{}")
-        (hermes_home / "google_client_secret.json").write_text("{}")
+        (hermes_home / "google-workspace").mkdir(parents=True)
+        (hermes_home / "google-workspace" / "token.json").write_text("{}")
 
         from tools.credential_files import (
             clear_credential_files,
@@ -66,8 +82,6 @@ class TestGoogleWorkspaceCredentialFiles:
             assert missing == [], f"Unexpected missing files: {missing}"
             mounts = get_credential_file_mounts()
             container_paths = {m["container_path"] for m in mounts}
-            assert "/root/.hermes/google_token.json" in container_paths
-            assert "/root/.hermes/google_client_secret.json" in container_paths
+            assert "/root/.hermes/google-workspace/token.json" in container_paths
         finally:
             clear_credential_files()
-
