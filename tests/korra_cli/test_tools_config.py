@@ -1296,3 +1296,30 @@ class TestLightpandaPostSetup:
         # Not in the forced-setup gate: a missing binary must not nag every
         # user who toggles the browser toolset.
         assert "lightpanda" not in _POST_SETUP_INSTALLED
+
+
+def test_default_off_builtin_toolsets_stay_switchable_on():
+    """Выключить по умолчанию можно только то, что владелец может включить.
+
+    `_DEFAULT_OFF_TOOLSETS` убирает набор из состава по умолчанию, а
+    `CONFIGURABLE_TOOLSETS` — единственный источник и для чек-листа
+    `hermes tools`, и для карточек дашборда, и для валидации
+    `PUT /api/tools/toolsets/{name}`. Встроенный набор, попавший в первый
+    список и забытый во втором, выезжает выключенным навсегда: штатной
+    галочки нет, а переключение отвечает 400 «Unknown toolset».
+
+    Наборы из плагинов сюда не относятся: их состав резолвится отдельно
+    через `_get_effective_configurable_toolsets()`.
+    """
+    from toolsets import TOOLSETS
+
+    configurable = {name for name, _label, _description in CONFIGURABLE_TOOLSETS}
+    unreachable = sorted(
+        name
+        for name in _DEFAULT_OFF_TOOLSETS
+        if name in TOOLSETS and name not in configurable
+    )
+    assert not unreachable, (
+        "выключены по умолчанию и не могут быть включены владельцем: "
+        f"{unreachable}"
+    )
