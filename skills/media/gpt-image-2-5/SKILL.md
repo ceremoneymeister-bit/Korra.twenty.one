@@ -63,7 +63,9 @@ are the supported workflow.
 For edits, state the change and pass concrete invariants in `preserve`. A mask
 must be an alpha PNG with the same dimensions as the edit base; transparent
 pixels identify the requested edit region. The mask guides the model and does
-not guarantee pixel-perfect boundaries.
+not guarantee pixel-perfect boundaries. Masked edits require the base and mask
+as active-profile/workspace files or data URLs so Korra can compare dimensions
+before sending them; a public URL base is unsupported for a masked edit.
 
 ## Prompt Presets
 
