@@ -40,6 +40,14 @@ def _tmp_hermes_home(tmp_path, monkeypatch):
 def provider(monkeypatch):
     # Codex plugin is API-key-independent; clear it to make the test honest.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        codex_plugin,
+        "_resolve_codex_credentials",
+        lambda: {
+            "api_key": "codex-token",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+        },
+    )
     return codex_plugin.OpenAICodexImageGenProvider()
 
 
@@ -93,7 +101,11 @@ class TestAvailability:
 
 class TestGenerate:
     def test_returns_auth_error_without_codex_token(self, provider, monkeypatch):
-        monkeypatch.setattr(codex_plugin, "_read_codex_access_token", lambda: None)
+        monkeypatch.setattr(
+            codex_plugin,
+            "_resolve_codex_credentials",
+            lambda: (_ for _ in ()).throw(RuntimeError("no saved credentials")),
+        )
         result = provider.generate("a cat")
         assert result["success"] is False
         assert result["error_type"] == "auth_required"
@@ -125,6 +137,7 @@ class TestGenerate:
         captured = {}
 
         def _collect(token, *, prompt, size, quality, input_images=None, **options):
+            captured["request_base_url"] = options.pop("base_url")
             captured.update(codex_plugin._build_responses_payload(
                 prompt=prompt,
                 size=size,
@@ -141,6 +154,7 @@ class TestGenerate:
 
         assert captured["model"] == "gpt-5.5"
         assert captured["store"] is False
+        assert captured["request_base_url"] == "https://chatgpt.com/backend-api/codex"
         assert captured["input"][0]["type"] == "message"
         assert captured["input"][0]["role"] == "user"
         assert captured["input"][0]["content"][0]["type"] == "input_text"

@@ -93,12 +93,10 @@ _MODELS: Dict[str, Dict[str, Any]] = {
     "gpt-image-2.5-sunburst": {
         "display": "GPT Image 2.5 Sunburst",
         "speed": "precise",
-        "strengths": "Precise generation, editing and identity work",
     },
     "gpt-image-2.5-flare": {
         "display": "GPT Image 2.5 Flare",
         "speed": "fast",
-        "strengths": "Fast everyday generation and iteration",
     },
 }
 
@@ -214,19 +212,24 @@ def _resolve_model(requested: Optional[str] = None) -> Tuple[str, Dict[str, Any]
     return DEFAULT_MODEL, _MODELS[DEFAULT_MODEL]
 
 
+def _resolve_codex_credentials() -> Dict[str, str]:
+    """Return refreshed credentials from Korra's active-profile auth broker."""
+    from korra_cli.auth import resolve_codex_runtime_credentials
+
+    credentials = resolve_codex_runtime_credentials(refresh_if_expiring=True)
+    token = str(credentials.get("api_key") or "").strip()
+    base_url = str(credentials.get("base_url") or "").strip().rstrip("/")
+    if not token:
+        raise RuntimeError("Codex OAuth broker returned no access token")
+    if not base_url:
+        raise RuntimeError("Codex OAuth broker returned no base URL")
+    return {"api_key": token, "base_url": base_url}
+
+
 def _read_codex_access_token() -> Optional[str]:
-    """Return a usable Codex OAuth token, or None.
-
-    Delegates to the canonical reader in ``agent.auxiliary_client`` so token
-    expiry, credential pool selection, and JWT decoding stay in one place.
-    """
+    """Compatibility probe backed only by the refresh-capable auth broker."""
     try:
-        from agent.auxiliary_client import _read_codex_access_token as _reader
-
-        token = _reader()
-        if isinstance(token, str) and token.strip():
-            return token.strip()
-        return None
+        return _resolve_codex_credentials()["api_key"]
     except Exception as exc:
         logger.debug("Could not resolve Codex access token: %s", exc)
         return None
@@ -717,6 +720,7 @@ def _collect_image_b64(
     output_compression: Optional[int] = None,
     action: str = "auto",
     mask_part: Optional[Dict[str, str]] = None,
+    base_url: str = _CODEX_BASE_URL,
 ) -> Optional[Dict[str, str]]:
     """Stream a Codex Responses image_generation call.
 
@@ -748,7 +752,7 @@ def _collect_image_b64(
 
     completed_response: Optional[Dict[str, Any]] = None
     with httpx.Client(timeout=timeout, headers=headers) as http:
-        with http.stream("POST", f"{_CODEX_BASE_URL}/responses", json=payload) as response:
+        with http.stream("POST", f"{base_url.rstrip('/')}/responses", json=payload) as response:
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
@@ -830,7 +834,6 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 "id": model_id,
                 "display": meta["display"],
                 "speed": meta["speed"],
-                "strengths": meta["strengths"],
                 "price": "varies",
             }
             for model_id, meta in _MODELS.items()
@@ -935,11 +938,15 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 aspect_ratio=aspect,
             )
 
-        token = _read_codex_access_token()
-        if not token:
+        try:
+            credentials = _resolve_codex_credentials()
+            token = credentials["api_key"]
+            base_url = credentials["base_url"]
+        except Exception as exc:
             return error_response(
                 error=(
-                    "No Codex/ChatGPT OAuth credentials available. Run "
+                    "Codex/ChatGPT OAuth credentials are unavailable: "
+                    f"{_sanitize_error_text(exc)}. Run "
                     "`hermes auth codex` (or `hermes setup` → Codex) to sign in."
                 ),
                 error_type="auth_required",
@@ -986,6 +993,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 output_compression=output_compression,
                 action=action,
                 mask_part=mask_part,
+                base_url=base_url,
             )
         except Exception as exc:
             logger.debug("Codex image generation failed", exc_info=True)
