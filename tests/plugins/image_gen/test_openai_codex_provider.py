@@ -20,17 +20,14 @@ import pytest
 codex_plugin = importlib.import_module("plugins.image_gen.openai-codex")
 
 
-# 1×1 transparent PNG — valid bytes for save_b64_image()
-_PNG_HEX = (
-    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
-    "890000000d49444154789c6300010000000500010d0a2db40000000049454e44"
-    "ae426082"
-)
-
-
 def _b64_png() -> str:
     import base64
-    return base64.b64encode(bytes.fromhex(_PNG_HEX)).decode()
+    import io
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGBA", (1, 1), (0, 0, 0, 0)).save(out, format="PNG")
+    return base64.b64encode(out.getvalue()).decode()
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +40,14 @@ def _tmp_hermes_home(tmp_path, monkeypatch):
 def provider(monkeypatch):
     # Codex plugin is API-key-independent; clear it to make the test honest.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        codex_plugin,
+        "_resolve_codex_credentials",
+        lambda: {
+            "api_key": "codex-token",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+        },
+    )
     return codex_plugin.OpenAICodexImageGenProvider()
 
 
@@ -57,16 +62,16 @@ class TestMetadata:
         assert provider.display_name == "OpenAI (Codex auth)"
 
     def test_default_model(self, provider):
-        assert provider.default_model() == "gpt-image-2-medium"
+        assert provider.default_model() == "gpt-image-2.5-sunburst"
 
-    def test_list_models_three_tiers(self, provider):
+    def test_list_models_sunburst_and_flare(self, provider):
         ids = [m["id"] for m in provider.list_models()]
-        assert ids == ["gpt-image-2-low", "gpt-image-2-medium", "gpt-image-2-high"]
+        assert ids == ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]
 
     def test_setup_schema_has_no_required_env_vars(self, provider):
         schema = provider.get_setup_schema()
         assert schema["env_vars"] == []
-        assert schema["badge"] == "free"
+        assert schema["badge"] == "ChatGPT subscription"
 
 
 # ── Availability ────────────────────────────────────────────────────────────
@@ -96,7 +101,11 @@ class TestAvailability:
 
 class TestGenerate:
     def test_returns_auth_error_without_codex_token(self, provider, monkeypatch):
-        monkeypatch.setattr(codex_plugin, "_read_codex_access_token", lambda: None)
+        monkeypatch.setattr(
+            codex_plugin,
+            "_resolve_codex_credentials",
+            lambda: (_ for _ in ()).throw(RuntimeError("no saved credentials")),
+        )
         result = provider.generate("a cat")
         assert result["success"] is False
         assert result["error_type"] == "auth_required"
@@ -109,7 +118,7 @@ class TestGenerate:
         result = provider.generate("a cat", aspect_ratio="landscape")
 
         assert result["success"] is True
-        assert result["model"] == "gpt-image-2-medium"
+        assert result["model"] == "gpt-image-2.5-sunburst"
         assert result["provider"] == "openai-codex"
         assert result["quality"] == "medium"
         assert result.get("image_source") == "final"
@@ -127,12 +136,14 @@ class TestGenerate:
 
         captured = {}
 
-        def _collect(token, *, prompt, size, quality, input_images=None):
+        def _collect(token, *, prompt, size, quality, input_images=None, **options):
+            captured["request_base_url"] = options.pop("base_url")
             captured.update(codex_plugin._build_responses_payload(
                 prompt=prompt,
                 size=size,
                 quality=quality,
                 input_images=input_images,
+                **options,
             ))
             return {"b64": _b64_png(), "source": "final"}
 
@@ -143,6 +154,7 @@ class TestGenerate:
 
         assert captured["model"] == "gpt-5.5"
         assert captured["store"] is False
+        assert captured["request_base_url"] == "https://chatgpt.com/backend-api/codex"
         assert captured["input"][0]["type"] == "message"
         assert captured["input"][0]["role"] == "user"
         assert captured["input"][0]["content"][0]["type"] == "input_text"
@@ -153,7 +165,7 @@ class TestGenerate:
 
         tool = captured["tools"][0]
         assert tool["type"] == "image_generation"
-        assert tool["model"] == "gpt-image-2"
+        assert tool["model"] == "gpt-image-2.5-sunburst"
         assert tool["quality"] == "medium"
         assert tool["size"] == "1024x1536"
         assert tool["output_format"] == "png"
@@ -165,7 +177,7 @@ class TestGenerate:
     def test_capabilities_advertise_image_inputs(self, provider):
         caps = provider.capabilities()
         assert caps["modalities"] == ["text", "image"]
-        assert caps["max_reference_images"] == 16
+        assert caps["max_reference_images"] == 5
 
 
     def test_rejects_non_image_local_source(self, provider, monkeypatch, tmp_path):
@@ -258,7 +270,7 @@ class TestGenerate:
         }
         assert codex_plugin._extract_image_b64(payload) == _b64_png()
 
-    def test_partial_only_stream_fails_closed_after_retry(self, provider, monkeypatch):
+    def test_partial_only_stream_fails_closed_without_retry(self, provider, monkeypatch):
         """Partial-only streams must not return success:true with a smear frame."""
         monkeypatch.setattr(codex_plugin, "_read_codex_access_token", lambda: "codex-token")
         calls = {"n": 0}
@@ -273,10 +285,9 @@ class TestGenerate:
         assert result["success"] is False
         assert result["error_type"] == "incomplete_image"
         assert "partial" in result["error"].lower()
-        # One initial attempt + one content-agnostic retry.
-        assert calls["n"] == codex_plugin._NONFINAL_RETRIES + 1
+        assert calls["n"] == 1
 
-    def test_empty_stream_retries_then_fails(self, provider, monkeypatch):
+    def test_empty_stream_fails_without_retry(self, provider, monkeypatch):
         monkeypatch.setattr(codex_plugin, "_read_codex_access_token", lambda: "codex-token")
         calls = {"n": 0}
 
@@ -289,9 +300,9 @@ class TestGenerate:
         result = provider.generate("a cat")
         assert result["success"] is False
         assert result["error_type"] == "empty_response"
-        assert calls["n"] == codex_plugin._NONFINAL_RETRIES + 1
+        assert calls["n"] == 1
 
-    def test_partial_then_final_on_retry_succeeds(self, provider, monkeypatch):
+    def test_partial_then_possible_final_is_not_retried(self, provider, monkeypatch):
         monkeypatch.setattr(codex_plugin, "_read_codex_access_token", lambda: "codex-token")
         calls = {"n": 0}
 
@@ -304,11 +315,11 @@ class TestGenerate:
         monkeypatch.setattr(codex_plugin, "_collect_image_b64", _then_final)
 
         result = provider.generate("a cat")
-        assert result["success"] is True
-        assert result.get("image_source") == "final"
-        assert calls["n"] == 2
+        assert result["success"] is False
+        assert result["error_type"] == "incomplete_image"
+        assert calls["n"] == 1
 
-    def test_empty_then_final_on_retry_succeeds(self, provider, monkeypatch):
+    def test_empty_then_possible_final_is_not_retried(self, provider, monkeypatch):
         monkeypatch.setattr(codex_plugin, "_read_codex_access_token", lambda: "codex-token")
         calls = {"n": 0}
 
@@ -321,13 +332,12 @@ class TestGenerate:
         monkeypatch.setattr(codex_plugin, "_collect_image_b64", _then_final)
 
         result = provider.generate("a cat")
-        assert result["success"] is True
-        assert result.get("image_source") == "final"
-        assert calls["n"] == 2
+        assert result["success"] is False
+        assert result["error_type"] == "empty_response"
+        assert calls["n"] == 1
 
     def test_empty_response_returns_error(self, provider, monkeypatch):
         monkeypatch.setattr(codex_plugin, "_read_codex_access_token", lambda: "codex-token")
-        monkeypatch.setattr(codex_plugin, "_NONFINAL_RETRIES", 0)
         monkeypatch.setattr(codex_plugin, "_collect_image_b64", lambda *a, **kw: None)
 
         result = provider.generate("a cat")

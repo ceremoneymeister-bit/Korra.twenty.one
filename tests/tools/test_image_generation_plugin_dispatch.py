@@ -52,6 +52,43 @@ class TestPluginDispatch:
         assert payload["image"] == "/tmp/codex-test.png"
         assert payload["aspect_ratio"] == "square"
 
+    def test_explicit_provider_discovery_failure_never_falls_through(
+        self, monkeypatch
+    ):
+        from korra_cli import plugins as plugins_module
+        from tools import image_generation_tool
+
+        monkeypatch.setattr(
+            image_generation_tool,
+            "_read_configured_image_provider",
+            lambda: "openai-codex",
+        )
+        monkeypatch.setattr(
+            plugins_module,
+            "_ensure_plugins_discovered",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("broken plugin")),
+        )
+        monkeypatch.setattr(
+            image_generation_tool,
+            "_maybe_route_managed_krea",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("must not fall through to managed Krea")
+            ),
+        )
+        monkeypatch.setattr(
+            image_generation_tool,
+            "image_generate_tool",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("must not fall through to FAL")
+            ),
+        )
+
+        payload = json.loads(image_generation_tool._handle_image_generate({"prompt": "cat"}))
+
+        assert payload["success"] is False
+        assert payload["error_type"] == "provider_discovery_failed"
+        assert "openai-codex" in payload["error"]
+
 
     def test_deepinfra_key_alone_does_not_select_image_backend(self, monkeypatch):
         """DeepInfra chat credentials do not imply consent to image billing."""

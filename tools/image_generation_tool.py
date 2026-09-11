@@ -1621,6 +1621,7 @@ def _dispatch_to_plugin_provider(
     image_url: Optional[str] = None,
     reference_image_urls: Optional[list] = None,
     upscale: Optional[bool] = None,
+    provider_options: Optional[Dict[str, Any]] = None,
 ):
     """Route the call to a plugin-registered provider when one is selected.
 
@@ -1658,8 +1659,16 @@ def _dispatch_to_plugin_provider(
         _ensure_plugins_discovered()
         provider = get_provider(configured)
     except Exception as exc:
-        logger.debug("image_gen plugin dispatch skipped: %s", exc)
-        return None
+        logger.warning("Configured image_gen provider discovery failed: %s", exc)
+        return json.dumps({
+            "success": False,
+            "image": None,
+            "error": (
+                f"Configured image generation provider '{configured}' could "
+                "not be loaded. Check the plugin installation and logs."
+            ),
+            "error_type": "provider_discovery_failed",
+        })
 
     if provider is None:
         try:
@@ -1698,6 +1707,8 @@ def _dispatch_to_plugin_provider(
             kwargs["reference_image_urls"] = norm_refs
         if upscale is not None:
             kwargs["upscale"] = bool(upscale)
+        if provider_options:
+            kwargs.update(provider_options)
         result = provider.generate(**kwargs)
     except TypeError as exc:
         # A provider whose generate() signature predates image_url support
@@ -1923,6 +1934,17 @@ def _handle_image_generate(args, **kw):
     if not isinstance(upscale, bool):
         upscale = None
     task_id = kw.get("task_id")
+    provider_options = {
+        key: args[key]
+        for key in (
+            "quality", "size", "background", "output_format",
+            "output_compression", "action", "reference_roles", "preserve",
+            "presets", "mask", "receipt",
+        )
+        if key in args
+    }
+    if "image_model" in args:
+        provider_options["model"] = args["image_model"]
 
     # Terminal-backend confinement chokepoint: convert path-like sources to
     # data: URLs via the shared resolver BEFORE any provider dispatch, so
@@ -1933,6 +1955,14 @@ def _handle_image_generate(args, **kw):
     if confine_error is not None:
         return confine_error
 
+    if isinstance(provider_options.get("mask"), str):
+        confined_mask, _, mask_error = _confine_source_images(
+            provider_options["mask"], None, task_id
+        )
+        if mask_error is not None:
+            return mask_error
+        provider_options["mask"] = confined_mask
+
     # Route to a plugin-registered provider if one is active (and it's
     # not the in-tree FAL path). When ``image_gen.provider == "krea"`` this
     # already reaches the Krea plugin's managed gateway path.
@@ -1941,6 +1971,7 @@ def _handle_image_generate(args, **kw):
         image_url=image_url,
         reference_image_urls=reference_image_urls,
         upscale=upscale,
+        provider_options=provider_options,
     )
     if dispatched is not None:
         return _postprocess_image_generate_result(dispatched, task_id=task_id)
@@ -2026,6 +2057,14 @@ def _active_image_capabilities() -> Dict[str, Any]:
                     info["max_reference_images"] = int(caps["max_reference_images"])
                 # Plugins opt in explicitly; absent = no upscale param.
                 info["supports_upscale"] = bool(caps.get("supports_upscale"))
+                for key in (
+                    "image_models", "qualities", "sizes", "backgrounds",
+                    "output_formats", "output_compression", "actions",
+                    "reference_roles", "reference_limit_includes_base",
+                    "presets", "mask", "receipts",
+                ):
+                    if key in caps:
+                        info[key] = caps[key]
                 return info
         except Exception:  # noqa: BLE001
             pass
@@ -2097,6 +2136,9 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
 
     modalities = set(info.get("modalities") or ["text"])
     max_refs = int(info.get("max_reference_images") or 0)
+    additional_ref_cap = max(
+        0, max_refs - int(bool(info.get("reference_limit_includes_base")))
+    )
     can_edit = "image" in modalities
 
     properties: Dict[str, Any] = {
@@ -2113,9 +2155,12 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
             properties["reference_image_urls"] = {
                 "type": "array",
                 "items": {"type": "string"},
-                "maxItems": max_refs,
+                # Keep the schema valid for edits: image_url consumes one of
+                # the provider's combined input slots. Text-to-image callers
+                # may still use the provider directly with five references.
+                "maxItems": additional_ref_cap,
                 "description": (
-                    f"Up to {max_refs} additional reference images (style, "
+                    f"Up to {additional_ref_cap} additional reference images (style, "
                     "character, or composition) guiding an edit. URLs or "
                     "absolute local paths."
                 ),
@@ -2128,6 +2173,82 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
 
     if info.get("supports_upscale"):
         properties["upscale"] = _UPSCALE_PARAM
+
+    if info.get("image_models"):
+        properties["image_model"] = {
+            "type": "string",
+            "enum": list(info["image_models"]),
+            "description": "Exact GPT Image model for this request.",
+        }
+    if info.get("qualities"):
+        properties["quality"] = {
+            "type": "string",
+            "enum": list(info["qualities"]),
+            "default": "medium",
+        }
+    if info.get("sizes"):
+        properties["size"] = {
+            "type": "string",
+            "description": (
+                "auto or WIDTHxHEIGHT. Custom edges must be multiples of 16, "
+                "at most 3840px, within 3:1 and 655360-8294400 total pixels."
+            ),
+        }
+    if info.get("backgrounds"):
+        properties["background"] = {
+            "type": "string",
+            "enum": list(info["backgrounds"]),
+            "default": "opaque",
+        }
+    if info.get("output_formats"):
+        properties["output_format"] = {
+            "type": "string",
+            "enum": list(info["output_formats"]),
+            "default": "png",
+        }
+    if info.get("output_compression"):
+        properties["output_compression"] = {
+            "type": "integer", "minimum": 0, "maximum": 100,
+            "description": "JPEG/WebP encoding compression; omit for PNG.",
+        }
+    if info.get("actions"):
+        properties["action"] = {
+            "type": "string", "enum": list(info["actions"]), "default": "auto",
+        }
+    if can_edit and info.get("reference_roles"):
+        properties["reference_roles"] = {
+            "type": "array",
+            "items": {"type": "string", "enum": list(info["reference_roles"])},
+            "maxItems": additional_ref_cap,
+            "description": (
+                "One role per reference_image_urls item, in order. image_url "
+                "is always the edit base and is not included in this list."
+            ),
+        }
+        properties["preserve"] = {
+            "type": "array", "items": {"type": "string"}, "maxItems": 20,
+            "description": "Specific invariants to preserve during an edit.",
+        }
+    if info.get("presets"):
+        properties["presets"] = {
+            "type": "array",
+            "items": {"type": "string", "enum": list(info["presets"])},
+            "uniqueItems": True,
+        }
+    if can_edit and info.get("mask"):
+        properties["mask"] = {
+            "type": "string",
+            "description": (
+                "Alpha PNG mask for image_url, with matching dimensions and "
+                "transparent pixels marking the edit region. For masked edits, "
+                "image_url must be a local/profile file or data URL."
+            ),
+        }
+    if info.get("receipts"):
+        properties["receipt"] = {
+            "type": "boolean", "default": False,
+            "description": "Save a sanitized profile-local JSON receipt.",
+        }
 
     description = base_desc.format(edit_clause=edit_clause)
 

@@ -40,3 +40,16 @@ Vendored Nous Research UI
 The source of @nous-research/ui 0.18.2 is vendored under
 web/src/vendor/nous-ui/. Its MIT license and copy record are preserved in
 web/src/vendor/nous-ui/LICENSE-NOTICE.md.
+
+GPT Image 2.5 workflow
+----------------------
+Portions of the native openai-codex image-generation workflow are adapted
+from GPT Image 2.5 Agent Kit v0.3.1:
+
+  https://github.com/AlekseiUL/gpt-image-2-5-agent-kit
+  Source revision: cc52564687907194c8db02e95996757fb5d19b86
+  Copyright (c) 2026 Aleksei Ulianov / Sprut_AI
+
+Those portions are provided under the MIT License. The source license is
+preserved at plugins/image_gen/openai-codex/LICENSE and the integration record
+at plugins/image_gen/openai-codex/NOTICE.
