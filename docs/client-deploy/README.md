@@ -293,39 +293,44 @@ docker exec -u 10000 korra sh -c 'korra doctor' | tail -20
 
 ## Шаг 8 [наш + клиент]. Google Workspace
 
-В образ входит код Google Workspace, а OAuth-приложение хранится только в DATA
-конкретной установки. Один проверенный client credential Ceremoneymeister можно
-использовать на нескольких установках; каждый владелец и каждый профиль всё
-равно получают собственный grant и собственный token. JSON приложения нельзя
-класть в git, Docker image, registry, shell history или отчёты.
+В образ входит код Google Workspace, а OAuth-приложение хранится на хосте вне
+DATA и подключается как read-only файл. Один проверенный client credential
+Ceremoneymeister можно использовать на нескольких установках; каждый владелец
+и каждый профиль всё равно получают собственный grant и token. JSON приложения
+нельзя класть в git, Docker image, registry, shell history или отчёты.
 
-Оператор устанавливает credential до передачи кабинета. Числовой UID/GID
-задаётся отдельным `chown`: на чистом сервере пользователя с именем `10000`
-может не быть, и `install -o 10000` там откажет.
+Оператор устанавливает credential до передачи кабинета. Числовая группа должна
+совпадать с runtime GID установки; каталог и файл остаются root-owned:
 
 ```bash
 google_oauth_source=/root/secrets/google-oauth-client.json
-google_data=/opt/korra/data
-google_target="$google_data/google/oauth_client.json"
+google_dir=/opt/korra/google
+google_target="$google_dir/oauth_client.json"
+runtime_gid=10000
 
 test -f "$google_oauth_source" && test ! -L "$google_oauth_source"
-install -d -m 0700 "$google_data/google"
-chown 10000:10000 "$google_data/google"
-test ! -L "$google_target"
-if test -e "$google_target"; then
-  cmp -s "$google_oauth_source" "$google_target"
-else
-  install -m 0600 "$google_oauth_source" "$google_target.tmp"
-  chown 10000:10000 "$google_target.tmp"
-  mv "$google_target.tmp" "$google_target"
-fi
-test "$(stat -c '%a:%u:%g' "$google_target")" = "600:10000:10000"
+install -d -o root -g "$runtime_gid" -m 0750 "$google_dir"
+install -o root -g "$runtime_gid" -m 0640 \
+  "$google_oauth_source" "$google_target"
+test "$(stat -c '%a:%u:%g' "$google_target")" = "640:0:$runtime_gid"
 ```
 
-Для другой установки подставляются её точный DATA и runtime UID/GID. Существующий
-отличающийся credential автоматически не заменяется: его ротация оформляется
+`up.sh` проверяет этот контракт и монтирует файл в
+`/run/korra-secrets/google-oauth-client.json` с `readonly`. Для другой установки
+подставляются её точный control directory и runtime GID. Ротация оформляется
 отдельно с backup и повторным входом владельцев. В rollout-receipt сохраняются
 только SHA-256 и права файла, без JSON-содержимого.
+
+Чтобы агент мог начать вход по просьбе владельца в личном чате, добавьте его
+точный platform ID в конфиг соответствующего профиля. Обычный allowlist или
+pairing этого права не даёт:
+
+```yaml
+gateway:
+  credential_management:
+    owners:
+      telegram: ["123456789"]
+```
 
 После этого владелец открывает **Настройки → Ключи → Google Workspace**, выбирает
 Gmail, Calendar, Drive, Contacts, Sheets или Docs и подтверждает вход. С текущим
