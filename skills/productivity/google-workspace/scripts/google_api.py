@@ -37,21 +37,23 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from _hermes_home import get_hermes_home
+from google_oauth_scopes import (
+    LEGACY_ALL_SCOPES,
+    TOKEN_REQUESTED_SCOPES_KEY,
+    TOKEN_SERVICES_KEY,
+    granted_scopes_from_payload,
+    require_selected_service,
+    scope_difference,
+    tracked_scope_contract,
+    validate_scope_contract,
+)
 
 HERMES_HOME = get_hermes_home()
 TOKEN_PATH = HERMES_HOME / "google_token.json"
 CLIENT_SECRET_PATH = HERMES_HOME / "google_client_secret.json"
 
-SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/contacts.readonly",
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/documents",
-]
+SCOPES = list(LEGACY_ALL_SCOPES)
+SCOPE_CONTRACT_KEYS = ("scopes", "korra_services", "korra_requested_scopes")
 
 
 def _normalize_authorized_user_payload(payload: dict) -> dict:
@@ -71,12 +73,50 @@ def _ensure_authenticated():
 def _stored_token_scopes() -> list[str]:
     try:
         data = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return list(SCOPES)
-    scopes = data.get("scopes")
-    if isinstance(scopes, list) and scopes:
-        return scopes
-    return list(SCOPES)
+    except Exception as e:
+        print(f"ERROR: Could not read Google token scope contract: {e}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        _, scopes = validate_scope_contract(data)
+    except ValueError as e:
+        print(f"ERROR: Google token scope contract is invalid: {e}", file=sys.stderr)
+        sys.exit(1)
+    return scopes
+
+
+def _require_selected_service(api_name: str) -> None:
+    _ensure_authenticated()
+    try:
+        payload = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
+        require_selected_service(payload, api_name)
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"ERROR: Google service is unavailable: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _restore_scope_contract_after_gws(original_payload: dict) -> None:
+    """Preserve Korra metadata if gws refreshes and rewrites its credential file."""
+    tracked = tracked_scope_contract(original_payload)
+    if tracked is None:
+        return
+    services, expected_scopes = tracked
+    try:
+        refreshed = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"ERROR: gws damaged the Google token file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    granted = granted_scopes_from_payload(refreshed)
+    missing, extra = scope_difference(granted, expected_scopes)
+    if missing or extra:
+        print("ERROR: gws changed the selected Google scope contract.", file=sys.stderr)
+        sys.exit(1)
+
+    refreshed.pop("scope", None)
+    refreshed["scopes"] = expected_scopes
+    refreshed[TOKEN_SERVICES_KEY] = list(services)
+    refreshed[TOKEN_REQUESTED_SCOPES_KEY] = expected_scopes
+    TOKEN_PATH.write_text(json.dumps(refreshed, indent=2), encoding="utf-8")
 
 
 def _gws_binary() -> str | None:
@@ -98,6 +138,11 @@ def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None 
         raise RuntimeError("gws not installed")
 
     _ensure_authenticated()
+    if not parts:
+        print("ERROR: Missing gws service name.", file=sys.stderr)
+        sys.exit(1)
+    _require_selected_service(parts[0])
+    original_payload = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
 
     cmd = [binary, *parts]
     if params is not None:
@@ -111,6 +156,7 @@ def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None 
         text=True, encoding='utf-8', errors='replace',
         env=_gws_env(),
     )
+    _restore_scope_contract_after_gws(original_payload)
     if result.returncode != 0:
         err = result.stderr.strip() or result.stdout.strip() or "Unknown gws error"
         print(err, file=sys.stderr)
@@ -187,12 +233,29 @@ def get_credentials():
 
     creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), _stored_token_scopes())
     if creds.expired and creds.refresh_token:
+        stored_payload = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
         creds.refresh(Request())
+        refreshed_payload = _normalize_authorized_user_payload(json.loads(creds.to_json()))
+        refreshed_scopes = refreshed_payload.get("scopes")
+        selected_scopes = stored_payload.get("scopes")
+        if "scopes" in refreshed_payload:
+            valid_refreshed_scopes = (
+                isinstance(refreshed_scopes, list)
+                and bool(refreshed_scopes)
+                and all(isinstance(scope, str) and scope for scope in refreshed_scopes)
+            )
+            if not valid_refreshed_scopes or set(refreshed_scopes) != set(selected_scopes):
+                print(
+                    "ERROR: Refreshed Google token changed the selected scope contract. Re-run setup.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+        for key in SCOPE_CONTRACT_KEYS:
+            if key in stored_payload:
+                refreshed_payload[key] = stored_payload[key]
+        refreshed_payload.pop("scope", None)
         TOKEN_PATH.write_text(
-            json.dumps(
-                _normalize_authorized_user_payload(json.loads(creds.to_json())),
-                indent=2,
-            ), encoding="utf-8"
+            json.dumps(refreshed_payload, indent=2), encoding="utf-8"
         )
     if not creds.valid:
         print("Token is invalid. Re-run setup.", file=sys.stderr)
@@ -201,6 +264,7 @@ def get_credentials():
 
 
 def build_service(api, version):
+    _require_selected_service(api)
     from googleapiclient.discovery import build
 
     return build(api, version, credentials=get_credentials())
@@ -1218,6 +1282,7 @@ def main():
     p.set_defaults(func=docs_append)
 
     args = parser.parse_args()
+    _require_selected_service(args.service)
     args.func(args)
 
 
