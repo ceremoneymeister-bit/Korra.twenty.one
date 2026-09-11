@@ -5,7 +5,10 @@ import os
 import stat
 import builtins
 import asyncio
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import types
 import urllib.parse
@@ -36,8 +39,17 @@ def _app() -> dict:
     }
 
 
-def _write_app(root: Path) -> None:
-    google.install_app_credentials(_app(), root=root)
+def _write_app(root: Path, *, gid: int | None = None) -> None:
+    """Provision the operator-owned fixture without using runtime code."""
+    runtime_gid = os.getegid() if gid is None else gid
+    directory = google.installation_google_dir(root)
+    directory.mkdir(parents=True, mode=0o750)
+    directory.chmod(0o750)
+    os.chown(directory, 0, runtime_gid)
+    path = google.app_credentials_path(root)
+    path.write_text(json.dumps(_app()), encoding="utf-8")
+    path.chmod(0o640)
+    os.chown(path, 0, runtime_gid)
 
 
 def _callback(auth_url: str, *, code: str = "one-time-code", scopes: list[str] | None = None) -> str:
@@ -89,8 +101,8 @@ def test_one_installation_app_and_profile_tokens_are_isolated(tmp_path):
     second_flow = google.start("calendar", root=root, profile_home=second)
     assert first_flow["authorization_url"] != second_flow["authorization_url"]
     assert google.app_credentials_path(root).exists()
-    assert not (first / "google" / "oauth_client.json").exists()
-    assert not (second / "google" / "oauth_client.json").exists()
+    assert not (first / "google-workspace" / "oauth_client.json").exists()
+    assert not (second / "google-workspace" / "oauth_client.json").exists()
 
     drive_scopes = scopes_for_services(("drive",))
     google.complete(
@@ -103,6 +115,20 @@ def test_one_installation_app_and_profile_tokens_are_isolated(tmp_path):
     assert stat.S_IMODE(os.stat(google.token_path(first)).st_mode) == 0o600
     assert not google.token_path(second).exists()
     assert "client_secret" not in google.token_path(first).read_text(encoding="utf-8")
+
+
+def test_default_profile_state_is_separate_from_operator_app_directory(tmp_path):
+    root = tmp_path / "install"
+    _write_app(root)
+    app_before = google.app_credentials_path(root).read_bytes()
+
+    result = google.start("drive", root=root, profile_home=root)
+
+    assert result["status"] == "pending"
+    assert google.pending_path(root) == root / "google-workspace" / "pending.json"
+    assert google.pending_path(root).is_file()
+    assert google.app_credentials_path(root).read_bytes() == app_before
+    assert stat.S_IMODE(google.installation_google_dir(root).stat().st_mode) == 0o750
 
 
 def test_all_alias_resolves_to_each_service_exact_minimum_scope():
@@ -310,8 +336,8 @@ def test_private_state_is_atomic_and_has_strict_modes(tmp_path):
     profile = root / "profiles" / "finance"
     _write_app(root)
     google.start("drive", root=root, profile_home=profile)
-    assert stat.S_IMODE(os.stat(google.installation_google_dir(root)).st_mode) == 0o700
-    assert stat.S_IMODE(os.stat(google.app_credentials_path(root)).st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(google.installation_google_dir(root)).st_mode) == 0o750
+    assert stat.S_IMODE(os.stat(google.app_credentials_path(root)).st_mode) == 0o640
     assert stat.S_IMODE(os.stat(google.profile_google_dir(profile)).st_mode) == 0o700
     assert stat.S_IMODE(os.stat(google.pending_path(profile)).st_mode) == 0o600
     assert not list(google.profile_google_dir(profile).glob(".*.tmp"))
@@ -323,7 +349,7 @@ def test_profile_google_directory_symlink_fails_closed(tmp_path):
     outside = tmp_path / "outside"
     profile.mkdir()
     outside.mkdir()
-    (profile / "google").symlink_to(outside, target_is_directory=True)
+    (profile / "google-workspace").symlink_to(outside, target_is_directory=True)
     _write_app(root)
 
     with pytest.raises(google.GoogleWorkspaceError) as denied:
@@ -340,7 +366,7 @@ def test_installation_google_directory_symlink_is_not_followed(tmp_path):
     (root / "google").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(google.GoogleWorkspaceError) as denied:
-        google.install_app_credentials(_app(), root=root)
+        google._load_app(root)
     assert denied.value.code == "state_path_unsafe"
     assert not (outside / "oauth_client.json").exists()
 
@@ -354,15 +380,72 @@ def test_installation_app_file_symlink_is_not_followed(tmp_path):
     (state_dir / "oauth_client.json").symlink_to(outside)
 
     with pytest.raises(google.GoogleWorkspaceError) as denied:
-        google.install_app_credentials(_app(), root=root)
+        google._load_app(root)
     assert denied.value.code == "state_path_unsafe"
     assert json.loads(outside.read_text(encoding="utf-8")) == {"sentinel": True}
+
+
+def test_runtime_has_no_app_install_api_and_can_only_read_operator_credential():
+    assert not hasattr(google, "install_app_credentials")
+    if os.geteuid() != 0:
+        pytest.skip("exact root/runtime-group filesystem check requires root")
+
+    base = Path(tempfile.mkdtemp(prefix="korra-google-app-", dir="/tmp"))
+    runtime_gid = 65534
+    try:
+        base.chmod(0o755)
+        _write_app(base, gid=runtime_gid)
+        script = """
+from pathlib import Path
+from korra_cli import google_workspace as google
+root = Path(__import__('sys').argv[1])
+kind, _ = google._load_app(root)
+print(kind)
+path = google.app_credentials_path(root)
+try:
+    path.write_text('{}', encoding='utf-8')
+except PermissionError:
+    print('write-denied')
+try:
+    (path.parent / 'replacement.json').write_text('{}', encoding='utf-8')
+except PermissionError:
+    print('replace-denied')
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(base)],
+            cwd=Path(__file__).resolve().parents[2],
+            text=True,
+            capture_output=True,
+            check=True,
+            user=65534,
+            group=runtime_gid,
+            extra_groups=[],
+        )
+        assert result.stdout.splitlines() == [
+            "installed",
+            "write-denied",
+            "replace-denied",
+        ]
+    finally:
+        shutil.rmtree(base)
+
+
+def test_stage2_restores_operator_owned_google_app_permissions():
+    stage2 = (
+        Path(__file__).resolve().parents[2] / "docker" / "stage2-hook.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'chown root:hermes "$google_app_dir"' in stage2
+    assert 'chmod 0750 "$google_app_dir"' in stage2
+    assert 'chown root:hermes "$google_app_file"' in stage2
+    assert 'chmod 0640 "$google_app_file"' in stage2
+    assert 'as_hermes mkdir -p "$HERMES_HOME/google"' not in stage2
 
 
 @pytest.mark.parametrize("name", ["token.json", "pending.json"])
 def test_profile_state_file_symlink_fails_closed_without_touching_target(tmp_path, name):
     profile = tmp_path / "profile"
-    state_dir = profile / "google"
+    state_dir = profile / "google-workspace"
     state_dir.mkdir(parents=True)
     outside = tmp_path / "outside.json"
     outside.write_text('{"sentinel": true}', encoding="utf-8")

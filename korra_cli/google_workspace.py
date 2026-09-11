@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import secrets
+import stat
 import time
 import urllib.error
 import urllib.parse
@@ -61,7 +62,11 @@ def app_credentials_path(root: Path | None = None) -> Path:
 
 
 def profile_google_dir(profile_home: Path | None = None) -> Path:
-    return _confined_child(profile_home or get_hermes_home(), "google")
+    # Keep mutable profile grants outside installation DATA/google. The
+    # default profile home is the installation root itself, so sharing the
+    # same directory would let the runtime replace the operator-owned app or
+    # make its own token directory unwritable once DATA/google is root-owned.
+    return _confined_child(profile_home or get_hermes_home(), "google-workspace")
 
 
 def token_path(profile_home: Path | None = None) -> Path:
@@ -199,16 +204,50 @@ def _app_block(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return kind, block
 
 
-def install_app_credentials(payload: dict[str, Any], *, root: Path | None = None) -> dict[str, Any]:
-    """Install one operator-supplied app credential in installation DATA."""
-    kind, _ = _app_block(payload)
+def _validate_operator_app_permissions(root: Path | None = None) -> None:
+    """Require the root-owned, runtime-group-readable app credential contract."""
     directory = installation_google_dir(root)
-    _private_dir(directory)
-    _atomic_private_json(app_credentials_path(root), payload)
-    return {"configured": True, "credential_type": kind, "redirect_uri": REDIRECT_URI}
+    path = app_credentials_path(root)
+    _reject_symlink(path)
+    try:
+        directory_stat = directory.stat()
+        app_stat = path.stat()
+    except FileNotFoundError:
+        raise GoogleWorkspaceError(
+            "app_missing",
+            "operator-managed OAuth app is not configured",
+        ) from None
+    except OSError as exc:
+        raise GoogleWorkspaceError(
+            "app_permissions",
+            "operator-managed OAuth app permissions cannot be verified",
+            status_code=409,
+        ) from exc
+
+    runtime_gid = os.getegid()
+    directory_ok = (
+        stat.S_ISDIR(directory_stat.st_mode)
+        and directory_stat.st_uid == 0
+        and directory_stat.st_gid == runtime_gid
+        and stat.S_IMODE(directory_stat.st_mode) == 0o750
+    )
+    app_ok = (
+        stat.S_ISREG(app_stat.st_mode)
+        and app_stat.st_uid == 0
+        and app_stat.st_gid == runtime_gid
+        and stat.S_IMODE(app_stat.st_mode) == 0o640
+    )
+    if not directory_ok or not app_ok:
+        raise GoogleWorkspaceError(
+            "app_permissions",
+            "OAuth app must be root-owned, runtime-group-readable, and runtime-non-writable "
+            "(directory 0750, file 0640)",
+            status_code=409,
+        )
 
 
 def _load_app(root: Path | None = None) -> tuple[str, dict[str, Any]]:
+    _validate_operator_app_permissions(root)
     payload = _read_json(app_credentials_path(root), label="app")
     return _app_block(payload)
 

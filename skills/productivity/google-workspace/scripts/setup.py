@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Operator compatibility CLI for native Google Workspace OAuth.
+"""Profile compatibility CLI for native Google Workspace OAuth.
 
 End users connect through Settings -> Keys or the owner-gated
 ``google_workspace_auth`` tool. Agents must never collect an app credential or
-localhost callback in chat. This CLI exists for a local installation operator.
+localhost callback in chat. Installation OAuth credentials are provisioned by
+the root-owned deployment perimeter and cannot be written through this script.
 
 Commands:
   setup.py --check                          # Is auth valid? Exit 0 = yes, 1 = no
-  setup.py --client-secret /path/to.json    # Install shared app credentials
   setup.py --auth-url --services LIST       # Print a least-privilege OAuth URL
   setup.py --auth-code CALLBACK_URL         # Complete with exact localhost URL
   setup.py --revoke                         # Revoke and delete stored token
@@ -49,10 +49,8 @@ from google_oauth_scopes import (
 
 HERMES_HOME = get_hermes_home()
 TOKEN_PATH = _native_google.token_path(HERMES_HOME)
-CLIENT_SECRET_PATH = _native_google.app_credentials_path()
 PENDING_AUTH_PATH = _native_google.pending_path(HERMES_HOME)
 _native_google._private_dir(_native_google.profile_google_dir(HERMES_HOME))
-_native_google._private_dir(_native_google.installation_google_dir())
 
 # Backwards-compatible name consumed by wrapper tests and older imports.
 # ``all`` now expands to these six exact per-service minimum scopes.
@@ -294,32 +292,6 @@ def check_auth(quiet: bool = False):
     return False
 
 
-def store_client_secret(path: str):
-    """Copy and validate client_secret.json to the Korra home directory."""
-    src = Path(path).expanduser().resolve()
-    if not src.exists():
-        print(f"ERROR: File not found: {src}")
-        sys.exit(1)
-
-    try:
-        data = json.loads(src.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        print("ERROR: File is not valid JSON.")
-        sys.exit(1)
-
-    if "installed" not in data and "web" not in data:
-        print("ERROR: Not a Google OAuth client secret file (missing 'installed' key).")
-        print("Download the correct file from: https://console.cloud.google.com/apis/credentials")
-        sys.exit(1)
-
-    try:
-        _native_google.install_app_credentials(data)
-    except _native_google.GoogleWorkspaceError as e:
-        print(f"ERROR: {e}")
-        sys.exit(1)
-    print(f"OK: Client secret saved to {CLIENT_SECRET_PATH}")
-
-
 def get_auth_url(services: tuple[str, ...]):
     """Print the OAuth authorization URL. User visits this in a browser."""
     try:
@@ -341,7 +313,7 @@ def exchange_auth_code(code: str):
         print(f"ERROR: {e}")
         sys.exit(1)
     print(f"OK: Authenticated. Token saved to {TOKEN_PATH}")
-    print(f"Profile-scoped token location: {display_hermes_home()}/google/token.json")
+    print(f"Profile-scoped token location: {display_hermes_home()}/google-workspace/token.json")
 
 
 def revoke():
@@ -357,7 +329,6 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--check", action="store_true", help="Check if auth is valid (exit 0=yes, 1=no)")
     group.add_argument("--check-live", action="store_true", help="Check auth with a real API call (detects disabled_client)")
-    group.add_argument("--client-secret", metavar="PATH", help="Store OAuth client_secret.json")
     group.add_argument("--auth-url", action="store_true", help="Print OAuth URL for user to visit")
     group.add_argument("--auth-code", metavar="CODE", help="Exchange auth code for token")
     group.add_argument("--revoke", action="store_true", help="Revoke and delete stored token")
@@ -384,8 +355,6 @@ def main():
         sys.exit(0 if check_auth() else 1)
     if getattr(args, "check_live", False):
         sys.exit(0 if check_auth_live() else 1)
-    elif args.client_secret:
-        store_client_secret(args.client_secret)
     elif args.auth_url:
         get_auth_url(services)
     elif args.auth_code:
