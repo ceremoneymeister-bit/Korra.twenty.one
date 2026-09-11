@@ -31,6 +31,7 @@ class FakeDockerUpdater(u.Updater):
         self.busy = False
         self.is_draining = False
         self.wrong_mount = False
+        self.mounts_override = None
         self.tags = {}
 
     def free_space(self, *args):
@@ -42,9 +43,15 @@ class FakeDockerUpdater(u.Updater):
     def docker(self, *args, **kwargs):
         self.calls.append(args)
         if args[0] == "inspect":
+            mounts = self.mounts_override or [{
+                "Type": "bind",
+                "Source": "/wrong" if self.wrong_mount else str(self.data),
+                "Destination": "/opt/data",
+                "RW": True,
+            }]
             return json.dumps([{"Name": "/" + self.name, "Image": self.image,
                 "State": {"Running": self.running},
-                "Mounts": [{"Type": "bind", "Source": "/wrong" if self.wrong_mount else str(self.data), "Destination": "/opt/data", "RW": True}],
+                "Mounts": mounts,
                 "HostConfig": {"NetworkMode": "host"},
                 "Config": {"Cmd": ["gateway", "run"], "Env": [f"KORRA_DASHBOARD_PORT={self.panel}", f"API_SERVER_PORT={self.api}"]}}])
         if args[:2] == ("image", "inspect"):
@@ -153,6 +160,82 @@ def test_wrong_mount_rejected_before_any_mutation(updater):
         updater.update("registry.example/korra:latest")
     assert u.tree_manifest(updater.data) == before
     assert not any(call[0] in {"stop", "pull", "start_image"} for call in updater.calls)
+
+
+def _data_mount(updater):
+    return {
+        "Type": "bind",
+        "Source": str(updater.data),
+        "Destination": "/opt/data",
+        "RW": True,
+    }
+
+
+def _google_mount(updater):
+    return {
+        "Type": "bind",
+        "Source": str(updater.home / "google" / "oauth_client.json"),
+        "Destination": "/run/korra-secrets/google-oauth-client.json",
+        "RW": False,
+    }
+
+
+def test_exact_optional_google_oauth_mount_is_accepted_in_any_order(updater):
+    updater.mounts_override = [_google_mount(updater), _data_mount(updater)]
+
+    assert updater.inspect_target()["Image"] == OLD
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("Source", "/opt/korra/foreign-data"),
+        ("Destination", "/opt/foreign-data"),
+        ("RW", False),
+        ("Type", "volume"),
+    ],
+)
+def test_changed_data_mount_is_rejected(updater, field, value):
+    data_mount = _data_mount(updater)
+    data_mount[field] = value
+    updater.mounts_override = [data_mount]
+
+    with pytest.raises(u.UpdateError, match="identity/mount"):
+        updater.inspect_target()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("Source", "/opt/korra/google/foreign.json"),
+        ("Destination", "/run/korra-secrets/foreign.json"),
+        ("RW", True),
+        ("Type", "volume"),
+    ],
+)
+def test_changed_google_oauth_mount_is_rejected(updater, field, value):
+    google_mount = _google_mount(updater)
+    google_mount[field] = value
+    updater.mounts_override = [_data_mount(updater), google_mount]
+
+    with pytest.raises(u.UpdateError, match="identity/mount"):
+        updater.inspect_target()
+
+
+def test_any_extra_mount_is_rejected(updater):
+    updater.mounts_override = [
+        _data_mount(updater),
+        _google_mount(updater),
+        {
+            "Type": "bind",
+            "Source": "/host/extra",
+            "Destination": "/container/extra",
+            "RW": False,
+        },
+    ]
+
+    with pytest.raises(u.UpdateError, match="identity/mount"):
+        updater.inspect_target()
 
 
 def test_dry_run_does_not_pull_drain_or_write_data(updater):

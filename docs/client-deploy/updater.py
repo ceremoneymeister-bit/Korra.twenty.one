@@ -562,11 +562,30 @@ class Updater:
     def inspect_target(self, expected=None, running=True, timeout=120):
         info = json.loads(self.docker("inspect", self.name, timeout=timeout))[0]
         mounts = info.get("Mounts", [])
-        if (info.get("Name") != "/" + self.name or len(mounts) != 1
-                or mounts[0].get("Type") != "bind"
-                or mounts[0].get("Source") != str(self.data)
-                or mounts[0].get("Destination") != "/opt/data"
-                or not mounts[0].get("RW")
+        expected_mounts = {
+            "/opt/data": (str(self.data), True),
+            "/run/korra-secrets/google-oauth-client.json": (
+                str(self.home / "google" / "oauth_client.json"),
+                False,
+            ),
+        }
+        seen_mounts = set()
+        mounts_ok = len(mounts) in (1, 2)
+        for mount in mounts:
+            destination = mount.get("Destination")
+            expected_mount = expected_mounts.get(destination)
+            if (
+                expected_mount is None
+                or destination in seen_mounts
+                or mount.get("Type") != "bind"
+                or mount.get("Source") != expected_mount[0]
+                or mount.get("RW") is not expected_mount[1]
+            ):
+                mounts_ok = False
+                break
+            seen_mounts.add(destination)
+        mounts_ok = mounts_ok and "/opt/data" in seen_mounts
+        if (info.get("Name") != "/" + self.name or not mounts_ok
                 or info.get("Config", {}).get("Cmd") != ["gateway", "run"]
                 or info.get("HostConfig", {}).get("NetworkMode") != "host"
                 or info.get("HostConfig", {}).get("Privileged")):
