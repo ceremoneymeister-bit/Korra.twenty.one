@@ -5,6 +5,14 @@ version: 1.3.0
 author: Nous Research
 license: MIT
 platforms: [linux, macos, windows]
+# Remote terminal backends (Docker, Modal, SSH) start with no host files, so
+# the profile's own Google grant has to be passed through or every `gws` call
+# in a sandbox fails unauthenticated (#16452). Only the profile-local grant is
+# listed: the operator's OAuth app file lives outside HERMES_HOME on a
+# read-only host mount and is deliberately never handed to a sandbox.
+required_credential_files:
+  - path: google-workspace/token.json
+    description: Profile-local Google OAuth grant (created by google_workspace_auth)
 metadata:
   hermes:
     tags: [Google, Gmail, Calendar, Drive, Sheets, Docs, Contacts, Email, OAuth]
@@ -50,9 +58,9 @@ OAuth app is configured, ask which services the user needs and call
 user finishes the flow in **Settings → Keys → Google Workspace** by pasting the
 full `http://localhost/?...` browser URL into the password-style field there.
 
-The installed Ceremoneymeister Desktop OAuth credential is operator-managed
-outside profile DATA, shared by profiles, and never added to the image or
-repository. The host file is `root:<runtime-group>` mode `0640` and is mounted
+The installed Desktop OAuth credential belongs to the installation operator.
+It is managed outside profile DATA, shared by profiles, and never added to the
+image or repository. The host file is `root:<runtime-group>` mode `0640` and is mounted
 at `/run/korra-secrets/google-oauth-client.json` as an exact read-only file
 mount: the runtime can read it and cannot install or replace it. Each profile
 has its own mutable grant at `$HERMES_HOME/google-workspace/token.json` (mode

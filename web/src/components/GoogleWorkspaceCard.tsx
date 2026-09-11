@@ -167,7 +167,7 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
           <Badge>{stateLabel}</Badge>
         </div>
         <CardDescription>
-          Один OAuth-клиент Ceremoneymeister используется этой установкой. Доступ и токены изолированы внутри выбранного агента.
+          Один OAuth-клиент установки, настроенный оператором. Доступ и токены изолированы внутри выбранного агента.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 p-4">
