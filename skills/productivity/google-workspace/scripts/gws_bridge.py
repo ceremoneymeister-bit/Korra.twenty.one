@@ -3,6 +3,8 @@
 
 Refreshes the token if expired, then executes gws with the valid access token.
 """
+from __future__ import annotations
+
 import json
 import os
 import subprocess
@@ -16,6 +18,7 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from _hermes_home import get_hermes_home
+from google_oauth_scopes import require_selected_service, validate_scope_contract
 
 
 def get_token_path() -> Path:
@@ -74,14 +77,24 @@ def refresh_token(token_data: dict) -> dict:
     return token_data
 
 
-def get_valid_token() -> str:
+def get_valid_token(api_name: str | None = None) -> str:
     """Return a valid access token, refreshing if needed."""
     token_path = get_token_path()
     if not token_path.exists():
-        print("ERROR: No Google token found. Run setup.py --auth-url first.", file=sys.stderr)
+        print(
+            "ERROR: No Google token found. Run setup.py --auth-url --services LIST first.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     token_data = json.loads(token_path.read_text(encoding="utf-8"))
+    try:
+        validate_scope_contract(token_data)
+        if api_name is not None:
+            require_selected_service(token_data, api_name)
+    except ValueError as e:
+        print(f"ERROR: Google token scope contract is invalid: {e}", file=sys.stderr)
+        sys.exit(1)
 
     expiry = token_data.get("expiry", "")
     if expiry:
@@ -99,7 +112,7 @@ def main():
         print("Usage: gws_bridge.py <gws args...>", file=sys.stderr)
         sys.exit(1)
 
-    access_token = get_valid_token()
+    access_token = get_valid_token(sys.argv[1])
     env = os.environ.copy()
     env["GOOGLE_WORKSPACE_CLI_TOKEN"] = access_token
 
