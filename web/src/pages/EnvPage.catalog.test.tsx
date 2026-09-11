@@ -9,7 +9,7 @@ vi.mock("@/contexts/usePageHeader", () => ({ usePageHeader: () => ({ setAfterTit
 vi.mock("@/components/ProfileScopeChip", () => ({ ProfileScopeChip: () => null }));
 vi.mock("@/components/KorraLoader", () => ({ KorraLoader: () => <p>Загрузка</p> }));
 
-import { api, type EnvVarInfo, type OAuthProvider } from "@/lib/api";
+import { api, type EnvVarInfo, type GoogleWorkspaceStatus, type OAuthProvider } from "@/lib/api";
 import EnvPage from "./EnvPage";
 
 let root: Root;
@@ -28,6 +28,16 @@ beforeEach(() => {
     id: "qwen-oauth", name: "Qwen", flow: "external", cli_command: "hermes auth add qwen-oauth",
     status: { logged_in: false },
   } as OAuthProvider] });
+  // Карточка Google опрашивает статус при монтировании страницы. Без ответа
+  // `act` не досчитывается до конца, и каталог падает по таймауту, ничего не
+  // сказав про сам каталог.
+  vi.spyOn(api, "getGoogleWorkspaceStatus").mockResolvedValue({
+    app: { configured: false },
+    connection: { state: "not_connected" },
+    pending: { active: false },
+    available_services: [],
+    completion_mode: "manual_localhost_url",
+  } satisfies GoogleWorkspaceStatus);
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); });
