@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from korra_constants import get_default_hermes_root, get_hermes_home
+from korra_constants import get_default_hermes_root, get_hermes_home, korra_env
 from korra_cli.google_workspace_scopes import (
     GOOGLE_IDENTITY_SCOPES,
     SERVICE_SCOPES,
@@ -44,6 +44,8 @@ REVOCATION_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 REDIRECT_URI = "http://localhost"
 PENDING_TTL_SECONDS = 10 * 60
 LOCK_TIMEOUT_SECONDS = 3.0
+DEFAULT_APP_MOUNT_PATH = Path("/run/korra-secrets/google-oauth-client.json")
+MOUNTINFO_PATH = Path("/proc/self/mountinfo")
 
 
 class GoogleWorkspaceError(RuntimeError):
@@ -58,7 +60,10 @@ def installation_google_dir(root: Path | None = None) -> Path:
 
 
 def app_credentials_path(root: Path | None = None) -> Path:
-    return installation_google_dir(root) / "oauth_client.json"
+    if root is not None:
+        return installation_google_dir(root) / "oauth_client.json"
+    configured = korra_env("KORRA_GOOGLE_OAUTH_CLIENT_PATH", "").strip()
+    return Path(configured) if configured else DEFAULT_APP_MOUNT_PATH
 
 
 def profile_google_dir(profile_home: Path | None = None) -> Path:
@@ -204,13 +209,32 @@ def _app_block(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return kind, block
 
 
+def _mount_field(value: str) -> str:
+    return (
+        value.replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
+    )
+
+
+def _is_exact_read_only_mount(path: Path) -> bool:
+    try:
+        target = path.resolve(strict=True)
+        for line in MOUNTINFO_PATH.read_text(encoding="utf-8").splitlines():
+            fields = line.split()
+            if len(fields) >= 6 and Path(_mount_field(fields[4])) == target:
+                return "ro" in fields[5].split(",")
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def _validate_operator_app_permissions(root: Path | None = None) -> None:
-    """Require the root-owned, runtime-group-readable app credential contract."""
-    directory = installation_google_dir(root)
+    """Require root ownership and an exact read-only runtime mount."""
     path = app_credentials_path(root)
     _reject_symlink(path)
     try:
-        directory_stat = directory.stat()
         app_stat = path.stat()
     except FileNotFoundError:
         raise GoogleWorkspaceError(
@@ -225,23 +249,28 @@ def _validate_operator_app_permissions(root: Path | None = None) -> None:
         ) from exc
 
     runtime_gid = os.getegid()
-    directory_ok = (
-        stat.S_ISDIR(directory_stat.st_mode)
-        and directory_stat.st_uid == 0
-        and directory_stat.st_gid == runtime_gid
-        and stat.S_IMODE(directory_stat.st_mode) == 0o750
-    )
     app_ok = (
         stat.S_ISREG(app_stat.st_mode)
         and app_stat.st_uid == 0
         and app_stat.st_gid == runtime_gid
         and stat.S_IMODE(app_stat.st_mode) == 0o640
     )
-    if not directory_ok or not app_ok:
+    if root is not None:
+        directory = installation_google_dir(root)
+        directory_stat = directory.stat()
+        app_ok = app_ok and (
+            stat.S_ISDIR(directory_stat.st_mode)
+            and directory_stat.st_uid == 0
+            and directory_stat.st_gid == runtime_gid
+            and stat.S_IMODE(directory_stat.st_mode) == 0o750
+        )
+    elif not path.is_absolute() or not _is_exact_read_only_mount(path):
+        app_ok = False
+    if not app_ok:
         raise GoogleWorkspaceError(
             "app_permissions",
-            "OAuth app must be root-owned, runtime-group-readable, and runtime-non-writable "
-            "(directory 0750, file 0640)",
+            "OAuth app must be a root-owned, runtime-group-readable 0640 file "
+            "mounted read-only at the configured runtime path",
             status_code=409,
         )
 
@@ -369,15 +398,15 @@ def status(*, profile_home: Path | None = None, root: Path | None = None) -> dic
         kind, _ = _load_app(root)
         app = {"configured": True, "credential_type": kind, "redirect_uri": REDIRECT_URI}
     except GoogleWorkspaceError as exc:
-        operator_path = (root or get_default_hermes_root()) / "google" / "oauth_client.json"
+        operator_path = app_credentials_path(root)
         app = {
             "configured": False,
             "reason": exc.code,
-            "operator_action": f"Install Ceremoneymeister OAuth app at {operator_path}",
+            "operator_action": f"Mount the Ceremoneymeister OAuth app read-only at {operator_path}",
         }
         if legacy_app_path(profile_home).exists():
             app["legacy_profile_credential"] = True
-            app["operator_action"] = "Move one verified OAuth app credential to installation Google DATA"
+            app["operator_action"] = "Provision one verified OAuth app through the operator-only read-only mount"
     token = _token_status(profile_home)
     with _state_lock(profile_home):
         pending = _pending_record(profile_home)

@@ -31,15 +31,22 @@ def setup_module(tmp_path, monkeypatch):
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if os.geteuid() != 0:
+        monkeypatch.setattr(
+            module._native_google,
+            "_validate_operator_app_permissions",
+            lambda _root=None: None,
+        )
     return module
 
 
-def _provision_operator_app(setup_module):
+def _provision_operator_app(setup_module, monkeypatch):
     root = setup_module._native_google.get_default_hermes_root()
     directory = setup_module._native_google.installation_google_dir(root)
     directory.mkdir(parents=True, mode=0o750)
     directory.chmod(0o750)
-    os.chown(directory, 0, os.getegid())
+    if os.geteuid() == 0:
+        os.chown(directory, 0, os.getegid())
     path = setup_module._native_google.app_credentials_path(root)
     path.write_text(
         json.dumps(
@@ -56,7 +63,14 @@ def _provision_operator_app(setup_module):
         encoding="utf-8",
     )
     path.chmod(0o640)
-    os.chown(path, 0, os.getegid())
+    if os.geteuid() == 0:
+        os.chown(path, 0, os.getegid())
+    monkeypatch.setenv("KORRA_GOOGLE_OAUTH_CLIENT_PATH", str(path))
+    monkeypatch.setattr(
+        setup_module._native_google,
+        "_is_exact_read_only_mount",
+        lambda _path: True,
+    )
 
 
 def test_stale_google_transitives_are_reported_missing(setup_module, monkeypatch):
@@ -148,9 +162,9 @@ def test_services_fail_closed_for_empty_or_unknown_values(setup_module, raw):
 
 
 def test_auth_url_uses_and_persists_exact_selected_scope_contract(
-    setup_module, capsys,
+    setup_module, monkeypatch, capsys,
 ):
-    _provision_operator_app(setup_module)
+    _provision_operator_app(setup_module, monkeypatch)
 
     setup_module.get_auth_url(("calendar", "drive", "sheets"))
 
@@ -165,7 +179,7 @@ def test_auth_url_uses_and_persists_exact_selected_scope_contract(
 
 
 def test_auth_url_refuses_scope_change_while_token_exists(setup_module, monkeypatch):
-    _provision_operator_app(setup_module)
+    _provision_operator_app(setup_module, monkeypatch)
     setup_module.TOKEN_PATH.write_text(
         json.dumps(
             {

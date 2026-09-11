@@ -11,7 +11,8 @@
 # Обновление/откат работающей установки: ./update.sh --help
 #
 # Полномочия намеренно минимальные: без docker.sock, без монтирования корня
-# хоста, без монтирования кода движка. Единственный том — каталог данных.
+# хоста, без монтирования кода движка. Кроме каталога данных допускается
+# только отдельный read-only file mount операторского Google OAuth-клиента.
 set -euo pipefail
 
 # ─── Параметры контура ──────────────────────────────────────────────────────
@@ -55,6 +56,7 @@ done
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 IMAGE_FILE="$HERE/IMAGE"
+GOOGLE_OAUTH_CLIENT="${GOOGLE_OAUTH_CLIENT:-$HERE/google/oauth_client.json}"
 
 # ─── Проверки до запуска ────────────────────────────────────────────────────
 if [ ! -s "$IMAGE_FILE" ]; then
@@ -79,6 +81,23 @@ if [ "$OWNER" != "$ENGINE_UID:$ENGINE_GID" ]; then
     exit 2
 fi
 
+GOOGLE_OAUTH_ARGS=()
+if [ -e "$GOOGLE_OAUTH_CLIENT" ]; then
+    if [ -L "$GOOGLE_OAUTH_CLIENT" ] || [ ! -f "$GOOGLE_OAUTH_CLIENT" ]; then
+        echo "Google OAuth credential must be a regular, non-symlink file: $GOOGLE_OAUTH_CLIENT" >&2
+        exit 2
+    fi
+    GOOGLE_OWNER_MODE=$(stat -c '%u:%g:%a' "$GOOGLE_OAUTH_CLIENT")
+    if [ "$GOOGLE_OWNER_MODE" != "0:$ENGINE_GID:640" ]; then
+        echo "Google OAuth credential must be root:$ENGINE_GID mode 0640; got $GOOGLE_OWNER_MODE" >&2
+        exit 2
+    fi
+    GOOGLE_OAUTH_ARGS=(
+        --mount "type=bind,src=$GOOGLE_OAUTH_CLIENT,dst=/run/korra-secrets/google-oauth-client.json,readonly"
+        -e KORRA_GOOGLE_OAUTH_CLIENT_PATH=/run/korra-secrets/google-oauth-client.json
+    )
+fi
+
 # ─── Команда запуска ────────────────────────────────────────────────────────
 # host-сеть — не наследие, а требование кабинета: панель отдаёт пропуск сессии
 # в HTML только при бинде на петлю, а любой бинд на 0.0.0.0 (без которого мост
@@ -93,6 +112,7 @@ RUN_ARGS=(
     --network host
     --restart unless-stopped
     "${RESOURCE_ARGS[@]}"
+    "${GOOGLE_OAUTH_ARGS[@]}"
     # Журнал контейнера без ротации за полгода съедает диск клиента молча.
     --log-opt max-size=50m --log-opt max-file=3
     -e KORRA_UID="$ENGINE_UID" -e KORRA_GID="$ENGINE_GID"
