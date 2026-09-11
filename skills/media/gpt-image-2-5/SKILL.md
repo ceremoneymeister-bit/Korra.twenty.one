@@ -1,7 +1,10 @@
 ---
 name: gpt-image-2-5
 description: Create or edit images with GPT Image 2.5.
+version: 1.0.0
+author: Aleksei Ulianov / Sprut_AI, Korra
 license: MIT
+platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [Image, Generation, Editing, Identity, Style]
