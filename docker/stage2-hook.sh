@@ -333,6 +333,40 @@ tree_has_non_hermes_owner() {
     find "$target" \( ! -user hermes -o ! -group hermes \) -print -quit 2>/dev/null | grep -q .
 }
 
+# --- Operator-owned Google OAuth app ---
+# The shared Ceremoneymeister OAuth client is an installation credential, not
+# profile/runtime state. The host operator places it in DATA/google; stage2
+# only restores the read-only boundary after a UID/GID remap. Runtime hermes
+# receives group read/traverse and cannot create, replace, or delete the app.
+# The directory is deliberately absent from every hermes-owned recursive
+# chown/seed list below.
+google_app_dir="$HERMES_HOME/google"
+google_app_file="$google_app_dir/oauth_client.json"
+if [ -e "$google_app_dir" ]; then
+    if refuse_symlinked_path "chown/chmod Google OAuth directory" "$google_app_dir"; then
+        :
+    elif [ ! -d "$google_app_dir" ]; then
+        echo "[stage2] Warning: Google OAuth path is not a directory: $google_app_dir"
+    else
+        chown root:hermes "$google_app_dir" 2>/dev/null || \
+            echo "[stage2] Warning: could not set root:hermes on $google_app_dir"
+        chmod 0750 "$google_app_dir" 2>/dev/null || \
+            echo "[stage2] Warning: could not set mode 0750 on $google_app_dir"
+        if [ -e "$google_app_file" ]; then
+            if refuse_symlinked_path "chown/chmod Google OAuth app" "$google_app_file"; then
+                :
+            elif [ ! -f "$google_app_file" ]; then
+                echo "[stage2] Warning: Google OAuth app is not a regular file: $google_app_file"
+            else
+                chown root:hermes "$google_app_file" 2>/dev/null || \
+                    echo "[stage2] Warning: could not set root:hermes on $google_app_file"
+                chmod 0640 "$google_app_file" 2>/dev/null || \
+                    echo "[stage2] Warning: could not set mode 0640 on $google_app_file"
+            fi
+        fi
+    fi
+fi
+
 needs_chown=false
 if [ "$(stat -c %u "$HERMES_HOME" 2>/dev/null)" != "$actual_hermes_uid" ]; then
     needs_chown=true

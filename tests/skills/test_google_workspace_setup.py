@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import types
 from importlib.metadata import PackageNotFoundError
@@ -20,8 +21,8 @@ SETUP_PATH = (
 
 @pytest.fixture()
 def setup_module(tmp_path, monkeypatch):
-    hermes_home = tmp_path / ".hermes"
-    hermes_home.mkdir()
+    hermes_home = tmp_path / ".hermes" / "profiles" / "default"
+    hermes_home.mkdir(parents=True)
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
     spec = importlib.util.spec_from_file_location(
         "test_google_workspace_setup_module",
@@ -31,6 +32,31 @@ def setup_module(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _provision_operator_app(setup_module):
+    root = setup_module._native_google.get_default_hermes_root()
+    directory = setup_module._native_google.installation_google_dir(root)
+    directory.mkdir(parents=True, mode=0o750)
+    directory.chmod(0o750)
+    os.chown(directory, 0, os.getegid())
+    path = setup_module._native_google.app_credentials_path(root)
+    path.write_text(
+        json.dumps(
+            {
+                "installed": {
+                    "client_id": "client.apps.googleusercontent.com",
+                    "client_secret": "secret",
+                    "auth_uri": setup_module._native_google.AUTHORIZATION_ENDPOINT,
+                    "token_uri": setup_module._native_google.TOKEN_ENDPOINT,
+                    "redirect_uris": ["http://localhost"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o640)
+    os.chown(path, 0, os.getegid())
 
 
 def test_stale_google_transitives_are_reported_missing(setup_module, monkeypatch):
@@ -124,17 +150,7 @@ def test_services_fail_closed_for_empty_or_unknown_values(setup_module, raw):
 def test_auth_url_uses_and_persists_exact_selected_scope_contract(
     setup_module, capsys,
 ):
-    setup_module._native_google.install_app_credentials(
-        {
-            "installed": {
-                "client_id": "client.apps.googleusercontent.com",
-                "client_secret": "secret",
-                "auth_uri": setup_module._native_google.AUTHORIZATION_ENDPOINT,
-                "token_uri": setup_module._native_google.TOKEN_ENDPOINT,
-                "redirect_uris": ["http://localhost"],
-            }
-        }
-    )
+    _provision_operator_app(setup_module)
 
     setup_module.get_auth_url(("calendar", "drive", "sheets"))
 
@@ -149,7 +165,7 @@ def test_auth_url_uses_and_persists_exact_selected_scope_contract(
 
 
 def test_auth_url_refuses_scope_change_while_token_exists(setup_module, monkeypatch):
-    setup_module.CLIENT_SECRET_PATH.write_text("{}", encoding="utf-8")
+    _provision_operator_app(setup_module)
     setup_module.TOKEN_PATH.write_text(
         json.dumps(
             {
@@ -170,6 +186,20 @@ def test_auth_url_refuses_scope_change_while_token_exists(setup_module, monkeypa
         setup_module.get_auth_url(("calendar", "drive"))
 
     assert not setup_module.PENDING_AUTH_PATH.exists()
+
+
+def test_setup_rejects_runtime_client_secret_install_option(setup_module, monkeypatch):
+    assert not hasattr(setup_module, "store_client_secret")
+    assert not hasattr(setup_module._native_google, "install_app_credentials")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["setup.py", "--client-secret", "/tmp/operator-secret.json"],
+    )
+
+    with pytest.raises(SystemExit) as rejected:
+        setup_module.main()
+    assert rejected.value.code == 2
 
 
 def test_exchange_delegates_only_a_full_callback_url(setup_module, monkeypatch):

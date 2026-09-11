@@ -51,9 +51,12 @@ user finishes the flow in **Settings → Keys → Google Workspace** by pasting 
 full `http://localhost/?...` browser URL into the password-style field there.
 
 The installed Ceremoneymeister Desktop OAuth credential is operator-managed
-installation DATA at `<installation-root>/google/oauth_client.json` (mode
-`0600`), shared by profiles and never added to the image or repository. Each
-profile has its own grant at `$HERMES_HOME/google/token.json` (mode `0600`).
+installation DATA at `<installation-root>/google/oauth_client.json`, shared by
+profiles and never added to the image or repository. Its directory is
+`root:<runtime-group>` mode `0750` and the file is `root:<runtime-group>` mode
+`0640`: the runtime can read it and cannot install or replace it. Each profile
+has its own mutable grant at `$HERMES_HOME/google-workspace/token.json` (mode
+`0600`), outside the operator-owned installation directory.
 
 Unknown names, empty items, duplicates, and combining `all` with another name
 are rejected before an OAuth URL is created. `all` expands to the same six

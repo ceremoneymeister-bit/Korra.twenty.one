@@ -166,6 +166,29 @@ nano /opt/korra/data/.env
 необязателен, без него речь распознаётся локально моделью из образа.
 `API_SERVER_KEY` оставьте пустым, контур создаст его себе сам.
 
+### Общий OAuth-клиент Google Workspace
+
+OAuth-клиент Ceremoneymeister устанавливает только root-оператор хоста. Он
+хранится один раз для всего контура, не входит в образ и недоступен для замены
+runtime-пользователем. Числовая группа должна совпадать с `KORRA_GID`
+контейнера (по умолчанию `10000`):
+
+```bash
+runtime_gid=10000
+install -d -o root -g "$runtime_gid" -m 0750 /opt/korra/data/google
+install -o root -g "$runtime_gid" -m 0640 \
+  /root/ceremoneymeister-google-oauth.json \
+  /opt/korra/data/google/oauth_client.json
+stat -c '%U:%g %a %n' \
+  /opt/korra/data/google \
+  /opt/korra/data/google/oauth_client.json
+```
+
+Ожидаемый контракт: каталог `root:<KORRA_GID> 750`, файл
+`root:<KORRA_GID> 640`. При старте контейнера `stage2-hook.sh` восстанавливает
+эти owner/group/mode после переназначения UID/GID. Он не создаёт credential и
+не получает его из модели, панели или `setup.py`.
+
 **Проверка** (для пути А):
 
 ```bash
