@@ -238,10 +238,17 @@ def _is_exact_read_only_mount(path: Path) -> bool:
 
 
 def _operator_app_file_is_safe(app_stat: os.stat_result) -> bool:
+    # POSIX ownership is the whole contract here: root owns the app file and
+    # only the runtime group may read it. Platforms without effective-gid
+    # (Windows) cannot express it, so the check fails closed rather than
+    # accepting a file whose permissions it never verified.
+    getegid = getattr(os, "getegid", None)
+    if getegid is None:
+        return False
     return (
         stat.S_ISREG(app_stat.st_mode)
         and app_stat.st_uid == 0
-        and app_stat.st_gid == os.getegid()
+        and app_stat.st_gid == getegid()
         and stat.S_IMODE(app_stat.st_mode) == 0o640
     )
 
