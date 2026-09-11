@@ -54,6 +54,8 @@ def api_module(monkeypatch, tmp_path):
 
 
 def _write_token(path: Path, *, token="ya29.test", expiry=None, **extra):
+    if expiry is None:
+        expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
     data = {
         "token": token,
         "refresh_token": "1//refresh",
@@ -62,8 +64,7 @@ def _write_token(path: Path, *, token="ya29.test", expiry=None, **extra):
         "token_uri": "https://oauth2.googleapis.com/token",
         **extra,
     }
-    if expiry is not None:
-        data["expiry"] = expiry
+    data["expiry"] = expiry
     path.write_text(json.dumps(data))
 
 
@@ -125,7 +126,7 @@ def test_bridge_main_injects_token_env(bridge_module, tmp_path):
         token_path,
         token="ya29.injected",
         expiry=future,
-        scopes=["https://www.googleapis.com/auth/calendar.events"],
+        scopes=["https://www.googleapis.com/auth/gmail.modify"],
     )
 
     captured = {}

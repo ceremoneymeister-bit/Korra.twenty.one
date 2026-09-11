@@ -18194,6 +18194,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     pairing_store._record_rate_limit(platform_name, source.user_id)
             return None
 
+        # Credential-management tools require a narrower capability than a
+        # session id. Bind it only after this identified sender has cleared the
+        # gateway's authoritative authorization path. Internal notifications
+        # and anonymous/chat-only grants deliberately remain incapable.
+        source._credential_management_authorized = bool(
+            not is_internal
+            and str(source.user_id or "").strip()
+            and source.chat_type == "dm"
+        )
+
         # Global emergency stop (`hermes pause`): give new turns a brief
         # paused notice instead of starting an agent run. Internal events
         # (background-process completions from IN-FLIGHT work) bypass the
@@ -26345,6 +26355,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             session_key=context.session_key,
             message_id=str(context.source.message_id) if context.source.message_id else "",
             profile=getattr(context.source, "profile", "") or "",
+            credential_management_authorized=(
+                getattr(
+                    context.source,
+                    "_credential_management_authorized",
+                    False,
+                )
+                is True
+            ),
             async_delivery=_async_delivery,
             cron_session="",
         )

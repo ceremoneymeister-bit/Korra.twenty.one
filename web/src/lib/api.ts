@@ -83,6 +83,7 @@ const PROFILE_SCOPED_PREFIXES = [
   "/api/tools/toolsets",
   "/api/config",
   "/api/env",
+  "/api/google-workspace",
   "/api/mcp",
   "/api/messaging/platforms",
   "/api/messaging/telegram/onboarding",
@@ -943,6 +944,41 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key }),
     }),
+  getGoogleWorkspaceStatus: () =>
+    fetchJSON<GoogleWorkspaceStatus>("/api/google-workspace/status"),
+  startGoogleWorkspace: (services: string[]) =>
+    fetchJSON<GoogleWorkspaceStart>("/api/google-workspace/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ services }),
+    }),
+  completeGoogleWorkspace: (callbackUrl: string) =>
+    fetchJSON<{ status: "connected"; services: string[] }>("/api/google-workspace/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_url: callbackUrl }),
+    }),
+  cancelGoogleWorkspace: () =>
+    fetchJSON<{ status: "cancelled" }>("/api/google-workspace/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }),
+  revokeGoogleWorkspace: () =>
+    fetchJSON<GoogleWorkspaceRevoke>("/api/google-workspace/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    }),
+  checkGoogleWorkspaceService: (service: string) =>
+    fetchJSON<{ service: string; status: "ok"; checked_at: string }>(
+      `/api/google-workspace/check/${encodeURIComponent(service)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    ),
 
   // Cron jobs
   getCronJobs: (profile = "all") =>
@@ -2439,6 +2475,44 @@ export interface EnvVarInfo {
   provider?: string;
   /** Имя провайдера для карточки ключей; сервер отдаёт его вместе с ключом. */
   provider_label?: string;
+}
+
+export interface GoogleWorkspaceStatus {
+  app: {
+    configured: boolean;
+    credential_type?: "installed" | "web";
+    redirect_uri?: string;
+    reason?: string;
+    operator_action?: string;
+    legacy_profile_credential?: boolean;
+  };
+  connection: {
+    state: "connected" | "not_connected" | "reauthorization_required";
+    services?: string[];
+    expires_at?: number | null;
+    reason?: string;
+    legacy_scope_count?: number;
+    unknown_scope_count?: number;
+    usable_services?: string[];
+    legacy_compatible?: boolean;
+    action?: string | null;
+  };
+  pending: { active: boolean; services?: string[]; expires_at?: number };
+  available_services: string[];
+  completion_mode: "manual_localhost_url";
+}
+
+export interface GoogleWorkspaceStart {
+  status: "pending";
+  authorization_url: string;
+  services: string[];
+  expires_at: number;
+  instructions: string;
+}
+
+export interface GoogleWorkspaceRevoke {
+  status: "revoked";
+  remote_revoked: boolean;
 }
 
 export interface TelegramOnboardingStartResponse {

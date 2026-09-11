@@ -103,6 +103,12 @@ _SESSION_UI_SESSION_ID: ContextVar = ContextVar("KORRA_UI_SESSION_ID", default=_
 _SESSION_MESSAGE_ID: ContextVar = ContextVar("KORRA_SESSION_MESSAGE_ID", default=_UNSET)
 
 _SESSION_PROFILE: ContextVar = ContextVar("KORRA_SESSION_PROFILE", default=_UNSET)
+# Narrow, server-derived capability for credential-management tools.  The
+# gateway binds it only after a real, identified sender clears authorization;
+# callers and model arguments cannot mint it.
+_CREDENTIAL_MANAGEMENT_AUTHORIZED: ContextVar = ContextVar(
+    "KORRA_CREDENTIAL_MANAGEMENT_AUTHORIZED", default=_UNSET
+)
 _BROWSER_CONTROL_PRINCIPAL: ContextVar = ContextVar(
     "KORRA_BROWSER_CONTROL_PRINCIPAL", default=_UNSET
 )
@@ -158,6 +164,7 @@ _VAR_MAP = {
     "KORRA_UI_SESSION_ID": _SESSION_UI_SESSION_ID,
     "KORRA_SESSION_MESSAGE_ID": _SESSION_MESSAGE_ID,
     "KORRA_SESSION_PROFILE": _SESSION_PROFILE,
+    "KORRA_CREDENTIAL_MANAGEMENT_AUTHORIZED": _CREDENTIAL_MANAGEMENT_AUTHORIZED,
     "KORRA_BROWSER_CONTROL_PRINCIPAL": _BROWSER_CONTROL_PRINCIPAL,
     "KORRA_BROWSER_CONTROL_TRANSPORT_FAMILY": _BROWSER_CONTROL_TRANSPORT_FAMILY,
     "KORRA_CRON_SESSION": _CRON_SESSION,
@@ -237,6 +244,7 @@ def set_session_vars(
     session_id: str = "",
     message_id: str = "",
     profile: str = "",
+    credential_management_authorized: bool = False,
     browser_control_principal: str = "",
     browser_control_transport_family: str = "",
     cwd: str = "",
@@ -284,6 +292,9 @@ def set_session_vars(
         _SESSION_UI_SESSION_ID.set(ui_session_id),
         _SESSION_MESSAGE_ID.set(message_id),
         _SESSION_PROFILE.set(profile),
+        _CREDENTIAL_MANAGEMENT_AUTHORIZED.set(
+            "1" if credential_management_authorized else ""
+        ),
         _BROWSER_CONTROL_PRINCIPAL.set(browser_control_principal),
         _BROWSER_CONTROL_TRANSPORT_FAMILY.set(browser_control_transport_family),
         _CRON_SESSION.set(cron_session),
@@ -325,6 +336,7 @@ def clear_session_vars(tokens: list) -> None:
         _SESSION_UI_SESSION_ID,
         _SESSION_MESSAGE_ID,
         _SESSION_PROFILE,
+        _CREDENTIAL_MANAGEMENT_AUTHORIZED,
         _BROWSER_CONTROL_PRINCIPAL,
         _BROWSER_CONTROL_TRANSPORT_FAMILY,
         _CRON_SESSION,

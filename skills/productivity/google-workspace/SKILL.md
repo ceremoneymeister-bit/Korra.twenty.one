@@ -5,11 +5,6 @@ version: 1.3.0
 author: Nous Research
 license: MIT
 platforms: [linux, macos, windows]
-required_credential_files:
-  - path: google_token.json
-    description: Google OAuth2 token (created by setup script)
-  - path: google_client_secret.json
-    description: Google OAuth2 client credentials (downloaded from Google Cloud Console)
 metadata:
   hermes:
     tags: [Google, Gmail, Calendar, Drive, Sheets, Docs, Contacts, Email, OAuth]
@@ -28,53 +23,30 @@ Gmail, Calendar, Drive, Contacts, Sheets, and Docs — through Korra-managed OAu
 
 ## Scripts
 
-- `scripts/setup.py` — OAuth2 setup (run once to authorize)
+- `google_workspace_auth` — owner-only connection tool for status, start, and cancel
 - `scripts/google_api.py` — compatibility wrapper CLI. It prefers `gws` for operations when available, while preserving Korra's existing JSON output contract.
 
 ## First-Time Setup
 
-The setup is fully non-interactive — you drive it step by step so it works
-on CLI, Telegram, Discord, or any platform.
+Connection management is native and self-service. The agent may call
+`google_workspace_auth` only from an identified, owner-authorized direct
+message. It must never ask the user to paste a callback URL, authorization
+code, access token, refresh token, client ID, or client secret into chat.
 
-Define a shorthand first:
+First call `google_workspace_auth` with `action=status`. If the installation
+OAuth app is configured, ask which services the user needs and call
+`action=start` with that exact service list. Send the returned Google URL. The
+user finishes the flow in **Settings → Keys → Google Workspace** by pasting the
+full `http://localhost/?...` browser URL into the password-style field there.
 
-```bash
-GSETUP="python ${HERMES_HOME:-$HOME/.hermes}/skills/productivity/google-workspace/scripts/setup.py"
-```
+The installed Ceremoneymeister Desktop OAuth credential is operator-managed
+installation DATA at `<installation-root>/google/oauth_client.json` (mode
+`0600`), shared by profiles and never added to the image or repository. Each
+profile has its own grant at `$HERMES_HOME/google/token.json` (mode `0600`).
 
-### Step 0: Check if already set up
-
-```bash
-$GSETUP --check
-```
-
-If it prints `AUTHENTICATED`, skip to Usage — setup is already done.
-
-### Step 1: Triage — ask the user what they need
-
-Before starting OAuth setup, ask the user TWO questions:
-
-**Question 1: "What Google services do you need? Just email, or also
-Calendar/Drive/Sheets/Docs?"**
-
-- **Email only** → They don't need this skill at all. Use the `himalaya` skill
-  instead — it works with a Gmail App Password (Settings → Security → App
-  Passwords) and takes 2 minutes to set up. No Google Cloud project needed.
-  Load the himalaya skill and follow its setup instructions.
-
-- **Email + Calendar** → Continue with this skill, but use
-  `--services email,calendar` during auth so the consent screen only asks for
-  the scopes they actually need.
-
-- **Calendar/Drive/Sheets/Docs only** → Continue with this skill and use a
-  narrower `--services` set like `calendar,drive,sheets,docs`.
-
-- **Full Workspace access** → Continue with this skill and explicitly select
-  `--services all`.
-
-`--services` has no default. Unknown names, empty items, duplicates, and
-combining `all` with another name are rejected before an OAuth URL is created.
-Each service requests only its mapped scopes:
+Unknown names, empty items, duplicates, and combining `all` with another name
+are rejected before an OAuth URL is created. `all` expands to the same six
+least-privilege service scopes listed below:
 
 | Service | OAuth scopes |
 |---------|--------------|
@@ -84,109 +56,12 @@ Each service requests only its mapped scopes:
 | `contacts` | `https://www.googleapis.com/auth/contacts.readonly` |
 | `sheets` | `https://www.googleapis.com/auth/spreadsheets` |
 | `docs` | `https://www.googleapis.com/auth/documents` |
-| `all` | The exact former eight-scope set (`https://www.googleapis.com/auth/` + each of `gmail.readonly`, `gmail.send`, `gmail.modify`, `calendar`, `drive`, `contacts.readonly`, `spreadsheets`, `documents`) |
+| `all` | Expands to all six rows above; no broader legacy scopes are added |
 
-**Question 2: "Does your Google account use Advanced Protection (hardware
-security keys required to sign in)? If you're not sure, you probably don't
-— it's something you would have explicitly enrolled in."**
-
-- **No / Not sure** → Normal setup. Continue below.
-- **Yes** → Their Workspace admin must add the OAuth client ID to the org's
-  allowed apps list before Step 4 will work. Let them know upfront.
-
-### Step 2: Create OAuth credentials (one-time, ~5 minutes)
-
-Tell the user:
-
-> You need a Google Cloud OAuth client. This is a one-time setup:
->
-> 1. Create or select a project:
->    https://console.cloud.google.com/projectselector2/home/dashboard
-> 2. Enable the APIs for the services selected in Step 1 from the API Library:
->    https://console.cloud.google.com/apis/library
->    Gmail API (`email`), Google Calendar API (`calendar`), Google Drive API
->    (`drive`), Google Sheets API (`sheets`), Google Docs API (`docs`), and/or
->    People API (`contacts`).
-> 3. Create the OAuth client here:
->    https://console.cloud.google.com/apis/credentials
->    Credentials → Create Credentials → OAuth 2.0 Client ID
-> 4. Application type: "Desktop app" → Create
-> 5. If the app is still in Testing, add the user's Google account as a test user here:
->    https://console.cloud.google.com/auth/audience
->    Audience → Test users → Add users
-> 6. Download the JSON file and tell me the file path
->
-> Important Korra CLI note: if the file path starts with `/`, do NOT send only the bare path as its own message in the CLI, because it can be mistaken for a slash command. Send it in a sentence instead, like:
-> `The JSON file path is: ~/Downloads/client_secret_....json`
-
-Once they provide the path:
-
-```bash
-$GSETUP --client-secret /path/to/client_secret.json
-```
-
-If they paste the raw client ID / client secret values instead of a file path,
-write a valid Desktop OAuth JSON file for them yourself, save it somewhere
-explicit (for example `~/Downloads/korra-google-client-secret.json`), then run
-`--client-secret` against that file.
-
-### Step 3: Get authorization URL
-
-Use the service set chosen in Step 1. Examples:
-
-```bash
-$GSETUP --auth-url --services email,calendar
-$GSETUP --auth-url --services calendar,drive,sheets,docs
-$GSETUP --auth-url --services all
-```
-
-This prints the exact authorization URL and saves its service/scope contract
-with the pending PKCE session in
-`$HERMES_HOME/google_oauth_pending.json`.
-
-Agent rules for this step:
-- Send the printed URL to the user as a single line.
-- Tell the user that the browser will likely fail on `http://localhost:1` after approval, and that this is expected.
-- Tell them to copy the ENTIRE redirected URL from the browser address bar.
-- If the user gets `Error 403: access_denied`, send them directly to `https://console.cloud.google.com/auth/audience` to add themselves as a test user.
-
-### Step 4: Exchange the code
-
-The user will paste back either a URL like `http://localhost:1/?code=4/0A...&scope=...`
-or just the code string. Either works. The `--auth-url` step stores a temporary
-pending OAuth session locally so `--auth-code` can complete the PKCE exchange
-later, even on headless systems:
-
-```bash
-$GSETUP --auth-code "THE_URL_OR_CODE_THE_USER_PASTED"
-```
-
-If `--auth-code` fails because the code expired, was already used, or came from
-an older browser tab, run `--auth-url --services ...` again with the same
-service set and have the user retry with the newest browser redirect only.
-
-### Step 5: Verify
-
-```bash
-$GSETUP --check
-```
-
-Should print `AUTHENTICATED`. Setup is complete — token refreshes automatically from now on.
-
-### Notes
-
-- Token is stored at `$HERMES_HOME/google_token.json` and auto-refreshes.
-- The selected service names and exact requested scopes are stored with the
-  token. `--check`, refresh, repeat authorization, and `--revoke` use this
-  contract. To change the service set, revoke the old token first and start a
-  new authorization with the new explicit `--services` value.
-- `google_api.py` and `gws_bridge.py` reject commands for services outside the
-  stored selection before API or subprocess dispatch. Keep the token private:
-  Google's full Drive scope can also authorize some Docs API calls at the raw
-  OAuth layer, so the Korra service gate is part of the least-privilege contract.
-- Pending OAuth session state/verifier are stored temporarily at `$HERMES_HOME/google_oauth_pending.json` until exchange completes.
-- If `gws` is installed, `google_api.py` points it at the same `$HERMES_HOME/google_token.json` credentials file. Users do not need to run a separate `gws auth login` flow.
-- To revoke: `$GSETUP --revoke`
+Existing recognized legacy grants remain usable only within the services their
+recorded scopes actually grant. Status marks them `reauthorization_required`;
+unknown scopes remain unusable. Revoke before requesting a different service
+set, then start a fresh consent flow.
 
 ## Usage
 
@@ -335,7 +210,7 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 ## Rules
 
 1. **Never send email, create/delete calendar events, delete Drive files, share files, or modify Docs/Sheets without confirming with the user first.** Show what will be done (recipients, file IDs, content, share role) and ask for approval. For `drive delete`, prefer the default trash (reversible) over `--permanent`.
-2. **Check auth before first use** — run `setup.py --check`. If it fails, guide the user through setup.
+2. **Check auth before first use** — call `google_workspace_auth` with `action=status`. If it fails, guide the owner to Settings → Keys.
 3. **Use the Gmail search syntax reference** for complex queries — load it with `skill_view("google-workspace", file_path="references/gmail-search-syntax.md")`.
 4. **Calendar times must include timezone** — always use ISO 8601 with offset (e.g., `2026-03-01T10:00:00-06:00`) or UTC (`Z`).
 5. **Respect rate limits** — avoid rapid-fire sequential API calls. Batch reads when possible.
@@ -344,16 +219,15 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 
 | Problem | Fix |
 |---------|-----|
-| `NOT_AUTHENTICATED` | Run setup Steps 2-5 above |
-| `REFRESH_FAILED` | Token revoked or expired — redo Steps 3-5 |
-| `HttpError 403: Insufficient Permission` | Missing API scope — `$GSETUP --revoke` then redo Steps 3-5 |
-| `TOKEN_SCOPE_CONTRACT_INVALID` | The token does not exactly match its selected services. `$GSETUP --revoke` then redo Steps 3-5 with an explicit service set. |
+| `NOT_AUTHENTICATED` | Connect in Settings → Keys |
+| `REFRESH_FAILED` | Disconnect and reconnect in Settings → Keys |
+| `HttpError 403: Insufficient Permission` | Select the needed service during a fresh connection in Settings → Keys |
+| `TOKEN_SCOPE_CONTRACT_INVALID` | Disconnect and reconnect with an explicit service set in Settings → Keys |
 | `HttpError 403: Access Not Configured` | API not enabled — user needs to enable it in Google Cloud Console |
-| `ModuleNotFoundError` | Run `$GSETUP --install-deps` |
+| `ModuleNotFoundError` | A local operator runs `setup.py --install-deps` |
 | Advanced Protection blocks auth | Workspace admin must allowlist the OAuth client ID |
 
 ## Revoking Access
 
-```bash
-$GSETUP --revoke
-```
+The owner uses **Settings → Keys → Google Workspace → Отключить Google**.
+The agent tool deliberately cannot revoke or delete a grant.

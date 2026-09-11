@@ -27,6 +27,7 @@ import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { OAuthProvidersCard } from "@/components/OAuthProvidersCard";
+import { GoogleWorkspaceCard } from "@/components/GoogleWorkspaceCard";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
 import {
@@ -1006,6 +1007,11 @@ export default function EnvPage() {
       </div>
 
       <div id="section-oauth">
+        <GoogleWorkspaceCard
+          onError={(msg) => showToast(msg, "error")}
+          onSuccess={(msg) => showToast(msg, "success")}
+        />
+        <div className="h-3" />
         <OAuthProvidersCard
           onError={(msg) => showToast(msg, "error")}
           onSuccess={(msg) => showToast(msg, "success")}

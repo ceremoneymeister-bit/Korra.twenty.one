@@ -108,7 +108,7 @@ def test_services_resolve_to_exact_minimum_scopes(setup_module):
 
 
 def test_all_services_requires_explicit_standalone_alias(setup_module):
-    assert setup_module._parse_services("all") == ("all",)
+    assert setup_module._parse_services("all") == tuple(setup_module.SERVICE_SCOPES)
     assert setup_module._scopes_for_services(("all",)) == setup_module.SCOPES
 
     with pytest.raises(ValueError, match="cannot be combined"):
@@ -122,41 +122,30 @@ def test_services_fail_closed_for_empty_or_unknown_values(setup_module, raw):
 
 
 def test_auth_url_uses_and_persists_exact_selected_scope_contract(
-    setup_module, monkeypatch,
+    setup_module, capsys,
 ):
-    setup_module.CLIENT_SECRET_PATH.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(setup_module, "_ensure_deps", lambda: None)
-    captured = {}
-
-    class FakeFlow:
-        code_verifier = "verifier"
-
-        @classmethod
-        def from_client_secrets_file(cls, path, *, scopes, redirect_uri, **kwargs):
-            captured.update(path=path, scopes=scopes, redirect_uri=redirect_uri, kwargs=kwargs)
-            return cls()
-
-        def authorization_url(self, **kwargs):
-            captured["authorization_kwargs"] = kwargs
-            return "https://accounts.example/auth", "state-123"
-
-    flow_module = types.ModuleType("google_auth_oauthlib.flow")
-    flow_module.Flow = FakeFlow
-    package = types.ModuleType("google_auth_oauthlib")
-    package.flow = flow_module
-    monkeypatch.setitem(sys.modules, "google_auth_oauthlib", package)
-    monkeypatch.setitem(sys.modules, "google_auth_oauthlib.flow", flow_module)
+    setup_module._native_google.install_app_credentials(
+        {
+            "installed": {
+                "client_id": "client.apps.googleusercontent.com",
+                "client_secret": "secret",
+                "auth_uri": setup_module._native_google.AUTHORIZATION_ENDPOINT,
+                "token_uri": setup_module._native_google.TOKEN_ENDPOINT,
+                "redirect_uris": ["http://localhost"],
+            }
+        }
+    )
 
     setup_module.get_auth_url(("calendar", "drive", "sheets"))
 
-    assert captured["scopes"] == [
+    pending = json.loads(setup_module.PENDING_AUTH_PATH.read_text(encoding="utf-8"))
+    assert pending["scopes"] == [
         "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/drive",
         "https://www.googleapis.com/auth/spreadsheets",
     ]
-    pending = json.loads(setup_module.PENDING_AUTH_PATH.read_text(encoding="utf-8"))
     assert pending["services"] == ["calendar", "drive", "sheets"]
-    assert pending["scopes"] == captured["scopes"]
+    assert capsys.readouterr().out.startswith("https://accounts.google.com/")
 
 
 def test_auth_url_refuses_scope_change_while_token_exists(setup_module, monkeypatch):
@@ -183,149 +172,21 @@ def test_auth_url_refuses_scope_change_while_token_exists(setup_module, monkeypa
     assert not setup_module.PENDING_AUTH_PATH.exists()
 
 
-def test_exchange_persists_selected_services_with_exact_scopes(setup_module, monkeypatch):
-    setup_module.CLIENT_SECRET_PATH.write_text("{}", encoding="utf-8")
-    setup_module._save_pending_auth(
-        state="state-123",
-        code_verifier="verifier",
-        services=("calendar", "drive", "sheets"),
-    )
-    monkeypatch.setattr(setup_module, "_ensure_deps", lambda: None)
-
-    requested_scopes = setup_module._scopes_for_services(("calendar", "drive", "sheets"))
-
-    class FakeCredentials:
-        granted_scopes = requested_scopes
-
-        def to_json(self):
-            return json.dumps(
-                {
-                    "token": "ya29.test",
-                    "refresh_token": "1//refresh",
-                    "client_id": "client",
-                    "client_secret": "secret",
-                    "scopes": requested_scopes,
-                }
-            )
-
-    class FakeFlow:
-        credentials = FakeCredentials()
-
-        @classmethod
-        def from_client_secrets_file(cls, path, **kwargs):
-            assert kwargs["scopes"] == requested_scopes
-            return cls()
-
-        def fetch_token(self, *, code):
-            assert code == "code-123"
-
-    flow_module = types.ModuleType("google_auth_oauthlib.flow")
-    flow_module.Flow = FakeFlow
-    package = types.ModuleType("google_auth_oauthlib")
-    package.flow = flow_module
-    monkeypatch.setitem(sys.modules, "google_auth_oauthlib", package)
-    monkeypatch.setitem(sys.modules, "google_auth_oauthlib.flow", flow_module)
-
-    setup_module.exchange_auth_code("code-123")
-
-    payload = json.loads(setup_module.TOKEN_PATH.read_text(encoding="utf-8"))
-    assert payload["scopes"] == requested_scopes
-    assert payload["korra_services"] == ["calendar", "drive", "sheets"]
-    assert payload["korra_requested_scopes"] == requested_scopes
-    assert not setup_module.PENDING_AUTH_PATH.exists()
-
-
-def test_exchange_rejects_tampered_pending_scope_contract_before_oauth(
-    setup_module, monkeypatch,
-):
-    setup_module.CLIENT_SECRET_PATH.write_text("{}", encoding="utf-8")
-    setup_module.PENDING_AUTH_PATH.write_text(
-        json.dumps(
-            {
-                "state": "state-123",
-                "code_verifier": "verifier",
-                "redirect_uri": setup_module.REDIRECT_URI,
-                "services": ["calendar"],
-                "scopes": ["https://www.googleapis.com/auth/gmail.send"],
-            }
-        ),
-        encoding="utf-8",
-    )
+def test_exchange_delegates_only_a_full_callback_url(setup_module, monkeypatch):
+    observed = []
     monkeypatch.setattr(
-        setup_module,
-        "_ensure_deps",
-        lambda: pytest.fail("OAuth dependencies must not load for tampered state"),
+        setup_module._native_google,
+        "complete",
+        lambda value, **kwargs: observed.append((value, kwargs)),
     )
+    callback = "http://localhost/?state=state-123&code=code-123"
 
     with pytest.raises(SystemExit):
         setup_module.exchange_auth_code("code-123")
 
-    assert not setup_module.TOKEN_PATH.exists()
+    setup_module.exchange_auth_code(callback)
 
-
-def test_exchange_rejects_full_callback_without_matching_state(setup_module, monkeypatch):
-    setup_module.CLIENT_SECRET_PATH.write_text("{}", encoding="utf-8")
-    setup_module._save_pending_auth(
-        state="state-123",
-        code_verifier="verifier",
-        services=("calendar",),
-    )
-    monkeypatch.setattr(
-        setup_module,
-        "_ensure_deps",
-        lambda: pytest.fail("OAuth must not start for a callback without state"),
-    )
-
-    with pytest.raises(SystemExit):
-        setup_module.exchange_auth_code("http://localhost:1/?code=code-123")
-
-    assert not setup_module.TOKEN_PATH.exists()
-
-
-def test_exchange_rejects_token_when_google_reports_no_granted_scopes(
-    setup_module, monkeypatch,
-):
-    setup_module.CLIENT_SECRET_PATH.write_text("{}", encoding="utf-8")
-    setup_module._save_pending_auth(
-        state="state-123",
-        code_verifier="verifier",
-        services=("calendar",),
-    )
-    monkeypatch.setattr(setup_module, "_ensure_deps", lambda: None)
-
-    class FakeCredentials:
-        granted_scopes = None
-
-        def to_json(self):
-            return json.dumps(
-                {
-                    "token": "ya29.test",
-                    "refresh_token": "1//refresh",
-                }
-            )
-
-    class FakeFlow:
-        credentials = FakeCredentials()
-
-        @classmethod
-        def from_client_secrets_file(cls, path, **kwargs):
-            return cls()
-
-        def fetch_token(self, *, code):
-            return None
-
-    flow_module = types.ModuleType("google_auth_oauthlib.flow")
-    flow_module.Flow = FakeFlow
-    package = types.ModuleType("google_auth_oauthlib")
-    package.flow = flow_module
-    monkeypatch.setitem(sys.modules, "google_auth_oauthlib", package)
-    monkeypatch.setitem(sys.modules, "google_auth_oauthlib.flow", flow_module)
-
-    with pytest.raises(SystemExit):
-        setup_module.exchange_auth_code("code-123")
-
-    assert not setup_module.TOKEN_PATH.exists()
-
+    assert observed == [(callback, {"profile_home": setup_module.HERMES_HOME})]
 
 def test_check_fails_when_tracked_token_has_missing_or_extra_scopes(
     setup_module, monkeypatch,
@@ -366,7 +227,7 @@ def test_check_fails_when_tracked_token_has_missing_or_extra_scopes(
     assert setup_module.check_auth() is False
 
 
-def test_check_live_uses_non_mutating_event_probe_for_calendar_scope(
+def test_check_live_delegates_to_native_profile_scoped_service_probe(
     setup_module, monkeypatch,
 ):
     selected = ("calendar",)
@@ -382,50 +243,15 @@ def test_check_live_uses_non_mutating_event_probe_for_calendar_scope(
         encoding="utf-8",
     )
     monkeypatch.setattr(setup_module, "check_auth", lambda quiet=False: True)
-    captured = {}
-
-    class FakeRequest:
-        def execute(self):
-            captured["executed"] = True
-
-    class FakeEvents:
-        def list(self, **kwargs):
-            captured["list_kwargs"] = kwargs
-            return FakeRequest()
-
-    class FakeService:
-        def events(self):
-            return FakeEvents()
-
-    discovery_module = types.ModuleType("googleapiclient.discovery")
-    discovery_module.build = lambda api, version, credentials: FakeService()
-    errors_module = types.ModuleType("googleapiclient.errors")
-    errors_module.HttpError = RuntimeError
-    api_package = types.ModuleType("googleapiclient")
-    api_package.discovery = discovery_module
-    api_package.errors = errors_module
-
-    class FakeCredentialsModule:
-        @staticmethod
-        def from_authorized_user_file(path):
-            return object()
-
-    credentials_module = types.ModuleType("google.oauth2.credentials")
-    credentials_module.Credentials = FakeCredentialsModule
-    oauth2_module = types.ModuleType("google.oauth2")
-    oauth2_module.credentials = credentials_module
-    google_module = types.ModuleType("google")
-    google_module.oauth2 = oauth2_module
-    monkeypatch.setitem(sys.modules, "googleapiclient", api_package)
-    monkeypatch.setitem(sys.modules, "googleapiclient.discovery", discovery_module)
-    monkeypatch.setitem(sys.modules, "googleapiclient.errors", errors_module)
-    monkeypatch.setitem(sys.modules, "google", google_module)
-    monkeypatch.setitem(sys.modules, "google.oauth2", oauth2_module)
-    monkeypatch.setitem(sys.modules, "google.oauth2.credentials", credentials_module)
+    captured = []
+    monkeypatch.setattr(
+        setup_module._native_google,
+        "check_service",
+        lambda service, *, profile_home: captured.append((service, profile_home)),
+    )
 
     assert setup_module.check_auth_live() is True
-    assert captured["list_kwargs"] == {"calendarId": "primary", "maxResults": 1}
-    assert captured["executed"] is True
+    assert captured == [("calendar", setup_module.HERMES_HOME)]
 
 
 def test_check_refresh_preserves_selected_scope_contract(setup_module, monkeypatch):

@@ -233,6 +233,32 @@ describe("api OAuth helpers", () => {
   });
 });
 
+describe("api Google Workspace helpers", () => {
+  it("keeps every connection operation on the selected management profile", async () => {
+    vi.stubGlobal("window", {});
+    const fetchMock = jsonFetchMock({ status: "revoked", remote_revoked: false });
+    vi.stubGlobal("fetch", fetchMock);
+    setManagementProfile("writer");
+
+    await api.getGoogleWorkspaceStatus();
+    await api.startGoogleWorkspace(["drive"]);
+    await api.completeGoogleWorkspace("http://localhost/?state=s&code=c");
+    await api.cancelGoogleWorkspace();
+    const revokeResult = await api.revokeGoogleWorkspace();
+    await api.checkGoogleWorkspaceService("drive");
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/google-workspace/status?profile=writer",
+      "/api/google-workspace/start?profile=writer",
+      "/api/google-workspace/complete?profile=writer",
+      "/api/google-workspace/cancel?profile=writer",
+      "/api/google-workspace/revoke?profile=writer",
+      "/api/google-workspace/check/drive?profile=writer",
+    ]);
+    expect(revokeResult).toEqual({ status: "revoked", remote_revoked: false });
+  });
+});
+
 describe("transcribeAudio", () => {
   const recording = () => new Blob(["звук"], { type: "audio/webm;codecs=opus" });
 
