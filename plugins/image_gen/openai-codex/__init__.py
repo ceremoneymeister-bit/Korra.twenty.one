@@ -1118,10 +1118,21 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
             output_meta = _atomic_write_validated_image(
                 saved_path, raw_bytes, output_format, allowed_root=output_root
             )
-            receipt_path = None
-            if kwargs.get("receipt") is True:
-                receipt_path = saved_path.with_suffix(saved_path.suffix + ".receipt.json")
-                receipt = {
+        except Exception as exc:
+            return error_response(
+                error=f"Could not validate/save image to profile cache: {_sanitize_error_text(exc)}",
+                error_type="invalid_image_output",
+                provider="openai-codex",
+                model=model_id,
+                prompt=prompt,
+                aspect_ratio=aspect,
+            )
+
+        receipt_path = None
+        receipt_error = None
+        if kwargs.get("receipt") is True:
+            candidate_receipt_path = saved_path.with_suffix(saved_path.suffix + ".receipt.json")
+            receipt = {
                     "schema": "korra.image-generation.receipt.v1",
                     "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     "provider": "openai-codex",
@@ -1141,21 +1152,19 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                     "input_image_count": len(input_images),
                     "reference_roles": list(kwargs.get("reference_roles") or ["general"] * len(explicit_refs)),
                     "output": output_meta,
-                }
+            }
+            try:
                 _atomic_publish(
-                    receipt_path,
+                    candidate_receipt_path,
                     (json.dumps(receipt, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
                     allowed_root=output_root,
                 )
-        except Exception as exc:
-            return error_response(
-                error=f"Could not validate/save image to profile cache: {_sanitize_error_text(exc)}",
-                error_type="invalid_image_output",
-                provider="openai-codex",
-                model=model_id,
-                prompt=prompt,
-                aspect_ratio=aspect,
-            )
+                receipt_path = candidate_receipt_path
+            except Exception as exc:
+                # The generated image is already a valid, published deliverable.
+                # Keep that success terminal so an optional metadata failure
+                # cannot prompt a second paid generation request.
+                receipt_error = _sanitize_error_text(exc)
 
         return success_response(
             image=str(saved_path),
@@ -1176,6 +1185,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 "requested_size": size,
                 "pixel_size": f"{output_meta['width']}x{output_meta['height']}",
                 "receipt": str(receipt_path) if receipt_path else None,
+                "receipt_error": receipt_error,
             },
         )
 

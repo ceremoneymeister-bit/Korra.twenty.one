@@ -422,6 +422,79 @@ def test_refresh_ignores_identity_scope_drift_and_preserves_legacy_inventory(
     assert saved["scopes"] == stored_scopes
 
 
+def test_revoke_waits_for_inflight_refresh_and_token_stays_deleted(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    _write_app(root)
+    _write_token(profile, ("drive",))
+    token_payload = json.loads(google.token_path(profile).read_text(encoding="utf-8"))
+    token_payload["expires_at"] = 1
+    google.token_path(profile).write_text(json.dumps(token_payload), encoding="utf-8")
+    google.token_path(profile).chmod(0o600)
+    refresh_entered = threading.Event()
+    release_refresh = threading.Event()
+    errors: list[BaseException] = []
+    revoke_result: dict = {}
+    remote_values: list[str] = []
+
+    class FakeCredentials:
+        expired = True
+        refresh_token = "refresh-value"
+        token = "expired"
+        expiry = None
+        granted_scopes = scopes_for_services(("drive",))
+        scopes = granted_scopes
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def refresh(self, _request):
+            refresh_entered.set()
+            assert release_refresh.wait(2)
+            self.token = "new-access"
+
+    credentials_module = types.ModuleType("google.oauth2.credentials")
+    credentials_module.Credentials = FakeCredentials
+    request_module = types.ModuleType("google.auth.transport.requests")
+    request_module.Request = lambda: object()
+    monkeypatch.setitem(sys.modules, "google.oauth2.credentials", credentials_module)
+    monkeypatch.setitem(sys.modules, "google.auth.transport.requests", request_module)
+
+    def run_refresh():
+        try:
+            google._credentials(profile, root)
+        except BaseException as exc:
+            errors.append(exc)
+
+    def run_revoke():
+        try:
+            revoke_result.update(
+                google.revoke(
+                    profile_home=profile,
+                    remote_revoke=lambda value: remote_values.append(value),
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    refresh_thread = threading.Thread(target=run_refresh)
+    revoke_thread = threading.Thread(target=run_revoke)
+    refresh_thread.start()
+    assert refresh_entered.wait(2)
+    revoke_thread.start()
+    time.sleep(0.05)
+    assert revoke_thread.is_alive()
+    release_refresh.set()
+    refresh_thread.join(2)
+    revoke_thread.join(2)
+
+    assert errors == []
+    assert revoke_result == {"status": "revoked", "remote_revoked": True}
+    assert remote_values == ["refresh-value"]
+    assert not google.token_path(profile).exists()
+
+
 def test_private_state_is_atomic_and_has_strict_modes(tmp_path):
     root = tmp_path / "install"
     profile = root / "profiles" / "finance"

@@ -223,6 +223,35 @@ def test_generate_saves_decoded_image_and_sanitized_receipt(monkeypatch, tmp_pat
     assert '"prompt_sha256"' in text
 
 
+def test_optional_receipt_failure_keeps_generated_image_success_terminal(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
+    monkeypatch.setattr(
+        provider_mod,
+        "_collect_image_b64",
+        lambda *args, **kwargs: {"b64": _image_b64(), "source": "final"},
+    )
+    real_publish = provider_mod._atomic_publish
+
+    def publish(path, payload, **kwargs):
+        if str(path).endswith(".receipt.json"):
+            raise OSError("receipt storage unavailable")
+        return real_publish(path, payload, **kwargs)
+
+    monkeypatch.setattr(provider_mod, "_atomic_publish", publish)
+
+    result = provider_mod.OpenAICodexImageGenProvider().generate(
+        "one terminal image",
+        receipt=True,
+    )
+
+    assert result["success"] is True
+    assert Path(result["image"]).is_file()
+    assert result["receipt"] is None
+    assert result["receipt_error"] == "receipt storage unavailable"
+    assert len(list((tmp_path / "cache" / "images").glob("*.png"))) == 1
+
+
 def test_stream_accepts_only_terminal_completed_result(monkeypatch):
     import httpx
 

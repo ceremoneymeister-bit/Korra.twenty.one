@@ -592,73 +592,89 @@ def revoke(
         return {"status": "revoked", "remote_revoked": remote_ok}
 
 
-def _credentials(profile_home: Path | None, root: Path | None):
+def _credentials(
+    profile_home: Path | None,
+    root: Path | None,
+    *,
+    required_service: str | None = None,
+):
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
 
     _, app = _load_app(root)
-    path = _active_token_path(profile_home)
-    payload = _read_json(path, label="token")
-    try:
-        _, scopes = validate_scope_contract(payload)
-    except ValueError as exc:
-        raise GoogleWorkspaceError(
-            "scope_contract_invalid",
-            str(exc),
-            status_code=409,
-        ) from exc
-    expires_at = payload.get("expires_at")
-    expiry = None
-    if isinstance(expires_at, (int, float)) and expires_at > 0:
-        expiry = datetime.fromtimestamp(expires_at, tz=timezone.utc)
-    creds = Credentials(
-        token=payload.get("token"),
-        refresh_token=payload.get("refresh_token"),
-        token_uri=TOKEN_ENDPOINT,
-        client_id=app["client_id"],
-        client_secret=app["client_secret"],
-        scopes=scopes,
-        expiry=expiry,
-    )
-    if creds.expired and creds.refresh_token:
+    with _state_lock(profile_home):
+        path = _active_token_path(profile_home)
+        payload = _read_json(path, label="token")
         try:
-            creds.refresh(Request())
-        except Exception as exc:
+            services, scopes = validate_scope_contract(payload)
+        except ValueError as exc:
             raise GoogleWorkspaceError(
-                "token_refresh_failed",
-                "Google authorization expired or was revoked; reconnect is required",
-                status_code=401,
-            ) from exc
-        refreshed_scopes = list(creds.granted_scopes or creds.scopes or scopes)
-        # Google may add or omit identity metadata independently of the
-        # Workspace grant. Compare only Workspace scopes, while keeping the
-        # stored scope inventory unchanged (including recognized legacy
-        # identity metadata).
-        refreshed_workspace_scopes = [
-            scope for scope in refreshed_scopes if scope not in GOOGLE_IDENTITY_SCOPES
-        ]
-        expected_workspace_scopes = [
-            scope for scope in scopes if scope not in GOOGLE_IDENTITY_SCOPES
-        ]
-        missing, extra = scope_difference(
-            refreshed_workspace_scopes,
-            expected_workspace_scopes,
-        )
-        if missing or extra:
-            raise GoogleWorkspaceError(
-                "scope_mismatch",
-                "Google returned a different scope set during refresh; reconnect is required",
+                "scope_contract_invalid",
+                str(exc),
                 status_code=409,
+            ) from exc
+        if (
+            required_service is not None
+            and services != ("all",)
+            and required_service not in services
+        ):
+            raise GoogleWorkspaceError(
+                "service_not_selected",
+                f"Google service '{required_service}' was not authorized",
+                status_code=403,
             )
-        refreshed = dict(payload)
-        refreshed["token"] = creds.token
-        refreshed["scopes"] = scopes
-        refreshed.pop("client_id", None)
-        refreshed.pop("client_secret", None)
-        if creds.expiry is not None:
-            refreshed["expires_at"] = int(creds.expiry.timestamp())
-        _atomic_private_json(path, refreshed)
-    return creds
+        expires_at = payload.get("expires_at")
+        expiry = None
+        if isinstance(expires_at, (int, float)) and expires_at > 0:
+            expiry = datetime.fromtimestamp(expires_at, tz=timezone.utc)
+        creds = Credentials(
+            token=payload.get("token"),
+            refresh_token=payload.get("refresh_token"),
+            token_uri=TOKEN_ENDPOINT,
+            client_id=app["client_id"],
+            client_secret=app["client_secret"],
+            scopes=scopes,
+            expiry=expiry,
+        )
+        if creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+            except Exception as exc:
+                raise GoogleWorkspaceError(
+                    "token_refresh_failed",
+                    "Google authorization expired or was revoked; reconnect is required",
+                    status_code=401,
+                ) from exc
+            refreshed_scopes = list(creds.granted_scopes or creds.scopes or scopes)
+            # Google may add or omit identity metadata independently of the
+            # Workspace grant. Compare only Workspace scopes, while keeping the
+            # stored scope inventory unchanged (including recognized legacy
+            # identity metadata).
+            refreshed_workspace_scopes = [
+                scope for scope in refreshed_scopes if scope not in GOOGLE_IDENTITY_SCOPES
+            ]
+            expected_workspace_scopes = [
+                scope for scope in scopes if scope not in GOOGLE_IDENTITY_SCOPES
+            ]
+            missing, extra = scope_difference(
+                refreshed_workspace_scopes,
+                expected_workspace_scopes,
+            )
+            if missing or extra:
+                raise GoogleWorkspaceError(
+                    "scope_mismatch",
+                    "Google returned a different scope set during refresh; reconnect is required",
+                    status_code=409,
+                )
+            refreshed = dict(payload)
+            refreshed["token"] = creds.token
+            refreshed["scopes"] = scopes
+            refreshed.pop("client_id", None)
+            refreshed.pop("client_secret", None)
+            if creds.expiry is not None:
+                refreshed["expires_at"] = int(creds.expiry.timestamp())
+            _atomic_private_json(path, refreshed)
+        return creds
 
 
 def check_service(
@@ -680,8 +696,15 @@ def check_service(
             status_code=409,
         ) from exc
     if services != ("all",) and service not in services:
-        raise GoogleWorkspaceError("service_not_selected", f"Google service '{service}' was not authorized", status_code=403)
-    creds = _credentials(profile_home, root)
+        raise GoogleWorkspaceError(
+            "service_not_selected",
+            f"Google service '{service}' was not authorized",
+            status_code=403,
+        )
+    # Revalidate the same service inside _credentials' lifecycle lock. The
+    # early check preserves cheap fail-fast behavior; the locked check is the
+    # authority if revoke/reconnect races this call.
+    creds = _credentials(profile_home, root, required_service=service)
     if probe is not None:
         probe(service, creds)
     else:
