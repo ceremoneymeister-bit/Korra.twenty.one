@@ -46,7 +46,7 @@ def get_valid_token(api_name: str | None = None) -> str:
         sys.exit(1)
 
     try:
-        return _native_google._credentials(get_hermes_home(), None).token
+        return _native_google._credentials(get_hermes_home()).token
     except _native_google.GoogleWorkspaceError as native_error:
         print(f"ERROR: {native_error}", file=sys.stderr)
         sys.exit(1)

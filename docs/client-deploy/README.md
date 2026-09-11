@@ -170,9 +170,10 @@ nano /opt/korra/data/.env
 
 OAuth-клиент Ceremoneymeister устанавливает только root-оператор хоста. Он
 хранится вне DATA, не входит в образ и монтируется `up.sh` отдельным read-only
-file mount. Поэтому runtime не может заменить его даже в контуре с
-`AGENT_SUDO=1`. Числовая группа должна совпадать с `KORRA_GID` контейнера (по
-умолчанию `10000`):
+file mount. Контур Google запускается через `host-bootstrap.py --no-admin`:
+это отзывает agent-held host-root grant, который иначе позволил бы изменить
+исходный host-файл. Числовая группа должна совпадать с `KORRA_GID` контейнера
+(по умолчанию `10000`):
 
 ```bash
 runtime_gid=10000
@@ -184,6 +185,12 @@ stat -c '%U:%g %a %n' \
   /opt/korra/google \
   /opt/korra/google/oauth_client.json
 ```
+
+При bootstrap добавьте `--no-admin` и в `--plan`, и в исполняющую команду.
+`up.sh` откажется монтировать Google credential при `AGENT_SUDO=1`, потому что
+в штатном bootstrap этот режим связан с действующим host-root grant. Root
+внутри контейнера без `CAP_SYS_ADMIN` не может перемонтировать read-only file;
+граница владельца завершается отзывом отдельного SSH-доступа к host root.
 
 Ожидаемый контракт: каталог `root:<KORRA_GID> 750`, файл
 `root:<KORRA_GID> 640`. Launcher проверяет контракт и монтирует файл в

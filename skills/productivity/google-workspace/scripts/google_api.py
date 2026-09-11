@@ -202,7 +202,7 @@ def get_credentials():
     """Load and refresh credentials from token file."""
     _ensure_authenticated()
     try:
-        return _native_google._credentials(HERMES_HOME, None)
+        return _native_google._credentials(HERMES_HOME)
     except _native_google.GoogleWorkspaceError as native_error:
         print(str(native_error), file=sys.stderr)
         sys.exit(1)

@@ -202,7 +202,7 @@ def check_auth(quiet: bool = False):
         return False
 
     try:
-        native_creds = _native_google._credentials(HERMES_HOME, None)
+        native_creds = _native_google._credentials(HERMES_HOME)
     except _native_google.GoogleWorkspaceError as e:
         print(f"TOKEN_INVALID: {e}")
         return False
