@@ -18,11 +18,13 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from _hermes_home import get_hermes_home
+from korra_cli import google_workspace as _native_google
 from google_oauth_scopes import require_selected_service, validate_scope_contract
+from utils import atomic_json_write
 
 
 def get_token_path() -> Path:
-    return get_hermes_home() / "google_token.json"
+    return _native_google._active_token_path(get_hermes_home())
 
 
 def _normalize_authorized_user_payload(payload: dict) -> dict:
@@ -71,8 +73,10 @@ def refresh_token(token_data: dict) -> dict:
         tz=timezone.utc,
     ).isoformat()
 
-    get_token_path().write_text(
-        json.dumps(_normalize_authorized_user_payload(token_data), indent=2), encoding="utf-8"
+    atomic_json_write(
+        get_token_path(),
+        _normalize_authorized_user_payload(token_data),
+        mode=0o600,
     )
     return token_data
 
@@ -95,6 +99,13 @@ def get_valid_token(api_name: str | None = None) -> str:
     except ValueError as e:
         print(f"ERROR: Google token scope contract is invalid: {e}", file=sys.stderr)
         sys.exit(1)
+
+    try:
+        return _native_google._credentials(get_hermes_home(), None).token
+    except _native_google.GoogleWorkspaceError as native_error:
+        if not all(token_data.get(key) for key in ("client_id", "client_secret")):
+            print(f"ERROR: {native_error}", file=sys.stderr)
+            sys.exit(1)
 
     expiry = token_data.get("expiry", "")
     if expiry:

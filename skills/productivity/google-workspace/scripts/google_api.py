@@ -37,8 +37,10 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from _hermes_home import get_hermes_home
+from korra_cli import google_workspace as _native_google
+from utils import atomic_json_write
 from google_oauth_scopes import (
-    LEGACY_ALL_SCOPES,
+    MINIMUM_SCOPES,
     TOKEN_REQUESTED_SCOPES_KEY,
     TOKEN_SERVICES_KEY,
     granted_scopes_from_payload,
@@ -49,10 +51,16 @@ from google_oauth_scopes import (
 )
 
 HERMES_HOME = get_hermes_home()
-TOKEN_PATH = HERMES_HOME / "google_token.json"
-CLIENT_SECRET_PATH = HERMES_HOME / "google_client_secret.json"
+_NATIVE_TOKEN_PATH = _native_google.token_path(HERMES_HOME)
+_LEGACY_TOKEN_PATH = _native_google.legacy_token_path(HERMES_HOME)
+TOKEN_PATH = (
+    _NATIVE_TOKEN_PATH
+    if _NATIVE_TOKEN_PATH.exists() or not _LEGACY_TOKEN_PATH.exists()
+    else _LEGACY_TOKEN_PATH
+)
+_native_google._private_dir(_native_google.profile_google_dir(HERMES_HOME))
 
-SCOPES = list(LEGACY_ALL_SCOPES)
+SCOPES = list(MINIMUM_SCOPES)
 SCOPE_CONTRACT_KEYS = ("scopes", "korra_services", "korra_requested_scopes")
 
 
@@ -116,7 +124,7 @@ def _restore_scope_contract_after_gws(original_payload: dict) -> None:
     refreshed["scopes"] = expected_scopes
     refreshed[TOKEN_SERVICES_KEY] = list(services)
     refreshed[TOKEN_REQUESTED_SCOPES_KEY] = expected_scopes
-    TOKEN_PATH.write_text(json.dumps(refreshed, indent=2), encoding="utf-8")
+    atomic_json_write(TOKEN_PATH, refreshed, mode=0o600)
 
 
 def _gws_binary() -> str | None:
@@ -128,7 +136,7 @@ def _gws_binary() -> str | None:
 
 def _gws_env() -> dict[str, str]:
     env = os.environ.copy()
-    env["GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"] = str(TOKEN_PATH)
+    env["GOOGLE_WORKSPACE_CLI_TOKEN"] = get_credentials().token
     return env
 
 
@@ -231,6 +239,16 @@ def get_credentials():
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
 
+    try:
+        return _native_google._credentials(HERMES_HOME, None)
+    except _native_google.GoogleWorkspaceError as native_error:
+        # Compatibility for a pre-native profile whose token still embeds the
+        # old app credential. New grants never duplicate that secret here.
+        stored = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
+        if not all(stored.get(key) for key in ("client_id", "client_secret")):
+            print(str(native_error), file=sys.stderr)
+            sys.exit(1)
+
     creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), _stored_token_scopes())
     if creds.expired and creds.refresh_token:
         stored_payload = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
@@ -254,9 +272,7 @@ def get_credentials():
             if key in stored_payload:
                 refreshed_payload[key] = stored_payload[key]
         refreshed_payload.pop("scope", None)
-        TOKEN_PATH.write_text(
-            json.dumps(refreshed_payload, indent=2), encoding="utf-8"
-        )
+        atomic_json_write(TOKEN_PATH, refreshed_payload, mode=0o600)
     if not creds.valid:
         print("Token is invalid. Re-run setup.", file=sys.stderr)
         sys.exit(1)
