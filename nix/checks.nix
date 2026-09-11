@@ -881,7 +881,9 @@ json.dump(sorted(leaf_paths(DEFAULT_CONFIG)), sys.stdout, indent=2)
         # parse without --help. argparse refuses unknown arguments before it
         # calls the command, so no process starts and no port is bound. The
         # error names each argument that argparse did not accept. If the
-        # error names only the sentinel, the parser accepts each other flag.
+        # error ends with `: <sentinel>` and names no other rejected token,
+        # the parser accepts each service flag. Match that suffix instead of
+        # argparse's prose because Korra localizes it while upstream does not.
         #
         # `--help` cannot do this job. It returns before argparse reads the
         # remainder of the command line.
@@ -923,9 +925,9 @@ json.dump(sorted(leaf_paths(DEFAULT_CONFIG)), sys.stdout, indent=2)
                 exit 1
               }
               case "$output" in
-                *"unrecognized arguments: ${sentinel}")
+                *": ${sentinel}")
                   echo "PASS: $label — every flag but the sentinel is recognized" ;;
-                *"unrecognized arguments"*)
+                *"${sentinel}"*)
                   echo "FAIL: $label — the CLI also rejected flags the module passes:"
                   echo "$output" | tail -3
                   exit 1 ;;
