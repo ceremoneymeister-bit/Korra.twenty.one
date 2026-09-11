@@ -88,6 +88,18 @@ def test_reference_roles_and_presets_are_bounded_and_ordered():
         raise AssertionError("conflicting presets were accepted")
 
 
+def test_edit_base_and_references_share_five_image_limit():
+    image = f"data:image/png;base64,{_image_b64()}"
+
+    assert len(provider_mod._normalize_input_images(image, [image] * 4)) == 5
+    try:
+        provider_mod._normalize_input_images(image, [image] * 5)
+    except ValueError as exc:
+        assert "At most 5 combined" in str(exc)
+    else:
+        raise AssertionError("edit base plus five references exceeded the combined cap")
+
+
 def test_mask_requires_alpha_png_matching_edit_base(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     base = tmp_path / "base.png"
@@ -305,7 +317,8 @@ def test_dynamic_schema_advertises_only_native_image25_options(monkeypatch):
     assert props["quality"]["enum"] == ["low", "medium", "high", "xhigh", "max", "auto"]
     assert {"size", "background", "output_format", "output_compression"} <= set(props)
     assert {"action", "reference_roles", "preserve", "mask", "presets", "receipt"} <= set(props)
-    assert props["reference_roles"]["maxItems"] == 5
+    assert props["reference_image_urls"]["maxItems"] == 4
+    assert props["reference_roles"]["maxItems"] == 4
     assert "upscale" not in props
 
     image_gen_registry._reset_for_tests()
@@ -426,3 +439,45 @@ def test_generated_output_follows_active_profile_home(monkeypatch, tmp_path):
         outputs.append(output)
 
     assert outputs[0].parent != outputs[1].parent
+
+
+def test_symlinked_profile_cache_is_rejected_before_backend_call(monkeypatch, tmp_path):
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+
+    profile_home = tmp_path / "profile"
+    outside = tmp_path / "outside"
+    profile_home.mkdir()
+    outside.mkdir()
+    (profile_home / "cache").symlink_to(outside, target_is_directory=True)
+    backend_calls = []
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
+    monkeypatch.setattr(
+        provider_mod,
+        "_collect_image_b64",
+        lambda *args, **kwargs: backend_calls.append((args, kwargs)),
+    )
+
+    token = set_hermes_home_override(profile_home)
+    try:
+        result = provider_mod.OpenAICodexImageGenProvider().generate("poster")
+    finally:
+        reset_hermes_home_override(token)
+
+    assert result["success"] is False
+    assert result["error_type"] == "invalid_image_output"
+    assert "symlink" in result["error"]
+    assert backend_calls == []
+    assert not list(outside.iterdir())
+
+
+def test_pillow_decompression_bomb_warning_fails_closed(monkeypatch):
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 4)
+
+    try:
+        provider_mod._decoded_image(
+            base64.b64decode(_image_b64(), validate=True), label="Reference"
+        )
+    except ValueError as exc:
+        assert "fully decodable" in str(exc)
+    else:
+        raise AssertionError("Pillow decompression-bomb warning was ignored")

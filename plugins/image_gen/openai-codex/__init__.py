@@ -28,6 +28,7 @@ import os
 import re
 import tempfile
 import uuid
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -268,17 +269,19 @@ def _decoded_image(raw: bytes, *, label: str, expected_format: Optional[str] = N
     from PIL import Image
 
     try:
-        with Image.open(io.BytesIO(raw)) as probe:
-            actual = (probe.format or "").upper()
-            if expected_format and actual != _PIL_FORMATS[expected_format]:
-                raise ValueError(
-                    f"{label} decoded as {actual or 'unknown'}, expected "
-                    f"{_PIL_FORMATS[expected_format]}."
-                )
-            probe.verify()
-        with Image.open(io.BytesIO(raw)) as decoded:
-            decoded.load()
-            return decoded.copy()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(raw)) as probe:
+                actual = (probe.format or "").upper()
+                if expected_format and actual != _PIL_FORMATS[expected_format]:
+                    raise ValueError(
+                        f"{label} decoded as {actual or 'unknown'}, expected "
+                        f"{_PIL_FORMATS[expected_format]}."
+                    )
+                probe.verify()
+            with Image.open(io.BytesIO(raw)) as decoded:
+                decoded.load()
+                return decoded.copy()
     except ValueError:
         raise
     except Exception as exc:
@@ -299,9 +302,43 @@ def _assert_local_input_root(path: Path) -> Path:
     return resolved
 
 
-def _atomic_publish(path: Path, data: bytes) -> None:
+def _assert_publish_path(path: Path, allowed_root: Path) -> None:
+    """Reject output parents that escape or traverse symlinks below a profile."""
+    root = allowed_root.resolve()
+    candidate = path.absolute()
+    try:
+        relative_parent = candidate.parent.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("Output path must remain under the active Korra profile.") from exc
+
+    current = root
+    for part in relative_parent.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"Output directory must not traverse a symlink: {current}")
+    resolved_parent = candidate.parent.resolve()
+    if resolved_parent != root and root not in resolved_parent.parents:
+        raise ValueError("Resolved output directory escapes the active Korra profile.")
+
+
+def _profile_image_output_dir() -> Tuple[Path, Path]:
+    from korra_constants import get_hermes_home
+
+    root = get_hermes_home().resolve()
+    output_dir = root / "cache" / "images"
+    _assert_publish_path(output_dir / ".confinement-check", root)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _assert_publish_path(output_dir / ".confinement-check", root)
+    return root, output_dir
+
+
+def _atomic_publish(path: Path, data: bytes, *, allowed_root: Optional[Path] = None) -> None:
     """Publish bytes atomically and refuse to replace an existing target."""
+    if allowed_root is not None:
+        _assert_publish_path(path, allowed_root)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if allowed_root is not None:
+        _assert_publish_path(path, allowed_root)
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
     )
@@ -319,7 +356,13 @@ def _atomic_publish(path: Path, data: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _atomic_write_validated_image(path: Path, raw: bytes, output_format: str) -> Dict[str, Any]:
+def _atomic_write_validated_image(
+    path: Path,
+    raw: bytes,
+    output_format: str,
+    *,
+    allowed_root: Optional[Path] = None,
+) -> Dict[str, Any]:
     image = _decoded_image(raw, label="Generated payload", expected_format=output_format)
     try:
         metadata = {
@@ -332,7 +375,7 @@ def _atomic_write_validated_image(path: Path, raw: bytes, output_format: str) ->
         }
     finally:
         image.close()
-    _atomic_publish(path, raw)
+    _atomic_publish(path, raw, allowed_root=allowed_root)
     return metadata
 
 
@@ -862,6 +905,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
         return {
             "modalities": ["text", "image"],
             "max_reference_images": _MAX_REFERENCE_IMAGES,
+            "reference_limit_includes_base": True,
             "image_models": list(_MODELS),
             "qualities": list(_QUALITIES),
             "sizes": True,
@@ -981,6 +1025,18 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
             )
 
         try:
+            output_root, output_dir = _profile_image_output_dir()
+        except Exception as exc:
+            return error_response(
+                error=f"Unsafe profile image output path: {_sanitize_error_text(exc)}",
+                error_type="invalid_image_output",
+                provider="openai-codex",
+                model=model_id,
+                prompt=prompt,
+                aspect_ratio=aspect,
+            )
+
+        try:
             collected = _collect_image_b64(
                 token,
                 prompt=guided_prompt,
@@ -1056,14 +1112,11 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
 
         try:
             raw_bytes = base64.b64decode(b64, validate=True)
-            from korra_constants import get_hermes_home
-
-            output_dir = get_hermes_home().resolve() / "cache" / "images"
             extension = _FORMAT_EXTENSIONS[output_format]
             filename = f"openai_codex_{model_id}_{uuid.uuid4().hex}.{extension}"
             saved_path = output_dir / filename
             output_meta = _atomic_write_validated_image(
-                saved_path, raw_bytes, output_format
+                saved_path, raw_bytes, output_format, allowed_root=output_root
             )
             receipt_path = None
             if kwargs.get("receipt") is True:
@@ -1092,6 +1145,7 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 _atomic_publish(
                     receipt_path,
                     (json.dumps(receipt, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                    allowed_root=output_root,
                 )
         except Exception as exc:
             return error_response(

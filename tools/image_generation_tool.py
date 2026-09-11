@@ -1659,8 +1659,16 @@ def _dispatch_to_plugin_provider(
         _ensure_plugins_discovered()
         provider = get_provider(configured)
     except Exception as exc:
-        logger.debug("image_gen plugin dispatch skipped: %s", exc)
-        return None
+        logger.warning("Configured image_gen provider discovery failed: %s", exc)
+        return json.dumps({
+            "success": False,
+            "image": None,
+            "error": (
+                f"Configured image generation provider '{configured}' could "
+                "not be loaded. Check the plugin installation and logs."
+            ),
+            "error_type": "provider_discovery_failed",
+        })
 
     if provider is None:
         try:
@@ -2052,7 +2060,8 @@ def _active_image_capabilities() -> Dict[str, Any]:
                 for key in (
                     "image_models", "qualities", "sizes", "backgrounds",
                     "output_formats", "output_compression", "actions",
-                    "reference_roles", "presets", "mask", "receipts",
+                    "reference_roles", "reference_limit_includes_base",
+                    "presets", "mask", "receipts",
                 ):
                     if key in caps:
                         info[key] = caps[key]
@@ -2127,6 +2136,9 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
 
     modalities = set(info.get("modalities") or ["text"])
     max_refs = int(info.get("max_reference_images") or 0)
+    additional_ref_cap = max(
+        0, max_refs - int(bool(info.get("reference_limit_includes_base")))
+    )
     can_edit = "image" in modalities
 
     properties: Dict[str, Any] = {
@@ -2143,9 +2155,12 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
             properties["reference_image_urls"] = {
                 "type": "array",
                 "items": {"type": "string"},
-                "maxItems": max_refs,
+                # Keep the schema valid for edits: image_url consumes one of
+                # the provider's combined input slots. Text-to-image callers
+                # may still use the provider directly with five references.
+                "maxItems": additional_ref_cap,
                 "description": (
-                    f"Up to {max_refs} additional reference images (style, "
+                    f"Up to {additional_ref_cap} additional reference images (style, "
                     "character, or composition) guiding an edit. URLs or "
                     "absolute local paths."
                 ),
@@ -2204,9 +2219,7 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
         properties["reference_roles"] = {
             "type": "array",
             "items": {"type": "string", "enum": list(info["reference_roles"])},
-            # The optional edit base does not consume a role. A generation
-            # request may therefore assign roles to all allowed references.
-            "maxItems": max_refs,
+            "maxItems": additional_ref_cap,
             "description": (
                 "One role per reference_image_urls item, in order. image_url "
                 "is always the edit base and is not included in this list."
@@ -2227,7 +2240,8 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
             "type": "string",
             "description": (
                 "Alpha PNG mask for image_url, with matching dimensions and "
-                "transparent pixels marking the edit region."
+                "transparent pixels marking the edit region. For masked edits, "
+                "image_url must be a local/profile file or data URL."
             ),
         }
     if info.get("receipts"):
