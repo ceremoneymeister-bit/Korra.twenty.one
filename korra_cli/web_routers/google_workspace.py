@@ -60,7 +60,10 @@ def _translate(exc: google.GoogleWorkspaceError) -> HTTPException:
 
 @router.get("/api/google-workspace/status")
 async def google_status(profile: Optional[str] = None):
-    return await asyncio.to_thread(google.status, profile_home=_profile_home(profile))
+    try:
+        return await asyncio.to_thread(google.status, profile_home=_profile_home(profile))
+    except google.GoogleWorkspaceError as exc:
+        raise _translate(exc) from exc
 
 
 @router.post("/api/google-workspace/start")

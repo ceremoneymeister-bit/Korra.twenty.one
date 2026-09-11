@@ -569,16 +569,18 @@ def revoke(
     old_path = legacy_token_path(profile_home)
     payload: dict[str, Any] = {}
     target = path if path.exists() else old_path
-    if target.exists():
+    target_exists = target.exists()
+    remote_ok = not target_exists
+    if target_exists:
         try:
             payload = _read_json(target, label="token")
         except GoogleWorkspaceError:
             payload = {}
-    remote_ok = True
     value = str(payload.get("refresh_token") or payload.get("token") or "").strip()
     if value:
         try:
             (remote_revoke or _revoke_remote)(value)
+            remote_ok = True
         except Exception:
             remote_ok = False
     with _state_lock(profile_home):
@@ -626,7 +628,20 @@ def _credentials(profile_home: Path | None, root: Path | None):
                 status_code=401,
             ) from exc
         refreshed_scopes = list(creds.granted_scopes or creds.scopes or scopes)
-        missing, extra = scope_difference(refreshed_scopes, scopes)
+        # Google may add or omit identity metadata independently of the
+        # Workspace grant. Compare only Workspace scopes, while keeping the
+        # stored scope inventory unchanged (including recognized legacy
+        # identity metadata).
+        refreshed_workspace_scopes = [
+            scope for scope in refreshed_scopes if scope not in GOOGLE_IDENTITY_SCOPES
+        ]
+        expected_workspace_scopes = [
+            scope for scope in scopes if scope not in GOOGLE_IDENTITY_SCOPES
+        ]
+        missing, extra = scope_difference(
+            refreshed_workspace_scopes,
+            expected_workspace_scopes,
+        )
         if missing or extra:
             raise GoogleWorkspaceError(
                 "scope_mismatch",

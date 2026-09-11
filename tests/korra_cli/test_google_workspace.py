@@ -4,7 +4,10 @@ import json
 import os
 import stat
 import builtins
+import asyncio
+import sys
 import time
+import types
 import urllib.parse
 from pathlib import Path
 
@@ -229,6 +232,79 @@ def test_unknown_legacy_scope_is_not_usable(tmp_path, monkeypatch):
         google.check_service("drive", profile_home=profile, probe=lambda *_: None)
 
 
+@pytest.mark.parametrize(
+    "contents",
+    ["not-json", json.dumps({"scopes": list(SERVICE_SCOPES["drive"])})],
+)
+def test_existing_unrevocable_token_reports_remote_not_confirmed(tmp_path, contents):
+    profile = tmp_path / "profile"
+    directory = google.profile_google_dir(profile)
+    directory.mkdir(parents=True)
+    google.token_path(profile).write_text(contents, encoding="utf-8")
+    remote_calls = []
+
+    result = google.revoke(
+        profile_home=profile,
+        remote_revoke=lambda value: remote_calls.append(value),
+    )
+
+    assert result == {"status": "revoked", "remote_revoked": False}
+    assert remote_calls == []
+    assert not google.token_path(profile).exists()
+
+
+def test_revoke_without_local_token_is_idempotently_confirmed(tmp_path):
+    assert google.revoke(profile_home=tmp_path / "profile") == {
+        "status": "revoked",
+        "remote_revoked": True,
+    }
+
+
+def test_refresh_ignores_identity_scope_drift_and_preserves_legacy_inventory(
+    tmp_path, monkeypatch,
+):
+    root = tmp_path / "install"
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    _write_app(root)
+    workspace_scope = SERVICE_SCOPES["email"][0]
+    stored_scopes = [workspace_scope, "openid"]
+    google.legacy_token_path(profile).write_text(
+        json.dumps(
+            {
+                "token": "expired",
+                "refresh_token": "refresh-value",
+                "scopes": stored_scopes,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeCredentials:
+        expired = True
+        refresh_token = "refresh-value"
+        token = "refreshed"
+        expiry = None
+        granted_scopes = [workspace_scope, "email"]
+        scopes = granted_scopes
+
+        def refresh(self, _request):
+            return None
+
+    credentials_module = types.ModuleType("google.oauth2.credentials")
+    credentials_module.Credentials = lambda **_kwargs: FakeCredentials()
+    request_module = types.ModuleType("google.auth.transport.requests")
+    request_module.Request = lambda: object()
+    monkeypatch.setitem(sys.modules, "google.oauth2.credentials", credentials_module)
+    monkeypatch.setitem(sys.modules, "google.auth.transport.requests", request_module)
+
+    credentials = google._credentials(profile, root)
+
+    assert credentials.token == "refreshed"
+    saved = json.loads(google.legacy_token_path(profile).read_text(encoding="utf-8"))
+    assert saved["scopes"] == stored_scopes
+
+
 def test_private_state_is_atomic_and_has_strict_modes(tmp_path):
     root = tmp_path / "install"
     profile = root / "profiles" / "finance"
@@ -428,6 +504,27 @@ def test_dashboard_rejects_an_invalid_profile_selector():
     with pytest.raises(HTTPException) as denied:
         _profile_home("../foreign")
     assert denied.value.status_code == 400
+
+
+def test_dashboard_status_translates_google_workspace_errors(monkeypatch):
+    from fastapi import HTTPException
+    from korra_cli.web_routers import google_workspace as routes
+
+    def fail_status(**_kwargs):
+        raise google.GoogleWorkspaceError(
+            "state_path_unsafe",
+            "unsafe state",
+            status_code=409,
+        )
+
+    monkeypatch.setattr(routes.google, "status", fail_status)
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(routes.google_status())
+    assert denied.value.status_code == 409
+    assert denied.value.detail == {
+        "code": "state_path_unsafe",
+        "message": "unsafe state",
+    }
 
 
 def test_dashboard_bodies_cannot_smuggle_a_profile_selector():
