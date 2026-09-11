@@ -559,6 +559,30 @@ class Updater:
         return self.docker("exec", "-u", self.runtime_user(), "-w", "/opt/hermes", self.name,
                            PYTHON, "-c", code, *args, timeout=timeout)
 
+    def google_oauth_source(self):
+        return self.home / "google" / "oauth_client.json"
+
+    def validate_google_oauth_source(self, runtime_gid):
+        path = self.google_oauth_source()
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            raise UpdateError("Google OAuth host credential is missing") from None
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or info.st_gid != int(runtime_gid) or stat.S_IMODE(info.st_mode) != 0o640):
+            raise UpdateError("Google OAuth host credential must be regular root:runtime-gid mode 0640")
+
+    def google_oauth_mount_contract(self, info):
+        destination = "/run/korra-secrets/google-oauth-client.json"
+        mount = next(
+            (item for item in info.get("Mounts", []) if item.get("Destination") == destination),
+            None,
+        )
+        return {
+            "present": mount is not None,
+            "source": mount.get("Source") if mount is not None else None,
+        }
+
     def inspect_target(self, expected=None, running=True, timeout=120):
         info = json.loads(self.docker("inspect", self.name, timeout=timeout))[0]
         mounts = info.get("Mounts", [])
@@ -585,6 +609,26 @@ class Updater:
                 break
             seen_mounts.add(destination)
         mounts_ok = mounts_ok and "/opt/data" in seen_mounts
+        google_destination = "/run/korra-secrets/google-oauth-client.json"
+        google_present = google_destination in seen_mounts
+        recorded_google = self.receipt.get("google_oauth_mount")
+        if recorded_google is not None:
+            expected_contract = {
+                "present": google_present,
+                "source": str(self.google_oauth_source()) if google_present else None,
+            }
+            mounts_ok = (
+                mounts_ok
+                and isinstance(recorded_google, dict)
+                and set(recorded_google) == {"present", "source"}
+                and recorded_google == expected_contract
+            )
+        if google_present:
+            try:
+                runtime_gid = runtime_env_from_info(info)["ENGINE_GID"]
+                self.validate_google_oauth_source(runtime_gid)
+            except UpdateError:
+                mounts_ok = False
         if (info.get("Name") != "/" + self.name or not mounts_ok
                 or info.get("Config", {}).get("Cmd") != ["gateway", "run"]
                 or info.get("HostConfig", {}).get("NetworkMode") != "host"
@@ -767,6 +811,9 @@ class Updater:
         rollback = self.receipt["phase"] == "rollback_recreate"
         resources = self.launch_resource_env(rollback=rollback)
         runtime = self.launch_runtime_env(rollback=rollback)
+        google_contract = self.receipt.get("google_oauth_mount")
+        if isinstance(google_contract, dict) and google_contract.get("present") is True:
+            self.validate_google_oauth_source(runtime["ENGINE_GID"])
         (self.home / "IMAGE").write_text(image + "\n")
         env = {**os.environ, "NAME": self.name, "DATA": str(self.data),
                "PANEL_PORT": str(self.panel), "API_PORT": str(self.api),
@@ -1113,6 +1160,7 @@ print(json.dumps(changed))
                 "memory_bytes": int(initial["HostConfig"].get("Memory", 0)),
             }
             self.receipt["old_runtime"] = runtime_env_from_info(initial)
+            self.receipt["google_oauth_mount"] = self.google_oauth_mount_contract(initial)
             self.launch_runtime_env()  # invalid ownership/admin overrides fail before pull/drain
             if self.receipt.get("expected_current") not in (None, old):
                 self.receipt["error_code"] = "expected_current_mismatch"

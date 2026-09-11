@@ -182,8 +182,60 @@ def _google_mount(updater):
 
 def test_exact_optional_google_oauth_mount_is_accepted_in_any_order(updater):
     updater.mounts_override = [_google_mount(updater), _data_mount(updater)]
+    updater.validate_google_oauth_source = lambda _gid: None
 
     assert updater.inspect_target()["Image"] == OLD
+
+
+def test_google_mount_source_must_exist_and_must_not_be_a_dangling_symlink(updater):
+    updater.mounts_override = [_data_mount(updater), _google_mount(updater)]
+
+    with pytest.raises(u.UpdateError, match="identity/mount"):
+        updater.inspect_target()
+
+    source = updater.google_oauth_source()
+    source.parent.mkdir()
+    source.symlink_to(source.parent / "missing.json")
+    with pytest.raises(u.UpdateError, match="identity/mount"):
+        updater.inspect_target()
+
+
+def test_recorded_google_mount_cannot_disappear_on_target_or_rollback(updater):
+    updater.mounts_override = [_data_mount(updater), _google_mount(updater)]
+    updater.validate_google_oauth_source = lambda _gid: None
+    initial = updater.inspect_target()
+    updater.receipt["google_oauth_mount"] = updater.google_oauth_mount_contract(initial)
+
+    updater.mounts_override = [_data_mount(updater)]
+    with pytest.raises(u.UpdateError, match="identity/mount"):
+        updater.inspect_target()
+
+
+def test_update_records_google_mount_contract_before_mutation(updater, monkeypatch):
+    updater.mounts_override = [_google_mount(updater), _data_mount(updater)]
+    updater.validate_google_oauth_source = lambda _gid: None
+
+    updater.update("registry.example/korra:latest", dry_run=True)
+
+    assert updater.receipt["google_oauth_mount"] == {
+        "present": True,
+        "source": str(updater.google_oauth_source()),
+    }
+
+
+def test_recreate_requires_recorded_google_source_before_running_up_sh(updater, monkeypatch):
+    updater.receipt["phase"] = "recreate"
+    updater.receipt["old_resources"] = {"nano_cpus": 0, "memory_bytes": 0}
+    updater.receipt["google_oauth_mount"] = {
+        "present": True,
+        "source": str(updater.google_oauth_source()),
+    }
+    attempted = []
+    monkeypatch.setattr(u.subprocess, "run", lambda *_args, **_kwargs: attempted.append(True))
+
+    with pytest.raises(u.UpdateError, match="credential is missing"):
+        u.Updater.start_image(updater, NEW)
+    assert attempted == []
 
 
 @pytest.mark.parametrize(
