@@ -14,6 +14,13 @@ from PIL import Image
 provider_mod = importlib.import_module("plugins.image_gen.openai-codex")
 
 
+def _credentials(token="token"):
+    return {
+        "api_key": token,
+        "base_url": "https://chatgpt.com/backend-api/codex",
+    }
+
+
 def _image_b64(fmt: str = "PNG") -> str:
     out = io.BytesIO()
     Image.new("RGBA", (2, 3), (12, 34, 56, 255)).save(out, format=fmt)
@@ -122,7 +129,7 @@ def test_local_reference_read_is_confined_to_profile_or_workspace(tmp_path):
 
 
 def test_invalid_model_fails_instead_of_falling_back(monkeypatch):
-    monkeypatch.setattr(provider_mod, "_read_codex_access_token", lambda: "token")
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
     result = provider_mod.OpenAICodexImageGenProvider().generate(
         "poster", model="gpt-image-2-medium"
     )
@@ -131,7 +138,7 @@ def test_invalid_model_fails_instead_of_falling_back(monkeypatch):
 
 
 def test_nonfinal_response_is_not_retried(monkeypatch):
-    monkeypatch.setattr(provider_mod, "_read_codex_access_token", lambda: "token")
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
     calls = []
 
     def _partial(*args, **kwargs):
@@ -164,7 +171,7 @@ def test_atomic_writer_validates_decoded_format_and_preserves_existing(tmp_path)
 
 def test_generate_rejects_invalid_base64_before_publishing(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(provider_mod, "_read_codex_access_token", lambda: "token")
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
     monkeypatch.setattr(
         provider_mod,
         "_collect_image_b64",
@@ -180,7 +187,7 @@ def test_generate_rejects_invalid_base64_before_publishing(monkeypatch, tmp_path
 
 def test_generate_saves_decoded_image_and_sanitized_receipt(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(provider_mod, "_read_codex_access_token", lambda: "token")
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
     monkeypatch.setattr(
         provider_mod,
         "_collect_image_b64",
@@ -304,26 +311,98 @@ def test_dynamic_schema_advertises_only_native_image25_options(monkeypatch):
     image_gen_registry._reset_for_tests()
 
 
-def test_token_reader_delegates_only_to_canonical_profile_broker(monkeypatch, tmp_path):
-    from agent import auxiliary_client
+def test_credentials_delegate_only_to_canonical_profile_broker(monkeypatch, tmp_path):
+    from korra_cli import auth
 
+    calls = []
     monkeypatch.setenv("OPENAI_API_KEY", "sk-must-be-ignored")
     monkeypatch.setenv("CHATGPT_CODEX_ACCESS_TOKEN", "env-must-be-ignored")
     (tmp_path / "token.txt").write_text("file-must-be-ignored")
 
-    monkeypatch.setattr(auxiliary_client, "_read_codex_access_token", lambda: None)
-    assert provider_mod._read_codex_access_token() is None
+    def _resolve(**kwargs):
+        calls.append(kwargs)
+        return {
+            "api_key": " profile-broker-token ",
+            "base_url": "https://chatgpt.com/backend-api/codex/",
+        }
 
-    monkeypatch.setattr(
-        auxiliary_client, "_read_codex_access_token", lambda: " profile-broker-token "
+    monkeypatch.setattr(auth, "resolve_codex_runtime_credentials", _resolve)
+    assert provider_mod._resolve_codex_credentials() == {
+        "api_key": "profile-broker-token",
+        "base_url": "https://chatgpt.com/backend-api/codex",
+    }
+    assert calls == [{"refresh_if_expiring": True}]
+
+
+def test_expiring_profile_token_is_refreshed_before_image_request(monkeypatch, tmp_path):
+    import time
+    from korra_cli import auth
+
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"exp": int(time.time()) - 60}).encode("utf-8")
+    ).rstrip(b"=").decode("ascii")
+    expired_token = f"header.{payload}.signature"
+    profile_home = tmp_path / "profile"
+    profile_home.mkdir()
+    (profile_home / "auth.json").write_text(
+        json.dumps({
+            "version": 1,
+            "providers": {
+                "openai-codex": {
+                    "tokens": {
+                        "access_token": expired_token,
+                        "refresh_token": "refresh-secret",
+                    },
+                },
+            },
+        }),
+        encoding="utf-8",
     )
-    assert provider_mod._read_codex_access_token() == "profile-broker-token"
+    monkeypatch.setenv("HERMES_HOME", str(profile_home))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "missing-codex-home"))
+    refreshed = []
+
+    def _refresh(tokens, timeout_seconds):
+        refreshed.append((tokens["refresh_token"], timeout_seconds))
+        return {"access_token": "fresh-access", "refresh_token": "fresh-refresh"}
+
+    monkeypatch.setattr(auth, "_refresh_codex_auth_tokens", _refresh)
+
+    credentials = provider_mod._resolve_codex_credentials()
+
+    assert credentials["api_key"] == "fresh-access"
+    assert refreshed and refreshed[0][0] == "refresh-secret"
+
+
+def test_refresh_failure_is_redacted_without_image_request(monkeypatch):
+    calls = []
+
+    def _auth_failure():
+        raise RuntimeError(
+            "refresh rejected Authorization: Bearer SUPER-SECRET access_token=SECOND-SECRET"
+        )
+
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _auth_failure)
+    monkeypatch.setattr(
+        provider_mod,
+        "_collect_image_b64",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    result = provider_mod.OpenAICodexImageGenProvider().generate("poster")
+
+    assert result["success"] is False
+    assert result["error_type"] == "auth_required"
+    assert "SUPER-SECRET" not in result["error"]
+    assert "SECOND-SECRET" not in result["error"]
+    assert "[REDACTED]" in result["error"]
+    assert calls == []
 
 
 def test_generated_output_follows_active_profile_home(monkeypatch, tmp_path):
     from korra_constants import reset_hermes_home_override, set_hermes_home_override
 
-    monkeypatch.setattr(provider_mod, "_read_codex_access_token", lambda: "token")
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
     monkeypatch.setattr(
         provider_mod,
         "_collect_image_b64",
