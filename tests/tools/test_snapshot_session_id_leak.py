@@ -50,6 +50,11 @@ def test_export_snippet_shape():
     assert "${!HERMES_SESSION_*}" in snippet
     assert "${!HERMES_CRON_AUTO_DELIVER_*}" in snippet
     assert "${!HERMES_BROWSER_CONTROL_*}" in snippet
+    # Owner authorization for credential-management tools is per-turn and
+    # server-derived; a stale "1" surviving in the snapshot would hand the
+    # capability to the next, unauthorized session that sources it.
+    assert "${!HERMES_CREDENTIAL_MANAGEMENT_*}" in snippet
+    assert "${!KORRA_CREDENTIAL_MANAGEMENT_*}" in snippet
     assert "HERMES_UI_SESSION_ID" in snippet
     assert "grep -vE" not in snippet
     assert '"$__hermes_snap_tmp"' in snippet

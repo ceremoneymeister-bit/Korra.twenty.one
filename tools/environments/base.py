@@ -545,7 +545,7 @@ def _cwd_marker(session_id: str) -> str:
 _SNAPSHOT_EXCLUDED_ENV_REGEX = (
     "^declare -x ((HERMES|KORRA)_SESSION_|(HERMES|KORRA)_UI_SESSION_ID|"
     "(HERMES|KORRA)_CRON_AUTO_DELIVER_|(HERMES|KORRA)_CRON_SESSION|"
-    "(HERMES|KORRA)_BROWSER_CONTROL_)"
+    "(HERMES|KORRA)_CREDENTIAL_MANAGEMENT_|(HERMES|KORRA)_BROWSER_CONTROL_)"
 )
 _SHELL_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -595,6 +595,12 @@ def _export_dump_excluding_session_vars(
         # утечёт в следующую команду.
         "${!KORRA_SESSION_*} ${!KORRA_CRON_AUTO_DELIVER_*} "
         "${!KORRA_BROWSER_CONTROL_*} "
+        # Owner authorization for credential-management tools is derived by
+        # the gateway per turn from an identified sender. Persisting it into
+        # the shared snapshot would let a later, unauthorized session
+        # ``source`` a stale "1" and inherit an owner capability it never
+        # cleared — the same cross-session leak as the session identity.
+        "${!HERMES_CREDENTIAL_MANAGEMENT_*} ${!KORRA_CREDENTIAL_MANAGEMENT_*} "
         # AI_AGENT / HERMES_AGENT are per-command attribution markers
         # (re-exported by every _wrap_command with outer-harness-preserving
         # ${VAR:-default} semantics).  Persisting them into the snapshot
