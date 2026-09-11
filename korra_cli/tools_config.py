@@ -157,9 +157,16 @@ def gui_toolset_label(label: str) -> str:
 # `hermes tools` → X (Twitter) Search setup walks users through credential
 # setup. The tool's check_fn means the schema still won't appear to the
 # model if the credential later goes missing or expires.
+# Google Workspace connection management is off by default. Its single tool
+# only ever answers an owner named in ``gateway.credential_management.owners``;
+# on every other profile it would occupy a schema slot to refuse each call, and
+# advertise a credential surface to a chat that cannot use it. The owner's own
+# path — Settings → Keys → Google Workspace — is a web route and needs no
+# toolset, so leaving this off costs the owner nothing until they deliberately
+# want the connection driven from chat.
 _DEFAULT_OFF_TOOLSETS = {
     "homeassistant", "spotify", "discord", "discord_admin", "video",
-    "video_gen", "image_gen", "x_search", "a2a",
+    "video_gen", "image_gen", "google_workspace", "x_search", "a2a",
 }
 
 
