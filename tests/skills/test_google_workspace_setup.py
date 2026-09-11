@@ -326,7 +326,7 @@ def test_check_refresh_preserves_selected_scope_contract(setup_module, monkeypat
     )
 
     assert setup_module.check_auth() is True
-    assert captured == [((setup_module.HERMES_HOME, None), {})]
+    assert captured == [((setup_module.HERMES_HOME,), {})]
     unchanged = json.loads(setup_module.TOKEN_PATH.read_text(encoding="utf-8"))
     assert unchanged["token"] == "ya29.old"
     assert unchanged["scopes"] == scopes

@@ -189,7 +189,7 @@ def test_revoke_waits_for_inflight_completion_and_removes_committed_token(tmp_pa
     root = tmp_path / "install"
     profile = root / "profiles" / "finance"
     _write_app(root)
-    flow = google.start("drive", root=root, profile_home=profile)
+    flow = google.start("drive", profile_home=profile)
     scopes = scopes_for_services(("drive",))
     exchange_entered = threading.Event()
     release_exchange = threading.Event()
@@ -208,7 +208,6 @@ def test_revoke_waits_for_inflight_completion_and_removes_committed_token(tmp_pa
             complete_result.update(
                 google.complete(
                     _callback(flow["authorization_url"], scopes=scopes),
-                    root=root,
                     profile_home=profile,
                     exchange=blocking_exchange,
                 )
@@ -251,7 +250,7 @@ def test_start_waits_for_inflight_completion_and_cannot_replace_flow(tmp_path):
     root = tmp_path / "install"
     profile = root / "profiles" / "finance"
     _write_app(root)
-    flow = google.start("drive", root=root, profile_home=profile)
+    flow = google.start("drive", profile_home=profile)
     scopes = scopes_for_services(("drive",))
     exchange_entered = threading.Event()
     release_exchange = threading.Event()
@@ -267,7 +266,6 @@ def test_start_waits_for_inflight_completion_and_cannot_replace_flow(tmp_path):
         try:
             google.complete(
                 _callback(flow["authorization_url"], scopes=scopes),
-                root=root,
                 profile_home=profile,
                 exchange=blocking_exchange,
             )
@@ -276,7 +274,7 @@ def test_start_waits_for_inflight_completion_and_cannot_replace_flow(tmp_path):
 
     def run_start():
         try:
-            google.start("calendar", root=root, profile_home=profile)
+            google.start("calendar", profile_home=profile)
         except BaseException as exc:
             start_errors.append(exc)
 
@@ -506,7 +504,7 @@ def test_revoke_waits_for_inflight_refresh_and_token_stays_deleted(tmp_path, mon
 
     def run_refresh():
         try:
-            google._credentials(profile, root)
+            google._credentials(profile)
         except BaseException as exc:
             errors.append(exc)
 
