@@ -1273,6 +1273,30 @@ def _named_holder_matches_roots(
     return (parent.st_dev, parent.st_ino) in directories
 
 
+def _proc_maps_path_variants(name: str) -> tuple[str, ...]:
+    """Return both meanings of Linux ``/proc/<pid>/maps`` newline escapes.
+
+    The kernel renders a newline in a mapped pathname as the four printable
+    characters ``\\012`` but does not escape a literal backslash.  The text is
+    therefore ambiguous.  Check every literal/newline combination so neither
+    spelling can hide a DATA holder.  Bound the expansion and refuse unusual
+    names rather than turning an attacker-controlled pathname into unbounded
+    work during the offline proof.
+    """
+    parts = name.split("\\012")
+    escape_count = len(parts) - 1
+    if escape_count > 8:
+        raise _ImportRefused("неоднозначное имя файла в /proc maps")
+    variants = [parts[0]]
+    for part in parts[1:]:
+        variants = [
+            prefix + separator + part
+            for prefix in variants
+            for separator in ("\\012", "\n")
+        ]
+    return tuple(variants)
+
+
 def _assert_import_offline(roots: list[Path], *, importer_fd: int | None = None) -> dict:
     """Inspect all holders, irrespective of service names or mount spelling.
 
@@ -1344,8 +1368,11 @@ def _assert_import_offline(roots: list[Path], *, importer_fd: int | None = None)
                     identity = (os.makedev(major, minor), int(fields[4]))
                     if identity in identities or (
                         len(fields) == 6
-                        and _named_holder_matches_roots(
-                            fields[5], proc, identities, directories
+                        and any(
+                            _named_holder_matches_roots(
+                                name, proc, identities, directories
+                            )
+                            for name in _proc_maps_path_variants(fields[5])
                         )
                     ):
                         raise _ImportRefused(f"DATA отображён в память процесса PID {pid}")

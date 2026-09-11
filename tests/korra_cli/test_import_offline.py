@@ -79,7 +79,7 @@ def require_host_proc():
 
 @contextmanager
 def holder(path, kind="fd"):
-    code = """import os, sqlite3, sys
+    code = """import ctypes, os, sqlite3, sys
 p, kind = sys.argv[1:]
 if kind == 'cwd':
     os.chdir(p)
@@ -88,6 +88,16 @@ elif kind == 'sqlite':
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('BEGIN IMMEDIATE')
     conn.execute("INSERT INTO sample VALUES ('uncommitted')")
+elif kind == 'libc_mmap_deleted':
+    size = os.path.getsize(p)
+    fd = os.open(p, os.O_RDONLY)
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mmap.restype = ctypes.c_void_p
+    address = libc.mmap(None, size, 1, 2, fd, 0)
+    if address == ctypes.c_void_p(-1).value:
+        raise OSError(ctypes.get_errno(), 'mmap failed')
+    os.close(fd)
+    os.unlink(p)
 else:
     handle=open(p, 'rb')
 print('ready', flush=True)
@@ -413,6 +423,18 @@ def test_same_host_data_under_container_path_is_a_holder(tmp_path):
     )
 
 
+def test_proc_maps_newline_escape_checks_both_ambiguous_spellings():
+    assert set(backup._proc_maps_path_variants("/opt/data/dir\\012line/file")) == {
+        "/opt/data/dir\\012line/file",
+        "/opt/data/dir\nline/file",
+    }
+
+
+def test_excessive_proc_maps_escape_ambiguity_refuses():
+    with pytest.raises(backup._ImportRefused, match="неоднозначное имя"):
+        backup._proc_maps_path_variants("/opt/data/" + "\\012" * 9)
+
+
 def test_timeout_is_not_an_offline_witness(tmp_path, isolated, monkeypatch):
     require_host_proc()
     user, target = isolated
@@ -434,6 +456,44 @@ def test_mmap_holder_survives_closed_original_fd(tmp_path, isolated):
         rejected(path, user)
     finally:
         mapping.close()
+
+
+def test_deleted_mmap_with_newline_path_remains_a_data_holder(tmp_path, isolated):
+    require_host_proc()
+    user, target = isolated
+    held_dir = target / "dir\nline"
+    held_dir.mkdir()
+    held = held_dir / "mapped.data"
+    held.write_bytes(b"mapped fixture")
+    path = archive(tmp_path, {"config.yaml": "restored"})
+    with holder(held, "libc_mmap_deleted"):
+        rejected(path, user)
+
+
+def test_real_cli_import_dispatches_before_data_logging(tmp_path, isolated):
+    require_host_proc()
+    user, target = isolated
+    path = archive(tmp_path, {"config.yaml": "model: restored\n"})
+    env = os.environ.copy()
+    env.pop("HERMES_HOME", None)
+    env.update(
+        HOME=str(user),
+        KORRA_HOME=str(target),
+        HERMES_SKIP_CHMOD="1",
+        PYTHONPATH=str(Path(__file__).resolve().parents[2]),
+    )
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "korra_cli.main", "import", str(path), "--force"],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stderr.decode(errors="replace")
+    assert (target / "config.yaml").read_text() == "model: restored\n"
+    assert not (target / "logs").exists()
 
 
 def test_real_cli_version_flag_does_not_restore(tmp_path, isolated):
