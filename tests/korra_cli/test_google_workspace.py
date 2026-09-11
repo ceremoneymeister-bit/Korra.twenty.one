@@ -28,6 +28,17 @@ from korra_cli.google_workspace_scopes import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _non_root_functional_app_fixture(monkeypatch):
+    """Keep functional tests portable; the root-only test exercises ownership."""
+    if os.geteuid() != 0:
+        monkeypatch.setattr(
+            google,
+            "_validate_operator_app_permissions",
+            lambda _root=None: None,
+        )
+
+
 def _app() -> dict:
     return {
         "installed": {
@@ -46,11 +57,13 @@ def _write_app(root: Path, *, gid: int | None = None) -> None:
     directory = google.installation_google_dir(root)
     directory.mkdir(parents=True, mode=0o750)
     directory.chmod(0o750)
-    os.chown(directory, 0, runtime_gid)
+    if os.geteuid() == 0:
+        os.chown(directory, 0, runtime_gid)
     path = google.app_credentials_path(root)
     path.write_text(json.dumps(_app()), encoding="utf-8")
     path.chmod(0o640)
-    os.chown(path, 0, runtime_gid)
+    if os.geteuid() == 0:
+        os.chown(path, 0, runtime_gid)
 
 
 def _callback(auth_url: str, *, code: str = "one-time-code", scopes: list[str] | None = None) -> str:
@@ -620,16 +633,32 @@ except PermissionError:
         shutil.rmtree(base)
 
 
-def test_stage2_restores_operator_owned_google_app_permissions():
-    stage2 = (
-        Path(__file__).resolve().parents[2] / "docker" / "stage2-hook.sh"
+def test_client_launcher_uses_exact_read_only_google_app_mount():
+    launcher = (
+        Path(__file__).resolve().parents[2] / "docs" / "client-deploy" / "up.sh"
     ).read_text(encoding="utf-8")
 
-    assert 'chown root:hermes "$google_app_dir"' in stage2
-    assert 'chmod 0750 "$google_app_dir"' in stage2
-    assert 'chown root:hermes "$google_app_file"' in stage2
-    assert 'chmod 0640 "$google_app_file"' in stage2
-    assert 'as_hermes mkdir -p "$HERMES_HOME/google"' not in stage2
+    assert "GOOGLE_OWNER_MODE" in launcher
+    assert '"0:$ENGINE_GID:640"' in launcher
+    assert "dst=/run/korra-secrets/google-oauth-client.json,readonly" in launcher
+    assert "KORRA_GOOGLE_OAUTH_CLIENT_PATH=/run/korra-secrets/google-oauth-client.json" in launcher
+
+
+def test_runtime_default_path_requires_exact_read_only_mount(tmp_path, monkeypatch):
+    if os.geteuid() != 0:
+        pytest.skip("exact root-owned mount contract requires root")
+    root = tmp_path / "operator"
+    _write_app(root)
+    path = google.app_credentials_path(root)
+    monkeypatch.setenv("KORRA_GOOGLE_OAUTH_CLIENT_PATH", str(path))
+    monkeypatch.setattr(google, "_is_exact_read_only_mount", lambda _path: False)
+
+    with pytest.raises(google.GoogleWorkspaceError) as denied:
+        google._load_app()
+    assert denied.value.code == "app_permissions"
+
+    monkeypatch.setattr(google, "_is_exact_read_only_mount", lambda _path: True)
+    assert google._load_app()[0] == "installed"
 
 
 @pytest.mark.parametrize("name", ["token.json", "pending.json"])
