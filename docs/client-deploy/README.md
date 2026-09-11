@@ -166,6 +166,38 @@ nano /opt/korra/data/.env
 необязателен, без него речь распознаётся локально моделью из образа.
 `API_SERVER_KEY` оставьте пустым, контур создаст его себе сам.
 
+### Общий OAuth-клиент Google Workspace
+
+OAuth-клиент Ceremoneymeister устанавливает только root-оператор хоста. Он
+хранится вне DATA, не входит в образ и монтируется `up.sh` отдельным read-only
+file mount. Контур Google запускается через `host-bootstrap.py --no-admin`:
+это отзывает agent-held host-root grant, который иначе позволил бы изменить
+исходный host-файл. Числовая группа должна совпадать с `KORRA_GID` контейнера
+(по умолчанию `10000`):
+
+```bash
+runtime_gid=10000
+install -d -o root -g "$runtime_gid" -m 0750 /opt/korra/google
+install -o root -g "$runtime_gid" -m 0640 \
+  /root/ceremoneymeister-google-oauth.json \
+  /opt/korra/google/oauth_client.json
+stat -c '%U:%g %a %n' \
+  /opt/korra/google \
+  /opt/korra/google/oauth_client.json
+```
+
+При bootstrap добавьте `--no-admin` и в `--plan`, и в исполняющую команду.
+`up.sh` откажется монтировать Google credential при `AGENT_SUDO=1`, потому что
+в штатном bootstrap этот режим связан с действующим host-root grant. Root
+внутри контейнера без `CAP_SYS_ADMIN` не может перемонтировать read-only file;
+граница владельца завершается отзывом отдельного SSH-доступа к host root.
+
+Ожидаемый контракт: каталог `root:<KORRA_GID> 750`, файл
+`root:<KORRA_GID> 640`. Launcher проверяет контракт и монтирует файл в
+`/run/korra-secrets/google-oauth-client.json` с флагом `readonly`; core также
+проверяет exact read-only mount. Credential не создаётся и не принимается из
+модели, панели или `setup.py`.
+
 **Проверка** (для пути А):
 
 ```bash

@@ -1,31 +1,26 @@
 #!/usr/bin/env python3
-"""Google Workspace OAuth2 setup for Korra.
+"""Profile compatibility CLI for native Google Workspace OAuth.
 
-Fully non-interactive — designed to be driven by the agent via terminal commands.
-The agent mediates between this script and the user (works on CLI, Telegram, Discord, etc.)
+End users connect through Settings -> Keys or the owner-gated
+``google_workspace_auth`` tool. Agents must never collect an app credential or
+localhost callback in chat. Installation OAuth credentials are provisioned by
+the root-owned deployment perimeter and cannot be written through this script.
 
 Commands:
   setup.py --check                          # Is auth valid? Exit 0 = yes, 1 = no
-  setup.py --client-secret /path/to.json    # Store OAuth client credentials
-  setup.py --auth-url                       # Print the OAuth URL for user to visit
-  setup.py --auth-code CODE                 # Exchange auth code for token
+  setup.py --auth-url --services LIST       # Print a least-privilege OAuth URL
+  setup.py --auth-code CALLBACK_URL         # Complete with exact localhost URL
   setup.py --revoke                         # Revoke and delete stored token
   setup.py --install-deps                   # Install Python dependencies only
 
-Agent workflow:
-  1. Run --check. If exit 0, auth is good — skip setup.
-  2. Ask user for client_secret.json path. Run --client-secret PATH.
-  3. Run --auth-url. Send the printed URL to the user.
-  4. User opens URL, authorizes, gets redirected to a page with a code.
-  5. User pastes the code. Agent runs --auth-code CODE.
-  6. Run --check to verify. Done.
+The app file is stored once in installation DATA. Tokens and pending PKCE state
+remain profile-scoped and use the native atomic/locking implementation.
 """
 
 from __future__ import annotations  # allow PEP 604 `X | None` on Python 3.9+
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -38,22 +33,28 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from _hermes_home import display_hermes_home, get_hermes_home
+from korra_cli import google_workspace as _native_google
+from utils import atomic_json_write
+from google_oauth_scopes import (
+    MINIMUM_SCOPES,
+    SERVICE_SCOPES,
+    TOKEN_REQUESTED_SCOPES_KEY,
+    TOKEN_SERVICES_KEY,
+    granted_scopes_from_payload as _granted_scopes_from_payload,
+    parse_services as _parse_services,
+    scope_difference as _scope_difference,
+    scopes_for_services as _scopes_for_services,
+    validate_scope_contract as _validate_scope_contract,
+)
 
 HERMES_HOME = get_hermes_home()
-TOKEN_PATH = HERMES_HOME / "google_token.json"
-CLIENT_SECRET_PATH = HERMES_HOME / "google_client_secret.json"
-PENDING_AUTH_PATH = HERMES_HOME / "google_oauth_pending.json"
+TOKEN_PATH = _native_google.token_path(HERMES_HOME)
+PENDING_AUTH_PATH = _native_google.pending_path(HERMES_HOME)
+_native_google._private_dir(_native_google.profile_google_dir(HERMES_HOME))
 
-SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/contacts.readonly",
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/documents",
-]
+# Backwards-compatible name consumed by wrapper tests and older imports.
+# ``all`` now expands to these six exact per-service minimum scopes.
+SCOPES = list(MINIMUM_SCOPES)
 
 # Exact pins: keep in sync with pyproject.toml [project.optional-dependencies].google
 # and tools/lazy_deps.py LAZY_DEPS['skill.google_workspace'].
@@ -73,7 +74,7 @@ REQUIRED_PACKAGES = [
 # OAuth redirect for "out of band" manual code copy flow.
 # Google deprecated OOB, so we use a localhost redirect and tell the user to
 # copy the code from the browser's URL bar (or the page body).
-REDIRECT_URI = "http://localhost:1"
+REDIRECT_URI = _native_google.REDIRECT_URI
 
 
 def _normalize_authorized_user_payload(payload: dict) -> dict:
@@ -88,23 +89,6 @@ def _load_token_payload(path: Path = TOKEN_PATH) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
-
-
-def _missing_scopes_from_payload(payload: dict) -> list[str]:
-    raw = payload.get("scopes") or payload.get("scope")
-    if not raw:
-        return []
-    granted = {s.strip() for s in (raw.split() if isinstance(raw, str) else raw) if s.strip()}
-    return sorted(scope for scope in SCOPES if scope not in granted)
-
-
-def _format_missing_scopes(missing_scopes: list[str]) -> str:
-    bullets = "\n".join(f"  - {scope}" for scope in missing_scopes)
-    return (
-        "Token is valid but missing required Google Workspace scopes:\n"
-        f"{bullets}\n"
-        "Run the Google Workspace setup again from this same Korra profile to refresh consent."
-    )
 
 
 def _missing_required_packages() -> list[str]:
@@ -196,12 +180,13 @@ def check_auth_live():
     if not check_auth(quiet=True):
         return False
     try:
-        from googleapiclient.discovery import build
-        from google.oauth2.credentials import Credentials
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH))
-        service = build("calendar", "v3", credentials=creds)
-        service.calendarList().list(maxResults=1).execute()
-        print("LIVE_CHECK_OK: Real API call succeeded.")
+        services, _ = _validate_scope_contract(_load_token_payload(TOKEN_PATH))
+        if not services:
+            print("LIVE_CHECK_FAILED: No supported service in stored scope contract.")
+            return False
+        checked = services[0]
+        _native_google.check_service(checked, profile_home=HERMES_HOME)
+        print(f"LIVE_CHECK_OK: Real {checked} API call succeeded.")
         return True
     except Exception as e:
         err_str = str(e).lower()
@@ -221,9 +206,31 @@ def check_auth(quiet: bool = False):
         print(f"NOT_AUTHENTICATED: No token at {TOKEN_PATH}")
         return False
 
+    payload = _load_token_payload(TOKEN_PATH)
+    try:
+        services, expected_scopes = _validate_scope_contract(payload)
+    except ValueError as e:
+        print(f"TOKEN_SCOPE_CONTRACT_INVALID: {e}")
+        return False
+
     _ensure_deps()
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
+
+    try:
+        native_creds = _native_google._credentials(HERMES_HOME)
+    except _native_google.GoogleWorkspaceError:
+        native_creds = None
+    if native_creds is not None:
+        if not native_creds.valid:
+            print("TOKEN_INVALID: Re-run setup.")
+            return False
+        if not quiet:
+            print(
+                f"AUTHENTICATED: Token valid at {TOKEN_PATH} "
+                f"(services: {','.join(services)})"
+            )
+        return True
 
     try:
         # Don't pass scopes — user may have authorized only a subset.
@@ -235,33 +242,33 @@ def check_auth(quiet: bool = False):
         print(f"TOKEN_CORRUPT: {e}")
         return False
 
-    payload = _load_token_payload(TOKEN_PATH)
     if creds.valid:
-        missing_scopes = _missing_scopes_from_payload(payload)
-        if missing_scopes:
-            print(f"AUTHENTICATED (partial): Token valid but missing {len(missing_scopes)} scopes:")
-            for s in missing_scopes:
-                print(f"  - {s}")
+        if services is None:
+            print("AUTHENTICATED_LEGACY: Token is valid; choose --services on next authorization.")
         if not quiet:
-            print(f"AUTHENTICATED: Token valid at {TOKEN_PATH}")
+            label = ",".join(services) if services is not None else "legacy-untracked"
+            print(f"AUTHENTICATED: Token valid at {TOKEN_PATH} (services: {label})")
         return True
 
     if creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            TOKEN_PATH.write_text(
-                json.dumps(
-                    _normalize_authorized_user_payload(json.loads(creds.to_json())),
-                    indent=2,
-                ), encoding="utf-8"
-            )
-            missing_scopes = _missing_scopes_from_payload(_load_token_payload(TOKEN_PATH))
-            if missing_scopes:
-                print(f"AUTHENTICATED (partial): Token refreshed but missing {len(missing_scopes)} scopes:")
-                for s in missing_scopes:
-                    print(f"  - {s}")
+            refreshed = _normalize_authorized_user_payload(json.loads(creds.to_json()))
+            refreshed_scopes = _granted_scopes_from_payload(refreshed)
+            if refreshed_scopes:
+                missing, extra = _scope_difference(refreshed_scopes, expected_scopes)
+                if missing or extra:
+                    print("REFRESH_SCOPE_CONTRACT_INVALID: Google returned a different scope set.")
+                    return False
+            refreshed.pop("scope", None)
+            refreshed["scopes"] = expected_scopes
+            if services is not None:
+                refreshed[TOKEN_SERVICES_KEY] = list(services)
+                refreshed[TOKEN_REQUESTED_SCOPES_KEY] = expected_scopes
+            atomic_json_write(TOKEN_PATH, refreshed, mode=0o600)
             if not quiet:
-                print(f"AUTHENTICATED: Token refreshed at {TOKEN_PATH}")
+                label = ",".join(services) if services is not None else "legacy-untracked"
+                print(f"AUTHENTICATED: Token refreshed at {TOKEN_PATH} (services: {label})")
             return True
         except Exception as e:
             err_str = str(e).lower()
@@ -285,201 +292,36 @@ def check_auth(quiet: bool = False):
     return False
 
 
-def store_client_secret(path: str):
-    """Copy and validate client_secret.json to the Korra home directory."""
-    src = Path(path).expanduser().resolve()
-    if not src.exists():
-        print(f"ERROR: File not found: {src}")
-        sys.exit(1)
-
-    try:
-        data = json.loads(src.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        print("ERROR: File is not valid JSON.")
-        sys.exit(1)
-
-    if "installed" not in data and "web" not in data:
-        print("ERROR: Not a Google OAuth client secret file (missing 'installed' key).")
-        print("Download the correct file from: https://console.cloud.google.com/apis/credentials")
-        sys.exit(1)
-
-    CLIENT_SECRET_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    print(f"OK: Client secret saved to {CLIENT_SECRET_PATH}")
-
-
-def _save_pending_auth(*, state: str, code_verifier: str):
-    """Persist the OAuth session bits needed for a later token exchange."""
-    PENDING_AUTH_PATH.write_text(
-        json.dumps(
-            {
-                "state": state,
-                "code_verifier": code_verifier,
-                "redirect_uri": REDIRECT_URI,
-            },
-            indent=2,
-        ), encoding="utf-8"
-    )
-
-
-def _load_pending_auth() -> dict:
-    """Load the pending OAuth session created by get_auth_url()."""
-    if not PENDING_AUTH_PATH.exists():
-        print("ERROR: No pending OAuth session found. Run --auth-url first.")
-        sys.exit(1)
-
-    try:
-        data = json.loads(PENDING_AUTH_PATH.read_text(encoding="utf-8"))
-    except Exception as e:
-        print(f"ERROR: Could not read pending OAuth session: {e}")
-        print("Run --auth-url again to start a fresh OAuth session.")
-        sys.exit(1)
-
-    if not data.get("state") or not data.get("code_verifier"):
-        print("ERROR: Pending OAuth session is missing PKCE data.")
-        print("Run --auth-url again to start a fresh OAuth session.")
-        sys.exit(1)
-
-    return data
-
-
-def _extract_code_and_state(code_or_url: str) -> tuple[str, str | None]:
-    """Accept either a raw auth code or the full redirect URL pasted by the user."""
-    if not code_or_url.startswith("http"):
-        return code_or_url, None
-
-    from urllib.parse import parse_qs, urlparse
-
-    parsed = urlparse(code_or_url)
-    params = parse_qs(parsed.query)
-    if "code" not in params:
-        print("ERROR: No 'code' parameter found in URL.")
-        sys.exit(1)
-
-    state = params.get("state", [None])[0]
-    return params["code"][0], state
-
-
-def get_auth_url():
+def get_auth_url(services: tuple[str, ...]):
     """Print the OAuth authorization URL. User visits this in a browser."""
-    if not CLIENT_SECRET_PATH.exists():
-        print("ERROR: No client secret stored. Run --client-secret first.")
+    try:
+        result = _native_google.start(services, profile_home=HERMES_HOME)
+    except (_native_google.GoogleWorkspaceError, ValueError) as e:
+        print(f"ERROR: {e}")
         sys.exit(1)
-
-    _ensure_deps()
-    from google_auth_oauthlib.flow import Flow
-
-    flow = Flow.from_client_secrets_file(
-        str(CLIENT_SECRET_PATH),
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
-        autogenerate_code_verifier=True,
-    )
-    auth_url, state = flow.authorization_url(
-        access_type="offline",
-        prompt="consent",
-    )
-    _save_pending_auth(state=state, code_verifier=flow.code_verifier)
-    # Print just the URL so the agent can extract it cleanly
-    print(auth_url)
+    print(result["authorization_url"])
 
 
 def exchange_auth_code(code: str):
     """Exchange the authorization code for a token and save it."""
-    if not CLIENT_SECRET_PATH.exists():
-        print("ERROR: No client secret stored. Run --client-secret first.")
+    if not isinstance(code, str) or not code.startswith("http"):
+        print("ERROR: Paste the complete localhost callback URL, including state and code.")
         sys.exit(1)
-
-    pending_auth = _load_pending_auth()
-    raw_callback = code
-    code, returned_state = _extract_code_and_state(code)
-    if returned_state and returned_state != pending_auth["state"]:
-        print("ERROR: OAuth state mismatch. Run --auth-url again to start a fresh session.")
-        sys.exit(1)
-
-    _ensure_deps()
-    from google_auth_oauthlib.flow import Flow
-    from urllib.parse import parse_qs, urlparse
-
-    # Extract granted scopes from the callback URL if the user pasted the full redirect URL.
-    granted_scopes = list(SCOPES)
-    if isinstance(raw_callback, str) and raw_callback.startswith("http"):
-        params = parse_qs(urlparse(raw_callback).query)
-        scope_val = (params.get("scope") or [""])[0].strip()
-        if scope_val:
-            granted_scopes = scope_val.split()
-
-    flow = Flow.from_client_secrets_file(
-        str(CLIENT_SECRET_PATH),
-        scopes=granted_scopes,
-        redirect_uri=pending_auth.get("redirect_uri", REDIRECT_URI),
-        state=pending_auth["state"],
-        code_verifier=pending_auth["code_verifier"],
-    )
-
     try:
-        # Accept partial scopes — user may deselect some permissions in the consent screen
-        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
-        flow.fetch_token(code=code)
-    except Exception as e:
-        print(f"ERROR: Token exchange failed: {e}")
-        print("The code may have expired. Run --auth-url to get a fresh URL.")
+        _native_google.complete(code, profile_home=HERMES_HOME)
+    except _native_google.GoogleWorkspaceError as e:
+        print(f"ERROR: {e}")
         sys.exit(1)
-
-    creds = flow.credentials
-    token_payload = _normalize_authorized_user_payload(json.loads(creds.to_json()))
-
-    # Store only the scopes actually granted by the user, not what was requested.
-    # creds.to_json() writes the requested scopes, which causes refresh to fail
-    # with invalid_scope if the user only authorized a subset.
-    actually_granted = list(creds.granted_scopes or []) if hasattr(creds, "granted_scopes") and creds.granted_scopes else []
-    if actually_granted:
-        token_payload["scopes"] = actually_granted
-    elif granted_scopes != SCOPES:
-        # granted_scopes was extracted from the callback URL
-        token_payload["scopes"] = granted_scopes
-
-    missing_scopes = _missing_scopes_from_payload(token_payload)
-    if missing_scopes:
-        print(f"WARNING: Token missing some Google Workspace scopes: {', '.join(missing_scopes)}")
-        print("Some services may not be available.")
-
-    TOKEN_PATH.write_text(json.dumps(token_payload, indent=2), encoding="utf-8")
-    PENDING_AUTH_PATH.unlink(missing_ok=True)
     print(f"OK: Authenticated. Token saved to {TOKEN_PATH}")
-    print(f"Profile-scoped token location: {display_hermes_home()}/google_token.json")
+    print(f"Profile-scoped token location: {display_hermes_home()}/google-workspace/token.json")
 
 
 def revoke():
     """Revoke stored token and delete it."""
-    if not TOKEN_PATH.exists():
-        print("No token to revoke.")
-        return
-
-    _ensure_deps()
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
-
-    try:
-        creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
-        if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-
-        import urllib.request
-        urllib.request.urlopen(
-            urllib.request.Request(
-                f"https://oauth2.googleapis.com/revoke?token={creds.token}",
-                method="POST",
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            ),
-            timeout=15,
-        )
-        print("Token revoked with Google.")
-    except Exception as e:
-        print(f"Remote revocation failed (token may already be invalid): {e}")
-
-    TOKEN_PATH.unlink(missing_ok=True)
-    PENDING_AUTH_PATH.unlink(missing_ok=True)
+    result = _native_google.revoke(profile_home=HERMES_HOME)
     print(f"Deleted {TOKEN_PATH}")
+    if not result["remote_revoked"]:
+        print("WARNING: Remote revocation could not be confirmed; local grant was removed.")
 
 
 def main():
@@ -487,21 +329,34 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--check", action="store_true", help="Check if auth is valid (exit 0=yes, 1=no)")
     group.add_argument("--check-live", action="store_true", help="Check auth with a real API call (detects disabled_client)")
-    group.add_argument("--client-secret", metavar="PATH", help="Store OAuth client_secret.json")
     group.add_argument("--auth-url", action="store_true", help="Print OAuth URL for user to visit")
     group.add_argument("--auth-code", metavar="CODE", help="Exchange auth code for token")
     group.add_argument("--revoke", action="store_true", help="Revoke and delete stored token")
     group.add_argument("--install-deps", action="store_true", help="Install Python dependencies")
+    parser.add_argument(
+        "--services",
+        metavar="LIST",
+        help=(
+            "Comma-separated OAuth allowlist for --auth-url: "
+            "email,calendar,drive,contacts,sheets,docs, or explicit all"
+        ),
+    )
     args = parser.parse_args()
+
+    if args.auth_url:
+        try:
+            services = _parse_services(args.services)
+        except ValueError as e:
+            parser.error(str(e))
+    elif args.services is not None:
+        parser.error("--services is only valid with --auth-url")
 
     if args.check:
         sys.exit(0 if check_auth() else 1)
     if getattr(args, "check_live", False):
         sys.exit(0 if check_auth_live() else 1)
-    elif args.client_secret:
-        store_client_secret(args.client_secret)
     elif args.auth_url:
-        get_auth_url()
+        get_auth_url(services)
     elif args.auth_code:
         exchange_auth_code(args.auth_code)
     elif args.revoke:
