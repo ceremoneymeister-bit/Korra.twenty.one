@@ -801,6 +801,112 @@ def check_local_bot_api(issues: list[str]) -> None:
     check_ok('Свой Telegram Bot API: медиа читается с диска', f'({root})')
 
 
+# Человеческие имена провайдеров речи: «local» в отчёте ничего не объясняет,
+# а разница между локальным whisper и облаком — это 11 секунд против двух.
+_STT_PROVIDER_LABELS = {
+    "local": 'локальный whisper из образа',
+    "local_command": 'локальная команда распознавания',
+}
+
+
+def _stt_effective_provider(stt_config: dict) -> str:
+    """Чем контур распознает речь прямо сейчас — без установки пакетов.
+
+    ``_get_provider`` — это и есть рантайм-решение, поэтому спрашиваем именно
+    его. Но по дороге он может попытаться доставить faster-whisper: отчёт о
+    состоянии не имеет права тянуть 390 МБ колёс, поэтому эта попытка на время
+    проверки выключается.
+    """
+    import tools.transcription_tools as stt_tools
+
+    original = stt_tools._try_lazy_install_stt
+    stt_tools._try_lazy_install_stt = lambda: False
+    try:
+        return stt_tools._get_provider(stt_config)
+    finally:
+        stt_tools._try_lazy_install_stt = original
+
+
+def _stt_declares_env(stt_config: dict, provider: str) -> bool:
+    """Объявляет ли провайдер речи обязательные переменные окружения.
+
+    Только тогда «ключ есть» — утверждение, а не догадка: у local и у
+    автоопределения проверять нечего.
+    """
+    import tools.transcription_tools as stt_tools
+
+    section = stt_tools._get_named_stt_provider_config(stt_config, provider)
+    return bool(section.get("requires_env"))
+
+
+def check_speech_recognition(issues: list[str]) -> None:
+    """Фактический провайдер речи и причина, по которой выбран именно он.
+
+    Шаблон контура просит deepgram и разрешает откат на local. Без ключа откат
+    срабатывает молча: голосовые обрабатываются, просто в пять раз дольше, и
+    владелец об этом не узнаёт. Свип 12.09.2026 нашёл восемь таких установок из
+    десяти — ни doctor, ни панель фактический выбор не называли.
+    """
+    import tools.transcription_tools as stt_tools
+
+    stt_config = stt_tools._load_stt_config()
+    if not stt_tools.is_stt_enabled(stt_config):
+        check_info('Распознавание речи выключено в настройках (stt.enabled: false)')
+        return
+
+    selected = stt_config.get("provider") or ""
+    selected = str(selected).strip().lower()
+    actual = _stt_effective_provider(stt_config)
+    label = _STT_PROVIDER_LABELS.get(actual, actual)
+
+    missing = stt_tools._stt_missing_required_env(selected, stt_config) if selected else []
+
+    # ``_get_provider`` возвращает исходный выбор и тогда, когда ни один
+    # запасной не готов: его собственная ошибка точнее общей. Для отчёта это
+    # не «работает», а «речи нет вообще» — единственный случай здесь, который
+    # обязан попасть в список проблем.
+    if actual == "none" or (actual == selected and missing):
+        detail = (
+            f'(выбран {selected}: не задан {", ".join(missing)})' if missing
+            else f'(выбран {selected}: провайдер не готов)' if selected
+            else '(нет ни локального whisper, ни облачного провайдера)'
+        )
+        _fail_and_issue(
+            'Распознавание речи не работает: ни один провайдер не готов',
+            detail,
+            'Задайте ключ выбранного провайдера речи (stt.provider) или включите локальный whisper: stt.fallback: local',
+            issues,
+        )
+        return
+
+    if not selected or selected == actual:
+        check_ok(f'Распознавание речи: {label}',
+                 '(ключ есть)' if missing == [] and selected and _stt_declares_env(stt_config, selected)
+                 else '(выбран в настройках)' if selected else '(выбран автоматически)')
+        return
+
+    # Работает запасной провайдер: назвать и его, и причину отката — иначе
+    # недонастройка выглядит как норма.
+    reason = f'не задан {", ".join(missing)}' if missing else 'провайдер не готов'
+    check_warn(f'Распознавание речи: {label}',
+               f'(вместо {selected}: {reason})')
+
+
+def check_channels_and_providers(issues: list[str]) -> None:
+    """Одна секция про то, чем контур слышит, ищет и получает медиа.
+
+    Всё это до сих пор узнавалось только из жалобы владельца: провал фото
+    пролежал девять дней, бесключевой поиск падал сотнями раз за разговор, а
+    речь молча ехала на запасном провайдере. Проверки сведены в одно место,
+    потому что вопрос у владельца один — «чем сейчас работает контур».
+    """
+    _section('Каналы и провайдеры')
+    try:
+        check_speech_recognition(issues)
+    except Exception as exc:
+        check_warn('Не удалось определить провайдер распознавания речи', f'({exc})')
+
+
 def _check_s6_supervision(issues: list[str]) -> None:
     """Inside a container under our s6 /init, surface what s6 sees.
 
@@ -3422,6 +3528,11 @@ def run_doctor(args):
 
     try:
         check_local_bot_api(issues)
+    except Exception:
+        pass
+
+    try:
+        check_channels_and_providers(issues)
     except Exception:
         pass
 
