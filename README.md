@@ -2,243 +2,125 @@
   <img src="assets/banner.png" alt="Korra 21" width="100%">
 </p>
 
-# Korra 21 ☤
-<p align="center">
-  <a href="https://github.com/ceremoneymeister-bit/Korra.twenty.one">Private repository</a> | <code>ghcr.io/ceremoneymeister-bit/korra.twenty.one</code>
-</p>
-<p align="center">
-  <a href="https://github.com/ceremoneymeister-bit/Korra.twenty.one"><img src="https://img.shields.io/badge/Repository-private-blueviolet?style=for-the-badge" alt="Private repository"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
-  <a href="README.ur-pk.md"><img src="https://img.shields.io/badge/Lang-اردو-green?style=for-the-badge" alt="اردو"></a>
-  <a href="README.es.md"><img src="https://img.shields.io/badge/Lang-Español-orange?style=for-the-badge" alt="Español"></a>
-</p>
+# Korra 21
 
-**Korra is a self-improving AI agent and a private hard fork of Hermes Agent
-0.21.** It has a built-in learning loop: it creates skills from experience,
-improves them during use, persists knowledge, searches past conversations, and
-builds a deepening model of who you are across sessions. Upstream authorship and
-licensing are preserved in [LICENSE](LICENSE).
+**ИИ-сотрудники для бизнеса, которые живут на вашем сервере.** Один контейнер:
+панель управления, Telegram-боты, несколько агентов-профилей с собственной
+памятью и характером, расписание задач, файлы, голос и картинки. Данные не
+покидают вашу машину, модель вы подключаете свою.
 
-Use any model you want — Nous Portal, OpenRouter, OpenAI, your own endpoint, and
-the providers included in the installed build. Inspect them with
-`hermes model --help`; switch with `hermes model` — no code changes, no lock-in.
+*English summary is at the bottom of this page.*
 
-<table>
-<tr><td><b>A real terminal interface</b></td><td>Full TUI with multiline editing, slash-command autocomplete, conversation history, interrupt-and-redirect, and streaming tool output.</td></tr>
-<tr><td><b>Lives where you do</b></td><td>Telegram, Discord, Slack, WhatsApp, Signal, and CLI — all from a single gateway process. Voice memo transcription, cross-platform conversation continuity.</td></tr>
-<tr><td><b>A closed learning loop</b></td><td>Agent-curated memory with periodic nudges. Autonomous skill creation after complex tasks. Skills self-improve during use. FTS5 session search with LLM summarization for cross-session recall. <a href="https://github.com/plastic-labs/honcho">Honcho</a> dialectic user modeling. Compatible with the <a href="https://agentskills.io">agentskills.io</a> open standard.</td></tr>
-<tr><td><b>Scheduled automations</b></td><td>Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits — all in natural language, running unattended.</td></tr>
-<tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
-<tr><td><b>Runs anywhere, not just your laptop</b></td><td>Seven terminal backends — local, Docker, SSH, Singularity, Modal, Daytona, and Vercel Sandbox. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
-<tr><td><b>Research-ready</b></td><td>Batch trajectory generation, trajectory compression for training the next generation of tool-calling models.</td></tr>
-</table>
+## Установка за одну просьбу вашему агенту
 
----
+Отправьте своему ИИ-агенту (Claude Code, Codex, Cursor, любому агенту с доступом
+к терминалу) одну фразу:
 
-## Quick Install
+> Установи Korra 21 по инструкции https://github.com/ceremoneymeister-bit/Korra.twenty.one/blob/main/INSTALL.md
 
-Korra's source repository,
-[`ceremoneymeister-bit/Korra.twenty.one`](https://github.com/ceremoneymeister-bit/Korra.twenty.one),
-is private. Client installations use the ready-made container image; there is
-no public shell or PowerShell installer. Authenticate to GHCR first if your
-account is prompted for package access.
+Инструкция написана для агента: каждый шаг там — команда и проверка результата.
+Человеку она тоже читается. Три сценария:
 
-### Linux, macOS, WSL2
+| Куда ставим | Что получится | Что нужно |
+|---|---|---|
+| Сервер Linux amd64 с root (рекомендуется) | контур с панелью, ботами, обновлением и откатом одной командой | 4 vCPU, 8 ГБ RAM, 60 ГБ диска, Docker |
+| Небольшой VPS без подготовки хоста | тот же контур, без файрвола и ключа администратора | 2 vCPU, 4 ГБ RAM, Docker |
+| Ноутбук или рабочий компьютер (Docker Desktop) | локальный агент с панелью на `localhost` | Docker Desktop |
 
-```bash
-docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
-docker run --rm -it \
-  -v "${HOME}/.hermes:/opt/data" \
-  ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
-```
+Образ: `ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest` (linux/amd64).
+Устанавливать нужно **образ из реестра**, а не локальную сборку: у неё другая
+механика слоёв, и расхождения уже ловились.
 
-### Windows (Docker Desktop, PowerShell)
+## Что умеет
 
-Run the ready-made image directly (source installs use `scripts/install.ps1`
-and need access to this private repository):
+- **Панель.** Чат с каждым агентом во вкладках, файлы рабочей папки, ключи и
+  настройки, история, обновление контура, диагностика. Слушает только
+  `127.0.0.1`, наружу открывается по вашему решению (SSH-туннель или ваш
+  реверс-прокси).
+- **Агенты-профили.** Каждый профиль — отдельный сотрудник со своим характером
+  (`SOUL.md`), памятью, ключами и Telegram-ботом. Все профили обслуживает один
+  шлюз, вкладки в панели работают сразу после установки.
+- **Telegram.** Бот на профиль, ответы только разрешённым пользователям,
+  голосовые сообщения распознаются локальной моделью из образа (русский язык
+  без внешних сервисов; с ключом Deepgram точнее).
+- **Память и навыки.** Агент помнит договорённости между сессиями, ищет по
+  прошлым разговорам, создаёт и улучшает навыки по опыту.
+- **Расписание.** Задачи по крону на естественном языке с доставкой в любой
+  канал: отчёты, напоминания, проверки.
+- **Файлы и картинки.** Загрузка в панели, фото с айфона (HEIC) читаются как
+  обычные, генерация и редактирование изображений через подписку ChatGPT
+  (GPT Image 2.5) по референсам.
+- **Google Workspace.** Gmail, Календарь, Диск, Контакты, Таблицы, Документы —
+  подключение из панели, права остаются внутри профиля.
+- **Своя модель.** Любой провайдер: ключ Anthropic, OpenAI, OpenRouter, свой
+  OpenAI-совместимый прокси, подписка ChatGPT/Codex через OAuth. Запасных
+  провайдеров, которые тихо подменяют модель, в Korra нет.
 
-```powershell
-docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
-docker run --rm -it `
-  -v "${env:USERPROFILE}/.hermes:/opt/data" `
-  ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
-```
+## Как это устроено
 
-For the background gateway and dashboard on Windows, use the supplied compose
-file:
+Один контейнер, один каталог данных на хосте (`/opt/korra/data`, внутри
+контейнера `/opt/data`), владелец `uid 10000`. Всё изменяемое состояние —
+конфиг, ключи, сессии, память, файлы — живёт там; обновление образа их не
+трогает. Панель и служебный API привязаны к петле; контейнер запускается без
+`docker.sock`, без монтирования корня хоста и без кода движка снаружи.
 
-```powershell
-docker compose -f docker-compose.windows.yml pull
-docker compose -f docker-compose.windows.yml up -d
-```
+Обновление и откат — host-kit из `docs/client-deploy/`: `update.sh --update`
+проверяет свободное место, снимает бэкап, репетирует миграцию схемы на копии
+и только потом пересоздаёт контейнер; `update.sh --rollback <job>` возвращает
+прежний образ. Каждая операция оставляет полный след в `updates/<job>/`.
 
-The mounted `.hermes` directory keeps configuration and sessions between
-container runs. Termux does not have a separate public client installer in this
-fork.
-
-## Getting Started
+## Первые команды
 
 ```bash
-hermes              # Interactive CLI — start a conversation
-hermes model        # Choose your LLM provider and model
-hermes tools        # Configure which tools are enabled
-hermes config set   # Set individual config values
-hermes config get   # Print individual config values
-hermes gateway      # Start the messaging gateway (Telegram, Discord, etc.)
-hermes setup        # Run the full setup wizard (configures everything at once)
-hermes claw migrate # Migrate from OpenClaw (if coming from OpenClaw)
-hermes update       # Update to the latest version
-hermes doctor       # Diagnose any issues
+docker exec -u 10000 korra korra doctor               # диагностика контура
+docker exec -u 10000 korra korra model                # выбрать провайдера и модель
+docker exec -u 10000 korra korra profile create smm   # новый агент-сотрудник
+docker exec -u 10000 korra korra --help
 ```
 
-The installed build is authoritative: start with `hermes --help` and
-`hermes <command> --help`, then inspect its source code when more detail is
-needed.
+Панель: `http://127.0.0.1:9119` (с сервера — через SSH-туннель). Первое
+сообщение в чате без провайдера получит честный ответ, что ключ не настроен,
+и подсказку, где его добавить.
+
+## Документация
+
+- [INSTALL.md](INSTALL.md) — установка (для агента и для человека), обновление, откат.
+- [docs/client-deploy/README.md](docs/client-deploy/README.md) — полный операторский чек-лист раскатки на сервер клиента.
+- [docs/client-deploy/PROVIDER.md](docs/client-deploy/PROVIDER.md) — подключение провайдера модели.
+- [docs/host-admin-setup.md](docs/host-admin-setup.md) — права агента на хосте и их отзыв.
+- [RELEASE_NOTES.md](RELEASE_NOTES.md) — что нового в выпусках.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — dev-окружение, тесты, правила изменений.
+
+## Безопасность
+
+- Ключи и токены лежат только в `.env` каталога данных с правами `600`; в
+  конфиг, git, образ и отчёты они не попадают.
+- Telegram-бот отвечает только пользователям из `TELEGRAM_ALLOWED_USERS`.
+- Право `sudo` у агента внутри контейнера выключено для клиентских
+  установок (`AGENT_SUDO=0`); включает его только владелец машины осознанно.
+- Pull request из форков запускается в CI только после ручного одобрения.
+
+## Лицензия
+
+MIT. Проект развивает открытый код других авторов; их уведомления об авторстве
+сохранены в [LICENSE](LICENSE) и [NOTICE](NOTICE).
 
 ---
 
-## Skip the API-key collection — Nous Portal
+## English summary
 
-Korra works with whatever provider you want. If you'd rather not collect five
-separate API keys for the model, web search, image generation, TTS, and a cloud
-browser, the built-in **Nous Portal** integration can cover them under one
-subscription:
+**Korra 21 is a self-hosted AI staff for a business:** one container with a
+control panel, Telegram bots, several agent profiles with their own memory and
+personality, scheduled tasks, files, voice and image generation. Data stays on
+your machine; you bring your own model provider.
 
-- **300+ models** — pick any of them with `/model <name>`
-- **Tool Gateway** — web search (Firecrawl), image generation (FAL), text-to-speech (OpenAI), cloud browser (Browser Use), all routed through your sub. No extra accounts.
+**Install with your AI agent:** send it one line —
+*"Install Korra 21 following https://github.com/ceremoneymeister-bit/Korra.twenty.one/blob/main/INSTALL.en.md"*.
+The runbook covers a Linux amd64 server (recommended), a small VPS without host
+hardening, and a laptop with Docker Desktop. Image:
+`ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest`.
 
-One command from a fresh install:
-
-```bash
-hermes setup --portal
-```
-
-That logs you in via OAuth, sets Nous as your provider, and turns on the Tool
-Gateway. Check what's wired up with `hermes portal info`; use
-`hermes portal --help` and the installed provider code for details that match
-this build.
-
-You can still bring your own keys per-tool whenever you want — the gateway is per-backend, not all-or-nothing.
-
----
-
-## CLI vs Messaging Quick Reference
-
-Korra has two entry points: start the terminal UI with `hermes`, or run the
-gateway and talk to it from Telegram, Discord, Slack, WhatsApp, Signal, or
-Email. Once you're in a conversation, many slash commands are shared across
-both interfaces.
-
-| Action                         | CLI                                           | Messaging platforms                                                              |
-| ------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------- |
-| Start chatting                 | `hermes`                                      | Run `hermes gateway setup` + `hermes gateway start`, then send the bot a message |
-| Start fresh conversation       | `/new` or `/reset`                            | `/new` or `/reset`                                                               |
-| Change model                   | `/model [provider:model]`                     | `/model [provider:model]`                                                        |
-| Set a personality              | `/personality [name]`                         | `/personality [name]`                                                            |
-| Retry or undo the last turn    | `/retry`, `/undo`                             | `/retry`, `/undo`                                                                |
-| Compress context / check usage | `/compress`, `/usage`, `/insights [--days N]` | `/compress`, `/usage`, `/insights [days]`                                        |
-| Browse skills                  | `/skills` or `/<skill-name>`                  | `/<skill-name>`                                                                  |
-| Interrupt current work         | `Ctrl+C` or send a new message                | `/stop` or send a new message                                                    |
-| Platform-specific status       | `/platforms`                                  | `/status`, `/sethome`                                                            |
-
-For the full command lists, use `hermes --help`,
-`hermes gateway --help`, and the installed command code.
-
----
-
-## Documentation
-
-Korra has no external documentation site. The source of truth is the installed
-build:
-
-| Topic | Where to verify |
-| --- | --- |
-| CLI and setup | `hermes --help`, `hermes <command> --help` |
-| Configuration and environment | `hermes config --help`, `hermes config env-path`, installed configuration code |
-| Providers and models | `hermes model --help`, installed provider plugins |
-| Messaging gateway | `hermes gateway --help`, installed platform adapters |
-| Tools and toolsets | `hermes tools --help`, `hermes tools list`, `toolsets.py` |
-| Skills | `hermes skills --help`, `hermes skills browse`, installed skills |
-| Development and architecture | `AGENTS.md` and the checked-out source tree |
-
----
-
-## Migrating from OpenClaw
-
-If you're coming from OpenClaw, Korra can automatically import your settings,
-memories, skills, and API keys.
-
-**During first-time setup:** The setup wizard (`hermes setup`) automatically detects `~/.openclaw` and offers to migrate before configuration begins.
-
-**Anytime after install:**
-
-```bash
-hermes claw migrate              # Interactive migration (full preset)
-hermes claw migrate --dry-run    # Preview what would be migrated
-hermes claw migrate --preset user-data   # Migrate without secrets
-hermes claw migrate --overwrite  # Overwrite existing conflicts
-```
-
-What gets imported:
-
-- **SOUL.md** — persona file
-- **Memories** — MEMORY.md and USER.md entries
-- **Skills** — user-created skills → `~/.hermes/skills/openclaw-imports/`
-- **Command allowlist** — approval patterns
-- **Messaging settings** — platform configs, allowed users, working directory
-- **API keys** — allowlisted secrets (Telegram, OpenRouter, OpenAI, Anthropic, ElevenLabs)
-- **TTS assets** — workspace audio files
-- **Workspace instructions** — AGENTS.md (with `--workspace-target`)
-
-See `hermes claw migrate --help` for all options, or use the `openclaw-migration` skill for an interactive agent-guided migration with dry-run previews.
-
----
-
-## Contributing
-
-Contributions are handled in the private
-[`ceremoneymeister-bit/Korra.twenty.one`](https://github.com/ceremoneymeister-bit/Korra.twenty.one)
-repository. You need explicit repository access; read `AGENTS.md` in the
-checkout for development rules and use the checked-out source as the technical
-reference.
-
-Clone into the standard development layout after authenticating to GitHub:
-
-```bash
-gh repo clone ceremoneymeister-bit/Korra.twenty.one \
-  "${HERMES_HOME:-$HOME/.hermes}/hermes-agent"
-cd "${HERMES_HOME:-$HOME/.hermes}/hermes-agent"
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv ~/.hermes/venvs/hermes-dev --python 3.11
-source ~/.hermes/venvs/hermes-dev/bin/activate
-uv pip install -e ".[all,dev]"
-scripts/run_tests.sh
-```
-
-For CI or another checkout location, clone the same private repository with
-credentials that have access. Client users do not need a source checkout; they
-run the prebuilt GHCR image from the installation section.
-
-Create the venv outside the cloned source tree — a venv inside the directory
-the agent operates from can be wiped by a relative-path command the agent runs
-against its own checkout, destroying the running runtime mid-session.
-
----
-
-## Project Links
-
-- 🔒 [Private repository](https://github.com/ceremoneymeister-bit/Korra.twenty.one)
-- 🐛 [Private issue tracker](https://github.com/ceremoneymeister-bit/Korra.twenty.one/issues)
-- 📚 [Skills Hub](https://agentskills.io)
-- 🔌 [computer-use-linux](https://github.com/avifenesh/computer-use-linux) — Linux desktop-control MCP server for Korra and other MCP hosts, with AT-SPI accessibility trees, Wayland/X11 input, screenshots, and compositor window targeting.
-- 🔌 [HermesClaw](https://github.com/AaronWong1999/hermesclaw) — Community WeChat bridge compatible with the `hermes` command and OpenClaw.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
-Korra 21 is a private hard fork of Hermes Agent 0.21. Upstream authorship and
-license notices are preserved in [LICENSE](LICENSE).
+The panel binds to `127.0.0.1:9119` only; the container runs without
+`docker.sock`, host-root mounts or engine code from outside. Updates and
+rollbacks go through `docs/client-deploy/update.sh`. License: MIT; upstream
+authorship notices are kept in `LICENSE` and `NOTICE`.

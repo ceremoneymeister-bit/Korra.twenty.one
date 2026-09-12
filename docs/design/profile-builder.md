@@ -2,11 +2,11 @@
 
 Status: design proposal (not yet implemented)
 Author: drafted for Teknium
-Supersedes: PR #31781 (prompt_toolkit `hermes profile wizard`)
+Supersedes: PR #31781 (prompt_toolkit `korra profile wizard`)
 
 ## Why this, not the CLI wizard
 
-PR #31781 added a keyboard-driven `hermes profile wizard` in the terminal.
+PR #31781 added a keyboard-driven `korra profile wizard` in the terminal.
 The decision is to **not** build the profile-creation experience in the CLI.
 The dashboard already owns mature, separate pages for every element a profile
 needs, and a profile is just a HERMES_HOME directory — so the dashboard is the
@@ -71,7 +71,7 @@ create flow is:
 2. write model (synchronous, HERMES_HOME override)
 3. write selected MCP servers (synchronous, HERMES_HOME override)
 4. seed/enable selected built-in + optional skills (synchronous)
-5. spawn `hermes -p <profile> skills install <id>` per hub skill (async, returns PIDs)
+5. spawn `korra -p <profile> skills install <id>` per hub skill (async, returns PIDs)
 
 Steps 1–4 commit before the response; step 5 returns a list of action PIDs the
 UI polls (same pattern as today's SkillsPage hub install). The builder's

@@ -48,7 +48,7 @@ Writes always target `settings`; they do not rewrite or delete legacy values.
 ### Namespace jail
 
 The API does not accept full config paths. A plugin can never use it to inspect
-or change arbitrary Hermes configuration.
+or change arbitrary Korra configuration.
 
 Accepted:
 
@@ -68,7 +68,7 @@ ctx.set_config(r"..\..\model.provider", "attacker-proxy")
 ```
 
 There is no global read allowlist: `ctx.profile_name` already exposes the only
-small host fact requested by the RFC. Settings writes use Hermes'
+small host fact requested by the RFC. Settings writes use Korra's
 profile-aware config loader/saver and atomic YAML replacement. The bridge
 validates the existing YAML before writing so malformed config is never
 silently replaced. Every operation resolves the active context-local
@@ -101,7 +101,7 @@ location.
 ### State guarantees
 
 - **Profile isolation:** the data root resolves from the active context-local
-  Hermes home on every operation.
+  Korra home on every operation.
 - **Atomic replacement:** state writes use temp-file + `fsync` + `os.replace`.
 - **Concurrent updates:** a sibling lock file serializes read-modify-write across
   threads and processes (`fcntl` on POSIX, `msvcrt` on Windows).
@@ -126,7 +126,7 @@ semantics.
 
 ## Verification contract
 
-The implementation is covered with real temporary-Hermes-home tests for:
+The implementation is covered with real temporary-Korra-home tests for:
 
 - fixture-plugin discovery and config/state round trips;
 - canonical `settings` writes and legacy `config` read fallback;
@@ -139,6 +139,5 @@ The implementation is covered with real temporary-Hermes-home tests for:
 
 ## Related
 
-- [Issue #64227](https://github.com/NousResearch/hermes-agent/issues/64227)
-- [RFC PR #58542](https://github.com/NousResearch/hermes-agent/pull/58542) by Topher Ross
+- Issue #64227 and RFC PR #58542 (by Topher Ross) — перенесено из апстрима
 - #67531 — standalone plugin settings namespace discussion

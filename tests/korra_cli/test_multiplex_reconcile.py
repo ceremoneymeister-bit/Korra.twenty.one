@@ -51,7 +51,7 @@ def _profile(home: Path, name: str, *, key: str | None = None, pin: bool = False
 
 
 def _legacy_0_20_home(tmp_path: Path) -> Path:
-    """Pavlova-shaped contour: four profiles, own gateways, no multiplex."""
+    """A 0.20-era contour: four profiles, own gateways, no multiplex flag."""
     home = tmp_path / "data"
     _write(home / "config.yaml", (
         "# Korra 0.20 контур\n"

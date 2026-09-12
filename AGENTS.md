@@ -1,12 +1,12 @@
-# Hermes Agent - Development Guide
+# Korra - Development Guide
 
-Instructions for AI coding assistants and developers working on the hermes-agent codebase.
+Instructions for AI coding assistants and developers working on the Korra codebase.
 
 **Never give up on the right solution.**
 
-## What Hermes Is
+## What Korra Is
 
-Hermes is a personal AI agent that runs the same agent core across a CLI, a
+Korra is a personal AI agent that runs the same agent core across a CLI, a
 messaging gateway (Telegram, Discord, Slack, and ~20 other platforms), a TUI,
 and an Electron desktop app. It learns across sessions (memory + skills),
 delegates to subagents, runs scheduled jobs, and drives a real terminal and
@@ -40,7 +40,7 @@ This is the project's intent layer. Use it two ways:
    job here is to recognize design intent and *avoid wrongly closing a
    legitimate contribution*, not to make the won't-implement call itself.
 
-Read the balance right: Hermes ships a **lot** — most merges are bug fixes to
+Read the balance right: Korra ships a **lot** — most merges are bug fixes to
 real reported behavior, and the product surface (platforms, channels,
 providers, models, desktop/TUI features) expands aggressively and on purpose.
 The restraint below is aimed squarely at the **core agent + the model tool
@@ -60,7 +60,7 @@ conservative at the waist.
   including large ones (a new messaging channel, a session-cap feature, a
   Windows PTY bridge). Breadth in the product is a goal, not a footprint
   concern — as long as it integrates with the existing setup/config UX
-  (`hermes tools`, `hermes setup`, auto-install) rather than bolting on a raw
+  (`korra tools`, `korra setup`, auto-install) rather than bolting on a raw
   env var.
 - **Refactor god-files into clean modules.** Extracting a multi-thousand-line
   cluster out of `cli.py` / `run_agent.py` / `gateway/run.py` into a focused
@@ -117,7 +117,7 @@ conservative at the waist.
   feature.
 - **Outbound telemetry / usage attribution without opt-in gating.** No new
   analytics, third-party identifier tagging, or attribution tags until a
-  generic user-facing opt-in (config gate + setup prompt + `hermes tools`
+  generic user-facing opt-in (config gate + setup prompt + `korra tools`
   toggle) exists. Park behind a label, do not merge.
 - **Change-detector tests, cache-breaking mid-conversation, dead code wired in
   without E2E proof, and plugins that touch core files.** Plugins live in their
@@ -129,8 +129,8 @@ conservative at the waist.
   this repo. They place an ongoing maintenance burden on us to keep them working
   against a fast-moving core, for a backend we don't own. Ship them as a
   **standalone plugin repo** users install into `~/.hermes/plugins/` (or via a
-  pip entry point), and promote them in the Nous Research Discord
-  (`#plugins-skills-and-skins`). This is a coupling-and-maintenance decision, not
+  pip entry point), and promote them in the community channels. This is a
+  coupling-and-maintenance decision, not
   a quality bar — the plugin can be excellent and still be a close. PRs that add
   such a directory to the tree are closed with a pointer to publish it as its own
   repo.
@@ -187,9 +187,9 @@ Each rung adds more permanent surface than the one above. Choose the highest
 1. **Extend existing code** — the capability is a variation of something that
    already exists. Zero new surface.
 2. **CLI command + skill** — manages config/state/infra expressible as shell
-   commands. The agent runs `hermes <subcommand>` guided by a skill. Zero
+   commands. The agent runs `korra <subcommand>` guided by a skill. Zero
    model-tool footprint. Default choice for subscriptions, scheduled tasks,
-   service setup. Examples: `hermes webhook`, `hermes cron`, `hermes tools`.
+   service setup. Examples: `korra webhook`, `korra cron`, `korra tools`.
 3. **Service-gated tool (`check_fn`)** — needs structured params/returns AND
    only appears when a prerequisite is configured. Zero footprint otherwise.
    Examples: Home Assistant tools (gated on token), memory-provider tools.
@@ -219,12 +219,12 @@ on the backend process.
 
 The client and the backend are separate machines on separate clocks. The
 desktop app can be driving a backend Electron spawned locally, one over SSH,
-one behind a plain URL + token, or Hermes Cloud. Only the first two are spawned
+one behind a plain URL + token, or a hosted backend. Only the first two are spawned
 by us and carry `HERMES_DESKTOP=1`. Every env-keyed GUI gate is therefore a
 silent no-op on the other half of the topologies, and the failure is invisible:
 the tool is stripped from the schema before the model ever sees it, on the same
 backend whose platform hint is telling the model it's *"chatting inside the
-Hermes desktop app."*
+Korra desktop app."*
 
 The pattern that works:
 
@@ -241,7 +241,7 @@ The pattern that works:
 - **Ask which identity you actually mean.** `HERMES_DESKTOP=1` legitimately
   marks *"this backend process was spawned by the app"* — it gates the cron
   ticker and web-dist handling correctly. It does NOT mean "a GUI is watching",
-  and the embedded terminal pane (`hermes --tui` against that same backend) is
+  and the embedded terminal pane (`korra --tui` against that same backend) is
   the standing counterexample.
 
 Same test both ways: if the capability would still make sense with the client
@@ -267,7 +267,7 @@ The canonical source is the filesystem. The notes call out the load-bearing
 entry points you'll actually edit.
 
 ```
-hermes-agent/
+<repo root>/
 ├── run_agent.py          # AIAgent class — core conversation loop (~12k LOC)
 ├── model_tools.py        # Tool orchestration, discover_builtin_tools(), handle_function_call()
 ├── toolsets.py           # Toolset definitions, _HERMES_CORE_TOOLS list
@@ -298,7 +298,7 @@ hermes-agent/
 │                         #   strike-freedom-cockpit, ...
 ├── optional-skills/      # Heavier/niche skills shipped but NOT active by default
 ├── skills/               # Built-in skills bundled with the repo
-├── ui-tui/               # Ink (React) terminal UI — `hermes --tui`
+├── ui-tui/               # Ink (React) terminal UI — `korra --tui`
 │   └── src/              # entry.tsx, app.tsx, gatewayClient.ts + app/components/hooks/lib
 ├── tui_gateway/          # Python JSON-RPC backend for the TUI
 ├── acp_adapter/          # ACP server (VS Code / Zed / JetBrains integration)
@@ -311,11 +311,11 @@ hermes-agent/
 **User config:** `~/.hermes/config.yaml` (settings), `~/.hermes/.env` (API keys only).
 **Logs:** `~/.hermes/logs/` — `agent.log` (INFO+), `errors.log` (WARNING+),
 `gateway.log` when running the gateway. Profile-aware via `get_hermes_home()`.
-Browse with `hermes logs [--follow] [--level ...] [--session ...]`.
+Browse with `korra logs [--follow] [--level ...] [--session ...]`.
 
 ## TypeScript Style
 
-Applies to TypeScript across Hermes: desktop, TUI, website, and future TS packages.
+Applies to TypeScript across Korra: desktop, TUI, website, and future TS packages.
 
 - Prefer small nanostores over component state when state is shared, reused, or read by distant UI.
 - Let each feature own its atoms. Chat state belongs near chat, shell state near shell, shared state in `src/store`.
@@ -466,12 +466,12 @@ if canonical == "mycommand":
 
 ## TUI Architecture (ui-tui + tui_gateway)
 
-The TUI is a full replacement for the classic (prompt_toolkit) CLI, activated via `hermes --tui` or `HERMES_TUI=1`.
+The TUI is a full replacement for the classic (prompt_toolkit) CLI, activated via `korra --tui` or `HERMES_TUI=1`.
 
 ### Process Model
 
 ```
-hermes --tui
+korra --tui
   └─ Node (Ink)  ──stdio JSON-RPC──  Python (tui_gateway)
        │                                  └─ AIAgent + tools + sessions
        └─ renders transcript, composer, prompts, activity
@@ -515,22 +515,22 @@ npm run fmt       # prettier
 npm test          # vitest
 ```
 
-### TUI in the Dashboard (`hermes dashboard` → `/chat`)
+### TUI in the Dashboard (`korra dashboard` → `/chat`)
 
-The dashboard embeds the real `hermes --tui` — **not** a rewrite.  See `korra_cli/pty_bridge.py` + the `@app.websocket("/api/pty")` endpoint in `korra_cli/web_server.py`.
+The dashboard embeds the real `korra --tui` — **not** a rewrite.  See `korra_cli/pty_bridge.py` + the `@app.websocket("/api/pty")` endpoint in `korra_cli/web_server.py`.
 
 - Browser loads `web/src/pages/ChatPage.tsx`, which mounts xterm.js's `Terminal` with the WebGL renderer, `@xterm/addon-fit` for container-driven resize, and `@xterm/addon-unicode11` for modern wide-character widths.
 - `/api/pty?token=…` upgrades to a WebSocket; auth uses the same ephemeral `_SESSION_TOKEN` as REST, via query param (browsers can't set `Authorization` on WS upgrade).
-- The server spawns whatever `hermes --tui` would spawn, through `ptyprocess` (POSIX PTY — WSL works, native Windows does not).
+- The server spawns whatever `korra --tui` would spawn, through `ptyprocess` (POSIX PTY — WSL works, native Windows does not).
 - Frames: raw PTY bytes each direction; resize via `\x1b[RESIZE:<cols>;<rows>]` intercepted on the server and applied with `TIOCSWINSZ`.
 
-**Do not re-implement the primary chat experience in React.** The main transcript, composer/input flow (including slash-command behavior), and PTY-backed terminal belong to the embedded `hermes --tui` — anything new you add to Ink shows up in the dashboard automatically. If you find yourself rebuilding the transcript or composer for the dashboard, stop and extend Ink instead.
+**Do not re-implement the primary chat experience in React.** The main transcript, composer/input flow (including slash-command behavior), and PTY-backed terminal belong to the embedded `korra --tui` — anything new you add to Ink shows up in the dashboard automatically. If you find yourself rebuilding the transcript or composer for the dashboard, stop and extend Ink instead.
 
 **Structured React UI around the TUI is allowed when it is not a second chat surface.** Sidebar widgets, inspectors, summaries, status panels, and similar supporting views (e.g. `ChatSidebar`, `ModelPickerDialog`, `ToolCall`) are fine when they complement the embedded TUI rather than replacing the transcript / composer / terminal. Keep their state independent of the PTY child's session and surface their failures non-destructively so the terminal pane keeps working unimpaired.
 
 ### Electron Desktop Chat App (`apps/desktop/`)
 
-A **separate** chat surface from both the classic CLI and the dashboard's embedded TUI. It is an Electron + React + nanostore renderer (`@assistant-ui/react`) that talks to a `tui_gateway` backend over JSON-RPC (`requestGateway(method, params)`). The WebSocket/JSON-RPC transport lives in the framework-agnostic `apps/shared` package (`@hermes/shared` — `JsonRpcGatewayClient` + WS URL helpers), which the web dashboard (`web/`) also consumes; **desktop has no build/runtime dependency on the dashboard frontend** — it spawns a headless `hermes serve` backend server (the same gateway `dashboard` serves, minus the browser UI entirely: `serve` sets `headless_backend=True`, so `cmd_dashboard` skips `_build_web_ui` AND exports `HERMES_SERVE_HEADLESS=1` so `mount_spa()` disables the SPA even if a stray `web_dist/` exists — only the JSON-RPC/WS/API surface is reachable). `dashboard` and `serve` share `cmd_dashboard`/`start_server` but are independent surfaces — neither launches the other. The one exception is a backward-compat *fallback*: `serve` is newer, so the desktop spawn (`electron/backend-command.ts` + `backendSupportsServe()` in `electron/main.ts`) detects whether the resolved runtime registers `serve` and, only when it does not (an older managed install / PATH `hermes` the app hasn't updated yet), rewrites the argv to the legacy `dashboard --no-open`. Without that, a new app against an un-upgraded runtime would crash on an unknown subcommand and brick every mid-upgrade user. It does NOT embed `hermes --tui` — it has its own composer, transcript, and slash-command pipeline. For scoped Desktop architecture, state, resolver, transport, and testing rules, read `apps/desktop/AGENTS.md`.
+A **separate** chat surface from both the classic CLI and the dashboard's embedded TUI. It is an Electron + React + nanostore renderer (`@assistant-ui/react`) that talks to a `tui_gateway` backend over JSON-RPC (`requestGateway(method, params)`). The WebSocket/JSON-RPC transport lives in the framework-agnostic `apps/shared` package (`@hermes/shared` — `JsonRpcGatewayClient` + WS URL helpers), which the web dashboard (`web/`) also consumes; **desktop has no build/runtime dependency on the dashboard frontend** — it spawns a headless `korra serve` backend server (the same gateway `dashboard` serves, minus the browser UI entirely: `serve` sets `headless_backend=True`, so `cmd_dashboard` skips `_build_web_ui` AND exports `HERMES_SERVE_HEADLESS=1` so `mount_spa()` disables the SPA even if a stray `web_dist/` exists — only the JSON-RPC/WS/API surface is reachable). `dashboard` and `serve` share `cmd_dashboard`/`start_server` but are independent surfaces — neither launches the other. The one exception is a backward-compat *fallback*: `serve` is newer, so the desktop spawn (`electron/backend-command.ts` + `backendSupportsServe()` in `electron/main.ts`) detects whether the resolved runtime registers `serve` and, only when it does not (an older managed install / PATH `korra` the app hasn't updated yet), rewrites the argv to the legacy `dashboard --no-open`. Without that, a new app against an un-upgraded runtime would crash on an unknown subcommand and brick every mid-upgrade user. It does NOT embed `korra --tui` — it has its own composer, transcript, and slash-command pipeline. For scoped Desktop architecture, state, resolver, transport, and testing rules, read `apps/desktop/AGENTS.md`.
 
 **Slash commands in the desktop app are curated client-side, then dispatched to the backend.** The pipeline:
 
@@ -538,7 +538,7 @@ A **separate** chat surface from both the classic CLI and the dashboard's embedd
 - **The renderer curates via `apps/desktop/src/lib/desktop-slash-commands.ts`.** This is the load-bearing file. It holds `DESKTOP_COMMAND_SPECS` (the built-ins and their Desktop surfaces) plus `NO_DESKTOP_SURFACE` block-lists for terminal-only / messaging-only / picker-owned / settings-owned / advanced commands that should NOT clutter the desktop popover.
   - `isDesktopSlashCommand(name)` — gates **execution**. Returns true for built-ins AND for any non-built-in (skill / quick command), so typed extension commands run.
   - `isDesktopSlashSuggestion(name)` — gates **discovery/completion**. Used by BOTH completion paths in `app/chat/composer/hooks/use-slash-completions.ts` (empty-query catalog filter + typed-query `complete.slash` filter) and by `filterDesktopCommandsCatalog`.
-  - `isDesktopSlashExtensionCommand(name)` — true when the command is NOT a known Hermes built-in (i.e. a skill or user quick command). Both suggestion and catalog-filter paths allow extensions through so skill commands surface in the palette. (Added when fixing "skill commands missing from the desktop slash palette" — the curated allow-list was silently dropping every skill/quick command from completions even though they executed fine when typed.)
+  - `isDesktopSlashExtensionCommand(name)` — true when the command is NOT a known Korra built-in (i.e. a skill or user quick command). Both suggestion and catalog-filter paths allow extensions through so skill commands surface in the palette. (Added when fixing "skill commands missing from the desktop slash palette" — the curated allow-list was silently dropping every skill/quick command from completions even though they executed fine when typed.)
 - **Dispatch** lives in `app/session/hooks/use-prompt-actions/slash.ts` (`runSlash`): built-ins that the desktop owns (`/skin`, `/help`, `/new`, …) are handled locally or via `commands.catalog`; everything else goes to `slash.exec`, falling back to `command.dispatch` (which the gateway resolves into skill / alias / exec directives). A skill command resolves to `{type: "skill", message}` and is submitted as a normal prompt.
 
 **Rule:** the desktop slash palette's curation is about hiding noise (terminal-only / messaging-only built-ins), NOT about hiding user-activated extensions. Skill commands and `quick_commands` are extensions the backend surfaces — they belong in completions. If you tighten `desktop-slash-commands.ts`, keep `isDesktopSlashExtensionCommand` flowing into both the suggestion and catalog-filter paths. Tests: from `apps/desktop`, run `npx vitest run src/lib/desktop-slash-commands.test.ts` (workspace dependencies are installed at the repo root).
@@ -549,14 +549,14 @@ A **separate** chat surface from both the classic CLI and the dashboard's embedd
 
 Before adding any tool, settle the footprint question first (see "The
 Footprint Ladder" in the Contribution Rubric): most capabilities should NOT
-be core tools. For custom or local-only tools, do **not** edit Hermes core.
+be core tools. For custom or local-only tools, do **not** edit Korra core.
 Use the plugin route instead: create `~/.hermes/plugins/<name>/plugin.yaml`
 and `~/.hermes/plugins/<name>/__init__.py`, then register tools with
 `ctx.register_tool(...)`. Plugin toolsets are discovered automatically and can be
 enabled or disabled without touching `tools/` or `toolsets.py`.
 
 Use the built-in route below only when the user is explicitly contributing a new
-core Hermes tool that should ship in the base system.
+core Korra tool that should ship in the base system.
 
 Built-in/core tools require changes in **2 files**:
 
@@ -666,7 +666,7 @@ the env var in code (see `gateway_timeout`, `terminal.cwd` → `TERMINAL_CWD`).
 | Loader | Used by | Location |
 |--------|---------|----------|
 | `load_cli_config()` | CLI mode | `cli.py` — merges CLI-specific defaults + user YAML |
-| `load_config()` | `hermes tools`, `hermes setup`, most CLI subcommands | `korra_cli/config.py` — merges `DEFAULT_CONFIG` + user YAML |
+| `load_config()` | `korra tools`, `korra setup`, most CLI subcommands | `korra_cli/config.py` — merges `DEFAULT_CONFIG` + user YAML |
 | Direct YAML load | Gateway runtime | `gateway/run.py` + `gateway/config.py` — reads user YAML raw |
 
 If you add a new key and the CLI sees it but the gateway doesn't (or vice
@@ -722,7 +722,7 @@ korra_cli/skin_engine.py    # SkinConfig dataclass, built-in skins, YAML loader
 
 ### Built-in skins
 
-- `default` — Classic Hermes gold/kawaii (the current look)
+- `default` — Classic Korra gold/kawaii (the current look)
 - `ares` — Crimson/bronze war-god theme with custom spinner wings
 - `mono` — Clean grayscale monochrome
 - `slate` — Cool blue developer-focused theme
@@ -773,7 +773,7 @@ Activate with `/skin cyberpunk` or `display.skin: cyberpunk` in config.yaml.
 
 ## Plugins
 
-Hermes has two plugin surfaces. Both live under `plugins/` in the repo so
+Korra has two plugin surfaces. Both live under `plugins/` in the repo so
 repo-shipped plugins can be discovered alongside user-installed ones in
 `~/.hermes/plugins/` and pip-installed entry points.
 
@@ -788,8 +788,8 @@ can:
   `on_session_start`, `on_session_end`
 - Register new tools via `ctx.register_tool(...)`
 - Register CLI subcommands via `ctx.register_cli_command(...)` — the
-  plugin's argparse tree is wired into `hermes` at startup so
-  `hermes <pluginname> <subcmd>` works with no change to `main.py`
+  plugin's argparse tree is wired into `korra` at startup so
+  `korra <pluginname> <subcmd>` works with no change to `main.py`
 
 Hooks are invoked from `model_tools.py` (pre/post tool) and `run_agent.py`
 (lifecycle). **Discovery timing pitfall:** `discover_plugins()` only runs
@@ -843,10 +843,10 @@ and is orchestrated by `agent/memory_manager.py`. Lifecycle hooks include
 
 **CLI commands via `plugins/memory/<name>/cli.py`:** if a memory plugin
 defines `register_cli(subparser)`, `discover_plugin_cli_commands()` finds
-it at argparse setup time and wires it into `hermes <plugin>`. The
+it at argparse setup time and wires it into `korra <plugin>`. The
 framework only exposes CLI commands for the **currently active** memory
 provider (read from `memory.provider` in config.yaml), so disabled
-providers don't clutter `hermes --help`.
+providers don't clutter `korra --help`.
 
 **Rule (Teknium, May 2026):** plugins MUST NOT modify core files
 (`run_agent.py`, `cli.py`, `gateway/run.py`, `korra_cli/main.py`, etc.).
@@ -860,7 +860,7 @@ built-in memory providers under `plugins/memory/` is closed. New memory
 backends must ship as **standalone plugin repos** that users install
 into `~/.hermes/plugins/` (or via pip entry points) — they implement
 the same `MemoryProvider` ABC, register through the same discovery
-path, and integrate via `hermes memory setup` / `post_setup()` without
+path, and integrate via `korra memory setup` / `post_setup()` without
 landing in this tree. PRs that add a new directory under
 `plugins/memory/` will be closed with a pointer to publish the
 provider as its own repo. Existing in-tree providers stay; bug fixes
@@ -876,8 +876,8 @@ the existing plugin discovery path and use the ABCs/hooks/ctx surface
 we expose; nothing special is needed in core. The reason is
 maintenance load: every product we absorb into the tree becomes our
 burden to keep working against a fast-moving core, for a backend we
-don't own. Promote standalone plugins in the Nous Research Discord
-(`#plugins-skills-and-skins`). PRs that add such a directory under
+don't own. Promote standalone plugins in the community channels.
+PRs that add such a directory under
 `plugins/` are closed with a pointer to publish it as its own repo —
 this is a coupling decision, not a quality judgment. (The
 `observability/`, `kanban/`, `disk-cleanup/`, etc. directories already
@@ -916,13 +916,12 @@ pattern (ABC + orchestrator + per-plugin directory). Context engines
 plug into `agent/context_engine.py`; image-gen providers into
 `agent/image_gen_provider.py`. Reference / docs-companion plugins
 (`example-dashboard`, `strike-freedom-cockpit`, `plugin-llm-example`,
-`plugin-llm-async-example`) live in the
-[`hermes-example-plugins`](https://github.com/NousResearch/hermes-example-plugins)
+`plugin-llm-async-example`) live in the upstream `hermes-example-plugins`
 companion repo, not in this tree.
 
 ### Bot Mode (`apps/desktop/src/plugins/hermes-bots/`)
 
-The desktop "Bots" experience ships bundled in-tree. Each bot is a Hermes
+The desktop "Bots" experience ships bundled in-tree. Each bot is a Korra
 agent **profile** with a persistent identity. Its design rests on one settled
 invariant that has been regressed repeatedly, cost users real conversation
 history each time, and is not open for re-litigation in a routine PR:
@@ -996,7 +995,7 @@ Two parallel surfaces:
   Organized by category directories (e.g. `skills/github/`, `skills/mlops/`).
 - **`optional-skills/`** — heavier or niche skills shipped with the repo but
   NOT active by default. Installed explicitly via
-  `hermes skills install official/<category>/<skill>`. Adapter lives in
+  `korra skills install official/<category>/<skill>`. Adapter lives in
   `tools/skills_hub.py` (`OptionalSkillSource`). Categories include
   `autonomous-ai-agents`, `blockchain`, `communication`, `creative`,
   `devops`, `email`, `health`, `mcp`, `migration`, `mlops`, `productivity`,
@@ -1037,7 +1036,7 @@ violate them.
    assert len(m.group(1)) <= 60, len(m.group(1))
    ```
 
-2. **Tools referenced in SKILL.md prose must be native Hermes tools or
+2. **Tools referenced in SKILL.md prose must be native Korra tools or
    MCP servers the skill explicitly expects.** When the skill needs a
    capability, point at the proper tool by name in backticks
    (`` `terminal` ``, `` `web_extract` ``, `` `read_file` ``,
@@ -1063,9 +1062,9 @@ violate them.
 
 4. **`author` credits the human contributor first.** For external
    contributions, the contributor's real name + GitHub handle goes
-   first; "Hermes Agent" is the secondary collaborator. If the
-   contributor's commit shows "Hermes Agent" as author (because they
-   used Hermes to draft the skill), replace it with their actual name
+   first; "Korra" is the secondary collaborator. If the
+   contributor's commit shows "Korra" as author (because they
+   used Korra to draft the skill), replace it with their actual name
    — credit the human, not the tool.
 
 5. **SKILL.md body uses the modern section order.** `# <Skill> Skill`
@@ -1112,7 +1111,7 @@ Current toolset keys: `browser`, `clarify`, `code_execution`, `cronjob`,
 `messaging`, `moa`, `rl`, `safe`, `search`, `session_search`, `skills`,
 `spotify`, `terminal`, `todo`, `tts`, `video`, `vision`, `web`, `yuanbao`.
 
-Enable/disable per platform via `hermes tools` (the curses UI) or the
+Enable/disable per platform via `korra tools` (the curses UI) or the
 `tools.<platform>.enabled` / `tools.<platform>.disabled` lists in
 `config.yaml`.
 
@@ -1123,7 +1122,7 @@ Enable/disable per platform via `hermes tools` (the curses UI) or the
 `tools/delegate_tool.py` spawns a subagent with an isolated
 context + terminal session. By default the parent waits for the
 child's summary before continuing its own loop. With `background=true`,
-Hermes returns a delegation id immediately and the result re-enters the
+Korra returns a delegation id immediately and the result re-enters the
 conversation later through the async-delegation completion queue.
 
 Two shapes:
@@ -1161,7 +1160,7 @@ go to `~/.hermes/skills/.archive/` and are restorable.
 
 - **Core:** `agent/curator.py` (review loop, auto-transitions, LLM review
   prompt) + `agent/curator_backup.py` (pre-run tar.gz snapshots).
-- **CLI:** `korra_cli/curator.py` wires `hermes curator <verb>` where
+- **CLI:** `korra_cli/curator.py` wires `korra curator <verb>` where
   verbs are: `status`, `run`, `pause`, `resume`, `pin`, `unpin`,
   `archive`, `restore`, `prune`, `backup`, `rollback`.
 - **Telemetry:** `tools/skill_usage.py` owns the sidecar
@@ -1190,7 +1189,7 @@ Full user-facing docs: `website/docs/user-guide/features/curator.md`.
 ## Cron (scheduled jobs)
 
 `cron/jobs.py` (job store) + `cron/scheduler.py` (tick loop). Agents
-schedule jobs via the `cronjob` tool; users via `hermes cron <verb>`
+schedule jobs via the `cronjob` tool; users via `korra cron <verb>`
 (`list`, `add`, `edit`, `pause`, `resume`, `run`, `remove`) or the
 `/cron` slash command.
 
@@ -1226,12 +1225,12 @@ main conversation's message-role alternation stays intact.
 ## Kanban (multi-agent work queue)
 
 Durable SQLite-backed board that lets multiple profiles / workers
-collaborate on shared tasks. Users drive it via `hermes kanban <verb>`;
+collaborate on shared tasks. Users drive it via `korra kanban <verb>`;
 workers spawned by the dispatcher drive it via a dedicated `kanban_*`
 toolset so their schema footprint is zero when they're not inside a
 kanban task.
 
-- **CLI:** `korra_cli/kanban.py` wires `hermes kanban` with verbs
+- **CLI:** `korra_cli/kanban.py` wires `korra kanban` with verbs
   `init`, `create`, `list` (alias `ls`), `show`, `assign`, `link`,
   `unlink`, `comment`, `attach`, `attachments`, `attach-rm`, `complete`,
   `request-review`, `request-changes`, `reopen-review`, `block`, `unblock`, `archive`,
@@ -1267,7 +1266,7 @@ Full user-facing docs: `website/docs/user-guide/features/kanban.md`.
 
 ---
 
-## Update Pipeline (`hermes update`)
+## Update Pipeline (`korra update`)
 
 The updater is transactional in shape (fleet-update campaign, #91277 —
 Aug 2026). Every stage exists because its absence was a real field
@@ -1278,7 +1277,7 @@ guards:
 plan → snapshot → apply → restart-per-kind → verify → report
 ```
 
-- **Plan** (`korra_cli/update_inventory.py`, `hermes update --plan`):
+- **Plan** (`korra_cli/update_inventory.py`, `korra update --plan`):
   read-only inventory — install kind, all profiles, every live gateway
   with supervisor + running code version. Deployment kinds are
   first-class: `git` updates in place; `docker`/`nix`/`apt` are NOT
@@ -1326,7 +1325,7 @@ without checking that design; scans are the fallback layer.
 
 ### Gateway lifecycle vs. the Desktop app
 
-`hermes serve` (control plane, desktop-spawned child) dies with the app
+`korra serve` (control plane, desktop-spawned child) dies with the app
 — by design. The messaging gateway (`gateway run`) SURVIVES the app: the
 serve backend's `/api/gateway/*` endpoints spawn it detached
 (`_spawn_hermes_action` — `start_new_session` / `DETACHED_PROCESS`), so
@@ -1344,7 +1343,7 @@ locks by widening the tree-kill.
 
 ### Prompt Caching Must Not Break
 
-Hermes-Agent ensures caching remains valid throughout a conversation. **Do NOT implement changes that would:**
+Korra ensures caching remains valid throughout a conversation. **Do NOT implement changes that would:**
 - Alter past context mid-conversation
 - Change toolsets mid-conversation
 - Reload memories or rebuild system prompts mid-conversation
@@ -1373,7 +1372,7 @@ in config.yaml (or `HERMES_BACKGROUND_NOTIFICATIONS` env var):
 
 ## Profiles: Multi-Instance Support
 
-Hermes supports **profiles** — multiple fully isolated instances, each with its own
+Korra supports **profiles** — multiple fully isolated instances, each with its own
 `HERMES_HOME` directory (config, API keys, memory, sessions, skills, gateway, etc.).
 
 The core mechanism: `_apply_profile_override()` in `korra_cli/main.py` sets
@@ -1424,7 +1423,7 @@ automatically scope to the active profile.
 
 6. **Profile operations are HOME-anchored, not HERMES_HOME-anchored** — `_get_profiles_root()`
    returns `Path.home() / ".hermes" / "profiles"`, NOT `get_hermes_home() / "profiles"`.
-   This is intentional — it lets `hermes -p coder profile list` see all profiles regardless
+   This is intentional — it lets `korra -p coder profile list` see all profiles regardless
    of which one is active.
 
 7. **Multiplex profile-scoped env reads MUST fail closed — never borrow from `os.environ`**
@@ -1461,7 +1460,7 @@ equal a subcommand (`-m dashboard serve`); truncated cmdlines hide the
 real subcommand. Rules:
 - Use the canonical matchers: `gateway.status.looks_like_gateway_command_line`
   (gateway run), `korra_cli.update_cmd._hermes_holder_subcommand`
-  (top-level subcommand of any Hermes argv). Never hand-roll token scans.
+  (top-level subcommand of any Korra argv). Never hand-roll token scans.
 - Flag sets must be DERIVED from the parser
   (`_holder_value_flags()` introspects `build_top_level_parser()`), never
   hand-written lists — they drift.
@@ -1627,7 +1626,7 @@ source files configuration belongs in the JS (vitest) test suite, not in `tests/
 
 ### Don't fake the host OS
 
-Hermes supports Linux, macOS and native Windows, and plenty of its behaviour
+Korra supports Linux, macOS and native Windows, and plenty of its behaviour
 genuinely differs per host. Those differences are tested by running on the
 host, not by patching `sys.platform`.
 

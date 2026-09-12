@@ -1,23 +1,23 @@
-# Hermes Middleware
+# Korra Middleware
 
-Hermes middleware is the behavior-changing companion to observer hooks.
+Korra middleware is the behavior-changing companion to observer hooks.
 Observer hooks report what happened. Middleware can change what happens by
 rewriting a request before execution or by wrapping the execution callback
 itself.
 
 This contract is intentionally backend-neutral. A plugin can use it for local
 policy, request shaping, tracing, adaptive routing, cache control, sandbox
-selection, or handoff to runtimes such as NeMo Relay without changing Hermes'
+selection, or handoff to runtimes such as NeMo Relay without changing Korra's
 planner, model provider adapters, tool registry, memory, or CLI UX.
 
 With middleware enabled, plugins can:
 
-- Rewrite LLM provider request kwargs before Hermes calls the provider.
+- Rewrite LLM provider request kwargs before Korra calls the provider.
 - Rewrite tool arguments before guardrails, approval checks, hooks, and tool
   execution see them.
-- Wrap the actual LLM execution callback while preserving Hermes retry,
+- Wrap the actual LLM execution callback while preserving Korra retry,
   streaming, interrupt, and hook behavior.
-- Wrap the actual tool execution callback while preserving Hermes guardrails,
+- Wrap the actual tool execution callback while preserving Korra guardrails,
   approval, post-tool hooks, and tool-result transformation.
 
 ## Contract
@@ -59,7 +59,7 @@ return {
 }
 ```
 
-Hermes stores those trace entries in later observer hook payloads as
+Korra stores those trace entries in later observer hook payloads as
 `middleware_trace`.
 
 Execution middleware receives a `next_call` callback. Call it to continue the
@@ -71,16 +71,16 @@ def on_tool_execution(**kwargs):
     return result
 ```
 
-If multiple plugins register the same execution middleware kind, Hermes runs
+If multiple plugins register the same execution middleware kind, Korra runs
 them as a nested chain in registration order. Middleware failures are fail-open:
-Hermes logs a warning and continues with the next middleware or the base
+Korra logs a warning and continues with the next middleware or the base
 runtime path.
 
 ## Execution Order
 
 ### LLM Calls
 
-For each provider request, Hermes applies middleware in this order:
+For each provider request, Korra applies middleware in this order:
 
 1. Build provider kwargs from the current conversation.
 2. Apply `llm_request` middleware.
@@ -95,11 +95,11 @@ request plus `next_call`.
 
 ### Tool Calls
 
-For each tool call, Hermes applies middleware in this order:
+For each tool call, Korra applies middleware in this order:
 
 1. Parse and coerce model-provided tool arguments.
 2. Apply `tool_request` middleware.
-3. Run the normal Hermes pre-execution path against the effective arguments:
+3. Run the normal Korra pre-execution path against the effective arguments:
    tool availability checks, observer block directives, guardrails, and
    approval checks.
 4. Run tool execution through `tool_execution` middleware.
@@ -115,17 +115,17 @@ rewritten path, command, or URL is the value downstream policy will evaluate.
 Middleware only runs for enabled plugins. For a bundled plugin:
 
 ```bash
-hermes plugins enable <plugin-name>
+korra plugins enable <plugin-name>
 ```
 
 For isolated local testing, use one `HERMES_HOME` for plugin enablement and the
 agent run:
 
 ```bash
-export HERMES_HOME=/tmp/hermes-middleware-test
+export HERMES_HOME=/tmp/korra-middleware-test
 mkdir -p "$HERMES_HOME"
-hermes plugins enable <plugin-name>
-hermes chat --query 'Reply exactly ok'
+korra plugins enable <plugin-name>
+korra chat --query 'Reply exactly ok'
 ```
 
 For source checkouts, prefer the source command so the runtime sees plugins and
@@ -133,8 +133,8 @@ middleware from the working tree:
 
 ```bash
 uv sync
-uv run hermes plugins enable <plugin-name>
-uv run hermes chat --query 'Reply exactly ok'
+uv run korra plugins enable <plugin-name>
+uv run korra chat --query 'Reply exactly ok'
 ```
 
 ## Generic Plugin Examples
@@ -154,7 +154,7 @@ def register(ctx):
 def tag_llm_request(**kwargs):
     request = dict(kwargs["request"])
     extra_body = dict(request.get("extra_body") or {})
-    extra_body.setdefault("metadata", {})["hermes_middleware_demo"] = True
+    extra_body.setdefault("metadata", {})["korra_middleware_demo"] = True
     request["extra_body"] = extra_body
     return {
         "request": request,
@@ -179,7 +179,7 @@ def normalize_terminal_workdir(**kwargs):
     if kwargs.get("tool_name") != "terminal":
         return None
     args = dict(kwargs["args"])
-    args.setdefault("workdir", "/tmp/hermes-middleware-demo")
+    args.setdefault("workdir", "/tmp/korra-middleware-demo")
     return {
         "args": args,
         "source": "middleware-demo",
@@ -210,7 +210,7 @@ def time_llm_execution(**kwargs):
     return response
 ```
 
-Return the same response shape Hermes expects from the provider adapter. Do not
+Return the same response shape Korra expects from the provider adapter. Do not
 wrap the response in a plugin-specific envelope unless the rest of the runtime
 expects that envelope.
 
@@ -245,14 +245,14 @@ Relay `plugins.toml`; see
   patches.
 - Execution middleware should call `next_call(...)` exactly once unless it is
   intentionally short-circuiting execution.
-- If execution middleware raises before calling `next_call(...)`, Hermes treats
+- If execution middleware raises before calling `next_call(...)`, Korra treats
   that as middleware failure and continues with the remaining middleware chain
   and base execution.
 - If execution middleware calls `next_call(...)` successfully and then raises
-  during post-processing, Hermes preserves the downstream result and does not
+  during post-processing, Korra preserves the downstream result and does not
   run the provider or tool a second time.
 - If downstream provider or tool execution fails, middleware may let that error
-  propagate or translate it deliberately. Hermes does not convert downstream
+  propagate or translate it deliberately. Korra does not convert downstream
   failure into a successful `None` result.
 - Tool request middleware runs before approvals. If it mutates file paths,
   commands, URLs, or arguments, the mutated values are what guardrails and

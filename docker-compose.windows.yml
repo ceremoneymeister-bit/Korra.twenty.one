@@ -4,7 +4,7 @@
 # Differences from docker-compose.yml:
 #   - Removes `network_mode: host` (not supported on Docker Desktop for Windows)
 #   - Uses explicit port mappings instead
-#   - Uses Windows-style volume path for ~/.hermes
+#   - Uses Windows-style volume path for ~/.korra
 #
 # Usage:
 #   docker compose -f docker-compose.windows.yml up -d
@@ -12,10 +12,10 @@
 services:
   gateway:
     image: ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
-    container_name: hermes
+    container_name: korra
     restart: unless-stopped
     volumes:
-      - ${USERPROFILE}/.hermes:/opt/data
+      - ${USERPROFILE}/.korra:/opt/data
     environment:
       - KORRA_UID=10000
       - KORRA_GID=10000
@@ -23,12 +23,12 @@ services:
 
   dashboard:
     image: ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
-    container_name: hermes-dashboard
+    container_name: korra-dashboard
     restart: unless-stopped
     depends_on:
       - gateway
     volumes:
-      - ${USERPROFILE}/.hermes:/opt/data
+      - ${USERPROFILE}/.korra:/opt/data
     environment:
       - KORRA_UID=10000
       - KORRA_GID=10000

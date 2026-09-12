@@ -1,11 +1,11 @@
 # Architecture Decision Records
 
-## 2026-07-13: Scope plugin manager state by Hermes home/profile (keyed cache)
+## 2026-07-13: Scope plugin manager state by Korra home/profile (keyed cache)
 
 Status: Accepted
 
 Context:
-Hermes supports multiple profiles via different Hermes home directories.
+Korra supports multiple profiles via different Korra home directories.
 Homes are switched two ways in a running process: the `HERMES_HOME`
 environment variable (single-profile CLI/gateway processes), and the
 context-local `set_hermes_home_override()` (`korra_constants.py`), which
@@ -37,7 +37,7 @@ path — at registration time. A single-slot cache meant:
 
 Decision:
 - Replace the single-slot singleton with a cache keyed on the *resolved*
-  Hermes home path (`_plugin_managers_by_home: Dict[Path, PluginManager]`).
+  Korra home path (`_plugin_managers_by_home: Dict[Path, PluginManager]`).
   `get_plugin_manager()` resolves the current home via `get_hermes_home()`
   (which itself already consults `get_hermes_home_override()` before
   `os.environ`), so both the env-var and context-local override paths are

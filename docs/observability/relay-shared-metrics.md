@@ -1,44 +1,44 @@
 # NeMo Relay Shared Metrics
 
-Hermes includes NeMo Relay as a normal runtime dependency on platforms for
+Korra includes NeMo Relay as a normal runtime dependency on platforms for
 which Relay publishes a native wheel. The shared-metrics integration is built
-into Hermes and does not require a Hermes observability plugin. Hermes remains
+into Korra and does not require a Korra observability plugin. Korra remains
 importable without Relay on other native targets. Those targets use an
 explicit reduced-capability no-op host:
-Hermes execution remains available, while Relay scopes, middleware, plugins,
+Korra execution remains available, while Relay scopes, middleware, plugins,
 and subscribers are unavailable. The `hermes-agent[nemo-relay]` extra remains
 as a no-op compatibility alias for existing installation commands.
 
 > [!WARNING]
-> This removes the Hermes `observability/nemo_relay` plugin. Existing users
+> This removes the Korra `observability/nemo_relay` plugin. Existing users
 > must remove `observability/nemo_relay` (or its legacy `nemo_relay` alias)
 > from `plugins.enabled` and move exporter configuration into a Relay
 > `plugins.toml` selected with `HERMES_NEMO_RELAY_PLUGINS_TOML`. The legacy
 > `HERMES_NEMO_RELAY_ATOF_*` and `HERMES_NEMO_RELAY_ATIF_*` variables no
-> longer activate exporters. Without the new variable, Hermes does not run
+> longer activate exporters. Without the new variable, Korra does not run
 > Relay plugin discovery, configuration layering, middleware, or exporters.
 
-Hermes requires NeMo Relay 0.7.1 or later within the 0.7 release line. That
+Korra requires NeMo Relay 0.7.1 or later within the 0.7 release line. That
 release establishes the lossless provider-codec contract used for Anthropic
 Messages, OpenAI Chat Completions, and OpenAI Responses requests.
 
 ## Runtime Dependency and Data Boundary
 
-Hermes installs the platform-specific `nemo-relay` native wheel from the
+Korra installs the platform-specific `nemo-relay` native wheel from the
 bounded `>=0.7.1,<0.8` dependency range. The published package is built from
 the [NVIDIA NeMo Relay repository](https://github.com/NVIDIA/NeMo-Relay).
 Unsupported platforms use the explicit no-op runtime described above rather
 than downloading a different implementation.
 
 When Relay managed execution is active, the provider request and response pass
-through that native module in the Hermes process so configured interceptors can
+through that native module in the Korra process so configured interceptors can
 operate on the real call. This is separate from the shared-metrics data
 contract. Shared-metrics mode installs no network exporter and its subscriber
 accepts only the versioned, allowlisted projection described below. Enabling a
 separately configured rich-observability or dynamic plugin can create a
 different data path and requires its own policy review.
 
-Collection remains off unless Hermes policy enables it:
+Collection remains off unless Korra policy enables it:
 
 ```yaml
 telemetry:
@@ -53,12 +53,12 @@ behalf.
 Relay plugin activation is owned by the native runtime and remains explicitly
 opt-in. Set `HERMES_NEMO_RELAY_PLUGINS_TOML` to a selected `plugins.toml` to
 activate configured middleware, exporters, or dynamic plugins. When the
-variable is unset, Hermes does not invoke Relay's plugin initializer, so Relay
+variable is unset, Korra does not invoke Relay's plugin initializer, so Relay
 does not perform plugin configuration discovery or layering. When it is set
 and the selected file loads successfully, Relay performs its normal static
 `plugins.toml` discovery and layers the selected static configuration over the
 discovered configuration. Dynamic `[[plugins.dynamic]]` records are loaded
-from the selected file only. If the selected file cannot be loaded, Hermes
+from the selected file only. If the selected file cannot be loaded, Korra
 reports the error and does not invoke Relay initialization or fall back to
 ambient discovery.
 
@@ -88,14 +88,14 @@ retain the same `session_id` and add `hermes.session.segment` plus
 
 ## Process-Wide Plugin Policy and Profile Isolation
 
-Relay plugin configuration is a process-level deployment choice, not a Hermes
+Relay plugin configuration is a process-level deployment choice, not a Korra
 profile setting. The first hosted profile triggers lazy initialization, and
-every additional profile hosted by that Hermes process shares the resulting
+every additional profile hosted by that Korra process shares the resulting
 static middleware, dynamic plugins, subscribers, exporters, and guardrail
-policy. After initialization succeeds, Hermes logs:
+policy. After initialization succeeds, Korra logs:
 
 ```text
-Relay plugins are active process-wide and apply to all profiles hosted by this Hermes process.
+Relay plugins are active process-wide and apply to all profiles hosted by this Korra process.
 ```
 
 Profile scopes still preserve causal isolation inside that shared policy.
@@ -108,19 +108,19 @@ profile.
 A worker plugin running in a separate worker process does not create a
 per-profile security boundary. One process-wide activation dispatches calls
 from all hosted profiles to that worker while preserving the invoking
-profile's Relay scope stack. Native dynamic plugins are loaded into the Hermes
+profile's Relay scope stack. Native dynamic plugins are loaded into the Korra
 process and share the same policy boundary.
 
-Run profiles in separate Hermes processes when they require different trust
+Run profiles in separate Korra processes when they require different trust
 levels, plugin credentials, exporter destinations, or guardrail policies.
 This process-wide plugin contract does not change each profile's independent
 shared-metrics consent, local SQLite state, or ATIF trajectory grouping.
 
-Hermes core owns one Relay host and one isolated Relay session scope per Hermes
+Korra core owns one Relay host and one isolated Relay session scope per Korra
 session. Core lifecycle producers use
 `korra_cli.observability.relay_runtime` to obtain the shared session handle or
 run Relay scope, LLM, tool, and mark APIs in that session context. New product
-marks do not require Hermes plugin registration. Shared-metrics marks must
+marks do not require Korra plugin registration. Shared-metrics marks must
 still contain only fields approved by the versioned allowlist; the hard
 dependency does not change the collection or privacy policy.
 
@@ -131,17 +131,17 @@ model calls, top-level task runs, tool and approval outcomes, and skill
 lifecycle and reuse:
 
 ```text
-Hermes turn, API, tool, and approval hooks
+Korra turn, API, tool, and approval hooks
   -> Relay session, task, LLM, tool, and mark lifecycle
-  -> Hermes shared-metrics subscriber
+  -> Korra shared-metrics subscriber
   -> SQLite counters
   -> immutable JSON delta package
 ```
 
-Hermes sends an empty `LLMRequest` into the metrics-owned lifecycle. This does
+Korra sends an empty `LLMRequest` into the metrics-owned lifecycle. This does
 not describe the separate managed-execution call through the native runtime
 documented above. The terminal metrics event contains the model identifier and
-provider route that Hermes used for the logical call, such as
+provider route that Korra used for the logical call, such as
 `nvidia/nemotron-3-ultra` through `openrouter`. These identifiers are
 lowercased and structurally bounded, but they are not normalized through a
 checked-in model catalog. Pricing and model-family classification belong to
@@ -154,30 +154,30 @@ counters created by older builds can be exported without losing data.
 The first consented session start emits an empty `hermes.client.active` Relay
 mark. The profile-scoped subscriber creates a random UUID install identity and
 uses a transactional compare-and-set to record at most one client-active
-counter in any rolling 24-hour window. The metric has no dimensions; Hermes
+counter in any rolling 24-hour window. The metric has no dimensions; Korra
 version, OS family, architecture, and install method remain bounded package
-resources. Concurrent Hermes processes share the SQLite latch, so simultaneous
+resources. Concurrent Korra processes share the SQLite latch, so simultaneous
 starts cannot double-count one install. A later session or task can attempt the
 mark again, but the subscriber suppresses it until the rolling window expires.
 
 Each task run is a Relay `Function` scope named `hermes.task_run`, parented to
-the owning Hermes session. The start counter contains only bounded execution
+the owning Korra session. The start counter contains only bounded execution
 surface and entrypoint values. The terminal counter contains bounded outcome,
 end reason, termination status, duration, logical model-call count, terminal
 tool-call count, and provider-retry count buckets. Retries are additional
-provider attempts for the same Hermes API request ID; they do not inflate the
-logical model-call count. Tool calls are deduplicated by their Hermes tool-call
+provider attempts for the same Korra API request ID; they do not inflate the
+logical model-call count. Tool calls are deduplicated by their Korra tool-call
 ID after a terminal tool result is observed. The outer `AIAgent` execution
 boundary closes the task for normal returns, early returns, exceptions, and
-cancellations. Active task ownership follows the task ID if Hermes rotates its
+cancellations. Active task ownership follows the task ID if Korra rotates its
 conversation session during context compression.
 
 Each tool invocation is represented by a Relay tool lifecycle named
 `hermes.tool_call`. The terminal counter contains only bounded tool category,
-outcome, approval outcome, latency, and explicit retry-count buckets. Hermes
+outcome, approval outcome, latency, and explicit retry-count buckets. Korra
 derives the category from the toolset already declared in its runtime registry;
 custom and unrecognized toolsets collapse to `other` rather than exporting
-tool or plugin names. Hermes does not infer retries from repeated tool names or
+tool or plugin names. Korra does not infer retries from repeated tool names or
 adjacent calls; when the
 hook does not provide an explicit retry relationship, the retry bucket is
 `unknown`. Approval decisions are emitted as `hermes.tool_approval` marks and
@@ -190,7 +190,7 @@ remains in the task's tool-count bucket.
 Successful skill mutations emit `hermes.skill.lifecycle` marks with only a
 bounded action and provenance. Successful loads emit `hermes.skill.load`
 marks with bounded provenance, first-use or reuse state, reuse-after-patch
-state, and a use-count bucket. Hermes derives reuse and patch-generation
+state, and a use-count bucket. Korra derives reuse and patch-generation
 continuity transactionally in its existing `skills/.usage.json` state; skill
 names and exact counts or generations never enter Relay metrics events,
 SQLite dimensions, or packages. A use after a new patch is counted once as
@@ -207,7 +207,7 @@ $HERMES_HOME/telemetry/shared_metrics/outbox/*.json
 
 The database keeps transactional aggregate and package-outbox state. Package
 files are immutable delta documents that conform to a closed JSON schema and
-are written with atomic replacement. Each package records the Hermes version,
+are written with atomic replacement. Each package records the Korra version,
 OS family, architecture, and install method as bounded client resources.
 Unrecognized platform or installation values are exported as `unknown`; raw
 platform strings, hostnames, and paths are never included. Fully packaged
@@ -231,7 +231,7 @@ the persistent local identifier by default. It requires a separate product and
 privacy decision covering consent, identity scope, rotation or keyed
 pseudonymization, reset behavior, retention, and deletion.
 
-The install identity is scoped to one `HERMES_HOME`. To reset it, stop Hermes
+The install identity is scoped to one `HERMES_HOME`. To reset it, stop Korra
 processes and remove `$HERMES_HOME/telemetry/shared_metrics`. This deliberately
 removes the old identity, aggregate database, and queued local packages
 together; the next consented session creates a new identity. Disabling shared
@@ -240,7 +240,7 @@ local state.
 
 ## Smoke Test
 
-Run a real Hermes CLI turn against the deterministic local model server:
+Run a real Korra CLI turn against the deterministic local model server:
 
 ```bash
 ./.venv/bin/python scripts/smoke_nemo_relay_shared_metrics.py
