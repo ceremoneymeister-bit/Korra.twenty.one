@@ -10385,7 +10385,9 @@ class TelegramAdapter(BasePlatformAdapter):
                 _observe_type = self._media_message_type(_m)
                 _event = self._build_message_event(_m, _observe_type, update_id=update.update_id)
                 if _m.caption:
-                    _event.text = self._clean_bot_trigger_text(_m.caption)
+                    _event.text = self._with_forward_attribution(
+                        _m, self._clean_bot_trigger_text(_m.caption)
+                    )
                 await self._cache_observed_media(_m, _event)
                 self._observe_unmentioned_group_message(
                     _m, _event.message_type, update_id=update.update_id, event=_event
@@ -10398,9 +10400,13 @@ class TelegramAdapter(BasePlatformAdapter):
 
         event = self._build_message_event(msg, msg_type, update_id=update.update_id)
         
-        # Add caption as text
+        # Add caption as text. The caption replaces the text built above, so the
+        # forwarding origin has to be re-applied here or it is lost for every
+        # forwarded attachment.
         if msg.caption:
-            event.text = self._clean_bot_trigger_text(msg.caption)
+            event.text = self._with_forward_attribution(
+                msg, self._clean_bot_trigger_text(msg.caption)
+            )
         
         # Handle stickers: describe via vision tool with caching
         if msg.sticker:
@@ -10985,6 +10991,77 @@ class TelegramAdapter(BasePlatformAdapter):
         except Exception:
             return None
 
+    @staticmethod
+    def _clean_forward_name(value: Any) -> Optional[str]:
+        """Bounded printable name, or None for anything that is not one."""
+        if isinstance(value, str):
+            name = value.strip()
+            if name:
+                return name[:128]
+        return None
+
+    def _forward_chat_label(self, chat: Any, *, channel: bool) -> Optional[str]:
+        title = self._clean_forward_name(getattr(chat, "title", None))
+        if not title:
+            return None
+        return f"{'канала' if channel else 'чата'} «{title}»"
+
+    def _forward_attribution(self, message: Any) -> Optional[str]:
+        """Return ``[Переслано от …]`` for a forwarded message, else None.
+
+        Telegram puts the real author in ``forward_origin`` (Bot API 7.0+) and,
+        for older payloads, in the ``forward_from*`` family. Reading neither is
+        how a forwarded post arrives as the owner's own words: the agent then
+        answers the post's instructions and files a stranger's claims under the
+        owner's name.
+        """
+        origin = getattr(message, "forward_origin", None)
+        who: Optional[str] = None
+        when = getattr(origin, "date", None) if origin is not None else None
+        if origin is not None:
+            who = (
+                self._clean_forward_name(
+                    getattr(getattr(origin, "sender_user", None), "full_name", None)
+                )
+                # MessageOriginChannel carries ``chat``; MessageOriginChat, a
+                # message sent on behalf of a group, carries ``sender_chat``.
+                or self._forward_chat_label(getattr(origin, "chat", None), channel=True)
+                or self._forward_chat_label(getattr(origin, "sender_chat", None), channel=False)
+            )
+            hidden = self._clean_forward_name(getattr(origin, "sender_user_name", None))
+            if who is None and hidden:
+                who = f"{hidden} (профиль скрыт)"
+            signature = self._clean_forward_name(getattr(origin, "author_signature", None))
+            if who and signature and signature not in who:
+                who = f"{who}, автор {signature}"
+        if who is None:
+            hidden = self._clean_forward_name(getattr(message, "forward_sender_name", None))
+            who = (
+                self._clean_forward_name(
+                    getattr(getattr(message, "forward_from", None), "full_name", None)
+                )
+                or self._forward_chat_label(
+                    getattr(message, "forward_from_chat", None), channel=True
+                )
+                or (f"{hidden} (профиль скрыт)" if hidden else None)
+            )
+        if not isinstance(when, datetime):
+            when = getattr(message, "forward_date", None)
+        if not isinstance(when, datetime):
+            when = None
+        if who is None and when is None:
+            return None
+        # Local clock, like every other timestamp the contour writes.
+        stamp = f", {when.astimezone().strftime('%d.%m.%Y %H:%M')}" if when is not None else ""
+        return f"[Переслано от {who or 'скрытого автора'}{stamp}]"
+
+    def _with_forward_attribution(self, message: Any, text: Optional[str]) -> str:
+        """Prefix text with its forwarding origin when the message has one."""
+        note = self._forward_attribution(message)
+        if not note:
+            return text or ""
+        return f"{note}\n\n{text}" if text else note
+
     def _build_message_event(
         self,
         message: Message,
@@ -11140,7 +11217,7 @@ class TelegramAdapter(BasePlatformAdapter):
         )
 
         return MessageEvent(
-            text=message.text or "",
+            text=self._with_forward_attribution(message, message.text),
             message_type=msg_type,
             source=source,
             raw_message=message,
