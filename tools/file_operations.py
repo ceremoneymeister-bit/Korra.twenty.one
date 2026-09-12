@@ -3087,7 +3087,7 @@ class ShellFileOperations(FileOperations):
             )
             prune_expr = f" \\( {prune_terms} \\) -prune -o"
 
-        cmd = f"find {self._escape_shell_arg(path)}{prune_expr}{hidden_filter_expr} -type f -name {self._escape_shell_arg(search_pattern)} " \
+        cmd = f"find {self._escape_shell_arg(path)}{prune_expr}{hidden_filter_expr} -type f -iname {self._escape_shell_arg(search_pattern)} " \
               f"-printf '%T@ %p\\n' 2>/dev/null | sort -rn{pagination_expr}"
 
         result = self._exec(cmd, timeout=60)
@@ -3155,9 +3155,14 @@ class ShellFileOperations(FileOperations):
             for item in self._macos_search_exclusions(path)
         )
         exclusion_args = f" {exclusion_globs}" if exclusion_globs else ""
+        # Korra K21-057: file-name globs are case-insensitive. iPhone photos
+        # are ``IMG_1234.HEIC`` while the model asks for ``*.heic``; a
+        # case-sensitive glob made three of five photos in a folder invisible.
+        # ``find -iname`` in the non-rg fallback matches this behaviour.
         # Try mtime-sorted first (rg 13+); fall back to unsorted if not supported.
         cmd_sorted = (
-            f"rg --files --sortr=modified -g {self._escape_shell_arg(glob_pattern)}"
+            f"rg --files --sortr=modified --glob-case-insensitive "
+            f"-g {self._escape_shell_arg(glob_pattern)}"
             f"{exclusion_args} "
             f"{self._escape_native_tool_arg(path)} 2>/dev/null "
             f"| head -n {fetch_limit}"
@@ -3169,7 +3174,8 @@ class ShellFileOperations(FileOperations):
         if not all_files and not limit_reason:
             # --sortr may have failed on older rg; retry without it.
             cmd_plain = (
-                f"rg --files -g {self._escape_shell_arg(glob_pattern)}"
+                f"rg --files --glob-case-insensitive "
+                f"-g {self._escape_shell_arg(glob_pattern)}"
                 f"{exclusion_args} "
                 f"{self._escape_native_tool_arg(path)} 2>/dev/null "
                 f"| head -n {fetch_limit}"

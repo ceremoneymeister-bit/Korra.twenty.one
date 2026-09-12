@@ -147,6 +147,13 @@ dependencies = [
   # install rather than gating it behind an extra + a mid-session lazy install
   # (which deadlocked the CLI under prompt_toolkit — see #40490).
   "Pillow==12.3.0",
+  # Korra K21-057: HEIC/HEIF photos straight from an iPhone must be visible
+  # to the agent and usable as image references. Pillow 12 decodes AVIF
+  # natively but needs pillow-heif for HEIC; the wheel bundles libheif +
+  # libde265, so no system package is required. Without it
+  # agent.image_routing dropped every HEIC silently ("plugin missing" looked
+  # identical to "format unsupported").
+  "pillow-heif==1.7.0",
   # Windows log rotation. Stdlib ``RotatingFileHandler.doRollover()`` uses
   # ``os.rename()`` which fails with ``PermissionError [WinError 32]`` on
   # Windows whenever any other process holds an append-mode handle on
@@ -553,6 +560,7 @@ packaging = false
 parallel-web = false
 pathspec = false
 pillow = false
+pillow-heif = false
 prompt-toolkit = false
 psutil = false
 pvporcupine = false

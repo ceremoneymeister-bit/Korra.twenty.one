@@ -276,6 +276,19 @@ def _detect_image_mime_type_from_bytes(data: bytes) -> Optional[str]:
         return "image/bmp"
     if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
         return "image/webp"
+    # ISO-BMFF photos (HEIC/HEIF from iPhones, AVIF from Chromium) and TIFF
+    # scans are real images that the shared sniffer recognises; they are
+    # re-encoded to PNG by _normalize_to_supported_image before embedding
+    # (K21-057). Returning None here made vision_analyze answer "source is
+    # not a recognized image" for every iPhone photo.
+    try:
+        from agent.image_routing import _sniff_mime_from_bytes
+
+        sniffed = _sniff_mime_from_bytes(data[:512])
+    except Exception:
+        sniffed = None
+    if sniffed in {"image/heic", "image/avif", "image/tiff"}:
+        return sniffed
     return None
 
 
@@ -338,9 +351,12 @@ def _rasterize_svg_to_png(svg_path: Path, out_path: Path) -> bool:
 
 
 def _normalize_to_supported_image(
-    image_path: Path, detected_mime: str
+    image_path: Path, detected_mime: str, source_label: Optional[str] = None
 ) -> tuple[Optional[Path], Optional[str], Optional[str]]:
     """Ensure an image is in a vision-provider-supported format.
+
+    ``source_label`` is the user-facing name of the original source (path or
+    URL) for error text; ``image_path`` is usually a temp copy.
 
     Returns a 3-tuple ``(path, mime, error)``:
       - If ``detected_mime`` is already supported: ``(image_path, detected_mime, None)``.
@@ -374,24 +390,35 @@ def _normalize_to_supported_image(
             "(`pip install cairosvg`) — then re-run vision_analyze on the PNG.",
         )
 
-    # Other non-supported raster formats (BMP, TIFF, ...): re-encode via Pillow.
+    # Other non-supported raster formats (HEIC/HEIF, AVIF, BMP, TIFF, ...):
+    # re-encode via the shared transcoder, which registers the optional
+    # HEIC decoder and explains exactly what is missing when it cannot
+    # (K21-057: an iPhone photo must not fail with a generic "unsupported").
     try:
-        from PIL import Image as _PILImage
-        with _PILImage.open(image_path) as _img:
-            if _img.mode not in ("RGB", "RGBA", "L"):
-                _img = _img.convert("RGBA")
-            _img.save(out_path, format="PNG")
-        if out_path.exists() and out_path.stat().st_size > 0:
-            return out_path, "image/png", None
+        from agent.image_routing import image_format_label, transcode_image_to_png
+
+        raw = image_path.read_bytes()
+        png, reason = transcode_image_to_png(raw, mime=detected_mime)
+        if png:
+            out_path.write_bytes(png)
+            if out_path.exists() and out_path.stat().st_size > 0:
+                return out_path, "image/png", None
+            reason = "перекодированный PNG не записался."
+        label = image_format_label(detected_mime)
     except Exception as _exc:
         logger.warning("Failed to normalize %s image to PNG: %s",
                        detected_mime, _exc)
+        label = detected_mime
+        reason = str(_exc)
+    shown = source_label or image_path.name
+    if len(shown) > 160:
+        shown = "…" + shown[-157:]
     return (
         None,
         None,
-        f"Image format {detected_mime!r} is not supported by the vision API "
-        f"and could not be converted to PNG (install Pillow for raster "
-        f"conversion). Convert it to PNG or JPEG and try again.",
+        f"Файл {shown}: формат {label} не принимается vision API и "
+        f"не перекодирован в PNG — {reason} Сохраните изображение как PNG или "
+        f"JPEG и повторите.",
     )
 
 
@@ -1285,7 +1312,7 @@ async def _vision_analyze_native(
         # resume.  Convert here so it can never enter history. Offloaded — the
         # rasterizers/Pillow are blocking.
         normalized_path, detected_mime_type, _norm_err = await asyncio.to_thread(
-            _normalize_to_supported_image, temp_image_path, detected_mime_type,
+            _normalize_to_supported_image, temp_image_path, detected_mime_type, image_url,
         )
         if _norm_err or normalized_path is None:
             return tool_error(
@@ -1489,7 +1516,7 @@ async def vision_analyze_tool(
         # reject these media types; convert before encoding. Offloaded — the
         # rasterizers/Pillow are blocking.
         normalized_path, detected_mime_type, _norm_err = await asyncio.to_thread(
-            _normalize_to_supported_image, temp_image_path, detected_mime_type,
+            _normalize_to_supported_image, temp_image_path, detected_mime_type, image_url,
         )
         if _norm_err or normalized_path is None:
             raise ValueError(_norm_err or "Image normalization failed.")

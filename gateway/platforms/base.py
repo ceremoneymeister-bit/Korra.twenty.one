@@ -896,6 +896,15 @@ def _looks_like_image(data: bytes) -> bool:
         return True
     if data[:4] == b"RIFF" and len(data) >= 12 and data[8:12] == b"WEBP":
         return True
+    # ISO-BMFF photos: HEIC/HEIF from iPhones, AVIF from Chromium. They are
+    # decoded downstream (pillow-heif / Pillow) and re-encoded to PNG before
+    # any provider sees them (K21-057); refusing them here made an iPhone
+    # photo sent as a Telegram document "not an image".
+    if len(data) >= 12 and data[4:8] == b"ftyp" and data[8:12] in {
+        b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heim", b"heis",
+        b"avif", b"avis",
+    }:
+        return True
     return False
 
 
@@ -1978,6 +1987,12 @@ SUPPORTED_IMAGE_DOCUMENT_TYPES = {
     ".png": "image/png",
     ".webp": "image/webp",
     ".gif": "image/gif",
+    # iPhone photos and Chromium screenshots arrive as documents in these
+    # formats; they are transcoded to PNG before any vision provider sees
+    # them (agent.image_routing.transcode_image_to_png, K21-057).
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".avif": "image/avif",
 }
 
 

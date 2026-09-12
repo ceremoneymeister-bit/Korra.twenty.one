@@ -59,7 +59,8 @@ _VALID_MODES = frozenset({"auto", "native", "text"})
 # them differently (send_document), and we don't want to attach a PDF as a
 # vision part.
 _IMAGE_EXTS = (
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".heic",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif",
+    ".heic", ".heif", ".avif",
 )
 _IMAGE_EXT_PATTERN = "|".join(e.lstrip(".") for e in _IMAGE_EXTS)
 
@@ -696,39 +697,106 @@ _UNIVERSALLY_SUPPORTED_MIMES = frozenset({
 })
 
 
-def _transcode_to_png(raw: bytes) -> Optional[bytes]:
-    """Decode arbitrary image bytes with Pillow and re-encode as PNG.
+# Human-facing names for the formats we know how to talk about. Used in the
+# messages that tell the user *why* a file was not attached — "HEIC с айфона
+# не прочитан: не установлен pillow-heif" is actionable, "skipped" is not.
+_MIME_LABELS = {
+    "image/heic": "HEIC/HEIF",
+    "image/avif": "AVIF",
+    "image/bmp": "BMP",
+    "image/tiff": "TIFF",
+    "image/x-icon": "ICO",
+    "image/svg+xml": "SVG",
+}
 
-    Returns None if Pillow isn't installed or can't decode the input
-    (rare formats, corrupted bytes, missing optional decoder plugin for
-    HEIC/AVIF, or vector formats like SVG). Caller falls back to skipping
-    the image so the rest of the turn still works.
+# Formats that need an optional Pillow plugin. Pillow 12 decodes AVIF
+# natively (libavif is bundled in the wheel); HEIC/HEIF still needs
+# pillow-heif, which the Korra image ships as a core dependency (K21-057).
+_PLUGIN_BACKED_MIMES = {
+    "image/heic": ("pillow_heif", "pillow-heif"),
+}
 
-    HEIC/HEIF and AVIF need optional Pillow plugins; we try to register
-    them on demand and swallow ImportError so a missing plugin just
-    looks like 'Pillow can't decode this' rather than crashing.
+_PLUGIN_STATE: Dict[str, bool] = {}
+
+
+def register_optional_image_plugins() -> Dict[str, bool]:
+    """Register HEIC/AVIF decoders with Pillow, once per process.
+
+    Returns ``{"heif": bool, "avif": bool}`` — whether each decoder is
+    available. Safe to call repeatedly and from any image path (native
+    attach, vision_analyze, image_generate references); it never raises.
     """
-    try:
-        from PIL import Image
-    except ImportError:
-        logger.info(
-            "image_routing: Pillow not installed; cannot transcode "
-            "non-standard image format to PNG. Install with `pip install Pillow` "
-            "(and `pillow-heif` / `pillow-avif-plugin` for those formats)."
-        )
-        return None
-    # Optional plugin registration. Silent on failure: an unsupported
-    # format will just fall through to Image.open raising below.
+    if _PLUGIN_STATE:
+        return dict(_PLUGIN_STATE)
+    heif = False
     try:
         import pillow_heif  # type: ignore
 
         pillow_heif.register_heif_opener()
-    except Exception:
-        pass
+        heif = True
+    except Exception as exc:
+        logger.info(
+            "image_routing: pillow-heif unavailable (%s) — HEIC/HEIF photos "
+            "cannot be decoded until it is installed.",
+            exc,
+        )
+    avif = False
     try:
-        import pillow_avif  # type: ignore  # noqa: F401  -- registers AVIF on import
+        from PIL import features as _pil_features
+
+        avif = bool(_pil_features.check("avif"))
     except Exception:
-        pass
+        avif = False
+    if not avif:
+        try:
+            import pillow_avif  # type: ignore  # noqa: F401  -- registers AVIF on import
+
+            avif = True
+        except Exception:
+            pass
+    _PLUGIN_STATE.update({"heif": heif, "avif": avif})
+    return dict(_PLUGIN_STATE)
+
+
+def _reset_optional_image_plugins_for_tests() -> None:
+    _PLUGIN_STATE.clear()
+
+
+def image_format_label(mime: Optional[str]) -> str:
+    """Short human label for a sniffed MIME (``image/heic`` → ``HEIC/HEIF``)."""
+    if not mime:
+        return "неизвестный формат"
+    return _MIME_LABELS.get(mime, mime)
+
+
+def transcode_image_to_png(raw: bytes, *, mime: Optional[str] = None) -> Tuple[Optional[bytes], str]:
+    """Decode image bytes with Pillow and re-encode as PNG.
+
+    Returns ``(png_bytes, "")`` on success or ``(None, reason)`` where
+    ``reason`` is a short, user-facing explanation of what is missing:
+    Pillow itself, the HEIC decoder plugin, a vector format Pillow cannot
+    rasterize, or bytes Pillow could not decode at all. The reason is the
+    important part — a HEIC dropped because ``pillow-heif`` is absent must
+    not look the same as a corrupt file (K21-057).
+    """
+    mime = mime or _sniff_mime_from_bytes(raw)
+    label = image_format_label(mime)
+    try:
+        from PIL import Image
+    except ImportError:
+        return None, (
+            f"{label}: Pillow не установлен, перекодировать в PNG нечем "
+            "(pip install Pillow)."
+        )
+    if mime == "image/svg+xml":
+        return None, "SVG — векторный формат, Pillow его не растеризует."
+    plugins = register_optional_image_plugins()
+    plugin = _PLUGIN_BACKED_MIMES.get(mime or "")
+    if plugin and not plugins.get("heif"):
+        return None, (
+            f"{label}: в этой установке нет декодера {plugin[1]} "
+            f"(pip install {plugin[1]}); фото с айфона нужно сохранить как JPEG."
+        )
     try:
         from io import BytesIO
 
@@ -740,12 +808,18 @@ def _transcode_to_png(raw: bytes) -> Optional[bytes]:
                 im = im.convert("RGBA")
             buf = BytesIO()
             im.save(buf, format="PNG", optimize=False)
-            return buf.getvalue()
+            return buf.getvalue(), ""
     except Exception as exc:
         logger.info(
-            "image_routing: Pillow could not transcode image to PNG -- %s", exc
+            "image_routing: Pillow could not transcode %s to PNG -- %s", label, exc
         )
-        return None
+        return None, f"{label}: Pillow не смог декодировать файл ({exc})."
+
+
+def _transcode_to_png(raw: bytes) -> Optional[bytes]:
+    """Compatibility wrapper: PNG bytes or None (see :func:`transcode_image_to_png`)."""
+    png, _reason = transcode_image_to_png(raw)
+    return png
 
 
 def _guess_mime(path: Path, raw: Optional[bytes] = None) -> str:
@@ -796,13 +870,19 @@ def _file_to_data_url(path: Path) -> Optional[str]:
     caller reports those paths in ``skipped`` and the rest of the turn
     proceeds.
     """
+    url, _reason = _file_to_data_url_with_reason(path)
+    return url
+
+
+def _file_to_data_url_with_reason(path: Path) -> Tuple[Optional[str], str]:
+    """Like :func:`_file_to_data_url` but says why a file was not attached."""
     try:
         from agent.file_safety import raise_if_read_blocked
 
         raise_if_read_blocked(str(path))
     except ValueError as exc:
         logger.warning("image_routing: blocked local image attachment %s -- %s", path, exc)
-        return None
+        return None, "путь защищён от чтения."
     except Exception:
         # Keep attachment routing best-effort if the guard itself is unavailable.
         pass
@@ -811,18 +891,18 @@ def _file_to_data_url(path: Path) -> Optional[str]:
         raw = path.read_bytes()
     except Exception as exc:
         logger.warning("image_routing: failed to read %s — %s", path, exc)
-        return None
+        return None, f"файл не читается ({exc})."
     mime = _guess_mime(path, raw=raw)
     if mime not in _UNIVERSALLY_SUPPORTED_MIMES:
-        transcoded = _transcode_to_png(raw)
+        transcoded, reason = transcode_image_to_png(raw, mime=mime)
         if transcoded is None:
             logger.warning(
                 "image_routing: %s is %s which is not accepted by all major "
                 "vision providers and could not be transcoded to PNG; "
-                "skipping this attachment.",
-                path, mime,
+                "skipping this attachment. %s",
+                path, mime, reason,
             )
-            return None
+            return None, reason
         logger.info(
             "image_routing: transcoded %s (%s) -> image/png for provider compatibility",
             path.name, mime,
@@ -830,7 +910,23 @@ def _file_to_data_url(path: Path) -> Optional[str]:
         raw = transcoded
         mime = "image/png"
     b64 = base64.b64encode(raw).decode("ascii")
-    return f"data:{mime};base64,{b64}"
+    return f"data:{mime};base64,{b64}", ""
+
+
+def describe_skipped_images(skipped: Dict[str, str]) -> str:
+    """One line per image that could not be attached, naming file and cause.
+
+    The text is meant for the model (and through it the user): a silently
+    dropped iPhone photo reads as "агент увидел только два JPG", a named one
+    reads as a fixable problem.
+    """
+    if not skipped:
+        return ""
+    lines = [
+        f"[Изображение не прочитано: {Path(p).name} — {reason or 'причина не определена'}]"
+        for p, reason in skipped.items()
+    ]
+    return "\n".join(lines)
 
 
 def build_native_content_parts(
@@ -872,6 +968,7 @@ def build_native_content_parts(
     not validated here).
     """
     skipped: List[str] = []
+    skip_reasons: Dict[str, str] = {}
     image_parts: List[Dict[str, Any]] = []
     attached_paths: List[str] = []
     attached_urls: List[str] = []
@@ -880,10 +977,12 @@ def build_native_content_parts(
         p = Path(raw_path)
         if not p.exists() or not p.is_file():
             skipped.append(str(raw_path))
+            skip_reasons[str(raw_path)] = "файл не найден."
             continue
-        data_url = _file_to_data_url(p)
+        data_url, reason = _file_to_data_url_with_reason(p)
         if not data_url:
             skipped.append(str(raw_path))
+            skip_reasons[str(raw_path)] = reason
             continue
         image_parts.append({
             "type": "image_url",
@@ -902,28 +1001,38 @@ def build_native_content_parts(
         attached_urls.append(url)
 
     text = (user_text or "").strip()
+    skip_note = describe_skipped_images(skip_reasons)
 
     # If at least one image attached, build a single text part that combines
-    # the user's caption (or a neutral default) with one hint per image.
+    # the user's caption (or a neutral default) with one hint per image. Files
+    # that could not be attached are named in the same text so the model can
+    # tell the user instead of silently seeing fewer photos (K21-057).
     if attached_paths or attached_urls:
         base_text = text or "What do you see in this image?"
         hint_lines: List[str] = []
         hint_lines.extend(f"[Image attached at: {p}]" for p in attached_paths)
         hint_lines.extend(f"[Image attached: {u}]" for u in attached_urls)
+        if skip_note:
+            hint_lines.append(skip_note)
         combined_text = f"{base_text}\n\n" + "\n".join(hint_lines)
         parts: List[Dict[str, Any]] = [{"type": "text", "text": combined_text}]
         parts.extend(image_parts)
         return parts, skipped
 
-    # No images successfully attached — fall back to plain text-only behaviour.
+    # No images successfully attached — fall back to plain text-only behaviour,
+    # still naming what was dropped and why.
     parts = []
-    if text:
-        parts.append({"type": "text", "text": text})
+    if text or skip_note:
+        parts.append({"type": "text", "text": f"{text}\n\n{skip_note}".strip() if skip_note else text})
     return parts, skipped
 
 
 __all__ = [
     "decide_image_input_mode",
     "build_native_content_parts",
+    "describe_skipped_images",
     "extract_image_refs",
+    "image_format_label",
+    "register_optional_image_plugins",
+    "transcode_image_to_png",
 ]

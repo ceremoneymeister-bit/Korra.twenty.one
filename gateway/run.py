@@ -6908,6 +6908,11 @@ class TurnRunner:
                         )
                     if any(p.get("type") == "image_url" for p in _parts):
                         _run_message: Any = _parts
+                    elif _skipped and _parts and _parts[0].get("type") == "text":
+                        # All images failed to read — keep the text, which now
+                        # names each dropped file and why (K21-057), so the
+                        # model tells the user instead of silently seeing less.
+                        _run_message = _parts[0].get("text") or ctx.message
                     else:
                         # All images failed to read — fall back to plain text.
                         _run_message = ctx.message

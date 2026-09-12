@@ -39,7 +39,7 @@ export interface PendingAttachment {
 export const MAX_ATTACHMENTS = 5;
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
-const IMAGE_KINDS = new Set(["png", "jpg", "jpeg", "webp", "heic", "gif"]);
+const IMAGE_KINDS = new Set(["png", "jpg", "jpeg", "webp", "heic", "heif", "avif", "gif"]);
 
 export function isImageKind(kind: string): boolean {
   return IMAGE_KINDS.has(kind.toLowerCase());

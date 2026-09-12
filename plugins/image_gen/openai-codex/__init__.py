@@ -416,6 +416,52 @@ def _validate_options(
         raise ValueError(f"Unsupported action: {action!r}.")
 
 
+def _accepted_raster_bytes(raw: bytes, *, label: str) -> Tuple[bytes, str]:
+    """Return ``(bytes, mime)`` GPT Image 2.5 accepts, transcoding when needed.
+
+    PNG/JPEG/GIF/WebP pass through untouched. HEIC/HEIF (iPhone photos),
+    AVIF, BMP and TIFF are re-encoded to PNG through the shared transcoder
+    so they work as edit bases and identity references (K21-057). Anything
+    else — or a format whose decoder is missing — fails with the file name,
+    the detected format and the concrete reason instead of a blind
+    "not a supported image".
+    """
+    from agent.image_routing import (
+        _sniff_mime_from_bytes,
+        image_format_label,
+        transcode_image_to_png,
+    )
+
+    sniffed = _sniff_mime_from_bytes(raw)
+    if sniffed in _ACCEPTED_INPUT_MIME:
+        return raw, sniffed
+    if sniffed in {"image/heic", "image/avif", "image/bmp", "image/tiff"}:
+        png, reason = transcode_image_to_png(raw, mime=sniffed)
+        if png is not None:
+            if len(png) > _MAX_INPUT_IMAGE_BYTES:
+                raise ValueError(
+                    f"{label}: {image_format_label(sniffed)} после перекодирования в PNG "
+                    "превышает 25MB."
+                )
+            logger.info(
+                "Codex image input %s transcoded %s -> image/png", label, sniffed
+            )
+            return png, "image/png"
+        raise ValueError(
+            f"{label}: формат {image_format_label(sniffed)} не перекодирован в PNG — {reason}"
+        )
+    if sniffed is None:
+        raise ValueError(
+            f"{label}: not a supported image — содержимое не распознано как "
+            "изображение (нужны PNG, JPEG, GIF, WebP или фото HEIC/AVIF/BMP/TIFF)."
+        )
+    raise ValueError(
+        f"{label}: формат {image_format_label(sniffed)} не поддерживается как вход "
+        "GPT Image 2.5 (нужны PNG, JPEG, GIF, WebP или фото HEIC/AVIF/BMP/TIFF, "
+        "которые перекодируются автоматически)."
+    )
+
+
 def _data_url_to_input_image_url(value: str) -> str:
     """Validate and canonicalize a data:image URL for Responses input_image."""
     if "," not in value:
@@ -427,9 +473,7 @@ def _data_url_to_input_image_url(value: str) -> str:
     raw = base64.b64decode(data, validate=True)
     if len(raw) > _MAX_INPUT_IMAGE_BYTES:
         raise ValueError("Image data URL exceeds 25MB cap")
-    mime = _sniff_image_mime(raw)
-    if mime is None:
-        raise ValueError("Image data URL does not contain supported image bytes")
+    raw, mime = _accepted_raster_bytes(raw, label="Image data URL")
     decoded = _decoded_image(raw, label="Image data URL")
     decoded.close()
     encoded = base64.b64encode(raw).decode("ascii")
@@ -458,9 +502,7 @@ def _local_image_to_data_url(value: str) -> str:
     if size > _MAX_INPUT_IMAGE_BYTES:
         raise ValueError(f"Image input path exceeds 25MB cap: {value}")
     raw = path.read_bytes()
-    mime = _sniff_image_mime(raw)
-    if mime is None:
-        raise ValueError(f"Image input path is not a supported image: {value}")
+    raw, mime = _accepted_raster_bytes(raw, label=f"Файл {path.name}")
     decoded = _decoded_image(raw, label="Image input")
     decoded.close()
     encoded = base64.b64encode(raw).decode("ascii")
