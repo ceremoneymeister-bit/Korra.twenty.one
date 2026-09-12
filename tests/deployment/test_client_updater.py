@@ -33,6 +33,8 @@ class FakeDockerUpdater(u.Updater):
         self.wrong_mount = False
         self.mounts_override = None
         self.tags = {}
+        self.judge_verdict = {"bad": []}
+        self.judge_image_missing = False
 
     def free_space(self, *args):
         pass
@@ -68,6 +70,13 @@ class FakeDockerUpdater(u.Updater):
             return "ok"
         if args[0] == "pull":
             return "ok"
+        if args[0] == "run":
+            # Судья SQLite: одноразовый контейнер старого образа поверх снимка,
+            # тем же приёмом, что и schema_rehearsal. Отсутствующий образ docker
+            # отвергает кодом возврата, а не пустым ответом.
+            if self.judge_image_missing:
+                raise u.UpdateError("docker run failed (exit 125)")
+            return json.dumps(self.judge_verdict)
         raise AssertionError(args)
 
     def probe_image(self, image):
@@ -1117,6 +1126,71 @@ def test_failed_schema_rehearsal_restores_old_state_before_candidate_boot(update
     assert restored == before
     with sqlite3.connect(updater.data / "state.db") as connection:
         assert connection.execute("SELECT * FROM messages").fetchall() == [("before",)]
+
+
+def _index_the_host_sqlite_rejects(path):
+    """База, которую хостовый SQLite бракует, а движок в образе принимает.
+
+    Живой случай (Виктория и Павлова, 12.09.2026): хост 3.45 и образ 3.53
+    расходятся в оценке кириллического trigram-индекса FTS5 на байт-идентичном
+    файле. Здесь тот же класс расхождения воспроизводится доступным способом —
+    индекс, чьё содержимое не сходится с таблицей: постраничная копия проходит,
+    а `PRAGMA quick_check` хоста отвечает `malformed inverted index`.
+    """
+    with sqlite3.connect(path) as database:
+        database.execute("CREATE VIRTUAL TABLE messages_fts_trigram USING fts5(content, tokenize='trigram')")
+        database.executemany("INSERT INTO messages_fts_trigram(content) VALUES (?)",
+                             [("Привет, как дела",), ("Отчёт по проекту",)])
+        database.commit()  # индекс должен лечь на диск до того, как его расшатают
+        database.execute("DELETE FROM messages_fts_trigram_data WHERE id > 100")
+    with sqlite3.connect(path) as database:
+        assert database.execute("PRAGMA quick_check").fetchone() != ("ok",)
+
+
+def test_index_only_the_host_rejects_no_longer_fails_the_backup_gate(updater):
+    _index_the_host_sqlite_rejects(updater.data / "profiles/secretary/state.db")
+
+    updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["status"] == "succeeded"
+    assert (updater.job / "before/profiles/secretary/state.db").exists()
+
+
+def test_snapshot_sqlite_is_judged_by_the_image_that_wrote_it(updater):
+    updater.update("registry.example/korra:latest")
+
+    judged = [call for call in updater.calls if call[0] == "run"]
+    assert judged, "гейт SQLite судит хостовым sqlite3: docker run старого образа не вызывался"
+    call = judged[0]
+    assert call[call.index("--network") + 1] == "none"
+    assert call[call.index("-v") + 1] == str(updater.job / "before") + ":/opt/data:ro"
+    assert call[call.index("-v") + 2] == updater.receipt["rollback_image_ref"]
+    assert updater.calls.index(("schema_rehearsal", NEW)) > updater.calls.index(call)
+
+
+def test_engine_verdict_stops_the_update_before_schema_rehearsal(updater):
+    with sqlite3.connect(updater.data / "profiles/secretary/state.db") as database:
+        database.execute("CREATE TABLE messages(text)")
+    updater.judge_verdict = {"bad": ["profiles/secretary/state.db"]}
+    before = u.tree_manifest(updater.data)
+
+    with pytest.raises(u.UpdateError, match="profiles/secretary/state.db"):
+        updater.update("registry.example/korra:latest")
+
+    assert not any(call[0] == "schema_rehearsal" for call in updater.calls)
+    assert updater.image == OLD and updater.running
+    assert u.tree_manifest(updater.data) == before
+
+
+def test_missing_previous_image_fails_the_gate_and_starts_the_container_again(updater):
+    updater.judge_image_missing = True
+
+    with pytest.raises(u.UpdateError, match="SQLite"):
+        updater.update("registry.example/korra:latest")
+
+    assert not any(call[0] == "schema_rehearsal" for call in updater.calls)
+    assert updater.calls.index(("start", updater.name)) > updater.calls.index(("stop", "--time", "60", updater.name))
+    assert updater.image == OLD and updater.running
 
 
 @pytest.fixture

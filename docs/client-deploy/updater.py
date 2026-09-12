@@ -159,6 +159,28 @@ if 'Провайдер ответа не настроен' not in message or 'К
 print('foundation-smoke-ok')
 '''
 
+# Judges every copied database with the engine that wrote it. Read-only and
+# immutable: the verdict may not add a WAL/SHM sidecar to a verified snapshot.
+SQLITE_JUDGE_CODE = r'''
+import json, sqlite3, sys
+from pathlib import Path
+relatives = json.loads(sys.argv[1])
+bad = []
+for relative in relatives:
+    try:
+        connection = sqlite3.connect((Path('/opt/data') / relative).as_uri() + '?mode=ro&immutable=1', uri=True)
+        try:
+            ok = connection.execute('PRAGMA quick_check').fetchall() == [('ok',)]
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        ok = False
+    if not ok:
+        bad.append(relative)
+print(json.dumps({'bad': bad, 'checked': len(relatives), 'sqlite': sqlite3.sqlite_version}))
+'''
+
+
 class UpdateError(RuntimeError):
     pass
 
@@ -368,12 +390,28 @@ def tree_manifest(root):
     return result
 
 
+def sqlite_files(root):
+    """Relative paths of every SQLite database in a snapshot, by file header."""
+    result = []
+    for directory, _dirs, files in os.walk(root, followlinks=False):
+        for name in files:
+            target = Path(directory) / name
+            if target.is_symlink() or not target.is_file():
+                continue
+            with target.open("rb") as stream:
+                if stream.read(16) == b"SQLite format 3\x00":
+                    result.append(target.relative_to(root).as_posix())
+    return sorted(result)
+
+
 def snapshot(source, destination):
-    """Complete offline copy, with SQLite backup/integrity checking for every DB.
+    """Complete offline copy, with a page-level SQLite backup for every DB.
 
     Source MUST be stopped by the caller. Unlike the portable native archive,
     this includes browser auth, custom venvs and lazy-packages needed by rollback.
     Symlinks are copied as links and are never followed by the host updater.
+    The copy stays stdlib-only on the host; the integrity verdict belongs to the
+    engine that wrote the databases (:meth:`Updater.judge_sqlite`).
     """
     if destination.exists():
         raise UpdateError("Refusing to overwrite an existing snapshot")
@@ -403,8 +441,6 @@ def snapshot(source, destination):
             with contextlib.closing(sqlite3.connect(target.as_uri() + "?mode=ro", uri=True)) as src:
                 with contextlib.closing(sqlite3.connect(temp)) as dst:
                     src.backup(dst, pages=256, progress=progress)
-                    if dst.execute("PRAGMA quick_check").fetchone() != ("ok",):
-                        raise UpdateError("SQLite snapshot failed integrity check")
             shutil.copystat(target, temp)
             owner = original.stat()
             os.chown(temp, owner.st_uid, owner.st_gid)
@@ -950,9 +986,51 @@ print('model-smoke-ok')
             self.receipt["error_code"] = "model_smoke_failed"
             raise UpdateError("Model smoke failed; see private operation.log") from exc
 
+    def judge_image(self):
+        """The image that wrote this DATA: this operation's protected old image."""
+        image = self.receipt.get("rollback_image_ref") or self.receipt.get("old_image_id")
+        if not image:
+            raise UpdateError("No previous image is available to judge SQLite integrity")
+        return image
+
+    def judge_sqlite(self, image, root):
+        """PRAGMA quick_check for every database of a snapshot, run by its writer.
+
+        The host carries SQLite 3.45 and the engine 3.53, and they disagree about
+        a Cyrillic trigram FTS5 index on a byte-identical file: the image answers
+        ok, the host malformed. A host verdict therefore blocked two healthy
+        installations in the 0.21.4 release. Judge and writer must be the same
+        version, so the verdict moves into the old image — the same disposable
+        container trick as the schema rehearsal. The snapshot is mounted
+        read-only: the judge cannot alter what it verifies.
+        """
+        relatives = sqlite_files(root)
+        if not relatives:
+            return {"bad": [], "checked": 0}
+        try:
+            output = self.docker("run", "--rm", "--network", "none", "--cpus", "1", "--memory", "2g",
+                                 "--user", self.runtime_user(), "--entrypoint", PYTHON,
+                                 "-v", str(root) + ":/opt/data:ro", image,
+                                 "-c", SQLITE_JUDGE_CODE, json.dumps(relatives), timeout=600)
+        except (UpdateError, OSError, subprocess.SubprocessError) as exc:
+            raise UpdateError(f"SQLite integrity cannot be judged by the engine that wrote it: {exc}") from exc
+        try:
+            result = json.loads(output.splitlines()[-1])
+            bad = result["bad"]
+        except (ValueError, KeyError, IndexError) as exc:
+            raise UpdateError("Malformed SQLite integrity verdict") from exc
+        if not isinstance(bad, list) or not set(bad) <= set(relatives):
+            raise UpdateError("Malformed SQLite integrity verdict")
+        self.log(f"sqlite judge: {len(relatives)} databases, {len(bad)} failed, "
+                 f"engine sqlite {result.get('sqlite')}")
+        if bad:
+            raise UpdateError("SQLite integrity check failed: " + ", ".join(sorted(bad)[:5]))
+        return result
+
     def verified_snapshot(self, name):
         destination = self.job / name
         manifest = snapshot(self.data, destination)
+        self.judge_sqlite(self.judge_image(), destination)
         atomic_json(self.job / (name + ".manifest.json"), manifest)
         if tree_manifest(destination) != manifest:
             raise UpdateError("Snapshot verification mismatch")
@@ -1115,6 +1193,7 @@ print(json.dumps(changed))
         snapshot(backup, stage)
         if tree_manifest(stage) != manifest:
             raise UpdateError("Restore stage does not match verified backup")
+        self.judge_sqlite(self.judge_image(), stage)
         credentials = overlay_credentials(latest, stage)
         config_credentials = self.preserve_config_credentials(latest, stage)
         atomic_json(self.job / "restore-stage.manifest.json", tree_manifest(stage))
