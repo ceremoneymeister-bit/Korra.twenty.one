@@ -892,6 +892,43 @@ def check_speech_recognition(issues: list[str]) -> None:
                f'(вместо {selected}: {reason})')
 
 
+def check_web_search(issues: list[str]) -> None:
+    """Какой бэкенд поиска выберет ``web_search`` и готов ли он.
+
+    Свип 12.09.2026: на пяти контурах ``web.backend`` пуст, ключей поиска нет
+    ни у кого, а объявленный бесключевой бэкенд отвечал ModuleNotFoundError —
+    13 раз за один разговор. Узнать это можно было единственным способом:
+    попросить агента что-нибудь найти. Здесь названо и то, что выбрано, и то,
+    работает ли оно.
+    """
+    import tools.web_tools as web_tools
+
+    backend = web_tools._get_search_backend()
+    available = web_tools._is_backend_available(backend)
+    # Единственный бесключевой путь, который можно проверить не выходя в сеть.
+    # Публичный ринг (exa/parallel/firecrawl/keenable) объявляет себя готовым
+    # по конфигу, а не по факту, поэтому доказательством работы поиска он не
+    # считается — ровно так контуры и жили с неработающим поиском.
+    bundled_keyless = web_tools._ddgs_package_importable()
+
+    if available:
+        check_ok(f'Поиск в интернете: {backend}',
+                 '(бесключевой)' if backend == "ddgs" else '(настроен)')
+        return
+    if bundled_keyless:
+        check_warn(f'Поиск в интернете: {backend} не готов',
+                   '(запросы уйдут в бесключевой ddgs)')
+        return
+    detail = f'(выбран {backend}; в образе нет пакета ddgs, ключей поиска тоже нет'
+    detail += ')' if web_tools.check_web_api_key() else '; инструмент web_search агенту не выдаётся)'
+    _fail_and_issue(
+        'Поиск в интернете не работает: нет ни бесключевого, ни ключевого провайдера',
+        detail,
+        'Обновите контур на образ с пакетом ddgs (бесключевой DuckDuckGo) либо задайте ключ поискового бэкенда в .env',
+        issues,
+    )
+
+
 def check_channels_and_providers(issues: list[str]) -> None:
     """Одна секция про то, чем контур слышит, ищет и получает медиа.
 
@@ -905,6 +942,10 @@ def check_channels_and_providers(issues: list[str]) -> None:
         check_speech_recognition(issues)
     except Exception as exc:
         check_warn('Не удалось определить провайдер распознавания речи', f'({exc})')
+    try:
+        check_web_search(issues)
+    except Exception as exc:
+        check_warn('Не удалось определить бэкенд поиска', f'({exc})')
 
 
 def _check_s6_supervision(issues: list[str]) -> None:
