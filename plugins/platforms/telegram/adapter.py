@@ -9874,9 +9874,17 @@ class TelegramAdapter(BasePlatformAdapter):
             "document": "документ",
             "photo": "изображение",
         }.get(kind, "вложение")
+        # The exception class names nothing the owner can act on, and
+        # "InvalidToken" — what PTB raises for a 404 — reads like a broken bot
+        # token when the file simply was not readable on the server. Say what
+        # happened; keep the class name in the log, where it diagnoses.
+        logger.warning(
+            "[Telegram] Media cache failure surfaced to owner: kind=%s error=%s",
+            kind, exc.__class__.__name__,
+        )
         try:
             await msg.reply_text(
-                f'''⚠️ Не удалось скачать {kind_label}{named} ({exc.__class__.__name__}). Попробуйте отправить его ещё раз.'''
+                f'''⚠️ Не удалось скачать {kind_label}{named}: файл недоступен на сервере. Попробуйте отправить его ещё раз.'''
             )
         except Exception as reply_err:
             logger.warning(
@@ -9887,7 +9895,7 @@ class TelegramAdapter(BasePlatformAdapter):
             )
         agent_note = (
             f"[The user attempted to send a {kind}{named} but it could not be "
-            f"downloaded ({exc.__class__.__name__}); they have been asked to retry.]"
+            f"downloaded from Telegram; they have been asked to retry.]"
         )
         event.text = self._append_observed_note(event.text, agent_note)
 

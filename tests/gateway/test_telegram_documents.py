@@ -245,12 +245,14 @@ class TestDocumentDownloadBlock:
 
         await adapter._handle_media_message(update, MagicMock())
 
-        # 1. User is told the download failed, with the filename + exception type.
+        # 1. User is told the download failed, with the filename. The exception
+        #    class used to be in the reply too; it named nothing the owner could
+        #    act on, so it moved to the log (K21-069).
         msg.reply_text.assert_awaited_once()
         reply = msg.reply_text.await_args.args[0]
         assert 'Не удалось скачать' in reply
         assert "notes.md" in reply
-        assert "RuntimeError" in reply
+        assert "RuntimeError" not in reply
 
         # 2. The agent still gets a turn, but event.text now carries a notice so
         #    it knows an attachment was attempted and failed (not a silent empty turn).
