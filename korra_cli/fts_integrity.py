@@ -183,6 +183,44 @@ def rebuild_fts_indexes(path: Path, tables: tuple[str, ...]) -> tuple[bool, str]
     return True, "индекс пересобран: " + ", ".join(tables)
 
 
+@dataclass(frozen=True)
+class SnapshotRepair:
+    """Что стало со снимком state.db перед упаковкой в архив."""
+
+    status: str
+    rebuilt: tuple[str, ...] = ()
+    problem: str | None = None
+
+
+def repair_snapshot_fts(
+    path: Path, *, timeout_seconds: float = 120.0
+) -> SnapshotRepair:
+    """Привести снимок state.db в состояние, которое примет `korra import`.
+
+    Вызывается на стороне `korra backup` для копии, только что снятой
+    ``sqlite3.Connection.backup()``: копия ещё никому не принадлежит, поэтому
+    индекс можно пересобрать прямо в ней, не трогая боевую базу. Импорт
+    отбивает архив по собственному `quick_check`, поэтому такую копию нельзя
+    ни класть в архив как есть, ни молча выбрасывать.
+    """
+    check = dict(max_bytes=0, timeout_seconds=timeout_seconds)
+    report = check_state_db_fts(path, **check)
+    if report.status != INDEX_DAMAGED:
+        problem = report.detail if report.status in (DATA_DAMAGED, UNREADABLE) else None
+        return SnapshotRepair(report.status, problem=problem)
+
+    rebuilt, detail = rebuild_fts_indexes(path, report.tables)
+    if not rebuilt:
+        return SnapshotRepair(report.status, problem=f"{report.detail}; {detail}")
+
+    after = check_state_db_fts(path, **check)
+    return SnapshotRepair(
+        after.status,
+        rebuilt=report.tables,
+        problem=None if after.status == OK else after.detail,
+    )
+
+
 def iter_state_databases(hermes_home: Path) -> list[Path]:
     """``state.db`` корневого профиля и всех профилей контура."""
     hermes_home = Path(hermes_home)

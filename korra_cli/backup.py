@@ -672,6 +672,26 @@ def copy_db_and_verify(src: Path, dst: Path) -> bool:
     return True
 
 
+def _repair_snapshot_fts(snapshot: Path, rel_path: Path) -> Optional[str]:
+    """K21-039: починить индекс FTS5 в снимке перед упаковкой в архив.
+
+    Возвращает строку для сводки: что пересобрано или почему база всё равно
+    не пройдёт preflight импорта. ``None`` — снимок в порядке, говорить не о чем.
+    """
+    try:
+        from korra_cli.fts_integrity import repair_snapshot_fts
+        result = repair_snapshot_fts(snapshot)
+    except Exception as exc:  # проверка не должна ронять сам бэкап
+        logger.warning("FTS check skipped for %s: %s", rel_path, exc)
+        return f"  {rel_path}: индекс FTS5 не проверен ({exc})"
+    if result.problem is not None:
+        return f"  {rel_path}: {result.problem}; такой архив `korra import` не примет"
+    if result.rebuilt:
+        return (f"  {rel_path}: индекс FTS5 пересобран в копии "
+                f"({', '.join(result.rebuilt)}); боевая база не тронута")
+    return None
+
+
 def _foreign_db_holder_pids(db_path: Path) -> Optional[List[int]]:
     """PIDs of OTHER processes holding *db_path* or its WAL/SHM open.
 
@@ -930,6 +950,7 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
 
     total_bytes = 0
     errors = []
+    fts_notes: list[str] = []
     t0 = time.monotonic()
 
     with _atomic_output_path(out_path) as archive_path, zipfile.ZipFile(
@@ -948,6 +969,15 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
                     ) as tmp:
                         tmp_db = Path(tmp.name)
                     if _safe_copy_db(abs_path, tmp_db):
+                        # K21-039: импорт проверяет каждую базу из архива своим
+                        # `quick_check`, поэтому копию с повреждённым обратным
+                        # индексом FTS5 отдавать нельзя — восстановление из
+                        # такого архива требовало ручной пересборки. Снимок ещё
+                        # никому не принадлежит, так что индекс чинится прямо в
+                        # нём, а боевая база остаётся нетронутой.
+                        repaired = _repair_snapshot_fts(tmp_db, rel_path)
+                        if repaired is not None:
+                            fts_notes.append(repaired)
                         zf.write(tmp_db, arcname=str(rel_path))
                         total_bytes += tmp_db.stat().st_size
                         tmp_db.unlink(missing_ok=True)
@@ -1002,6 +1032,11 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
     print(f"  До сжатия:   {_format_size(total_bytes)}")
     print(f"  После сжатия: {_format_size(zip_size)}")
     print(f"  Время:       {elapsed:.1f} с")
+
+    if fts_notes:
+        print("\n  Поисковый индекс FTS5:")
+        for note in fts_notes:
+            print(f"  {note}")
 
     if external_to_add:
         print(

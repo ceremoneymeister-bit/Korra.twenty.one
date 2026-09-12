@@ -1,9 +1,10 @@
-"""K21-055: повреждение индекса FTS5 в живом state.db должно замечаться само.
+"""K21-055/K21-039: повреждение индекса FTS5 должно замечаться само.
 
 У Виктории (12.09.2026) `state.db` работающего контура уже был повреждён по
 обратному индексу FTS5: беседы читались, сообщения писались, контур выглядел
 здоровым — узнали об этом только при импорте в новый контур, где preflight
-импорта отбил архив по `quick_check`.
+импорта отбил архив по `quick_check`. Соседняя беда K21-039 — тот же дефект в
+архивной копии, из-за которого восстановление требовало ручной пересборки.
 
 Здесь проверяется, что повреждение называется само, что «индекс можно
 пересобрать» отличается от «повреждены данные», и что пересборка не теряет
@@ -14,6 +15,8 @@ from __future__ import annotations
 import random
 import sqlite3
 import uuid
+import zipfile
+from argparse import Namespace
 from pathlib import Path
 
 from korra_cli import fts_integrity
@@ -153,3 +156,29 @@ def test_container_boot_reports_the_damaged_index(tmp_path, monkeypatch, capsys)
     assert fts_integrity.INDEX_DAMAGED in out
     assert "messages_fts_trigram" in out
     assert f"{profile / 'state.db'} ok" in out
+
+
+def test_backup_archive_survives_a_damaged_live_index(tmp_path, monkeypatch):
+    """K21-039: архив не должен содержать базу, которую отвергнет импорт."""
+    from korra_cli import backup
+
+    home = tmp_path / "data"
+    home.mkdir()
+    (home / "config.yaml").write_text("model: test\n")
+    expected = _state_db(home / "state.db")
+    _damage_fts_index(home / "state.db")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    out_path = tmp_path / "archive.zip"
+
+    backup.run_backup(Namespace(output=str(out_path), quick=False))
+
+    with zipfile.ZipFile(out_path) as archive:
+        (tmp_path / "restored.db").write_bytes(archive.read("state.db"))
+    restored = tmp_path / "restored.db"
+    assert fts_integrity.check_state_db_fts(restored).status == fts_integrity.OK
+    conn = sqlite3.connect(str(restored))
+    try:
+        assert conn.execute("SELECT count(*) FROM messages").fetchone()[0] == expected
+    finally:
+        conn.close()
