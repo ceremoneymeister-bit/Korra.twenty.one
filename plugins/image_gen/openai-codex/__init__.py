@@ -592,8 +592,10 @@ def _build_guided_prompt(
 
 
 # Progressive preview frames (partial_image_b64) are intermediate renders.
-# Request none and accept output only from the terminal response.completed
-# object; generate() additionally refuses every source except ``final``.
+# Request none; a result is only a completed ``image_generation_call`` item
+# (streamed via response.output_item.done or listed in the terminal
+# response.completed.output) confirmed by a completed terminal event.
+# generate() additionally refuses every source except ``final``.
 _PARTIAL_IMAGES_REQUESTED = 0
 def _build_responses_payload(
     *,
@@ -750,6 +752,192 @@ def _iter_sse_json(response: Any):
         yield payload
 
 
+class CodexImageStreamDiagnostics:
+    """What the Codex SSE stream actually carried, for honest error text.
+
+    The previous ``empty_response`` message was blind: it said only that no
+    completed ``image_generation_call`` was found, which on 12.09.2026 sent a
+    day of diagnosis toward "content policy on faces" while the server had in
+    fact delivered a finished PNG in ``response.output_item.done`` and an
+    empty ``response.completed.output``. Every event type, the terminal
+    status, refusal text and ``incomplete_details`` are recorded here so the
+    error names what arrived instead of what was expected.
+    """
+
+    _MAX_TEXT = 240
+
+    def __init__(self) -> None:
+        self.event_types: Dict[str, int] = {}
+        self.terminal_status: Optional[str] = None
+        self.terminal_event: Optional[str] = None
+        self.output_item_types: List[str] = []
+        self.image_call_statuses: List[str] = []
+        self.partial_frames = 0
+        self.refusals: List[str] = []
+        self.incomplete_reason: Optional[str] = None
+        self.error_message: Optional[str] = None
+        self.output_text: List[str] = []
+
+    def _note_text(self, bucket: List[str], value: Any) -> None:
+        if isinstance(value, str) and value.strip():
+            text = _sanitize_error_text(value.strip(), limit=self._MAX_TEXT)
+            if text not in bucket:
+                bucket.append(text)
+
+    def observe(self, event: Dict[str, Any]) -> None:
+        event_type = str(event.get("type") or "?")
+        self.event_types[event_type] = self.event_types.get(event_type, 0) + 1
+
+        if "partial_image_b64" in event:
+            self.partial_frames += 1
+
+        item = event.get("item")
+        if event_type == "response.output_item.done" and isinstance(item, dict):
+            item_type = str(item.get("type") or "?")
+            self.output_item_types.append(item_type)
+            if item_type == "image_generation_call":
+                self.image_call_statuses.append(str(item.get("status") or "?"))
+            if item_type == "refusal":
+                self._note_text(self.refusals, item.get("refusal"))
+            for part in item.get("content") or []:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "refusal":
+                    self._note_text(self.refusals, part.get("refusal"))
+                elif part.get("type") == "output_text":
+                    self._note_text(self.output_text, part.get("text"))
+
+        if event_type == "response.refusal.done":
+            self._note_text(self.refusals, event.get("refusal"))
+        if event_type == "error":
+            self._note_text_error(event.get("message") or event.get("error"))
+
+        response_obj = event.get("response")
+        if event_type in {
+            "response.completed",
+            "response.failed",
+            "response.incomplete",
+        } and isinstance(response_obj, dict):
+            self.terminal_event = event_type
+            status = response_obj.get("status")
+            self.terminal_status = str(status) if status else None
+            details = response_obj.get("incomplete_details")
+            if isinstance(details, dict) and details.get("reason"):
+                self.incomplete_reason = str(details.get("reason"))
+            error = response_obj.get("error")
+            if isinstance(error, dict):
+                self._note_text_error(error.get("message") or error.get("code"))
+            elif error:
+                self._note_text_error(error)
+
+    def _note_text_error(self, value: Any) -> None:
+        if isinstance(value, dict):
+            value = value.get("message") or value.get("code") or json.dumps(value)[: self._MAX_TEXT]
+        if isinstance(value, str) and value.strip():
+            self.error_message = _sanitize_error_text(value.strip(), limit=self._MAX_TEXT)
+
+    def summary(self) -> str:
+        parts: List[str] = []
+        if self.event_types:
+            parts.append(
+                "events: "
+                + ", ".join(f"{name}×{count}" for name, count in self.event_types.items())
+            )
+        else:
+            parts.append("events: none")
+        if self.terminal_event:
+            parts.append(
+                f"terminal {self.terminal_event} status={self.terminal_status or '?'}"
+            )
+        else:
+            parts.append("no terminal response.* event")
+        if self.output_item_types:
+            parts.append("output items: " + ", ".join(self.output_item_types))
+        if self.image_call_statuses:
+            parts.append(
+                "image_generation_call status: " + ", ".join(self.image_call_statuses)
+            )
+        if self.partial_frames:
+            parts.append(f"partial_image frames: {self.partial_frames}")
+        if self.incomplete_reason:
+            parts.append(f"incomplete_details.reason={self.incomplete_reason}")
+        if self.error_message:
+            parts.append(f"error: {self.error_message}")
+        if self.refusals:
+            parts.append("refusal: " + " | ".join(self.refusals))
+        if self.output_text:
+            parts.append("assistant text: " + " | ".join(self.output_text))
+        return "; ".join(parts)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "event_types": dict(self.event_types),
+            "terminal_event": self.terminal_event,
+            "terminal_status": self.terminal_status,
+            "output_item_types": list(self.output_item_types),
+            "image_call_statuses": list(self.image_call_statuses),
+            "partial_frames": self.partial_frames,
+            "incomplete_reason": self.incomplete_reason,
+            "error_message": self.error_message,
+            "refusals": list(self.refusals),
+            "output_text": list(self.output_text),
+        }
+
+
+class CodexImageEmptyResponse(RuntimeError):
+    """The stream finished cleanly but carried no completed image result."""
+
+    def __init__(self, diagnostics: CodexImageStreamDiagnostics) -> None:
+        self.diagnostics = diagnostics
+        super().__init__(
+            "Codex response contained no completed image_generation_call result "
+            f"({diagnostics.summary()})"
+        )
+
+
+def _completed_image_calls(nodes: Any) -> List[Dict[str, Any]]:
+    """Return every ``image_generation_call`` object found in a payload tree."""
+    return [
+        node
+        for node in _walk_objects(nodes)
+        if node.get("type") == "image_generation_call"
+    ]
+
+
+def _merge_image_calls(
+    terminal_calls: List[Dict[str, Any]],
+    streamed_calls: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge terminal-output calls with streamed ``output_item.done`` calls.
+
+    The terminal ``response.completed.output`` is authoritative when it
+    carries the call; the streamed copy is used when the terminal output is
+    empty (observed 12.09.2026: ``output: []`` after a completed item). Calls
+    are deduplicated by ``id`` so the same call seen twice is not counted as
+    two generations, while two distinct ids still trip the multi-call guard.
+    """
+    merged: List[Dict[str, Any]] = []
+    seen_ids: set = set()
+    seen_results: set = set()
+    for call in terminal_calls + streamed_calls:
+        call_id = call.get("id")
+        result = call.get("result")
+        has_id = isinstance(call_id, str) and bool(call_id)
+        has_result = isinstance(result, str) and bool(result)
+        if has_id and call_id in seen_ids:
+            continue
+        # The same finished image seen twice (streamed item without an id,
+        # terminal copy with one) is one generation, not two.
+        if has_result and result in seen_results:
+            continue
+        if has_id:
+            seen_ids.add(call_id)
+        if has_result:
+            seen_results.add(result)
+        merged.append(call)
+    return merged
+
+
 def _collect_image_b64(
     token: str,
     *,
@@ -767,8 +955,17 @@ def _collect_image_b64(
 ) -> Optional[Dict[str, str]]:
     """Stream a Codex Responses image_generation call.
 
-    Return one final result only after ``response.completed``. Preview frames,
-    early output-item events, truncated streams, and multiple calls are errors.
+    Return one final result only after ``response.completed`` confirms the
+    stream finished. The completed ``image_generation_call`` may arrive either
+    inside the terminal ``response.completed.output`` or earlier as a
+    ``response.output_item.done`` item with ``status == "completed"`` — the
+    Codex backend has been observed sending the finished item early and an
+    empty terminal ``output`` (K21-056). Preview frames
+    (``partial_image_b64``) are never a result, truncated streams are an
+    error, and more than one distinct image call is an error.
+
+    Raises :class:`CodexImageEmptyResponse` (carrying stream diagnostics)
+    when the stream completed but no finished image was delivered.
     """
     import httpx
     from agent.codex_headers import codex_cloudflare_headers
@@ -793,7 +990,9 @@ def _collect_image_b64(
     )
     timeout = httpx.Timeout(300.0, connect=30.0, read=300.0, write=30.0, pool=30.0)
 
+    diagnostics = CodexImageStreamDiagnostics()
     completed_response: Optional[Dict[str, Any]] = None
+    streamed_calls: List[Dict[str, Any]] = []
     with httpx.Client(timeout=timeout, headers=headers) as http:
         with http.stream("POST", f"{base_url.rstrip('/')}/responses", json=payload) as response:
             try:
@@ -805,34 +1004,56 @@ def _collect_image_b64(
                     f"{_summarize_error_body(exc.response.text)}"
                 ) from exc
             for event in _iter_sse_json(response):
-                if event.get("type") == "response.completed":
+                if not isinstance(event, dict):
+                    continue
+                diagnostics.observe(event)
+                event_type = event.get("type")
+                if event_type == "response.output_item.done":
+                    item = event.get("item")
+                    if (
+                        isinstance(item, dict)
+                        and item.get("type") == "image_generation_call"
+                        and item.get("status") == "completed"
+                    ):
+                        streamed_calls.append(item)
+                elif event_type == "response.completed":
                     terminal = event.get("response")
                     if not isinstance(terminal, dict) or terminal.get("status") != "completed":
-                        raise RuntimeError("Codex image response did not complete successfully")
+                        raise RuntimeError(
+                            "Codex image response did not complete successfully "
+                            f"({diagnostics.summary()})"
+                        )
                     completed_response = terminal
+                elif event_type in {"response.failed", "response.incomplete"}:
+                    raise RuntimeError(
+                        f"Codex image response ended with {event_type} "
+                        f"({diagnostics.summary()})"
+                    )
 
     if completed_response is None:
-        raise RuntimeError("Codex image stream ended without response.completed")
+        raise RuntimeError(
+            "Codex image stream ended without response.completed "
+            f"({diagnostics.summary()})"
+        )
 
-    calls = [
-        node
-        for node in _walk_objects(completed_response.get("output", []))
-        if node.get("type") == "image_generation_call"
-    ]
-    call_ids = {
-        call.get("id") for call in calls
-        if isinstance(call.get("id"), str) and call.get("id")
-    }
-    if len(call_ids) > 1 or len(calls) > 1:
-        raise RuntimeError("Codex returned multiple image_generation calls")
+    terminal_calls = _completed_image_calls(completed_response.get("output", []))
+    calls = _merge_image_calls(terminal_calls, streamed_calls)
+    if len(calls) > 1:
+        raise RuntimeError(
+            "Codex returned multiple image_generation calls "
+            f"({diagnostics.summary()})"
+        )
     if not calls:
-        return None
+        raise CodexImageEmptyResponse(diagnostics)
     call = calls[0]
     if call.get("status") != "completed":
-        raise RuntimeError("Codex returned a non-completed image_generation call")
+        raise RuntimeError(
+            "Codex returned a non-completed image_generation call "
+            f"({diagnostics.summary()})"
+        )
     result_b64 = call.get("result")
     if not isinstance(result_b64, str) or not result_b64:
-        return None
+        raise CodexImageEmptyResponse(diagnostics)
     return {"b64": result_b64, "source": "final"}
 
 
@@ -1051,12 +1272,27 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 mask_part=mask_part,
                 base_url=base_url,
             )
+        except CodexImageEmptyResponse as exc:
+            # The stream finished but carried no finished image. Say exactly
+            # what arrived (event types, terminal status, refusal text) so the
+            # next person does not guess at policy or quota.
+            logger.warning("Codex image stream carried no result: %s", exc)
+            err = error_response(
+                error=_sanitize_error_text(exc, limit=1200),
+                error_type="empty_response",
+                provider="openai-codex",
+                model=model_id,
+                prompt=prompt,
+                aspect_ratio=aspect,
+            )
+            err["stream_diagnostics"] = exc.diagnostics.as_dict()
+            return err
         except Exception as exc:
             logger.debug("Codex image generation failed", exc_info=True)
             return error_response(
                 error=(
                     "OpenAI image generation via Codex auth failed: "
-                    f"{_sanitize_error_text(exc)}"
+                    f"{_sanitize_error_text(exc, limit=1200)}"
                 ),
                 error_type="api_error",
                 provider="openai-codex",
