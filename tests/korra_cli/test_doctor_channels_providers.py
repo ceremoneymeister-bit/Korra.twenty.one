@@ -189,3 +189,86 @@ def test_search_probe_failure_does_not_break_doctor(contour, monkeypatch):
     text, _ = run()
     # Речь по-прежнему названа: одна сломавшаяся проверка не уносит секцию.
     assert "Распознавание речи" in text
+
+
+# ─── Медиа из Telegram (K21-070) ────────────────────────────────────────────
+#
+# Успехи и провалы загрузки медиа пишутся на INFO только в файловый
+# gateway.log, а в docker logs видны одни WARNING. Поэтому провал фото у
+# Дмитрия пролежал девять дней: ноль успешных «Cached user …» за всю жизнь
+# контура, и ни одна проверка об этом не говорила.
+
+
+@pytest.fixture
+def gateway_log(tmp_path, monkeypatch):
+    """Журнал шлюза в подставном HERMES_HOME."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.setattr(doctor, "HERMES_HOME", tmp_path)
+
+    def write(lines):
+        (log_dir / "gateway.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    return write
+
+
+def _stamp(days_ago):
+    from datetime import datetime, timedelta
+
+    moment = datetime.now() - timedelta(days=days_ago)
+    return moment.strftime("%Y-%m-%d %H:%M:%S,000")
+
+
+def run_media(issues=None):
+    issues = [] if issues is None else issues
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        doctor.check_media_intake(issues)
+    return output.getvalue(), issues
+
+
+def test_only_failures_is_the_nine_day_blind_spot(gateway_log):
+    gateway_log([
+        f"{_stamp(1)} WARNING gateway.telegram: [Telegram] Failed to cache photo: Not Found",
+        f"{_stamp(2)} WARNING gateway.telegram: [Telegram] Failed to cache voice: Not Found",
+    ])
+    text, issues = run_media()
+    assert "Медиа" in text
+    assert "2" in text
+    assert issues
+
+
+def test_successful_intake_is_reported_green(gateway_log):
+    gateway_log([
+        f"{_stamp(1)} INFO gateway.telegram: [Telegram] Cached user voice at /opt/data/x.oga",
+        f"{_stamp(3)} INFO gateway.telegram: [Telegram] Cached user photo at /opt/data/y.jpg",
+    ])
+    text, issues = run_media()
+    assert "Медиа" in text
+    assert issues == []
+
+
+def test_partial_failures_are_visible_but_not_a_stop(gateway_log):
+    gateway_log([
+        f"{_stamp(1)} INFO gateway.telegram: [Telegram] Cached user voice at /opt/data/x.oga",
+        f"{_stamp(1)} WARNING gateway.telegram: [Telegram] Failed to cache video: Not Found",
+    ])
+    text, issues = run_media()
+    assert "1" in text
+    assert issues == []
+
+
+def test_older_than_the_window_is_not_counted(gateway_log):
+    gateway_log([
+        f"{_stamp(30)} WARNING gateway.telegram: [Telegram] Failed to cache photo: Not Found",
+    ])
+    text, issues = run_media()
+    assert issues == []
+    assert "не было" in text
+
+
+def test_missing_log_says_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor, "HERMES_HOME", tmp_path)
+    text, issues = run_media()
+    assert text.strip() == ""
+    assert issues == []

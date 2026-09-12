@@ -929,6 +929,96 @@ def check_web_search(issues: list[str]) -> None:
     )
 
 
+# Окно, за которое имеет смысл судить о медиа: короче — и редкое голосовое
+# раз в неделю выглядит как «ничего не было», длиннее — и давно починенная
+# поломка ещё месяц висит в отчёте.
+_MEDIA_WINDOW_DAYS = 7
+# Хвост каждого файла журнала, который читается ради счётчиков. Шлюз пишет
+# gateway.log по 5 МБ × 3 ротации; читать всё ради двух счётчиков незачем.
+_MEDIA_LOG_TAIL_BYTES = 2 * 1024 * 1024
+
+
+def _media_intake_counts(log_dir, window_days: int = _MEDIA_WINDOW_DAYS) -> tuple:
+    """Сколько входящих файлов принято и сколько провалено за окно.
+
+    Читает хвост ``gateway.log`` и его ротаций. Возвращает
+    ``(принято, провалено, был ли журнал)``.
+    """
+    import re
+    from datetime import datetime, timedelta
+
+    stamp_re = re.compile(r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})")
+    cutoff = datetime.now() - timedelta(days=window_days)
+    cached = failed = 0
+    seen_log = False
+
+    for name in ("gateway.log", "gateway.log.1", "gateway.log.2", "gateway.log.3"):
+        path = log_dir / name
+        if not path.is_file():
+            continue
+        seen_log = True
+        try:
+            with open(path, "rb") as handle:
+                size = path.stat().st_size
+                if size > _MEDIA_LOG_TAIL_BYTES:
+                    handle.seek(size - _MEDIA_LOG_TAIL_BYTES)
+                    handle.readline()  # обрезанная первая строка — не наша
+                chunk = handle.read().decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in chunk.splitlines():
+            if "Cached user " in line:
+                kind = "ok"
+            elif "Failed to cache" in line:
+                kind = "fail"
+            else:
+                continue
+            match = stamp_re.match(line)
+            if not match:
+                continue
+            try:
+                moment = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            if moment < cutoff:
+                continue
+            if kind == "ok":
+                cached += 1
+            else:
+                failed += 1
+
+    return cached, failed, seen_log
+
+
+def check_media_intake(issues: list[str]) -> None:
+    """Доходят ли до агента входящие файлы — без чтения логов владельцем.
+
+    Успехи и провалы загрузки медиа пишутся на INFO только в файловый
+    ``gateway.log``, а в ``docker logs`` видны одни WARNING. Из-за этого провал
+    фото пролежал девять дней: ноль успешных загрузок за всю жизнь контура, и
+    ни одна проверка об этом не говорила.
+    """
+    cached, failed, seen_log = _media_intake_counts(HERMES_HOME / "logs")
+    if not seen_log:
+        return
+    window = f'за {_MEDIA_WINDOW_DAYS} дней'
+    if not cached and not failed:
+        check_info(f'Медиа {window}: входящих файлов не было')
+        return
+    if failed and not cached:
+        _fail_and_issue(
+            f'Медиа {window}: не принято ни одного файла',
+            f'(провалов: {failed} — фото и голосовые до агента не доходят)',
+            'Проверьте строку про свой Telegram Bot API выше и журнал шлюза: korra logs gateway --level WARNING',
+            issues,
+        )
+        return
+    if failed:
+        check_warn(f'Медиа {window}: принято {cached}', f'(провалов: {failed})')
+        return
+    check_ok(f'Медиа {window}: принято {cached}', '(провалов нет)')
+
+
 def check_channels_and_providers(issues: list[str]) -> None:
     """Одна секция про то, чем контур слышит, ищет и получает медиа.
 
@@ -946,6 +1036,10 @@ def check_channels_and_providers(issues: list[str]) -> None:
         check_web_search(issues)
     except Exception as exc:
         check_warn('Не удалось определить бэкенд поиска', f'({exc})')
+    try:
+        check_media_intake(issues)
+    except Exception as exc:
+        check_warn('Не удалось посчитать входящие медиа', f'({exc})')
 
 
 def _check_s6_supervision(issues: list[str]) -> None:
