@@ -57,6 +57,28 @@ def _scoped_gate_env(name: str, default: str = "") -> str:
         return (os.getenv(name) or default).strip()
 
 
+def resolve_telegram_local_mode(extra: dict) -> bool:
+    """Decide whether media is read from disk rather than fetched over HTTP.
+
+    A telegram-bot-api server started with ``--local`` never serves files over
+    HTTP: it answers with an absolute path on its own filesystem. A contour that
+    fetches that path over HTTP gets a 404, which surfaces to the owner as
+    "InvalidToken" and never recovers on retry — exactly how voice messages and
+    photos were lost on three installations for nine days before 12.09.2026.
+
+    An explicit ``local_mode`` in the profile config always wins, including an
+    explicit ``false``. Otherwise the host kit decides: it mounts the server's
+    directory read-only and announces it in ``KORRA_TELEGRAM_LOCAL_ROOT``, so a
+    contour wired to its own Bot API server works without config edits.
+    """
+    configured = extra.get("local_mode")
+    if configured is not None:
+        return bool(configured)
+    if not extra.get("base_url"):
+        return False
+    return bool(os.environ.get("KORRA_TELEGRAM_LOCAL_ROOT", "").strip())
+
+
 def _consume_abandoned_task(task: asyncio.Task) -> None:
     """Observe a detached task's terminal exception to avoid noisy loop logs."""
     try:
@@ -4545,7 +4567,13 @@ class TelegramAdapter(BasePlatformAdapter):
             # local_mode=True so download_*() reads from disk instead of issuing
             # an HTTP GET that would 404. Requires that the same path is
             # readable by the Hermes process (shared mount, same machine, etc.).
-            if self.config.extra.get("local_mode"):
+            local_mode = resolve_telegram_local_mode(self.config.extra)
+            if local_mode and self.config.extra.get("local_mode") is None:
+                logger.info(
+                    "[%s] Own Bot API server detected: reading media from %s",
+                    self.name, os.environ.get("KORRA_TELEGRAM_LOCAL_ROOT", "").strip(),
+                )
+            if local_mode:
                 builder = builder.local_mode(True)
                 logger.info("[%s] Using Telegram local_mode (read files from disk)", self.name)
 

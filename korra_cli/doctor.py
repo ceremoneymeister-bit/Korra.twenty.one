@@ -744,6 +744,63 @@ def _check_version_consistency(issues: list[str]) -> None:
         )
 
 
+def check_local_bot_api(issues: list[str]) -> None:
+    """Свой сервер Telegram Bot API: виден ли контуру его каталог с файлами.
+
+    Сервер, запущенный с ``--local``, файлы по HTTP не отдаёт — он называет
+    абсолютный путь на своём диске. Если контур этого каталога не видит, всё
+    входящее медиа приходит к агенту как 404, а владелец читает «InvalidToken»
+    и повторяет отправку без всякого толку. Симптом ничем не выдаёт причину и
+    прожил девять дней на трёх установках, поэтому здесь он назван прямо.
+    """
+    try:
+        from korra_cli.config import load_config
+
+        extra = ((load_config() or {}).get("telegram") or {}).get("extra") or {}
+    except Exception:
+        return
+    base_url = str(extra.get("base_url") or "").strip()
+    if not base_url:
+        return
+    if not any(host in base_url for host in ("127.0.0.1", "localhost", "[::1]")):
+        # Сервер на другой машине: файлы туда и обратно ходят по сети штатно.
+        return
+    if extra.get("local_mode") is False:
+        check_info('Свой Telegram Bot API: чтение с диска выключено в конфиге')
+        return
+
+    root = os.environ.get("KORRA_TELEGRAM_LOCAL_ROOT", "").strip()
+    fix = (
+        'Пересоздайте контур через host-kit (update.sh) — он примонтирует каталог '
+        'своего Telegram Bot API только на чтение; либо задайте BOT_API_DIR вручную'
+    )
+    if not root:
+        _fail_and_issue(
+            'Свой Telegram Bot API: каталог с файлами не примонтирован',
+            f'({base_url} — входящие фото и голосовые не дойдут до агента)',
+            fix,
+            issues,
+        )
+        return
+    if not os.path.isdir(root):
+        _fail_and_issue(
+            'Свой Telegram Bot API: каталог объявлен, но недоступен',
+            f'({root})',
+            fix,
+            issues,
+        )
+        return
+    if not os.access(root, os.R_OK | os.X_OK):
+        _fail_and_issue(
+            'Свой Telegram Bot API: каталог не читается',
+            f'({root})',
+            'Проверьте владельца каталога: файлы сервера бота должен читать пользователь контура',
+            issues,
+        )
+        return
+    check_ok('Свой Telegram Bot API: медиа читается с диска', f'({root})')
+
+
 def _check_s6_supervision(issues: list[str]) -> None:
     """Inside a container under our s6 /init, surface what s6 sees.
 
@@ -3360,6 +3417,11 @@ def run_doctor(args):
 
     try:
         check_multiplex_profiles(should_fix=should_fix, issues=issues)
+    except Exception:
+        pass
+
+    try:
+        check_local_bot_api(issues)
     except Exception:
         pass
 

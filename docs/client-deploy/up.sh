@@ -102,6 +102,51 @@ if [ -e "$GOOGLE_OAUTH_CLIENT" ]; then
     )
 fi
 
+# ─── Свой сервер Telegram Bot API ───────────────────────────────────────────
+# Сервер, запущенный с --local, файлы по HTTP не отдаёт: на запрос он называет
+# абсолютный путь на своём диске. Контур обязан видеть тот же путь, иначе
+# каждое голосовое и каждое фото приходят к агенту как 404, владелец читает
+# «InvalidToken», а повтор не помогает никогда. Ровно так молча ломалось
+# медиа на трёх установках до 12.09.2026 — симптом прожил девять дней.
+#
+# Каталог ищется по порту из конфига самого контура, а не по первому
+# попавшемуся контейнеру: на одном хосте живут несколько контуров, у каждого
+# свой сервер на своём порту и со своим каталогом.
+BOT_API_ARGS=()
+BOT_API_DIR="${BOT_API_DIR:-}"
+BOT_API_DEST="${BOT_API_DEST:-}"
+if [ -z "$BOT_API_DIR" ] && [ -s "$DATA/config.yaml" ]; then
+    # Совпадает только со своим сервером: у адреса Bot API путь /bot на конце,
+    # чего нет у прочих локальных адресов в конфиге (например, у провайдера).
+    BOT_API_PORT=$(grep -oE 'https?://(127\.0\.0\.1|localhost):[0-9]+/bot$' "$DATA/config.yaml" \
+        | head -1 | sed -E 's#.*:([0-9]+)/bot$#\1#')
+    if [ -n "$BOT_API_PORT" ] && command -v docker >/dev/null 2>&1; then
+        for candidate in $(docker ps -q 2>/dev/null); do
+            CANDIDATE_CMD=$(docker inspect "$candidate" --format '{{range .Config.Cmd}}{{println .}}{{end}}' 2>/dev/null || true)
+            printf '%s\n' "$CANDIDATE_CMD" | grep -qx -- '--local' || continue
+            printf '%s\n' "$CANDIDATE_CMD" | grep -qx -- "--http-port=$BOT_API_PORT" || continue
+            BOT_API_DEST=$(printf '%s\n' "$CANDIDATE_CMD" | sed -n 's/^--dir=//p' | head -1)
+            [ -n "$BOT_API_DEST" ] || continue
+            BOT_API_DIR=$(docker inspect "$candidate" \
+                --format "{{range .Mounts}}{{if eq .Destination \"$BOT_API_DEST\"}}{{.Source}}{{end}}{{end}}" 2>/dev/null || true)
+            break
+        done
+    fi
+fi
+if [ -n "$BOT_API_DIR" ]; then
+    BOT_API_DEST="${BOT_API_DEST:-/opt/data/telegram-bot-api}"
+    if [ ! -d "$BOT_API_DIR" ]; then
+        echo "Каталог своего Telegram Bot API не найден: $BOT_API_DIR" >&2
+        exit 2
+    fi
+    # Только чтение: скачанные файлы пишет сервер бота, контур их читает.
+    BOT_API_ARGS=(
+        --mount "type=bind,src=$BOT_API_DIR,dst=$BOT_API_DEST,readonly"
+        -e KORRA_TELEGRAM_LOCAL_ROOT="$BOT_API_DEST"
+    )
+    printf 'Свой Telegram Bot API: %s → %s (только чтение)\n' "$BOT_API_DIR" "$BOT_API_DEST"
+fi
+
 # ─── Команда запуска ────────────────────────────────────────────────────────
 # host-сеть — не наследие, а требование кабинета: панель отдаёт пропуск сессии
 # в HTML только при бинде на петлю, а любой бинд на 0.0.0.0 (без которого мост
@@ -117,6 +162,7 @@ RUN_ARGS=(
     --restart unless-stopped
     "${RESOURCE_ARGS[@]}"
     "${GOOGLE_OAUTH_ARGS[@]}"
+    "${BOT_API_ARGS[@]}"
     # Журнал контейнера без ротации за полгода съедает диск клиента молча.
     --log-opt max-size=50m --log-opt max-file=3
     -e KORRA_UID="$ENGINE_UID" -e KORRA_GID="$ENGINE_GID"
