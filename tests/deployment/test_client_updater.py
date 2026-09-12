@@ -61,6 +61,13 @@ class FakeDockerUpdater(u.Updater):
         if args[:2] == ("image", "tag"):
             self.tags[args[3]] = args[2]
             return "ok"
+        if args[:2] == ("image", "ls"):
+            return "\n".join(f"{reference}|{image}" for reference, image in sorted(self.tags.items()))
+        if args[:2] == ("image", "rm"):
+            if args[2] not in self.tags:
+                raise u.UpdateError("docker image rm failed (exit 1)")
+            del self.tags[args[2]]
+            return "Untagged: " + args[2]
         if args[0] == "stop":
             self.running = False
             self.is_draining = False
@@ -854,6 +861,65 @@ def test_cli_dry_run_job_id_cannot_claim_real_update(updater, monkeypatch, capsy
     with pytest.raises(u.UpdateError, match="dry-run/execution mode"):
         u.main(["--update", reference, "--job-id", "cli-dry"])
     assert updater.image == OLD and updater.running
+
+
+def _stale_job(updater, job_id, candidate, rollback):
+    job = updater.jobs / job_id
+    job.mkdir()
+    u.atomic_json(job / "status.json", {"job_id": job_id, "name": updater.name, "data": str(updater.data),
+                                        "candidate_image_ref": candidate, "rollback_image_ref": rollback})
+
+
+def test_gc_keeps_current_and_previous_and_drops_this_installations_stale_tags(updater):
+    updater.update("registry.example/korra:latest")
+    current = {updater.receipt["candidate_image_ref"], updater.receipt["rollback_image_ref"]}
+    _stale_job(updater, "old-job", "korra-local-candidate:old", "korra-local-rollback:old")
+    updater.tags.update({
+        "korra-local-candidate:old": "sha256:" + "5" * 64,
+        "korra-local-rollback:old": "sha256:" + "6" * 64,
+        # Соседняя установка на том же хосте: её теги трогать нельзя.
+        "korra-local-candidate:neighbour": "sha256:" + "7" * 64,
+        "ghcr.io/example/korra.twenty.one:0.21.4": NEW,
+    })
+
+    result = updater.gc()
+
+    assert result["removed"] == ["korra-local-candidate:old", "korra-local-rollback:old"]
+    assert set(result["kept"]) == current
+    assert result["skipped"] == ["korra-local-candidate:neighbour"]
+    assert set(updater.tags) == current | {"korra-local-candidate:neighbour",
+                                           "ghcr.io/example/korra.twenty.one:0.21.4"}
+
+
+def test_gc_keeps_the_rollback_tag_of_the_previous_image(updater):
+    updater.update("registry.example/korra:latest")
+    rollback = updater.receipt["rollback_image_ref"]
+    (updater.home / "IMAGE.prev").unlink()
+
+    assert rollback in updater.gc()["removed"]
+    assert (updater.home / "IMAGE.prev").exists() is False
+
+    # Пока IMAGE.prev на месте, откат по нему остаётся возможен.
+    (updater.home / "IMAGE.prev").write_text(OLD + "\n")
+    updater.tags[rollback] = OLD
+    assert rollback in updater.gc()["kept"]
+
+
+def test_gc_cli_refuses_while_another_operation_holds_the_target_lock(updater, monkeypatch, capsys):
+    monkeypatch.setattr(u.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(u, "HERE", updater.home)
+    monkeypatch.setattr(u, "Updater", lambda: updater)
+    monkeypatch.setattr(u, "trusted_control", lambda path: None)
+    assert u.main(["--gc"]) == 0
+    assert json.loads(capsys.readouterr().out)["action"] == "gc"
+
+    held = u.target_lock_path(updater.data).open("a")
+    u.fcntl.flock(held, u.fcntl.LOCK_EX | u.fcntl.LOCK_NB)
+    try:
+        with pytest.raises(u.UpdateError, match="target lock"):
+            u.main(["--gc"])
+    finally:
+        held.close()
 
 
 def test_rollback_retry_after_old_image_start_failure_preserves_all_exports(updater):

@@ -795,6 +795,66 @@ class Updater:
         self.receipt[purpose + "_image_ref"] = reference
         return reference
 
+    def own_image_refs(self):
+        """Protective tags this deployment created, from its own receipts."""
+        refs = set()
+        for path in sorted(self.jobs.glob("*/status.json")):
+            try:
+                receipt = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if (not isinstance(receipt, dict) or receipt.get("name") != self.name
+                    or receipt.get("data") != str(self.data)):
+                continue
+            for key in ("candidate_image_ref", "rollback_image_ref"):
+                value = receipt.get(key)
+                if isinstance(value, str) and value.startswith("korra-local-"):
+                    refs.add(value)
+        return refs
+
+    def gc(self):
+        """Drop the protective tags that no longer pin this deployment's images.
+
+        Every operation tags its candidate and its predecessor so Docker cannot
+        drop an image out from under a running job, and nothing ever removed
+        those tags again: one 59 GB client host carried 18.9 GB of dead images
+        with 16 GB free. Exactly two images stay — the running one (IMAGE) and
+        the one `--rollback` needs (IMAGE.prev). Tags of another installation on
+        the same host are reported, never removed: it has its own IMAGE pair.
+        """
+        keep = set()
+        for name in ("IMAGE", "IMAGE.prev"):
+            path = self.home / name
+            if not path.is_file():
+                continue
+            try:
+                keep.add(json.loads(self.docker("image", "inspect", path.read_text().strip()))[0]["Id"])
+            except (UpdateError, ValueError, KeyError, IndexError):
+                self.log(f"gc: {name} does not resolve to a local image")
+        own = self.own_image_refs()
+        result = {"action": "gc", "kept": [], "removed": [], "skipped": [], "failed": []}
+        listed = self.docker("image", "ls", "--no-trunc", "--format", "{{.Repository}}:{{.Tag}}|{{.ID}}")
+        for line in sorted(listed.splitlines()):
+            reference, _, image_id = line.strip().partition("|")
+            if not reference.startswith("korra-local-"):
+                continue
+            if image_id in keep:
+                result["kept"].append(reference)
+            elif reference not in own:
+                result["skipped"].append(reference)
+            else:
+                try:
+                    self.docker("image", "rm", reference)
+                    result["removed"].append(reference)
+                except UpdateError as exc:
+                    # A stopped neighbour's container may still reference the
+                    # image; housekeeping does not stop at the first refusal.
+                    result["failed"].append(reference)
+                    self.log(f"gc: {reference} not removed: {exc}")
+        self.log("gc: kept {}, removed {}, skipped {}, failed {}".format(
+            *(len(result[key]) for key in ("kept", "removed", "skipped", "failed"))))
+        return result
+
     def probe_image(self, image):
         output = self.docker("run", "--rm", "--network", "none", "--cpus", "1",
                              "--memory", "768m", "--entrypoint", PYTHON,
@@ -1483,6 +1543,7 @@ def parse_args(argv=None):
     mode.add_argument("--rollback", metavar="JOB_ID")
     mode.add_argument("--worker", metavar="JOB_ID", help=argparse.SUPPRESS)
     mode.add_argument("--warm-deps", action="store_true", help=argparse.SUPPRESS)
+    mode.add_argument("--gc", action="store_true")
     mode.add_argument("--capabilities", action="store_true")
     parser.add_argument("--job-id")
     parser.add_argument("--expected-current", metavar="SHA256_IMAGE_ID")
@@ -1548,6 +1609,7 @@ def main(argv=None):
     if args.capabilities:
         print(json.dumps({"protocol": 1, "update": True, "detach": True, "status": True,
                           "rollback_detach": True, "expected_current": True, "artifact_verification": True,
+                          "gc": True,
                           "files": ["update.sh", "updater.py", "up.sh", "backup.sh", "dependencies.lock.json"]}))
         return 0
     if os.geteuid() != 0:
@@ -1580,6 +1642,16 @@ def main(argv=None):
         return 0
     updater.jobs.mkdir(mode=0o700, exist_ok=True)
     trusted_control(updater.jobs)
+    if args.gc:
+        # Housekeeping runs under the same target lock as an update: a live
+        # operation's candidate tag is exactly what must not be removed.
+        with target_lock_path(updater.data).open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise UpdateError("Another update holds the target lock") from exc
+            print(json.dumps(updater.gc()))
+        return 0
     if args.worker:
         if args.lock_fd is None:
             raise UpdateError("Worker requires inherited target lock")
