@@ -11,6 +11,7 @@ Here: once the handler does see it, the file is cached and handed over on the
 voice path, so the gateway transcribes its soundtrack instead of dropping it.
 """
 
+import os
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -116,7 +117,7 @@ async def test_video_note_is_cached_and_goes_the_voice_way(adapter):
     # The owner's caption survives, and the agent is told this was a circle.
     assert "послушай" in event.text
     assert "кружок" in event.text.lower()
-    assert event.media_urls[0] in event.text
+    assert os.path.basename(event.media_urls[0]) in event.text
 
 
 @pytest.mark.asyncio

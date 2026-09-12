@@ -10530,9 +10530,14 @@ class TelegramAdapter(BasePlatformAdapter):
                 cached_path = cache_video_from_bytes(bytes(video_bytes), ext=".mp4")
                 event.media_urls = [cached_path]
                 event.media_types = ["audio/mp4"]
+                # media_urls stays the host path the gateway reads for STT; the
+                # note has to carry the path the agent's sandbox can open.
+                from tools.credential_files import to_agent_visible_cache_path
+
                 event.text = self._append_observed_note(
                     event.text,
-                    f"[Пользователь прислал видео-кружок (video note), файл: {cached_path}]",
+                    "[Пользователь прислал видео-кружок (video note), файл: "
+                    f"{to_agent_visible_cache_path(cached_path)}]",
                 )
                 logger.info("[Telegram] Cached user video note at %s", cached_path)
             except Exception as e:
