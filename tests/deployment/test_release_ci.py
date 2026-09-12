@@ -311,3 +311,71 @@ def test_actual_full_ci_aggregate_rejects_incomplete_python_lane(tmp_path, resul
            "GITHUB_OUTPUT": str(tmp_path / "output")}
     completed = subprocess.run(["bash", "-c", step["run"]], cwd=ROOT, env=env, capture_output=True, text=True)
     assert completed.returncode != 0
+
+
+def merge_publication_step():
+    """Настоящий шаг публикации манифеста из docker.yml."""
+    jobs = yaml.safe_load((ROOT / ".github/workflows/docker.yml").read_text())["jobs"]
+    return next(step for step in jobs["merge"]["steps"]
+                if step.get("name") == "Create manifest list and push")
+
+
+def run_merge(tmp_path, event_name, release_tag):
+    """Прогон шага с подставным docker: реестр не трогаем, теги записываем."""
+    digests = tmp_path / "digests"
+    digests.mkdir(exist_ok=True)
+    (digests / ("c" * 64)).write_text("", encoding="utf-8")
+    stub, calls = tmp_path / "docker", tmp_path / "docker-calls"
+    stub.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_CALLS"\n', encoding="utf-8")
+    stub.chmod(0o755)
+    result = subprocess.run(["bash", "-c", merge_publication_step()["run"]], cwd=digests,
+        capture_output=True, text=True, env={**os.environ, "IMAGE_NAME": "ghcr.io/synthetic/korra",
+        "RELEASE_TAG": release_tag, "EVENT_NAME": event_name, "DOCKER_CALLS": str(calls),
+        "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"]})
+    return result, calls.read_text(encoding="utf-8") if calls.exists() else ""
+
+
+@pytest.mark.parametrize("event_name,release_tag,expected", [
+    ("schedule", "", ["ghcr.io/synthetic/korra:main", "ghcr.io/synthetic/korra:latest"]),
+    ("workflow_dispatch", "", ["ghcr.io/synthetic/korra:main", "ghcr.io/synthetic/korra:latest"]),
+    ("release", "K21-2026.09.12", ["ghcr.io/synthetic/korra:K21-2026.09.12"]),
+])
+def test_build_publication_never_moves_the_stable_channel(tmp_path, event_name, release_tag, expected):
+    """Сборка не объявляет выпуск: `stable` двигает конвейер раскатки (K21-075).
+
+    Ночной прогон на main обязан двигать только `:main` и `:latest` — это
+    последняя успешная сборка, а не решение о выпуске.
+    """
+    result, calls = run_merge(tmp_path, event_name, release_tag)
+    assert result.returncode == 0, result.stderr
+    assert [word for line in calls.splitlines() for word in line.split()
+            if word.startswith("ghcr.io/") and "@" not in word] == expected
+    assert ":stable" not in calls
+
+
+@pytest.mark.parametrize("channel", ["stable", "latest", "main"])
+def test_release_named_after_a_channel_cannot_hijack_it(tmp_path, channel):
+    """Релиз с именем канала увёл бы клиентов на образ мимо колец раскатки."""
+    result, calls = run_merge(tmp_path, "release", channel)
+    assert result.returncode != 0
+    assert "channel tag" in result.stdout
+    assert calls == ""
+
+
+def installer_commands(document):
+    """Только исполняемые строки инструкции: прозу про каналы не судим."""
+    lines, inside = [], False
+    for line in (ROOT / document).read_text(encoding="utf-8").splitlines():
+        if line.startswith("```"):
+            inside = not inside
+        elif inside:
+            lines.append(line)
+    return lines
+
+
+@pytest.mark.parametrize("document", ["INSTALL.md", "INSTALL.en.md"])
+def test_install_guide_takes_the_release_channel_not_the_nightly_tag(document):
+    """Клиент ставится с канала выпуска, а не с последней ночной сборки."""
+    assert not [line for line in installer_commands(document)
+                if "korra.twenty.one:latest" in line]
+    assert any("korra.twenty.one:stable" in line for line in installer_commands(document))

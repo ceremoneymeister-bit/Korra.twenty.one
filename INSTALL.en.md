@@ -4,8 +4,12 @@ A runbook for an AI agent installing Korra on the owner's behalf, and for a
 human doing the same by hand. Every step is a command plus a check; a step
 without its check is not done. The Russian original is [INSTALL.md](INSTALL.md).
 
-Image: `ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest`, linux/amd64
+Image: `ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable`, linux/amd64
 only. Do not build the image locally: the registry image is the tested one.
+
+`stable` is the release channel: an image is moved onto it only after
+acceptance and two rollout rings. `latest` is the last successful nightly build
+of `main` — no release decision stands behind it, so do not install from it.
 
 Pick a scenario:
 
@@ -67,9 +71,12 @@ returns `UNKNOWN`. The name mapping lives inside the container by design.
 
 ### A4. Image pinned by digest
 
+The `stable` channel points at another image tomorrow; the contour is pinned by
+digest so update and rollback stay reproducible.
+
 ```bash
-docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
-DIGEST=$(docker image inspect ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest \
+docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable
+DIGEST=$(docker image inspect ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable \
   --format '{{index .RepoDigests 0}}' | cut -d@ -f2)
 echo "ghcr.io/ceremoneymeister-bit/korra.twenty.one@${DIGEST}" > /opt/korra/IMAGE
 cat /opt/korra/IMAGE
@@ -162,9 +169,9 @@ does not.
 ### A9. Update and rollback
 
 ```bash
-docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
+docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable
 NEW=ghcr.io/ceremoneymeister-bit/korra.twenty.one@$(docker image inspect \
-  ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest --format '{{index .RepoDigests 0}}' | cut -d@ -f2)
+  ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable --format '{{index .RepoDigests 0}}' | cut -d@ -f2)
 cd /opt/korra && NAME=korra DATA=/opt/korra/data PANEL_PORT=9119 API_PORT=8650 \
   ./update.sh --update "$NEW"
 tail -3 /opt/korra/updates.log       # phase=complete status=succeeded
@@ -208,6 +215,9 @@ docker compose -f docker-compose.korra.yml up -d
 ```
 
 On macOS and Linux replace `${USERPROFILE}/.korra` with `${HOME}/.korra` in the file.
+This compose file still tracks `latest`, the last `main` build. That is fine for
+an owner's own machine; a contour we are responsible for is installed with
+scenario A or B from the `stable` channel.
 
 **Check:**
 

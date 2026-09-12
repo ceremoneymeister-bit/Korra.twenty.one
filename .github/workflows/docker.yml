@@ -409,6 +409,12 @@ jobs:
   #
   # On main pushes: tags both :main and :latest.
   # On releases: tags :<release_tag_name>.
+  #
+  # Korra: ни один из этих тегов не является каналом выпуска. :latest — это
+  # последняя успешная сборка main (ночью, без человека), и ставить с неё
+  # клиента нельзя. Канал клиентов — :stable; его двигает конвейер раскатки
+  # после кольца 2 отдельной командой imagetools create. Этот workflow тег
+  # :stable не пишет никогда — контракт в docs/client-deploy/README.md.
   # ---------------------------------------------------------------------------
   merge:
     if: github.repository == 'ceremoneymeister-bit/Korra.twenty.one' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main')
@@ -454,6 +460,9 @@ jobs:
         env:
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          # Через env, а не выражением в теле: так шаг исполним и проверяется
+          # тестом на настоящем скрипте, а не на его копии.
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           args=()
@@ -464,7 +473,17 @@ jobs:
             fi
             args+=("${IMAGE_NAME}@sha256:${digest_file}")
           done
-          if [ "${{ github.event_name }}" = "release" ]; then
+          if [ "$EVENT_NAME" = "release" ]; then
+            # Каналы двигает не сборка. :stable принадлежит конвейеру раскатки
+            # и переезжает после кольца 2; :main/:latest — просто последняя
+            # успешная сборка main. Релиз, названный именем канала, увёл бы
+            # клиентов на образ мимо колец.
+            for channel in stable latest main; do
+              if [ "$RELEASE_TAG" = "$channel" ]; then
+                echo "::error::Release '$RELEASE_TAG' names a channel tag; channels are moved by the rollout pipeline"
+                exit 1
+              fi
+            done
             tags=(-t "${IMAGE_NAME}:${RELEASE_TAG}")
           else
             tags=(-t "${IMAGE_NAME}:main" -t "${IMAGE_NAME}:latest")
