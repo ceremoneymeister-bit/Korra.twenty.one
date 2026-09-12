@@ -35,6 +35,11 @@ class FakeDockerUpdater(u.Updater):
         self.tags = {}
         self.judge_verdict = {"bad": []}
         self.judge_image_missing = False
+        # Мультиплексный контур: профили обслуживает корневой шлюз и он же их
+        # перечисляет. Без мультиплекса у каждого профиля свой шлюз и своё home,
+        # а лежачий профиль в ответе просто отсутствует.
+        self.multiplex = True
+        self.profile_gateways = ()
 
     def free_space(self, *args):
         pass
@@ -90,7 +95,7 @@ class FakeDockerUpdater(u.Updater):
         self.calls.append(("probe", image))
         return {"skills": {}}
 
-    def native_states(self, action="status"):
+    def native_states(self, action="status", timeout=None):
         self.calls.append(("native", action))
         # Маркер настоящий: внутри контейнера drain — это файл в DATA, и
         # «не остался ли он после операции» проверяется по файлу, а не по флагу.
@@ -101,7 +106,13 @@ class FakeDockerUpdater(u.Updater):
         if action == "cancel":
             self.is_draining = False
             marker.unlink(missing_ok=True)
-        return [{"home": "/opt/data", "state": {"gateway_state": "draining" if self.is_draining else "running", "active_agents": 1 if self.busy else 0, "served_profiles": ["default", "secretary"]}}]
+        state = {"gateway_state": "draining" if self.is_draining else "running",
+                 "active_agents": 1 if self.busy else 0}
+        if self.multiplex:
+            return [{"home": "/opt/data", "state": {**state, "served_profiles": ["default", "secretary"]}}]
+        return [{"home": "/opt/data", "state": dict(state)}] + [
+            {"home": "/opt/data/profiles/" + name, "state": dict(state)}
+            for name in sorted(self.profile_gateways)]
 
     def start_image(self, image):
         self.calls.append(("start_image", image))
@@ -1335,6 +1346,73 @@ def real_smoke_context(updater, monkeypatch):
     return updater, clock, models, settings
 
 
+def test_preflight_expects_every_profile_that_its_own_gateway_serves(updater):
+    # Контур без мультиплекса: свой шлюз у каждого профиля, свой served_profiles
+    # он не сообщает — имя профиля видно только по его home.
+    updater.multiplex = False
+    updater.profile_gateways = ("figma-storybook", "secretary")
+    for name in ("figma-storybook", "secretary", "archive"):
+        _profile_with_gateway_state(updater, name, "running")
+
+    updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["served_profiles"] == ["default", "figma-storybook", "secretary"]
+    # `archive` намерен работать, но лежал ещё до обновления: обновление не
+    # обязано его поднять, а откат по такому требованию встал бы в
+    # rollback_failed на исправном контуре. Гейтом он не становится, но виден.
+    assert updater.receipt["expected_profiles"] == ["default", "figma-storybook", "secretary"]
+    assert updater.receipt["profiles_down_before"] == ["archive"]
+
+
+def test_smoke_is_red_with_the_name_of_a_profile_that_never_came_up(real_smoke_context, monkeypatch):
+    updater, clock, models, _ = real_smoke_context
+    updater.receipt["expected_profiles"] = ["default", "figma-storybook", "secretary"]
+    monkeypatch.setenv("PROFILE_WAIT_SECONDS", "20")
+    monkeypatch.setattr(updater, "native_states", lambda **kwargs: [
+        {"home": "/opt/data", "state": {"gateway_state": "running"}},
+        {"home": "/opt/data/profiles/secretary", "state": {"gateway_state": "running"}}])
+
+    with pytest.raises(u.UpdateError, match="figma-storybook"):
+        u.Updater.smoke(updater, OLD)
+
+    assert updater.receipt["error_code"] == "profile_gateway_timeout"
+    assert updater.receipt["missing_profiles"] == ["figma-storybook"]
+    assert models == []
+
+
+def test_smoke_waits_out_a_slow_profile_inside_its_own_budget(real_smoke_context, monkeypatch):
+    updater, clock, models, _ = real_smoke_context
+    updater.receipt["expected_profiles"] = ["default", "secretary"]
+    monkeypatch.setenv("PROFILE_WAIT_SECONDS", "60")
+    homes = [{"home": "/opt/data", "state": {"gateway_state": "running"}}]
+
+    def native(**kwargs):
+        # Шлюз профиля поднимается дольше WAIT_SECONDS: исправный выпуск на
+        # таком контуре откатывать нельзя.
+        if clock[0] < 12:
+            return homes
+        return homes + [{"home": "/opt/data/profiles/secretary", "state": {"gateway_state": "running"}}]
+
+    monkeypatch.setattr(updater, "native_states", native)
+    u.Updater.smoke(updater, OLD)
+
+    assert updater.receipt["profile_readiness"] == "ok"
+    assert len(models) == 1 and clock[0] >= 12
+
+
+def test_smoke_profile_gate_can_be_stood_down_deliberately(real_smoke_context, monkeypatch):
+    updater, clock, models, _ = real_smoke_context
+    updater.receipt["expected_profiles"] = ["default", "figma-storybook"]
+    monkeypatch.setenv("PROFILE_WAIT_SECONDS", "0")
+    monkeypatch.setattr(updater, "native_states", lambda **kwargs: [
+        {"home": "/opt/data", "state": {"gateway_state": "running"}}])
+
+    u.Updater.smoke(updater, OLD)
+
+    assert updater.receipt["profile_readiness"] == "skipped"
+    assert len(models) == 1
+
+
 @pytest.mark.parametrize("alias", ["HERMES", "KORRA"])
 def test_real_smoke_waits_for_native_control_and_profiles_then_calls_model_once(real_smoke_context, monkeypatch, alias):
     updater, clock, models, settings = real_smoke_context
@@ -1342,7 +1420,9 @@ def test_real_smoke_waits_for_native_control_and_profiles_then_calls_model_once(
     calls = [0]
     def native(**kwargs):
         calls[0] += 1
-        assert 0 < kwargs["timeout"] <= 5
+        # Каждый запрос ограничен своей фазой: до готовности корня — его
+        # сроком (WAIT_SECONDS=5), после — бюджетом профилей, но не больше 10 с.
+        assert 0 < kwargs["timeout"] <= 10
         if calls[0] == 1:
             raise u.UpdateError("Gateway control socket unavailable")
         return [{"home": "/opt/data", "state": {

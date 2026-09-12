@@ -493,6 +493,29 @@ def gateway_intent(root):
     return intent
 
 
+def autostart_profiles(intent):
+    """Named profiles the engine brings up on the next boot, by its own rule.
+
+    Mirrors korra_cli.container_boot._read_desired_state: an explicit
+    desired_state is the operator's durable intent and is honoured verbatim;
+    otherwise a transient sub-state of a gateway that was running (draining,
+    degraded) still reads as running.
+    """
+    running = set()
+    for relative, value in intent.items():
+        home = Path(relative).parent
+        if home == Path("."):
+            continue
+        state = value.get("desired_state")
+        if state is None:
+            state = value.get("gateway_state")
+            if state in ("draining", "degraded"):
+                state = "running"
+        if state == "running":
+            running.add(home.name)
+    return running
+
+
 def credential_path(relative):
     p = Path(relative)
     low = p.name.lower()
@@ -989,16 +1012,38 @@ class Updater:
             raise UpdateError("Provider capability cannot be verified") from None
 
     def smoke(self, expected):
+        """Readiness of the panel, the root gateway, every expected profile and the model.
+
+        Two budgets, because the two failures are not the same. The panel and the
+        root gateway must answer within WAIT_SECONDS — that is the old contract.
+        A profile gateway has its own PROFILE_WAIT_SECONDS after that: profiles
+        come up one by one and a contour with nine of them needs longer than a
+        contour with one, and a slow profile must not roll back a healthy
+        release. A profile that never comes up is named in the receipt.
+        """
         wait_seconds = max(1, int(os.environ.get("WAIT_SECONDS", "120")))
-        deadline = time.monotonic() + wait_seconds
+        profile_seconds = max(0, int(os.environ.get("PROFILE_WAIT_SECONDS", "240")))
         baseline = self.receipt.get("old_resources", {})
         rollback = self.receipt["phase"] == "rollback_recreate"
-        expected_profiles = set(self.receipt.get("served_profiles", ["default"]))
+        expected_profiles = set(self.receipt.get("expected_profiles")
+                                or self.receipt.get("served_profiles") or ["default"])
+        if not profile_seconds:
+            # A deliberate operator stand-down for an emergency update. The gate
+            # is never dropped silently: the receipt says it was skipped.
+            self.receipt["profile_readiness"] = "skipped"
+            expected_profiles = {"default"}
+        core_deadline = time.monotonic() + wait_seconds
+        deadline = core_deadline + (profile_seconds if expected_profiles - {"default"} else 0)
+        core_ready = False
+        missing = sorted(expected_profiles - {"default"})
         base = f"http://127.0.0.1:{self.panel}"
         while time.monotonic() < deadline:
             # Target/resource changes and a stopped container are never treated
-            # as a transient startup delay.
-            info = self.inspect_target(expected, timeout=min(10, max(0.1, deadline - time.monotonic())))
+            # as a transient startup delay. While the root is still silent no
+            # request may outlive its own deadline; the profile budget starts
+            # only once the root and the panel have answered.
+            limit = deadline if core_ready else core_deadline
+            info = self.inspect_target(expected, timeout=min(10, max(0.1, limit - time.monotonic())))
             actual = {"nano_cpus": int(info["HostConfig"].get("NanoCpus", 0)),
                       "memory_bytes": int(info["HostConfig"].get("Memory", 0))}
             for key, environment in (("nano_cpus", "CONTAINER_CPUS"), ("memory_bytes", "CONTAINER_MEMORY")):
@@ -1009,7 +1054,7 @@ class Updater:
                 raise UpdateError("Container root/ownership differs from the preserved contract")
             try:
                 def budget():
-                    remaining = deadline - time.monotonic()
+                    remaining = limit - time.monotonic()
                     if remaining <= 0:
                         raise TimeoutError("Readiness deadline")
                     return min(10, remaining)
@@ -1033,17 +1078,35 @@ class Updater:
                 for item in states:
                     state = item["state"]
                     if state.get("gateway_state") != "running":
-                        raise UpdateError("Native gateway is still starting")
+                        # A root gateway that is still starting is the old wait.
+                        # A profile in the same state waits inside its own budget
+                        # and is named, instead of hiding behind one timeout.
+                        if item["home"] == "/opt/data":
+                            raise UpdateError("Native gateway is still starting")
+                        continue
                     served.update(state.get("served_profiles") or ["default" if item["home"] == "/opt/data" else Path(item["home"]).name])
-                if (states and status.get("gateway_running") is True and status.get("gateway_state") == "running"
-                        and expected_profiles.issubset(present) and expected_profiles.issubset(served)):
+                core_ready = core_ready or bool(
+                    states and status.get("gateway_running") is True
+                    and status.get("gateway_state") == "running"
+                    and "default" in present and "default" in served)
+                missing = sorted(expected_profiles - {"default"} - (present & served))
+                if core_ready and not missing:
                     break
             except (UpdateError, OSError, ValueError, KeyError, TypeError, IndexError, subprocess.TimeoutExpired):
                 pass
+            if not core_ready and time.monotonic() >= core_deadline:
+                break
             time.sleep(min(1, max(0, deadline - time.monotonic())))
-        else:
+        if not core_ready:
             self.receipt["error_code"] = "native_readiness_timeout"
             raise UpdateError(f"Native gateway readiness timed out after {wait_seconds}s; see private operation.log")
+        if missing:
+            self.receipt["error_code"] = "profile_gateway_timeout"
+            self.receipt["missing_profiles"] = missing
+            self.receipt["profile_readiness"] = "missing"
+            raise UpdateError(f"Profile gateways did not come up after {profile_seconds}s: " + ", ".join(missing))
+        if expected_profiles - {"default"}:
+            self.receipt["profile_readiness"] = "ok"
         expected_capability = validate_capability(self.receipt.get("baseline_capability"))
         actual_capability = self.capability()
         if actual_capability != expected_capability:
@@ -1398,8 +1461,23 @@ print(json.dumps(changed))
             states = self.native_states()
             served = set()
             for item in states:
-                served.update(item["state"].get("served_profiles") or ["default"])
+                state = item["state"]
+                if state.get("gateway_state") != "running":
+                    continue
+                # Профиль без мультиплекса своего served_profiles не сообщает —
+                # его имя видно только по home. Прежний `or ["default"]` схлопывал
+                # весь контур в один default, и smoke не замечал лежащих шлюзов.
+                served.update(state.get("served_profiles")
+                              or ["default" if item["home"] == "/opt/data" else Path(item["home"]).name])
             self.receipt["served_profiles"] = sorted(served)
+            # Ждём после обновления ровно то, что работало до него. Брать сюда
+            # намерение из DATA нельзя: профиль, лежавший ещё до операции,
+            # обновление поднять не обязано, а требование поднять его уронило бы
+            # в rollback_failed и сам откат. Расхождение «намерен работать, но не
+            # обслуживается» не гейт, а диагностика — она едет в квитанции.
+            self.receipt["expected_profiles"] = sorted({"default"} | served)
+            self.receipt["profiles_down_before"] = sorted(
+                autostart_profiles(gateway_intent(self.data)) - served)
             if target == old:
                 self.phase("already_current", status="succeeded")
                 return
