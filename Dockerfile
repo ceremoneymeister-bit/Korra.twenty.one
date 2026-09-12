@@ -309,10 +309,17 @@ RUN cd plugins/platforms/photon/sidecar && \
 # ключей. Тянет ctranslate2/av/onnxruntime (CPU-колёса, ~390 МБ) — torch и
 # CUDA не тянет и не должен: на серверах контуров GPU нет.
 #
+# Korra: [ddgs] — по той же причине. Бесключевой DuckDuckGo объявлен в
+# кредитной лестнице web_search, но пакета в образе не было: свип 12.09.2026
+# показал ModuleNotFoundError на всех пяти проверенных контурах, и ключей
+# поиска нет ни на одном. Ставить руками некуда — /opt/hermes только на
+# чтение. Тянет ddgs + primp (abi3-колесо) + lxml, ~15 МБ, системных
+# библиотек не требует.
+#
 # The editable link is created after the source copy below.
 COPY pyproject.toml uv.lock ./
 RUN touch ./README.md
-RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra otlp --extra anthropic --extra bedrock --extra azure-identity --extra hindsight --extra matrix --extra voice
+RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra otlp --extra anthropic --extra bedrock --extra azure-identity --extra hindsight --extra matrix --extra voice --extra ddgs
 
 # ---------- Веса локального whisper (вшиты в образ) ----------
 # Модель кладётся в образ ОДИН раз на сборке, а не качается в рантайме:
