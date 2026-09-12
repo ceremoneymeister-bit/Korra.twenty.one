@@ -647,6 +647,19 @@ def main() -> int:
         )
     except Exception as exc:  # pragma: no cover - report only
         print(f"multiplex: inspect failed: {exc}")
+    # K21-055: повреждённый индекс FTS5 ничем себя не выдаёт — контур работает,
+    # health отвечает ok, и узнают об этом только на следующей миграции, когда
+    # импорт отобьёт архив. Старт — единственный момент, когда базы заведомо
+    # никем не открыты (user services ещё не поднялись), поэтому проверка живёт
+    # здесь. Она ничего не чинит: ремонт живой базы берёт блокировки и
+    # криминалистическую копию, это отдельное решение (korra doctor --fix).
+    try:
+        from korra_cli.fts_integrity import check_contour_state_databases
+
+        for state_report in check_contour_state_databases(hermes_home):
+            print(state_report.line())
+    except Exception as exc:  # pragma: no cover - report only
+        print(f"fts: проверка не выполнена: {exc}")
     return 0
 
 
