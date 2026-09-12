@@ -522,6 +522,51 @@ def test_client_mode_verify_refuses_a_contour_that_kept_host_powers(host, case):
         api.close()
 
 
+def launcher(tmp_path, **environment):
+    """Настоящий up.sh на синтетическом каталоге раскатки, всегда --dry-run."""
+    home, data = tmp_path / "kit", tmp_path / "data"
+    for path in (home, data):
+        path.mkdir(parents=True, exist_ok=True)
+    (home / "up.sh").write_bytes((SOURCE.parent / "up.sh").read_bytes())
+    (home / "up.sh").chmod(0o755)
+    (home / "IMAGE").write_text("sha256:" + "a" * 64 + "\n")
+    os.chown(data, 10000, 10000)
+    result = subprocess.run(["bash", str(home / "up.sh"), "--dry-run"], timeout=60,
+        capture_output=True, text=True, env={**os.environ, "NAME": "synthetic",
+        "DATA": str(data), "PANEL_PORT": "29119", "API_PORT": "28650", **environment})
+    return home, result
+
+
+def test_launcher_refuses_a_dangling_google_credential(tmp_path):
+    """Оборванный symlink не должен молча означать «Google не настроен» (K21-037).
+
+    Проверка входа стоит за `[ -e ]`, а он на оборванном symlink ложен: контур
+    поднимался без операторского OAuth-клиента и без единого слова об этом.
+    """
+    if os.geteuid() != 0:
+        pytest.skip("владелец каталога данных требует root")
+    home, _ = launcher(tmp_path)
+    (home / "google").mkdir()
+    (home / "google/oauth_client.json").symlink_to(tmp_path / "missing.json")
+    _, result = launcher(tmp_path)
+    assert result.returncode == 2
+    assert "regular, non-symlink" in result.stderr
+
+
+def test_launcher_ignores_a_google_credential_path_override(tmp_path):
+    """Путь операторского OAuth-клиента канонический; апдейтер сверяет тот же mount."""
+    if os.geteuid() != 0:
+        pytest.skip("владелец каталога данных требует root")
+    outside = tmp_path / "elsewhere.json"
+    outside.write_text("{}\n")
+    os.chown(outside, 0, 10000)
+    outside.chmod(0o640)
+    _, result = launcher(tmp_path, GOOGLE_OAUTH_CLIENT=str(outside))
+    assert result.returncode == 0, result.stderr
+    assert str(outside) not in result.stdout
+    assert "google-oauth-client.json" not in result.stdout
+
+
 def test_wrong_image_arch_never_launches_native_container(host):
     item, fake = host
     fake.arch = "arm64"
