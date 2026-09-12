@@ -54,6 +54,7 @@ class HostFixture:
         self.pending_rules = False
         self.firewall_manager = False
         self.jail_ready = True
+        self.container_sudo = True
 
     def __call__(self, args, **kwargs):
         args = list(map(str, args))
@@ -81,6 +82,8 @@ class HostFixture:
             self.container_present = True
             return result
         elif args[:2] == ["docker", "exec"]:
+            if "sudo" in args and not self.container_sudo:
+                return SimpleNamespace(stdout="", returncode=1)
             output = self.identity if "-c" in args else "0"
         elif args[0] == "systemctl":
             if args[1] == "is-active":
@@ -468,6 +471,55 @@ def test_no_admin_bootstrap_revokes_an_existing_managed_host_grant(host):
     result = item.bootstrap()
     assert result["host_grant"] is False
     assert item.record(first["install_id"])["state"] == "revoked"
+
+
+def listening_contour(item):
+    """Панель и API контура на петле: порты занимает сам тест, не контейнер."""
+    import socket
+    panel, api = socket.socket(), socket.socket()
+    for sock in (panel, api):
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+    item.o.panel_port, item.o.api_port = panel.getsockname()[1], api.getsockname()[1]
+    return panel, api
+
+
+def test_client_mode_verify_passes_without_sudo_and_host_root(host):
+    """`verify --no-admin` проверяет то, что обещает режим, а не обратное.
+
+    Установка Голди 12.09.2026: сценарий A инструкции идёт с `--no-admin`, а
+    verify требовала `sudo -n id -u` в контейнере и вход по закреплённому
+    host-root ключу. В этом режиме обе проверки обязаны падать, и установщик,
+    следующий инструкции буквально, решал, что сломал контур.
+    """
+    item, fake = host
+    item.o.admin = False
+    fake.container_sudo = False
+    panel, api = listening_contour(item)
+    try:
+        assert item.verify() is True
+    finally:
+        panel.close()
+        api.close()
+    assert not any("/usr/bin/ssh" in call for call in fake.calls)
+
+
+@pytest.mark.parametrize("case", ["sudo", "grant", "panel_down"])
+def test_client_mode_verify_refuses_a_contour_that_kept_host_powers(host, case):
+    item, fake = host
+    if case == "grant":
+        item.access("grant")
+    fake.container_sudo = case == "sudo"
+    item.o.admin = False
+    panel, api = listening_contour(item)
+    if case == "panel_down":
+        panel.close()
+    try:
+        with pytest.raises(h.HostError, match="Client mode|loopback"):
+            item.verify()
+    finally:
+        panel.close()
+        api.close()
 
 
 def test_wrong_image_arch_never_launches_native_container(host):

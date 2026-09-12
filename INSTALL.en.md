@@ -115,6 +115,17 @@ docker exec -u 10000 korra korra --version
 docker exec -u 10000 korra korra doctor | tail -25
 ```
 
+Expected: `verify` prints `{"verified": true}`, the container is `Up`,
+`/api/status` answers JSON, `doctor` has no red lines (warnings about an
+unconfigured provider are fine).
+
+With `--no-admin` the check follows what the mode promises: the container runs
+the pinned image with a single data volume, panel and API answer on the
+loopback, there is no host-admin key and no `sudo` for the agent inside the
+container. Without `--no-admin` the same command demands the opposite —
+container root and a login with the pinned host-root key — so the mode flag
+belongs in it.
+
 ### A7. Panel and provider
 
 The panel listens on `127.0.0.1:9119` only. From the owner's machine:

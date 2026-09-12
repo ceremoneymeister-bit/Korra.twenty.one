@@ -706,11 +706,36 @@ PermitTTY yes
 
     def verify(self):
         self.checked_container()
+        if not self.o.admin:
+            return self.verify_client_mode()
         for args in (["sudo", "-n", "id", "-u"],
                      ["/usr/bin/ssh", "-F", "/opt/data/.ssh/korra-host.conf", "host", "id", "-u"]):
             value = self.run(["docker", "exec", "-u", f"{self.o.uid}:{self.o.gid}", self.o.name, *args]).stdout.strip()
             if value != "0":
                 raise HostError("Admin mode must yield container root and pinned host root")
+
+    def verify_client_mode(self):
+        """A --no-admin contour is verified by what that mode actually promises.
+
+        checked_container() has already proven the container, its single DATA
+        bind, the pinned image and the runtime UID/GID. Left to check: no host
+        root grant, no container root, panel/API answering on the loopback.
+        Asking for sudo and pinned host root here — as the install guide did —
+        can only fail in this mode (K21-063).
+        """
+        grant = self.matching_inventory()
+        if grant and grant[1].get("state") != "revoked":
+            raise HostError("Client mode must hold no host root grant")
+        for port in (self.o.panel_port, self.o.api_port):
+            with socket.socket() as probe:
+                probe.settimeout(5)
+                if probe.connect_ex(("127.0.0.1", port)):
+                    raise HostError("Panel/API must answer on the host loopback")
+        value = self.run(["docker", "exec", "-u", f"{self.o.uid}:{self.o.gid}", self.o.name,
+                          "sudo", "-n", "id", "-u"], check=False).stdout.strip()
+        if value == "0":
+            raise HostError("Client mode must leave the agent without container root")
+        return True
 
     def bootstrap(self):
         if not self.o.admin and self.matching_inventory() is not None:
