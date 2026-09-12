@@ -290,13 +290,16 @@ class HostBootstrap:
                 info = self.data.lstat()
                 if not stat.S_ISDIR(info.st_mode) or (info.st_uid, info.st_gid) != (o.uid, o.gid):
                     raise HostError("Existing DATA has unexpected ownership")
-        if shutil.disk_usage(parent).free < 24 * 1024**3:
-            raise HostError("At least 24 GiB free is required before host provisioning")
-        memory = self.memory_kib()
-        if (os.cpu_count() or 0) < 4 or memory < 7 * 1024**2:
-            raise HostError("Require at least 4 CPUs and an 8 GiB-class host (7 GiB reported RAM)")
-        if not o.plan and o.action == "bootstrap":
-            self.firewall_preflight()
+        if o.action == "bootstrap":
+            # Resources gate provisioning only. Grant/rotate/verify operate on an
+            # installation that already exists: a 2 CPU / 4 GiB client host must
+            # keep its narrow host-root actions, revocation included.
+            if shutil.disk_usage(parent).free < 24 * 1024**3:
+                raise HostError("At least 24 GiB free is required before host provisioning")
+            if (os.cpu_count() or 0) < 4 or self.memory_kib() < 7 * 1024**2:
+                raise HostError("Require at least 4 CPUs and an 8 GiB-class host (7 GiB reported RAM)")
+            if not o.plan:
+                self.firewall_preflight()
         return {"name": o.name, "data": str(self.data), "image": o.image, "admin": o.admin,
                 "panel_port": o.panel_port, "api_port": o.api_port, "admin_port": o.admin_port,
                 "host_components": ["Docker", "swap", "UFW", "fail2ban", "OpenSSH"],

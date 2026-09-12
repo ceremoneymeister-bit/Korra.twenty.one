@@ -535,6 +535,7 @@ def test_bootstrap_requires_verified_sshd_jail(host):
 @pytest.mark.parametrize("low", ["cpu", "ram"])
 def test_host_resources_refuse_before_provisioning(host, monkeypatch, low):
     item, fake = host
+    item.o.action = "bootstrap"
     if low == "cpu":
         monkeypatch.setattr(h.os, "cpu_count", lambda: 2)
     else:
@@ -543,6 +544,25 @@ def test_host_resources_refuse_before_provisioning(host, monkeypatch, low):
     with pytest.raises(h.HostError, match="CPU|RAM"):
         item.preflight()
     assert files(item.root) == before
+
+
+@pytest.mark.parametrize("action", ["grant", "rotate", "revoke", "verify"])
+def test_small_host_keeps_granting_and_revoking_host_root(host, monkeypatch, action):
+    """Гейт установки не должен закрывать выдачу и отзыв уже выданного доступа.
+
+    Живой случай 11.09.2026 (Павлова, 2 CPU / 3,8 ГиБ): preflight вызывается до
+    разбора действия, поэтому «мало CPU/RAM/диска» отказывал и в отзыве
+    host-root — на типовом клиентском сервере отозвать доступ было нельзя.
+    """
+    item, fake = host
+    monkeypatch.setattr(h.os, "cpu_count", lambda: 2)
+    (item.root / "proc/meminfo").write_text("MemTotal: 3985408 kB\n")
+    monkeypatch.setattr(h.shutil, "disk_usage", lambda path: SimpleNamespace(free=2 * 1024**3))
+    item.o.action = action
+    assert item.preflight()["name"] == "synthetic"
+    item.o.action = "bootstrap"
+    with pytest.raises(h.HostError, match="CPU|RAM|GiB"):
+        item.preflight()
 
 
 def test_host_installs_native_launcher_and_backup_dependencies(host):
