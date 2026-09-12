@@ -90,6 +90,9 @@ docker exec -u 10000 korra korra --help
 - [docs/host-admin-setup.md](docs/host-admin-setup.md) — права агента на хосте и их отзыв.
 - [RELEASE_NOTES.md](RELEASE_NOTES.md) — что нового в выпусках.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev-окружение, тесты, правила изменений.
+- Установка из исходников для разработчиков: `scripts/install.sh` (Linux, macOS)
+  и `scripts/install.ps1` (Windows PowerShell). Владельцу контура они не нужны:
+  рабочий путь — образ из реестра по `INSTALL.md`.
 
 ## Безопасность
 
