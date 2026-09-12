@@ -1217,6 +1217,16 @@ _IMPORT_MAX_FILES = 100_000
 _IMPORT_MAX_FILE_BYTES = 4 * 1024**3
 _IMPORT_MAX_TOTAL_BYTES = 32 * 1024**3
 _IMPORT_MAX_RATIO = 1000
+# K21-054: степень сжатия одной записи судится только выше этого порога.
+# Свой же бэкап переносит сегмент WAL Postgres провайдера памяти — 16 МиБ,
+# почти целиком нули, сжатие 1028x. Отдельная запись такого размера бомбой
+# быть не может: сколько бы ни было нулей внутри, распаковка стоит ровно
+# `file_size` байт, а он здесь мал. Порог в 64 МиБ оставляет запас на WAL
+# с нестандартным --wal-segsize и держит настоящую однофайловую бомбу
+# (объявленные гигабайты из килобайта архива) под прежним правилом.
+# Совокупный потолок расширения архива проверяется отдельно ниже, поэтому
+# мелкими сверхсжимаемыми записями обойти лимит тоже нельзя.
+_IMPORT_RATIO_MIN_BYTES = 64 * 1024**2
 _IMPORT_SCAN_SECONDS = 10.0
 _IMPORT_IDENTITY_NAMES = {"install_id", ".install_id.lock"}
 
@@ -1390,8 +1400,17 @@ def _import_archive_plan(zf, root, home, *, same_host_restore=False):
     infos = zf.infolist()
     if len(infos) > _IMPORT_MAX_FILES:
         raise _ImportRefused("слишком много файлов в ZIP")
-    if sum(info.file_size for info in infos) > _IMPORT_MAX_TOTAL_BYTES:
+    total_file_size = sum(info.file_size for info in infos)
+    if total_file_size > _IMPORT_MAX_TOTAL_BYTES:
         raise _ImportRefused("превышен суммарный размер ZIP после распаковки")
+    # K21-054: потолок расширения держится на архиве целиком, а не на каждой
+    # записи. Так весь ZIP по-прежнему не может распаковаться больше чем в
+    # _IMPORT_MAX_RATIO раз от своего размера — это то самое свойство, ради
+    # которого проверку заводили, — но одна легитимная запись из нулей
+    # (WAL Postgres) больше не отбивает собственный бэкап целиком.
+    total_compress_size = sum(info.compress_size for info in infos)
+    if total_file_size > max(total_compress_size, 1) * _IMPORT_MAX_RATIO:
+        raise _ImportRefused("слишком высокое сжатие ZIP")
     prefix = _detect_prefix(zf)
     seen = set()
     plan = []
@@ -1409,7 +1428,8 @@ def _import_archive_plan(zf, root, home, *, same_host_restore=False):
             raise _ImportRefused("ZIP содержит ссылку, специальный или зашифрованный файл")
         if info.file_size > _IMPORT_MAX_FILE_BYTES:
             raise _ImportRefused("превышен размер файла в ZIP")
-        if info.file_size > max(info.compress_size, 1) * _IMPORT_MAX_RATIO:
+        if (info.file_size > _IMPORT_RATIO_MIN_BYTES
+                and info.file_size > max(info.compress_size, 1) * _IMPORT_MAX_RATIO):
             raise _ImportRefused("слишком высокое сжатие ZIP")
         external = name.startswith(_EXTERNAL_PREFIX)
         rel = name[len(_EXTERNAL_PREFIX):] if external else name[len(prefix):] if prefix and name.startswith(prefix) else name
