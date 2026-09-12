@@ -35,6 +35,11 @@ IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
 IMAGE_ID = re.compile(r"^sha256:[a-f0-9]{64}$")
 VOLATILE = {"gateway.sock", "gateway.sock.path", "gateway.pid", "cron.pid",
             "gateway.lock", "processes.json", "gateway_state.json", ".drain_request.json"}
+# gateway_state.json is volatile as a whole — it names the pid/argv of a
+# container that no longer exists — but container boot reads exactly these two
+# fields to decide which profile gateways to bring up. They are preserved
+# across a restore; nothing else from that file is.
+GATEWAY_INTENT = ("desired_state", "gateway_state")
 
 # Runs with the image's own imports and no mounted data/network. The complete
 # file map supplements the native (historically MD5) provenance marker.
@@ -158,6 +163,28 @@ if 'Провайдер ответа не настроен' not in message or 'К
     raise RuntimeError('Unexpected provider failure')
 print('foundation-smoke-ok')
 '''
+
+# Judges every copied database with the engine that wrote it. Read-only and
+# immutable: the verdict may not add a WAL/SHM sidecar to a verified snapshot.
+SQLITE_JUDGE_CODE = r'''
+import json, sqlite3, sys
+from pathlib import Path
+relatives = json.loads(sys.argv[1])
+bad = []
+for relative in relatives:
+    try:
+        connection = sqlite3.connect((Path('/opt/data') / relative).as_uri() + '?mode=ro&immutable=1', uri=True)
+        try:
+            ok = connection.execute('PRAGMA quick_check').fetchall() == [('ok',)]
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        ok = False
+    if not ok:
+        bad.append(relative)
+print(json.dumps({'bad': bad, 'checked': len(relatives), 'sqlite': sqlite3.sqlite_version}))
+'''
+
 
 class UpdateError(RuntimeError):
     pass
@@ -368,12 +395,28 @@ def tree_manifest(root):
     return result
 
 
+def sqlite_files(root):
+    """Relative paths of every SQLite database in a snapshot, by file header."""
+    result = []
+    for directory, _dirs, files in os.walk(root, followlinks=False):
+        for name in files:
+            target = Path(directory) / name
+            if target.is_symlink() or not target.is_file():
+                continue
+            with target.open("rb") as stream:
+                if stream.read(16) == b"SQLite format 3\x00":
+                    result.append(target.relative_to(root).as_posix())
+    return sorted(result)
+
+
 def snapshot(source, destination):
-    """Complete offline copy, with SQLite backup/integrity checking for every DB.
+    """Complete offline copy, with a page-level SQLite backup for every DB.
 
     Source MUST be stopped by the caller. Unlike the portable native archive,
     this includes browser auth, custom venvs and lazy-packages needed by rollback.
     Symlinks are copied as links and are never followed by the host updater.
+    The copy stays stdlib-only on the host; the integrity verdict belongs to the
+    engine that wrote the databases (:meth:`Updater.judge_sqlite`).
     """
     if destination.exists():
         raise UpdateError("Refusing to overwrite an existing snapshot")
@@ -403,8 +446,6 @@ def snapshot(source, destination):
             with contextlib.closing(sqlite3.connect(target.as_uri() + "?mode=ro", uri=True)) as src:
                 with contextlib.closing(sqlite3.connect(temp)) as dst:
                     src.backup(dst, pages=256, progress=progress)
-                    if dst.execute("PRAGMA quick_check").fetchone() != ("ok",):
-                        raise UpdateError("SQLite snapshot failed integrity check")
             shutil.copystat(target, temp)
             owner = original.stat()
             os.chown(temp, owner.st_uid, owner.st_gid)
@@ -422,6 +463,34 @@ def snapshot(source, destination):
     if not manifest:
         raise UpdateError("Empty snapshot")
     return manifest
+
+
+def gateway_intent(root):
+    """Durable start/stop intent of the root and per-profile gateways.
+
+    Source MUST be stopped by the caller, so these files hold the last state the
+    engine persisted. Read only the intent fields: the runtime identity beside
+    them belongs to a container that is already gone.
+    """
+    homes = [root]
+    profiles = root / "profiles"
+    if profiles.resolve() == profiles and profiles.is_dir():
+        homes.extend(sorted(p for p in profiles.glob("*") if p.is_dir() and not p.is_symlink()))
+    intent = {}
+    for home in homes:
+        path = home / "gateway_state.json"
+        if home.resolve() != home or path.is_symlink() or not path.is_file():
+            continue
+        try:
+            value = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(value, dict):
+            continue
+        recorded = {key: value[key] for key in GATEWAY_INTENT if isinstance(value.get(key), str)}
+        if recorded:
+            intent[path.relative_to(root).as_posix()] = recorded
+    return intent
 
 
 def credential_path(relative):
@@ -726,6 +795,66 @@ class Updater:
         self.receipt[purpose + "_image_ref"] = reference
         return reference
 
+    def own_image_refs(self):
+        """Protective tags this deployment created, from its own receipts."""
+        refs = set()
+        for path in sorted(self.jobs.glob("*/status.json")):
+            try:
+                receipt = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if (not isinstance(receipt, dict) or receipt.get("name") != self.name
+                    or receipt.get("data") != str(self.data)):
+                continue
+            for key in ("candidate_image_ref", "rollback_image_ref"):
+                value = receipt.get(key)
+                if isinstance(value, str) and value.startswith("korra-local-"):
+                    refs.add(value)
+        return refs
+
+    def gc(self):
+        """Drop the protective tags that no longer pin this deployment's images.
+
+        Every operation tags its candidate and its predecessor so Docker cannot
+        drop an image out from under a running job, and nothing ever removed
+        those tags again: one 59 GB client host carried 18.9 GB of dead images
+        with 16 GB free. Exactly two images stay — the running one (IMAGE) and
+        the one `--rollback` needs (IMAGE.prev). Tags of another installation on
+        the same host are reported, never removed: it has its own IMAGE pair.
+        """
+        keep = set()
+        for name in ("IMAGE", "IMAGE.prev"):
+            path = self.home / name
+            if not path.is_file():
+                continue
+            try:
+                keep.add(json.loads(self.docker("image", "inspect", path.read_text().strip()))[0]["Id"])
+            except (UpdateError, ValueError, KeyError, IndexError):
+                self.log(f"gc: {name} does not resolve to a local image")
+        own = self.own_image_refs()
+        result = {"action": "gc", "kept": [], "removed": [], "skipped": [], "failed": []}
+        listed = self.docker("image", "ls", "--no-trunc", "--format", "{{.Repository}}:{{.Tag}}|{{.ID}}")
+        for line in sorted(listed.splitlines()):
+            reference, _, image_id = line.strip().partition("|")
+            if not reference.startswith("korra-local-"):
+                continue
+            if image_id in keep:
+                result["kept"].append(reference)
+            elif reference not in own:
+                result["skipped"].append(reference)
+            else:
+                try:
+                    self.docker("image", "rm", reference)
+                    result["removed"].append(reference)
+                except UpdateError as exc:
+                    # A stopped neighbour's container may still reference the
+                    # image; housekeeping does not stop at the first refusal.
+                    result["failed"].append(reference)
+                    self.log(f"gc: {reference} not removed: {exc}")
+        self.log("gc: kept {}, removed {}, skipped {}, failed {}".format(
+            *(len(result[key]) for key in ("kept", "removed", "skipped", "failed"))))
+        return result
+
     def probe_image(self, image):
         output = self.docker("run", "--rm", "--network", "none", "--cpus", "1",
                              "--memory", "768m", "--entrypoint", PYTHON,
@@ -950,9 +1079,51 @@ print('model-smoke-ok')
             self.receipt["error_code"] = "model_smoke_failed"
             raise UpdateError("Model smoke failed; see private operation.log") from exc
 
+    def judge_image(self):
+        """The image that wrote this DATA: this operation's protected old image."""
+        image = self.receipt.get("rollback_image_ref") or self.receipt.get("old_image_id")
+        if not image:
+            raise UpdateError("No previous image is available to judge SQLite integrity")
+        return image
+
+    def judge_sqlite(self, image, root):
+        """PRAGMA quick_check for every database of a snapshot, run by its writer.
+
+        The host carries SQLite 3.45 and the engine 3.53, and they disagree about
+        a Cyrillic trigram FTS5 index on a byte-identical file: the image answers
+        ok, the host malformed. A host verdict therefore blocked two healthy
+        installations in the 0.21.4 release. Judge and writer must be the same
+        version, so the verdict moves into the old image — the same disposable
+        container trick as the schema rehearsal. The snapshot is mounted
+        read-only: the judge cannot alter what it verifies.
+        """
+        relatives = sqlite_files(root)
+        if not relatives:
+            return {"bad": [], "checked": 0}
+        try:
+            output = self.docker("run", "--rm", "--network", "none", "--cpus", "1", "--memory", "2g",
+                                 "--user", self.runtime_user(), "--entrypoint", PYTHON,
+                                 "-v", str(root) + ":/opt/data:ro", image,
+                                 "-c", SQLITE_JUDGE_CODE, json.dumps(relatives), timeout=600)
+        except (UpdateError, OSError, subprocess.SubprocessError) as exc:
+            raise UpdateError(f"SQLite integrity cannot be judged by the engine that wrote it: {exc}") from exc
+        try:
+            result = json.loads(output.splitlines()[-1])
+            bad = result["bad"]
+        except (ValueError, KeyError, IndexError) as exc:
+            raise UpdateError("Malformed SQLite integrity verdict") from exc
+        if not isinstance(bad, list) or not set(bad) <= set(relatives):
+            raise UpdateError("Malformed SQLite integrity verdict")
+        self.log(f"sqlite judge: {len(relatives)} databases, {len(bad)} failed, "
+                 f"engine sqlite {result.get('sqlite')}")
+        if bad:
+            raise UpdateError("SQLite integrity check failed: " + ", ".join(sorted(bad)[:5]))
+        return result
+
     def verified_snapshot(self, name):
         destination = self.job / name
         manifest = snapshot(self.data, destination)
+        self.judge_sqlite(self.judge_image(), destination)
         atomic_json(self.job / (name + ".manifest.json"), manifest)
         if tree_manifest(destination) != manifest:
             raise UpdateError("Snapshot verification mismatch")
@@ -1090,6 +1261,41 @@ print(json.dumps(changed))
                              self.receipt["old_image_id"], "-c", code)
         return json.loads(output.splitlines()[-1])
 
+    def apply_gateway_intent(self, stage):
+        """Return the recorded gateway intent to a restored tree.
+
+        Without this file a named profile is registered down on container boot
+        and its gateway never comes back: after a rollback four of five profiles
+        stayed down for a designer whose Telegram bots live in them. A profile
+        the owner had deliberately stopped keeps its own recorded intent, so an
+        automatic rollback does not start anything nobody asked for.
+        """
+        intent = self.receipt.get("gateway_intent")
+        if not isinstance(intent, dict):
+            return []
+        restored = []
+        for relative, value in sorted(intent.items()):
+            path = Path(relative)
+            if path.is_absolute() or ".." in path.parts or path.name != "gateway_state.json":
+                raise UpdateError("Unsafe gateway intent path")
+            recorded = {key: value[key] for key in GATEWAY_INTENT
+                        if isinstance(value, dict) and isinstance(value.get(key), str)}
+            if not recorded:
+                continue
+            destination = stage / path
+            for ancestor in destination.parents:
+                if ancestor == stage:
+                    break
+                if ancestor.is_symlink():
+                    raise UpdateError("Gateway intent destination has a symlink ancestor")
+            if not destination.parent.is_dir():
+                continue
+            atomic_json(destination, recorded)
+            owner = destination.parent.stat()
+            os.chown(destination, owner.st_uid, owner.st_gid)
+            restored.append(relative)
+        return restored
+
     def restore(self):
         backup, manifest = self.verify_backup()
         latest = self.latest_snapshot()
@@ -1115,8 +1321,11 @@ print(json.dumps(changed))
         snapshot(backup, stage)
         if tree_manifest(stage) != manifest:
             raise UpdateError("Restore stage does not match verified backup")
+        self.judge_sqlite(self.judge_image(), stage)
         credentials = overlay_credentials(latest, stage)
         config_credentials = self.preserve_config_credentials(latest, stage)
+        gateways = self.apply_gateway_intent(stage)
+        atomic_json(self.job / "restored-gateway-intent.json", gateways)
         atomic_json(self.job / "restore-stage.manifest.json", tree_manifest(stage))
         atomic_json(stage_record, {"path": str(stage), "source": str(backup), "phase": "verified"})
         atomic_json(self.job / "preserved-credentials.json", credentials)
@@ -1136,7 +1345,8 @@ print(json.dumps(changed))
             os.replace(displaced, self.data)
             raise
         self.receipt.update(post_update_export=str(latest), post_update_changes=len(changes),
-                            displaced_data=str(displaced), preserved_credentials=len(credentials))
+                            displaced_data=str(displaced), preserved_credentials=len(credentials),
+                            restored_gateways=len(gateways))
         history = self.receipt.setdefault("displaced_data_history", [])
         if str(displaced) not in history:
             history.append(str(displaced))
@@ -1204,6 +1414,9 @@ print(json.dumps(changed))
             self.phase("backup")
             backup = self.verified_snapshot("before")
             self.receipt["backup_path"] = str(backup)
+            # Read from stopped DATA, not from the snapshot: the file itself is
+            # volatile and never copied, only the intent inside it survives.
+            self.receipt["gateway_intent"] = gateway_intent(self.data)
             backed_up = True
             self.phase("schema_rehearsal")
             self.rehearse_schema(target)
@@ -1330,6 +1543,7 @@ def parse_args(argv=None):
     mode.add_argument("--rollback", metavar="JOB_ID")
     mode.add_argument("--worker", metavar="JOB_ID", help=argparse.SUPPRESS)
     mode.add_argument("--warm-deps", action="store_true", help=argparse.SUPPRESS)
+    mode.add_argument("--gc", action="store_true")
     mode.add_argument("--capabilities", action="store_true")
     parser.add_argument("--job-id")
     parser.add_argument("--expected-current", metavar="SHA256_IMAGE_ID")
@@ -1395,6 +1609,7 @@ def main(argv=None):
     if args.capabilities:
         print(json.dumps({"protocol": 1, "update": True, "detach": True, "status": True,
                           "rollback_detach": True, "expected_current": True, "artifact_verification": True,
+                          "gc": True,
                           "files": ["update.sh", "updater.py", "up.sh", "backup.sh", "dependencies.lock.json"]}))
         return 0
     if os.geteuid() != 0:
@@ -1427,6 +1642,16 @@ def main(argv=None):
         return 0
     updater.jobs.mkdir(mode=0o700, exist_ok=True)
     trusted_control(updater.jobs)
+    if args.gc:
+        # Housekeeping runs under the same target lock as an update: a live
+        # operation's candidate tag is exactly what must not be removed.
+        with target_lock_path(updater.data).open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise UpdateError("Another update holds the target lock") from exc
+            print(json.dumps(updater.gc()))
+        return 0
     if args.worker:
         if args.lock_fd is None:
             raise UpdateError("Worker requires inherited target lock")

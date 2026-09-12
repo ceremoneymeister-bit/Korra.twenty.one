@@ -33,6 +33,8 @@ class FakeDockerUpdater(u.Updater):
         self.wrong_mount = False
         self.mounts_override = None
         self.tags = {}
+        self.judge_verdict = {"bad": []}
+        self.judge_image_missing = False
 
     def free_space(self, *args):
         pass
@@ -59,6 +61,13 @@ class FakeDockerUpdater(u.Updater):
         if args[:2] == ("image", "tag"):
             self.tags[args[3]] = args[2]
             return "ok"
+        if args[:2] == ("image", "ls"):
+            return "\n".join(f"{reference}|{image}" for reference, image in sorted(self.tags.items()))
+        if args[:2] == ("image", "rm"):
+            if args[2] not in self.tags:
+                raise u.UpdateError("docker image rm failed (exit 1)")
+            del self.tags[args[2]]
+            return "Untagged: " + args[2]
         if args[0] == "stop":
             self.running = False
             self.is_draining = False
@@ -68,6 +77,13 @@ class FakeDockerUpdater(u.Updater):
             return "ok"
         if args[0] == "pull":
             return "ok"
+        if args[0] == "run":
+            # Судья SQLite: одноразовый контейнер старого образа поверх снимка,
+            # тем же приёмом, что и schema_rehearsal. Отсутствующий образ docker
+            # отвергает кодом возврата, а не пустым ответом.
+            if self.judge_image_missing:
+                raise u.UpdateError("docker run failed (exit 125)")
+            return json.dumps(self.judge_verdict)
         raise AssertionError(args)
 
     def probe_image(self, image):
@@ -456,6 +472,54 @@ def test_failed_update_rolls_back_data_preserving_new_auth_and_export(updater):
     assert {"auth.json", "state.db", "new-message.txt", "revoked.token"} <= set(changes)
 
 
+def _profile_with_gateway_state(updater, name, desired_state):
+    home = updater.data / "profiles" / name
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "SOUL.md").write_text("профиль " + name)
+    (home / "gateway_state.json").write_text(json.dumps({
+        "gateway_state": "running", "desired_state": desired_state,
+        # Идентичность умершего контейнера: возвращать её обратно нельзя.
+        "pid": 4242, "argv": ["korra", "gateway", "run", "-p", name],
+        "start_time": "8140012", "code_sha": "9876d4a2"}))
+    return home
+
+
+def _boot_actions(updater):
+    """Что сделает с восстановленным DATA сам движок на старте контейнера."""
+    from korra_cli.container_boot import reconcile_profile_gateways
+
+    actions = reconcile_profile_gateways(
+        hermes_home=updater.data, scandir=updater.data.parent / "scandir", dry_run=True,
+        container_argv=("/init", "main-wrapper.sh", "gateway", "run"))
+    return {action.profile: action.action for action in actions}
+
+
+def test_rollback_returns_profile_gateways_to_their_recorded_intent(updater):
+    (updater.data / "gateway_state.json").write_text(json.dumps(
+        {"gateway_state": "running", "desired_state": "running", "pid": 41}))
+    _profile_with_gateway_state(updater, "secretary", "running")
+    _profile_with_gateway_state(updater, "figma-storybook", "running")
+    _profile_with_gateway_state(updater, "archive", "stopped")
+    updater.fail_smoke = True
+
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["status"] == "rolled_back"
+    actions = _boot_actions(updater)
+    assert actions["secretary"] == "started" and actions["figma-storybook"] == "started"
+    # Осознанно остановленный профиль откат не поднимает.
+    assert actions["archive"] == "registered"
+    body = json.loads((updater.data / "profiles/secretary/gateway_state.json").read_text())
+    assert body == {"desired_state": "running", "gateway_state": "running"}
+    # Отдельный `--rollback` читает намерение из квитанции, а не из памяти.
+    receipt = json.loads((updater.job / "status.json").read_text())
+    assert receipt["gateway_intent"]["profiles/archive/gateway_state.json"]["desired_state"] == "stopped"
+    assert json.loads((updater.job / "restored-gateway-intent.json").read_text()) == [
+        "gateway_state.json", "profiles/archive/gateway_state.json",
+        "profiles/figma-storybook/gateway_state.json", "profiles/secretary/gateway_state.json"]
+
+
 def test_backup_corruption_prevents_restore(updater):
     updater.update("registry.example/korra:latest")
     (updater.job / "before/config.yaml").write_text("tampered")
@@ -799,6 +863,65 @@ def test_cli_dry_run_job_id_cannot_claim_real_update(updater, monkeypatch, capsy
     assert updater.image == OLD and updater.running
 
 
+def _stale_job(updater, job_id, candidate, rollback):
+    job = updater.jobs / job_id
+    job.mkdir()
+    u.atomic_json(job / "status.json", {"job_id": job_id, "name": updater.name, "data": str(updater.data),
+                                        "candidate_image_ref": candidate, "rollback_image_ref": rollback})
+
+
+def test_gc_keeps_current_and_previous_and_drops_this_installations_stale_tags(updater):
+    updater.update("registry.example/korra:latest")
+    current = {updater.receipt["candidate_image_ref"], updater.receipt["rollback_image_ref"]}
+    _stale_job(updater, "old-job", "korra-local-candidate:old", "korra-local-rollback:old")
+    updater.tags.update({
+        "korra-local-candidate:old": "sha256:" + "5" * 64,
+        "korra-local-rollback:old": "sha256:" + "6" * 64,
+        # Соседняя установка на том же хосте: её теги трогать нельзя.
+        "korra-local-candidate:neighbour": "sha256:" + "7" * 64,
+        "ghcr.io/example/korra.twenty.one:0.21.4": NEW,
+    })
+
+    result = updater.gc()
+
+    assert result["removed"] == ["korra-local-candidate:old", "korra-local-rollback:old"]
+    assert set(result["kept"]) == current
+    assert result["skipped"] == ["korra-local-candidate:neighbour"]
+    assert set(updater.tags) == current | {"korra-local-candidate:neighbour",
+                                           "ghcr.io/example/korra.twenty.one:0.21.4"}
+
+
+def test_gc_keeps_the_rollback_tag_of_the_previous_image(updater):
+    updater.update("registry.example/korra:latest")
+    rollback = updater.receipt["rollback_image_ref"]
+    (updater.home / "IMAGE.prev").unlink()
+
+    assert rollback in updater.gc()["removed"]
+    assert (updater.home / "IMAGE.prev").exists() is False
+
+    # Пока IMAGE.prev на месте, откат по нему остаётся возможен.
+    (updater.home / "IMAGE.prev").write_text(OLD + "\n")
+    updater.tags[rollback] = OLD
+    assert rollback in updater.gc()["kept"]
+
+
+def test_gc_cli_refuses_while_another_operation_holds_the_target_lock(updater, monkeypatch, capsys):
+    monkeypatch.setattr(u.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(u, "HERE", updater.home)
+    monkeypatch.setattr(u, "Updater", lambda: updater)
+    monkeypatch.setattr(u, "trusted_control", lambda path: None)
+    assert u.main(["--gc"]) == 0
+    assert json.loads(capsys.readouterr().out)["action"] == "gc"
+
+    held = u.target_lock_path(updater.data).open("a")
+    u.fcntl.flock(held, u.fcntl.LOCK_EX | u.fcntl.LOCK_NB)
+    try:
+        with pytest.raises(u.UpdateError, match="target lock"):
+            u.main(["--gc"])
+    finally:
+        held.close()
+
+
 def test_rollback_retry_after_old_image_start_failure_preserves_all_exports(updater):
     updater.update("registry.example/korra:latest")
     (updater.data / "new-message.txt").write_text("new image business write")
@@ -1117,6 +1240,71 @@ def test_failed_schema_rehearsal_restores_old_state_before_candidate_boot(update
     assert restored == before
     with sqlite3.connect(updater.data / "state.db") as connection:
         assert connection.execute("SELECT * FROM messages").fetchall() == [("before",)]
+
+
+def _index_the_host_sqlite_rejects(path):
+    """База, которую хостовый SQLite бракует, а движок в образе принимает.
+
+    Живой случай (Виктория и Павлова, 12.09.2026): хост 3.45 и образ 3.53
+    расходятся в оценке кириллического trigram-индекса FTS5 на байт-идентичном
+    файле. Здесь тот же класс расхождения воспроизводится доступным способом —
+    индекс, чьё содержимое не сходится с таблицей: постраничная копия проходит,
+    а `PRAGMA quick_check` хоста отвечает `malformed inverted index`.
+    """
+    with sqlite3.connect(path) as database:
+        database.execute("CREATE VIRTUAL TABLE messages_fts_trigram USING fts5(content, tokenize='trigram')")
+        database.executemany("INSERT INTO messages_fts_trigram(content) VALUES (?)",
+                             [("Привет, как дела",), ("Отчёт по проекту",)])
+        database.commit()  # индекс должен лечь на диск до того, как его расшатают
+        database.execute("DELETE FROM messages_fts_trigram_data WHERE id > 100")
+    with sqlite3.connect(path) as database:
+        assert database.execute("PRAGMA quick_check").fetchone() != ("ok",)
+
+
+def test_index_only_the_host_rejects_no_longer_fails_the_backup_gate(updater):
+    _index_the_host_sqlite_rejects(updater.data / "profiles/secretary/state.db")
+
+    updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["status"] == "succeeded"
+    assert (updater.job / "before/profiles/secretary/state.db").exists()
+
+
+def test_snapshot_sqlite_is_judged_by_the_image_that_wrote_it(updater):
+    updater.update("registry.example/korra:latest")
+
+    judged = [call for call in updater.calls if call[0] == "run"]
+    assert judged, "гейт SQLite судит хостовым sqlite3: docker run старого образа не вызывался"
+    call = judged[0]
+    assert call[call.index("--network") + 1] == "none"
+    assert call[call.index("-v") + 1] == str(updater.job / "before") + ":/opt/data:ro"
+    assert call[call.index("-v") + 2] == updater.receipt["rollback_image_ref"]
+    assert updater.calls.index(("schema_rehearsal", NEW)) > updater.calls.index(call)
+
+
+def test_engine_verdict_stops_the_update_before_schema_rehearsal(updater):
+    with sqlite3.connect(updater.data / "profiles/secretary/state.db") as database:
+        database.execute("CREATE TABLE messages(text)")
+    updater.judge_verdict = {"bad": ["profiles/secretary/state.db"]}
+    before = u.tree_manifest(updater.data)
+
+    with pytest.raises(u.UpdateError, match="profiles/secretary/state.db"):
+        updater.update("registry.example/korra:latest")
+
+    assert not any(call[0] == "schema_rehearsal" for call in updater.calls)
+    assert updater.image == OLD and updater.running
+    assert u.tree_manifest(updater.data) == before
+
+
+def test_missing_previous_image_fails_the_gate_and_starts_the_container_again(updater):
+    updater.judge_image_missing = True
+
+    with pytest.raises(u.UpdateError, match="SQLite"):
+        updater.update("registry.example/korra:latest")
+
+    assert not any(call[0] == "schema_rehearsal" for call in updater.calls)
+    assert updater.calls.index(("start", updater.name)) > updater.calls.index(("stop", "--time", "60", updater.name))
+    assert updater.image == OLD and updater.running
 
 
 @pytest.fixture
