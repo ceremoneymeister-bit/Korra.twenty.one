@@ -12,10 +12,20 @@ where the real library is the one under test.
 """
 
 import datetime
+import sys
 
 import pytest
 
 pytest.importorskip("telegram", reason="python-telegram-bot not installed")
+if not hasattr(sys.modules["telegram"], "__file__"):
+    # tests/gateway/conftest.py replaces the package with a mock for the whole
+    # process when it is collected first. scripts/run_tests.sh spawns a pytest
+    # per file, so this file still runs for real there; inside one shared
+    # process a mocked PTB would judge nothing.
+    pytest.skip(
+        "`telegram` is mocked in this process — run this file on its own",
+        allow_module_level=True,
+    )
 from telegram import Chat, Dice, Message, Update, User, VideoNote  # noqa: E402
 from unittest.mock import MagicMock  # noqa: E402
 
