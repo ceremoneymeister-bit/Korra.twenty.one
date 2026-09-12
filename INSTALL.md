@@ -46,7 +46,8 @@ uname -m        # ожидается x86_64
 
 ```bash
 install -d -m 755 /opt/korra
-install -d -o 10000 -g 10000 -m 750 /opt/korra/data
+mkdir -p /opt/korra/data
+chown 10000:10000 /opt/korra/data && chmod 750 /opt/korra/data
 cd /opt/korra
 for f in up.sh update.sh updater.py host-bootstrap.py backup.sh dependencies.lock.json env.template; do
   curl -fsSL "https://raw.githubusercontent.com/ceremoneymeister-bit/Korra.twenty.one/main/docs/client-deploy/$f" -o "$f"
@@ -62,6 +63,11 @@ chmod 644 dependencies.lock.json env.template
 stat -c '%u:%g %a %n' /opt/korra/data      # 10000:10000 750
 python3 /opt/korra/updater.py --capabilities
 ```
+
+Владельца назначаем отдельной командой и числами: пользователя с uid 10000 в
+`passwd` хоста нет, и на свежей Ubuntu `install -d -o 10000` отвечает
+`invalid user: '10000'`. Спрашиваем тоже числа (`%u:%g`) — `%U:%G` ответит
+`UNKNOWN`. Сопоставление имени живёт внутри контейнера, так и задумано.
 
 ### A4. Образ, закреплённый дайджестом
 
@@ -133,8 +139,15 @@ curl -fsS http://127.0.0.1:9119/api/status | head -c 300
 docker exec -u 10000 korra korra doctor | tail -25
 ```
 
-Ожидание: контейнер `Up`, `/api/status` отвечает JSON с версией, `doctor`
-без красных строк (предупреждения о ненастроенном провайдере допустимы).
+Ожидание: `verify` печатает `{"verified": true}`, контейнер `Up`,
+`/api/status` отвечает JSON с версией, `doctor` без красных строк
+(предупреждения о ненастроенном провайдере допустимы).
+
+С `--no-admin` проверка идёт по обещаниям этого режима: контейнер работает на
+закреплённом образе с единственным томом данных, панель и API отвечают на
+петле, ключа администратора хоста нет, `sudo` у агента в контейнере нет. Без
+`--no-admin` та же команда требует обратного — контейнерного root и входа по
+закреплённому host-root ключу, — поэтому ключ режима в ней обязателен.
 
 ### A7. Панель и провайдер
 

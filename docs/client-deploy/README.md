@@ -64,7 +64,8 @@ Docker и активный swap сохраняются; собственный s
 
 ```bash
 install -d -m 755 /opt/korra
-install -d -o 10000 -g 10000 -m 750 /opt/korra/data
+mkdir -p /opt/korra/data
+chown 10000:10000 /opt/korra/data && chmod 750 /opt/korra/data
 ```
 
 `/opt/korra` — каталог раскатки: туда лягут полный host kit (launcher, updater,
@@ -79,7 +80,9 @@ stat -c '%u:%g %a %n' /opt/korra/data   # ожидается 10000:10000 750
 
 Спрашиваем именно числа (`%u:%g`): имени пользователя 10000 на хосте нет, и
 `%U:%G` честно ответит `UNKNOWN`. Сопоставление имени живёт внутри
-контейнера — так и задумано.
+контейнера — так и задумано. По той же причине владелец назначается отдельной
+командой: `install -d -o 10000` на свежей Ubuntu отвечает
+`invalid user: '10000'` и останавливает установку на первом шаге.
 
 Туда же кладём комплект — с нашей машины, из этого каталога репозитория:
 
@@ -180,10 +183,11 @@ file mount. Контур Google запускается через `host-bootstra
 
 ```bash
 runtime_gid=10000
-install -d -o root -g "$runtime_gid" -m 0750 /opt/korra/google
-install -o root -g "$runtime_gid" -m 0640 \
-  /root/ceremoneymeister-google-oauth.json \
-  /opt/korra/google/oauth_client.json
+mkdir -p /opt/korra/google
+chown "root:$runtime_gid" /opt/korra/google && chmod 0750 /opt/korra/google
+cp /root/ceremoneymeister-google-oauth.json /opt/korra/google/oauth_client.json
+chown "root:$runtime_gid" /opt/korra/google/oauth_client.json
+chmod 0640 /opt/korra/google/oauth_client.json
 stat -c '%U:%g %a %n' \
   /opt/korra/google \
   /opt/korra/google/oauth_client.json
@@ -243,6 +247,12 @@ python3 /opt/korra/host-bootstrap.py verify \
   --image "$(cat /opt/korra/IMAGE)" --ssh-port 22
 docker ps --filter name=korra --format '{{.Names}} {{.Status}} {{.Image}}'
 ```
+
+Контур без администрирования проверяется той же командой с `--no-admin`: в этом
+режиме verify требует контейнер на закреплённом образе с единственным томом
+данных, панель и API на петле, отсутствие host grant и отсутствие sudo у агента
+в контейнере. Без ключа режима команда требует обратного — контейнерного root и
+входа по host-root ключу — и на клиентском контуре обязана отказать.
 
 Порт панели по умолчанию 9119. Изменение требует согласовать ограничение
 permitopen ключа кабинета на шаге 9. Ротация и отзыв root-доступа, включая
@@ -319,9 +329,10 @@ google_target="$google_dir/oauth_client.json"
 runtime_gid=10000
 
 test -f "$google_oauth_source" && test ! -L "$google_oauth_source"
-install -d -o root -g "$runtime_gid" -m 0750 "$google_dir"
-install -o root -g "$runtime_gid" -m 0640 \
-  "$google_oauth_source" "$google_target"
+mkdir -p "$google_dir"
+chown "root:$runtime_gid" "$google_dir" && chmod 0750 "$google_dir"
+cp "$google_oauth_source" "$google_target"
+chown "root:$runtime_gid" "$google_target" && chmod 0640 "$google_target"
 test "$(stat -c '%a:%u:%g' "$google_target")" = "640:0:$runtime_gid"
 ```
 
@@ -491,7 +502,8 @@ mmap через полный Linux `/proc` хоста; неизвестная в
 
 ```bash
 # IMAGE — проверенный точный digest; архив держим вне целевого DATA.
-install -d -o 10000 -g 10000 -m 750 /opt/korra-restore/data
+mkdir -p /opt/korra-restore/data
+chown 10000:10000 /opt/korra-restore/data && chmod 750 /opt/korra-restore/data
 docker run --rm --network none --pid=host --cap-add SYS_PTRACE \
   --security-opt apparmor=unconfined --user 0 \
   --entrypoint /opt/hermes/.venv/bin/python \

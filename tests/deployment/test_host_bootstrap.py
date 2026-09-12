@@ -28,6 +28,10 @@ SPEC = importlib.util.spec_from_file_location("host_bootstrap", SOURCE)
 h = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(h)
 
+UPDATER_SPEC = importlib.util.spec_from_file_location("native_updater", SOURCE.parent / "updater.py")
+u = importlib.util.module_from_spec(UPDATER_SPEC)
+UPDATER_SPEC.loader.exec_module(u)
+
 
 class HostFixture:
     """Real keys/files; every host provisioning/service command stays synthetic."""
@@ -50,6 +54,7 @@ class HostFixture:
         self.pending_rules = False
         self.firewall_manager = False
         self.jail_ready = True
+        self.container_sudo = True
 
     def __call__(self, args, **kwargs):
         args = list(map(str, args))
@@ -77,6 +82,8 @@ class HostFixture:
             self.container_present = True
             return result
         elif args[:2] == ["docker", "exec"]:
+            if "sudo" in args and not self.container_sudo:
+                return SimpleNamespace(stdout="", returncode=1)
             output = self.identity if "-c" in args else "0"
         elif args[0] == "systemctl":
             if args[1] == "is-active":
@@ -466,6 +473,100 @@ def test_no_admin_bootstrap_revokes_an_existing_managed_host_grant(host):
     assert item.record(first["install_id"])["state"] == "revoked"
 
 
+def listening_contour(item):
+    """Панель и API контура на петле: порты занимает сам тест, не контейнер."""
+    import socket
+    panel, api = socket.socket(), socket.socket()
+    for sock in (panel, api):
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+    item.o.panel_port, item.o.api_port = panel.getsockname()[1], api.getsockname()[1]
+    return panel, api
+
+
+def test_client_mode_verify_passes_without_sudo_and_host_root(host):
+    """`verify --no-admin` проверяет то, что обещает режим, а не обратное.
+
+    Установка Голди 12.09.2026: сценарий A инструкции идёт с `--no-admin`, а
+    verify требовала `sudo -n id -u` в контейнере и вход по закреплённому
+    host-root ключу. В этом режиме обе проверки обязаны падать, и установщик,
+    следующий инструкции буквально, решал, что сломал контур.
+    """
+    item, fake = host
+    item.o.admin = False
+    fake.container_sudo = False
+    panel, api = listening_contour(item)
+    try:
+        assert item.verify() is True
+    finally:
+        panel.close()
+        api.close()
+    assert not any("/usr/bin/ssh" in call for call in fake.calls)
+
+
+@pytest.mark.parametrize("case", ["sudo", "grant", "panel_down"])
+def test_client_mode_verify_refuses_a_contour_that_kept_host_powers(host, case):
+    item, fake = host
+    if case == "grant":
+        item.access("grant")
+    fake.container_sudo = case == "sudo"
+    item.o.admin = False
+    panel, api = listening_contour(item)
+    if case == "panel_down":
+        panel.close()
+    try:
+        with pytest.raises(h.HostError, match="Client mode|loopback"):
+            item.verify()
+    finally:
+        panel.close()
+        api.close()
+
+
+def launcher(tmp_path, **environment):
+    """Настоящий up.sh на синтетическом каталоге раскатки, всегда --dry-run."""
+    home, data = tmp_path / "kit", tmp_path / "data"
+    for path in (home, data):
+        path.mkdir(parents=True, exist_ok=True)
+    (home / "up.sh").write_bytes((SOURCE.parent / "up.sh").read_bytes())
+    (home / "up.sh").chmod(0o755)
+    (home / "IMAGE").write_text("sha256:" + "a" * 64 + "\n")
+    os.chown(data, 10000, 10000)
+    result = subprocess.run(["bash", str(home / "up.sh"), "--dry-run"], timeout=60,
+        capture_output=True, text=True, env={**os.environ, "NAME": "synthetic",
+        "DATA": str(data), "PANEL_PORT": "29119", "API_PORT": "28650", **environment})
+    return home, result
+
+
+def test_launcher_refuses_a_dangling_google_credential(tmp_path):
+    """Оборванный symlink не должен молча означать «Google не настроен» (K21-037).
+
+    Проверка входа стоит за `[ -e ]`, а он на оборванном symlink ложен: контур
+    поднимался без операторского OAuth-клиента и без единого слова об этом.
+    """
+    if os.geteuid() != 0:
+        pytest.skip("владелец каталога данных требует root")
+    home, _ = launcher(tmp_path)
+    (home / "google").mkdir()
+    (home / "google/oauth_client.json").symlink_to(tmp_path / "missing.json")
+    _, result = launcher(tmp_path)
+    assert result.returncode == 2
+    assert "regular, non-symlink" in result.stderr
+
+
+def test_launcher_ignores_a_google_credential_path_override(tmp_path):
+    """Путь операторского OAuth-клиента канонический; апдейтер сверяет тот же mount."""
+    if os.geteuid() != 0:
+        pytest.skip("владелец каталога данных требует root")
+    outside = tmp_path / "elsewhere.json"
+    outside.write_text("{}\n")
+    os.chown(outside, 0, 10000)
+    outside.chmod(0o640)
+    _, result = launcher(tmp_path, GOOGLE_OAUTH_CLIENT=str(outside))
+    assert result.returncode == 0, result.stderr
+    assert str(outside) not in result.stdout
+    assert "google-oauth-client.json" not in result.stdout
+
+
 def test_wrong_image_arch_never_launches_native_container(host):
     item, fake = host
     fake.arch = "arm64"
@@ -535,6 +636,7 @@ def test_bootstrap_requires_verified_sshd_jail(host):
 @pytest.mark.parametrize("low", ["cpu", "ram"])
 def test_host_resources_refuse_before_provisioning(host, monkeypatch, low):
     item, fake = host
+    item.o.action = "bootstrap"
     if low == "cpu":
         monkeypatch.setattr(h.os, "cpu_count", lambda: 2)
     else:
@@ -543,6 +645,178 @@ def test_host_resources_refuse_before_provisioning(host, monkeypatch, low):
     with pytest.raises(h.HostError, match="CPU|RAM"):
         item.preflight()
     assert files(item.root) == before
+
+
+@pytest.mark.parametrize("action", ["grant", "rotate", "revoke", "verify"])
+def test_small_host_keeps_granting_and_revoking_host_root(host, monkeypatch, action):
+    """Гейт установки не должен закрывать выдачу и отзыв уже выданного доступа.
+
+    Живой случай 11.09.2026 (Павлова, 2 CPU / 3,8 ГиБ): preflight вызывается до
+    разбора действия, поэтому «мало CPU/RAM/диска» отказывал и в отзыве
+    host-root — на типовом клиентском сервере отозвать доступ было нельзя.
+    """
+    item, fake = host
+    monkeypatch.setattr(h.os, "cpu_count", lambda: 2)
+    (item.root / "proc/meminfo").write_text("MemTotal: 3985408 kB\n")
+    monkeypatch.setattr(h.shutil, "disk_usage", lambda path: SimpleNamespace(free=2 * 1024**3))
+    item.o.action = action
+    assert item.preflight()["name"] == "synthetic"
+    item.o.action = "bootstrap"
+    with pytest.raises(h.HostError, match="CPU|RAM|GiB"):
+        item.preflight()
+
+
+def initialized_data(path):
+    """Каталог DATA как после установки: апдейтер требует в нём config.yaml."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "config.yaml").write_text("# synthetic\n")
+    os.chown(path / "config.yaml", 10000, 10000)
+    os.chown(path, 10000, 10000)
+    path.chmod(0o750)
+    return path
+
+
+# Кейс каталога DATA → принимают ли его обе стороны contract.
+DATA_CONTRACT = {"short_root": False, "dedicated": True, "symlink": False,
+                 "traversal": False, "sticky_ancestor": True, "group_writable_ancestor": False}
+
+
+def data_case(tmp_path, case):
+    if case == "short_root":
+        return Path("/root/.korra21")       # три компонента: путь из ring 10.09
+    if case == "symlink":
+        initialized_data(tmp_path / "real/data")
+        (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
+        return tmp_path / "link/data"
+    if case == "traversal":
+        initialized_data(tmp_path / "opt/korra/data")
+        return tmp_path / "opt/korra/../korra/data"
+    ancestor = tmp_path / {"sticky_ancestor": "sticky", "group_writable_ancestor": "shared",
+                           "dedicated": "opt"}[case]
+    data = initialized_data(ancestor / "korra/data")
+    ancestor.chmod({"sticky_ancestor": 0o1777, "group_writable_ancestor": 0o775,
+                    "dedicated": 0o755}[case])
+    return data
+
+
+def bootstrap_accepts(item, path):
+    probe = h.HostBootstrap(SimpleNamespace(**{**vars(item.o), "data": Path(path)}),
+                            system_root=item.root, run=item.run)
+    try:
+        probe.preflight()
+        return True
+    except h.HostError:
+        return False
+
+
+def updater_accepts(path):
+    try:
+        u.canonical_data(str(path))
+        return True
+    except u.UpdateError:
+        return False
+
+
+@pytest.mark.parametrize("case", sorted(DATA_CONTRACT))
+def test_existing_data_contract_matches_the_native_updater(host, tmp_path, case):
+    """Установщик и апдейтер выносят о каталоге DATA один вердикт (K21-024).
+
+    Ring 10.09.2026: `host-bootstrap --plan` принял существующий `/root/.korra21`,
+    а native updater отверг тот же путь из-за минимума в четыре компонента —
+    данные владельца пришлось переносить уже после установки.
+    """
+    item, fake = host
+    path = data_case(tmp_path, case)
+    expected = DATA_CONTRACT[case]
+    assert updater_accepts(path) is expected
+    assert bootstrap_accepts(item, path) is expected
+
+
+MOUNT_PROBE = """
+import importlib.util, json, os, subprocess, sys
+source, data = sys.argv[1], sys.argv[2]
+subprocess.run(["mount", "-t", "tmpfs", "-o", "mode=0750", "tmpfs", data], check=True)
+os.chown(data, 10000, 10000)
+with open(os.path.join(data, "config.yaml"), "w") as stream:
+    stream.write("# synthetic\\n")
+os.chown(os.path.join(data, "config.yaml"), 10000, 10000)
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+host = load("host_bootstrap", source)
+native = load("native_updater", os.path.join(os.path.dirname(source), "updater.py"))
+verdict = {}
+for name, call in (("bootstrap", lambda: host.check_data_path(data, must_exist=False)),
+                   ("updater", lambda: native.canonical_data(data))):
+    try:
+        call()
+        verdict[name] = True
+    except (host.HostError, native.UpdateError):
+        verdict[name] = False
+print(json.dumps(verdict))
+"""
+
+
+def test_data_on_its_own_mount_is_judged_the_same_by_both_entrypoints(tmp_path):
+    """DATA отдельным томом: ни установщик, ни апдейтер не смотрят на точку монтирования.
+
+    Монтирование живёт в приватном mount namespace: даже убитый тест не оставит
+    на хосте постороннего тома.
+    """
+    if os.geteuid() != 0 or not h.shutil.which("unshare"):
+        pytest.skip("приватный mount namespace требует root и unshare")
+    data = tmp_path / "opt/korra/data"
+    data.mkdir(parents=True)
+    result = subprocess.run(["unshare", "-m", "--propagation", "private", sys.executable,
+                             "-c", MOUNT_PROBE, str(SOURCE), str(data)],
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        pytest.skip("mount в namespace недоступен: " + result.stderr.strip()[-120:])
+    assert json.loads(result.stdout) == {"bootstrap": True, "updater": True}
+
+
+def executable_lines(document):
+    """Строки, которые установщик действительно выполняет: код блоков и сам скрипт."""
+    text = (ROOT / document).read_text(encoding="utf-8")
+    if document.endswith(".sh"):
+        return [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    lines, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("```"):
+            inside = not inside
+        elif inside:
+            lines.append(line)
+    return lines
+
+
+@pytest.mark.parametrize("document", ["INSTALL.md", "INSTALL.en.md", "docs/client-deploy/README.md",
+                                      "docs/client-deploy/up.sh"])
+def test_documented_data_recipe_needs_no_passwd_entry(document):
+    """У uid 10000 на минимальном хосте нет записи в passwd (K21-004).
+
+    Ubuntu 26.04 Татьяны: `install -d -o 10000 -g 10000` отвечает там
+    `invalid user: '10000'`, и установка встаёт на первом же шаге. Переносима
+    двухфазная схема — создать каталог, затем назначить владельца числами.
+    """
+    assert not [line for line in executable_lines(document) if "install -d -o" in line
+                or "install -o " in line]
+    assert any("chown 10000:10000" in line or "chown $ENGINE_UID:$ENGINE_GID" in line
+               for line in executable_lines(document))
+
+
+def test_data_directory_recipe_is_numeric_idempotent_and_keeps_existing_data(tmp_path):
+    """Та же схема на живой файловой системе: владелец числами, повтор безопасен."""
+    if os.geteuid() != 0:
+        pytest.skip("назначение чужого владельца требует root")
+    data = tmp_path / "korra/data"
+    recipe = f"mkdir -p {data} && chown 10000:10000 {data} && chmod 750 {data}"
+    subprocess.run(["bash", "-c", recipe], check=True, timeout=20)
+    (data / "config.yaml").write_text("# существующие данные\n")
+    subprocess.run(["bash", "-c", recipe], check=True, timeout=20)
+    assert (data.stat().st_uid, data.stat().st_gid, data.stat().st_mode & 0o777) == (10000, 10000, 0o750)
+    assert (data / "config.yaml").read_text() == "# существующие данные\n"
 
 
 def test_host_installs_native_launcher_and_backup_dependencies(host):

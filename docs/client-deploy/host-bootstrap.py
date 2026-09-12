@@ -49,6 +49,33 @@ def trusted(path):
             raise HostError("Control path must be root-owned, non-symlink and not writable by others")
 
 
+def check_data_path(path, *, must_exist):
+    """One existing-DATA contract for this CLI and the native updater.
+
+    `must_exist=False` is the provisioning call: the directory itself is created
+    later, so only the path shape and the ancestors that already exist are
+    judged. Every rule below matches updater.canonical_data on purpose —
+    otherwise --plan accepts a DATA that the first update refuses, and the
+    owner's data has to be moved after the install (K21-024).
+    """
+    path = Path(path)
+    if not path.is_absolute() or path.resolve() != path or len(path.parts) < 4:
+        raise HostError("DATA must be an absolute, non-symlink dedicated directory")
+    if not path.is_dir():
+        if path.exists() or path.is_symlink():
+            raise HostError("DATA must be a dedicated directory")
+        if must_exist:
+            raise HostError("DATA does not exist")
+    ancestor = path.parent
+    while not ancestor.exists():
+        ancestor = ancestor.parent
+    for entry in (ancestor, *ancestor.parents):
+        info = entry.lstat()
+        if info.st_uid != 0 or (info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
+            raise HostError("DATA ancestors must prevent an agent from replacing the deployment directory")
+    return path
+
+
 def mkdir(path, mode=0o700):
     path.mkdir(parents=True, exist_ok=True)
     trusted(path)
@@ -284,19 +311,21 @@ class HostBootstrap:
         parent = self.data.parent
         while not parent.exists():
             parent = parent.parent
-        if not o.plan:
-            trusted(parent)
-            if self.data.exists():
-                info = self.data.lstat()
-                if not stat.S_ISDIR(info.st_mode) or (info.st_uid, info.st_gid) != (o.uid, o.gid):
-                    raise HostError("Existing DATA has unexpected ownership")
-        if shutil.disk_usage(parent).free < 24 * 1024**3:
-            raise HostError("At least 24 GiB free is required before host provisioning")
-        memory = self.memory_kib()
-        if (os.cpu_count() or 0) < 4 or memory < 7 * 1024**2:
-            raise HostError("Require at least 4 CPUs and an 8 GiB-class host (7 GiB reported RAM)")
-        if not o.plan and o.action == "bootstrap":
-            self.firewall_preflight()
+        check_data_path(self.data, must_exist=False)
+        if not o.plan and self.data.exists():
+            info = self.data.lstat()
+            if not stat.S_ISDIR(info.st_mode) or (info.st_uid, info.st_gid) != (o.uid, o.gid):
+                raise HostError("Existing DATA has unexpected ownership")
+        if o.action == "bootstrap":
+            # Resources gate provisioning only. Grant/rotate/verify operate on an
+            # installation that already exists: a 2 CPU / 4 GiB client host must
+            # keep its narrow host-root actions, revocation included.
+            if shutil.disk_usage(parent).free < 24 * 1024**3:
+                raise HostError("At least 24 GiB free is required before host provisioning")
+            if (os.cpu_count() or 0) < 4 or self.memory_kib() < 7 * 1024**2:
+                raise HostError("Require at least 4 CPUs and an 8 GiB-class host (7 GiB reported RAM)")
+            if not o.plan:
+                self.firewall_preflight()
         return {"name": o.name, "data": str(self.data), "image": o.image, "admin": o.admin,
                 "panel_port": o.panel_port, "api_port": o.api_port, "admin_port": o.admin_port,
                 "host_components": ["Docker", "swap", "UFW", "fail2ban", "OpenSSH"],
@@ -677,11 +706,36 @@ PermitTTY yes
 
     def verify(self):
         self.checked_container()
+        if not self.o.admin:
+            return self.verify_client_mode()
         for args in (["sudo", "-n", "id", "-u"],
                      ["/usr/bin/ssh", "-F", "/opt/data/.ssh/korra-host.conf", "host", "id", "-u"]):
             value = self.run(["docker", "exec", "-u", f"{self.o.uid}:{self.o.gid}", self.o.name, *args]).stdout.strip()
             if value != "0":
                 raise HostError("Admin mode must yield container root and pinned host root")
+
+    def verify_client_mode(self):
+        """A --no-admin contour is verified by what that mode actually promises.
+
+        checked_container() has already proven the container, its single DATA
+        bind, the pinned image and the runtime UID/GID. Left to check: no host
+        root grant, no container root, panel/API answering on the loopback.
+        Asking for sudo and pinned host root here — as the install guide did —
+        can only fail in this mode (K21-063).
+        """
+        grant = self.matching_inventory()
+        if grant and grant[1].get("state") != "revoked":
+            raise HostError("Client mode must hold no host root grant")
+        for port in (self.o.panel_port, self.o.api_port):
+            with socket.socket() as probe:
+                probe.settimeout(5)
+                if probe.connect_ex(("127.0.0.1", port)):
+                    raise HostError("Panel/API must answer on the host loopback")
+        value = self.run(["docker", "exec", "-u", f"{self.o.uid}:{self.o.gid}", self.o.name,
+                          "sudo", "-n", "id", "-u"], check=False).stdout.strip()
+        if value == "0":
+            raise HostError("Client mode must leave the agent without container root")
+        return True
 
     def bootstrap(self):
         if not self.o.admin and self.matching_inventory() is not None:

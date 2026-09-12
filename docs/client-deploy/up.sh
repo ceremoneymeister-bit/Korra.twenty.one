@@ -56,7 +56,10 @@ done
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 IMAGE_FILE="$HERE/IMAGE"
-GOOGLE_OAUTH_CLIENT="${GOOGLE_OAUTH_CLIENT:-$HERE/google/oauth_client.json}"
+# Путь операторского OAuth-клиента канонический и не переопределяется: этот же
+# источник сверяет апдейтер при каждой пересборке контейнера, а переменная
+# окружения молча смонтировала бы в контур любой файл хоста.
+GOOGLE_OAUTH_CLIENT="$HERE/google/oauth_client.json"
 
 # ─── Проверки до запуска ────────────────────────────────────────────────────
 if [ ! -s "$IMAGE_FILE" ]; then
@@ -69,7 +72,9 @@ IMAGE=$(tr -d '[:space:]' < "$IMAGE_FILE")
 
 if [ ! -d "$DATA" ]; then
     echo "Нет каталога данных $DATA. Создайте его до запуска:" >&2
-    echo "  install -d -o $ENGINE_UID -g $ENGINE_GID -m 750 $DATA" >&2
+    # Владелец назначается числами и отдельной командой: записи с uid 10000 в
+    # passwd минимального хоста нет, и install -d -o отвечает invalid user.
+    echo "  mkdir -p $DATA && chown $ENGINE_UID:$ENGINE_GID $DATA && chmod 750 $DATA" >&2
     exit 2
 fi
 
@@ -82,7 +87,9 @@ if [ "$OWNER" != "$ENGINE_UID:$ENGINE_GID" ]; then
 fi
 
 GOOGLE_OAUTH_ARGS=()
-if [ -e "$GOOGLE_OAUTH_CLIENT" ]; then
+# -L рядом с -e намеренно: оборванный symlink для -e не существует, и контур
+# поднимался бы без операторского клиента, ни слова об этом не сказав.
+if [ -e "$GOOGLE_OAUTH_CLIENT" ] || [ -L "$GOOGLE_OAUTH_CLIENT" ]; then
     if [ "$AGENT_SUDO" != 0 ]; then
         echo "Google OAuth requires the client --no-admin contour (AGENT_SUDO=0) so the agent holds no host-root grant." >&2
         exit 2
