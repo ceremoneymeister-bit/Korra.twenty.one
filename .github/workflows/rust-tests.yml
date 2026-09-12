@@ -68,7 +68,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/bootstrap-installer/src-tauri/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('apps/bootstrap-installer/src-tauri/Cargo.toml') }}
+          # Korra: два self-hosted раннера живут на одной машине в разных
+          # _work-каталогах; `target/` хранит абсолютные пути сборки, и кэш,
+          # снятый на одном раннере, ломает tauri-build на другом
+          # («failed to read plugin permissions», K21-053, повтор 12.09.2026).
+          # Имя раннера в ключе разводит их кэши.
+          key: cargo-${{ runner.os }}-${{ runner.name }}-${{ hashFiles('apps/bootstrap-installer/src-tauri/Cargo.toml') }}
 
       # --lib only: the integration/bin targets would need a built frontend
       # (vite dist) that this lane deliberately does not produce.
