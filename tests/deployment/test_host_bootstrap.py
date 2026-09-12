@@ -745,3 +745,80 @@ def test_native_remap_ceiling_refuses_before_provisioning(host, field):
     with pytest.raises(h.HostError, match="UID|GID"):
         item.preflight()
     assert not any(call[:2] == ["systemctl", "enable"] for call in fake.calls)
+
+
+def dual_stack_nft(family, ufw_prefix):
+    """Инвентарь ядра на хосте с Docker и включённым UFW обеих семей."""
+    filter_chains = [("INPUT", "input", "drop"), ("OUTPUT", "output", "accept"),
+                     ("FORWARD", "forward", "drop")]
+    entries = [{"table": {"family": family, "name": "filter"}},
+               {"table": {"family": family, "name": "nat"}}]
+    for name, hook, policy in filter_chains:
+        entries.append({"chain": {"family": family, "table": "filter", "name": name,
+                                  "hook": hook, "policy": policy}})
+    for name in (ufw_prefix + "before-input", ufw_prefix + "before-output", "DOCKER-USER"):
+        entries.append({"chain": {"family": family, "table": "filter", "name": name}})
+    for chain in ("INPUT", "OUTPUT"):
+        entries.append({"rule": {"family": family, "table": "filter", "chain": chain,
+                                 "expr": [{"jump": {"target": ufw_prefix + "before-" + chain.lower()}}]}})
+    for name, hook in (("PREROUTING", "prerouting"), ("POSTROUTING", "postrouting")):
+        entries.append({"chain": {"family": family, "table": "nat", "name": name,
+                                  "hook": hook, "policy": "accept"}})
+    return entries
+
+
+def dual_stack_mirror(ufw_prefix):
+    """То же зеркалом iptables-nft: с пустой nat/INPUT, которой в ядре нет."""
+    return ("*filter\n:INPUT DROP [0:0]\n:OUTPUT ACCEPT [0:0]\n:FORWARD DROP [0:0]\n"
+            ":" + ufw_prefix + "before-input - [0:0]\n:" + ufw_prefix + "before-output - [0:0]\n"
+            ":DOCKER-USER - [0:0]\n"
+            "-A INPUT -j " + ufw_prefix + "before-input\n"
+            "-A OUTPUT -j " + ufw_prefix + "before-output\n"
+            "COMMIT\n"
+            "*nat\n:INPUT ACCEPT [0:0]\n:PREROUTING ACCEPT [0:0]\n:POSTROUTING ACCEPT [0:0]\nCOMMIT\n")
+
+
+def test_dual_stack_ufw_host_is_accepted(host, monkeypatch):
+    """UFW с IPv6 — это результат работы самого bootstrap, а не чужая политика.
+
+    Живой случай 12.09.2026: Ubuntu 26.04 + Docker 29, где UFW называет свои
+    цепочки ufw6-* для IPv6, а iptables-nft-save дорисовывает пустую nat/INPUT.
+    До исправления preflight отвергал такой хост тремя разными отказами подряд.
+    """
+    item, fake = host
+    fake.firewall_active = True
+    which = h.shutil.which
+    monkeypatch.setattr(h.shutil, "which",
+                        lambda name: None if name.endswith("legacy-save") else which(name))
+    original = item.run
+    def run(args, **kwargs):
+        if args[0] == "nft":
+            return SimpleNamespace(stdout=json.dumps({"nftables":
+                dual_stack_nft("ip", "ufw-") + dual_stack_nft("ip6", "ufw6-")}), returncode=0)
+        if args[0].startswith("iptables"):
+            return SimpleNamespace(stdout=dual_stack_mirror("ufw-"), stderr="", returncode=0)
+        if args[0].startswith("ip6tables"):
+            return SimpleNamespace(stdout=dual_stack_mirror("ufw6-"), stderr="", returncode=0)
+        return original(args, **kwargs)
+    item.run = run
+    assert item.firewall_preflight() is True
+
+
+def test_preloaded_image_is_not_pulled_again(host):
+    """Образ, доставленный тарболом на изолированный хост, уже лежит локально."""
+    item, fake = host
+    seen = []
+    original = item.run
+    def run(args, **kwargs):
+        if args[0] == "docker":
+            seen.append(args[1])
+            if args[1] == "image":
+                return SimpleNamespace(stdout=json.dumps(
+                    [{"Architecture": "amd64", "Os": "linux", "Id": item.o.image}]), returncode=0)
+            if args[1] == "pull":
+                raise AssertionError("предзагруженный образ не должен тянуться из реестра")
+            return SimpleNamespace(stdout="", returncode=0)
+        return original(args, **kwargs)
+    item.run = run
+    assert item.run(["docker", "image", "inspect", item.o.image], check=False).returncode == 0
+    assert "pull" not in seen

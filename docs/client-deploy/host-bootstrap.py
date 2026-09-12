@@ -175,7 +175,7 @@ def iptables_inventory(text, active, ssh_port):
     """Recognize only existing UFW, fail2ban SSH, Docker forwarding/NAT."""
     tables, chains, counts = set(), {}, {}
     table = None
-    linked_ufw = all(re.search(r"(?m)^-A " + chain + r" (?:.* )?-j ufw-", text)
+    linked_ufw = all(re.search(r"(?m)^-A " + chain + r" (?:.* )?-j ufw6?-", text)
                      for chain in ("INPUT", "OUTPUT"))
     for line in text.splitlines():
         if not line or line.startswith("#") or line == "COMMIT":
@@ -208,7 +208,8 @@ def iptables_inventory(text, active, ssh_port):
         counts[(table, chain)] = counts.get((table, chain), 0) + 1
         target = words[words.index("-j") + 1] if "-j" in words else ""
         allowed = active and table == "filter" and (
-            chain.startswith("ufw-") or chain in {"INPUT", "OUTPUT", "FORWARD"} and target.startswith("ufw-"))
+            chain.startswith(("ufw-", "ufw6-"))
+            or chain in {"INPUT", "OUTPUT", "FORWARD"} and target.startswith(("ufw-", "ufw6-")))
         if table == "filter":
             if chain.startswith("f2b-") and target in {"RETURN", "REJECT", "DROP"}:
                 allowed = True
@@ -389,7 +390,7 @@ class HostBootstrap:
                 nft_tables[family].add(table)
                 if kind == "chain":
                     name = value.get("name", "")
-                    if name not in hooks and not name.startswith(("DOCKER", "ufw-", "f2b-")):
+                    if name not in hooks and not name.startswith(("DOCKER", "ufw-", "ufw6-", "f2b-")):
                         raise HostError("Unknown nft firewall chain")
                     if value.get("hook") and value["hook"] != hooks.get(name):
                         raise HostError("Unknown nft firewall base hook")
@@ -421,7 +422,7 @@ class HostBootstrap:
                     ufw_kernel_verified = True
             if nft_tables[family] and not any(
                 nft_tables[family] <= tables
-                and {key: policy for key, policy in chains.items() if key[0] in nft_tables[family]} == nft_chains[family]
+                and all(chains.get(key) == policy for key, policy in nft_chains[family].items())
                 and all(counts.get(key, 0) == count for key, count in nft_counts[family].items())
                 and all(nft_counts[family].get(key, 0) == count for key, count in counts.items() if key[0] in nft_tables[family])
                 for tables, chains, counts in mirrors
@@ -698,7 +699,8 @@ PermitTTY yes
                 with socket.socket() as probe:
                     probe.bind(("127.0.0.1", port))
             self.prepare()
-            self.run(["docker", "pull", self.o.image], timeout=900)
+            if self.run(["docker", "image", "inspect", self.o.image], check=False).returncode:
+                self.run(["docker", "pull", self.o.image], timeout=900)
             image = json.loads(self.run(["docker", "image", "inspect", self.o.image]).stdout)[0]
             if image.get("Architecture") != "amd64" or image.get("Os") != "linux":
                 raise HostError("Image must be native linux/amd64")
