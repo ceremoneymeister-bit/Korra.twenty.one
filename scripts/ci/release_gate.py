@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+import time
 import urllib.request
 
 REPOSITORY = "ceremoneymeister-bit/Korra.twenty.one"
@@ -46,8 +47,25 @@ def evaluate(needs, event):
     return results
 
 
-def admission(workspace):
-    """Read-only check inside the common workflow concurrency lease."""
+def admission(workspace, wait=0, sleep=time.sleep, clock=time.monotonic):
+    """Read-only check inside the common workflow concurrency lease.
+
+    ``wait`` seconds of polling (every 30 s) let a PR job on the shared
+    production host outlast a transient load spike instead of failing red in
+    ten seconds; the resource floor itself is unchanged and a still-busy host
+    still refuses.
+    """
+    deadline = clock() + max(0, wait)
+    while True:
+        try:
+            return _admission_once(workspace)
+        except GateError:
+            if clock() >= deadline:
+                raise
+            sleep(30)
+
+
+def _admission_once(workspace):
     available = None
     for line in Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
         if line.startswith("MemAvailable:"):
@@ -164,6 +182,8 @@ def main(argv=None):
     check.add_argument("--receipt", type=Path, required=True)
     resource = sub.add_parser("admission")
     resource.add_argument("--workspace", type=Path, default=Path.cwd())
+    resource.add_argument("--wait", type=int, default=0,
+                          help="seconds to keep polling (every 30 s) before refusing")
     sub.add_parser("evaluate")
     args = parser.parse_args(argv)
     try:
@@ -173,7 +193,7 @@ def main(argv=None):
             args.receipt.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             print(f"Full CI accepted: run {result['run_id']} exact {args.revision}")
         elif args.command == "admission":
-            print(json.dumps(admission(args.workspace), sort_keys=True))
+            print(json.dumps(admission(args.workspace, wait=args.wait), sort_keys=True))
         else:
             result = evaluate(json.loads(os.environ["NEEDS"]), os.environ["GITHUB_EVENT_NAME"])
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:

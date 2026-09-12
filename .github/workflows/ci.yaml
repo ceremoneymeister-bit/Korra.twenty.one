@@ -42,7 +42,9 @@ jobs:
   detect:
     name: Detect affected areas
     runs-on: [self-hosted, linux, x64]
-    timeout-minutes: 1
+    # Раннер живёт на общем боевом хосте: гейт ресурсов ниже ждёт до 20 минут,
+    # пока нагрузка спадёт, вместо мгновенного красного PR (12.09.2026).
+    timeout-minutes: 25
     outputs:
       python: ${{ steps.classify.outputs.python }}
       python_prod: ${{ steps.classify.outputs.python_prod }}
@@ -69,7 +71,7 @@ jobs:
         run: git sparse-checkout disable 2>/dev/null || true
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Shared host resource admission
-        run: python3 scripts/ci/release_gate.py admission
+        run: python3 scripts/ci/release_gate.py admission --wait 1200
       - name: Detect affected areas
         id: classify
         uses: ./.github/actions/detect-changes

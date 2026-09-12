@@ -38,14 +38,14 @@ jobs:
   detect:
     name: Detect affected areas
     runs-on: [self-hosted, linux, x64]
-    timeout-minutes: 10
+    timeout-minutes: 25
     outputs:
       build: ${{ steps.gate.outputs.build }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Shared host resource admission
-        run: python3 scripts/ci/release_gate.py admission
+        run: python3 scripts/ci/release_gate.py admission --wait 1200
 
       - name: Detect affected areas
         id: classify

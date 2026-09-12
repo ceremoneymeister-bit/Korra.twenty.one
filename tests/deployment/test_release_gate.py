@@ -123,3 +123,37 @@ def test_failed_cli_gate_removes_stale_success_receipt(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "verify_ci", fail)
     assert g.main(["verify-ci", "--revision", SHA, "--receipt", str(receipt)]) == 1
     assert not receipt.exists()
+
+
+def test_resource_admission_waits_for_a_transient_spike(monkeypatch, tmp_path):
+    """--wait keeps polling while the shared host is busy, then admits.
+
+    12.09.2026: a PR went red in eleven seconds because a local test run had
+    pushed load1 to 40 on the shared production host. The floor stays as
+    strict as before; only the instant refusal is replaced by bounded polling.
+    """
+    loads = iter([40.0, 12.0, 2.0])
+    monkeypatch.setattr(g.os, "getloadavg", lambda: (next(loads), 0.0, 0.0))
+    monkeypatch.setattr(g.shutil, "disk_usage", lambda _p: type("du", (), {"free": 25 * 1024**3})())
+    monkeypatch.setattr(
+        g.Path, "read_text", lambda self, encoding="ascii": "MemTotal: 1 kB\nMemAvailable: 8388608 kB\n"
+    )
+    ticks = iter([0.0, 31.0, 62.0, 93.0])
+    slept = []
+
+    result = g.admission(tmp_path, wait=120, sleep=slept.append, clock=lambda: next(ticks))
+
+    assert result["load1"] == 2.0
+    assert slept == [30, 30]
+
+
+def test_resource_admission_still_refuses_after_the_wait(monkeypatch, tmp_path):
+    monkeypatch.setattr(g.os, "getloadavg", lambda: (40.0, 0.0, 0.0))
+    monkeypatch.setattr(g.shutil, "disk_usage", lambda _p: type("du", (), {"free": 25 * 1024**3})())
+    monkeypatch.setattr(
+        g.Path, "read_text", lambda self, encoding="ascii": "MemAvailable: 8388608 kB\n"
+    )
+    ticks = iter([0.0, 31.0, 61.0, 91.0])
+
+    with pytest.raises(g.GateError):
+        g.admission(tmp_path, wait=60, sleep=lambda _s: None, clock=lambda: next(ticks))
