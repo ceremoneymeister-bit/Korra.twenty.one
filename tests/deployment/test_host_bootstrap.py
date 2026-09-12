@@ -28,6 +28,10 @@ SPEC = importlib.util.spec_from_file_location("host_bootstrap", SOURCE)
 h = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(h)
 
+UPDATER_SPEC = importlib.util.spec_from_file_location("native_updater", SOURCE.parent / "updater.py")
+u = importlib.util.module_from_spec(UPDATER_SPEC)
+UPDATER_SPEC.loader.exec_module(u)
+
 
 class HostFixture:
     """Real keys/files; every host provisioning/service command stays synthetic."""
@@ -563,6 +567,117 @@ def test_small_host_keeps_granting_and_revoking_host_root(host, monkeypatch, act
     item.o.action = "bootstrap"
     with pytest.raises(h.HostError, match="CPU|RAM|GiB"):
         item.preflight()
+
+
+def initialized_data(path):
+    """Каталог DATA как после установки: апдейтер требует в нём config.yaml."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "config.yaml").write_text("# synthetic\n")
+    os.chown(path / "config.yaml", 10000, 10000)
+    os.chown(path, 10000, 10000)
+    path.chmod(0o750)
+    return path
+
+
+# Кейс каталога DATA → принимают ли его обе стороны contract.
+DATA_CONTRACT = {"short_root": False, "dedicated": True, "symlink": False,
+                 "traversal": False, "sticky_ancestor": True, "group_writable_ancestor": False}
+
+
+def data_case(tmp_path, case):
+    if case == "short_root":
+        return Path("/root/.korra21")       # три компонента: путь из ring 10.09
+    if case == "symlink":
+        initialized_data(tmp_path / "real/data")
+        (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
+        return tmp_path / "link/data"
+    if case == "traversal":
+        initialized_data(tmp_path / "opt/korra/data")
+        return tmp_path / "opt/korra/../korra/data"
+    ancestor = tmp_path / {"sticky_ancestor": "sticky", "group_writable_ancestor": "shared",
+                           "dedicated": "opt"}[case]
+    data = initialized_data(ancestor / "korra/data")
+    ancestor.chmod({"sticky_ancestor": 0o1777, "group_writable_ancestor": 0o775,
+                    "dedicated": 0o755}[case])
+    return data
+
+
+def bootstrap_accepts(item, path):
+    probe = h.HostBootstrap(SimpleNamespace(**{**vars(item.o), "data": Path(path)}),
+                            system_root=item.root, run=item.run)
+    try:
+        probe.preflight()
+        return True
+    except h.HostError:
+        return False
+
+
+def updater_accepts(path):
+    try:
+        u.canonical_data(str(path))
+        return True
+    except u.UpdateError:
+        return False
+
+
+@pytest.mark.parametrize("case", sorted(DATA_CONTRACT))
+def test_existing_data_contract_matches_the_native_updater(host, tmp_path, case):
+    """Установщик и апдейтер выносят о каталоге DATA один вердикт (K21-024).
+
+    Ring 10.09.2026: `host-bootstrap --plan` принял существующий `/root/.korra21`,
+    а native updater отверг тот же путь из-за минимума в четыре компонента —
+    данные владельца пришлось переносить уже после установки.
+    """
+    item, fake = host
+    path = data_case(tmp_path, case)
+    expected = DATA_CONTRACT[case]
+    assert updater_accepts(path) is expected
+    assert bootstrap_accepts(item, path) is expected
+
+
+MOUNT_PROBE = """
+import importlib.util, json, os, subprocess, sys
+source, data = sys.argv[1], sys.argv[2]
+subprocess.run(["mount", "-t", "tmpfs", "-o", "mode=0750", "tmpfs", data], check=True)
+os.chown(data, 10000, 10000)
+with open(os.path.join(data, "config.yaml"), "w") as stream:
+    stream.write("# synthetic\\n")
+os.chown(os.path.join(data, "config.yaml"), 10000, 10000)
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+host = load("host_bootstrap", source)
+native = load("native_updater", os.path.join(os.path.dirname(source), "updater.py"))
+verdict = {}
+for name, call in (("bootstrap", lambda: host.check_data_path(data, must_exist=False)),
+                   ("updater", lambda: native.canonical_data(data))):
+    try:
+        call()
+        verdict[name] = True
+    except (host.HostError, native.UpdateError):
+        verdict[name] = False
+print(json.dumps(verdict))
+"""
+
+
+def test_data_on_its_own_mount_is_judged_the_same_by_both_entrypoints(tmp_path):
+    """DATA отдельным томом: ни установщик, ни апдейтер не смотрят на точку монтирования.
+
+    Монтирование живёт в приватном mount namespace: даже убитый тест не оставит
+    на хосте постороннего тома.
+    """
+    if os.geteuid() != 0 or not h.shutil.which("unshare"):
+        pytest.skip("приватный mount namespace требует root и unshare")
+    data = tmp_path / "opt/korra/data"
+    data.mkdir(parents=True)
+    result = subprocess.run(["unshare", "-m", "--propagation", "private", sys.executable,
+                             "-c", MOUNT_PROBE, str(SOURCE), str(data)],
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        pytest.skip("mount в namespace недоступен: " + result.stderr.strip()[-120:])
+    assert json.loads(result.stdout) == {"bootstrap": True, "updater": True}
 
 
 def test_host_installs_native_launcher_and_backup_dependencies(host):

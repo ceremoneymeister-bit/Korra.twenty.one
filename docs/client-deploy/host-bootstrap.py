@@ -49,6 +49,33 @@ def trusted(path):
             raise HostError("Control path must be root-owned, non-symlink and not writable by others")
 
 
+def check_data_path(path, *, must_exist):
+    """One existing-DATA contract for this CLI and the native updater.
+
+    `must_exist=False` is the provisioning call: the directory itself is created
+    later, so only the path shape and the ancestors that already exist are
+    judged. Every rule below matches updater.canonical_data on purpose —
+    otherwise --plan accepts a DATA that the first update refuses, and the
+    owner's data has to be moved after the install (K21-024).
+    """
+    path = Path(path)
+    if not path.is_absolute() or path.resolve() != path or len(path.parts) < 4:
+        raise HostError("DATA must be an absolute, non-symlink dedicated directory")
+    if not path.is_dir():
+        if path.exists() or path.is_symlink():
+            raise HostError("DATA must be a dedicated directory")
+        if must_exist:
+            raise HostError("DATA does not exist")
+    ancestor = path.parent
+    while not ancestor.exists():
+        ancestor = ancestor.parent
+    for entry in (ancestor, *ancestor.parents):
+        info = entry.lstat()
+        if info.st_uid != 0 or (info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
+            raise HostError("DATA ancestors must prevent an agent from replacing the deployment directory")
+    return path
+
+
 def mkdir(path, mode=0o700):
     path.mkdir(parents=True, exist_ok=True)
     trusted(path)
@@ -284,12 +311,11 @@ class HostBootstrap:
         parent = self.data.parent
         while not parent.exists():
             parent = parent.parent
-        if not o.plan:
-            trusted(parent)
-            if self.data.exists():
-                info = self.data.lstat()
-                if not stat.S_ISDIR(info.st_mode) or (info.st_uid, info.st_gid) != (o.uid, o.gid):
-                    raise HostError("Existing DATA has unexpected ownership")
+        check_data_path(self.data, must_exist=False)
+        if not o.plan and self.data.exists():
+            info = self.data.lstat()
+            if not stat.S_ISDIR(info.st_mode) or (info.st_uid, info.st_gid) != (o.uid, o.gid):
+                raise HostError("Existing DATA has unexpected ownership")
         if o.action == "bootstrap":
             # Resources gate provisioning only. Grant/rotate/verify operate on an
             # installation that already exists: a 2 CPU / 4 GiB client host must
