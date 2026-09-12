@@ -346,12 +346,36 @@ def check_fn_cache_scope() -> Optional[str]:
         return CHECK_FN_CACHE_BYPASS
 
 
+def _expected_unscoped_secret(exc: BaseException) -> bool:
+    """Is this the fail-closed "no profile scope yet" signal, not a failure?
+
+    ``get_secret`` raises ``UnscopedSecretError`` when a credential read runs
+    without an active profile scope — exactly what an availability probe does
+    on a multiplex boot before any turn installed one. The tool is correctly
+    unavailable until the scope arrives; a traceback here only teaches the
+    owner to ignore tracebacks.
+    """
+    try:
+        from agent.secret_scope import UnscopedSecretError
+    except Exception:  # noqa: BLE001 — secret scope optional in stripped envs
+        return False
+    return isinstance(exc, UnscopedSecretError)
+
+
 def _run_check_fn_uncached(fn: Callable, *, unresolved_scope: bool = False) -> bool:
     """Run an availability check without cache/grace handling."""
     try:
         return bool(fn())
-    except Exception:
+    except Exception as exc:
         detail = " while profile cache scope was unresolved" if unresolved_scope else ""
+        if _expected_unscoped_secret(exc):
+            logger.debug(
+                "check_fn %s needs a profile scope to read its secret%s; "
+                "dependent tools stay unavailable until one is installed",
+                getattr(fn, "__qualname__", fn),
+                detail,
+            )
+            return False
         logger.warning(
             "check_fn %s raised%s; dependent tools will be unavailable this turn",
             getattr(fn, "__qualname__", fn),
