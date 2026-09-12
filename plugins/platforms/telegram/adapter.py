@@ -315,6 +315,35 @@ _TELEGRAM_IMAGE_EXT_TO_MIME = {
     ".avif": "image/avif",
 }
 
+# Update fields of Bot API ``Update``, newest first in Telegram's own order.
+# Used only to name an update that no handler claimed, so the log says which
+# kind went unread instead of "something arrived".
+_TELEGRAM_UPDATE_FIELDS = (
+    "message", "edited_message", "channel_post", "edited_channel_post",
+    "business_connection", "business_message", "edited_business_message",
+    "deleted_business_messages", "message_reaction", "message_reaction_count",
+    "inline_query", "chosen_inline_result", "callback_query", "shipping_query",
+    "pre_checkout_query", "purchased_paid_media", "poll", "poll_answer",
+    "my_chat_member", "chat_member", "chat_join_request", "chat_boost",
+    "removed_chat_boost",
+)
+
+# Message fields that describe the envelope rather than what was sent. What is
+# left after removing them names the payload (``dice``, ``contact``, ``poll``…),
+# which is the useful half of an unhandled-update log line.
+_TELEGRAM_MESSAGE_ENVELOPE_FIELDS = frozenset({
+    "message_id", "message_thread_id", "date", "chat", "from", "from_user",
+    "sender_chat", "sender_business_bot", "business_connection_id",
+    "is_topic_message", "is_automatic_forward", "reply_to_message", "quote",
+    "external_reply", "edit_date", "has_protected_content", "media_group_id",
+    "author_signature", "caption", "caption_entities", "entities",
+    "link_preview_options", "reply_markup", "via_bot", "forward_origin",
+    "forward_from", "forward_from_chat", "forward_from_message_id",
+    "forward_date", "forward_sender_name", "forward_signature",
+    "show_caption_above_media", "has_media_spoiler", "effect_id", "api_kwargs",
+})
+
+
 def _coerce_duration_seconds(value: Any) -> Optional[int]:
     """Round a raw length to whole positive seconds, or None if unusable."""
     try:
@@ -863,6 +892,14 @@ class TelegramAdapter(BasePlatformAdapter):
         self._dm_topics: Dict[str, int] = {}
         # Track forum chats where we've already registered bot commands
         self._forum_command_registered: set[int] = set()
+        # Core (group 0) handlers, as registered by _register_handlers. The
+        # catch-all observer asks them whether an inbound update has a home, so
+        # "what this adapter understands" stays stated in exactly one place.
+        self._core_handlers: List[Any] = []
+        # Update kinds already reported as unhandled. One INFO line per kind per
+        # process is enough to notice a new silent class of updates without
+        # turning a chatty group into a log flood.
+        self._logged_unhandled_kinds: Set[str] = set()
         # Lock per la registrazione sicura dei comandi nei forum supergroup
         self._forum_lock = asyncio.Lock()
         # Status indicator: when enabled, the bot's short description (the line
@@ -4291,7 +4328,12 @@ class TelegramAdapter(BasePlatformAdapter):
         post-auth boundary. Registered in a dedicated high group so it observes
         alongside, never displaces, the core handlers. Malformed updates and
         dispatch errors cannot raise into PTB's update loop.
+
+        Being the only place that sees every update, it is also where an update
+        nobody handles gets named in the log — the video-note case proved that
+        such a gap is otherwise invisible until an owner complains.
         """
+        self._log_unhandled_update(update)
         handler: Optional[Callable[[Dict[str, Any], Any], Awaitable[None]]] = getattr(
             self, "_platform_event_handler", None
         )
@@ -4318,6 +4360,78 @@ class TelegramAdapter(BasePlatformAdapter):
         except Exception:
             logger.debug("[%s] gateway_platform_event dispatch error", self.name, exc_info=True)
             return
+
+    def _log_unhandled_update(self, update) -> None:
+        """Name an update that reached the bot without reaching any handler.
+
+        One INFO line per kind per process: enough to see a new blind spot in
+        ``docker logs``, quiet enough for a busy group where service messages
+        (pins, joins) arrive constantly. Never raises — this is observability
+        sitting inside PTB's update loop.
+        """
+        try:
+            kind = self._unhandled_update_kind(update)
+            if not kind:
+                return
+            logged = getattr(self, "_logged_unhandled_kinds", None)
+            if logged is None:
+                logged = set()
+                self._logged_unhandled_kinds = logged
+            if kind in logged:
+                return
+            logged.add(kind)
+            logger.info(
+                "[%s] Unhandled update kind=%s — no handler claims it, "
+                "the sender gets silence",
+                self.name, kind,
+            )
+        except Exception:
+            logger.debug("[%s] unhandled-update logging failed", self.name, exc_info=True)
+
+    def _unhandled_update_kind(self, update) -> Optional[str]:
+        """Return the name of an unclaimed update kind, or None when handled.
+
+        "Handled" is answered by the group-0 handlers themselves plus the
+        ``gateway_platform_event`` types (reaction, edit) that this observer
+        forwards, so the answer cannot drift from the registration site.
+        """
+        for handler in getattr(self, "_core_handlers", ()) or ():
+            try:
+                if handler.check_update(update):
+                    return None
+            except Exception:
+                continue
+        if (
+            getattr(update, "message_reaction", None) is not None
+            or getattr(update, "edited_message", None) is not None
+        ):
+            return None
+        message = (
+            getattr(update, "effective_message", None)
+            or getattr(update, "message", None)
+        )
+        if message is not None:
+            payload = self._message_payload_field(message)
+            if payload:
+                return payload
+        for field in _TELEGRAM_UPDATE_FIELDS:
+            if getattr(update, field, None) is not None:
+                return field
+        return "unknown"
+
+    @staticmethod
+    def _message_payload_field(message) -> Optional[str]:
+        """Name what a message carries (``dice``, ``contact``, ``poll``…)."""
+        try:
+            fields = message.to_dict()
+        except Exception:
+            return None
+        if not isinstance(fields, dict):
+            return None
+        for name, value in fields.items():
+            if value and name not in _TELEGRAM_MESSAGE_ENVELOPE_FIELDS:
+                return name
+        return None
 
     def _source_for_platform_event_auth(self, update):
         """Route a supported update to its event-specific auth-source extractor.
@@ -4473,33 +4587,49 @@ class TelegramAdapter(BasePlatformAdapter):
         the ``gateway_platform_event`` observer (group 99) in lockstep with the
         core handlers.
         """
-        app.add_handler(TelegramMessageHandler(
+        # Re-registration (reconnect rebuild) starts the group-0 record over.
+        self._core_handlers = []
+        self._add_core_handler(app, TelegramMessageHandler(
             filters.TEXT & ~filters.COMMAND,
             self._handle_text_message
         ))
-        app.add_handler(TelegramMessageHandler(
+        self._add_core_handler(app, TelegramMessageHandler(
             filters.COMMAND,
             self._handle_command
         ))
-        app.add_handler(TelegramMessageHandler(
+        self._add_core_handler(app, TelegramMessageHandler(
             filters.LOCATION | getattr(filters, "VENUE", filters.LOCATION),
             self._handle_location_message
         ))
-        app.add_handler(TelegramMessageHandler(
-            filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Document.ALL | filters.Sticker.ALL,
+        # VIDEO_NOTE (кружок) belongs here: Telegram delivers it in its own
+        # field, so without it the update matched no handler at all and the
+        # owner got silence — no reply, no error, no note to the agent.
+        self._add_core_handler(app, TelegramMessageHandler(
+            filters.PHOTO | filters.VIDEO | filters.VIDEO_NOTE | filters.AUDIO | filters.VOICE | filters.Document.ALL | filters.Sticker.ALL,
             self._handle_media_message
         ))
         # Handle inline keyboard button callbacks (update prompts)
-        app.add_handler(CallbackQueryHandler(self._handle_callback_query))
+        self._add_core_handler(app, CallbackQueryHandler(self._handle_callback_query))
         # Inline command picker (@botname <query>) — searchable, uncapped
         # access to every command/skill. Inert until the bot owner enables
         # inline mode via BotFather /setinline (Telegram never delivers
         # inline_query updates otherwise), so registering unconditionally
         # is safe.
-        app.add_handler(InlineQueryHandler(self._handle_inline_query))
+        self._add_core_handler(app, InlineQueryHandler(self._handle_inline_query))
         # gateway_platform_event observer (see _on_platform_update); group 99 so
         # it observes alongside, never displaces, the core handlers.
         app.add_handler(TypeHandler(Update, self._on_platform_update), group=99)
+
+    def _add_core_handler(self, app, handler) -> None:
+        """Register a group-0 handler and remember it.
+
+        The remembered list is what ``_on_platform_update`` consults to decide
+        whether an inbound update has a handler at all. Asking the handlers
+        themselves keeps that judgement exact and avoids a second list of
+        update types that would silently drift from this one.
+        """
+        self._core_handlers.append(handler)
+        app.add_handler(handler)
 
     async def connect(self, *, is_reconnect: bool = False) -> bool:
         """Connect to Telegram via polling or webhook.
@@ -9575,6 +9705,11 @@ class TelegramAdapter(BasePlatformAdapter):
             return MessageType.AUDIO
         if msg.voice:
             return MessageType.VOICE
+        # A video note (кружок) is a voice message with a face: the owner
+        # speaks into it. VOICE routes it through the same soundtrack
+        # transcription (and voice-reply) path a voice message takes.
+        if getattr(msg, "video_note", None):
+            return MessageType.VOICE
         return MessageType.DOCUMENT
 
     async def _cache_observed_media(self, msg: Message, event: MessageEvent) -> None:
@@ -9691,6 +9826,8 @@ class TelegramAdapter(BasePlatformAdapter):
             return msg.video, "", "video/mp4", "video"
         if msg.voice:
             return msg.voice, "voice.ogg", "audio/ogg", "audio"
+        if getattr(msg, "video_note", None):
+            return msg.video_note, "video_note.mp4", "video/mp4", "video"
         if msg.audio:
             return msg.audio, getattr(msg.audio, "file_name", "") or "", "", "audio"
         if msg.document:
@@ -9733,6 +9870,7 @@ class TelegramAdapter(BasePlatformAdapter):
             "voice message": "голосовое сообщение",
             "audio file": "аудиофайл",
             "video file": "видеофайл",
+            "video note": "видео-кружок",
             "document": "документ",
             "photo": "изображение",
         }.get(kind, "вложение")
@@ -10359,6 +10497,33 @@ class TelegramAdapter(BasePlatformAdapter):
             except Exception as e:
                 logger.warning("[Telegram] Failed to cache video: %s", _redact_telegram_error_text(e), exc_info=True)
                 await self._surface_media_cache_failure(msg, event, "video file", e)
+
+        # A video note (кружок) is speech first, picture second. The file is an
+        # mp4 and is cached as one, but it is handed over as the audio the owner
+        # recorded, so the gateway transcribes its soundtrack the way it does a
+        # voice message (STT accepts .mp4). The note below gives the agent the
+        # path, so the picture is still reachable when it matters.
+        elif getattr(msg, "video_note", None):
+            try:
+                allowed, note = self._telegram_media_size_allowed(msg.video_note, "video note")
+                if not allowed:
+                    event.text = self._append_observed_note(event.text, note or "")
+                    logger.info("[Telegram] Skipped oversized user video note (size=%s)", getattr(msg.video_note, "file_size", None))
+                    await self.handle_message(event)
+                    return
+                file_obj = await msg.video_note.get_file()
+                video_bytes = await file_obj.download_as_bytearray()
+                cached_path = cache_video_from_bytes(bytes(video_bytes), ext=".mp4")
+                event.media_urls = [cached_path]
+                event.media_types = ["audio/mp4"]
+                event.text = self._append_observed_note(
+                    event.text,
+                    f"[Пользователь прислал видео-кружок (video note), файл: {cached_path}]",
+                )
+                logger.info("[Telegram] Cached user video note at %s", cached_path)
+            except Exception as e:
+                logger.warning("[Telegram] Failed to cache video note: %s", _redact_telegram_error_text(e), exc_info=True)
+                await self._surface_media_cache_failure(msg, event, "video note", e)
 
         # Download document files to cache for agent processing
         elif msg.document:
