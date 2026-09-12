@@ -465,6 +465,54 @@ def test_failed_update_rolls_back_data_preserving_new_auth_and_export(updater):
     assert {"auth.json", "state.db", "new-message.txt", "revoked.token"} <= set(changes)
 
 
+def _profile_with_gateway_state(updater, name, desired_state):
+    home = updater.data / "profiles" / name
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "SOUL.md").write_text("профиль " + name)
+    (home / "gateway_state.json").write_text(json.dumps({
+        "gateway_state": "running", "desired_state": desired_state,
+        # Идентичность умершего контейнера: возвращать её обратно нельзя.
+        "pid": 4242, "argv": ["korra", "gateway", "run", "-p", name],
+        "start_time": "8140012", "code_sha": "9876d4a2"}))
+    return home
+
+
+def _boot_actions(updater):
+    """Что сделает с восстановленным DATA сам движок на старте контейнера."""
+    from korra_cli.container_boot import reconcile_profile_gateways
+
+    actions = reconcile_profile_gateways(
+        hermes_home=updater.data, scandir=updater.data.parent / "scandir", dry_run=True,
+        container_argv=("/init", "main-wrapper.sh", "gateway", "run"))
+    return {action.profile: action.action for action in actions}
+
+
+def test_rollback_returns_profile_gateways_to_their_recorded_intent(updater):
+    (updater.data / "gateway_state.json").write_text(json.dumps(
+        {"gateway_state": "running", "desired_state": "running", "pid": 41}))
+    _profile_with_gateway_state(updater, "secretary", "running")
+    _profile_with_gateway_state(updater, "figma-storybook", "running")
+    _profile_with_gateway_state(updater, "archive", "stopped")
+    updater.fail_smoke = True
+
+    with pytest.raises(u.UpdateError, match="Injected model"):
+        updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["status"] == "rolled_back"
+    actions = _boot_actions(updater)
+    assert actions["secretary"] == "started" and actions["figma-storybook"] == "started"
+    # Осознанно остановленный профиль откат не поднимает.
+    assert actions["archive"] == "registered"
+    body = json.loads((updater.data / "profiles/secretary/gateway_state.json").read_text())
+    assert body == {"desired_state": "running", "gateway_state": "running"}
+    # Отдельный `--rollback` читает намерение из квитанции, а не из памяти.
+    receipt = json.loads((updater.job / "status.json").read_text())
+    assert receipt["gateway_intent"]["profiles/archive/gateway_state.json"]["desired_state"] == "stopped"
+    assert json.loads((updater.job / "restored-gateway-intent.json").read_text()) == [
+        "gateway_state.json", "profiles/archive/gateway_state.json",
+        "profiles/figma-storybook/gateway_state.json", "profiles/secretary/gateway_state.json"]
+
+
 def test_backup_corruption_prevents_restore(updater):
     updater.update("registry.example/korra:latest")
     (updater.job / "before/config.yaml").write_text("tampered")

@@ -35,6 +35,11 @@ IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
 IMAGE_ID = re.compile(r"^sha256:[a-f0-9]{64}$")
 VOLATILE = {"gateway.sock", "gateway.sock.path", "gateway.pid", "cron.pid",
             "gateway.lock", "processes.json", "gateway_state.json", ".drain_request.json"}
+# gateway_state.json is volatile as a whole — it names the pid/argv of a
+# container that no longer exists — but container boot reads exactly these two
+# fields to decide which profile gateways to bring up. They are preserved
+# across a restore; nothing else from that file is.
+GATEWAY_INTENT = ("desired_state", "gateway_state")
 
 # Runs with the image's own imports and no mounted data/network. The complete
 # file map supplements the native (historically MD5) provenance marker.
@@ -458,6 +463,34 @@ def snapshot(source, destination):
     if not manifest:
         raise UpdateError("Empty snapshot")
     return manifest
+
+
+def gateway_intent(root):
+    """Durable start/stop intent of the root and per-profile gateways.
+
+    Source MUST be stopped by the caller, so these files hold the last state the
+    engine persisted. Read only the intent fields: the runtime identity beside
+    them belongs to a container that is already gone.
+    """
+    homes = [root]
+    profiles = root / "profiles"
+    if profiles.resolve() == profiles and profiles.is_dir():
+        homes.extend(sorted(p for p in profiles.glob("*") if p.is_dir() and not p.is_symlink()))
+    intent = {}
+    for home in homes:
+        path = home / "gateway_state.json"
+        if home.resolve() != home or path.is_symlink() or not path.is_file():
+            continue
+        try:
+            value = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(value, dict):
+            continue
+        recorded = {key: value[key] for key in GATEWAY_INTENT if isinstance(value.get(key), str)}
+        if recorded:
+            intent[path.relative_to(root).as_posix()] = recorded
+    return intent
 
 
 def credential_path(relative):
@@ -1168,6 +1201,41 @@ print(json.dumps(changed))
                              self.receipt["old_image_id"], "-c", code)
         return json.loads(output.splitlines()[-1])
 
+    def apply_gateway_intent(self, stage):
+        """Return the recorded gateway intent to a restored tree.
+
+        Without this file a named profile is registered down on container boot
+        and its gateway never comes back: after a rollback four of five profiles
+        stayed down for a designer whose Telegram bots live in them. A profile
+        the owner had deliberately stopped keeps its own recorded intent, so an
+        automatic rollback does not start anything nobody asked for.
+        """
+        intent = self.receipt.get("gateway_intent")
+        if not isinstance(intent, dict):
+            return []
+        restored = []
+        for relative, value in sorted(intent.items()):
+            path = Path(relative)
+            if path.is_absolute() or ".." in path.parts or path.name != "gateway_state.json":
+                raise UpdateError("Unsafe gateway intent path")
+            recorded = {key: value[key] for key in GATEWAY_INTENT
+                        if isinstance(value, dict) and isinstance(value.get(key), str)}
+            if not recorded:
+                continue
+            destination = stage / path
+            for ancestor in destination.parents:
+                if ancestor == stage:
+                    break
+                if ancestor.is_symlink():
+                    raise UpdateError("Gateway intent destination has a symlink ancestor")
+            if not destination.parent.is_dir():
+                continue
+            atomic_json(destination, recorded)
+            owner = destination.parent.stat()
+            os.chown(destination, owner.st_uid, owner.st_gid)
+            restored.append(relative)
+        return restored
+
     def restore(self):
         backup, manifest = self.verify_backup()
         latest = self.latest_snapshot()
@@ -1196,6 +1264,8 @@ print(json.dumps(changed))
         self.judge_sqlite(self.judge_image(), stage)
         credentials = overlay_credentials(latest, stage)
         config_credentials = self.preserve_config_credentials(latest, stage)
+        gateways = self.apply_gateway_intent(stage)
+        atomic_json(self.job / "restored-gateway-intent.json", gateways)
         atomic_json(self.job / "restore-stage.manifest.json", tree_manifest(stage))
         atomic_json(stage_record, {"path": str(stage), "source": str(backup), "phase": "verified"})
         atomic_json(self.job / "preserved-credentials.json", credentials)
@@ -1215,7 +1285,8 @@ print(json.dumps(changed))
             os.replace(displaced, self.data)
             raise
         self.receipt.update(post_update_export=str(latest), post_update_changes=len(changes),
-                            displaced_data=str(displaced), preserved_credentials=len(credentials))
+                            displaced_data=str(displaced), preserved_credentials=len(credentials),
+                            restored_gateways=len(gateways))
         history = self.receipt.setdefault("displaced_data_history", [])
         if str(displaced) not in history:
             history.append(str(displaced))
@@ -1283,6 +1354,9 @@ print(json.dumps(changed))
             self.phase("backup")
             backup = self.verified_snapshot("before")
             self.receipt["backup_path"] = str(backup)
+            # Read from stopped DATA, not from the snapshot: the file itself is
+            # volatile and never copied, only the intent inside it survives.
+            self.receipt["gateway_intent"] = gateway_intent(self.data)
             backed_up = True
             self.phase("schema_rehearsal")
             self.rehearse_schema(target)
