@@ -137,11 +137,30 @@ def reconcile_profile_gateways(
     # for every profile. Named slots must still be registered (so explicit
     # lifecycle management remains available), but booting them from their
     # persisted run intent would create additional multiplex owners.
-    from utils import is_truthy_value
-
-    multiplex_profiles = is_truthy_value(
-        os.environ.get("GATEWAY_MULTIPLEX_PROFILES"),
+    # Korra K21-058: the panel's agent tabs need the root gateway to
+    # multiplex profiles, each profile to carry the root API_SERVER_KEY and
+    # to pin its own api_server off. Fresh installs get this from the seed
+    # templates; a contour updated from 0.20.x got nothing and every tab but
+    # the main one answered 404. Repair it here, before any gateway slot is
+    # brought up, and read the effective flag from config.yaml as well as
+    # the env override — the env-only read left named gateways auto-starting
+    # next to a multiplexing root on every contour that set the flag in
+    # config.yaml.
+    from korra_cli.multiplex_reconcile import (
+        multiplex_effective,
+        reconcile_multiplex,
     )
+
+    try:
+        multiplex_report = reconcile_multiplex(hermes_home, dry_run=dry_run)
+        for line in multiplex_report.actions:
+            log.info("multiplex: %s", line)
+        for line in multiplex_report.errors:
+            log.warning("multiplex: %s", line)
+    except Exception:  # pragma: no cover - reconcile must never block boot
+        log.warning("multiplex reconcile failed; continuing", exc_info=True)
+
+    multiplex_profiles = multiplex_effective(hermes_home)
 
     # Default profile — always register, even if nothing has ever
     # populated the root profile dir. The slot exists so
@@ -601,6 +620,10 @@ def main() -> int:
 
     hermes_home = Path(korra_env("KORRA_HOME", "/opt/data"))
     scandir = Path(os.environ.get("S6_PROFILE_GATEWAY_SCANDIR", "/run/service"))
+    # cont-init.d output is the only trace of what boot changed; make the
+    # multiplex repair lines (log.info) visible there.
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
     actions = reconcile_profile_gateways(
         hermes_home=hermes_home, scandir=scandir,
     )
@@ -609,6 +632,21 @@ def main() -> int:
             f"reconcile: profile={a.profile} "
             f"prior_state={a.prior_state} action={a.action}"
         )
+    # K21-058: say out loud whether the agent tabs will work on this boot.
+    try:
+        from korra_cli.multiplex_reconcile import inspect_multiplex
+
+        report = inspect_multiplex(hermes_home)
+        broken = ", ".join(
+            f"{p.name} ({p.describe()})" for p in report.broken_profiles
+        )
+        print(
+            f"multiplex: flag={report.flag} root_key={report.root_key_present} "
+            f"profiles={report.named_profiles} tabs_work={report.tabs_work}"
+            + (f" broken: {broken}" if broken else "")
+        )
+    except Exception as exc:  # pragma: no cover - report only
+        print(f"multiplex: inspect failed: {exc}")
     return 0
 
 

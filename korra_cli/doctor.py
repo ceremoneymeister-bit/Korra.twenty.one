@@ -873,6 +873,89 @@ def check_certificates(should_fix: bool = False, issues: "list | None" = None) -
             )
 
 
+def check_multiplex_profiles(
+    should_fix: bool = False,
+    issues: "list[str] | None" = None,
+    hermes_home: "Path | None" = None,
+) -> None:
+    """Секция «Вкладки агентов»: три условия мультиплекса по каждому профилю.
+
+    Вкладка агента в панели отвечает только когда корневой шлюз
+    мультиплексирует профили, у профиля есть корневой ``API_SERVER_KEY`` и
+    его собственный api-сервер выключен. Любой пропуск даёт одинаковый
+    симптом «Корра не смогла ответить» при живом Telegram (K21-058).
+    ``--fix`` чинит все три пункта на месте.
+    """
+    from korra_cli.multiplex_reconcile import inspect_multiplex, reconcile_multiplex
+
+    if hermes_home is None:
+        try:
+            from korra_constants import get_default_hermes_root
+
+            hermes_home = Path(get_default_hermes_root())
+        except Exception:
+            hermes_home = Path(HERMES_HOME)
+    issues = issues if issues is not None else []
+
+    report = inspect_multiplex(hermes_home)
+    if report.named_profiles == 0 and report.flag is not None:
+        return  # нечего мультиплексировать и владелец уже определился
+
+    _section('Вкладки агентов (мультиплекс профилей)')
+
+    if should_fix and not report.tabs_work and report.flag is not False:
+        fixed = reconcile_multiplex(hermes_home)
+        for line in fixed.actions:
+            check_ok(f'Исправлено: {line}')
+        for line in fixed.errors:
+            check_warn(f'Не удалось исправить: {line}')
+        report = fixed
+        if fixed.actions and report.tabs_work:
+            check_info('Перезапустите шлюз, чтобы общий шлюз подхватил профили: korra gateway restart')
+
+    if report.flag is None:
+        _fail_and_issue(
+            'gateway.multiplex_profiles не задан в корневом config.yaml',
+            f'профилей: {report.named_profiles}; вкладки агентов в панели отвечают 404',
+            'Включите общий шлюз: korra doctor --fix (или gateway.multiplex_profiles: true в config.yaml)',
+            issues,
+        )
+    elif report.flag is False:
+        if report.named_profiles:
+            check_warn(
+                'gateway.multiplex_profiles: false — вкладки агентов в панели работать не будут',
+                'это явное решение владельца; агенты доступны только в своих каналах',
+            )
+        else:
+            check_ok('Мультиплекс выключен, именованных профилей нет')
+        return
+    else:
+        check_ok('gateway.multiplex_profiles: true')
+
+    if not report.root_key_present:
+        _fail_and_issue(
+            'В корневом .env нет API_SERVER_KEY',
+            'без него общий шлюз не поднимет api-сервер и не раздаст ключ профилям',
+            'Задайте API_SERVER_KEY в корневом .env (openssl rand -hex 32) и перезапустите шлюз',
+            issues,
+        )
+
+    if report.named_profiles == 0:
+        check_info('Именованных профилей пока нет')
+        return
+
+    for finding in report.profiles:
+        if finding.ok:
+            check_ok(f'  {finding.name}: ключ, пин api_server и собственный шлюз в порядке')
+        else:
+            _fail_and_issue(
+                f'  {finding.name}: {finding.describe()}',
+                '',
+                f'Профиль {finding.name}: korra doctor --fix (ключ в .env, platforms.api_server.enabled: false, собственный шлюз stopped)',
+                issues,
+            )
+
+
 def _check_gateway_service_linger(issues: list[str]) -> None:
     """Warn when a systemd user gateway service will stop after logout.
 
@@ -3274,6 +3357,11 @@ def run_doctor(args):
                 check_warn(f'Плагин {_active_memory_provider} не найден', 'Выполните: korra memory setup')
         except Exception as _e:
             check_warn(f'Не удалось проверить {_active_memory_provider}', str(_e))
+
+    try:
+        check_multiplex_profiles(should_fix=should_fix, issues=issues)
+    except Exception:
+        pass
 
     try:
         from korra_cli.profiles import list_profiles, _get_wrapper_dir, profile_exists
