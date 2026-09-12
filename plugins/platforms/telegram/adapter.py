@@ -10551,9 +10551,14 @@ class TelegramAdapter(BasePlatformAdapter):
                 # document size limit by taking the image path.
                 if not doc.file_size or doc.file_size > self._max_doc_bytes:
                     limit_mb = self._max_doc_bytes // (1024 * 1024)
-                    event.text = (
-                        "The document is too large or its size could not be verified. "
-                        f"Maximum: {limit_mb} MB."
+                    # Append, never replace: the caption is what the owner
+                    # actually asked for. Replacing it left the agent answering
+                    # a system sentence as if the owner had written it, with the
+                    # request itself gone.
+                    event.text = self._append_observed_note(
+                        event.text,
+                        f"[Документ слишком большой или его размер не подтверждён. "
+                        f"Максимум: {limit_mb} МБ. Файл не скачан.]",
                     )
                     logger.info("[Telegram] Document too large: %s bytes", doc.file_size)
                     await self.handle_message(event)
