@@ -732,6 +732,48 @@ def test_data_on_its_own_mount_is_judged_the_same_by_both_entrypoints(tmp_path):
     assert json.loads(result.stdout) == {"bootstrap": True, "updater": True}
 
 
+def executable_lines(document):
+    """Строки, которые установщик действительно выполняет: код блоков и сам скрипт."""
+    text = (ROOT / document).read_text(encoding="utf-8")
+    if document.endswith(".sh"):
+        return [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    lines, inside = [], False
+    for line in text.splitlines():
+        if line.startswith("```"):
+            inside = not inside
+        elif inside:
+            lines.append(line)
+    return lines
+
+
+@pytest.mark.parametrize("document", ["INSTALL.md", "INSTALL.en.md", "docs/client-deploy/README.md",
+                                      "docs/client-deploy/up.sh"])
+def test_documented_data_recipe_needs_no_passwd_entry(document):
+    """У uid 10000 на минимальном хосте нет записи в passwd (K21-004).
+
+    Ubuntu 26.04 Татьяны: `install -d -o 10000 -g 10000` отвечает там
+    `invalid user: '10000'`, и установка встаёт на первом же шаге. Переносима
+    двухфазная схема — создать каталог, затем назначить владельца числами.
+    """
+    assert not [line for line in executable_lines(document) if "install -d -o" in line
+                or "install -o " in line]
+    assert any("chown 10000:10000" in line or "chown $ENGINE_UID:$ENGINE_GID" in line
+               for line in executable_lines(document))
+
+
+def test_data_directory_recipe_is_numeric_idempotent_and_keeps_existing_data(tmp_path):
+    """Та же схема на живой файловой системе: владелец числами, повтор безопасен."""
+    if os.geteuid() != 0:
+        pytest.skip("назначение чужого владельца требует root")
+    data = tmp_path / "korra/data"
+    recipe = f"mkdir -p {data} && chown 10000:10000 {data} && chmod 750 {data}"
+    subprocess.run(["bash", "-c", recipe], check=True, timeout=20)
+    (data / "config.yaml").write_text("# существующие данные\n")
+    subprocess.run(["bash", "-c", recipe], check=True, timeout=20)
+    assert (data.stat().st_uid, data.stat().st_gid, data.stat().st_mode & 0o777) == (10000, 10000, 0o750)
+    assert (data / "config.yaml").read_text() == "# существующие данные\n"
+
+
 def test_host_installs_native_launcher_and_backup_dependencies(host):
     item, fake = host
     fake.missing = {"curl", "unzip", "rclone"}

@@ -69,7 +69,9 @@ IMAGE=$(tr -d '[:space:]' < "$IMAGE_FILE")
 
 if [ ! -d "$DATA" ]; then
     echo "Нет каталога данных $DATA. Создайте его до запуска:" >&2
-    echo "  install -d -o $ENGINE_UID -g $ENGINE_GID -m 750 $DATA" >&2
+    # Владелец назначается числами и отдельной командой: записи с uid 10000 в
+    # passwd минимального хоста нет, и install -d -o отвечает invalid user.
+    echo "  mkdir -p $DATA && chown $ENGINE_UID:$ENGINE_GID $DATA && chmod 750 $DATA" >&2
     exit 2
 fi
 

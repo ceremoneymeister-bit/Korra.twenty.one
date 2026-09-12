@@ -42,7 +42,8 @@ uname -m        # expect x86_64
 
 ```bash
 install -d -m 755 /opt/korra
-install -d -o 10000 -g 10000 -m 750 /opt/korra/data
+mkdir -p /opt/korra/data
+chown 10000:10000 /opt/korra/data && chmod 750 /opt/korra/data
 cd /opt/korra
 for f in up.sh update.sh updater.py host-bootstrap.py backup.sh dependencies.lock.json env.template; do
   curl -fsSL "https://raw.githubusercontent.com/ceremoneymeister-bit/Korra.twenty.one/main/docs/client-deploy/$f" -o "$f"
@@ -58,6 +59,11 @@ chmod 644 dependencies.lock.json env.template
 stat -c '%u:%g %a %n' /opt/korra/data      # 10000:10000 750
 python3 /opt/korra/updater.py --capabilities
 ```
+
+Ownership is set by a separate command and by number: the host has no `passwd`
+entry for uid 10000, and on a recent Ubuntu `install -d -o 10000` answers
+`invalid user: '10000'`. The check asks for numbers too (`%u:%g`); `%U:%G`
+returns `UNKNOWN`. The name mapping lives inside the container by design.
 
 ### A4. Image pinned by digest
 
