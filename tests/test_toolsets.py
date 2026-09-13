@@ -356,3 +356,41 @@ class TestResolveToolsetMemo:
         assert first == second
         assert first  # non-empty sanity
 
+
+
+class TestKorraLegacyAliases:
+    """Configs migrated from Korra 0.20.x still carry `korra-*` toolset names.
+
+    The 0.21 hard fork restarted from upstream and lost those names; every
+    platform that listed only `korra-*` resolved to zero tools and the agent
+    answered without ever calling a tool.
+    """
+
+    def test_legacy_platform_names_validate(self):
+        assert validate_toolset("korra-telegram")
+        assert validate_toolset("korra-cli")
+
+    def test_alias_resolves_to_the_upstream_toolset(self):
+        for legacy, canonical in toolsets_mod._KORRA_TOOLSET_ALIASES.items():
+            assert sorted(resolve_toolset(legacy)) == sorted(resolve_toolset(canonical)), (
+                f"{legacy} must resolve exactly like {canonical}"
+            )
+
+    def test_alias_is_present_in_toolsets_mapping(self):
+        # `_get_platform_tools` expands composites through a literal
+        # `name in TOOLSETS` membership test, so an alias that only lives in
+        # resolve_toolset() would still leave the platform with no tools.
+        assert "korra-telegram" in TOOLSETS
+        assert TOOLSETS["korra-telegram"]["includes"] == ["hermes-telegram"]
+
+    def test_platform_tools_match_between_legacy_and_canonical(self):
+        from korra_cli.tools_config import _get_platform_tools
+
+        legacy = _get_platform_tools(
+            {"platform_toolsets": {"telegram": ["korra-telegram"]}}, "telegram"
+        )
+        canonical = _get_platform_tools(
+            {"platform_toolsets": {"telegram": ["hermes-telegram"]}}, "telegram"
+        )
+        assert legacy == canonical
+        assert legacy, "a migrated config must not end up with an empty toolset set"

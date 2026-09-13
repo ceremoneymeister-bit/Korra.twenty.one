@@ -2666,6 +2666,16 @@ def _get_platform_tools(
     # Normalise to str so downstream sorted() never mixes types.
     toolset_names = [str(ts) for ts in toolset_names]
 
+    # Configs migrated from Korra 0.20.x carry the rebranded platform names
+    # (``korra-telegram``, ``korra-cli``, …). They resolve through the
+    # compatibility aliases in ``toolsets``, but the platform-default
+    # bookkeeping below keys off the canonical ``hermes-*`` names, so map them
+    # here — otherwise a migrated contour gets the right tools under a name the
+    # rest of this function treats as a user-selected extra toolset.
+    from toolsets import _KORRA_TOOLSET_ALIASES
+
+    toolset_names = [_KORRA_TOOLSET_ALIASES.get(ts, ts) for ts in toolset_names]
+
     configurable_keys = {ts_key for ts_key, _, _ in CONFIGURABLE_TOOLSETS}
     plugin_ts_keys = _get_plugin_toolset_keys()
     platform_default_keys = {p["default_toolset"] for p in PLATFORMS.values()}
