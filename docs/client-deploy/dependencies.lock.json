@@ -13,6 +13,6 @@
     {"spec": "matplotlib==3.10.6", "module": "matplotlib"},
     {"spec": "tabulate==0.10.0", "module": "tabulate"},
     {"spec": "beautifulsoup4==4.13.5", "module": "bs4"},
-    {"spec": "ddgs==9.5.5", "module": "ddgs"}
+    {"spec": "ddgs==9.16.0", "module": "ddgs"}
   ]
 }
