@@ -311,6 +311,9 @@ class HostBootstrap:
         parent = self.data.parent
         while not parent.exists():
             parent = parent.parent
+        # Deliberately outside `if not o.plan`: the plan judges the real ancestors
+        # of DATA, so a path under a directory someone else can replace is refused
+        # here and not at the owner's first update (K21-024).
         check_data_path(self.data, must_exist=False)
         if not o.plan and self.data.exists():
             info = self.data.lstat()

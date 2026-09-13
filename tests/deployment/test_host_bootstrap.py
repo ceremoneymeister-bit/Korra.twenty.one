@@ -8,14 +8,25 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "docs/client-deploy/host-bootstrap.py"
 
 
+def unwritten_data(name):
+    """DATA флотской формы, которого на хосте ещё нет (K21-024).
+
+    План судит настоящих предков каталога DATA, а предки pytest `tmp_path`
+    принадлежат пользователю CI — такой DATA установщик обязан отвергать.
+    План ничего не создаёт, поэтому несуществующий путь под root-owned `/opt`
+    остаётся read-only фикстурой: на хосте его нет ни до, ни после прогона.
+    """
+    return Path("/opt") / f"korra21-{name}" / "data"
+
+
 def test_operator_cli_plan_is_available_without_creating_data(tmp_path):
-    target = tmp_path / "new-data"
+    target = unwritten_data("synthetic-k21-plan")
     result = subprocess.run([sys.executable, str(SOURCE), "bootstrap", "--plan",
         "--home", str(tmp_path), "--data", str(target), "--name", "synthetic-k21-plan",
         "--image", "ghcr.io/ceremoneymeister-bit/korra.twenty.one@sha256:" + "a" * 64],
         env={**os.environ, "HOME": str(tmp_path)}, capture_output=True, text=True, timeout=20)
-    assert result.returncode == 0
-    assert not target.exists()
+    assert result.returncode == 0, result.stderr
+    assert not target.exists() and not target.parent.exists()
     assert '"admin": true' in result.stdout
 
 import importlib.util
@@ -592,12 +603,31 @@ def test_host_package_installation_is_idempotent_and_off_image(host, monkeypatch
     assert allow < deny
 
 
-def test_plan_accepts_documented_control_home_without_writes(tmp_path):
-    target = tmp_path / "uncreated-data"
+def test_plan_accepts_documented_control_home_without_writes():
+    target = unwritten_data("synthetic-plan")
     result = subprocess.run([sys.executable, str(SOURCE), "bootstrap", "--plan",
         "--home", "/opt/korra", "--data", str(target), "--name", "synthetic-plan",
         "--image", "sha256:" + "a" * 64], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
+    assert not target.exists() and not target.parent.exists()
+
+
+def test_plan_refuses_data_whose_ancestor_lets_others_replace_it(tmp_path):
+    """Отказ по предкам DATA предсказывает план, а не первое обновление (K21-024).
+
+    Матрица contract идёт через root-фикстуру `host` и на CI целиком
+    пропускается; этому кейсу root не нужен, поэтому правило остаётся
+    проверенным и там.
+    """
+    ancestor = tmp_path / "shared"
+    (ancestor / "korra").mkdir(parents=True)
+    ancestor.chmod(0o777)
+    target = ancestor / "korra/data"
+    result = subprocess.run([sys.executable, str(SOURCE), "bootstrap", "--plan",
+        "--home", "/opt/korra", "--data", str(target), "--name", "synthetic-plan",
+        "--image", "sha256:" + "a" * 64], capture_output=True, text=True, timeout=20)
+    assert result.returncode != 0
+    assert "DATA ancestors" in result.stderr
     assert not target.exists()
 
 
