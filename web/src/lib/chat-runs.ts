@@ -72,6 +72,9 @@ onMount($chatRuns, () => {
   window.addEventListener("online", resume);
   document.addEventListener("visibilitychange", resume);
   return () => {
+    // nanostores убирает подписку отложенно, и окно успевает исчезнуть раньше
+    // уборки: без проверки падал весь прогон web, а не один тест.
+    if (typeof window === "undefined") return;
     window.clearInterval(timer);
     window.removeEventListener("focus", resume);
     window.removeEventListener("online", resume);
