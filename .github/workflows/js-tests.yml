@@ -86,3 +86,11 @@ jobs:
         # 8-ядерном/16Г сервере OOM-киллер снимает самые жирные процессы —
         # desktop::lint и desktop::test:ui умирали по SIGTERM (143).
         run: node .github/scripts/run-workspace-checks.mjs --concurrency 2
+        env:
+          # Korra: --concurrency 2 делит раннер между пакетами, но каждый
+          # vitest внутри берёт воркеров по os.availableParallelism() — это 16
+          # ядер машины, а cgroup-квота раннера 8. Два пакета по 16 воркеров на
+          # 8 ядрах давали четырёхкратную переподписку: desktop::test:ui падал
+          # «Test timed out in 15000ms» в 10 прогонах с 01.09, каждый раз на
+          # другом наборе файлов. 4 воркера × 2 пакета = ровно квота.
+          VITEST_MAX_WORKERS: 4
