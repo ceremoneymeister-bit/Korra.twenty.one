@@ -175,12 +175,16 @@ def test_traversal_rejects_whole_archive(tmp_path, isolated, bad_name):
 
 
 @pytest.mark.parametrize("variant", ["crc", "sqlite", "ratio", "symlink", "duplicate"])
-def test_full_preflight_has_zero_target_writes(tmp_path, isolated, variant):
+def test_full_preflight_has_zero_target_writes(tmp_path, isolated, monkeypatch, variant):
     user, target = isolated
     files = {"config.yaml": "replacement", "late.txt": "unique-corrupt-payload"}
     if variant == "sqlite":
         files["state.db"] = b"SQLite format 3\x00" + b"broken" * 30
     if variant == "ratio":
+        # K21-054: правило степени сжатия судит только записи крупнее
+        # _IMPORT_RATIO_MIN_BYTES. Порог снят, чтобы фикстура осталась
+        # мегабайтной, а проверялось по-прежнему само правило.
+        monkeypatch.setattr(backup, "_IMPORT_RATIO_MIN_BYTES", 1)
         files["large.txt"] = b"0" * (2 * 1024 * 1024)
     path = archive(tmp_path, files, zipfile.ZIP_DEFLATED if variant == "ratio" else zipfile.ZIP_STORED)
     if variant == "crc":
@@ -628,3 +632,73 @@ def test_external_provider_alias_never_hosts_staging(tmp_path, isolated, monkeyp
     rejected(path, user)
     assert writes == []
     assert provider.stat().st_mtime_ns == before_mtime
+
+
+def deflated(tmp_path, files, name="backup.zip"):
+    """ZIP, сжатый ровно так же, как его пишет ``korra backup``."""
+    path = tmp_path / name
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for member, content in files.items():
+            zf.writestr(member, content)
+    return path
+
+
+def test_own_backup_wal_segment_is_accepted(tmp_path, isolated):
+    """K21-054: свой же архив с сегментом WAL Postgres должен приниматься.
+
+    Провайдер памяти держит кластер Postgres вне HERMES_HOME, и `korra backup`
+    кладёт его сегменты WAL под ``_external/``. Сегмент — 16 МиБ почти сплошных
+    нулей, дефлейт сжимает его в 1028 раз. До K21-054 весь архив отбивался как
+    подозрение на zip-бомбу, и путь «сделал бэкап — восстановил из него» не
+    работал без ручного обхода (миграция Виктории 12.09.2026).
+    """
+    require_host_proc()
+    user, target = isolated
+    segment = "_external/.honcho/pgdata/pg_wal/000000010000000000000001"
+    path = deflated(tmp_path, {
+        "config.yaml": "replacement",
+        # Живой архив всегда несёт и обычные данные: без них весь ZIP состоял
+        # бы из одних нулей и его по делу отбивал бы совокупный потолок.
+        "_external/.honcho/pgdata/base/16384/1259": os.urandom(1024 * 1024),
+        segment: b"\x00" * (16 * 1024 * 1024),
+    })
+    with zipfile.ZipFile(path) as zf:
+        info = zf.getinfo(segment)
+        assert info.file_size > max(info.compress_size, 1) * backup._IMPORT_MAX_RATIO
+    restore(path)
+    assert (target / "config.yaml").read_text() == "replacement"
+    assert (user / ".honcho/pgdata/pg_wal/000000010000000000000001").stat().st_size == 16 * 1024 * 1024
+
+
+def test_single_member_bomb_above_ratio_floor_is_refused(tmp_path, isolated):
+    """K21-054: настоящая однофайловая бомба отбивается прежним правилом."""
+    user, target = isolated
+    path = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        zf.writestr("config.yaml", "replacement")
+        # Пишется потоком: 96 МиБ нулей в архиве занимают около сотни КиБ,
+        # в памяти теста — один мебибайтный кусок.
+        with zf.open("bomb.bin", "w") as member:
+            for _ in range(96):
+                member.write(b"\x00" * (1024 * 1024))
+    with zipfile.ZipFile(path) as zf:
+        info = zf.getinfo("bomb.bin")
+        assert info.file_size > backup._IMPORT_RATIO_MIN_BYTES
+    rejected(path, user)
+
+
+def test_whole_archive_expansion_ratio_is_capped(tmp_path, isolated, monkeypatch):
+    """K21-054: совокупное расширение архива по-прежнему ограничено.
+
+    Записи мельче _IMPORT_RATIO_MIN_BYTES поштучно не судятся, поэтому потолок
+    держит проверка по архиву целиком — иначе мелкими сверхсжимаемыми файлами
+    можно было бы набрать разрешённые 32 ГиБ из крошечного ZIP.
+    """
+    user, target = isolated
+    monkeypatch.setattr(backup, "_IMPORT_MAX_RATIO", 2)
+    path = deflated(tmp_path, {"config.yaml": "replacement",
+                               "late.bin": b"\x00" * (256 * 1024)})
+    with zipfile.ZipFile(path) as zf:
+        assert all(info.file_size <= backup._IMPORT_RATIO_MIN_BYTES
+                   for info in zf.infolist())
+    rejected(path, user)

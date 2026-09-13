@@ -524,11 +524,10 @@ mkdir -p /opt/korra-restore/data
 chown 10000:10000 /opt/korra-restore/data && chmod 750 /opt/korra-restore/data
 docker run --rm --network none --pid=host --cap-add SYS_PTRACE \
   --security-opt apparmor=unconfined --user 0 \
-  --entrypoint /opt/hermes/.venv/bin/python \
-  -e KORRA_HOME=/opt/data -e HOME=/tmp/korra-restore-home \
+  -e KORRA_HOME=/opt/data \
   -v /opt/korra-restore/data:/opt/data \
   -v /opt/korra/incoming/backup.zip:/backup.zip:ro \
-  "$IMAGE" -m korra_cli.main import /backup.zip --force
+  "$IMAGE" korra import /backup.zip --force
 ```
 
 Все пять ограничений в строке запуска обязательны: `--network none` изолирует
@@ -539,6 +538,14 @@ AppArmor отключается только у этого одноразово�
 gateway остаётся штатный профиль. При недостаточной видимости `/proc` import
 отказывает с готовой строкой обязательных флагов и не меняет DATA;
 `--network none` остаётся обязательной операторской изоляцией этого запуска.
+
+`--entrypoint` здесь не нужен: образ сам распознаёт `import` как одноразовую
+команду, выполняет бутстрап тома и не поднимает под неё ни dashboard, ни шлюзы
+профилей. Раньше без подмены entrypoint импорт падал «не удалось проверить всех
+держателей DATA» — собственный dashboard успевал открыть целевой DATA до
+holder-проверки. Старая форма запуска (`--entrypoint /opt/hermes/.venv/bin/python
+… -m korra_cli.main import`) продолжает работать, но обязательной больше не
+является.
 
 Путь `/opt/data` внутри importer может совпадать с путём в другом контейнере:
 import сравнивает каждый путь через `/proc/<pid>/root` по device/inode с
@@ -558,9 +565,10 @@ import сравнивает каждый путь через `/proc/<pid>/root` 
 `HERMES_HOME`/`KORRA_HOME` и `-p <profile>` выбирают ровно одну целевую
 папку; корень и соседние профили не заменяются. Состояние процессов, lock/socket/
 drain/restart markers и архивные WAL/SHM/journal не переносятся. Внешние файлы
-провайдера памяти из `_external/` возвращаются относительно `HOME`; для их
-восстановления задайте отдельный постоянный HOME и смонтируйте его, сохраняя
-полную видимость процессов хоста.
+провайдера памяти из `_external/` возвращаются относительно `HOME`. На штатном
+запуске образ сам держит `HOME=/opt/data` — тот же, с которым потом работают
+службы, — поэтому они ложатся на смонтированный том без отдельного монтирования;
+`-e HOME=…` на этом пути не действует.
 
 По умолчанию это перенос в **новый контур**: его существующие `.ssh` и
 `install_id` сохраняются, архивные ключи и installation identity пропускаются.

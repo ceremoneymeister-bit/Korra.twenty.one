@@ -672,6 +672,26 @@ def copy_db_and_verify(src: Path, dst: Path) -> bool:
     return True
 
 
+def _repair_snapshot_fts(snapshot: Path, rel_path: Path) -> Optional[str]:
+    """K21-039: починить индекс FTS5 в снимке перед упаковкой в архив.
+
+    Возвращает строку для сводки: что пересобрано или почему база всё равно
+    не пройдёт preflight импорта. ``None`` — снимок в порядке, говорить не о чем.
+    """
+    try:
+        from korra_cli.fts_integrity import repair_snapshot_fts
+        result = repair_snapshot_fts(snapshot)
+    except Exception as exc:  # проверка не должна ронять сам бэкап
+        logger.warning("FTS check skipped for %s: %s", rel_path, exc)
+        return f"  {rel_path}: индекс FTS5 не проверен ({exc})"
+    if result.problem is not None:
+        return f"  {rel_path}: {result.problem}; такой архив `korra import` не примет"
+    if result.rebuilt:
+        return (f"  {rel_path}: индекс FTS5 пересобран в копии "
+                f"({', '.join(result.rebuilt)}); боевая база не тронута")
+    return None
+
+
 def _foreign_db_holder_pids(db_path: Path) -> Optional[List[int]]:
     """PIDs of OTHER processes holding *db_path* or its WAL/SHM open.
 
@@ -930,6 +950,7 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
 
     total_bytes = 0
     errors = []
+    fts_notes: list[str] = []
     t0 = time.monotonic()
 
     with _atomic_output_path(out_path) as archive_path, zipfile.ZipFile(
@@ -948,6 +969,15 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
                     ) as tmp:
                         tmp_db = Path(tmp.name)
                     if _safe_copy_db(abs_path, tmp_db):
+                        # K21-039: импорт проверяет каждую базу из архива своим
+                        # `quick_check`, поэтому копию с повреждённым обратным
+                        # индексом FTS5 отдавать нельзя — восстановление из
+                        # такого архива требовало ручной пересборки. Снимок ещё
+                        # никому не принадлежит, так что индекс чинится прямо в
+                        # нём, а боевая база остаётся нетронутой.
+                        repaired = _repair_snapshot_fts(tmp_db, rel_path)
+                        if repaired is not None:
+                            fts_notes.append(repaired)
                         zf.write(tmp_db, arcname=str(rel_path))
                         total_bytes += tmp_db.stat().st_size
                         tmp_db.unlink(missing_ok=True)
@@ -1002,6 +1032,11 @@ def _run_backup_locked(args, hermes_root: Path) -> None:
     print(f"  До сжатия:   {_format_size(total_bytes)}")
     print(f"  После сжатия: {_format_size(zip_size)}")
     print(f"  Время:       {elapsed:.1f} с")
+
+    if fts_notes:
+        print("\n  Поисковый индекс FTS5:")
+        for note in fts_notes:
+            print(f"  {note}")
 
     if external_to_add:
         print(
@@ -1217,6 +1252,16 @@ _IMPORT_MAX_FILES = 100_000
 _IMPORT_MAX_FILE_BYTES = 4 * 1024**3
 _IMPORT_MAX_TOTAL_BYTES = 32 * 1024**3
 _IMPORT_MAX_RATIO = 1000
+# K21-054: степень сжатия одной записи судится только выше этого порога.
+# Свой же бэкап переносит сегмент WAL Postgres провайдера памяти — 16 МиБ,
+# почти целиком нули, сжатие 1028x. Отдельная запись такого размера бомбой
+# быть не может: сколько бы ни было нулей внутри, распаковка стоит ровно
+# `file_size` байт, а он здесь мал. Порог в 64 МиБ оставляет запас на WAL
+# с нестандартным --wal-segsize и держит настоящую однофайловую бомбу
+# (объявленные гигабайты из килобайта архива) под прежним правилом.
+# Совокупный потолок расширения архива проверяется отдельно ниже, поэтому
+# мелкими сверхсжимаемыми записями обойти лимит тоже нельзя.
+_IMPORT_RATIO_MIN_BYTES = 64 * 1024**2
 _IMPORT_SCAN_SECONDS = 10.0
 _IMPORT_IDENTITY_NAMES = {"install_id", ".install_id.lock"}
 
@@ -1390,8 +1435,17 @@ def _import_archive_plan(zf, root, home, *, same_host_restore=False):
     infos = zf.infolist()
     if len(infos) > _IMPORT_MAX_FILES:
         raise _ImportRefused("слишком много файлов в ZIP")
-    if sum(info.file_size for info in infos) > _IMPORT_MAX_TOTAL_BYTES:
+    total_file_size = sum(info.file_size for info in infos)
+    if total_file_size > _IMPORT_MAX_TOTAL_BYTES:
         raise _ImportRefused("превышен суммарный размер ZIP после распаковки")
+    # K21-054: потолок расширения держится на архиве целиком, а не на каждой
+    # записи. Так весь ZIP по-прежнему не может распаковаться больше чем в
+    # _IMPORT_MAX_RATIO раз от своего размера — это то самое свойство, ради
+    # которого проверку заводили, — но одна легитимная запись из нулей
+    # (WAL Postgres) больше не отбивает собственный бэкап целиком.
+    total_compress_size = sum(info.compress_size for info in infos)
+    if total_file_size > max(total_compress_size, 1) * _IMPORT_MAX_RATIO:
+        raise _ImportRefused("слишком высокое сжатие ZIP")
     prefix = _detect_prefix(zf)
     seen = set()
     plan = []
@@ -1409,7 +1463,8 @@ def _import_archive_plan(zf, root, home, *, same_host_restore=False):
             raise _ImportRefused("ZIP содержит ссылку, специальный или зашифрованный файл")
         if info.file_size > _IMPORT_MAX_FILE_BYTES:
             raise _ImportRefused("превышен размер файла в ZIP")
-        if info.file_size > max(info.compress_size, 1) * _IMPORT_MAX_RATIO:
+        if (info.file_size > _IMPORT_RATIO_MIN_BYTES
+                and info.file_size > max(info.compress_size, 1) * _IMPORT_MAX_RATIO):
             raise _ImportRefused("слишком высокое сжатие ZIP")
         external = name.startswith(_EXTERNAL_PREFIX)
         rel = name[len(_EXTERNAL_PREFIX):] if external else name[len(prefix):] if prefix and name.startswith(prefix) else name

@@ -29,7 +29,25 @@ if [ -z "${KORRA_MAIN_WRAPPER_ENV_READY:-${HERMES_MAIN_WRAPPER_ENV_READY:-}}" ] 
 fi
 unset KORRA_MAIN_WRAPPER_ENV_READY HERMES_MAIN_WRAPPER_ENV_READY
 
-drop() { [ "$(id -u)" = 0 ] && set -- s6-setuidgid hermes "$@"; exec "$@"; }
+# K21-038: `korra import` — единственная команда, которой сброс до hermes
+# ломает саму работу. Она доказывает, что целевой DATA никем не удерживается,
+# читая /proc всех процессов начального PID namespace, и возвращает каждому
+# восстановленному файлу его владельца. Под UID 10000 первое упирается в
+# PermissionError на чужих /proc/<pid>/fd и выходит наружу как «не удалось
+# проверить всех держателей DATA» — то самое сообщение, из-за которого миграцию
+# 11.09.2026 пришлось делать через --entrypoint. Остальные команды, включая
+# backup, по-прежнему работают под hermes.
+korra_keep_root=0
+if [ "$(id -u)" = 0 ] && sh /opt/hermes/docker/cli-role.sh needs-root "$@"; then
+    korra_keep_root=1
+fi
+
+drop() {
+    if [ "$(id -u)" = 0 ] && [ "$korra_keep_root" != 1 ]; then
+        set -- s6-setuidgid hermes "$@"
+    fi
+    exec "$@"
+}
 
 # --- Reject the unsupported `docker run --user <uid>:<gid>` start ---
 # Mirror the guard in stage2-hook.sh (cont-init). This is the surface the
