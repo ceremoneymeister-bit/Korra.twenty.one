@@ -14,6 +14,20 @@
 
 set -e
 
+# K21-038: одноразовые команды CLI (`import`, `backup`, `config`) идут мимо
+# /init. Иначе s6 сперва поднимает пользовательские службы, dashboard и шлюзы
+# профилей открывают целевой DATA, и `korra import` на полностью остановленном
+# контуре отказывается работать: «не удалось проверить всех держателей DATA».
+# Бутстрап stage2 при этом выполняется — владелец тома, права и конфиг нужны и
+# здесь; не выполняется только подъём служб, которые такой команде мешают.
+# Путь тот же, которым уже живут обёрнутые runtime (см. ниже).
+if sh /opt/hermes/docker/cli-role.sh oneshot "$@"; then
+    echo "[korra] одноразовая команда CLI: пользовательские службы не поднимаются (K21-038)" >&2
+    export PATH="/command:/package/admin/s6/command:${PATH}"
+    KORRA_ONESHOT_CLI=1 /opt/hermes/docker/stage2-hook.sh
+    exec /opt/hermes/docker/main-wrapper.sh "$@"
+fi
+
 if [ "$$" -eq 1 ]; then
     exec /init /opt/hermes/docker/main-wrapper.sh "$@"
 fi

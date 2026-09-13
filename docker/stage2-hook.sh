@@ -838,4 +838,12 @@ if [ -z "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ] && \
     fi
 fi
 
-echo "[stage2] Setup complete; starting user services"
+# K21-038: на пути одноразовой команды CLI никакие службы дальше не стартуют,
+# и прежняя строка врала ровно в том разборе, ради которого её читают. Флаг
+# выставляет entrypoint-dispatch.sh — единственное место, которое видит CMD
+# (cont-init.d вызывается без аргументов).
+if [ -n "${KORRA_ONESHOT_CLI:-}" ]; then
+    echo "[stage2] Setup complete; one-shot CLI command — user services stay down"
+else
+    echo "[stage2] Setup complete; starting user services"
+fi
