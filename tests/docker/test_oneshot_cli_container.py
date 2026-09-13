@@ -94,6 +94,20 @@ def fake_image(tmp_path):
         ("hermes", 'echo "HERMES $*"\n'),
         ("korra", 'echo "KORRA $*"\n'),
         ("with-contenv", 'exec "$@"\n'),
+        # Контейнер стартует от root, и пользователь hermes в образе есть.
+        # Без этой заглушки скрипт видел бы того, кто запустил pytest: на
+        # раннере это uid 10003 без записи `hermes` в passwd, и обе проверки
+        # уходили в апстримную ветку «arbitrary --user» до сброса привилегий.
+        # Неожиданная форма вызова — громкий отказ, чтобы заглушка не прятала
+        # изменение в самих скриптах.
+        (
+            "id",
+            'case "$*" in\n'
+            '  "-u") echo 0 ;;\n'
+            '  "-u hermes") echo 10000 ;;\n'
+            '  *) echo "id stub: unexpected args: $*" >&2; exit 2 ;;\n'
+            'esac\n',
+        ),
     ):
         script = tmp_path / name
         script.write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
