@@ -4,9 +4,13 @@
 для человека, который делает то же руками. Каждый шаг — команда и проверка.
 Шаг без проверки не считается выполненным.
 
-Образ: `ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest`, только
+Образ: `ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable`, только
 linux/amd64. Собирать образ локально не нужно и не стоит: у локальной сборки
 другая механика слоёв.
+
+`stable` — канал выпуска: на него переводят образ, уже прошедший приёмку и два
+кольца раскатки. Тег `latest` — это последняя успешная ночная сборка ветки
+`main`, решения о выпуске за ней нет; ставить с неё контур нельзя.
 
 Выберите сценарий:
 
@@ -71,12 +75,12 @@ python3 /opt/korra/updater.py --capabilities
 
 ### A4. Образ, закреплённый дайджестом
 
-Тег `latest` завтра укажет на другой образ; контур закрепляется дайджестом,
+Канал `stable` завтра укажет на другой образ; контур закрепляется дайджестом,
 чтобы обновление и откат были воспроизводимы.
 
 ```bash
-docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
-DIGEST=$(docker image inspect ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest \
+docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable
+DIGEST=$(docker image inspect ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable \
   --format '{{index .RepoDigests 0}}' | cut -d@ -f2)
 echo "ghcr.io/ceremoneymeister-bit/korra.twenty.one@${DIGEST}" > /opt/korra/IMAGE
 cat /opt/korra/IMAGE
@@ -179,9 +183,9 @@ docker exec -u 10000 korra korra config get model
 ### A9. Обновление и откат
 
 ```bash
-docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest
+docker pull ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable
 NEW=ghcr.io/ceremoneymeister-bit/korra.twenty.one@$(docker image inspect \
-  ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest --format '{{index .RepoDigests 0}}' | cut -d@ -f2)
+  ghcr.io/ceremoneymeister-bit/korra.twenty.one:stable --format '{{index .RepoDigests 0}}' | cut -d@ -f2)
 cd /opt/korra && NAME=korra DATA=/opt/korra/data PANEL_PORT=9119 API_PORT=8650 \
   ./update.sh --update "$NEW"
 tail -3 /opt/korra/updates.log       # phase=complete status=succeeded
@@ -233,6 +237,9 @@ docker compose -f docker-compose.korra.yml up -d
 ```
 
 На macOS и Linux замените в файле `${USERPROFILE}/.korra` на `${HOME}/.korra`.
+Этот compose-файл пока тянет `latest` — последнюю сборку `main`. Для машины
+владельца, которая ставится «посмотреть», это допустимо; контур, за который мы
+отвечаем, ставится по сценарию A или B с канала `stable`.
 
 **Проверка:**
 
