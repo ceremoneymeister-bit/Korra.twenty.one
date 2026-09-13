@@ -84,6 +84,54 @@ def test_damaged_index_names_the_table_and_calls_itself_rebuildable(tmp_path):
     assert "сообщения целы" in report.detail
 
 
+def test_verdict_does_not_depend_on_the_quick_check_wording(tmp_path):
+    """Одно повреждение — разные слова у разных сборок SQLite.
+
+    Первая версия модуля разбирала строку регулярным выражением и на CI
+    (SQLite 3.53.1) объявляла ребилдабельный индекс потерей данных, хотя на
+    хостовом 3.45 тот же тест был зелёным. Приговор должен приходить от пробной
+    пересборки, а не от текста, поэтому здесь он сверяется с ответом
+    собственной команды FTS5 — той, что одинакова на всех версиях.
+    """
+    path = tmp_path / "state.db"
+    _state_db(path)
+    _damage_fts_index(path)
+
+    report = fts_integrity.check_state_db_fts(path)
+
+    # Сырой текст сохранён для оператора, но в классификации не участвует:
+    # на 3.45 это «malformed inverted index…», на 3.53 — «fts5: corruption
+    # found reading blob…».
+    assert report.problems
+    assert fts_integrity.OK not in report.problems
+
+    copy = tmp_path / "copy.db"
+    copy.write_bytes(path.read_bytes())
+    conn = sqlite3.connect(str(copy))
+    try:
+        failing = fts_integrity._failing_fts5_tables(
+            conn, fts_integrity._fts5_tables(conn)
+        )
+    finally:
+        conn.close()
+    assert failing == ("messages_fts_trigram",)
+    assert report.tables == failing
+
+
+def test_check_leaves_the_live_database_untouched(tmp_path):
+    """Проба пересборки обязана идти на копии: боевую базу трогать нельзя."""
+    path = tmp_path / "state.db"
+    _state_db(path)
+    _damage_fts_index(path)
+    before = path.read_bytes()
+
+    assert fts_integrity.check_state_db_fts(path).status == fts_integrity.INDEX_DAMAGED
+
+    assert path.read_bytes() == before
+    # Временная копия не должна пережить проверку.
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".korra-fts")] == []
+
+
 def test_damaged_pages_are_not_called_rebuildable(tmp_path):
     path = tmp_path / "state.db"
     _state_db(path)
