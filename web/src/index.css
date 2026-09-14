@@ -9,6 +9,13 @@
 @import '@nous-research/ui/styles/globals.css';
 @import './themes/neumorphism.css';
 
+/* This is a private SPA. Full-document navigation (notably logout) must not
+   retain an animated snapshot of the previous authenticated document. Route
+   animations remain local; override the vendor's cross-document opt-in. */
+@view-transition {
+  navigation: none;
+}
+
 /* Scan the vendored design-system source so its utility classes survive
    Tailwind's JIT purge. Vite resolves the unchanged package imports here. */
 @source './vendor/nous-ui';

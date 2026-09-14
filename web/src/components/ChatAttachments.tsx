@@ -13,6 +13,7 @@ import {
   FileImage,
   FileAudio,
   FileArchive,
+  FolderOpen,
   Presentation,
   File as FileIcon,
   X,
@@ -32,6 +33,7 @@ import type { AttachmentDisplay } from "@/lib/chat-types";
 import { FileAttachment } from "@/components/chat/FileAttachment";
 
 const KIND_ICON: Record<string, ComponentType<{ size?: number; className?: string }>> = {
+  folder: FolderOpen,
   pdf: FileText,
   doc: FileText,
   docx: FileText,
@@ -121,8 +123,12 @@ export function AttachmentChip({
             </span>
           ) : item.status === "uploading" ? (
             `Загрузка ${item.progress}% · ${formatSize(item.size)}`
+          ) : item.status === "preparing" ? (
+            `Подготовка ${item.progress}%`
+          ) : item.status === "paused" ? (
+            `Пауза · ${item.progress}%`
           ) : (
-            `${item.kind.toUpperCase()} · ${formatSize(item.size)}`
+            `${item.kind === "folder" ? `${item.uploaded?.file_count ?? ""} файлов` : item.kind.toUpperCase()} · ${formatSize(item.size)}${item.originalSize ? ` (было ${formatSize(item.originalSize)})` : ""}`
           )}
         </span>
       </div>
@@ -143,7 +149,7 @@ export function AttachmentChip({
         </div>
       )}
 
-      {failed && (
+      {(failed || item.status === "paused") && (
         <button
           type="button"
           onClick={onRetry}

@@ -17,6 +17,22 @@ def _load_package_data():
     return tool["setuptools"]["package-data"]
 
 
+def test_designer_presentation_dependency_is_optional_and_locked():
+    """CLI installs stay lean; the image explicitly opts into PPTX production."""
+    from packaging.requirements import Requirement
+
+    optional = _load_optional_dependencies()
+    requirements = [Requirement(spec) for spec in optional["design"]]
+    pptx = next(item for item in requirements if item.name == "python-pptx")
+    assert pptx.specifier == "==1.0.2"
+    assert not any("[design]" in spec for spec in optional["all"])
+    with (Path(__file__).resolve().parents[1] / "uv.lock").open("rb") as handle:
+        lock = tomllib.load(handle)
+    versions = {item["version"] for item in lock["package"] if item["name"] == "python-pptx"}
+    assert len(versions) == 1
+    assert next(iter(versions)) in pptx.specifier
+
+
 def test_matrix_extra_not_in_all():
     """The [matrix] extra pulls `mautrix[encryption]` -> `python-olm`,
     which has Linux-only wheels and no native build path on Windows or

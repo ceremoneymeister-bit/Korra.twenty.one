@@ -639,6 +639,55 @@ TOOLSETS = {
 }
 
 
+# Korra 0.20.x shipped rebranded platform toolset names (`korra-telegram`,
+# `korra-cli`, …) and wrote them into every `platform_toolsets` block. The
+# 0.21 hard fork restarted from upstream and dropped those names, so a data
+# directory carried over from 0.20.x resolves each of them to an empty tool
+# list: `_get_platform_tools` skips names that are not in TOOLSETS, the
+# platform ends up with zero tools and the agent silently degrades to
+# text-only replies (it prints tool calls into the chat instead of running
+# them). Registering the old names as compatibility aliases keeps migrated
+# configs working without rewriting client files. See #38798 for the upstream
+# write-up of the same silent-failure shape.
+_KORRA_TOOLSET_ALIASES = {
+    "korra-cli": "hermes-cli",
+    "korra-cron": "hermes-cron",
+    "korra-telegram": "hermes-telegram",
+    "korra-discord": "hermes-discord",
+    "korra-whatsapp": "hermes-whatsapp",
+    "korra-slack": "hermes-slack",
+    "korra-signal": "hermes-signal",
+    "korra-bluebubbles": "hermes-bluebubbles",
+    "korra-homeassistant": "hermes-homeassistant",
+    "korra-email": "hermes-email",
+    "korra-mattermost": "hermes-mattermost",
+    "korra-matrix": "hermes-matrix",
+    "korra-dingtalk": "hermes-dingtalk",
+    "korra-feishu": "hermes-feishu",
+    "korra-wecom": "hermes-wecom",
+    "korra-wecom-callback": "hermes-wecom-callback",
+    "korra-weixin": "hermes-weixin",
+    "korra-qqbot": "hermes-qqbot",
+    "korra-webhook": "hermes-webhook",
+    "korra-yuanbao": "hermes-yuanbao",
+    "korra-sms": "hermes-sms",
+    "korra-gateway": "hermes-gateway",
+    "korra-api-server": "hermes-api-server",
+    "korra-acp": "hermes-acp",
+}
+
+for _korra_name, _hermes_name in _KORRA_TOOLSET_ALIASES.items():
+    if _hermes_name in TOOLSETS and _korra_name not in TOOLSETS:
+        TOOLSETS[_korra_name] = {
+            "description": (
+                f"Korra compatibility alias for `{_hermes_name}`. "
+                "Keeps configs migrated from Korra 0.20.x on the upstream "
+                "platform tool contract."
+            ),
+            "tools": [],
+            "includes": [_hermes_name],
+        }
+
 
 def get_toolset(name: str, *, include_registry: bool = True) -> Optional[Dict[str, Any]]:
     """

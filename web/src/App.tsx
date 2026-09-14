@@ -959,13 +959,13 @@ export default function App() {
               </div>
             </div>
 
+            <AuthWidget collapsed={isDesktopCollapsed} />
             <div
               className={cn(
                 "flex shrink-0 flex-col",
                 isDesktopCollapsed && "lg:hidden",
               )}
             >
-              <AuthWidget />
               <SidebarFooter status={sidebarStatus} />
             </div>
           </aside>

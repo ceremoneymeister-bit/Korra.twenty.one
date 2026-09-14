@@ -2136,9 +2136,10 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
 
     modalities = set(info.get("modalities") or ["text"])
     max_refs = int(info.get("max_reference_images") or 0)
-    additional_ref_cap = max(
-        0, max_refs - int(bool(info.get("reference_limit_includes_base")))
-    )
+    # A static maxItems cannot depend on the optional edit base. Advertise
+    # every generate slot; describe the combined edit cap and let the native
+    # provider reject overflow before dispatch, never silently drop inputs.
+    additional_ref_cap = max(0, max_refs)
     can_edit = "image" in modalities
 
     properties: Dict[str, Any] = {
@@ -2155,14 +2156,14 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
             properties["reference_image_urls"] = {
                 "type": "array",
                 "items": {"type": "string"},
-                # Keep the schema valid for edits: image_url consumes one of
-                # the provider's combined input slots. Text-to-image callers
-                # may still use the provider directly with five references.
                 "maxItems": additional_ref_cap,
                 "description": (
-                    f"Up to {additional_ref_cap} additional reference images (style, "
-                    "character, or composition) guiding an edit. URLs or "
+                    f"Up to {additional_ref_cap} reference images (style, "
+                    "character, or composition) guiding generation or editing. URLs or "
                     "absolute local paths."
+                    + (f" Combined input limit: {max_refs}, including image_url. "
+                       f"With an edit base use at most {max(0, max_refs - 1)} references."
+                       if info.get("reference_limit_includes_base") else "")
                 ),
             }
     else:
@@ -2191,7 +2192,10 @@ def _build_dynamic_image_schema() -> Dict[str, Any]:
             "type": "string",
             "description": (
                 "auto or WIDTHxHEIGHT. Custom edges must be multiples of 16, "
-                "at most 3840px, within 3:1 and 655360-8294400 total pixels."
+                "at most 3840px, within 3:1 and 655360-8294400 total pixels. "
+                "Requested dimensions are not guaranteed: inspect pixel_size and "
+                "size_warning in the result. Keep the original; do not regenerate "
+                "automatically to correct dimensions."
             ),
         }
     if info.get("backgrounds"):

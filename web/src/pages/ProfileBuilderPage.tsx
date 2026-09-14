@@ -39,7 +39,7 @@ import { Textarea } from "@nous-research/ui/ui/components/textarea";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { api, probeProfileChat } from "@/lib/api";
-import type { ProfileInfo } from "@/lib/api";
+import type { AgentTemplate, ProfileInfo } from "@/lib/api";
 import {
   composeSoul,
   descriptionFromRole,
@@ -97,7 +97,7 @@ interface CreatedAgent {
   id: string;
   label: string;
   /** Роль: своими словами, из заготовки или не задана. */
-  role: "own" | "starter" | "none";
+  role: "own" | "starter" | "none" | "template";
   /** Явно выбранная модель; null — унаследована от источника сервером. */
   model: ModelChoice | null;
   /** Сервер подтвердил запись модели (`model_set`). */
@@ -137,6 +137,46 @@ export default function ProfileBuilderPage() {
   // Текст владельца, который заменила заготовка, — чтобы одно нажатие не
   // стёрло написанное безвозвратно.
   const [replacedRole, setReplacedRole] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<AgentTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templatesError, setTemplatesError] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplate | null>(null);
+  const ownDraft = useRef({ name: "", id: null as string | null });
+  const createInFlight = useRef(false);
+  // Retain the same operation after a lost response; edits start a new one.
+  const templateAttempt = useRef<{ payload: string; key: string } | null>(null);
+
+  const loadTemplates = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await api.getAgentTemplates();
+      if (!Array.isArray(response.templates)) throw new Error("Invalid catalogue response");
+      if (!signal?.aborted) {
+        setTemplates(response.templates);
+        setTemplatesError("");
+      }
+    } catch {
+      if (!signal?.aborted) setTemplatesError("Не удалось загрузить готовых агентов. Можно повторить или создать своего.");
+    } finally {
+      if (!signal?.aborted) setTemplatesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadTemplates(controller.signal);
+    return () => controller.abort();
+  }, [loadTemplates]);
+
+  const chooseTemplate = (template: AgentTemplate | null) => {
+    if (!template && !selectedTemplate) return;
+    if (template && !selectedTemplate) ownDraft.current = { name: displayName, id: customId };
+    setSelectedTemplate(template);
+    setDisplayName(template?.name ?? ownDraft.current.name);
+    setCustomId(template ? null : ownDraft.current.id);
+    setCloneFrom(null);
+    setNoSkills(false);
+    setCreateError("");
+  };
 
   // ── Модель ─────────────────────────────────────────────────────────
   const [modelChoices, setModelChoices] = useState<ModelChoice[] | null>(null);
@@ -327,7 +367,8 @@ export default function ProfileBuilderPage() {
 
   const handleCreate = async () => {
     const name = displayName.trim();
-    if (!name || !idReady || creating) return;
+    if (!name || !idReady || createInFlight.current) return;
+    createInFlight.current = true;
     setCreating(true);
     setCreateError("");
     const picked = pickedModel;
@@ -343,17 +384,33 @@ export default function ProfileBuilderPage() {
       provider: picked?.provider,
       model: picked?.model,
       display_name: name,
-      soul: composeSoul(name, role),
+      soul: selectedTemplate ? undefined : composeSoul(name, role),
+      ...(selectedTemplate ? {
+        template_id: selectedTemplate.id,
+        template_version: selectedTemplate.version,
+        description: selectedTemplate.description,
+      } : {}),
     };
     try {
-      const res = await api.createProfile(body);
+      if (selectedTemplate) {
+        const payload = JSON.stringify(body);
+        if (templateAttempt.current?.payload !== payload) {
+          const key = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+            (byte) => byte.toString(16).padStart(2, "0")).join("");
+          templateAttempt.current = { payload, key };
+        }
+      }
+      const res = await api.createProfile({
+        ...body,
+        ...(selectedTemplate ? { idempotency_key: templateAttempt.current!.key } : {}),
+      });
       // Каноническое имя решает сервер — и вкладка, и контрольное сообщение
       // адресуются им, а не тем, что вывел транслит.
       const created = res.name || profileId;
       // Агент уже есть на диске: неудача обновления каталога — не повод
       // считать создание провалившимся и тем более повторять его.
       void refreshProfiles().catch(() => undefined);
-      const modelSaved = !picked || res.model_set !== false;
+      const modelSaved = selectedTemplate ? res.model_set === true : !picked || res.model_set !== false;
       if (!modelSaved) {
         showToast(
           "Агент создан, но модель не сохранилась — задайте её в настройках агента.",
@@ -364,7 +421,7 @@ export default function ProfileBuilderPage() {
       setProbeFor({
         id: created,
         label: name,
-        role: !roleText
+        role: selectedTemplate ? "template" : !roleText
           ? "none"
           : ROLE_STARTERS.some((item) => item.role === roleText)
             ? "starter"
@@ -372,10 +429,17 @@ export default function ProfileBuilderPage() {
         model: picked,
         modelSaved,
       });
-      void runProbe(created);
+      if (selectedTemplate && !modelSaved) {
+        setProbeState("error");
+        setProbeError("Модель не настроена");
+        setProbeDetail("Подключите чат-модель в настройках агента. Его роль и навыки уже сохранены.");
+      } else {
+        void runProbe(created);
+      }
     } catch (error) {
       setCreateError(ownerFacingError(error, "Не удалось создать агента."));
     } finally {
+      createInFlight.current = false;
       setCreating(false);
     }
   };
@@ -385,6 +449,9 @@ export default function ProfileBuilderPage() {
     probeRequest.current += 1;
     probeAbort.current?.abort();
     setProbeFor(null);
+    setSelectedTemplate(null);
+    templateAttempt.current = null;
+    ownDraft.current = { name: "", id: null };
     setProbeState("sending");
     setProbeReply("");
     setProbeError("");
@@ -446,6 +513,7 @@ export default function ProfileBuilderPage() {
               <dd>
                 {probeFor.role === "own" && "своими словами, плюс правила общения по-русски"}
                 {probeFor.role === "starter" && "из заготовки, плюс правила общения по-русски"}
+                {probeFor.role === "template" && `готовый агент: роль и навыки · ${selectedTemplate?.version}`}
                 {probeFor.role === "none" &&
                   "не задана — только имя и правила общения. Добавьте роль в меню вкладки: «Роль и поведение»."}
               </dd>
@@ -463,6 +531,13 @@ export default function ProfileBuilderPage() {
                 )}
               </dd>
             </dl>
+            {probeFor.role === "template" && (
+              <p className="text-sm text-[var(--neo-text-secondary)]">
+                Роль и навыки можно менять — обновления каталога их не перезапишут.
+                Проверка ответа ниже проверяет только чат. Генерация изображений,
+                GPT Image 2.5 и экспорт презентаций ещё не проверены.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -552,6 +627,11 @@ export default function ProfileBuilderPage() {
                   )}
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">
+                  {probeFor.role === "template" && !probeFor.modelSaved && (
+                    <Button ghost onClick={() => navigate(`/profiles?agent=${encodeURIComponent(probeFor.id)}&edit=model`)}>
+                      Настроить модель
+                    </Button>
+                  )}
                   {failure.keys && (
                     <Button
                       ghost
@@ -592,6 +672,46 @@ export default function ProfileBuilderPage() {
           Отмена
         </Button>
       </div>
+
+      <Card>
+        <CardContent className="grid gap-3 p-5" aria-label="Готовые агенты">
+          <p className="font-semibold">Добавить из готовых агентов</p>
+          {templatesLoading && <p role="status">Загружаю каталог…</p>}
+          {templatesError && (
+            <div role="alert" className="grid gap-2 text-sm">
+              <p>{templatesError}</p>
+              <Button ghost disabled={templatesLoading} onClick={() => {
+                setTemplatesLoading(true);
+                void loadTemplates();
+              }}>Повторить загрузку</Button>
+            </div>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {templates.map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                disabled={creating}
+                aria-pressed={selectedTemplate?.id === template.id}
+                onClick={() => chooseTemplate(template)}
+                className={cn("rounded-xl border p-4 text-left", selectedTemplate?.id === template.id && "ring-2 ring-current")}
+              >
+                <span className="block font-semibold">{template.name}</span>
+                <span className="mt-1 block text-sm text-[var(--neo-text-secondary)]">{template.description}</span>
+              </button>
+            ))}
+            <Button ghost disabled={creating} aria-pressed={!selectedTemplate} onClick={() => chooseTemplate(null)}>
+              Создать своего
+            </Button>
+          </div>
+          {selectedTemplate && (
+            <div className="grid gap-2 text-sm text-[var(--neo-text-secondary)]">
+              <p>Готовая роль и методики установятся в отдельный профиль, без чужой памяти и расписаний.</p>
+              {selectedTemplate.requirements.map((requirement) => <p key={requirement}>{requirement}</p>)}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="grid gap-5 p-5">
@@ -636,7 +756,7 @@ export default function ProfileBuilderPage() {
             </p>
           </div>
 
-          <div className="grid gap-2">
+          {!selectedTemplate && <div className="grid gap-2">
             <Label htmlFor="pb-role">Что он делает и как себя ведёт</Label>
             {/* Заготовки — не шаблоны «на выбор», а с чего начать: текст
                 попадает в поле и правится как свой. Имя подставляется, только
@@ -693,7 +813,7 @@ export default function ProfileBuilderPage() {
                 «Роль и поведение».
               </p>
             )}
-          </div>
+          </div>}
 
           <div className="grid gap-2">
             <Label htmlFor="pb-provider">Модель</Label>
@@ -770,7 +890,7 @@ export default function ProfileBuilderPage() {
             )}
           </div>
 
-          <div className="grid gap-3">
+          {!selectedTemplate && <div className="grid gap-3">
             <button
               type="button"
               className="flex w-fit items-center gap-1.5 text-sm text-[var(--neo-text-secondary)] hover:text-[var(--neo-text-primary)]"
@@ -828,7 +948,7 @@ export default function ProfileBuilderPage() {
                 </label>
               </div>
             )}
-          </div>
+          </div>}
         </CardContent>
       </Card>
 
@@ -840,10 +960,10 @@ export default function ProfileBuilderPage() {
 
       <div className="flex items-center justify-end gap-2">
         <Button
-          onClick={handleCreate}
+          onClick={() => void handleCreate()}
           disabled={!nameReady || !idReady || creating || profiles === null}
         >
-          {creating ? "Создаю…" : "Создать агента"}
+          {creating ? "Создаю…" : selectedTemplate ? "Добавить агента" : "Создать агента"}
         </Button>
       </div>
 

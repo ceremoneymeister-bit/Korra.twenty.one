@@ -346,11 +346,57 @@ def test_dynamic_schema_advertises_only_native_image25_options(monkeypatch):
     assert props["quality"]["enum"] == ["low", "medium", "high", "xhigh", "max", "auto"]
     assert {"size", "background", "output_format", "output_compression"} <= set(props)
     assert {"action", "reference_roles", "preserve", "mask", "presets", "receipt"} <= set(props)
-    assert props["reference_image_urls"]["maxItems"] == 4
-    assert props["reference_roles"]["maxItems"] == 4
+    assert props["reference_image_urls"]["maxItems"] == 5
+    assert props["reference_roles"]["maxItems"] == 5
     assert "upscale" not in props
 
     image_gen_registry._reset_for_tests()
+
+
+def test_five_references_reach_generate_but_edit_cannot_add_a_sixth(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
+    calls = []
+
+    def collect(*args, **kwargs):
+        calls.append(kwargs)
+        return {"b64": _image_b64(), "source": "final"}
+
+    monkeypatch.setattr(provider_mod, "_collect_image_b64", collect)
+    provider = provider_mod.OpenAICodexImageGenProvider()
+    image = f"data:image/png;base64,{_image_b64()}"
+    result = provider.generate("poster", action="generate", reference_image_urls=[image] * 5)
+    assert result["success"] is True
+    assert result["input_image_count"] == 5
+    assert len(calls) == 1
+    result = provider.generate("edit", image_url=image, reference_image_urls=[image] * 5)
+    assert result["success"] is False
+    assert result["error_type"] == "invalid_image_input"
+    assert len(calls) == 1  # No call, truncation, or extra generation.
+
+
+def test_size_mismatch_is_explicit_and_keeps_original_without_retry(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(provider_mod, "_resolve_codex_credentials", _credentials)
+    calls = []
+
+    def collect(*args, **kwargs):
+        calls.append(kwargs)
+        return {"b64": _image_b64(), "source": "final"}
+
+    monkeypatch.setattr(provider_mod, "_collect_image_b64", collect)
+    result = provider_mod.OpenAICodexImageGenProvider().generate(
+        "poster", size="1024x1024", receipt=True,
+    )
+    assert result["success"] is True
+    assert result["requested_size"] == "1024x1024"
+    assert result["pixel_size"] == "2x3"
+    assert result["size_matches_request"] is False
+    assert "2x3" in result["size_warning"] and "1024x1024" in result["size_warning"]
+    assert Path(result["image"]).read_bytes() == base64.b64decode(_image_b64())
+    receipt = json.loads(Path(result["receipt"]).read_text())
+    assert receipt["size_matches_request"] is False
+    assert len(calls) == 1
 
 
 def test_credentials_delegate_only_to_canonical_profile_broker(monkeypatch, tmp_path):

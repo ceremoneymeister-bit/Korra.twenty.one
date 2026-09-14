@@ -1,0 +1,8 @@
+name: designer
+version: 0.1.0
+description: Визуальный дизайнер и арт-директор — от референсов до проверенных файлов.
+author: Korra 21
+distribution_owned:
+  - SOUL.md
+  - skills/visual-design
+  - distribution.yaml

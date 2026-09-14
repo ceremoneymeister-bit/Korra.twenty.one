@@ -9,6 +9,7 @@ import { PageHeaderContext } from "@/contexts/page-header-context";
 import { ROLE_STARTERS } from "@/lib/agent-wizard";
 
 const apiMocks = vi.hoisted(() => ({
+  getAgentTemplates: vi.fn(),
   getProfiles: vi.fn(),
   getModelOptions: vi.fn(),
   createProfile: vi.fn(),
@@ -216,6 +217,11 @@ const modelSelect = () => container.querySelector<HTMLButtonElement>("#pb-model"
 const location = () => container.querySelector('[data-testid="location"]')?.textContent;
 
 beforeEach(() => {
+  apiMocks.getAgentTemplates.mockResolvedValue({ templates: [{
+    id: "korra.designer", version: "0.1.0", name: "Дизайнер",
+    description: "Презентации, визуалы, сторис, карусели и референсы",
+    requirements: ["Подключите GPT Image 2.5 отдельно"],
+  }] });
   vi.stubGlobal(
     "matchMedia",
     vi.fn((query: string) => ({
@@ -538,6 +544,62 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(scopeMocks.refreshProfiles).not.toHaveBeenCalled();
     expect(nameInput().value).toBe("Учитель китайского");
+  });
+
+  it("готовый Дизайнер ставится пакетом и открывает собственный чат", async () => {
+    apiMocks.createProfile.mockResolvedValueOnce({ ok: true, name: "dizayner", model_set: true });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(okReply("Я — Дизайнер."));
+    await openWizard();
+    await click(findButton("Дизайнер"));
+    expect(nameInput().value).toBe("Дизайнер");
+    expect(roleInput()).toBeNull();
+    expect(findButton("Дополнительно")).toBeUndefined();
+    expect(container.textContent).toContain("GPT Image 2.5 отдельно");
+    await click(findButton("Добавить агента"));
+    await flush();
+    expect(apiMocks.createProfile).toHaveBeenCalledWith(expect.objectContaining({
+      template_id: "korra.designer", template_version: "0.1.0",
+      idempotency_key: expect.any(String), display_name: "Дизайнер",
+      clone_from: null, no_skills: false, soul: undefined,
+    }));
+    expect(container.textContent).toContain("роль и навыки");
+    expect(container.textContent).toContain("ещё не проверены");
+    await click(findButton("Открыть чат"));
+    expect(location()).toBe("/agents?agent=dizayner");
+  });
+
+  it("после потерянного ответа повторяет ту же операцию", async () => {
+    apiMocks.createProfile.mockRejectedValueOnce(new Error("Network error"));
+    apiMocks.createProfile.mockResolvedValueOnce({ ok: true, name: "designer", model_set: false });
+    await openWizard();
+    await click(findButton("Дизайнер"));
+    await click(findButton("Добавить агента"));
+    await click(findButton("Добавить агента"));
+    expect(apiMocks.createProfile).toHaveBeenCalledTimes(2);
+    expect(apiMocks.createProfile.mock.calls[1][0]).toEqual(apiMocks.createProfile.mock.calls[0][0]);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("роль и навыки уже сохранены");
+    await click(findButton("Настроить модель"));
+    expect(location()).toBe("/profiles?agent=designer&edit=model");
+  });
+
+  it("возврат к своему агенту сохраняет написанную роль и имя", async () => {
+    await openWizard();
+    await enterText(nameInput(), "Помощник");
+    await enterText(roleInput(), "Моя собственная роль");
+    await click(findButton("Дизайнер"));
+    await click(findButton("Создать своего"));
+    expect(nameInput().value).toBe("Помощник");
+    expect(roleInput().value).toBe("Моя собственная роль");
+  });
+
+  it("отказ каталога оставляет свой мастер и позволяет повторить загрузку", async () => {
+    apiMocks.getAgentTemplates.mockRejectedValueOnce(new Error("unavailable"));
+    await openWizard();
+    expect(container.textContent).toContain("Не удалось загрузить готовых агентов");
+    expect(nameInput()).not.toBeNull();
+    await click(findButton("Повторить загрузку"));
+    expect(findButton("Дизайнер")).toBeDefined();
   });
 
   it("копирование настроек спрятано под «Дополнительно» и меняет модель по умолчанию", async () => {

@@ -14,7 +14,10 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
   const [downloadError, setDownloadError] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    void describeAttachment(path, controller.signal).then(setFile).catch(() => {
+    setFile(null); setFailed(false); setImageFailed(false); setPreview(undefined);
+    void describeAttachment(path, controller.signal).then(value => {
+      if (!controller.signal.aborted) setFile(value);
+    }).catch(() => {
       if (!controller.signal.aborted) setFailed(true);
     });
     return () => controller.abort();
@@ -34,7 +37,8 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [file]);
   const label = name || file?.name || path.split("/").pop() || "Файл";
-  const download = file ? `${artifactUrl(file.path, false)}&chat=1` : undefined;
+  const folder = file?.kind === "folder";
+  const download = file && !folder ? `${artifactUrl(file.path, false)}&chat=1` : undefined;
   return (
     <div className="my-3 max-w-lg rounded-xl bg-[var(--neo-surface)] p-3 shadow-[var(--neo-depth-1)]" aria-label={`Вложение: ${label}`}>
       {file && isImageKind(file.kind) && file.size <= 25 * 1024 * 1024 && !imageFailed && (!window.__HERMES_SESSION_TOKEN__ || preview) && (
@@ -42,12 +46,12 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
           onError={() => setImageFailed(true)} className="mb-3 max-h-80 rounded-lg object-contain" />
       )}
       <div className="flex items-center gap-3">
-        <FileText size={22} className="shrink-0 text-muted-foreground" aria-hidden />
+        {folder ? <FolderOpen size={22} className="shrink-0 text-muted-foreground" aria-hidden /> : <FileText size={22} className="shrink-0 text-muted-foreground" aria-hidden />}
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm" title={label}>{label}</div>
           <div className="text-xs text-muted-foreground" role="status">
-            {file ? `${file.kind.toUpperCase()} · ${formatSize(file.size)}` : failed
-              ? "Файл недоступен: удалён, перемещён, больше 100 МБ или вне рабочей папки." : "Проверяем файл…"}
+            {file ? `${folder ? `${file.truncated ? "Не менее " : ""}${file.file_count} файлов` : file.kind.toUpperCase()} · ${formatSize(file.size)}` : failed
+              ? "Вложение недоступно: удалено, перемещено, больше 2 ГБ или вне рабочей папки." : "Проверяем вложение…"}
           </div>
         </div>
         {download && <a href={download} download={label} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs shadow-[var(--neo-depth-1)]" aria-label={`Скачать ${label}`}
@@ -62,7 +66,7 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
         </a>}
       </div>
       {downloadError && <p role="alert" className="mt-2 text-xs text-destructive">Не удалось скачать файл. Проверьте соединение или обновите страницу.</p>}
-      {file && <a href={withBasePath(`/files?${new URLSearchParams({ path: file.path.slice(0, file.path.lastIndexOf("/")) })}`)}
+      {file && <a href={withBasePath(`/files?${new URLSearchParams({ path: folder ? file.path : file.path.slice(0, file.path.lastIndexOf("/")) })}`)}
         className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
         <FolderOpen size={13} aria-hidden /> Показать в «Файлах»
       </a>}

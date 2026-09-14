@@ -2281,7 +2281,10 @@ _SENSITIVE_MANAGED_DIR_NAMES = frozenset({
     "mcp-tokens",
     "pairing",
 })
-_MANAGED_INTERNAL_NAMES = frozenset({".trash"})
+# ``.uploads`` — staging сессий загрузки, ``.index`` — индекс дедупликации
+# inbox. Ни листинг, ни attachment, ни download их не отдают: файл становится
+# данными только после публикации (web_routers/uploads.py).
+_MANAGED_INTERNAL_NAMES = frozenset({".trash", ".uploads", ".index"})
 
 
 def _is_sensitive_filename(name: str) -> bool:
@@ -3313,7 +3316,8 @@ async def chat_completions_proxy(
     # Browser uploads arrive as a separate, owner-friendly array. Convert it
     # to the durable text block understood by every agent/tool transport before
     # fingerprinting and forwarding the OpenAI-compatible request.
-    _apply_chat_attachments(body, profile_name or None, request=request)
+    from starlette.concurrency import run_in_threadpool
+    await run_in_threadpool(_apply_chat_attachments, body, profile_name or None, request=request)
     do_stream = bool(body.get("stream", False))
     upstream_path = (
         f"/p/{urllib.parse.quote(profile_name, safe='')}/v1/chat/completions"
@@ -3494,8 +3498,16 @@ async def chat_approval_proxy(
 
 
 # --- Korra browser chat: owner file attachments ----------------------------
-_CHAT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-_CHAT_MAX_ATTACHMENTS = 5
+# Сессия загрузки (`/api/uploads/*`) — общий примитив чата и экрана «Файлы».
+# Роутер вынесен отдельным файлом: helpers он берёт из web_server через
+# late-binding, поэтому здесь достаточно регистрации.
+from korra_cli.web_routers import uploads as _uploads_routes  # noqa: E402
+
+app.include_router(_uploads_routes.router)
+
+_CHAT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+_CHAT_MAX_ATTACHMENTS = 30
+_CHAT_MAX_FILE_BYTES = 2 * 1024 ** 3
 _CHAT_ATTACHMENT_READERS: dict[str, str] = {
     ".txt": "read_file", ".md": "read_file", ".csv": "read_file",
     ".json": "read_file", ".yaml": "read_file", ".yml": "read_file",
@@ -3567,6 +3579,8 @@ def _chat_client_root(home: str | Path | None = None) -> Path:
 
 
 def _chat_human_size(size: int) -> str:
+    if size >= 1024 ** 3:
+        return f"{size / 1024 ** 3:.1f} ГБ"
     if size >= 1024 * 1024:
         return f"{size / (1024 * 1024):.1f} МБ"
     if size >= 1024:
@@ -3578,65 +3592,19 @@ def _chat_human_size(size: int) -> str:
 async def upload_chat_file(
     request: Request, file: UploadFile = File(...), profile: Optional[str] = None
 ):
-    """Store an owner attachment and return its agent-readable descriptor."""
+    """Store an owner attachment and return its agent-readable descriptor.
+
+    Внутри это сессия загрузки из одного файла (web_routers/uploads.py): файл
+    ложится в такую же папку пакета, что и многофайловая загрузка, а ответ
+    остаётся прежним — старый SPA из кэша браузера продолжает работать.
+    """
     profile_name = (profile or "").strip()
     if profile_name and not _CHAT_PROFILE_RE.fullmatch(profile_name):
         raise HTTPException(status_code=400, detail="Некорректное имя профиля")
 
-    original_name = str(file.filename or "").strip() or "file"
-    extension = Path(original_name).suffix.lower()
-    if extension in _CHAT_DENIED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400, detail=f"Файлы {extension} загружать нельзя"
-        )
-
-    # Resolve the destination in the profile scope, but never hold a process
-    # environment scope across an await. Fleet always resolves to its shared
-    # workspace, independently of the selected agent's private data directory.
-    with _profile_scope(profile_name or None) as scoped_home:
-        day = datetime.now().strftime("%Y-%m-%d")
-        target_dir = _chat_client_root(scoped_home) / "inbox" / day
-    _, target_dir, _ = _resolve_managed_path(str(target_dir), request, for_write=True)
-    if _is_private_managed_path(target_dir):
-        raise HTTPException(403, "Служебная папка недоступна.")
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / (
-        f"{secrets.token_hex(4)}-{_chat_safe_stem(original_name)}{extension}"
+    return await _uploads_routes.publish_single_chat_upload(
+        request, file, profile_name or None
     )
-    fd, temporary = tempfile.mkstemp(prefix=".chat-", suffix=".upload", dir=target_dir)
-    tmp_path = Path(temporary)
-    total = 0
-    digest = hashlib.sha256()
-    published = False
-    try:
-        with os.fdopen(fd, "wb") as output:
-            while chunk := await file.read(1024 * 1024):
-                total += len(chunk)
-                if total > _CHAT_MAX_UPLOAD_BYTES:
-                    raise HTTPException(413, "Файл больше 50 МБ")
-                digest.update(chunk)
-                output.write(chunk)
-        if total == 0:
-            raise HTTPException(400, "Пустой файл")
-        tmp_path.chmod(0o644)
-        _publish_managed_upload(tmp_path, target, overwrite=False)
-        published = True
-    finally:
-        if not published:
-            tmp_path.unlink(missing_ok=True)
-        await file.close()
-    digest = digest.hexdigest()
-    reader = _CHAT_ATTACHMENT_READERS.get(extension, "unknown")
-
-    return {
-        "ok": True,
-        "path": str(target),
-        "name": original_name,
-        "kind": extension.lstrip(".") or "bin",
-        "size": total,
-        "sha256": digest,
-        "reader": reader,
-    }
 
 
 def _apply_chat_attachments(
@@ -3681,6 +3649,7 @@ def _apply_chat_attachments(
             root = _chat_client_root(scoped_home).resolve()
     lines: list[str] = []
     seen: set[str] = set()
+    folder_deadline = time.monotonic() + 2
     for index, item in enumerate(raw, start=1):
         if not isinstance(item, dict):
             raise HTTPException(status_code=400, detail="Некорректное вложение")
@@ -3691,13 +3660,13 @@ def _apply_chat_attachments(
                 status_code=400, detail="Некорректный путь вложения"
             ) from exc
         if request is not None:
-            descriptor = _chat_file_descriptor(str(item.get("path", "")), request)
+            descriptor = _chat_file_descriptor(str(item.get("path", "")), request, folder_deadline=folder_deadline)
             target = Path(descriptor["path"])
         elif not _path_is_under(root, target):
             raise HTTPException(
                 status_code=400, detail="Вложение вне папки клиента"
             )
-        if not target.is_file() or not os.access(target, os.R_OK):
+        if not (target.is_file() or target.is_dir()) or not os.access(target, os.R_OK):
             raise HTTPException(
                 status_code=409,
                 detail=f"Файл недоступен: {item.get('name') or target.name}",
@@ -3710,16 +3679,21 @@ def _apply_chat_attachments(
             " ", str(item.get("name") or target.name)
         )
         name = re.sub(r"\s{2,}", " ", name).strip()[:120] or target.name
-        kind = (
+        kind = "folder" if target.is_dir() else (
             re.sub(r"[^0-9A-Za-z]", "", str(item.get("kind") or ""))[:16]
             or target.suffix.lstrip(".")[:16]
             or "bin"
         )
-        reader = _CHAT_ATTACHMENT_READERS.get(target.suffix.lower(), "unknown")
-        size = _chat_human_size(target.stat().st_size)
+        folder = (descriptor if request is not None else _chat_folder_descriptor(target, deadline=folder_deadline)) if target.is_dir() else None
+        reader = "directory" if folder else _CHAT_ATTACHMENT_READERS.get(target.suffix.lower(), "unknown")
+        size = _chat_human_size(folder["size"] if folder else target.stat().st_size)
         lines.append(
             f"{len(lines) + 1}. {name} · {kind} · {size} · читать: {reader}\n   {target}"
         )
+        if folder:
+            partial = " (обход ограничен; это минимум)" if folder["truncated"] else ""
+            lines[-1] += (f"\n   файлов: {folder['file_count']}{partial}; "
+                          f"примеры имён: {json.dumps(folder['sample'], ensure_ascii=False)}")
 
     block = "[вложения]\n" + "\n".join(lines)
     messages = body.get("messages")
@@ -3866,6 +3840,14 @@ async def list_managed_files(request: Request, path: Optional[str] = None):
     # keep it off the FastAPI event loop so chat/status requests stay live.
     entries = await run_in_threadpool(_scan_managed_directory, policy, target)
     locked_root = policy.locked_root
+    if locked_root is not None and target == locked_root:
+        # Ленивая уборка брошенного staging: отдельной фоновой задачи у
+        # файлового слоя нет, а открытый экран «Файлы» — второй естественный
+        # повод после новой загрузки. Внутри стоит интервал в 10 минут.
+        await run_in_threadpool(
+            _uploads_routes.sweep_staging,
+            locked_root / _uploads_routes.STAGING_DIR_NAME,
+        )
     parent = None
     if target.parent != target and (locked_root is None or target != locked_root):
         parent = str(target.parent)
@@ -4656,8 +4638,8 @@ def _managed_file_response(
         size = target.stat().st_size
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Could not stat file: {exc}")
-    if size > _MANAGED_FILE_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="File is too large")
+    if size > _CHAT_MAX_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="Файл больше 2 ГБ. Разделите его на части.")
 
     mime_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
 
@@ -4707,7 +4689,48 @@ def _chat_file_path(reference: str) -> str:
     return value
 
 
-def _chat_file_descriptor(reference: str, request: Request) -> dict[str, Any]:
+def _chat_folder_descriptor(target: Path, *, deadline: float | None = None) -> dict[str, Any]:
+    """A bounded metadata walk; never read file contents or follow symlinks."""
+    import time
+
+    deadline = min(deadline, time.monotonic() + 2) if deadline is not None else time.monotonic() + 2
+    pending = [(target, 0)]
+    count = size = visited = 0
+    sample: list[str] = []
+    truncated = False
+    while pending and visited < 10_000 and time.monotonic() < deadline:
+        directory, depth = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    visited += 1
+                    if visited > 10_000 or time.monotonic() >= deadline:
+                        truncated = True
+                        break
+                    path = Path(entry.path)
+                    if entry.name.startswith(".") or entry.is_symlink() or _is_private_managed_path(path):
+                        continue
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            if depth < 16:
+                                pending.append((path, depth + 1))
+                            else:
+                                truncated = True
+                        elif entry.is_file(follow_symlinks=False):
+                            size += entry.stat(follow_symlinks=False).st_size
+                            count += 1
+                            if len(sample) < 8:
+                                sample.append(str(path.relative_to(target)))
+                    except OSError:
+                        truncated = True
+        except OSError:
+            truncated = True
+    return {"path": str(target), "name": target.name, "kind": "folder",
+            "reader": "directory", "size": size, "file_count": count,
+            "sample": sample, "truncated": truncated or bool(pending)}
+
+
+def _chat_file_descriptor(reference: str, request: Request, *, folder_deadline: float | None = None) -> dict[str, Any]:
     path = _chat_file_path(reference)
     policy, target, _ = _resolve_managed_path(path, request)
     if policy.locked_root is None:
@@ -4718,11 +4741,13 @@ def _chat_file_descriptor(reference: str, request: Request) -> dict[str, Any]:
             raise HTTPException(403, "Файл вне рабочей папки. Попросите агента сохранить его в workspace.")
     if _is_private_managed_path(target):
         raise HTTPException(403, "Служебный файл недоступен для передачи.")
+    if target.is_dir():
+        return _chat_folder_descriptor(target, deadline=folder_deadline)
     if not target.is_file():
         raise HTTPException(404, "Файл удалён или перемещён. Попросите агента создать его снова.")
     size = target.stat().st_size
-    if size > _MANAGED_FILE_MAX_BYTES:
-        raise HTTPException(413, "Файл больше 100 МБ. Попросите агента разделить его на части.")
+    if size > _CHAT_MAX_FILE_BYTES:
+        raise HTTPException(413, "Файл больше 2 ГБ. Попросите агента разделить его на части.")
     return {
         "path": str(target), "name": target.name,
         "kind": target.suffix.lstrip(".").lower() or "bin", "size": size,
@@ -4732,7 +4757,8 @@ def _chat_file_descriptor(reference: str, request: Request) -> dict[str, Any]:
 
 @app.get("/api/files/attachment")
 async def describe_chat_file(request: Request, path: str):
-    return _chat_file_descriptor(path, request)
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(_chat_file_descriptor, path, request)
 
 
 @app.get("/api/files/download")
@@ -4892,6 +4918,10 @@ async def upload_managed_file_stream(
     tmp_fd, tmp_name = tempfile.mkstemp(
         prefix=f".{target.name}.", suffix=".upload", dir=str(target.parent)
     )
+    # mkstemp отдаёт 0600, и опубликованный файл остаётся нечитаемым для любого
+    # хостового процесса с другим uid (бэкап, docker cp, rsync клиента в своё
+    # облако). В одном workspace держим единый режим 0644/0755.
+    os.fchmod(tmp_fd, 0o644)
     tmp_path = Path(tmp_name)
     total = 0
     renamed = False

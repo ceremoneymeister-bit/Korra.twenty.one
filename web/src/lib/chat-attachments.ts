@@ -9,7 +9,8 @@
  * (history comes back from the server with the block intact).
  */
 
-import { authedFetch, fetchJSON, withBasePath } from "@/lib/api";
+import { authedFetch, fetchJSON, HERMES_BASE_PATH, withBasePath } from "@/lib/api";
+import { cabinetLogoutPath } from "@/lib/cabinet-session";
 import type { AttachmentDisplay } from "@/lib/chat-types";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 
@@ -19,9 +20,11 @@ export interface UploadedAttachment {
   kind: string;
   size: number;
   reader: string;
+  file_count?: number;
+  truncated?: boolean;
 }
 
-export type PendingStatus = "uploading" | "ready" | "error";
+export type PendingStatus = "preparing" | "uploading" | "paused" | "ready" | "error";
 
 export interface PendingAttachment {
   id: string;
@@ -34,10 +37,13 @@ export interface PendingAttachment {
   uploaded?: UploadedAttachment;
   previewUrl?: string;
   file: File;
+  uploadId?: string;
+  uploadIndex?: number;
+  originalSize?: number;
 }
 
-export const MAX_ATTACHMENTS = 5;
-export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 30;
+export const MAX_ATTACHMENT_BYTES = 2 * 1024 ** 3;
 
 const IMAGE_KINDS = new Set(["png", "jpg", "jpeg", "webp", "heic", "heif", "avif", "gif"]);
 
@@ -51,6 +57,7 @@ export function kindOf(name: string): string {
 }
 
 export function formatSize(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} ГБ`;
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} КБ`;
   return `${bytes} Б`;
@@ -82,7 +89,9 @@ export async function downloadWorkspaceFile(path: string, name: string, chat = f
   const endpoint = `/api/files/download?${query}`;
   let url = withBasePath(endpoint);
   let objectUrl = false;
-  if (window.__HERMES_SESSION_TOKEN__) {
+  // Cabinet HTML also carries an engine token, but the proxy authenticates
+  // native downloads using its cookie and supplies the upstream token itself.
+  if (window.__HERMES_SESSION_TOKEN__ && !cabinetLogoutPath(HERMES_BASE_PATH)) {
     const response = await authedFetch(endpoint);
     if (!response.ok) throw new Error("Не удалось скачать файл. Он мог быть удалён или перемещён.");
     url = URL.createObjectURL(await response.blob());

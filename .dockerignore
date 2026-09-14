@@ -62,6 +62,8 @@ htmlcov/
 # него стоит и что в нём было (раздел «Обновления»). Без файла в образе
 # установка не может рассказать о себе, не спрашивая никого снаружи.
 !RELEASE_NOTES.md
+# First-party agent instructions are runtime assets, not authoring docs.
+!korra_cli/data/agent_templates/**
 
 # Runtime data (bind-mounted at /opt/data; must not leak into build context)
 data/

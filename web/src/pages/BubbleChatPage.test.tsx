@@ -6,22 +6,23 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const attachmentMocks = vi.hoisted(() => ({
-  uploadAttachment: vi.fn(),
+  createUpload: vi.fn(),
+  completeUpload: vi.fn(),
+  runUploadQueue: vi.fn(),
 }));
 
 const apiMocks = vi.hoisted(() => ({
   transcribeAudio: vi.fn(),
 }));
 
-vi.mock("@/lib/chat-attachments", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/chat-attachments")>(
-    "@/lib/chat-attachments",
-  );
-  return {
-    ...actual,
-    uploadAttachment: attachmentMocks.uploadAttachment,
-  };
-});
+vi.mock("@/lib/upload-session", async () => ({
+  ...await vi.importActual<typeof import("@/lib/upload-session")>("@/lib/upload-session"),
+  createUpload: attachmentMocks.createUpload, completeUpload: attachmentMocks.completeUpload,
+}));
+vi.mock("@/lib/upload-queue", async () => ({
+  ...await vi.importActual<typeof import("@/lib/upload-queue")>("@/lib/upload-queue"),
+  runUploadQueue: attachmentMocks.runUploadQueue,
+}));
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -37,6 +38,8 @@ vi.mock("thinking-orbs", () => ({
 }));
 
 import { BubbleChatComposer } from "./BubbleChatPage";
+import { $uploadJobs, dismissUploadJob } from "@/store/upload-jobs";
+import type { UploadManifest } from "@/lib/upload-session";
 
 /** `MediaRecorder` из jsdom не существует — подменяем предсказуемым. */
 class FakeMediaRecorder {
@@ -141,27 +144,28 @@ beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", () => {});
   apiMocks.transcribeAudio.mockReset();
   apiMocks.transcribeAudio.mockResolvedValue("");
-  attachmentMocks.uploadAttachment.mockReset();
-  attachmentMocks.uploadAttachment.mockImplementation(
-    (file: File, onProgress: (percent: number) => void) => {
-      onProgress(100);
-      return {
-        abort: vi.fn(),
-        promise: Promise.resolve({
-          path: `/tmp/${file.name}`,
-          name: file.name,
-          kind: file.name.split(".").pop() ?? "bin",
-          size: file.size,
-          reader: "read_file",
-        }),
-      };
-    },
-  );
+  attachmentMocks.createUpload.mockReset();
+  attachmentMocks.completeUpload.mockReset();
+  attachmentMocks.runUploadQueue.mockReset();
+  const manifests = new Map<string, UploadManifest>();
+  attachmentMocks.createUpload.mockImplementation(async (manifest: UploadManifest) => {
+    manifests.set(manifest.upload_id, manifest);
+    return { upload_id: manifest.upload_id, published: false, received: [], already_present: [] };
+  });
+  attachmentMocks.runUploadQueue.mockResolvedValue({ completed: [], failed: [] });
+  attachmentMocks.completeUpload.mockImplementation(async (id: string) => {
+    const manifest = manifests.get(id)!;
+    return { published: true, files: manifest.files.map((file, index) => ({
+      index, path: `/tmp/${file.path}`, name: file.path, kind: file.path.split(".").pop(), size: file.size, reader: "read_file",
+    })), folder: manifest.name ? { path: "/tmp/batch", name: manifest.name, file_count: manifest.files.length,
+      total_bytes: manifest.files.reduce((sum, file) => sum + file.size, 0) } : null, skipped: [], excluded: [] };
+  });
 });
 
 afterEach(async () => {
   await act(async () => root?.unmount());
   container?.remove();
+  Object.keys($uploadJobs.get()).forEach(dismissUploadJob);
   vi.unstubAllGlobals();
 });
 
@@ -173,7 +177,7 @@ describe("BubbleChatComposer", () => {
     Object.defineProperty(input, "files", { configurable: true, value: [file, file] });
     await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
     await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
-    expect(attachmentMocks.uploadAttachment).toHaveBeenCalledTimes(1);
+    expect(attachmentMocks.createUpload).toHaveBeenCalledTimes(1);
     expect(container.querySelectorAll('[role="listitem"]')).toHaveLength(1);
   });
 
@@ -182,13 +186,13 @@ describe("BubbleChatComposer", () => {
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     const empty = new File([], "пустой.txt");
     const big = new File(["данные"], "большой.xlsx");
-    Object.defineProperty(big, "size", { value: 51 * 1024 * 1024 });
+    Object.defineProperty(big, "size", { value: 2 * 1024 ** 3 + 1 });
     for (const file of [empty, big]) {
       Object.defineProperty(input, "files", { configurable: true, value: [file] });
       await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
       expect(container.querySelector('[role="alert"]')?.textContent).toContain(file.name);
     }
-    expect(attachmentMocks.uploadAttachment).not.toHaveBeenCalled();
+    expect(attachmentMocks.createUpload).not.toHaveBeenCalled();
   });
   it("keeps send inactive for an empty draft and activates it for text", async () => {
     const onSend = vi.fn();

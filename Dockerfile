@@ -70,7 +70,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 # hermes process, the dashboard, and per-profile gateways.
 RUN apt-get -o Acquire::Retries=3 update && \
     apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg gcc g++ make cmake python3-dev python3-venv libffi-dev libolm-dev libatomic1 procps git openssh-client docker-cli sudo xz-utils && \
+    ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg gcc g++ make cmake python3-dev python3-venv libffi-dev libolm-dev libatomic1 procps git openssh-client docker-cli sudo xz-utils \
+    libreoffice-impress poppler-utils fonts-dejavu-core fonts-liberation2 && \
     rm -rf /var/lib/apt/lists/*
 
 # Prefer the fixed SQLite over Debian's vulnerable libsqlite3.so.0. Keep the
@@ -316,10 +317,15 @@ RUN cd plugins/platforms/photon/sidecar && \
 # чтение. Тянет ddgs + primp (abi3-колесо) + lxml, ~15 МБ, системных
 # библиотек не требует.
 #
+# Korra Designer: editable PPTX creation plus PDF export and slide previews.
+# [design] supplies python-pptx; the apt layer above supplies headless Impress,
+# poppler and Cyrillic-capable fonts. Runtime installation is disabled, so a
+# bundled skill alone is insufficient (scripts/designer_preflight.py).
+#
 # The editable link is created after the source copy below.
 COPY pyproject.toml uv.lock ./
 RUN touch ./README.md
-RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra otlp --extra anthropic --extra bedrock --extra azure-identity --extra hindsight --extra matrix --extra voice --extra ddgs
+RUN uv sync --frozen --no-install-project --extra all --extra messaging --extra otlp --extra anthropic --extra bedrock --extra azure-identity --extra hindsight --extra matrix --extra voice --extra ddgs --extra design
 
 # ---------- Веса локального whisper (вшиты в образ) ----------
 # Модель кладётся в образ ОДИН раз на сборке, а не качается в рантайме:
@@ -554,6 +560,9 @@ RUN ln -sf hermes /opt/hermes/bin/korra
 # binary by absolute path, so this PATH ordering is transparent to
 # every other consumer.
 ENV PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:${PATH}"
+# Native terminal uses a login-shell snapshot, which otherwise loses ENV PATH
+# in /etc/profile and cannot see bundled Python skill dependencies.
+COPY --chmod=0644 docker/runtime-path.sh /etc/profile.d/korra-runtime-path.sh
 RUN mkdir -p /opt/data
 VOLUME [ "/opt/data" ]
 

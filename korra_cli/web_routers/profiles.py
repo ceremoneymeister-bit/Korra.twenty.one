@@ -789,9 +789,39 @@ async def list_profiles_endpoint():
         return {"profiles": _fallback_profile_dicts(profiles_mod)}
 
 
+@router.get("/api/agent-templates")
+async def list_agent_templates_endpoint():
+    from korra_cli.agent_templates import list_agent_templates
+
+    return {"templates": await run_in_threadpool(list_agent_templates)}
+
+
 @router.post("/api/profiles")
 async def create_profile_endpoint(body: ProfileCreate):
+    if body.template_id is not None:
+        from korra_cli.agent_templates import TemplateConflict, create_template_profile
+
+        try:
+            return await run_in_threadpool(
+                create_template_profile, body, write_model=_write_profile_model,
+            )
+        except TemplateConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except TimeoutError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except Exception:
+            _log.exception("Creating template profile failed")
+            raise HTTPException(status_code=500, detail="Не удалось добавить готового агента. Повторите запрос с теми же параметрами.")
+    if body.template_version is not None or body.idempotency_key is not None:
+        raise HTTPException(status_code=400, detail="Не выбран готовый агент.")
+    return await run_in_threadpool(_create_custom_profile, body)
+
+
+def _create_custom_profile(body: ProfileCreate):
     from korra_cli import profiles as profiles_mod
+
     explicit_source = (body.clone_from or "").strip()
     if explicit_source:
         # Duplicating a specific profile: clone its config/skills/SOUL (or full

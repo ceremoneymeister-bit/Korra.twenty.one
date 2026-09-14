@@ -25,12 +25,14 @@
 
 import { useEffect, useState } from "react";
 import { api, type AuthMeResponse } from "@/lib/api";
+import { useCabinetSession } from "@/hooks/useCabinetSession";
 import { cn } from "@/lib/utils";
 import { LogOut } from "lucide-react";
 import { useI18n } from "@/i18n";
 
 interface AuthWidgetProps {
   className?: string;
+  collapsed?: boolean;
 }
 
 /** Truncate ``user_id`` to fit a small UI without revealing the full
@@ -41,11 +43,12 @@ function truncateUserId(id: string): string {
   return `${id.slice(0, 14)}…`;
 }
 
-export function AuthWidget({ className }: AuthWidgetProps) {
+export function AuthWidget({ className, collapsed = false }: AuthWidgetProps) {
   const { tr } = useI18n();
   const [me, setMe] = useState<AuthMeResponse | null>(null);
   const [hidden, setHidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { logout: cabinetLogout } = useCabinetSession();
 
   // Loopback / --insecure mode: the auth gate is off, so /api/auth/me is a
   // guaranteed 401. Don't fire the request at all — it only produces console
@@ -54,7 +57,7 @@ export function AuthWidget({ className }: AuthWidgetProps) {
     typeof window !== "undefined" && !!window.__HERMES_AUTH_REQUIRED__;
 
   useEffect(() => {
-    if (!gated) return;
+    if (!gated || cabinetLogout) return;
     let cancelled = false;
     api
       .getAuthMe()
@@ -79,14 +82,36 @@ export function AuthWidget({ className }: AuthWidgetProps) {
     return () => {
       cancelled = true;
     };
-  }, [gated, tr]);
+  }, [gated, cabinetLogout, tr]);
+
+  useEffect(() => {
+    if (!cabinetLogout && !gated) return;
+    const restore = (event: PageTransitionEvent) => {
+      if (event.persisted) window.location.reload();
+    };
+    window.addEventListener("pageshow", restore);
+    return () => window.removeEventListener("pageshow", restore);
+  }, [cabinetLogout, gated]);
+
+  if (cabinetLogout) return <a href={cabinetLogout}
+    aria-label="Выйти из кабинета" title="Выйти из кабинета"
+    className={cn("mx-3 my-2 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-current/10 focus-visible:ring-2", className)}
+    onClick={event => {
+      event.preventDefault();
+      // If the browser restores this document from its back/forward cache,
+      // keep private content hidden until pageshow reloads through the gate.
+      document.documentElement.style.visibility = "hidden";
+      window.location.assign(cabinetLogout);
+    }}>
+    <LogOut size={17} aria-hidden /><span className={collapsed ? "lg:sr-only" : undefined}>Выйти из кабинета</span>
+  </a>;
 
   // Nothing to show in ungated mode — there is no logged-in identity.
   if (!gated) return null;
 
   if (hidden) return null;
 
-  if (error) {
+  if (error && !me) {
     return (
       <div
         className={cn(
@@ -116,7 +141,8 @@ export function AuthWidget({ className }: AuthWidgetProps) {
   }
 
   const handleLogout = () => {
-    void api.logout();
+    setError(null);
+    void api.logout().catch(() => setError("Не удалось выйти. Проверьте соединение и повторите."));
   };
 
   // Prefer display_name → email → truncated user_id. Contract V1 only
@@ -136,7 +162,7 @@ export function AuthWidget({ className }: AuthWidgetProps) {
       role="status"
       aria-label={tr("Logged in as {name}", { name: label })}
     >
-      <div className="flex min-w-0 flex-col">
+      <div className={cn("flex min-w-0 flex-col", collapsed && "lg:hidden")}>
         <span className="truncate font-mono text-foreground/90" title={me.user_id}>
           {label}
         </span>
@@ -148,15 +174,16 @@ export function AuthWidget({ className }: AuthWidgetProps) {
         type="button"
         onClick={handleLogout}
         className={cn(
-          "shrink-0 rounded p-1.5 text-muted-foreground/70",
+          "inline-flex min-h-11 shrink-0 items-center gap-2 rounded px-3 py-2 text-muted-foreground/70",
           "transition-colors hover:bg-current/10 hover:text-foreground",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-current/40",
         )}
         aria-label={tr("Log out")}
         title={tr("Log out")}
       >
-        <LogOut className="h-3.5 w-3.5" />
+        <LogOut className="h-3.5 w-3.5" /><span className={collapsed ? "lg:sr-only" : undefined}>Выйти</span>
       </button>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

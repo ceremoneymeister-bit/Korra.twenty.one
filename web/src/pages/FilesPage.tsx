@@ -8,7 +8,6 @@ import {
 } from "react";
 import {
   ArrowUp,
-  CheckCircle2,
   ChevronRight,
   Copy,
   Download,
@@ -23,8 +22,6 @@ import {
   Trash2,
   Upload,
   MessageSquare,
-  X,
-  XCircle,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Button } from "@/components/ProductButton";
@@ -53,28 +50,24 @@ import {
 } from "@/lib/dashboard-flags";
 import { productNavLabel } from "@/lib/product-nav";
 import { downloadWorkspaceFile } from "@/lib/chat-attachments";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import {
-  availableCopyName,
   buildFileBreadcrumbs,
   filterAndSortFileEntries,
   type FileSortMode,
 } from "@/lib/file-manager";
+import { useStore } from "@nanostores/react";
+import { useAgentTabs } from "@/hooks/useAgentTabs";
+import { useCabinetSession } from "@/hooks/useCabinetSession";
+import { UploadJobsPanel } from "@/components/UploadJobsPanel";
+import { prepareUploadBatch } from "@/lib/upload-batch";
+import { readDirectoryHandle, readDroppedFolder, selectedFolder, type FolderSelection } from "@/lib/folder-select";
+import { type ConflictPolicy } from "@/lib/upload-session";
+import { $uploadJobs, startUploadJob } from "@/store/upload-jobs";
 import { PluginSlot } from "@/plugins";
 
-type UploadStatus = "waiting" | "uploading" | "choice" | "done" | "failed" | "cancelled";
 const TRASH_PAGE_SIZE = 50;
-
-interface UploadItem {
-  id: string;
-  file: File;
-  targetDirectory: string;
-  existingNames: string[];
-  existingRevision?: string;
-  status: UploadStatus;
-  uploadedName?: string;
-  message?: string;
-}
 
 function joinPath(base: string, name: string): string {
   const cleanName = name.trim().replace(/^[\\/]+/, "");
@@ -292,6 +285,7 @@ export default function FilesPage() {
   // Fleet is the full Korra workspace manager. The narrower client-mode
   // inbox/artifacts rules belong to white-label owner cabinets only.
   const clientMode = isClientUiMode();
+  const { restrictedFiles } = useCabinetSession();
   const { toast, showToast } = useToast();
   const { setAfterTitle, setEnd } = usePageHeader();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -321,8 +315,14 @@ export default function FilesPage() {
   const [listing, setListing] = useState<ManagedFilesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [resolvingCollision, setResolvingCollision] = useState(false);
-  const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
+  const [uploadNotice, setUploadNotice] = useState("");
+  const [pendingBatch, setPendingBatch] = useState<{ files: File[]; folder?: FolderSelection; target: string } | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const jobs = useStore($uploadJobs);
+  const completedUploads = Object.values(jobs).filter(job => job.origin === "files" && job.status === "complete").map(job => job.uploadId).join(",");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [recipient, setRecipient] = useState("default");
+  const { tabs, hiddenTabs } = useAgentTabs();
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState<FileSortMode>("name");
@@ -361,9 +361,8 @@ export default function FilesPage() {
     clientMode && /(?:^|\/)home\/client$/.test(normalizedActivePath);
   const isInClientInbox =
     clientMode && /(?:^|\/)home\/client\/inbox(?:\/|$)/.test(normalizedActivePath);
-  const currentCollision = uploadItems.find((item) => item.status === "choice") ?? null;
   const canUpload =
-    Boolean(activePath) && !uploading && !currentCollision && (!clientMode || isInClientInbox);
+    Boolean(activePath) && !uploading && !pendingBatch && (!clientMode || isInClientInbox);
   const baseEntries = useMemo(() => (listing?.entries ?? []).filter((entry) => {
     if (!clientMode) return true;
     if (entry.name.startsWith(".") || entry.name.endsWith(".meta.json")) return false;
@@ -373,9 +372,7 @@ export default function FilesPage() {
     () => filterAndSortFileEntries(baseEntries, searchQuery, sortMode),
     [baseEntries, searchQuery, sortMode],
   );
-  const uploadActive = uploadItems.some((item) =>
-    ["waiting", "uploading", "choice"].includes(item.status),
-  );
+  useEffect(() => { setSelected([]); }, [activePath]);
 
   /** Переход в папку — новая запись в истории: «Назад» вернёт на уровень выше. */
   const navigateTo = useCallback(
@@ -522,110 +519,51 @@ export default function FilesPage() {
     }
   };
 
-  const uploadFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
-    const uploadPath = activePath;
-    const batch = Array.from(files).map((file, index): UploadItem => ({
-      id: `${file.name}-${file.size}-${file.lastModified}-${index}`,
-      file,
-      targetDirectory: uploadPath,
-      existingNames: baseEntries.map((entry) => entry.name),
-      existingRevision: baseEntries.find((entry) => entry.name === file.name)?.revision ?? undefined,
-      status: "waiting",
-    }));
-    setUploadItems(batch);
-    setUploading(true);
-    let succeeded = 0;
-    for (const item of batch) {
-      setUploadItems((current) => current.map((candidate) =>
-        candidate.id === item.id ? { ...candidate, status: "uploading" } : candidate,
-      ));
-      try {
-        await api.uploadFile(joinPath(uploadPath, item.file.name), item.file, false);
-        succeeded += 1;
-        setUploadItems((current) => current.map((candidate) =>
-          candidate.id === item.id
-            ? { ...candidate, status: "done", uploadedName: item.file.name }
-            : candidate,
-        ));
-      } catch (exception) {
-        const collision = exception instanceof Error && /^409:/.test(exception.message);
-        let existingRevision = item.existingRevision;
-        if (collision) {
-          try {
-            const freshListing = await api.listFiles(uploadPath);
-            existingRevision = freshListing.entries.find(
-              (entry) => entry.name === item.file.name,
-            )?.revision ?? undefined;
-          } catch {
-            // The collision remains actionable as cancel/copy. Replacement is
-            // refused server-side unless we have a fresh optimistic revision.
-          }
-        }
-        setUploadItems((current) => current.map((candidate) =>
-          candidate.id === item.id
-            ? {
-                ...candidate,
-                status: collision ? "choice" : "failed",
-                existingRevision,
-                message: collision
-                  ? "Файл с таким именем уже есть"
-                  : ownerFacingError(exception, "Не удалось загрузить файл."),
-              }
-            : candidate,
-        ));
-      }
-    }
+  useEffect(() => { if (completedUploads) void load(); }, [completedUploads, load]);
+
+  const beginUpload = async (batch: { files: File[]; folder?: FolderSelection; target: string }, conflict: ConflictPolicy) => {
+    setUploading(true); setError(null); setPendingBatch(null);
     try {
-      if (succeeded > 0) showToast(`Загружено файлов: ${succeeded}`, "success");
-      await load();
+      const input = await prepareUploadBatch(batch.files, { origin: "files", target: batch.target, folder: batch.folder, conflict });
+      startUploadJob(input);
+      setUploadNotice(batch.folder?.directoryCapture === "files-only" ? "Выбор папки в этом браузере не включает пустые каталоги. Чтобы сохранить их, перетащите папку." : "");
+    } catch (cause) {
+      setError(ownerFacingError(cause, "Не удалось подготовить загрузку."));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      if (folderInputRef.current) folderInputRef.current.value = "";
     }
   };
 
-  const resolveCollision = async (action: "replace" | "copy" | "cancel") => {
-    if (!currentCollision || resolvingCollision) return;
-    if (action === "cancel") {
-      setUploadItems((current) => current.map((item) =>
-        item.id === currentCollision.id
-          ? { ...item, status: "cancelled", message: "Загрузка отменена" }
-          : item,
-      ));
-      return;
+  const uploadFiles = (files: FileList | File[] | null, folder?: FolderSelection) => {
+    if (!activePath || (!files?.length && !folder)) return;
+    const batch = { files: Array.from(files ?? []), folder, target: activePath };
+    const names = folder ? [folder.name] : batch.files.map(file => file.name);
+    if (baseEntries.some(entry => names.includes(entry.name))) setPendingBatch(batch);
+    else void beginUpload(batch, "copy");
+  };
+
+  const chooseFolder = async () => {
+    const picker = (window as Window & { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker;
+    if (!picker) { folderInputRef.current?.click(); return; }
+    try { uploadFiles([], await readDirectoryHandle(await picker.call(window))); }
+    catch (cause) {
+      if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(ownerFacingError(cause, "Не удалось прочитать папку."));
     }
-    setResolvingCollision(true);
-    const knownNames = [
-      ...currentCollision.existingNames,
-      ...uploadItems.flatMap((item) => item.uploadedName ? [item.uploadedName] : []),
-    ];
-    const nextName = action === "copy"
-      ? availableCopyName(currentCollision.file.name, knownNames)
-      : currentCollision.file.name;
-    try {
-      await api.uploadFile(
-        joinPath(currentCollision.targetDirectory, nextName),
-        currentCollision.file,
-        action === "replace",
-        action === "replace" ? currentCollision.existingRevision : undefined,
-      );
-      setUploadItems((current) => current.map((item) =>
-        item.id === currentCollision.id
-          ? { ...item, status: "done", uploadedName: nextName, message: undefined }
-          : item,
-      ));
-      showToast(action === "replace" ? "Файл заменён" : `Сохранено как «${nextName}»`, "success");
-      await load();
-    } catch (exception) {
-      setUploadItems((current) => current.map((item) =>
-        item.id === currentCollision.id
-          ? { ...item, status: "failed", message: ownerFacingError(exception, "Не удалось загрузить файл.") }
-          : item,
-      ));
-    } finally {
-      setResolvingCollision(false);
-    }
+  };
+
+  const sendToAgent = (paths: string[]) => {
+    if (!paths.length) return;
+    if (paths.length > 30) { setError("В сообщение можно передать до 30 вложений. Выберите содержащую их папку или уменьшите выбор."); return; }
+    const query = new URLSearchParams({ agent: recipient });
+    paths.forEach(path => query.append("attach", path));
+    navigate(`${productUiMode() === "fleet" ? "/agents" : "/chat"}?${query}`);
+  };
+
+  const copyPaths = (paths: string[]) => {
+    void copyTextToClipboard(paths.join("\n")).then(copied => showToast(copied ? "Путь скопирован" : "Не удалось скопировать путь. Проверьте разрешение браузера.", copied ? "success" : "error"))
+      .catch(() => showToast("Не удалось скопировать путь. Проверьте разрешение браузера.", "error"));
   };
 
   const handleDragEnter = (event: ReactDragEvent<HTMLElement>) => {
@@ -655,7 +593,10 @@ export default function FilesPage() {
     event.preventDefault();
     dragDepthRef.current = 0;
     setDraggingFiles(false);
-    void uploadFiles(event.dataTransfer.files);
+    if (Array.from(event.dataTransfer.items ?? []).some(item => item.webkitGetAsEntry?.()?.isDirectory)) {
+      void readDroppedFolder(event.dataTransfer.items).then(folder => uploadFiles([], folder))
+        .catch(cause => setError(ownerFacingError(cause, "Не удалось прочитать папку.")));
+    } else uploadFiles(event.dataTransfer.files);
   };
 
   const downloadFile = (entry: ManagedFileEntry) => {
@@ -727,6 +668,12 @@ export default function FilesPage() {
         onChange={(event) => void uploadFiles(event.currentTarget.files)}
       />
 
+      <input ref={folderInputRef} type="file" multiple {...{ webkitdirectory: "" }} className="hidden" aria-label="Выбрать папку"
+        onChange={event => {
+          try { uploadFiles([], selectedFolder(Array.from(event.currentTarget.files ?? []))); }
+          catch (cause) { setError(ownerFacingError(cause, "Не удалось прочитать папку.")); }
+        }} />
+
       <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         {canChangePath ? (
           <form
@@ -777,7 +724,8 @@ export default function FilesPage() {
               Загрузить
             </Button>
           )}
-          {!clientMode && (
+          {(!clientMode || isInClientInbox) && <Button type="button" outlined size="sm" disabled={!canUpload} onClick={() => void chooseFolder()} prefix={<FolderOpen />}>Загрузить папку</Button>}
+          {!clientMode && !restrictedFiles && (
             <Button
               type="button"
               onClick={() => setCreateDialogOpen(true)}
@@ -817,7 +765,7 @@ export default function FilesPage() {
                 {uploading ? "Загрузка" : draggingFiles ? "Отпустите файлы" : "Перетащите файлы сюда"}
               </span>
               <span className="block truncate text-xs text-text-secondary" title={headerPath}>
-                {headerPath} · до 100 МБ на файл
+                {headerPath} · до 2 ГБ на файл, 20 ГБ на загрузку
               </span>
             </span>
           </span>
@@ -834,47 +782,23 @@ export default function FilesPage() {
         </p>
       )}
 
-      {uploadItems.length > 0 ? (
-        <Card className="min-w-0 max-w-full overflow-hidden rounded-xl" aria-live="polite">
-          <CardContent className="p-0">
-            <div className="flex min-h-12 items-center justify-between gap-3 border-b border-border px-4 py-2">
-              <span className="text-sm font-semibold">Загрузки</span>
-              {!uploadActive ? (
-                <Button ghost size="icon" type="button" onClick={() => setUploadItems([])} aria-label="Скрыть список загрузок">
-                  <X />
-                </Button>
-              ) : null}
-            </div>
-            <div className="divide-y divide-border/60">
-              {uploadItems.map((item) => (
-                <div key={item.id} className="flex min-h-12 items-center gap-3 px-4 py-2 text-sm">
-                  {item.status === "done" ? (
-                    <CheckCircle2 className="size-4 shrink-0 text-success" aria-hidden />
-                  ) : item.status === "failed" || item.status === "cancelled" ? (
-                    <XCircle className="size-4 shrink-0 text-destructive" aria-hidden />
-                  ) : item.status === "uploading" ? (
-                    <Spinner />
-                  ) : (
-                    <Upload className="size-4 shrink-0 text-text-tertiary" aria-hidden />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">{item.uploadedName ?? item.file.name}</span>
-                  <span className="shrink-0 text-xs text-text-secondary">
-                    {item.status === "waiting" ? "Ожидает" :
-                      item.status === "uploading" ? "Загружается" :
-                        item.status === "choice" ? "Нужен выбор" :
-                          item.status === "done" ? "Готово" : item.message ?? "Не загружено"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+      <UploadJobsPanel origin="files" />
+      {uploadNotice && <p role="status" className="text-sm text-muted-foreground">{uploadNotice}</p>}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={visibleEntries.length > 0 && visibleEntries.every(entry => selected.includes(entry.path))}
+          onChange={event => setSelected(event.target.checked ? visibleEntries.map(entry => entry.path) : [])} /> Выбрать все</label>
+        <span>Выбрано: {selected.length}</span>
+        <select aria-label="Агент для файлов" value={recipient} onChange={event => setRecipient(event.target.value)} className="max-w-48 rounded-lg bg-[var(--neo-surface)] px-2 py-2">
+          {[...tabs, ...hiddenTabs].map(tab => <option key={tab.profile} value={tab.profile || "default"}>{tab.label}</option>)}
+        </select>
+        <Button type="button" size="sm" outlined disabled={!selected.length} onClick={() => sendToAgent(selected)} prefix={<MessageSquare />}>Передать агенту</Button>
+        <Button type="button" size="sm" ghost disabled={!selected.length} onClick={() => copyPaths(selected)} prefix={<Copy />}>Копировать путь</Button>
+      </div>
 
-      <FileTrash
+      {!restrictedFiles && <FileTrash
         onRestored={() => void load()}
         refreshVersion={trashRefreshVersion}
-      />
+      />}
 
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
         <label className="relative min-w-0 flex-1">
@@ -954,6 +878,10 @@ export default function FilesPage() {
                 key={entry.path}
                 className="relative grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-sm last:border-b-0 hover:bg-background/35 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem]"
               >
+                <label className="absolute left-1 top-1/2 z-10 flex h-11 w-9 -translate-y-1/2 items-center justify-center">
+                  <input type="checkbox" aria-label={`Выбрать ${entry.name}`} checked={selected.includes(entry.path)}
+                    onChange={event => setSelected(current => event.target.checked ? [...new Set([...current, entry.path])] : current.filter(path => path !== entry.path))} />
+                </label>
                 {/* `after:inset-0` растягивает область нажатия на всю строку:
                     владелец жаловался, что папка открывается только по имени,
                     а промах по размеру или дате не делает ничего (QA 03.09).
@@ -961,7 +889,7 @@ export default function FilesPage() {
                 <button
                   type="button"
                   onClick={() => (entry.is_directory ? openDirectory(entry) : previewEntry(entry))}
-                  className="flex min-w-0 cursor-pointer items-center gap-3 text-left text-foreground after:absolute after:inset-0 after:content-['']"
+                  className="flex min-w-0 cursor-pointer items-center gap-3 pl-6 text-left text-foreground after:absolute after:inset-0 after:content-['']"
                 >
                   {entry.is_directory ? (
                     <Folder className="h-4 w-4 shrink-0 text-warning" />
@@ -979,7 +907,9 @@ export default function FilesPage() {
                 <span className="hidden truncate text-xs text-text-secondary md:block">
                   {Number.isFinite(entry.mtime) ? dateFormat.format(entry.mtime * 1000) : "-"}
                 </span>
-                <span className="relative z-10 flex justify-end gap-1">
+                <span className="relative z-10 flex max-w-[140px] flex-wrap justify-end gap-1 justify-self-end">
+                  <Button ghost size="icon" type="button" onClick={() => sendToAgent([entry.path])} aria-label={`Отправить в чат ${clientEntryLabel(entry.name)}`}><MessageSquare /></Button>
+                  <Button ghost size="icon" type="button" onClick={() => copyPaths([entry.path])} aria-label={`Копировать путь ${clientEntryLabel(entry.name)}`}><Copy /></Button>
                   {entry.is_directory ? (
                     <Button
                       ghost
@@ -992,11 +922,6 @@ export default function FilesPage() {
                     </Button>
                   ) : (
                     <>
-                      <Button ghost size="icon" type="button"
-                        onClick={() => navigate(`${productUiMode() === "fleet" ? "/agents" : "/chat"}?${new URLSearchParams({ attach: entry.path })}`)}
-                        aria-label={`Отправить в чат ${clientEntryLabel(entry.name)}`}>
-                        <MessageSquare />
-                      </Button>
                       <Button
                         ghost
                         size="icon"
@@ -1017,7 +942,7 @@ export default function FilesPage() {
                       </Button>
                     </>
                   )}
-                  {entry.capabilities?.rename && entry.revision ? (
+                  {!restrictedFiles && entry.capabilities?.rename && entry.revision ? (
                     <Button
                       ghost
                       size="icon"
@@ -1031,7 +956,7 @@ export default function FilesPage() {
                       <Pencil />
                     </Button>
                   ) : null}
-                  {entry.capabilities?.trash && entry.revision ? (
+                  {!restrictedFiles && entry.capabilities?.trash && entry.revision ? (
                     <Button
                       ghost
                       size="icon"
@@ -1054,45 +979,16 @@ export default function FilesPage() {
 
       <PluginSlot name="files:bottom" />
 
-      <Dialog
-        open={Boolean(currentCollision)}
-        onOpenChange={(open) => {
-          if (!open && !resolvingCollision) void resolveCollision("cancel");
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Файл с таким именем уже есть</DialogTitle>
-            <DialogDescription>
-              {currentCollision?.existingRevision
-                ? `Выберите, что сделать с «${currentCollision.file.name}».`
-                : "Не удалось подтвердить текущую версию файла. Сохраните копию или отмените загрузку."}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2 p-4">
-            <Button
-              type="button"
-              outlined
-              disabled={resolvingCollision}
-              onClick={() => void resolveCollision("copy")}
-              prefix={<Copy />}
-            >
-              Сохранить копию
-            </Button>
-            <Button
-              type="button"
-              disabled={resolvingCollision || !currentCollision?.existingRevision}
-              onClick={() => void resolveCollision("replace")}
-              prefix={resolvingCollision ? <Spinner /> : <RefreshCw />}
-            >
-              Заменить файл
-            </Button>
-          </div>
-          <DialogFooter>
-            <Button type="button" ghost disabled={resolvingCollision} onClick={() => void resolveCollision("cancel")}>
-              Отмена
-            </Button>
-          </DialogFooter>
+      <Dialog open={Boolean(pendingBatch)} onOpenChange={open => { if (!open) setPendingBatch(null); }}>
+        <DialogContent className="max-w-md"><DialogHeader>
+          <DialogTitle>Файлы с таким именем уже есть</DialogTitle>
+          <DialogDescription>Правило применяется ко всей загрузке. Копия сохранит существующие файлы; замена перезапишет совпавшие файлы.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-2 p-4">
+          <Button type="button" onClick={() => pendingBatch && void beginUpload(pendingBatch, "copy")}>Сохранить копию</Button>
+          <Button type="button" outlined onClick={() => pendingBatch && void beginUpload(pendingBatch, "skip")}>Пропустить совпавшие</Button>
+          <Button type="button" outlined onClick={() => pendingBatch && void beginUpload(pendingBatch, "replace")}>Заменить файлы</Button>
+        </div><DialogFooter><Button type="button" ghost onClick={() => setPendingBatch(null)}>Отмена</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

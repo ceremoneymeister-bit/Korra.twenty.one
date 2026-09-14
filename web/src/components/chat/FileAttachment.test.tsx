@@ -27,7 +27,7 @@ it("показывает имя, размер и защищённое скачи
 it("недоступный файл объясняется без рабочей кнопки скачивания", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("denied")));
   await act(async () => root.render(<Markdown content="MEDIA:/etc/secret.xlsx" />));
-  expect(host.textContent).toContain("Файл недоступен");
+  expect(host.textContent).toContain("Вложение недоступно");
   expect(host.querySelector('a[download]')).toBeNull();
 });
 

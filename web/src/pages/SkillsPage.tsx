@@ -42,6 +42,7 @@ import type {
   SkillHubScan,
 } from "@/lib/api";
 import { useProfileScope } from "@/contexts/useProfileScope";
+import { useCabinetSession } from "@/hooks/useCabinetSession";
 import { ToolsetConfigDrawer } from "@/components/ToolsetConfigDrawer";
 import { SkillEditorDialog } from "@/components/SkillEditorDialog";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
@@ -128,6 +129,7 @@ function toolsetIcon(
 /* ------------------------------------------------------------------ */
 
 export default function SkillsPage() {
+  const { canManageSkills, canConfigureToolsets, canBrowseSkillsHub } = useCabinetSession();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [toolsets, setToolsets] = useState<ToolsetInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -175,6 +177,7 @@ export default function SkillsPage() {
 
   /* ---- Toggle skill ---- */
   const handleToggleSkill = async (skill: SkillInfo) => {
+    if (!canManageSkills) return;
     setTogglingSkills((prev) => new Set(prev).add(skill.name));
     try {
       await api.toggleSkill(skill.name, !skill.enabled, selectedProfile || undefined);
@@ -381,6 +384,9 @@ export default function SkillsPage() {
     <div className="flex flex-col gap-4">
       <PluginSlot name="skills:top" />
       <Toast toast={toast} />
+      {(!canManageSkills || !canConfigureToolsets) && <p role="status" className="rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground">
+        В этом кабинете навыки и инструменты доступны для просмотра. Для изменения навыков или подключения генератора обратитесь к администратору установки. Текущая чат-модель работает независимо от генератора изображений.
+      </p>}
 
       <div className="flex flex-col sm:flex-row sm:items-start gap-4">
         <aside aria-label={t.skills.title} className="sm:w-56 sm:shrink-0">
@@ -413,7 +419,7 @@ export default function SkillsPage() {
                     setSearch("");
                   }}
                 />
-                <PanelItem
+                {canBrowseSkillsHub && <PanelItem
                   icon={Search}
                   label={tr("Browse hub")}
                   active={view === "hub"}
@@ -421,7 +427,7 @@ export default function SkillsPage() {
                     setView("hub");
                     setSearch("");
                   }}
-                />
+                />}
               </div>
 
               {view === "skills" &&
@@ -490,6 +496,7 @@ export default function SkillsPage() {
                       <SkillRow
                         key={skill.name}
                         skill={skill}
+                        readOnly={!canManageSkills}
                         toggling={togglingSkills.has(skill.name)}
                         onToggle={() => handleToggleSkill(skill)}
                         onEdit={() => openEditEditor(skill.name)}
@@ -527,14 +534,14 @@ export default function SkillsPage() {
                     >
                       {tr("Learn a skill")}
                     </Button>
-                    <Button
+                    {canManageSkills && <Button
                       size="sm"
                       outlined
                       onClick={openCreateEditor}
                       prefix={<Plus />}
                     >
                       {tr("New skill")}
-                    </Button>
+                    </Button>}
                   </div>
                 </div>
               </CardHeader>
@@ -551,6 +558,7 @@ export default function SkillsPage() {
                       <SkillRow
                         key={skill.name}
                         skill={skill}
+                        readOnly={!canManageSkills}
                         toggling={togglingSkills.has(skill.name)}
                         onToggle={() => handleToggleSkill(skill)}
                         onEdit={() => openEditEditor(skill.name)}
@@ -629,7 +637,7 @@ export default function SkillsPage() {
                                     : t.skills.disabledForCli}
                                 </span>
                               )}
-                              <div className="mt-3">
+                              {canConfigureToolsets && <div className="mt-3">
                                 <Button
                                   size="sm"
                                   outlined
@@ -638,7 +646,7 @@ export default function SkillsPage() {
                                 >
                                   {tr("Configure")}
                                 </Button>
-                              </div>
+                              </div>}
                             </div>
                           </div>
                         </CardContent>
@@ -649,11 +657,11 @@ export default function SkillsPage() {
               )}
             </>
           ) : (
-            <HubBrowser showToast={showToast} profile={selectedProfile || undefined} />
+            canBrowseSkillsHub && <HubBrowser showToast={showToast} profile={selectedProfile || undefined} />
           )}
         </div>
       </div>
-      {configToolset && (
+      {canConfigureToolsets && configToolset && (
         <ToolsetConfigDrawer
           toolset={configToolset}
           profile={selectedProfile || undefined}
@@ -662,7 +670,7 @@ export default function SkillsPage() {
         />
       )}
       <SkillEditorDialog
-        open={editorOpen}
+        open={canManageSkills && editorOpen}
         editName={editorSkill}
         profile={selectedProfile || undefined}
         onClose={() => setEditorOpen(false)}
@@ -730,6 +738,7 @@ export default function SkillsPage() {
 
 function SkillRow({
   skill,
+  readOnly,
   toggling,
   onToggle,
   onEdit,
@@ -742,7 +751,8 @@ function SkillRow({
         <Switch
           checked={skill.enabled}
           onCheckedChange={onToggle}
-          disabled={toggling}
+          disabled={toggling || readOnly}
+          aria-label={`${skill.name}: ${skill.enabled ? "включён" : "выключен"}`}
         />
       </div>
       <div className="flex-1 min-w-0">
@@ -763,7 +773,7 @@ function SkillRow({
           {skill.description?.trim() || noDescriptionLabel}
         </p>
       </div>
-      <Button
+      {!readOnly && <Button
         ghost
         size="icon"
         className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:text-foreground"
@@ -772,7 +782,7 @@ function SkillRow({
         onClick={onEdit}
       >
         <Pencil />
-      </Button>
+      </Button>}
     </div>
   );
 }
@@ -802,6 +812,7 @@ interface PanelItemProps {
 }
 
 interface SkillRowProps {
+  readOnly: boolean;
   noDescriptionLabel: string;
   onToggle: () => void;
   onEdit: () => void;

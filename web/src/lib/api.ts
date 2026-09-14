@@ -46,7 +46,9 @@ declare global {
     __HERMES_AUTH_REQUIRED__?: boolean;
   }
 }
-const SESSION_HEADER = "X-Hermes-Session-Token";
+/** Экспортирован ради XHR-загрузок: им нужен прогресс, поэтому fetchJSON они
+ * не используют, а заголовок сессии должен остаться один на всю панель. */
+export const SESSION_HEADER = "X-Hermes-Session-Token";
 
 function setSessionHeader(headers: Headers, token: string): void {
   if (!headers.has(SESSION_HEADER)) {
@@ -663,7 +665,9 @@ export const api = {
       // /auth/logout returns 302 → /login. Follow that with a full-page
       // navigation rather than letting fetch() opaquely consume the
       // redirect — the SPA needs to leave the protected area.
-      window.location.assign("/login");
+      if (!r.ok && r.status !== 401) throw new Error("Не удалось завершить сессию.");
+      document.documentElement.style.visibility = "hidden";
+      window.location.assign(withBasePath("/login"));
       return r;
     }),
   getSessions: (
@@ -1027,6 +1031,8 @@ export const api = {
     }),
 
   // Profiles
+  getAgentTemplates: () =>
+    fetchJSON<{ templates: AgentTemplate[] }>("/api/agent-templates"),
   getProfiles: () =>
     fetchJSON<{ profiles: ProfileInfo[] }>("/api/profiles"),
   getActiveProfile: () =>
@@ -1039,6 +1045,9 @@ export const api = {
     }),
   createProfile: (body: {
     name: string;
+    template_id?: string;
+    template_version?: string;
+    idempotency_key?: string;
     display_name?: string;
     soul?: string;
     clone_from?: string | null;
@@ -1057,6 +1066,9 @@ export const api = {
       name: string;
       path: string;
       model_set?: boolean;
+      template_id?: string;
+      template_version?: string;
+      generation_checked?: boolean;
       mcp_written?: number;
       skills_disabled?: number;
       hub_installs?: Array<{ identifier: string; pid: number | null }>;
@@ -2776,6 +2788,14 @@ export interface ProfileMaterialInfo {
   filename?: string;
   updated_at?: string;
   url?: string;
+}
+
+export interface AgentTemplate {
+  id: string;
+  version: string;
+  name: string;
+  description: string;
+  requirements: string[];
 }
 
 export interface ProfileInfo {

@@ -62,14 +62,15 @@ import {
 } from "@/components/ChatAttachments";
 import {
   MAX_ATTACHMENTS,
-  MAX_ATTACHMENT_BYTES,
-  isImageKind,
-  kindOf,
   splitAttachments,
-  uploadAttachment,
   type PendingAttachment,
   type UploadedAttachment,
 } from "@/lib/chat-attachments";
+import { attachUploadBatch } from "@/lib/chat-upload-batch";
+import { readDroppedFolder, type FolderSelection } from "@/lib/folder-select";
+import { sendOriginals, setSendOriginals } from "@/lib/image-optimize";
+import { resumeUploadJob, excludeUploadFile, cancelUploadJob } from "@/store/upload-jobs";
+import { UploadJobsPanel } from "@/components/UploadJobsPanel";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { CopyTextButton } from "@/components/chat/CopyTextButton";
@@ -632,17 +633,12 @@ export function BubbleChatComposer({
   const [submitting, setSubmitting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const abortsRef = useRef<Record<string, () => void>>({});
+  const [originals, setOriginals] = useState(sendOriginals);
+  const [showAllAttachments, setShowAllAttachments] = useState(false);
   const attachmentsRef = useRef<PendingAttachment[]>([]);
   const textareaId = useId();
   const shortcutId = useId();
   const { themeName } = useTheme();
-
-  const patch = useCallback((id: string, next: Partial<PendingAttachment>) => {
-    setAttachments((list) =>
-      list.map((item) => (item.id === id ? { ...item, ...next } : item)),
-    );
-  }, [setAttachments]);
 
   const pickWorkspaceFile = useCallback((uploaded: UploadedAttachment) => {
     setAttachments(list => {
@@ -653,81 +649,22 @@ export function BubbleChatComposer({
     });
   }, [setAttachments]);
 
-  const startUpload = useCallback(
-    (item: PendingAttachment) => {
-      patch(item.id, { status: "uploading", progress: 0, error: undefined });
-      const { promise, abort } = uploadAttachment(
-        item.file,
-        (percent) => patch(item.id, { progress: percent }),
-        profile,
-      );
-      abortsRef.current[item.id] = abort;
-      promise
-        .then((uploaded) =>
-          patch(item.id, { status: "ready", progress: 100, uploaded }),
-        )
-        .catch((err: Error) =>
-          patch(item.id, {
-            status: "error",
-            error: ownerFacingError(err, "Не удалось загрузить вложение."),
-          }),
-        )
-        .finally(() => {
-          delete abortsRef.current[item.id];
-        });
-    },
-    [patch, profile],
-  );
-
-  const addFiles = useCallback(
-    (files: FileList | File[]) => {
-      const incoming = Array.from(files);
-      if (incoming.length === 0) return;
-      setComposerError(null);
-
-      const list = attachmentsRef.current;
-      const seen = new Set(list.map(item => `${item.name}:${item.size}:${item.file.lastModified}`));
-      const unique = incoming.filter(file => {
-        const key = `${file.name}:${file.size}:${file.lastModified}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      const room = MAX_ATTACHMENTS - list.length;
-      if (unique.length > room) {
-        setComposerError(`Не больше ${MAX_ATTACHMENTS} файлов в сообщении`);
-      }
-      const accepted: PendingAttachment[] = [];
-      for (const file of unique.slice(0, Math.max(0, room))) {
-        if (file.size === 0 || file.size > MAX_ATTACHMENT_BYTES) {
-          setComposerError(file.size === 0 ? `«${file.name}» — пустой файл` : `«${file.name}» больше 50 МБ`);
-          continue;
-        }
-        const kind = kindOf(file.name);
-        accepted.push({
-          id: crypto.randomUUID(), name: file.name, size: file.size, kind,
-          status: "uploading", progress: 0, file,
-          previewUrl: isImageKind(kind) ? URL.createObjectURL(file) : undefined,
-        });
-      }
-      // Reserve immediately, then upload outside React's replayable updater.
-      // Repeated drops and StrictMode must never create duplicate disk files.
-      const next = [...list, ...accepted];
-      attachmentsRef.current = next;
-      setAttachments(next);
-      accepted.forEach(startUpload);
-    },
-    [startUpload, setAttachments],
-  );
+  const addFiles = useCallback((files: FileList | File[], folder?: FolderSelection) => {
+    if (disabled || submitting || !active) return;
+    setComposerError(null);
+    void attachUploadBatch(Array.from(files), { profile, folder, originals, set: setAttachments })
+      .catch(cause => setComposerError(ownerFacingError(cause, "Не удалось подготовить вложения.")));
+  }, [active, disabled, submitting, profile, originals, setAttachments]);
 
   const removeAttachment = useCallback((id: string) => {
-    abortsRef.current[id]?.();
-    delete abortsRef.current[id];
-    setAttachments((list) => {
-      const gone = list.find((item) => item.id === id);
-      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
-      return list.filter((item) => item.id !== id);
-    });
+    const gone = attachmentsRef.current.find(item => item.id === id);
+    if (gone?.uploadId && gone.status !== "ready") {
+      if (gone.uploadIndex !== undefined) excludeUploadFile(gone.uploadId, gone.uploadIndex);
+      if (!attachmentsRef.current.some(item => item.id !== id && item.uploadId === gone.uploadId)) {
+        void cancelUploadJob(gone.uploadId).catch(cause => setComposerError(ownerFacingError(cause, "Не удалось отменить загрузку.")));
+      }
+    }
+    setAttachments(list => list.filter(item => item.id !== id));
   }, [setAttachments]);
 
   // Освобождение object URL при размонтировании. Через пустой список
@@ -842,7 +779,7 @@ export function BubbleChatComposer({
     if (disabled || submitting) cancelDictation();
   }, [cancelDictation, disabled, submitting]);
 
-  const uploading = attachments.some((item) => item.status === "uploading");
+  const uploading = attachments.some((item) => !["ready", "error"].includes(item.status));
   const failed = attachments.some((item) => item.status === "error");
   const ready = attachments.filter((item) => item.status === "ready");
 
@@ -984,7 +921,10 @@ export function BubbleChatComposer({
               if (!hasDraggedFiles(Array.from(e.dataTransfer.types))) return;
               e.preventDefault();
               setDragging(false);
-              if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
+              if (Array.from(e.dataTransfer.items ?? []).some(item => item.webkitGetAsEntry?.()?.isDirectory)) {
+                void readDroppedFolder(e.dataTransfer.items).then(folder => addFiles([], folder))
+                  .catch(cause => setComposerError(ownerFacingError(cause, "Не удалось прочитать папку.")));
+              } else if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
             }
           : undefined
       }
@@ -1069,16 +1009,25 @@ export function BubbleChatComposer({
               role="list"
               aria-label="Прикреплённые файлы"
             >
-              {attachments.map((item) => (
+              {(showAllAttachments ? attachments : attachments.slice(0, 12)).map((item) => (
                 <AttachmentChip
                   key={item.id}
                   item={item}
                   onRemove={() => removeAttachment(item.id)}
-                  onRetry={() => startUpload(item)}
+                  onRetry={() => item.uploadId && resumeUploadJob(item.uploadId)}
                 />
               ))}
             </div>
           )}
+
+          {attachments.length > 12 && <button type="button" className="px-3 py-2 text-xs" onClick={() => setShowAllAttachments(value => !value)}>
+            {showAllAttachments ? "Свернуть вложения" : `Ещё ${attachments.length - 12} вложений`}
+          </button>}
+          <UploadJobsPanel origin="chat" ids={[...new Set(attachments.flatMap(item => item.uploadId ? [item.uploadId] : []))]} />
+          {allowAttachments && <label className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={originals} onChange={event => { setOriginals(event.target.checked); setSendOriginals(event.target.checked); }} />
+            Отправлять оригиналы фото
+          </label>}
 
           {composerError && (
             <p
@@ -1097,6 +1046,8 @@ export function BubbleChatComposer({
               {allowAttachments && <WorkspaceFilePicker
                 disabled={!active || disabled || submitting || attachments.length >= MAX_ATTACHMENTS}
                 onPick={pickWorkspaceFile}
+                remaining={MAX_ATTACHMENTS - attachments.length}
+                profile={profile}
               />}
               {allowAttachments && (
                 <button

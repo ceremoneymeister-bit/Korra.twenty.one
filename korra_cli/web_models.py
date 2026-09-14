@@ -616,6 +616,10 @@ class SkillsUpdateRequest(BaseModel):
 
 class ProfileCreate(BaseModel):
     name: str
+    # First-party catalogue only; never a filesystem path or remote URL.
+    template_id: Optional[str] = None
+    template_version: Optional[str] = None
+    idempotency_key: Optional[str] = None
     display_name: Optional[str] = None
     # Exact SOUL.md text. None preserves the default/cloned persona.
     soul: Optional[str] = None

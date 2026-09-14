@@ -20,6 +20,7 @@ Usage::
 """
 
 import json
+import functools
 import logging
 import os
 import re
@@ -29,6 +30,7 @@ import stat
 import subprocess
 import sys
 import time
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -1424,6 +1426,28 @@ def profiles_to_serve(
     return serve
 
 
+_creation_lock_holder = threading.local()
+
+
+def profile_creation_lock():
+    """Serialize profile publication, including template and ordinary creates."""
+    from korra_cli.auth import _file_lock
+
+    return _file_lock(
+        _get_profiles_root() / ".creation.lock", _creation_lock_holder, 120,
+        "Другой агент ещё создаётся. Повторите добавление чуть позже.",
+    )
+
+
+def _serialize_profile_creation(function):
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        with profile_creation_lock():
+            return function(*args, **kwargs)
+    return wrapped
+
+
+@_serialize_profile_creation
 def create_profile(
     name: str,
     clone_from: Optional[str] = None,
@@ -1434,6 +1458,8 @@ def create_profile(
     description: Optional[str] = None,
     display_name: Optional[str] = None,
     soul: Optional[str] = None,
+    *,
+    _staging_dir: Optional[Path] = None,
 ) -> Path:
     """Create a new profile directory.
 
@@ -1461,6 +1487,10 @@ def create_profile(
     soul:
         Optional exact SOUL.md content. Omission preserves the default or
         cloned persona; an empty string explicitly clears it.
+    _staging_dir:
+        Internal template installer destination, not an API input. When set,
+        bootstrap here without registering a gateway; the caller publishes
+        the completed directory under profile_creation_lock().
 
     Returns
     -------
@@ -1481,7 +1511,7 @@ def create_profile(
             "Нельзя создать профиль 'default': это встроенный основной профиль Korra."
         )
 
-    profile_dir = get_profile_dir(canon)
+    profile_dir = _staging_dir if _staging_dir is not None else get_profile_dir(canon)
     if profile_dir.exists() and named_profile_is_deleted(profile_dir):
         # Empty shells left by post-delete mkdir may be replaced. Identity
         # files mean the leftover is not a shell — fail closed, no rmtree.
@@ -1653,7 +1683,8 @@ def create_profile(
     # `s6-svc -u` instead of spawning a bare process. On host (systemd
     # / launchd / windows) this is a no-op — the existing per-profile
     # unit-generation paths handle gateway lifecycle.
-    _maybe_register_gateway_service(canon)
+    if _staging_dir is None:
+        _maybe_register_gateway_service(canon)
 
     # Korra: под мультиплексом ни один вторичный профиль не должен объявлять
     # свой api_server — иначе движок пропускает все его адаптеры. Для свежего

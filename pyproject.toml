@@ -2,7 +2,7 @@
 
 [project]
 name = "hermes-agent"
-version = "0.21.5"
+version = "0.21.6"
 description = "The self-improving AI agent — creates skills from experience, improves them during use, and runs anywhere"
 readme = "README.md"
 # Upper bound is load-bearing, not cosmetic. uv resolves the project's
@@ -204,6 +204,10 @@ parallel-web = ["parallel-web==0.4.2"]
 # macOS поведение апстрима сохраняется, в образ она приезжает явным
 # `--extra ddgs` в Dockerfile (тем же приёмом, что [voice]).
 ddgs = ["ddgs==9.16.0"]
+# Editable presentation production. The Korra image includes this explicitly;
+# CLI-only installs need not pull it in through core/[all]. System renderers
+# (LibreOffice and poppler) are installed by the image, not at first use.
+design = ["python-pptx==1.0.2"]
 # Image generation backends
 fal = ["fal-client==0.13.1"]
 # Edge TTS — default TTS provider but still optional (users can pick
@@ -641,7 +645,7 @@ py-modules = [
 include = ["agent", "agent.*", "tools", "tools.*", "korra_cli", "korra_cli.*", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "cron.*", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*"]
 
 [tool.setuptools.package-data]
-korra_cli = ["observability/schemas/*.json", "data/*.json"]
+korra_cli = ["observability/schemas/*.json", "data/*.json", "data/agent_templates/**/*"]
 # gateway/assets/ ships status_phrases.yaml and the Telegram BotFather
 # screenshot. Without this, sealed venvs (uv2nix) silently lose both —
 # status phrases fall back to the tiny hardcoded set and the Telegram

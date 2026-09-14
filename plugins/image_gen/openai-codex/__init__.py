@@ -1406,6 +1406,16 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 aspect_ratio=aspect,
             )
 
+        pixel_size = f"{output_meta['width']}x{output_meta['height']}"
+        size_matches_request = None if size == "auto" else pixel_size == size
+        size_warning = None
+        if size_matches_request is False:
+            size_warning = (
+                f"Requested {size}, but the generated original is {pixel_size}. "
+                "Report the actual dimensions. Keep this original; if an exact "
+                "canvas is needed, offer a separate crop/pad/resize export. "
+                "Do not silently stretch or regenerate the image."
+            )
         receipt_path = None
         receipt_error = None
         if kwargs.get("receipt") is True:
@@ -1422,6 +1432,8 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                     "host_model": _CODEX_CHAT_MODEL,
                     "quality": quality,
                     "size": size,
+                    "size_matches_request": size_matches_request,
+                    "size_warning": size_warning,
                     "background": background,
                     "output_format": output_format,
                     "output_compression": output_compression,
@@ -1461,7 +1473,9 @@ class OpenAICodexImageGenProvider(ImageGenProvider):
                 "input_image_count": len(input_images),
                 "image_source": image_source,
                 "requested_size": size,
-                "pixel_size": f"{output_meta['width']}x{output_meta['height']}",
+                "pixel_size": pixel_size,
+                "size_matches_request": size_matches_request,
+                "size_warning": size_warning,
                 "receipt": str(receipt_path) if receipt_path else None,
                 "receipt_error": receipt_error,
             },
