@@ -8,7 +8,7 @@
     {"spec": "pdfplumber==0.11.7", "module": "pdfplumber"},
     {"spec": "pypdfium2==4.30.0", "module": "pypdfium2"},
     {"spec": "pandas==2.3.2", "module": "pandas"},
-    {"spec": "xlsxwriter==3.2.5", "module": "xlsxwriter"},
+    {"spec": "xlsxwriter==3.2.9", "module": "xlsxwriter"},
     {"spec": "pymupdf==1.26.4", "module": "fitz"},
     {"spec": "matplotlib==3.10.6", "module": "matplotlib"},
     {"spec": "tabulate==0.10.0", "module": "tabulate"},

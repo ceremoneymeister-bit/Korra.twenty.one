@@ -132,6 +132,29 @@ def test_missing_provider_reports_actionable_error():
     ci.validate_health({"gateway_running": True, "version": "1"}, {"status": "ok", "version": "1"})
 
 
+def test_host_dependency_conflict_is_refused_before_publication():
+    pins = ci.host_dependency_pins([{"spec": "xlsxwriter==3.2.5", "module": "xlsxwriter"}])
+    with pytest.raises(ci.AcceptanceError, match="conflict"):
+        ci.validate_host_dependencies(pins, {"xlsxwriter": "3.2.9"})
+
+
+def test_host_dependency_gate_allows_matching_core_and_packages_for_warmup():
+    pins = ci.host_dependency_pins([{"spec": "core-package==2.0"}, {"spec": "optional-package==1.0"}])
+    ci.validate_host_dependencies(pins, {"core-package": "2.0", "optional-package": None})
+
+
+@pytest.mark.parametrize("packages", [[], [{"spec": "package>=1"}], [{"spec": "package==1"}, {"spec": "package==2"}], [None]])
+def test_host_dependency_gate_refuses_malformed_or_duplicate_pins(packages):
+    with pytest.raises(ci.AcceptanceError):
+        ci.host_dependency_pins(packages)
+
+
+@pytest.mark.parametrize("installed", [{}, {"package": ""}, {"package": False}, {"package": "1", "other": "1"}])
+def test_host_dependency_gate_does_not_assume_unverified_metadata(installed):
+    with pytest.raises(ci.AcceptanceError):
+        ci.validate_host_dependencies({"package": "1"}, installed)
+
+
 @pytest.mark.parametrize("body", ["", "data: [DONE]", stream(reason="stop"), stream(message=""), stream(done=False)])
 def test_missing_provider_cannot_appear_successful_or_empty(body):
     with pytest.raises(ci.AcceptanceError):
@@ -179,7 +202,7 @@ def test_probe_failure_cleans_only_generated_container(monkeypatch):
     assert commands[-1] == ("docker", "rm", "--force", "--volumes", name)
 
 
-def image_daemon(release_note, help_text="usage: korra"):
+def image_daemon(release_note, help_text="usage: korra", host_versions=None):
     """Docker, отвечающий как на живом образе. Пробы подменены целиком."""
     def docker(*args, **kwargs):
         if args[:3] == ("docker", "image", "inspect"):
@@ -187,6 +210,8 @@ def image_daemon(release_note, help_text="usage: korra"):
         if args[:2] == ("docker", "inspect"):
             return json.dumps([{"State": {"Running": True}, "Image": IMAGE_ID}])
         if args[:2] == ("docker", "exec"):
+            if args[-2] == "host-dependencies":
+                return json.dumps({name: (host_versions or {}).get(name) for name in json.loads(args[-1])})
             if args[-1] == "health":
                 return json.dumps({"panel": {"gateway_running": True, "version": "1"},
                                    "api": {"status": "ok", "version": "1"}})
@@ -198,6 +223,13 @@ def image_daemon(release_note, help_text="usage: korra"):
                 return help_text
         return ""
     return docker
+
+
+def test_clean_boot_does_not_admit_a_conflicting_host_kit(monkeypatch):
+    monkeypatch.setattr(ci, "run", image_daemon(
+        {"release_id": "K21-test", "revision": REVISION}, host_versions={"xlsxwriter": "0.0-conflicting"}))
+    with pytest.raises(ci.AcceptanceError, match="Host dependency pins conflict"):
+        ci.check_image(IMAGE_ID, revision=REVISION)
 
 
 def test_release_notes_must_be_stamped_with_the_build_revision():

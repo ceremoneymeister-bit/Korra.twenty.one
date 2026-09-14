@@ -127,6 +127,30 @@ def validate_sse(body: str) -> None:
         raise AcceptanceError("Missing-provider chat did not explain how to configure Ключи")
 
 
+def host_dependency_pins(packages: list[dict]) -> dict[str, str]:
+    if not isinstance(packages, list) or not packages:
+        raise AcceptanceError("Host dependency manifest must contain pinned packages")
+    pins = {}
+    for package in packages:
+        spec = package.get("spec") if isinstance(package, dict) else None
+        if not isinstance(spec, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+==[A-Za-z0-9_.+-]+", spec):
+            raise AcceptanceError("Host dependency manifest must contain exact pins")
+        name, version = spec.split("==")
+        if name in pins:
+            raise AcceptanceError("Duplicate host dependency pin")
+        pins[name] = version
+    return pins
+
+
+def validate_host_dependencies(pins: dict[str, str], installed: dict[str, str | None]) -> None:
+    if not isinstance(installed, dict) or set(installed) != set(pins):
+        raise AcceptanceError("Image host-dependency metadata is incomplete")
+    # Missing packages are supplied by native warmup. An already installed core
+    # version is immutable: install_specs cannot downgrade it to a stale host pin.
+    if any(version is not None and version != pins[name] for name, version in installed.items()):
+        raise AcceptanceError("Host dependency pins conflict with immutable image core")
+
+
 # Executed by the image's own Python, as the normal runtime UID. Only synthetic
 # local API auth is read, and it is never returned to the runner.
 PROBE = r'''
@@ -176,6 +200,15 @@ elif mode == 'release':
     note = release_notes.current_release()
     print(json.dumps({'release_id': note.release_id if note else '',
                       'revision': note.revision if note else ''}))
+elif mode == 'host-dependencies':
+    import importlib.metadata
+    installed = {}
+    for name in json.loads(sys.argv[2]):
+        try:
+            installed[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            installed[name] = None
+    print(json.dumps(installed))
 elif mode == 'chat':
     env = (data / '.env').read_text()
     key = re.search(r'^API_SERVER_KEY=(.+)$', env, re.M).group(1)
@@ -245,6 +278,11 @@ def check_image(image: str, timeout: int = 180, revision: str = "") -> list[str]
                     raise AcceptanceError("Timed out waiting for dashboard and API JSON readiness")
                 time.sleep(2)
         probe("bootstrap")
+        packages = json.loads(Path(__file__).with_name("dependencies.lock.json").read_text())["packages"]
+        pins = host_dependency_pins(packages)
+        installed = json.loads(run("docker", "exec", "--user", "10000:10000", name, "python", "-c", PROBE,
+                                   "host-dependencies", json.dumps(list(pins)), timeout=40))
+        validate_host_dependencies(pins, installed)
         if revision:
             validate_release_note(json.loads(probe("release")), revision)
         help_text = run("docker", "exec", "--user", "10000:10000", name, "korra", "--help")
@@ -256,7 +294,8 @@ def check_image(image: str, timeout: int = 180, revision: str = "") -> list[str]
             raise AcceptanceError("Clean candidate tried to connect a Telegram bot")
         return ["dashboard and API JSON readiness", "clean bootstrap and empty credentials/cron",
                 "Korra CLI, skill and dashboard assets", "missing-provider SSE error with Ключи hint",
-                "no Telegram connection; network disabled"] + (
+                "no Telegram connection; network disabled",
+                "host dependency pins compatible with immutable image core"] + (
                     ["release notes stamped with this build revision"] if revision else [])
     finally:
         # The name is generated above, never supplied by the operator. --volumes
