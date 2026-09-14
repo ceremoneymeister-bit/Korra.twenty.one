@@ -587,6 +587,7 @@ pytest-asyncio = false
 python-dotenv = false
 python-multipart = false
 python-olm = false
+python-pptx = false
 python-telegram-bot = false
 pyyaml = false
 qrcode = false

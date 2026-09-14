@@ -38,6 +38,7 @@ ruff = false
 exa-py = false
 mcp = false
 python-olm = false
+python-pptx = false
 wheel = false
 websockets = false
 pytest = false
