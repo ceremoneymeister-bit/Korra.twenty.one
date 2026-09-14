@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -32,6 +33,7 @@ class FakeDockerUpdater(u.Updater):
         self.is_draining = False
         self.wrong_mount = False
         self.mounts_override = None
+        self.extra_env = []
         self.tags = {}
         self.judge_verdict = {"bad": []}
         self.judge_image_missing = False
@@ -60,7 +62,7 @@ class FakeDockerUpdater(u.Updater):
                 "State": {"Running": self.running},
                 "Mounts": mounts,
                 "HostConfig": {"NetworkMode": "host"},
-                "Config": {"Cmd": ["gateway", "run"], "Env": [f"KORRA_DASHBOARD_PORT={self.panel}", f"API_SERVER_PORT={self.api}"]}}])
+                "Config": {"Cmd": ["gateway", "run"], "Env": [f"KORRA_DASHBOARD_PORT={self.panel}", f"API_SERVER_PORT={self.api}", *self.extra_env]}}])
         if args[:2] == ("image", "inspect"):
             return json.dumps([{"Id": self.tags.get(args[2], OLD if args[2] == OLD else NEW), "Size": 1}])
         if args[:2] == ("image", "tag"):
@@ -212,6 +214,144 @@ def test_exact_optional_google_oauth_mount_is_accepted_in_any_order(updater):
     updater.validate_google_oauth_source = lambda _gid: None
 
     assert updater.inspect_target()["Image"] == OLD
+
+
+def _telegram_mount(updater):
+    source = updater.home.parent / "telegram-bot-api"
+    source.mkdir(exist_ok=True)
+    updater.extra_env = ["KORRA_TELEGRAM_LOCAL_ROOT=/opt/data/telegram-bot-api"]
+    return {"Type": "bind", "Source": str(source),
+            "Destination": "/opt/data/telegram-bot-api", "RW": False}
+
+
+def test_existing_telegram_media_mount_survives_update_and_rollback(updater):
+    updater.mounts_override = [_telegram_mount(updater), _data_mount(updater)]
+    updater.update("registry.example/korra:latest")
+    assert updater.receipt["status"] == "succeeded"
+    assert updater.receipt["telegram_mount"] == {
+        "present": True, "source": updater.mounts_override[0]["Source"],
+        "destination": "/opt/data/telegram-bot-api",
+    }
+    updater.rollback()
+    assert updater.image == OLD
+    assert updater.inspect_target()["Mounts"] == updater.mounts_override
+
+
+@pytest.mark.parametrize("change", ["missing", "source", "writeable", "environment", "extra", "symlink"])
+def test_telegram_media_contract_cannot_change_after_capture(updater, change):
+    mount = _telegram_mount(updater)
+    updater.mounts_override = [_data_mount(updater), mount]
+    initial = updater.inspect_target()
+    updater.receipt["telegram_mount"] = updater.telegram_mount_contract(initial)
+    if change == "missing":
+        updater.mounts_override.pop()
+        updater.extra_env = []
+    elif change == "source":
+        other = updater.home.parent / "foreign-media"
+        other.mkdir()
+        mount["Source"] = str(other)
+    elif change == "writeable":
+        mount["RW"] = True
+    elif change == "environment":
+        updater.extra_env = []
+    elif change == "extra":
+        updater.mounts_override.append(dict(mount))
+    else:
+        source = Path(mount["Source"])
+        other = source.with_name("displaced-media")
+        source.rename(other)
+        source.symlink_to(other, target_is_directory=True)
+    with pytest.raises(u.UpdateError):
+        updater.inspect_target()
+
+
+def test_telegram_mount_cannot_appear_after_absent_baseline(updater):
+    updater.receipt["telegram_mount"] = updater.telegram_mount_contract(updater.inspect_target())
+    updater.mounts_override = [_data_mount(updater), _telegram_mount(updater)]
+    with pytest.raises(u.UpdateError):
+        updater.inspect_target()
+
+
+def test_telegram_source_inside_swapped_data_is_refused_before_mutation(updater):
+    mount = _telegram_mount(updater)
+    source = updater.data / "telegram-bot-api"
+    source.mkdir()
+    mount["Source"] = str(source)
+    updater.mounts_override = [_data_mount(updater), mount]
+    before = u.tree_manifest(updater.data)
+    with pytest.raises(u.UpdateError):
+        updater.update("registry.example/korra:latest")
+    assert u.tree_manifest(updater.data) == before
+    assert not any(call[0] in {"pull", "native", "stop", "start_image"} for call in updater.calls)
+
+
+@pytest.mark.parametrize("rollback", [False, True])
+def test_launcher_gets_exact_telegram_mount_not_ambient_overrides(updater, monkeypatch, rollback):
+    mount = _telegram_mount(updater)
+    updater.mounts_override = [_data_mount(updater), mount]
+    updater.receipt["telegram_mount"] = updater.telegram_mount_contract(updater.inspect_target())
+    updater.receipt["phase"] = "rollback_recreate" if rollback else "recreate"
+    updater.receipt["old_resources"] = {"nano_cpus": 0, "memory_bytes": 0}
+    monkeypatch.setenv("BOT_API_DIR", "/foreign")
+    monkeypatch.setenv("BOT_API_DEST", "/foreign")
+    captured = []
+    monkeypatch.setattr(u.subprocess, "run", lambda *a, **kw:
+                        captured.append(kw["env"]) or types.SimpleNamespace(returncode=0, stdout=""))
+    u.Updater.start_image(updater, NEW)
+    assert captured[0]["BOT_API_DIR"] == mount["Source"]
+    assert captured[0]["BOT_API_DEST"] == mount["Destination"]
+    assert captured[0]["BOT_API_AUTODETECT"] == "0"
+
+
+def test_absent_telegram_contract_disables_launcher_discovery(updater):
+    updater.receipt["telegram_mount"] = updater.telegram_mount_contract(updater.inspect_target())
+    assert updater.launch_telegram_env() == {
+        "BOT_API_DIR": "", "BOT_API_DEST": "", "BOT_API_AUTODETECT": "0",
+    }
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_real_launcher_preserves_captured_media_contract_without_docker_discovery(updater, present):
+    if present:
+        updater.mounts_override = [_data_mount(updater), _telegram_mount(updater)]
+    updater.receipt["telegram_mount"] = updater.telegram_mount_contract(updater.inspect_target())
+    u.shutil.copy2(SOURCE.with_name("up.sh"), updater.home / "up.sh")
+    (updater.data / "config.yaml").write_text("telegram_base_url: http://127.0.0.1:19999/bot\n")
+    binaries = updater.home / "bin"
+    binaries.mkdir()
+    docker = binaries / "docker"
+    docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_CALL_LOG"\nexit 77\n')
+    docker.chmod(0o755)
+    env = {**os.environ, "DATA": str(updater.data), "ENGINE_UID": str(os.getuid()),
+           "ENGINE_GID": str(os.getgid()), "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
+           "DOCKER_CALL_LOG": str(updater.home / "docker-calls.log"),
+           **updater.launch_telegram_env()}
+    result = subprocess.run(["bash", str(updater.home / "up.sh"), "--dry-run"],
+                            env=env, text=True, capture_output=True, check=True)
+    argv = shlex.split(result.stdout.splitlines()[-1])
+    assert not (updater.home / "docker-calls.log").exists()
+    media = [argv[i+1] for i, value in enumerate(argv[:-1])
+             if value == "--mount" and "telegram-bot-api" in argv[i+1]]
+    if present:
+        contract = updater.receipt["telegram_mount"]
+        assert media == [f"type=bind,src={contract['source']},dst={contract['destination']},readonly"]
+        assert "KORRA_TELEGRAM_LOCAL_ROOT=" + contract["destination"] in argv
+    else:
+        assert media == []
+        assert not any(value.startswith("KORRA_TELEGRAM_LOCAL_ROOT=") for value in argv)
+
+
+def test_telegram_and_google_mounts_can_coexist_without_allowing_other_binds(updater):
+    updater.mounts_override = [_telegram_mount(updater), _google_mount(updater), _data_mount(updater)]
+    updater.validate_google_oauth_source = lambda _gid: None
+    assert updater.inspect_target()["Image"] == OLD
+
+
+@pytest.mark.parametrize("source", ["/", "/root", "/opt/data", "/host/path,readonly=false", "relative/path"])
+def test_telegram_contract_rejects_broad_and_malformed_sources(updater, source):
+    with pytest.raises(u.UpdateError):
+        updater.validate_telegram_contract({"present": True, "source": source,
+                                            "destination": "/opt/data/telegram-bot-api"})
 
 
 def test_google_mount_source_must_exist_and_must_not_be_a_dangling_symlink(updater):

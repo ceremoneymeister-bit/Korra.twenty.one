@@ -675,9 +675,56 @@ class Updater:
             "source": mount.get("Source") if mount is not None else None,
         }
 
+    def validate_telegram_contract(self, contract):
+        if not isinstance(contract, dict) or set(contract) != {"present", "source", "destination"}:
+            raise UpdateError("Malformed Telegram media mount contract")
+        if contract["present"] is False:
+            if contract["source"] is not None or contract["destination"] is not None:
+                raise UpdateError("Malformed absent Telegram media mount contract")
+            return
+        # Only the existing dedicated media mount is supported. Never turn an
+        # arbitrary extra bind (or a writable media bind) into an allowed mount.
+        if contract["present"] is not True or contract["destination"] != "/opt/data/telegram-bot-api":
+            raise UpdateError("Unsupported Telegram media mount destination")
+        source = contract["source"]
+        if not isinstance(source, str) or any(c in source for c in (",", "\n", "\r", "\0")):
+            raise UpdateError("Unsafe Telegram media mount source")
+        path = Path(source)
+        if (not path.is_absolute() or len(path.parts) < 4 or path.resolve() != path
+                or not path.is_dir() or self.data.is_relative_to(path) or path.is_relative_to(self.data)
+                or self.home.is_relative_to(path)):
+            raise UpdateError("Telegram media source must remain a dedicated non-symlink directory")
+
+    def telegram_mount_contract(self, info):
+        destination = "/opt/data/telegram-bot-api"
+        mounts = [item for item in info.get("Mounts", []) if item.get("Destination") == destination]
+        environment = dict(item.split("=", 1) for item in info["Config"].get("Env", []) if "=" in item)
+        root = environment.get("KORRA_TELEGRAM_LOCAL_ROOT", "")
+        if not mounts and not root:
+            return {"present": False, "source": None, "destination": None}
+        if (len(mounts) != 1 or root != destination
+                or mounts[0].get("Type") != "bind" or mounts[0].get("RW") is not False):
+            raise UpdateError("Container identity/mount differs from Telegram media contract")
+        contract = {"present": True, "source": mounts[0].get("Source"), "destination": destination}
+        self.validate_telegram_contract(contract)
+        return contract
+
+    def launch_telegram_env(self):
+        contract = self.receipt.get("telegram_mount")
+        if contract is None:
+            # Receipts created by older updaters keep their historical launcher
+            # behaviour. Every newly admitted update records even absence.
+            return {}
+        self.validate_telegram_contract(contract)
+        return {"BOT_API_DIR": contract["source"] or "", "BOT_API_DEST": contract["destination"] or "",
+                "BOT_API_AUTODETECT": "0"}
+
     def inspect_target(self, expected=None, running=True, timeout=120):
         info = json.loads(self.docker("inspect", self.name, timeout=timeout))[0]
         mounts = info.get("Mounts", [])
+        telegram = self.telegram_mount_contract(info)
+        if "telegram_mount" in self.receipt and self.receipt["telegram_mount"] != telegram:
+            raise UpdateError("Telegram media mount differs from the preserved baseline")
         expected_mounts = {
             "/opt/data": (str(self.data), True),
             "/run/korra-secrets/google-oauth-client.json": (
@@ -685,8 +732,10 @@ class Updater:
                 False,
             ),
         }
+        if telegram["present"]:
+            expected_mounts[telegram["destination"]] = (telegram["source"], False)
         seen_mounts = set()
-        mounts_ok = len(mounts) in (1, 2)
+        mounts_ok = 1 <= len(mounts) <= len(expected_mounts)
         for mount in mounts:
             destination = mount.get("Destination")
             expected_mount = expected_mounts.get(destination)
@@ -963,6 +1012,7 @@ class Updater:
         rollback = self.receipt["phase"] == "rollback_recreate"
         resources = self.launch_resource_env(rollback=rollback)
         runtime = self.launch_runtime_env(rollback=rollback)
+        telegram = self.launch_telegram_env()
         google_contract = self.receipt.get("google_oauth_mount")
         if isinstance(google_contract, dict) and google_contract.get("present") is True:
             self.validate_google_oauth_source(runtime["ENGINE_GID"])
@@ -970,7 +1020,7 @@ class Updater:
         env = {**os.environ, "NAME": self.name, "DATA": str(self.data),
                "PANEL_PORT": str(self.panel), "API_PORT": str(self.api),
                "KORRA_UPDATER_JOB": self.receipt["job_id"],
-               "KORRA_UPDATER_ROLLBACK": "1" if rollback else "0", **resources, **runtime}
+               "KORRA_UPDATER_ROLLBACK": "1" if rollback else "0", **resources, **runtime, **telegram}
         result = subprocess.run(["bash", str(self.home / "up.sh")], env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=1500)
@@ -1434,6 +1484,7 @@ print(json.dumps(changed))
             }
             self.receipt["old_runtime"] = runtime_env_from_info(initial)
             self.receipt["google_oauth_mount"] = self.google_oauth_mount_contract(initial)
+            self.receipt["telegram_mount"] = self.telegram_mount_contract(initial)
             self.launch_runtime_env()  # invalid ownership/admin overrides fail before pull/drain
             if self.receipt.get("expected_current") not in (None, old):
                 self.receipt["error_code"] = "expected_current_mismatch"

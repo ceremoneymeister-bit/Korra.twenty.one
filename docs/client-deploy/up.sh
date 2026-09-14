@@ -12,7 +12,8 @@
 #
 # Полномочия намеренно минимальные: без docker.sock, без монтирования корня
 # хоста, без монтирования кода движка. Кроме каталога данных допускается
-# только отдельный read-only file mount операторского Google OAuth-клиента.
+# отдельный read-only file mount операторского Google OAuth-клиента и
+# read-only каталог медиа существующего локального Telegram Bot API.
 set -euo pipefail
 
 # ─── Параметры контура ──────────────────────────────────────────────────────
@@ -122,11 +123,12 @@ fi
 BOT_API_ARGS=()
 BOT_API_DIR="${BOT_API_DIR:-}"
 BOT_API_DEST="${BOT_API_DEST:-}"
-if [ -z "$BOT_API_DIR" ] && [ -s "$DATA/config.yaml" ]; then
+BOT_API_AUTODETECT="${BOT_API_AUTODETECT:-1}"
+if [ "$BOT_API_AUTODETECT" = 1 ] && [ -z "$BOT_API_DIR" ] && [ -s "$DATA/config.yaml" ]; then
     # Совпадает только со своим сервером: у адреса Bot API путь /bot на конце,
     # чего нет у прочих локальных адресов в конфиге (например, у провайдера).
     BOT_API_PORT=$(grep -oE 'https?://(127\.0\.0\.1|localhost):[0-9]+/bot$' "$DATA/config.yaml" \
-        | head -1 | sed -E 's#.*:([0-9]+)/bot$#\1#')
+        | head -1 | sed -E 's#.*:([0-9]+)/bot$#\1#' || true)
     if [ -n "$BOT_API_PORT" ] && command -v docker >/dev/null 2>&1; then
         for candidate in $(docker ps -q 2>/dev/null); do
             CANDIDATE_CMD=$(docker inspect "$candidate" --format '{{range .Config.Cmd}}{{println .}}{{end}}' 2>/dev/null || true)
