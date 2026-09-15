@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   productHomePath,
+  resolveOpenGroup,
   selectProductNav,
   selectProductSettingsNav,
   selectProductSidebar,
@@ -136,6 +137,46 @@ describe("selectProductSidebar", () => {
     expect(paths).not.toContain("/achievements");
     expect(paths).not.toContain("/kanban");
     expect(paths).toContain("/sessions");
+  });
+});
+
+describe("resolveOpenGroup", () => {
+  const groups = selectProductSidebar(ADMIN_NAV, PLUGIN_NAV, "fleet");
+
+  it("раскрывает группу текущего экрана — в том числе после прямого перехода и F5", () => {
+    // Свежее состояние без выбора пользователя = прямой заход или обновление.
+    expect(resolveOpenGroup("/sessions", groups, null)).toBe("service");
+    expect(resolveOpenGroup("/achievements", groups, null)).toBe("service");
+    expect(resolveOpenGroup("/env", groups, null)).toBe("settings");
+    // Вложенный экран открывает группу своего пункта.
+    expect(resolveOpenGroup("/help/tasks", groups, null)).toBe("settings");
+    expect(resolveOpenGroup("/profiles/new", groups, null)).toBe("service");
+  });
+
+  it("держит группы закрытыми на экранах главного списка", () => {
+    expect(resolveOpenGroup("/agents", groups, null)).toBeNull();
+    expect(resolveOpenGroup("/kanban", groups, null)).toBeNull();
+    // До загрузки манифестов групп ещё нет — и открывать нечего.
+    expect(resolveOpenGroup("/sessions", null, null)).toBeNull();
+  });
+
+  it("не открывает заново группу, свёрнутую вручную на этом же экране", () => {
+    const collapsed = { path: "/sessions", group: null };
+    expect(resolveOpenGroup("/sessions", groups, collapsed)).toBeNull();
+    // Выбор пользователя важнее авто-раскрытия и на соседней группе.
+    expect(
+      resolveOpenGroup("/sessions", groups, { path: "/sessions", group: "settings" }),
+    ).toBe("settings");
+  });
+
+  it("снова раскрывает группу при переходе на другой её пункт", () => {
+    const collapsed = { path: "/sessions", group: null };
+    expect(resolveOpenGroup("/achievements", groups, collapsed)).toBe("service");
+    expect(resolveOpenGroup("/skills", groups, collapsed)).toBe("service");
+    // Ручное раскрытие на прежнем экране не тянется на экран другой группы.
+    expect(
+      resolveOpenGroup("/env", groups, { path: "/agents", group: "service" }),
+    ).toBe("settings");
   });
 });
 

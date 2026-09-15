@@ -209,6 +209,42 @@ export interface ProductSidebarGroups<T extends NavEntry> {
   service: T[];
 }
 
+/** Свёрнутые группы сайдбара. Главный список не сворачивается. */
+export type SidebarGroupKey = "settings" | "service";
+
+/** Что пользователь сам раскрыл или свернул, находясь на этом маршруте. */
+export interface SidebarGroupChoice {
+  path: string;
+  group: SidebarGroupKey | null;
+}
+
+/**
+ * Какая группа сайдбара раскрыта.
+ *
+ * По умолчанию раскрыта группа текущего экрана: иначе после прямого перехода
+ * на `/sessions` или `/achievements` и после F5 активный пункт спрятан внутри
+ * свёрнутой группы и пользователь не видит, где находится. Выбор пользователя
+ * важнее авто-раскрытия, но действует только на том маршруте, где он сделан:
+ * свёрнутая вручную группа не открывается сама, пока не сменится экран.
+ */
+export function resolveOpenGroup<T extends NavEntry>(
+  path: string,
+  groups: ProductSidebarGroups<T> | null,
+  choice: SidebarGroupChoice | null,
+): SidebarGroupKey | null {
+  if (choice && choice.path === path) return choice.group;
+  if (!groups) return null;
+  // Совпадение как у ссылки сайдбара: вложенный экран (`/help/tasks`,
+  // `/profiles/new`) подсвечивает свой пункт, значит и группу открывает он же.
+  const holds = (items: T[]) =>
+    items.some(
+      (item) => item.path === path || path.startsWith(`${item.path}/`),
+    );
+  if (holds(groups.settings)) return "settings";
+  if (holds(groups.service)) return "service";
+  return null;
+}
+
 /**
  * Итоговый состав сайдбара продукта: главный список, «Настройки», «Служебное».
  *
