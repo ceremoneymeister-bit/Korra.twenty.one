@@ -63,8 +63,8 @@ export interface ThemeLayout {
   /** Corner-radius token. Example: `"0"`, `"0.25rem"`, `"0.5rem"`,
    *  `"1rem"`. Maps to `--radius` and cascades into every component. */
   radius: string;
-  /** Spacing multiplier. `compact` = 0.85, `comfortable` = 1.0 (default),
-   *  `spacious` = 1.2. Applied via the `--spacing-mul` CSS var. */
+  /** Spacing multiplier. `compact` = 0.8, `comfortable` = 0.9 (default),
+   *  `spacious` = 1.05. Applied via the `--theme-spacing-mul` CSS var. */
   density: ThemeDensity;
 }
 

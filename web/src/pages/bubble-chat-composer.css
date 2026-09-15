@@ -2,12 +2,13 @@
  * the first row; attachment/dictation/send controls always own the last. */
 
 .korra-chat-transcript__content {
-  padding-bottom: 28px;
+  padding-bottom: calc(var(--korra-space, 0.25rem) * 7);
 }
 
 .korra-chat-composer {
   flex-shrink: 0;
-  padding: 0 16px 22px;
+  /* В единицах плотности продукта: 16/22 px при множителе 1, компактнее на ноутбуке. */
+  padding: 0 calc(var(--korra-space, 0.25rem) * 4) calc(var(--korra-space, 0.25rem) * 5.5);
 }
 
 .korra-chat-composer__dropzone {
@@ -21,10 +22,10 @@
   position: relative;
   isolation: isolate;
   display: flex;
-  min-height: 120px;
+  min-height: calc(var(--korra-space, 0.25rem) * 30);
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: calc(var(--korra-space, 0.25rem) * 2);
+  padding: calc(var(--korra-space, 0.25rem) * 2) calc(var(--korra-space, 0.25rem) * 3);
   overflow: hidden;
   border: 0;
   border-radius: var(--neo-radius-card);

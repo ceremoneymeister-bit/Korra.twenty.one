@@ -114,8 +114,19 @@
   /* Layout tokens. */
   --radius: 0.5rem;
   --theme-radius: 1rem;
-  --theme-spacing-mul: 1;
+  /* Стандартная плотность продукта — 0.9 от шкалы Tailwind: панели, шапки,
+     отступы и высоты контролов на 10 % компактнее, размер текста не меняется.
+     Держать в согласии с DENSITY_MULTIPLIERS.comfortable в themes/context.tsx. */
+  --theme-spacing-mul: 0.9;
   --theme-density: comfortable;
+  /* Адаптивный множитель: ThemeProvider пишет --theme-spacing-mul inline и
+     media-правило его не перебило бы, поэтому размер окна учитывается
+     отдельным сомножителем. На 13″ ноутбуке и планшете (≤ 1440 CSS px по
+     ширине или ≤ 900 по высоте) итог 0.9 × 0.94 ≈ 0.85 — уровень «compact». */
+  --korra-density-viewport: 1;
+  /* Единая единица отступов продукта: та же, что у утилит Tailwind (p-N,
+     gap-N, w-N, h-N), доступна и обычному CSS (composer, лента чата). */
+  --korra-space: calc(0.25rem * var(--theme-spacing-mul, 1) * var(--korra-density-viewport, 1));
 
   /* transitions.dev motion scale. Components consume only these semantic
      timings/curves; palette changes stay instant when the theme flips. */
@@ -175,7 +186,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
    Tailwind's spacing scale; multiplying `--spacing` at :root scales them
    all proportionally in Tailwind v4. */
 @theme inline {
-  --spacing: calc(0.25rem * var(--theme-spacing-mul, 1));
+  --spacing: var(--korra-space);
   --font-sans: var(--theme-font-sans);
   --font-mono: var(--theme-font-mono);
 }
@@ -376,6 +387,16 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
     max-height: none;
     overflow-x: hidden;
     overflow-y: auto;
+  }
+}
+
+/* Небольшой ноутбук и планшет: чуть плотнее, чтобы переписке и файлам
+   оставалось больше места. Текст, touch targets (правила выше в px) и
+   пользовательский zoom не затрагиваются. Телефон (≤ 768) и большой экран
+   остаются на своей плотности. */
+@media (max-width: 1440px) and (min-width: 769px), (max-height: 900px) and (min-width: 769px) {
+  :root {
+    --korra-density-viewport: 0.94;
   }
 }
 

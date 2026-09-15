@@ -81,10 +81,14 @@ function paletteVars(palette: ThemePalette): Record<string, string> {
   };
 }
 
+/** `comfortable` — стандарт продукта (обе встроенные темы): 0.9 от шкалы
+ *  Tailwind, ещё × 0.94 на небольшом ноутбуке/планшете через
+ *  `--korra-density-viewport` в index.css. Плотность пользователю не
+ *  предлагается, поэтому сдвиг стандарта не ломает сохранённых настроек. */
 const DENSITY_MULTIPLIERS: Record<ThemeDensity, string> = {
-  compact: "0.85",
-  comfortable: "1",
-  spacious: "1.2",
+  compact: "0.8",
+  comfortable: "0.9",
+  spacious: "1.05",
 };
 
 function typographyVars(typo: ThemeTypography): Record<string, string> {
