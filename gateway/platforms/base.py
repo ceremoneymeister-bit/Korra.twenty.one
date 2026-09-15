@@ -1344,26 +1344,52 @@ def _profile_cache_roots() -> List[Path]:
     return roots
 
 
+def _kanban_root() -> Path:
+    """Return the Kanban root, which is shared across profiles by design."""
+    home_override = korra_env("KORRA_KANBAN_HOME", "").strip()
+    return Path(home_override).expanduser() if home_override else _HERMES_ROOT
+
+
+def _kanban_board_dirs() -> List[Path]:
+    """Return every directory under ``<root>/kanban/boards``, read at check time.
+
+    Deliberately lax: the DENY side must catch a board's ``kanban.db`` whatever
+    the directory is called, while ``_kanban_attachment_roots`` narrows the same
+    walk before it allowlists anything.
+    """
+    try:
+        return [path for path in (_kanban_root() / "kanban" / "boards").iterdir() if path.is_dir()]
+    except OSError:
+        return []
+
+
 def _kanban_attachment_roots() -> List[Path]:
     """Return durable Kanban attachment roots without importing kanban_db."""
     override = korra_env("KORRA_KANBAN_ATTACHMENTS_ROOT", "").strip()
     if override:
         return [Path(override).expanduser()]
-    home_override = korra_env("KORRA_KANBAN_HOME", "").strip()
-    root = Path(home_override).expanduser() if home_override else _HERMES_ROOT
-    roots = [root / "kanban" / "attachments"]
-    boards_root = root / "kanban" / "boards"
-    try:
-        board_dirs = [
-            path for path in boards_root.iterdir()
-            if path.is_dir() and not path.is_symlink()
-            and re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", path.name)
-            and (path / "kanban.db").is_file()
-        ]
-    except OSError:
-        return roots
-    roots.extend(path / "attachments" for path in board_dirs)
+    roots = [_kanban_root() / "kanban" / "attachments"]
+    roots.extend(
+        path / "attachments" for path in _kanban_board_dirs()
+        if not path.is_symlink()
+        and re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", path.name)
+        and (path / "kanban.db").is_file()
+    )
     return roots
+
+
+def _kanban_board_db_paths() -> List[Path]:
+    """Return the named-board ``kanban.db`` stores plus their SQLite sidecars.
+
+    They sit right beside the ``attachments/`` dir the allow side already
+    trusts, and hold every task, comment and run transcript.
+    """
+    return [board / name for board in _kanban_board_dirs() for name in _sqlite_files("kanban.db")]
+
+
+def _sqlite_files(name: str) -> Tuple[str, ...]:
+    """Return a SQLite store name plus its WAL/SHM/rollback-journal sidecars."""
+    return (name, f"{name}-wal", f"{name}-shm", f"{name}-journal")
 
 
 def _media_delivery_allowed_roots() -> List[Path]:
@@ -1454,6 +1480,13 @@ def _media_delivery_denied_paths() -> List[Path]:
         # Bitwarden Secrets Manager plaintext and encrypted disk caches.
         os.path.join("cache", "bws_cache.json"),
         os.path.join("cache", "bws_cache.enc.json"),
+        # The whole conversation history — every secret the user ever pasted
+        # into a chat — and the Kanban store at the home root. The SQLite
+        # sidecars are listed too: WAL mode touches ``state.db-wal`` on every
+        # write, so strict mode's recency trust alone would have handed them
+        # over (#41071).
+        *_sqlite_files("state.db"),
+        *_sqlite_files("kanban.db"),
     )
     # Directory trees whose every child is credential material.
     #
@@ -1463,16 +1496,22 @@ def _media_delivery_denied_paths() -> List[Path]:
     # The write side already denies it (file_tools _check_sensitive_path);
     # this pairs the media-delivery (exfil) side so a prompt-injection MEDIA
     # tag can't deliver a live bearer token as a native attachment.
-    # (session/kanban SQLite stores are handled by #41071 — kept out here.)
+    #
+    # sessions/ is the legacy transcript directory and browser-profile/ the
+    # copied Chromium cookie/login store (agent/file_safety.py already denies
+    # the latter on the read side) — same exfil class, denied as whole trees.
     _ROOT_CREDENTIAL_DIRS = (
         "pairing",
         "mcp-tokens",
+        "sessions",
+        "browser-profile",
     )
     for hermes_root in (_HERMES_HOME, _HERMES_ROOT):
         for rel in _ROOT_CREDENTIAL_FILES:
             denied.append(hermes_root / rel)
         for rel in _ROOT_CREDENTIAL_DIRS:
             denied.append(hermes_root / rel)
+    denied.extend(_kanban_board_db_paths())
     return denied
 
 
