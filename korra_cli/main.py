@@ -11023,8 +11023,11 @@ def cmd_profile(args):
                     f'Модель:         {p.model}'
                     + (f" ({p.provider})" if p.provider else "")
                 )
+            from korra_cli.profiles import GATEWAY_STATUS_LABELS_RU
+
             print(
-                f"Шлюз:           {('работает' if p.gateway_running else 'остановлен')}"
+                f"Шлюз:           "
+                f"{GATEWAY_STATUS_LABELS_RU.get(p.gateway_status, 'остановлен')}"
             )
             print(f'Навыков:        {p.skill_count} установлено')
             if p.alias_path:
@@ -11034,7 +11037,7 @@ def cmd_profile(args):
         return
 
     if action == "list":
-        from korra_cli.profiles import format_profile_label
+        from korra_cli.profiles import GATEWAY_STATUS_SHORT_RU, format_profile_label
 
         profiles = list_profiles()
         active = get_active_profile_name()
@@ -11045,11 +11048,11 @@ def cmd_profile(args):
 
         # Header
         print(
-            f"\n {'Profile':<16} {'Model':<28} {'Gateway':<12} "
-            f"{'Alias':<12} {'Distribution'}"
+            f"\n {'Агент':<16} {'Модель':<28} {'Шлюз':<14} "
+            f"{'Команда':<12} {'Сборка'}"
         )
         print(
-            f" {'─' * 15}    {'─' * 27}    {'─' * 11}    "
+            f" {'─' * 15}    {'─' * 27}    {'─' * 13}    "
             f"{'─' * 11}    {'─' * 20}"
         )
 
@@ -11061,7 +11064,10 @@ def cmd_profile(args):
             )
             name = format_profile_label(p.name, p.display_name)
             model = (p.model or "—")[:26]
-            gw = "running" if p.gateway_running else "stopped"
+            # «общий шлюз» — профиль ведёт мультиплексор основного профиля.
+            # Раньше здесь стоял stopped, и владелец видел выключенным агента,
+            # который в этот момент отвечал в Telegram (K21-088).
+            gw = GATEWAY_STATUS_SHORT_RU.get(p.gateway_status, "остановлен")
             alias = (p.alias_name or p.name) if p.alias_path else "—"
             if p.is_default:
                 alias = "—"
@@ -11070,7 +11076,7 @@ def cmd_profile(args):
                 dist = dist[:30]
             else:
                 dist = "—"
-            print(f"{marker}{name:<15} {model:<28} {gw:<12} {alias:<12} {dist}")
+            print(f"{marker}{name:<15} {model:<28} {gw:<14} {alias:<12} {dist}")
         print()
 
     elif action == "use":

@@ -692,12 +692,38 @@ def build_alias_map() -> dict[str, str]:
 # ProfileInfo
 # ---------------------------------------------------------------------------
 
+# Состояние шлюза одного профиля. Три значения, а не флаг: «обслуживается
+# общим шлюзом» — рабочее состояние, и владелец не должен читать его как
+# «остановлен» (K21-088).
+GATEWAY_STATUS_RUNNING = "running"
+GATEWAY_STATUS_SERVED = "served"
+GATEWAY_STATUS_STOPPED = "stopped"
+
+# Подписи для человека. Держим рядом с состояниями, чтобы CLI, доктор и
+# панель не расходились в словах.
+GATEWAY_STATUS_LABELS_RU = {
+    GATEWAY_STATUS_RUNNING: "работает",
+    GATEWAY_STATUS_SERVED: "обслуживается общим шлюзом",
+    GATEWAY_STATUS_STOPPED: "остановлен",
+}
+
+# Короткие подписи для колонки таблицы `korra profile list`.
+GATEWAY_STATUS_SHORT_RU = {
+    GATEWAY_STATUS_RUNNING: "работает",
+    GATEWAY_STATUS_SERVED: "общий шлюз",
+    GATEWAY_STATUS_STOPPED: "остановлен",
+}
+
+
 @dataclass
 class ProfileInfo:
     """Summary information about a profile."""
     name: str
     path: Path
     is_default: bool
+    # True only when this profile has a gateway PROCESS of its own.  A profile
+    # the shared gateway serves has none — see ``gateway_status`` below, which
+    # is what user-facing surfaces must read.
     gateway_running: bool
     model: Optional[str] = None
     provider: Optional[str] = None
@@ -726,6 +752,11 @@ class ProfileInfo:
     # Optional user-facing display name from profile.yaml. Presentation
     # only — resolution/comparison/spawn paths always use ``name``.
     display_name: str = ""
+    # ``running`` (own gateway process) | ``served`` (the shared multiplexer
+    # carries this profile) | ``stopped``.  ``gateway_running`` alone cannot
+    # express ``served``, and rendering it as "остановлен" is what made a
+    # working agent look switched off (K21-088).
+    gateway_status: str = GATEWAY_STATUS_STOPPED
 
 
 def _read_distribution_meta(profile_dir: Path) -> tuple:
@@ -1058,7 +1089,7 @@ def seed_provider_credentials_from_root(
 
 
 def _check_gateway_running(profile_dir: Path) -> bool:
-    """Check if a gateway is running for a given profile directory.
+    """Does this profile have a gateway PROCESS of its own right now?
 
     Primary signal is the profile's ``gateway.pid`` (verified against the
     runtime lock).  That check fails closed whenever the lock isn't held by
@@ -1069,25 +1100,42 @@ def _check_gateway_running(profile_dir: Path) -> bool:
     in the profile's own ``gateway_state.json`` against the live process table,
     mirroring the ``/api/status`` sidebar's liveness logic so the two surfaces
     agree.  Parameterized by ``profile_dir`` so it never mutates ``HERMES_HOME``.
+
+    Deliberately narrow: a profile the shared multiplexer serves has no gateway
+    of its own and answers False here.  Callers that decide what to SHOW the
+    owner want :func:`resolve_profile_gateway_status`; callers that decide what
+    to stop, restart or count as a separate process want this one.
     """
     try:
-        from gateway.status import get_running_pid
-        if (
-            get_running_pid(profile_dir / "gateway.pid", cleanup_stale=False)
-            is not None
-        ):
-            return True
-    except Exception:
-        pass
-    try:
-        from gateway.status import (
-            get_runtime_status_running_pid,
-            read_runtime_status,
-        )
-        runtime = read_runtime_status(profile_dir / "gateway_state.json")
-        return get_runtime_status_running_pid(runtime, expected_home=profile_dir) is not None
+        from gateway.status import live_gateway_pid_for_home
+
+        return live_gateway_pid_for_home(profile_dir) is not None
     except Exception:
         return False
+
+
+def resolve_profile_gateway_status(profile_dir: Path) -> str:
+    """``running`` / ``served`` / ``stopped`` for one profile's home.
+
+    Разделение важно для владельца: профиль, который ведёт общий шлюз,
+    работает — у него просто нет отдельного процесса. До K21-088 обе эти
+    ситуации показывались как «остановлен», и после создания агента панель
+    предлагала «запустить» то, что уже отвечало в Telegram.
+
+    Собственный шлюз важнее: профиль, поднятый с ``--force``, управляется
+    по-прежнему сам, даже если общий шлюз его тоже числит за собой.
+    """
+    profile_dir = Path(profile_dir)
+    if _check_gateway_running(profile_dir):
+        return GATEWAY_STATUS_RUNNING
+    try:
+        from gateway.status import multiplexer_liveness_for_profile
+
+        if multiplexer_liveness_for_profile(profile_dir) is not None:
+            return GATEWAY_STATUS_SERVED
+    except Exception:
+        pass
+    return GATEWAY_STATUS_STOPPED
 
 
 # In-process cache for skill counts. Walking ``skills_dir.rglob("SKILL.md")``
@@ -1289,11 +1337,13 @@ def list_profiles() -> List[ProfileInfo]:
         model, provider = _read_config_model(default_home)
         dist_name, dist_version, dist_source = _read_distribution_meta(default_home)
         meta = read_profile_meta(default_home)
+        default_status = resolve_profile_gateway_status(default_home)
         profiles.append(ProfileInfo(
             name="default",
             path=default_home,
             is_default=True,
-            gateway_running=_check_gateway_running(default_home),
+            gateway_running=default_status == GATEWAY_STATUS_RUNNING,
+            gateway_status=default_status,
             model=model,
             provider=provider,
             has_env=(default_home / ".env").exists(),
@@ -1332,11 +1382,13 @@ def list_profiles() -> List[ProfileInfo]:
                 alias_path = None
             dist_name, dist_version, dist_source = _read_distribution_meta(entry)
             meta = read_profile_meta(entry)
+            entry_status = resolve_profile_gateway_status(entry)
             profiles.append(ProfileInfo(
                 name=name,
                 path=entry,
                 is_default=False,
-                gateway_running=_check_gateway_running(entry),
+                gateway_running=entry_status == GATEWAY_STATUS_RUNNING,
+                gateway_status=entry_status,
                 model=model,
                 provider=provider,
                 has_env=(entry / ".env").exists(),

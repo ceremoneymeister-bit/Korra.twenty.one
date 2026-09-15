@@ -2115,14 +2115,24 @@ def _gateway_list() -> None:
 
     current = get_active_profile_name()
 
+    from korra_cli.profiles import (
+        GATEWAY_STATUS_RUNNING,
+        GATEWAY_STATUS_SERVED,
+    )
+
     print('Шлюзы:')
     for prof in profiles:
-        marker = "✓" if prof.gateway_running else "✗"
+        status = getattr(prof, "gateway_status", None) or (
+            GATEWAY_STATUS_RUNNING if prof.gateway_running else "stopped"
+        )
+        # «◆» — своего процесса нет, но профиль ведёт общий шлюз: это рабочее
+        # состояние, и «✗ не запущен» здесь вводило владельца в заблуждение.
+        marker = {GATEWAY_STATUS_RUNNING: "✓", GATEWAY_STATUS_SERVED: "◆"}.get(status, "✗")
         label = prof.name
         if prof.name == current:
             label += " (текущий)"
         parts = [f"  {marker} {label:<24s}"]
-        if prof.gateway_running:
+        if status == GATEWAY_STATUS_RUNNING:
             try:
                 from gateway.status import get_running_pid
 
@@ -2131,6 +2141,8 @@ def _gateway_list() -> None:
                     parts.append(f"PID {pid}")
             except Exception:
                 pass
+        elif status == GATEWAY_STATUS_SERVED:
+            parts.append('общий шлюз основного профиля')
         else:
             parts.append('не запущен')
         print(" — ".join(parts))
@@ -6181,80 +6193,29 @@ def _running_under_gateway_supervisor() -> bool:
     return is_gateway_supervisor_process()
 
 
-def named_profile_served_by_running_multiplexer() -> bool:
+def named_profile_served_by_running_multiplexer(profile: str | None = None) -> bool:
     """True when a live default multiplexer already ticks this named profile.
 
-    Shared by the named-profile start guard and cron liveness: a satellite
-    profile has no gateway.pid of its own, but the default multiplexer's
-    ticker still fires its jobs (#97120).
+    Shared by the named-profile start guard, the stop/restart refusals, cron
+    liveness and the dashboard status ladder: a satellite profile has no
+    gateway.pid of its own, but the default multiplexer's ticker still fires
+    its jobs (#97120) and its adapters still carry its chat (K21-088).
+
+    ``profile`` names the profile to ask about; omitted, it is the profile this
+    process runs as.  The decision itself lives in
+    :mod:`korra_cli.gateway_multiplex_served` so ``gateway.status`` can reach it
+    without importing this module.
     """
     try:
-        suffix = _profile_suffix()
+        name = (profile or "").strip() or _profile_suffix()
     except Exception:
         return False
-    if not suffix:
+    if not name:
         return False
 
-    try:
-        from korra_constants import get_default_hermes_root
-        default_root = get_default_hermes_root()
-    except Exception:
-        return False
+    from korra_cli.gateway_multiplex_served import profile_served_by_live_multiplexer
 
-    try:
-        from gateway.status import _read_pid_record
-
-        default_pid_path = default_root / "gateway.pid"
-        rec = _read_pid_record(default_pid_path)
-        if not rec:
-            return False
-        from gateway.status import _pid_exists, _pid_from_record
-        pid = _pid_from_record(rec)
-        if not pid or not _pid_exists(pid):
-            return False
-
-        from gateway.config import _env_multiplex_profiles_override
-
-        cfg_path = default_root / "config.yaml"
-        cfg = {}
-        if cfg_path.exists():
-            from korra_cli.config import read_user_config_raw
-
-            cfg = read_user_config_raw(cfg_path)
-
-        env_multiplex = _env_multiplex_profiles_override()
-        if env_multiplex is False:
-            return False
-        if env_multiplex is True:
-            multiplex = True
-        else:
-            if not cfg_path.exists():
-                return False
-            multiplex = bool(
-                cfg.get("multiplex_profiles")
-                or (cfg.get("gateway", {}) or {}).get("multiplex_profiles")
-            )
-        if not multiplex:
-            return False
-
-        gateway_cfg = cfg.get("gateway", {}) or {}
-        if "multiplex_profile_allowlist" in cfg:
-            raw_allowlist = cfg.get("multiplex_profile_allowlist")
-        else:
-            raw_allowlist = gateway_cfg.get("multiplex_profile_allowlist")
-        from gateway.config import _normalize_multiplex_profile_allowlist
-        from korra_cli.profiles import normalize_profile_name
-
-        profile_allowlist = _normalize_multiplex_profile_allowlist(raw_allowlist)
-        if (
-            profile_allowlist is not None
-            and normalize_profile_name(suffix) not in profile_allowlist
-        ):
-            return False
-        return True
-    except Exception:
-        logger.debug("Multiplexer-serving probe failed", exc_info=True)
-        return False
+    return profile_served_by_live_multiplexer(name)
 
 
 def _guard_named_profile_under_multiplexer(force: bool = False) -> None:
@@ -6302,6 +6263,74 @@ def _guard_named_profile_under_multiplexer(force: bool = False) -> None:
     # off, so a correct refusal became an unbounded restart loop. 78 also reaches
     # the s6 finish script's 125 "permanent failure" translation (see #51228),
     # the same path the other fatal-config exits take.
+    sys.exit(GATEWAY_FATAL_CONFIG_EXIT_CODE)
+
+
+def profile_has_no_gateway_of_its_own() -> bool:
+    """True when the live shared gateway serves this profile and it has none of its own.
+
+    The ``--force`` escape hatch stays open: a profile that started a separate
+    gateway anyway owns a PID file, and every lifecycle verb keeps addressing
+    that gateway exactly as before.
+    """
+    try:
+        if not named_profile_served_by_running_multiplexer():
+            return False
+        from korra_cli.profiles import _check_gateway_running
+        from korra_constants import get_hermes_home
+
+        return not _check_gateway_running(get_hermes_home())
+    except Exception:
+        logger.debug("shared-gateway ownership probe failed", exc_info=True)
+        return False
+
+
+def _refuse_lifecycle_for_served_profile(verb: str, *, force: bool = False) -> None:
+    """Refuse start/stop/restart of a profile the shared gateway serves.
+
+    Отдельного шлюза у такого профиля нет. Прежде ``stop`` печатал
+    «✗ Шлюз этого профиля не запущен» и выходил с кодом 0 — тот же контур, где
+    ``gateway list`` и ``status`` говорили «работает», — а ``start``/``restart``
+    в контейнере уходили в службу s6 этого профиля и могли поднять ВТОРОГО
+    владельца тех же токенов бота (K21-088).
+
+    Останов и перезапуск общего шлюза остаются отдельным явным действием из
+    основного профиля: они отключают всех агентов сразу, и подменять ими
+    операцию над одним профилем нельзя.
+    """
+    if force:
+        return
+    try:
+        suffix = _profile_suffix()
+    except Exception:
+        return
+    if not suffix or not profile_has_no_gateway_of_its_own():
+        return
+
+    print_error(
+        f'Отдельного шлюза у профиля «{suffix}» нет: его обслуживает общий шлюз.'
+    )
+    print(
+        '  При включённом gateway.multiplex_profiles один шлюз ведёт все\n'
+        '  профили сразу. Операция над общим шлюзом затронет всех агентов,\n'
+        '  поэтому её нужно выполнить явно из основного профиля:\n'
+    )
+    print('    korra gateway status     # Посмотреть, кого он обслуживает')
+    if verb == "stop":
+        print('    korra gateway stop       # Отключит всех агентов сразу')
+    else:
+        print('    korra gateway restart    # Перезапустит всех агентов сразу')
+    print()
+    if verb == "stop":
+        print('  Чтобы убрать профиль из общего шлюза, снимите его с обслуживания')
+        print('  (gateway.multiplex_profile_allowlist) и перезапустите общий шлюз.')
+    else:
+        print('  Чтобы всё равно поднять отдельный шлюз профиля, добавьте --force.')
+        print('  Пока общий шлюз ведёт этот профиль, делать это не рекомендуется:')
+        print('  два процесса займут один токен бота.')
+    # EX_CONFIG: отказ решён конфигурацией, повтор его не изменит. Тот же код,
+    # что у _guard_named_profile_under_multiplexer, поэтому systemd-юнит с
+    # RestartPreventExitStatus не уходит в цикл перезапусков.
     sys.exit(GATEWAY_FATAL_CONFIG_EXIT_CODE)
 
 
@@ -8548,6 +8577,13 @@ def _gateway_command_inner(args):
         system = getattr(args, "system", False)
         start_all = getattr(args, "all", False)
 
+        # Перед любой отправкой в супервизор: у профиля, который ведёт общий
+        # шлюз, своего шлюза нет, и поднимать второй нельзя (K21-088).
+        if not start_all:
+            _refuse_lifecycle_for_served_profile(
+                "start", force=getattr(args, "force", False)
+            )
+
         # Phase 4: inside a container with s6, dispatch via the service
         # manager instead of falling through to systemd/launchd/windows.
         # `--all` isn't meaningful here (each profile has its own service
@@ -8632,6 +8668,12 @@ def _gateway_command_inner(args):
 
         stop_all = getattr(args, "all", False)
         system = getattr(args, "system", False)
+
+        # У обслуживаемого профиля останавливать нечего: прежнее
+        # «✗ Шлюз этого профиля не запущен» с кодом 0 противоречило
+        # `gateway status` на том же профиле (K21-088).
+        if not stop_all:
+            _refuse_lifecycle_for_served_profile("stop")
 
         # Phase 4: inside a container with s6, dispatch via the service
         # manager. ``--all`` iterates every registered profile gateway
@@ -8732,6 +8774,13 @@ def _gateway_command_inner(args):
         system = getattr(args, "system", False)
         restart_all = getattr(args, "all", False)
         service_configured = False
+
+        # Перезапуск одного обслуживаемого профиля — не операция над ним:
+        # общий шлюз перезапускается целиком и уводит в офлайн всех агентов.
+        if not restart_all:
+            _refuse_lifecycle_for_served_profile(
+                "restart", force=getattr(args, "force", False)
+            )
 
         # Phase 4: inside a container with s6, dispatch via the service
         # manager (s6-svc -t restarts the supervised process). ``--all``
