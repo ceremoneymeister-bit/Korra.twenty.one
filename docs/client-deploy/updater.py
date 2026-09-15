@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sqlite3
 import stat
@@ -33,6 +34,15 @@ LOCK_ROOT = Path("/run/lock")
 PYTHON = "/opt/hermes/.venv/bin/python"
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
 IMAGE_ID = re.compile(r"^sha256:[a-f0-9]{64}$")
+RUNTIME_IDENTITY_KEYS = ("ENGINE_UID", "ENGINE_GID", "AGENT_SUDO")
+# Launcher variable → the container variable it decides. KORRA_TIMEZONE is the
+# contour clock: agent "now", schedules, cron next_run. KORRA_OWNER_TIMEZONE is
+# what the panel shows its owner and falls back to KORRA_TIMEZONE when unset.
+# Both are part of the runtime contract, because up.sh — not the updater —
+# chooses them, and its default silently replaced a client's real timezone on
+# 15.09.2026 while the job still reported success.
+RUNTIME_TIMEZONE_KEYS = {"TIMEZONE": "KORRA_TIMEZONE", "OWNER_TIMEZONE": "KORRA_OWNER_TIMEZONE"}
+TIMEZONE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9+_.-]*(?:/[A-Za-z0-9+_.-]+){0,3}")
 VOLATILE = {"gateway.sock", "gateway.sock.path", "gateway.pid", "cron.pid",
             "gateway.lock", "processes.json", "gateway_state.json", ".drain_request.json"}
 # gateway_state.json is volatile as a whole — it names the pid/argv of a
@@ -216,8 +226,25 @@ def validate_readiness_health(status):
 
 
 
+def validate_timezone(value):
+    """One container timezone, or "" for "this contour never pinned one".
+
+    The empty string is a real state, not a missing field: a contour whose
+    launcher passed no timezone has always taken whatever the launcher default
+    said, and the updater must not invent a value it never had.
+    """
+    if not isinstance(value, str):
+        raise UpdateError("Invalid container timezone")
+    if value and (len(value) > 64 or ".." in value or not TIMEZONE_NAME.fullmatch(value)):
+        raise UpdateError("Invalid container timezone")
+    return value
+
+
 def validate_runtime_env(value):
-    if not isinstance(value, dict) or set(value) != {"ENGINE_UID", "ENGINE_GID", "AGENT_SUDO"}:
+    # Receipts written before timezone joined the contract carry identity only;
+    # they stay loadable, and the timezone half then simply has nothing to pin.
+    if (not isinstance(value, dict)
+            or set(value) - set(RUNTIME_TIMEZONE_KEYS) != set(RUNTIME_IDENTITY_KEYS)):
         raise UpdateError("Missing original container root/ownership contract")
     for key in ("ENGINE_UID", "ENGINE_GID"):
         if (not isinstance(value[key], str) or not value[key].isdigit()
@@ -225,7 +252,24 @@ def validate_runtime_env(value):
             raise UpdateError("Invalid original container UID/GID")
     if value["AGENT_SUDO"] not in {"0", "1"}:
         raise UpdateError("Invalid original container admin mode")
+    for key in RUNTIME_TIMEZONE_KEYS:
+        if key in value:
+            validate_timezone(value[key])
     return dict(value)
+
+
+def timezone_env(environment):
+    """Both timezones a Docker environment actually carries.
+
+    Read exactly as the engine reads them: nonempty KORRA_* first, then the
+    HERMES_* alias, stripped. A trailing space in the launcher must not read as
+    a different timezone than the one the running contour is using.
+    """
+    def zone(*names):
+        return next((environment[name].strip() for name in names
+                     if environment.get(name, "").strip()), "")
+    return {"TIMEZONE": zone("KORRA_TIMEZONE", "HERMES_TIMEZONE"),
+            "OWNER_TIMEZONE": zone("KORRA_OWNER_TIMEZONE", "HERMES_OWNER_TIMEZONE")}
 
 
 def runtime_env_from_info(info):
@@ -241,7 +285,22 @@ def runtime_env_from_info(info):
         "ENGINE_UID": first("KORRA_UID", "HERMES_UID", "PUID"),
         "ENGINE_GID": first("KORRA_GID", "HERMES_GID", "PGID"),
         "AGENT_SUDO": sudo,
+        **timezone_env(environment),
     })
+
+
+def timezone_from_launch_argv(argv):
+    """Both timezones the launcher's own `--dry-run` docker argv would set."""
+    return timezone_env(dict(item.split("=", 1) for flag, item in zip(argv, argv[1:])
+                             if flag == "-e" and "=" in item))
+
+
+def timezone_drift(actual, plan):
+    """Name every pinned timezone the contour did not actually get."""
+    return "; ".join(
+        f"{RUNTIME_TIMEZONE_KEYS[key]} {actual[key] or 'unset'} instead of {item['expected']}"
+        for key, item in sorted(plan.items())
+        if item["expected"] and actual[key] != item["expected"])
 
 
 def utc():
@@ -1008,19 +1067,29 @@ class Updater:
         atomic_json(self.job / "pruned-skills.json", removed)
         return removed
 
+    def launcher_env(self, rollback=False):
+        """Exactly the environment the host launcher is handed for this phase.
+
+        Every contract field is passed explicitly, including an empty timezone:
+        a TIMEZONE left over in the operator's shell must not reach a client's
+        contour just because nobody overwrote it. Empty means "your own
+        persistent default decides", which is what up.sh reads it as.
+        """
+        return {**os.environ, "NAME": self.name, "DATA": str(self.data),
+                "PANEL_PORT": str(self.panel), "API_PORT": str(self.api),
+                "KORRA_UPDATER_JOB": self.receipt["job_id"],
+                "KORRA_UPDATER_ROLLBACK": "1" if rollback else "0",
+                **self.launch_resource_env(rollback=rollback),
+                **self.launch_runtime_env(rollback=rollback),
+                **self.launch_telegram_env()}
+
     def start_image(self, image):
         rollback = self.receipt["phase"] == "rollback_recreate"
-        resources = self.launch_resource_env(rollback=rollback)
-        runtime = self.launch_runtime_env(rollback=rollback)
-        telegram = self.launch_telegram_env()
+        env = self.launcher_env(rollback=rollback)
         google_contract = self.receipt.get("google_oauth_mount")
         if isinstance(google_contract, dict) and google_contract.get("present") is True:
-            self.validate_google_oauth_source(runtime["ENGINE_GID"])
+            self.validate_google_oauth_source(env["ENGINE_GID"])
         (self.home / "IMAGE").write_text(image + "\n")
-        env = {**os.environ, "NAME": self.name, "DATA": str(self.data),
-               "PANEL_PORT": str(self.panel), "API_PORT": str(self.api),
-               "KORRA_UPDATER_JOB": self.receipt["job_id"],
-               "KORRA_UPDATER_ROLLBACK": "1" if rollback else "0", **resources, **runtime, **telegram}
         result = subprocess.run(["bash", str(self.home / "up.sh")], env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=1500)
@@ -1052,7 +1121,63 @@ class Updater:
                     raise UpdateError("Changing DATA UID/GID requires separate operator preparation")
             if "AGENT_SUDO" in os.environ:
                 value["AGENT_SUDO"] = os.environ["AGENT_SUDO"]
+        for key in RUNTIME_TIMEZONE_KEYS:
+            # An older receipt has no timezone to preserve; "" keeps the host
+            # launcher's own default in charge instead of guessing a value.
+            value.setdefault(key, "")
+            # The contour's clock is a launcher setting, not an update option.
+            # A TIMEZONE left over from a rehearsal in the operator's shell is
+            # exactly how a client lost Asia/Novosibirsk on 15.09.2026, so a
+            # shell that disagrees with the contour stops the operation here,
+            # before pull/drain, instead of quietly winning the argument.
+            if not rollback and os.environ.get(key, "").strip() not in ("", value[key]):
+                raise UpdateError(
+                    "Changing the contour timezone is a launcher setting, not an update "
+                    "override; edit this installation's up.sh default or unset " + key)
         return validate_runtime_env(value)
+
+    def timezone_plan(self, rollback=False):
+        """What the contour's two timezones must be after this phase, and why.
+
+        `launcher_default` is the compatible path for a contour (or a receipt)
+        that never pinned one: nothing is promised, so nothing is enforced, and
+        the receipt says so instead of implying a preserved value.
+        """
+        expected = self.launch_runtime_env(rollback=rollback)
+        return {key: {"expected": expected[key],
+                      "source": "preserved" if expected[key] else "launcher_default"}
+                for key in RUNTIME_TIMEZONE_KEYS}
+
+    def verify_launcher_timezone(self, rollback=False):
+        """Refuse a launcher that would not reproduce the pinned timezone.
+
+        The launcher, not the updater, decides what the container gets: up.sh
+        falls back to its own default whenever TIMEZONE arrives empty, and an
+        adopted host launcher may carry someone else's default. Finding that
+        out after the contour is stopped costs a rollback through the very same
+        launcher, so it is asked first — `--dry-run` starts nothing, touches
+        neither DATA nor Docker, and answers with the exact docker argv.
+        """
+        plan = self.timezone_plan(rollback=rollback)
+        if not any(item["expected"] for item in plan.values()):
+            return None
+        result = subprocess.run(["bash", str(self.home / "up.sh"), "--dry-run"],
+                                env=self.launcher_env(rollback=rollback),
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, timeout=120)
+        if result.returncode:
+            with (self.job / "operation.log").open("a") as stream:
+                stream.write(result.stdout)
+            self.receipt["error_code"] = "launcher_dry_run_failed"
+            raise UpdateError("Host launcher rejected `up.sh --dry-run` on the preserved "
+                              "contract; see private operation.log")
+        planned = timezone_from_launch_argv(shlex.split(result.stdout.splitlines()[-1]))
+        drift = timezone_drift(planned, plan)
+        if drift:
+            self.receipt["error_code"] = "launcher_timezone_mismatch"
+            raise UpdateError("Host launcher would start the contour with " + drift
+                              + "; restore this installation's timezone default in up.sh")
+        return planned
 
     def capability(self, timeout=30):
         try:
@@ -1100,8 +1225,18 @@ class Updater:
                 if key in baseline and (rollback or not os.environ.get(environment)) and actual[key] != baseline[key]:
                     raise UpdateError("Container resource limits differ from the preserved baseline")
             self.receipt["active_resources"] = actual
-            if runtime_env_from_info(info) != self.launch_runtime_env(rollback=rollback):
+            live = runtime_env_from_info(info)
+            expected_runtime = self.launch_runtime_env(rollback=rollback)
+            if ({key: live[key] for key in RUNTIME_IDENTITY_KEYS}
+                    != {key: expected_runtime[key] for key in RUNTIME_IDENTITY_KEYS}):
                 raise UpdateError("Container root/ownership differs from the preserved contract")
+            # What the contour actually runs on, not what the launcher was told:
+            # a job that quietly moved the owner's clock is not a success.
+            self.receipt["active_timezone"] = {key: live[key] for key in RUNTIME_TIMEZONE_KEYS}
+            drift = timezone_drift(live, self.timezone_plan(rollback=rollback))
+            if drift:
+                self.receipt["error_code"] = "runtime_timezone_drift"
+                raise UpdateError("Container timezone differs from the preserved contract: " + drift)
             try:
                 def budget():
                     remaining = limit - time.monotonic()
@@ -1494,6 +1629,10 @@ print(json.dumps(changed))
             if configured_id != old:
                 raise UpdateError("IMAGE file differs from running container")
             self.receipt["old_image_id"] = old
+            self.receipt["timezone_plan"] = self.timezone_plan()
+            # Asked of the real launcher while the contour is still up, so a
+            # dry run reports it too and a mismatch never costs an outage.
+            self.verify_launcher_timezone()
             self.free_space()
             if dry_run:
                 self.phase("dry_run", status="succeeded", planned_reference=reference)
@@ -1586,6 +1725,11 @@ print(json.dumps(changed))
         validate_capability(self.receipt.get("baseline_capability"))
         self.launch_runtime_env(rollback=True)
         self.launch_resource_env(rollback=True)  # validate before stopping an older job's healthy container
+        # A launcher whose timezone default drifted since the update would
+        # restore the old image with the wrong clock. Ask before quiescing:
+        # a refused rollback that changed nothing is recoverable, a finished
+        # one that silently moved the owner's day is not.
+        self.verify_launcher_timezone(rollback=True)
         self.verify_backup()  # validate before quiescing a healthy newer gateway
         allowed = {self.receipt.get("old_image_id"), self.receipt.get("target_image_id")}
         try:
@@ -1738,7 +1882,7 @@ def main(argv=None):
     if args.capabilities:
         print(json.dumps({"protocol": 1, "update": True, "detach": True, "status": True,
                           "rollback_detach": True, "expected_current": True, "artifact_verification": True,
-                          "gc": True,
+                          "gc": True, "runtime_timezone": True,
                           "files": ["update.sh", "updater.py", "up.sh", "backup.sh", "dependencies.lock.json"]}))
         return 0
     if os.geteuid() != 0:
