@@ -69,6 +69,7 @@ import {
 import { attachUploadBatch } from "@/lib/chat-upload-batch";
 import { readDroppedFolder, type FolderSelection } from "@/lib/folder-select";
 import { sendOriginals, setSendOriginals } from "@/lib/image-optimize";
+import { AttachmentMenu } from "@/components/chat/AttachmentMenu";
 import { resumeUploadJob, excludeUploadFile, cancelUploadJob } from "@/store/upload-jobs";
 import { UploadJobsPanel } from "@/components/UploadJobsPanel";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
@@ -1024,11 +1025,6 @@ export function BubbleChatComposer({
             {showAllAttachments ? "Свернуть вложения" : `Ещё ${attachments.length - 12} вложений`}
           </button>}
           <UploadJobsPanel origin="chat" ids={[...new Set(attachments.flatMap(item => item.uploadId ? [item.uploadId] : []))]} />
-          {allowAttachments && <label className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-            <input type="checkbox" checked={originals} onChange={event => { setOriginals(event.target.checked); setSendOriginals(event.target.checked); }} />
-            Отправлять оригиналы фото
-          </label>}
-
           {composerError && (
             <p
               role="alert"
@@ -1050,20 +1046,16 @@ export function BubbleChatComposer({
                 profile={profile}
               />}
               {allowAttachments && (
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
+                <AttachmentMenu
                   disabled={
                     disabled ||
                     submitting ||
                     attachments.length >= MAX_ATTACHMENTS
                   }
-                  className="korra-chat-composer__control korra-chat-composer__attach"
-                  aria-label="Прикрепить файл"
-                  title="Прикрепить файл"
-                >
-                  <Plus size={20} strokeWidth={1.5} aria-hidden />
-                </button>
+                  onPickFiles={() => fileRef.current?.click()}
+                  originals={originals}
+                  onOriginalsChange={value => { setOriginals(value); setSendOriginals(value); }}
+                />
               )}
               <button
                 type="button"
