@@ -37,8 +37,9 @@ vi.mock("thinking-orbs", () => ({
   ),
 }));
 
-import { BubbleChatComposer } from "./BubbleChatPage";
+import { BubbleChatComposer, BubbleChatSidebar } from "./BubbleChatPage";
 import { $uploadJobs, dismissUploadJob } from "@/store/upload-jobs";
+import type { SessionInfo } from "@/lib/api";
 import type { UploadManifest } from "@/lib/upload-session";
 
 /** `MediaRecorder` из jsdom не существует — подменяем предсказуемым. */
@@ -575,5 +576,84 @@ describe("BubbleChatComposer · диктовка", () => {
     enableMicrophone();
     await render(<BubbleChatComposer onSend={vi.fn()} streaming disabled />);
     expect(microphoneButton().disabled).toBe(true);
+  });
+});
+
+/** Стороны, которым padding-утилита Tailwind даёт отступ. */
+function paddedSides(element: Element): string[] {
+  const BY_AXIS: Record<string, string[]> = {
+    "": ["top", "right", "bottom", "left"],
+    t: ["top"],
+    r: ["right"],
+    b: ["bottom"],
+    l: ["left"],
+    x: ["left", "right"],
+    y: ["top", "bottom"],
+  };
+  const sides = new Set<string>();
+  for (const name of element.className.split(/\s+/)) {
+    const match = /^p([trblxy]?)-(\d+(?:\.\d+)?)$/.exec(name);
+    if (!match || Number(match[2]) === 0) continue;
+    for (const side of BY_AXIS[match[1]]) sides.add(side);
+  }
+  return [...sides].sort();
+}
+
+function session(id: string, title: string): SessionInfo {
+  return {
+    id, source: null, model: null, title, started_at: 0, ended_at: null,
+    last_active: Date.now() / 1000 - 120, is_active: false, message_count: 2,
+    tool_call_count: 0, input_tokens: 0, output_tokens: 0, preview: null,
+  };
+}
+
+describe("BubbleChatSidebar", () => {
+  const sessions = [
+    session("a", "Первый чат"),
+    session("b", "Второй чат"),
+    session("c", "Третий чат"),
+  ];
+
+  async function renderSidebar(activeId: string) {
+    await render(
+      <BubbleChatSidebar
+        sessions={sessions}
+        activeId={activeId}
+        loading={false}
+        error={null}
+        onSelect={vi.fn()}
+        onNewChat={vi.fn()}
+        onRequestDelete={vi.fn()}
+      />,
+    );
+    return container.querySelector<HTMLElement>('nav[aria-label="Список чатов"]')!;
+  }
+
+  it("держит место под внешнюю тень внутри прокручиваемого списка", async () => {
+    const nav = await renderSidebar("a");
+    // Тень активной карточки уходит и вверх, и вниз, и в стороны, а обрезает
+    // её сам scrollport: место обязано быть внутренним отступом, а не внешним.
+    expect(nav.className).toContain("overflow-y-auto");
+    expect(paddedSides(nav)).toEqual(["bottom", "left", "right", "top"]);
+    expect(nav.className).not.toContain("overflow-y-visible");
+    // Скриншот-проверка целостности тени — в браузере: DOM её не рисует.
+    const active = container.querySelector('[aria-current="page"]')!;
+    expect(active.className).toContain("shadow-[var(--neo-depth-1)]");
+  });
+
+  it("сохраняет выбор, создание и удаление чата", async () => {
+    const nav = await renderSidebar("c");
+    expect(container.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+    expect(container.querySelector('[aria-current="page"]')?.textContent).toContain(
+      "Третий чат",
+    );
+    expect(nav.querySelectorAll('button[aria-label^="Удалить чат"]')).toHaveLength(
+      sessions.length,
+    );
+    expect(
+      [...container.querySelectorAll("button")].some((button) =>
+        button.textContent?.includes("Новый чат"),
+      ),
+    ).toBe(true);
   });
 });

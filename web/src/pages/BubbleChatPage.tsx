@@ -322,7 +322,7 @@ interface BubbleChatSidebarProps {
   onRequestDelete: (id: string) => void;
 }
 
-function BubbleChatSidebar({
+export function BubbleChatSidebar({
   sessions,
   activeId,
   loading,
@@ -351,7 +351,12 @@ function BubbleChatSidebar({
       </div>
       <nav
         aria-label="Список чатов"
-        className="mt-4 flex flex-1 flex-col gap-1 overflow-y-auto px-1 pb-1"
+        // Отступ под тень выбранной карточки держим ВНУТРИ прокрутки со всех
+        // четырёх сторон: `--neo-depth-1` смещает блик на -1px вверх и влево,
+        // и у крайней карточки внешний `mt` места не даёт — scrollport срезал
+        // её верх ровной линией (скриншоты владельца 15.09). Зазор под «Новым
+        // чатом» прежний: mt-3 + pt-1 = mt-4.
+        className="mt-3 flex flex-1 flex-col gap-1 overflow-y-auto p-1"
       >
         {loading && sessions.length === 0 && (
           <p className="px-5 py-2 text-sm text-[var(--neo-text-secondary)]">
