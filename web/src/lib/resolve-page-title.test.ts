@@ -24,9 +24,11 @@ const t = {
 } as unknown as Translations;
 
 describe("resolvePageTitle", () => {
-  it("называет мастер и раздел пользы даже со старым манифестом", () => {
+  it("называет мастер и раздел достижений даже со старым манифестом", () => {
     expect(resolvePageTitle("/profiles/new/", t, [])).toBe("Создать агента");
-    expect(resolvePageTitle("/achievements", t, [{ path: "/achievements", label: "Achievements" }])).toBe("Польза от агентов");
+    expect(resolvePageTitle("/achievements", t, [{ path: "/achievements", label: "Achievements" }])).toBe("Достижения");
+    // Плагин мог остаться с прежней подписью — заголовок всё равно продуктовый.
+    expect(resolvePageTitle("/achievements", t, [{ path: "/achievements", label: "Польза от агентов" }])).toBe("Достижения");
   });
   it("uses i18n nav keys for translated routes", () => {
     expect(resolvePageTitle("/sessions", t, [])).toBe("Sessions");
@@ -46,6 +48,8 @@ describe("resolvePageTitle", () => {
   it("uses the configured fleet label before the admin fallback", () => {
     (globalThis as { window?: unknown }).window = { __KORRA_UI_MODE__: "fleet" };
     expect(resolvePageTitle("/agents", t, [])).toBe("Агенты");
+    // «История» переехала в «Служебное»; заголовок обязан совпасть с пунктом.
+    expect(resolvePageTitle("/sessions", t, [])).toBe("История");
     delete (globalThis as { window?: unknown }).window;
   });
 

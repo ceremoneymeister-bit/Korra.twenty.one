@@ -171,7 +171,9 @@ def main():
         page.get_by_role("button", name="Результаты", exact=True).click()
         assert parse_qs(urlparse(page.url).query)["view"] == ["done"]
         expect(card).to_be_visible()
-        page.get_by_role("link", name="Польза от агентов", exact=True).click()
+        # «Достижения» (прежняя «Польза от агентов») живут в свёрнутой группе.
+        page.get_by_role("button", name="Служебное", exact=True).click()
+        page.get_by_role("link", name="Достижения", exact=True).click()
         page.locator('[data-milestone="result"] a').click()
         expect(page.get_by_role("button", name="Результаты", exact=True)).to_have_attribute("aria-pressed", "true")
         expect(page.get_by_label("Доска", exact=True)).to_have_value(board)

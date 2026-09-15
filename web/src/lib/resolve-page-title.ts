@@ -1,6 +1,6 @@
 import type { Translations } from "@/i18n/types";
 import { productUiMode } from "./dashboard-flags";
-import { productNavLabel } from "./product-nav";
+import { SHIPPED_PLUGIN_LABELS, productNavLabel } from "./product-nav";
 import { russianInterfaceLabel } from "./russian-interface-text";
 
 const BUILTIN: Record<string, keyof Translations["app"]["nav"]> = {
@@ -34,10 +34,8 @@ const BUILTIN_LITERAL: Record<string, string> = {
 
 // Плагины поставки: их подпись задана продуктом, а не манифестом, поэтому она
 // нужна и здесь — на случай, если у вкладки не оказалось русского имени.
-const PLUGIN_LITERAL: Record<string, string> = {
-  "/kanban": "Канбан-доска",
-  "/achievements": "Польза от агентов",
-};
+// Источник подписей один, общий с сайдбаром (см. product-nav).
+const PLUGIN_LITERAL = SHIPPED_PLUGIN_LABELS;
 
 export function resolvePageTitle(
   pathname: string,

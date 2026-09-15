@@ -33,9 +33,11 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
-describe("Польза от агентов", () => {
+describe("Достижения", () => {
   it("показывает первый шаг без выдуманных результатов и ведёт к действию", async () => {
     await renderPage();
+    // Название пункта меню нейтральное, поэтому экран объясняет своё содержание.
+    expect(host.textContent).toContain("Результаты работы агентов");
     expect(host.textContent).toContain("Работа вашей команды");
     expect(host.querySelector('.kb-benefit-next a')?.getAttribute("href")).toBe("/kanban");
     expect(host.textContent).not.toMatch(/Hermes|Copper|Olympian/);

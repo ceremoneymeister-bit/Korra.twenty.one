@@ -1,4 +1,4 @@
-/* Польза от агентов Korra. Использует существующие данные контура без анализа текстов разговоров.
+/* «Достижения» Korra: результаты работы агентов. Использует существующие данные контура без анализа текстов разговоров.
    Первоначальный плагин достижений: @PCinkusz, https://github.com/PCinkusz/hermes-achievements (MIT). */
 (function () {
   "use strict";
@@ -78,8 +78,8 @@
     return h("div", { className: "korra-benefits", "aria-busy": loading },
       h("section", { className: "kb-benefit-hero" },
         h("div", null,
-          h("h2", null, "Больше сделанного. Меньше рутины."),
-          h("p", null, "Ваш путь от первого поручения к команде агентов для бизнеса.")),
+          h("h2", null, "Результаты работы агентов"),
+          h("p", null, "Сводка задач, расписаний и помощников: что уже сделано и что можно поручить дальше. Качество результата и выгоду оцениваете вы.")),
         h("button", { type: "button", className: "neo-button", onClick: () => void refresh(), disabled: loading }, loading ? "Обновляем…" : "Обновить данные")),
       h("section", { className: "kb-benefit-overview" },
         h("div", null,

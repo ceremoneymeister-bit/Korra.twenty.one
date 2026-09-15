@@ -116,10 +116,11 @@ import {
   productUiMode,
 } from "@/lib/dashboard-flags";
 import {
+  SHIPPED_PLUGIN_LABELS,
   productHomePath,
   selectProductNav,
-  selectProductSettingsNav,
-  selectServiceNav,
+  selectProductSidebar,
+  type ProductSidebarGroups,
 } from "@/lib/product-nav";
 import { latchChatActivation } from "@/lib/chat-activation";
 import { isStaleBuild, loadedBuild } from "@/lib/build-version";
@@ -331,7 +332,9 @@ function buildNavItems(
 
     const pluginItem: NavItem = {
       path: manifest.tab.path,
-      label: ({ "/kanban": "Канбан-доска", "/achievements": "Польза от агентов" } as Record<string, string>)[manifest.tab.path] ?? russianInterfaceLabel(manifest.label, manifest.name),
+      label:
+        SHIPPED_PLUGIN_LABELS[manifest.tab.path] ??
+        russianInterfaceLabel(manifest.label, manifest.name),
       icon: resolveIcon(manifest.icon),
     };
 
@@ -551,38 +554,23 @@ export default function App() {
   }, [embeddedChat, showTokenAnalytics, uiMode]);
 
   const sidebarNav = useMemo(
-    () => {
-      const partitioned = partitionSidebarNav(builtinNav, manifests);
-      const workspacePlugins = ["/kanban", "/achievements"].flatMap(path => partitioned.pluginItems.filter(item => item.path === path));
-      if (!workspacePlugins.length || !isProductUiMode()) return partitioned;
-      const coreItems = [...partitioned.coreItems];
-      const afterTasks = coreItems.findIndex((item) => item.path === "/cron");
-      coreItems.splice(afterTasks < 0 ? coreItems.length : afterTasks + 1, 0, ...workspacePlugins);
-      return {
-        coreItems,
-        pluginItems: partitioned.pluginItems.filter((item) => !["/kanban", "/achievements"].includes(item.path)),
-      };
-    },
+    () => partitionSidebarNav(builtinNav, manifests),
     [builtinNav, manifests],
   );
-  const productSettingsNav = useMemo<NavItem[]>(() => {
-    if (!isProductUiMode()) return [];
+  // Продуктовый сайдбар собирается одним решением: главный список, «Настройки»
+  // и «Служебное» приходят из product-nav готовыми, поэтому пункт плагина не
+  // может остаться в двух группах сразу или потеряться между ними.
+  const productSidebar = useMemo<ProductSidebarGroups<NavItem> | null>(() => {
+    if (!uiMode) return null;
     const source = embeddedChat || bubbleChat
       ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
       : BUILTIN_NAV_REST;
-    return selectProductSettingsNav(source);
-  }, [bubbleChat, embeddedChat]);
-  const productServiceNav = useMemo<NavItem[]>(() => {
-    if (!isProductUiMode()) return [];
-    const source = embeddedChat || bubbleChat
-      ? [CHAT_NAV_ITEM, ...BUILTIN_NAV_REST]
-      : BUILTIN_NAV_REST;
-    // Канбан живёт в главном списке под «Задачами» (решение владельца 03.09).
-    const pluginItems = partitionSidebarNav(source, manifests).pluginItems.filter(
-      (item) => !["/kanban", "/achievements"].includes(item.path),
-    );
-    return [...selectServiceNav(source), ...pluginItems];
-  }, [bubbleChat, embeddedChat, manifests]);
+    const { pluginItems } = partitionSidebarNav(source, manifests);
+    return selectProductSidebar(source, pluginItems, uiMode);
+  }, [bubbleChat, embeddedChat, manifests, uiMode]);
+  const mainNav = productSidebar?.main ?? sidebarNav.coreItems;
+  const productSettingsNav = productSidebar?.settings ?? [];
+  const productServiceNav = productSidebar?.service ?? [];
   // Группы сайдбара — аккордеон (решение владельца 03.09): открыта одна,
   // клик по другой переключает, клик вне сайдбара закрывает.
   const [openGroup, setOpenGroup] = useState<"settings" | "service" | null>(null);
@@ -622,10 +610,15 @@ export default function App() {
     () =>
       manifests
         .filter((m) => !m.tab.hidden)
-        .map((m) => ({
-          path: m.tab.override ?? m.tab.path,
-          label: m.name === "kanban" ? "Канбан-доска" : russianInterfaceLabel(m.label, m.name),
-        })),
+        .map((m) => {
+          const path = m.tab.override ?? m.tab.path;
+          return {
+            path,
+            label:
+              SHIPPED_PLUGIN_LABELS[path] ??
+              russianInterfaceLabel(m.label, m.name),
+          };
+        }),
     [manifests],
   );
 
@@ -795,7 +788,7 @@ export default function App() {
               aria-label={t.app.navigation}
             >
               <ul className="flex flex-col">
-                {sidebarNav.coreItems.map((item) => (
+                {mainNav.map((item) => (
                   <SidebarNavLink
                     closeMobile={closeMobile}
                     collapsed={isDesktopCollapsed}
