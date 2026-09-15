@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Download, FileText, FolderOpen } from "lucide-react";
 import { describeAttachment, downloadWorkspaceFile, formatSize, isImageKind, type UploadedAttachment } from "@/lib/chat-attachments";
 import { artifactUrl } from "@/lib/chat-artifacts";
 import { authedFetch, withBasePath } from "@/lib/api";
 import { ownerFacingError } from "@/lib/owner-facing-error";
+import { ImageViewer } from "@/components/chat/ImageViewer";
 
 const UNAVAILABLE_FALLBACK = "Вложение недоступно: удалено, перемещено, больше 2 ГБ или вне рабочей папки.";
 
@@ -17,9 +18,10 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
   const [preview, setPreview] = useState<string>();
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(false);
+  const [viewing, setViewing] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    setFile(null); setFailed(null); setImageFailed(false); setPreview(undefined);
+    setFile(null); setFailed(null); setImageFailed(false); setPreview(undefined); setViewing(false);
     void describeAttachment(path, controller.signal).then(value => {
       if (!controller.signal.aborted) setFile(value);
     }).catch((error: unknown) => {
@@ -44,11 +46,32 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
   const label = name || file?.name || path.split("/").pop() || "Файл";
   const folder = file?.kind === "folder";
   const download = file && !folder ? `${artifactUrl(file.path, false)}&chat=1` : undefined;
+  // Просмотр показывает ровно то, что уже получила карточка: object URL при
+  // токене сессии, иначе тот же проверяемый маршрут Files. Ограничение 25 МБ
+  // остаётся здесь — большой файл по-прежнему только скачивается.
+  const imageSrc = file && isImageKind(file.kind) && file.size <= 25 * 1024 * 1024 && !imageFailed && (!window.__HERMES_SESSION_TOKEN__ || preview)
+    ? preview || `${artifactUrl(file.path)}&chat=1`
+    : undefined;
+  // Токен сессии нельзя класть в ссылку, поэтому в таком контуре и карточка,
+  // и просмотр скачивают одним и тем же авторизованным запросом.
+  const authedDownload = useCallback(() => {
+    if (downloading || !file) return;
+    setDownloading(true); setDownloadError(false);
+    void downloadWorkspaceFile(file.path, label, true).catch(() => setDownloadError(true)).finally(() => setDownloading(false));
+  }, [downloading, file, label]);
   return (
     <div className="my-3 max-w-lg rounded-xl bg-[var(--neo-surface)] p-3 shadow-[var(--neo-depth-1)]" aria-label={`Вложение: ${label}`}>
-      {file && isImageKind(file.kind) && file.size <= 25 * 1024 * 1024 && !imageFailed && (!window.__HERMES_SESSION_TOKEN__ || preview) && (
-        <img src={preview || `${artifactUrl(file.path)}&chat=1`} alt={label} loading="lazy"
-          onError={() => setImageFailed(true)} className="mb-3 max-h-80 rounded-lg object-contain" />
+      {imageSrc && (
+        <button type="button" onClick={() => setViewing(true)} aria-label={`Открыть изображение крупно: ${label}`}
+          className="mb-3 block cursor-zoom-in rounded-lg border-0 bg-transparent p-0 outline-none focus-visible:shadow-[var(--neo-inset-compact)]">
+          <img src={imageSrc} alt={label} loading="lazy"
+            onError={() => setImageFailed(true)} className="max-h-80 rounded-lg object-contain" />
+        </button>
+      )}
+      {viewing && imageSrc && (
+        <ImageViewer src={imageSrc} name={label} downloadHref={download} downloading={downloading}
+          onDownload={window.__HERMES_SESSION_TOKEN__ ? authedDownload : undefined}
+          onClose={() => setViewing(false)} />
       )}
       <div className="flex items-center gap-3">
         {folder ? <FolderOpen size={22} className="shrink-0 text-muted-foreground" aria-hidden /> : <FileText size={22} className="shrink-0 text-muted-foreground" aria-hidden />}
@@ -63,9 +86,7 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
           aria-disabled={downloading} onClick={event => {
             if (!window.__HERMES_SESSION_TOKEN__) return;
             event.preventDefault();
-            if (downloading || !file) return;
-            setDownloading(true); setDownloadError(false);
-            void downloadWorkspaceFile(file.path, label, true).catch(() => setDownloadError(true)).finally(() => setDownloading(false));
+            authedDownload();
           }}>
           <Download size={14} aria-hidden /> {downloading ? "Скачиваем…" : "Скачать"}
         </a>}
