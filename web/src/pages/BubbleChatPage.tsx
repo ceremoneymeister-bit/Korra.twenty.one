@@ -35,7 +35,6 @@ import {
   Globe,
   BotMessageSquare,
   Square,
-  X,
   Paperclip,
   RotateCcw,
   Mic,
@@ -70,6 +69,7 @@ import { attachUploadBatch } from "@/lib/chat-upload-batch";
 import { readDroppedFolder, type FolderSelection } from "@/lib/folder-select";
 import { sendOriginals, setSendOriginals } from "@/lib/image-optimize";
 import { AttachmentMenu } from "@/components/chat/AttachmentMenu";
+import { SessionActions } from "@/components/chat/SessionActions";
 import { ChatUnreadMark } from "@/components/chat/SessionRunActivity";
 import { resumeUploadJob, excludeUploadFile, cancelUploadJob } from "@/store/upload-jobs";
 import { UploadJobsPanel } from "@/components/UploadJobsPanel";
@@ -324,6 +324,7 @@ interface BubbleChatSidebarProps {
   onSelect: (id: string) => void;
   onNewChat: () => void;
   onRequestDelete: (id: string) => void;
+  onRenamed?: () => void;
 }
 
 export function BubbleChatSidebar({
@@ -335,6 +336,7 @@ export function BubbleChatSidebar({
   onSelect,
   onNewChat,
   onRequestDelete,
+  onRenamed,
 }: BubbleChatSidebarProps) {
   return (
     // No bg- override — let the parent dashboard background show through.
@@ -411,27 +413,8 @@ export function BubbleChatSidebar({
                   </span>
                 </span>
               </button>
-              {/* Delete button — shows on hover only. Stopping propagation so
-                  clicking X doesn't also select the session. */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRequestDelete(s.id);
-                }}
-                className={cn(
-                  "absolute top-1/2 right-2 -translate-y-1/2",
-                  "rounded-[var(--neo-radius-round)] border-0 bg-transparent p-1 outline-0",
-                  "opacity-0 group-hover:opacity-60 hover:!opacity-100",
-                  "text-[var(--neo-text-secondary)] hover:text-destructive hover:shadow-[var(--neo-inset-compact)]",
-                  "focus-visible:opacity-100 focus-visible:outline-0",
-                  "transition-opacity",
-                )}
-                aria-label={`Удалить чат «${titleFor(s)}»`}
-                title="Удалить чат"
-              >
-                <X size={12} aria-hidden />
-              </button>
+              <SessionActions key={`${profile}:${s.id}`} sessionId={s.id} profile={profile}
+                title={titleFor(s)} onRenamed={onRenamed} onDelete={() => onRequestDelete(s.id)} />
             </div>
           );
         })}
@@ -1416,6 +1399,7 @@ export default function BubbleChatPage({
         onSelect={handleSelect}
         onNewChat={handleNewChat}
         onRequestDelete={sessionDelete.requestDelete}
+        onRenamed={() => void sessionList.refresh()}
       />
       <DeleteConfirmDialog
         open={sessionDelete.isOpen}

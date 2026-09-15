@@ -647,7 +647,7 @@ describe("BubbleChatSidebar", () => {
     expect(container.querySelector('[aria-current="page"]')?.textContent).toContain(
       "Третий чат",
     );
-    expect(nav.querySelectorAll('button[aria-label^="Удалить чат"]')).toHaveLength(
+    expect(nav.querySelectorAll('button[aria-label^="Действия с чатом"]')).toHaveLength(
       sessions.length,
     );
     expect(
