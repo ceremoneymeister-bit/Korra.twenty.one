@@ -668,12 +668,62 @@ def test_host_resources_refuse_before_provisioning(host, monkeypatch, low):
     item, fake = host
     item.o.action = "bootstrap"
     if low == "cpu":
-        monkeypatch.setattr(h.os, "cpu_count", lambda: 2)
+        monkeypatch.setattr(h.os, "cpu_count", lambda: 1)
     else:
         (item.root / "proc/meminfo").write_text("MemTotal: 1048576 kB\n")
     before = files(item.root)
     with pytest.raises(h.HostError, match="CPU|RAM"):
         item.preflight()
+    assert files(item.root) == before
+
+
+def test_small_vps_passes_provisioning_gate(host, monkeypatch):
+    """Порог — как у Hermes: 2 vCPU / 2 GiB-class хост проходит `bootstrap --plan`.
+
+    Наш прежний гейт 4 CPU / 7 GiB отклонял живые клиентские серверы
+    2 vCPU / 3,8 GiB, на которых Korra работает годами; движку столько не нужно.
+    """
+    item, fake = host
+    item.o.action = "bootstrap"
+    item.o.plan = True
+    monkeypatch.setattr(h.os, "cpu_count", lambda: 2)
+    (item.root / "proc/meminfo").write_text("MemTotal: 1990000 kB\n")
+    monkeypatch.setattr(h.shutil, "disk_usage", lambda path: SimpleNamespace(free=20 * 1024**3))
+    assert item.preflight()["name"] == "synthetic"
+    (item.root / "proc/meminfo").write_text("MemTotal: 1400000 kB\n")
+    with pytest.raises(h.HostError, match="RAM"):
+        item.preflight()
+
+
+@pytest.mark.parametrize(
+    "cpus, mem_kib, free, refusal",
+    [
+        (2, 1572864, 16 * 1024**3, None),
+        (1, 1572864, 16 * 1024**3, "CPUs"),
+        (2, 1572863, 16 * 1024**3, "RAM"),
+        (2, 1572864, 16 * 1024**3 - 1, "GiB free"),
+    ],
+    ids=["exact-minimum", "one-cpu", "kib-short-of-ram", "byte-short-of-disk"],
+)
+def test_provisioning_gate_boundary(host, monkeypatch, cpus, mem_kib, free, refusal):
+    """Ровно согласованный минимум проходит, на шаг ниже — отказ по своей причине.
+
+    Границы записаны числами: 2 CPU, 1536 MiB видимой RAM (1572864 kB в
+    /proc/meminfo) и 16 GiB свободного места — это договорённость 15.09.2026,
+    а не деталь реализации, поэтому её молчаливый сдвиг должен падать здесь.
+    """
+    item, fake = host
+    item.o.action = "bootstrap"
+    item.o.plan = True
+    monkeypatch.setattr(h.os, "cpu_count", lambda: cpus)
+    (item.root / "proc/meminfo").write_text(f"MemTotal: {mem_kib} kB\n")
+    monkeypatch.setattr(h.shutil, "disk_usage", lambda path: SimpleNamespace(free=free))
+    before = files(item.root)
+    if refusal is None:
+        assert item.preflight()["name"] == "synthetic"
+    else:
+        with pytest.raises(h.HostError, match=refusal):
+            item.preflight()
     assert files(item.root) == before
 
 

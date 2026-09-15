@@ -114,7 +114,9 @@ python3 /opt/korra/host-bootstrap.py bootstrap --no-admin \
 
 `--no-admin` starts the contour without a host-admin key and without `sudo`
 for the agent inside the container. Pass your real SSH port. The preflight
-needs at least 4 CPUs and 7 GiB RAM; on a smaller machine use scenario B.
+needs at least 2 CPUs, 1536 MiB reported RAM and 16 GiB free; the 4 vCPU / 8 GB
+/ 60 GB of scenario A stay a recommendation for several active profiles. On a
+smaller machine use scenario B.
 
 **Check:**
 
