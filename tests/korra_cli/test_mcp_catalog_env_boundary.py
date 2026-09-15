@@ -56,8 +56,14 @@ def catalog_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _isolate_hermes
 
 @pytest.fixture
 def client():
-    with TestClient(app) as test_client:
+    # These tests exercise registered routes and middleware only. Entering the
+    # client context would start the whole dashboard lifespan, including the
+    # unrelated session-reconcile and hosted-room SQLite workers, once per test.
+    test_client = TestClient(app)
+    try:
         yield test_client
+    finally:
+        test_client.close()
 
 
 def test_catalog_rejects_undeclared_key_before_any_write_or_install(
