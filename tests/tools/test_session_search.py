@@ -493,14 +493,20 @@ class TestCrossProfileRead:
         monkeypatch.setattr(profiles_mod, "profile_exists", lambda n: exists)
         monkeypatch.setattr(profiles_mod, "get_profile_dir", lambda n: home)
 
-    def test_bare_id_locates_across_profiles(self, db, tmp_path, monkeypatch):
-        # The real-world failure: model dropped the owning profile and passed a
-        # bare id. The tool must scan profiles and find it anyway.
+    def test_bare_id_never_reads_another_profiles_store(self, db, tmp_path, monkeypatch):
+        """Profiles are separate agents. A bare id that misses the caller's own
+        store must NOT be resolved by scanning every other profile's state.db:
+        ids travel in logs and tool output, so that handed any caller holding
+        one another agent's whole transcript with no opt-in and no profile
+        named. Naming the owner stays the sanctioned cross-profile read.
+
+        Ported from hermes-agent ``df0eed4f`` (from PR #108074, refs #106761).
+        """
         other_home = tmp_path / "asdf_home"
         other_home.mkdir()
         other = SessionDB(other_home / "state.db")
         other.create_session("s_far", source="cli")
-        other.append_message("s_far", role="user", content="hi")
+        other.append_message("s_far", role="user", content="parol-ot-kabineta")
         other._conn.commit()
 
         from collections import namedtuple
@@ -509,11 +515,45 @@ class TestCrossProfileRead:
         monkeypatch.setattr(profiles_mod, "get_profile_dir", lambda n: tmp_path / "default_home")
         monkeypatch.setattr(profiles_mod, "list_profiles", lambda: [Info("asdf", other_home)])
 
-        # `db` (current profile) lacks s_far; no profile passed → scan finds it.
+        # `db` (the caller's profile) lacks s_far and no profile was named.
         result = json.loads(session_search(session_id="s_far", db=db))
-        assert result["success"] is True
-        assert result["mode"] == "read"
-        assert result["profile"] == "asdf"
+        assert result["success"] is False
+        assert "messages" not in result
+        assert "parol-ot-kabineta" not in json.dumps(result, ensure_ascii=False)
+        assert "profile=" in result["error"]
+
+        # Both explicit forms of the cross-profile contract still work.
+        self._patch_profiles(monkeypatch, other_home)
+        named = json.loads(session_search(session_id="s_far", profile="asdf", db=db))
+        assert named["success"] is True and named["message_count"] == 1
+        linked = json.loads(session_search(session_id="asdf/s_far", db=db))
+        assert linked["success"] is True and linked["session_id"] == "s_far"
+
+    def test_named_profile_miss_stays_a_miss(self, db, tmp_path, monkeypatch):
+        """An explicit `profile=` read that misses must not fall through to a
+        scan of the remaining profiles either — that was the same leak with an
+        extra step.
+        """
+        other_home = tmp_path / "asdf_home"
+        other_home.mkdir()
+        other = SessionDB(other_home / "state.db")
+        other.create_session("s_far", source="cli")
+        other.append_message("s_far", role="user", content="parol-ot-kabineta")
+        other._conn.commit()
+
+        empty_home = tmp_path / "empty_home"
+        empty_home.mkdir()
+        SessionDB(empty_home / "state.db").close()
+
+        from collections import namedtuple
+        from korra_cli import profiles as profiles_mod
+        Info = namedtuple("Info", "name path")
+        self._patch_profiles(monkeypatch, empty_home)
+        monkeypatch.setattr(profiles_mod, "list_profiles", lambda: [Info("asdf", other_home)])
+
+        result = json.loads(session_search(session_id="s_far", profile="empty", db=db))
+        assert result["success"] is False
+        assert "parol-ot-kabineta" not in json.dumps(result, ensure_ascii=False)
 
 
     def test_combined_value_autosplits(self, db, tmp_path, monkeypatch):

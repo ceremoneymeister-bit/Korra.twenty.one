@@ -657,6 +657,114 @@ class TestMediaDeliveryDefaultMode:
         assert BasePlatformAdapter.validate_media_delivery_path(str(token)) is None
 
 
+    def test_denylist_blocks_session_and_kanban_stores(self, tmp_path, monkeypatch):
+        """Transcripts and the service SQLite stores must never leave as an attachment.
+
+        ``state.db`` holds the whole conversation history — every secret the
+        user ever pasted into a chat — ``sessions/`` the legacy transcripts,
+        ``browser-profile/`` the copied cookie/login store, and a named board's
+        ``kanban.db`` sits right beside the attachments dir the allow side
+        already trusts. The WAL/SHM sidecars are touched on every write, so
+        recency trust alone would have handed them over. Plain reports from the
+        shared install workspace and generated pictures stay deliverable.
+
+        Ported from hermes-agent ``4139695c97`` (#41071).
+        """
+        self._patch_roots(monkeypatch)
+
+        fake_home = tmp_path / "home"
+        hermes_dir = fake_home / ".hermes"
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setattr("gateway.platforms.base._HERMES_HOME", hermes_dir)
+        monkeypatch.setattr("gateway.platforms.base._HERMES_ROOT", hermes_dir)
+        # The system-path prefixes are a different guard and would mask this
+        # one whenever the tmp tree happens to sit under one of them (e.g. a
+        # root-run runner with TMPDIR under /root). Same isolation the
+        # neighbouring #38106 / #31733 tests use.
+        monkeypatch.setattr("gateway.platforms.base._MEDIA_DELIVERY_DENIED_PREFIXES", ())
+        for name in ("HERMES_KANBAN_HOME", "KORRA_KANBAN_HOME",
+                     "HERMES_KANBAN_ATTACHMENTS_ROOT", "KORRA_KANBAN_ATTACHMENTS_ROOT"):
+            monkeypatch.delenv(name, raising=False)
+
+        denied = [
+            "state.db", "state.db-wal", "state.db-shm", "state.db-journal",
+            "kanban.db", "kanban.db-wal",
+            "sessions/20260915_120000_abc.json",
+            "browser-profile/chrome/Cookies",
+            "kanban/boards/marketing/kanban.db",
+            "kanban/boards/marketing/kanban.db-wal",
+        ]
+        allowed = [
+            "cache/images/generated.png",
+            "workspace/report.pdf",
+            "kanban/boards/marketing/attachments/brief.pdf",
+        ]
+        for rel in denied + allowed:
+            path = hermes_dir / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"chat history + secrets\n")
+
+        assert [rel for rel in denied
+                if BasePlatformAdapter.validate_media_delivery_path(str(hermes_dir / rel))] == []
+        assert [rel for rel in allowed
+                if not BasePlatformAdapter.validate_media_delivery_path(str(hermes_dir / rel))] == []
+
+    def test_denylist_covers_every_profile_home_not_just_the_launch_home(self, tmp_path, monkeypatch):
+        """One multiplexing gateway serves every ``<root>/profiles/*``.
+
+        The credential guard must cover each profile's ``.env`` / ``auth.json``
+        / ``config.yaml`` / ``state.db`` / transcripts whether the emitting turn
+        belongs to the launch profile or to the secondary's own turn (where
+        ``_profile_runtime_scope`` installs a per-turn HERMES_HOME override).
+        The profile's own cache artifacts, its plain agent-written files and the
+        shared install workspace stay deliverable.
+
+        Ported from hermes-agent ``3b044261`` (PR #107609).
+        """
+        from korra_constants import reset_hermes_home_override, set_hermes_home_override
+
+        self._patch_roots(monkeypatch)
+
+        fake_home = tmp_path / "home"
+        hermes_root = fake_home / ".hermes"
+        profile_a = hermes_root / "profiles" / "alpha"   # the launch profile
+        profile_b = hermes_root / "profiles" / "beta"    # a served secondary
+        profile_a.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setattr("gateway.platforms.base._HERMES_HOME", profile_a)
+        monkeypatch.setattr("gateway.platforms.base._HERMES_ROOT", hermes_root)
+        # See test_denylist_blocks_session_and_kanban_stores: the system-path
+        # prefixes are a different guard and must not mask this one.
+        monkeypatch.setattr("gateway.platforms.base._MEDIA_DELIVERY_DENIED_PREFIXES", ())
+
+        denied = [
+            ".env", "auth.json", "config.yaml", "google_token.json",
+            "mcp-tokens/server.json", "pairing/device.json",
+            "state.db", "state.db-wal",
+            "sessions/20260915_120000_abc.json",
+            "browser-profile/chrome/Cookies",
+        ]
+        allowed = ["cache/images/generated.png", "report.pdf"]
+        for rel in denied + allowed:
+            path = profile_b / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"SECRET=1\n")
+        shared = hermes_root / "workspace" / "quarterly.pdf"
+        shared.parent.mkdir(parents=True, exist_ok=True)
+        shared.write_bytes(b"%PDF-1.4")
+
+        for scope in (None, profile_b):  # alpha's turn, then beta's own turn
+            token = set_hermes_home_override(scope)
+            try:
+                assert [rel for rel in denied
+                        if BasePlatformAdapter.validate_media_delivery_path(str(profile_b / rel))] == []
+                assert [rel for rel in allowed
+                        if not BasePlatformAdapter.validate_media_delivery_path(str(profile_b / rel))] == []
+                assert (BasePlatformAdapter.validate_media_delivery_path(str(shared))
+                        == str(shared.resolve()))
+            finally:
+                reset_hermes_home_override(token)
+
     def test_denylist_blocks_non_cache_file_under_hermes_home(self, tmp_path, monkeypatch):
         """A non-credential file the agent wrote directly under ~/.hermes
         (not in a cache subdir) is still deliverable via recency trust — we

@@ -99,7 +99,12 @@ def load_arm(path: Path, name: str, work_db_path: Path):
         return None, None
 
     mod._resolve_profile_db = _fake_resolve_profile_db
-    mod._locate_session_db = _fake_locate_session_db
+    # Current arms have no implicit cross-profile scan at all — a bare id is
+    # read only from the caller's own store. Older arms loaded from a git ref
+    # still carry `_locate_session_db`, and those must stay hermetic instead of
+    # walking the real profiles on the machine running the eval.
+    if hasattr(mod, "_locate_session_db"):
+        mod._locate_session_db = _fake_locate_session_db
     return mod
 
 
