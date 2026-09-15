@@ -16,6 +16,20 @@ export const $chatRuns = atom<ChatRun[]>([]);
 export const $chatRunsReachable = atom<boolean | null>(null);
 export const $viewedChat = atom<{ profile: string; sessionId: string | null } | null>(null);
 export const $unreadChatRuns = atom<ChatRun[]>([]);
+/** Ответы, чьё всплывающее уведомление человек закрыл. Закрыть карточку —
+ *  не значит прочитать ответ: отметка у чата в списке остаётся до открытия
+ *  именно этого чата (markChatViewed). */
+export const $dismissedRunToasts = atom<string[]>([]);
+
+export function dismissRunToasts(): void {
+  const ids = $unreadChatRuns.get().map(run => run.message_id);
+  $dismissedRunToasts.set([...new Set([...$dismissedRunToasts.get(), ...ids])].slice(-200));
+}
+
+/** Есть ли у конкретного чата (profile + session) непрочитанный ответ. */
+export function hasUnreadResponse(unread: ChatRun[], profile: string, sessionId: string | null | undefined): boolean {
+  return Boolean(sessionId) && unread.some(run => run.profile === profile && run.session_id === sessionId);
+}
 
 export function chatRunUrl(path = "", profile?: string, sessionId?: string): string {
   const query = new URLSearchParams();
