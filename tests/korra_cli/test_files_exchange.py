@@ -169,3 +169,20 @@ def test_thirty_attachments_are_admitted_without_truncation(files):
     body = {'messages': [{'role': 'user', 'content': ''}], 'attachments': attachments}
     server._apply_chat_attachments(body, request=request)
     assert all(item['path'] in body['messages'][0]['content'] for item in attachments)
+
+
+def test_result_outside_workspace_explains_the_reason_and_the_next_step(files):
+    """Карточка «Показать в папке» должна объяснить, почему файла нет, а не
+    показать общий отказ: результат в профиле агента лежит вне общей рабочей
+    папки, и продолжение — попросить агента сохранить его в workspace."""
+    client, root, workspace = files
+    private = root / 'profiles' / 'designer' / 'листовка.pdf'
+    private.parent.mkdir(parents=True)
+    private.write_bytes(b'%PDF')
+    response = client.get('/api/files/attachment', params={'path': str(private)})
+    assert response.status_code == 403
+    assert response.json()['detail'] == 'Файл вне рабочей папки. Попросите агента сохранить его в workspace.'
+    # Удалённый файл внутри workspace — другая причина и другое продолжение.
+    missing = client.get('/api/files/attachment', params={'path': str(workspace / 'нет.pdf')})
+    assert missing.status_code == 404
+    assert 'удалён или перемещён' in missing.json()['detail']

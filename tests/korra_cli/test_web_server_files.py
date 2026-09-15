@@ -965,3 +965,51 @@ def test_file_manager_frontend_contract_is_present_in_openapi():
     )
     assert missing == []
     assert "delete" not in schema.get("paths", {}).get("/api/files", {})
+
+
+def test_owner_creates_folders_inside_the_fleet_workspace_only(monkeypatch, tmp_path):
+    """«Создать папку» владельца: русское имя с пробелами в пустом корне,
+    занятое имя → 409 без перезаписи, выход за workspace, `..`, служебные
+    каталоги и символические ссылки закрыты. Это движковая половина пути
+    cabinet client → engine; сам маршрут кабинет открывает через files_mkdir."""
+    hermes_home = tmp_path / "hermes-home"
+    hermes_home.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.delenv("HERMES_DASHBOARD_FILES_ROOT", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("KORRA_UI_MODE", "fleet")
+
+    client, prev_auth_required, prev_bound_host = _client_with_app_state()
+    try:
+        workspace = hermes_home / "workspace"
+        assert client.get("/api/files").json()["entries"] == []
+
+        created = client.post("/api/files/mkdir", json={"path": "Отчёты за сентябрь"})
+        assert created.status_code == 200, created.text
+        assert created.json()["entry"]["is_directory"] is True
+        assert created.json()["entry"]["name"] == "Отчёты за сентябрь"
+        assert (workspace / "Отчёты за сентябрь").is_dir()
+
+        marker = workspace / "Отчёты за сентябрь" / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+        duplicate = client.post("/api/files/mkdir", json={"path": str(workspace / "Отчёты за сентябрь")})
+        assert duplicate.status_code == 409
+        assert "уже существует" in duplicate.json()["detail"]
+        assert marker.read_text(encoding="utf-8") == "keep"
+
+        names = [entry["name"] for entry in client.get("/api/files").json()["entries"]]
+        assert names == ["Отчёты за сентябрь"]
+
+        assert client.post("/api/files/mkdir", json={"path": "../escape"}).status_code == 400
+        assert client.post("/api/files/mkdir", json={"path": str(outside / "escape")}).status_code == 403
+        assert client.post("/api/files/mkdir", json={"path": str(hermes_home / "escape")}).status_code == 403
+        assert client.post("/api/files/mkdir", json={"path": ".trash/forged"}).status_code == 403
+        (workspace / "link").symlink_to(outside, target_is_directory=True)
+        assert client.post("/api/files/mkdir", json={"path": "link/через ссылку"}).status_code == 403
+        assert not (outside / "escape").exists()
+        assert not (outside / "через ссылку").exists()
+        assert not (hermes_home / "escape").exists()
+    finally:
+        _close_client(client)
+        _restore_app_state(prev_auth_required, prev_bound_host)

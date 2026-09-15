@@ -4732,7 +4732,17 @@ def _chat_folder_descriptor(target: Path, *, deadline: float | None = None) -> d
 
 def _chat_file_descriptor(reference: str, request: Request, *, folder_deadline: float | None = None) -> dict[str, Any]:
     path = _chat_file_path(reference)
-    policy, target, _ = _resolve_managed_path(path, request)
+    try:
+        policy, target, _ = _resolve_managed_path(path, request)
+    except HTTPException as exc:
+        # Карточка в чате показывает причину владельцу: результат, сохранённый
+        # агентом в свой профиль или в /tmp, не «недоступен вообще», а лежит
+        # вне общей рабочей папки, и продолжение — попросить перенести его.
+        if exc.status_code == 403 and exc.detail == "Path outside managed files root":
+            raise HTTPException(403, "Файл вне рабочей папки. Попросите агента сохранить его в workspace.") from exc
+        if exc.status_code == 404:
+            raise HTTPException(404, "Файл удалён или перемещён. Попросите агента создать его снова.") from exc
+        raise
     if policy.locked_root is None:
         # Local admin Files may browse the host. Model-produced links have a
         # narrower contract: only the active data directory is deliverable.

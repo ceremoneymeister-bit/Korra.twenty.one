@@ -29,6 +29,16 @@ it("uses declared per-surface capabilities independently of the role label", asy
   expect(result.canManageSkills).toBe(true);
   expect(result.canConfigureToolsets).toBe(true);
   expect(result.restrictedFiles).toBe(true);
+  expect(result.canCreateFolders).toBe(false);
+});
+it("offers folder creation only on the exact files_mkdir hint, not on the wider files_manage", async () => {
+  const owner = await probe({ kind: "cabinet", mode: "client", capabilities: { files_mkdir: true } });
+  expect(owner.canCreateFolders).toBe(true);
+  expect(owner.restrictedFiles).toBe(true);
+  // Старый кабинет присылает только files_manage: точной подсказки нет — кнопки нет.
+  const legacyAdmin = await probe({ kind: "cabinet", mode: "admin", capabilities: { files_manage: true } });
+  expect(legacyAdmin.restrictedFiles).toBe(false);
+  expect(legacyAdmin.canCreateFolders).toBe(false);
 });
 it("keeps standalone controls and does not probe a nonexistent cabinet", async () => {
   state.base = "";

@@ -31,6 +31,26 @@ it("недоступный файл объясняется без рабочей
   expect(host.querySelector('a[download]')).toBeNull();
 });
 
+it("результат вне рабочей папки получает причину сервера и продолжение, а не общий текст", async () => {
+  const detail = "Файл вне рабочей папки. Попросите агента сохранить его в workspace.";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), { status: 403 })));
+  await act(async () => root.render(<Markdown content="MEDIA:/opt/data/profiles/designer/report.pdf" />));
+  expect(host.textContent).toContain("Вложение недоступно. Файл вне рабочей папки. Попросите агента");
+  expect(host.querySelector('a[download]')).toBeNull();
+  expect(host.querySelector('a[href*="/files?"]')).toBeNull();
+});
+
+it("«Показать в папке» ведёт в папку файла и подсвечивает именно его", async () => {
+  const path = "/opt/data/workspace/Отчёты/сентябрь.xlsx";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ path, name: "сентябрь.xlsx", kind: "xlsx", size: 10, reader: "xlsx" }))));
+  await act(async () => root.render(<Markdown content={`MEDIA:${path}`} />));
+  const link = [...host.querySelectorAll("a")].find(item => item.textContent?.includes("Показать в папке"))!;
+  const url = new URL(link.getAttribute("href")!, "https://local.test");
+  expect(url.pathname).toBe("/files");
+  expect(url.searchParams.get("path")).toBe("/opt/data/workspace/Отчёты");
+  expect(url.searchParams.get("highlight")).toBe("сентябрь.xlsx");
+});
+
 it("изображение получает превью через тот же проверяемый маршрут", async () => {
   const path = "/opt/data/workspace/image.png";
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({path, name: "image.png", kind: "png", size: 128, reader: "image"}))));

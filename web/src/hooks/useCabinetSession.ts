@@ -21,7 +21,10 @@ export function useCabinetSession() {
     return () => controller.abort();
   }, [fallbackLogout]);
   const allowed = (name: string) => !fallbackLogout || capabilities[name] === true;
-  return { logout, restrictedFiles: !allowed("files_manage"),
+  // «Создать папку» — отдельная подсказка `files_mkdir`: кабинет открывает
+  // владельцу ровно эту операцию. Старый кабинет ключа не присылает, и
+  // кнопка остаётся скрытой, вместо того чтобы обещать закрытый маршрут.
+  return { logout, restrictedFiles: !allowed("files_manage"), canCreateFolders: allowed("files_mkdir"),
     canManageSkills: allowed("skills_manage"), canBrowseSkillsHub: allowed("skills_hub"),
     canConfigureToolsets: allowed("toolsets_config") };
 }

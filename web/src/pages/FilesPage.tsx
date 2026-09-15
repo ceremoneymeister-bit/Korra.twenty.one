@@ -54,7 +54,11 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import {
   buildFileBreadcrumbs,
+  buildWorkspaceBreadcrumbs,
   filterAndSortFileEntries,
+  workspaceEntryLabel,
+  workspaceEntryTarget,
+  workspaceParentPath,
   type FileSortMode,
 } from "@/lib/file-manager";
 import { useStore } from "@nanostores/react";
@@ -285,7 +289,10 @@ export default function FilesPage() {
   // Fleet is the full Korra workspace manager. The narrower client-mode
   // inbox/artifacts rules belong to white-label owner cabinets only.
   const clientMode = isClientUiMode();
-  const { restrictedFiles } = useCabinetSession();
+  const { restrictedFiles, canCreateFolders } = useCabinetSession();
+  // Fleet — общий workspace установки: поверх физических `client/inbox` и
+  // дат показываем «Мои файлы» / «Загрузки из чатов», пути не меняем.
+  const fleetMode = productUiMode() === "fleet";
   const { toast, showToast } = useToast();
   const { setAfterTitle, setEnd } = usePageHeader();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -347,9 +354,21 @@ export default function FilesPage() {
   const canChangePath = listing?.can_change_path ?? false;
   const managedRoot = listing?.locked_root ?? listing?.root;
   const breadcrumbs = useMemo(
-    () => buildFileBreadcrumbs(managedRoot, activePath, filesRootLabel()),
-    [activePath, managedRoot],
+    () => (fleetMode
+      ? buildWorkspaceBreadcrumbs(managedRoot, activePath)
+      : buildFileBreadcrumbs(managedRoot, activePath, filesRootLabel())),
+    [activePath, fleetMode, managedRoot],
   );
+  const entryLabel = useCallback(
+    (entry: { path: string; name: string }) => (fleetMode ? workspaceEntryLabel(managedRoot, entry.path, entry.name) : clientEntryLabel(entry.name)),
+    [fleetMode, managedRoot],
+  );
+  // «Показать в папке» из чата: `/files?path=<папка>&highlight=<имя>` подсвечивает
+  // и прокручивает к нужной строке, чтобы файл не искали глазами среди сотни.
+  const highlight = searchParams.get("highlight")?.trim() || null;
+  const highlightedRowRef = useCallback((node: HTMLDivElement | null) => {
+    node?.scrollIntoView?.({ block: "center" });
+  }, []);
   const rawHeaderPath = displayPath(listing?.locked_root ?? listing?.path ?? requestedPath);
   const headerPath = clientMode
     ? clientDisplayPath(activePath)
@@ -368,10 +387,14 @@ export default function FilesPage() {
     if (entry.name.startsWith(".") || entry.name.endsWith(".meta.json")) return false;
     return !isAtClientRoot || ["artifacts", "inbox"].includes(entry.name);
   }), [clientMode, isAtClientRoot, listing?.entries]);
-  const visibleEntries = useMemo(
-    () => filterAndSortFileEntries(baseEntries, searchQuery, sortMode),
-    [baseEntries, searchQuery, sortMode],
-  );
+  const visibleEntries = useMemo(() => {
+    const sorted = filterAndSortFileEntries(baseEntries, searchQuery, sortMode);
+    if (!fleetMode) return sorted;
+    // «Загрузки из чатов» — постоянный раздел корня, а не папка среди папок:
+    // держим её первой независимо от сортировки по имени/дате/размеру.
+    const pinned = sorted.filter((item) => workspaceEntryTarget(managedRoot, item.path) !== item.path);
+    return pinned.length ? [...pinned, ...sorted.filter((item) => !pinned.includes(item))] : sorted;
+  }, [baseEntries, fleetMode, managedRoot, searchQuery, sortMode]);
   useEffect(() => { setSelected([]); }, [activePath]);
 
   /** Переход в папку — новая запись в истории: «Назад» вернёт на уровень выше. */
@@ -380,6 +403,8 @@ export default function FilesPage() {
       const next = new URLSearchParams(searchParamsRef.current);
       if (path) next.set("path", path);
       else next.delete("path");
+      // Подсветка относится к файлу в конкретной папке; в соседней она чужая.
+      next.delete("highlight");
       setSearchParams(next);
     },
     [setSearchParams],
@@ -402,22 +427,34 @@ export default function FilesPage() {
   );
 
   const load = useCallback(
-    async (path?: string) => {
+    async (path?: string): Promise<void> => {
       if (!mountedRef.current) return;
-      const target = path === undefined ? currentPathRef.current : path;
+      let target = path === undefined ? currentPathRef.current : path;
       const requestId = ++listRequestRef.current;
       setLoading(true);
       setError(null);
       try {
-        const result = await api.listFiles(target);
-        if (requestId !== listRequestRef.current) return;
-        setListing(result);
-        currentPathRef.current = result.path;
-        setPathInput(result.path);
-        syncPathParam(result.path);
-      } catch (e) {
-        if (requestId !== listRequestRef.current) return;
-        setError(ownerFacingError(e, "Не удалось загрузить список файлов."));
+        for (;;) {
+          try {
+            const result = await api.listFiles(target);
+            if (requestId !== listRequestRef.current) return;
+            setListing(result);
+            currentPathRef.current = result.path;
+            setPathInput(result.path);
+            syncPathParam(result.path);
+            return;
+          } catch (e) {
+            if (requestId !== listRequestRef.current) return;
+            // «Загрузки из чатов» открываются сразу в `client/inbox`; если чат
+            // ещё ничего не клал, а `client` существует, показываем его, а не ошибку.
+            if (target?.endsWith("/client/inbox") && /^404\b/.test(e instanceof Error ? e.message : "")) {
+              target = target.slice(0, -"/inbox".length);
+              continue;
+            }
+            setError(ownerFacingError(e, "Не удалось загрузить список файлов."));
+            return;
+          }
+        }
       } finally {
         if (requestId === listRequestRef.current) setLoading(false);
       }
@@ -480,7 +517,7 @@ export default function FilesPage() {
 
   const openDirectory = (entry: ManagedFileEntry) => {
     if (entry.is_directory) {
-      navigateTo(entry.path);
+      navigateTo(fleetMode ? workspaceEntryTarget(managedRoot, entry.path) : entry.path);
     }
   };
 
@@ -608,7 +645,7 @@ export default function FilesPage() {
   const previewEntry = (entry: ManagedFileEntry) => {
     if (entry.is_directory) return;
     setPreviewFile({
-      name: clientEntryLabel(entry.name),
+      name: entryLabel(entry),
       path: entry.path,
       mimeType: entry.mime_type,
     });
@@ -705,7 +742,7 @@ export default function FilesPage() {
                   disabled={index === breadcrumbs.length - 1}
                   className="min-h-9 rounded-md px-2 font-medium text-text-secondary hover:bg-background/45 hover:text-foreground disabled:text-foreground"
                 >
-                  {clientEntryLabel(item.label)}
+                  {fleetMode ? item.label : clientEntryLabel(item.label)}
                 </button>
               </span>
             ))}
@@ -725,7 +762,7 @@ export default function FilesPage() {
             </Button>
           )}
           {(!clientMode || isInClientInbox) && <Button type="button" outlined size="sm" disabled={!canUpload} onClick={() => void chooseFolder()} prefix={<FolderOpen />}>Загрузить папку</Button>}
-          {!clientMode && !restrictedFiles && (
+          {canCreateFolders && (
             <Button
               type="button"
               onClick={() => setCreateDialogOpen(true)}
@@ -846,7 +883,7 @@ export default function FilesPage() {
           {listing?.parent && !isAtClientRoot && (
             <button
               type="button"
-              onClick={() => navigateTo(listing.parent ?? undefined)}
+              onClick={() => navigateTo((fleetMode ? workspaceParentPath(managedRoot, activePath, listing.parent) : listing.parent) ?? undefined)}
               className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-left text-sm transition-colors hover:bg-background/40 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem]"
             >
               <span className="flex min-w-0 items-center gap-2 font-mono text-text-secondary">
@@ -876,7 +913,11 @@ export default function FilesPage() {
             visibleEntries.map((entry) => (
               <div
                 key={entry.path}
-                className="relative grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-sm last:border-b-0 hover:bg-background/35 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem]"
+                ref={highlight === entry.name ? highlightedRowRef : undefined}
+                data-highlighted={highlight === entry.name ? "true" : undefined}
+                className={`relative grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-sm last:border-b-0 hover:bg-background/35 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem] ${
+                  highlight === entry.name ? "bg-primary/10 shadow-[inset_3px_0_0_var(--primary)]" : ""
+                }`}
               >
                 <label className="absolute left-1 top-1/2 z-10 flex h-11 w-9 -translate-y-1/2 items-center justify-center">
                   <input type="checkbox" aria-label={`Выбрать ${entry.name}`} checked={selected.includes(entry.path)}
@@ -897,7 +938,7 @@ export default function FilesPage() {
                     <FileIcon className="h-4 w-4 shrink-0 text-text-tertiary" />
                   )}
                   <span className="min-w-0">
-                    <span className="block truncate font-medium">{clientEntryLabel(entry.name)}</span>
+                    <span className="block truncate font-medium">{entryLabel(entry)}</span>
                     <span className="mt-0.5 block truncate text-xs text-muted-foreground md:hidden">
                       {formatBytes(entry.size)} · {Number.isFinite(entry.mtime) ? dateFormat.format(entry.mtime * 1000) : "Дата неизвестна"}
                     </span>
@@ -908,15 +949,15 @@ export default function FilesPage() {
                   {Number.isFinite(entry.mtime) ? dateFormat.format(entry.mtime * 1000) : "-"}
                 </span>
                 <span className="relative z-10 flex max-w-[140px] flex-wrap justify-end gap-1 justify-self-end">
-                  <Button ghost size="icon" type="button" onClick={() => sendToAgent([entry.path])} aria-label={`Отправить в чат ${clientEntryLabel(entry.name)}`}><MessageSquare /></Button>
-                  <Button ghost size="icon" type="button" onClick={() => copyPaths([entry.path])} aria-label={`Копировать путь ${clientEntryLabel(entry.name)}`}><Copy /></Button>
+                  <Button ghost size="icon" type="button" onClick={() => sendToAgent([entry.path])} aria-label={`Отправить в чат ${entryLabel(entry)}`}><MessageSquare /></Button>
+                  <Button ghost size="icon" type="button" onClick={() => copyPaths([entry.path])} aria-label={`Копировать путь ${entryLabel(entry)}`}><Copy /></Button>
                   {entry.is_directory ? (
                     <Button
                       ghost
                       size="icon"
                       type="button"
                       onClick={() => openDirectory(entry)}
-                      aria-label={`Открыть ${clientEntryLabel(entry.name)}`}
+                      aria-label={`Открыть ${entryLabel(entry)}`}
                     >
                       <FolderOpen />
                     </Button>
@@ -927,7 +968,7 @@ export default function FilesPage() {
                         size="icon"
                         type="button"
                         onClick={() => previewEntry(entry)}
-                        aria-label={`Просмотреть ${clientEntryLabel(entry.name)}`}
+                        aria-label={`Просмотреть ${entryLabel(entry)}`}
                       >
                         <Eye />
                       </Button>
@@ -936,7 +977,7 @@ export default function FilesPage() {
                         size="icon"
                         type="button"
                         onClick={() => downloadFile(entry)}
-                        aria-label={`Скачать ${clientEntryLabel(entry.name)}`}
+                        aria-label={`Скачать ${entryLabel(entry)}`}
                       >
                         <Download />
                       </Button>

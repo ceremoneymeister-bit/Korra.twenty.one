@@ -3,22 +3,27 @@ import { Download, FileText, FolderOpen } from "lucide-react";
 import { describeAttachment, downloadWorkspaceFile, formatSize, isImageKind, type UploadedAttachment } from "@/lib/chat-attachments";
 import { artifactUrl } from "@/lib/chat-artifacts";
 import { authedFetch, withBasePath } from "@/lib/api";
+import { ownerFacingError } from "@/lib/owner-facing-error";
+
+const UNAVAILABLE_FALLBACK = "Вложение недоступно: удалено, перемещено, больше 2 ГБ или вне рабочей папки.";
 
 /** Metadata and bytes both pass through the Files server's access checks. */
 export function FileAttachment({ path, name }: { path: string; name?: string }) {
   const [file, setFile] = useState<UploadedAttachment | null>(null);
-  const [failed, setFailed] = useState(false);
+  // Причина недоступности приходит с сервера вместе с продолжением («попросите
+  // агента сохранить в workspace»); общий текст — только когда причины нет.
+  const [failed, setFailed] = useState<string | null>(null);
   const [imageFailed, setImageFailed] = useState(false);
   const [preview, setPreview] = useState<string>();
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    setFile(null); setFailed(false); setImageFailed(false); setPreview(undefined);
+    setFile(null); setFailed(null); setImageFailed(false); setPreview(undefined);
     void describeAttachment(path, controller.signal).then(value => {
       if (!controller.signal.aborted) setFile(value);
-    }).catch(() => {
-      if (!controller.signal.aborted) setFailed(true);
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setFailed(ownerFacingError(error, UNAVAILABLE_FALLBACK));
     });
     return () => controller.abort();
   }, [path]);
@@ -51,7 +56,7 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
           <div className="truncate text-sm" title={label}>{label}</div>
           <div className="text-xs text-muted-foreground" role="status">
             {file ? `${folder ? `${file.truncated ? "Не менее " : ""}${file.file_count} файлов` : file.kind.toUpperCase()} · ${formatSize(file.size)}` : failed
-              ? "Вложение недоступно: удалено, перемещено, больше 2 ГБ или вне рабочей папки." : "Проверяем вложение…"}
+              ? (failed === UNAVAILABLE_FALLBACK || /^Вложение недоступно/.test(failed) ? failed : `Вложение недоступно. ${failed}`) : "Проверяем вложение…"}
           </div>
         </div>
         {download && <a href={download} download={label} className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs shadow-[var(--neo-depth-1)]" aria-label={`Скачать ${label}`}
@@ -66,9 +71,11 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
         </a>}
       </div>
       {downloadError && <p role="alert" className="mt-2 text-xs text-destructive">Не удалось скачать файл. Проверьте соединение или обновите страницу.</p>}
-      {file && <a href={withBasePath(`/files?${new URLSearchParams({ path: folder ? file.path : file.path.slice(0, file.path.lastIndexOf("/")) })}`)}
+      {file && <a href={withBasePath(`/files?${new URLSearchParams(folder
+          ? { path: file.path }
+          : { path: file.path.slice(0, file.path.lastIndexOf("/")), highlight: file.name })}`)}
         className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <FolderOpen size={13} aria-hidden /> Показать в «Файлах»
+        <FolderOpen size={13} aria-hidden /> Показать в папке
       </a>}
     </div>
   );

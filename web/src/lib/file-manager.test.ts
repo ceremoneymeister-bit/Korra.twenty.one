@@ -4,7 +4,11 @@ import type { ManagedFileEntry } from "@/lib/api";
 import {
   availableCopyName,
   buildFileBreadcrumbs,
+  buildWorkspaceBreadcrumbs,
   filterAndSortFileEntries,
+  workspaceEntryLabel,
+  workspaceEntryTarget,
+  workspaceParentPath,
 } from "@/lib/file-manager";
 
 const entries: ManagedFileEntry[] = [
@@ -33,5 +37,40 @@ describe("file manager helpers", () => {
         { label: "Клиенты", path: "/opt/data/workspace/Клиенты" },
         { label: "Иван", path: "/opt/data/workspace/Клиенты/Иван" },
       ]);
+  });
+});
+
+describe("workspace labels over the physical fleet layout", () => {
+  const root = "/opt/data/workspace";
+  it("names the chat inbox and its date/package folders without touching paths", () => {
+    expect(workspaceEntryLabel(root, `${root}/client`, "client")).toBe("Загрузки из чатов");
+    expect(workspaceEntryLabel(root, `${root}/client/inbox`, "inbox")).toBe("Загрузки из чатов");
+    expect(workspaceEntryLabel(root, `${root}/client/inbox/2026-09-15`, "2026-09-15")).toBe("15 сентября 2026");
+    expect(workspaceEntryLabel(root, `${root}/client/inbox/2026-09-15/a1b2c3-1230`, "a1b2c3-1230")).toBe("Загрузка 12:30");
+    expect(workspaceEntryLabel(root, `${root}/client/inbox/2026-09-15/a1b2c3-1230/фото.jpg`, "фото.jpg")).toBe("фото.jpg");
+    // Папка владельца с таким же именем вне inbox остаётся собой.
+    expect(workspaceEntryLabel(root, `${root}/Проекты/client`, "client")).toBe("client");
+    expect(workspaceEntryLabel(root, `${root}/2026-09-15`, "2026-09-15")).toBe("2026-09-15");
+    expect(workspaceEntryLabel(null, `${root}/client`, "client")).toBe("client");
+  });
+
+  it("opens the inbox directly from the root and returns to the root from it", () => {
+    expect(workspaceEntryTarget(root, `${root}/client`)).toBe(`${root}/client/inbox`);
+    expect(workspaceEntryTarget(root, `${root}/Проекты`)).toBe(`${root}/Проекты`);
+    expect(workspaceParentPath(root, `${root}/client/inbox`, `${root}/client`)).toBe(root);
+    expect(workspaceParentPath(root, `${root}/client/inbox/2026-09-15`, `${root}/client/inbox`)).toBe(`${root}/client/inbox`);
+    expect(workspaceParentPath(root, `${root}/Проекты/Иван`, `${root}/Проекты`)).toBe(`${root}/Проекты`);
+  });
+
+  it("collapses client/inbox into one readable breadcrumb", () => {
+    expect(buildWorkspaceBreadcrumbs(root, `${root}/client/inbox/2026-09-15/a1b2c3-1230`)).toEqual([
+      { label: "Мои файлы", path: root },
+      { label: "Загрузки из чатов", path: `${root}/client/inbox` },
+      { label: "15 сентября 2026", path: `${root}/client/inbox/2026-09-15` },
+      { label: "Загрузка 12:30", path: `${root}/client/inbox/2026-09-15/a1b2c3-1230` },
+    ]);
+    expect(buildWorkspaceBreadcrumbs(root, root)).toEqual([{ label: "Мои файлы", path: root }]);
+    expect(buildWorkspaceBreadcrumbs(root, `${root}/Клиенты/Иван`).map((item) => item.label))
+      .toEqual(["Мои файлы", "Клиенты", "Иван"]);
   });
 });
