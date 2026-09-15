@@ -70,6 +70,7 @@ import { attachUploadBatch } from "@/lib/chat-upload-batch";
 import { readDroppedFolder, type FolderSelection } from "@/lib/folder-select";
 import { sendOriginals, setSendOriginals } from "@/lib/image-optimize";
 import { AttachmentMenu } from "@/components/chat/AttachmentMenu";
+import { ChatUnreadMark } from "@/components/chat/SessionRunActivity";
 import { resumeUploadJob, excludeUploadFile, cancelUploadJob } from "@/store/upload-jobs";
 import { UploadJobsPanel } from "@/components/UploadJobsPanel";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
@@ -315,6 +316,8 @@ function AssistantBubble({
 
 interface BubbleChatSidebarProps {
   sessions: SessionInfo[];
+  /** Профиль агента этого списка: отметка «Новый ответ» привязана к profile + session. */
+  profile?: string;
   activeId: string | null;
   loading: boolean;
   error: string | null;
@@ -325,6 +328,7 @@ interface BubbleChatSidebarProps {
 
 export function BubbleChatSidebar({
   sessions,
+  profile = "default",
   activeId,
   loading,
   error,
@@ -399,8 +403,11 @@ export function BubbleChatSidebar({
                 />
                 <span className="flex-1 min-w-0 relative">
                   <span className="block truncate">{titleFor(s)}</span>
-                  <span className="mt-0.5 block text-xs text-[var(--neo-text-secondary)]">
-                    {formatRelative(s.last_active)}
+                  <span className="mt-0.5 flex items-center gap-2 text-xs text-[var(--neo-text-secondary)]">
+                    <span className="min-w-0 truncate">{formatRelative(s.last_active)}</span>
+                    {/* «Выбран», «В работе» и «Есть непрочитанный ответ» — разные
+                        состояния; отметка стоит у конкретного чата, а не у агента. */}
+                    <ChatUnreadMark profile={profile} sessionId={s.id} />
                   </span>
                 </span>
               </button>
@@ -1402,6 +1409,7 @@ export default function BubbleChatPage({
     <div className="flex h-full min-h-0 -mx-3 sm:-mx-6">
       <BubbleChatSidebar
         sessions={sessionList.sessions}
+        profile={agentProfile || "default"}
         activeId={sessionId}
         loading={sessionList.loading}
         error={sessionList.error}
