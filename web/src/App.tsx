@@ -118,9 +118,12 @@ import {
 import {
   SHIPPED_PLUGIN_LABELS,
   productHomePath,
+  resolveOpenGroup,
   selectProductNav,
   selectProductSidebar,
   type ProductSidebarGroups,
+  type SidebarGroupChoice,
+  type SidebarGroupKey,
 } from "@/lib/product-nav";
 import { latchChatActivation } from "@/lib/chat-activation";
 import { isStaleBuild, loadedBuild } from "@/lib/build-version";
@@ -572,24 +575,32 @@ export default function App() {
   const productSettingsNav = productSidebar?.settings ?? [];
   const productServiceNav = productSidebar?.service ?? [];
   // Группы сайдбара — аккордеон (решение владельца 03.09): открыта одна,
-  // клик по другой переключает, клик вне сайдбара закрывает.
-  const [openGroup, setOpenGroup] = useState<"settings" | "service" | null>(null);
+  // клик по другой переключает, клик вне сайдбара закрывает. Группа текущего
+  // экрана раскрывается сама (решение владельца 15.09), поэтому состояние
+  // здесь — только выбор пользователя для конкретного маршрута, а не сама
+  // открытая группа: иначе ручное сворачивание тут же отменялось бы.
+  const [groupChoice, setGroupChoice] = useState<SidebarGroupChoice | null>(null);
+  const openGroup = resolveOpenGroup(normalizedPath, productSidebar, groupChoice);
   const settingsOpen = openGroup === "settings";
   const serviceOpen = openGroup === "service";
-  const toggleGroup = useCallback(
-    (group: "settings" | "service") =>
-      setOpenGroup((current) => (current === group ? null : group)),
-    [],
-  );
+  // Без useCallback: обработчики групп и так создаются на месте, а ручная
+  // мемоизация с двумя зависимостями мешает React Compiler.
+  const toggleGroup = (group: SidebarGroupKey) =>
+    setGroupChoice({
+      path: normalizedPath,
+      group: openGroup === group ? null : group,
+    });
   useEffect(() => {
     if (!openGroup) return;
     const closeOnOutsidePress = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (!target?.closest?.("aside")) setOpenGroup(null);
+      if (!target?.closest?.("aside")) {
+        setGroupChoice({ path: normalizedPath, group: null });
+      }
     };
     document.addEventListener("pointerdown", closeOnOutsidePress);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
-  }, [openGroup]);
+  }, [normalizedPath, openGroup]);
   const routes = useMemo(() => {
     const built = buildRoutes(builtinRoutes, manifests);
     if (!isFleetMode) return built;
