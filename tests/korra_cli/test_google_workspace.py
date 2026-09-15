@@ -850,3 +850,27 @@ def test_dashboard_bodies_cannot_smuggle_a_profile_selector():
 
     with pytest.raises(ValidationError):
         GoogleStartBody.model_validate({"services": ["drive"], "profile": "foreign"})
+
+
+def test_google_console_legacy_auth_uri_is_accepted(tmp_path):
+    """Скачанный из Google Console клиент пишет `auth_uri` без `/v2/`.
+
+    Живой случай 15.09.2026 (Виктория): корректно смонтированное приложение
+    отвечало `app_invalid` только из-за этого написания. Поток авторизации всё
+    равно идёт на AUTHORIZATION_ENDPOINT движка.
+    """
+    root = tmp_path / "root"
+    _write_app(root)
+    path = _app_path(root)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["installed"]["auth_uri"] = "https://accounts.google.com/o/oauth2/auth"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert google.status(profile_home=root)["app"]["configured"] is True
+    # Файл клиента не задаёт адрес согласия: ссылка строится движком и остаётся
+    # на v2-endpoint, каким бы ни было написание в JSON.
+    flow = google.start("drive", profile_home=root)
+    assert flow["authorization_url"].startswith(google.AUTHORIZATION_ENDPOINT + "?")
+    payload["installed"]["auth_uri"] = "https://evil.example/o/oauth2/auth"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert google.status(profile_home=root)["app"]["configured"] is False
+    assert google.status(profile_home=root)["app"]["reason"] == "app_invalid"

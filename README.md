@@ -24,7 +24,7 @@
 | Куда ставим | Что получится | Что нужно |
 |---|---|---|
 | Сервер Linux amd64 с root (рекомендуется) | контур с панелью, ботами, обновлением и откатом одной командой | 4 vCPU, 8 ГБ RAM, 60 ГБ диска, Docker |
-| Небольшой VPS без подготовки хоста | тот же контур, без файрвола и ключа администратора | 2 vCPU, 4 ГБ RAM, Docker |
+| Небольшой VPS | тот же контур; host-bootstrap ставит swap и файрвол от 2 vCPU и 2 ГБ RAM | 2 vCPU, 2–4 ГБ RAM, 16 ГБ свободно, Docker |
 | Ноутбук или рабочий компьютер (Docker Desktop) | локальный агент с панелью на `localhost` | Docker Desktop |
 
 Образ: `ghcr.io/ceremoneymeister-bit/korra.twenty.one:latest` (linux/amd64).

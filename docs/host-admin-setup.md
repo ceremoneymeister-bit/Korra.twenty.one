@@ -15,8 +15,9 @@ Web-installer отсутствует. Bootstrap включает admin mode: sud
 Поддерживаются Linux x86_64, Ubuntu/Debian с systemd. Control kit принадлежит
 root, расположен вне DATA и не доступен агенту на запись. До изменяющих команд
 проверяются root, ОС/архитектура, immutable digest, пути/владелец DATA, минимум
-4 CPU, 8 GiB-class RAM (не менее 7 GiB видимой памяти), 24 GiB свободного диска
-и отдельные panel/API/admin/operator-SSH порты. Root account должен допускать
+2 CPU, 2 GiB-class RAM (не менее 1536 MiB видимой памяти), 16 GiB свободного
+диска (4 CPU / 8 GiB / 60 GiB остаются рекомендацией) и отдельные
+panel/API/admin/operator-SSH порты. Root account должен допускать
 public-key login без PAM: locked/unknown account останавливает bootstrap.
 Скрипт не меняет глобальную политику root account. Настройте её через
 операторскую консоль; password authentication отдельного listener выключена.

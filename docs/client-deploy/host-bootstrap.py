@@ -22,6 +22,13 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 IDENTITY = re.compile(r"[0-9a-f]{32}")
+# Минимальные ресурсы провизионинга (только `bootstrap`): как у Hermes Agent для
+# облачных моделей — 2 ядра, 2 GiB-class RAM (в /proc/meminfo видно ~1.9 GiB),
+# место под образ, swap 4 GiB, откат и резервные копии.
+MIN_CPUS = 2
+MIN_RAM_KIB = 1536 * 1024
+MIN_FREE_GIB = 16
+
 IMAGE = re.compile(r"(?:ghcr\.io/ceremoneymeister-bit/korra\.twenty\.one@)?sha256:[0-9a-f]{64}")
 ID_CODE = """from korra_cli.install_identity import get_install_id
 value=get_install_id()
@@ -323,10 +330,14 @@ class HostBootstrap:
             # Resources gate provisioning only. Grant/rotate/verify operate on an
             # installation that already exists: a 2 CPU / 4 GiB client host must
             # keep its narrow host-root actions, revocation included.
-            if shutil.disk_usage(parent).free < 24 * 1024**3:
-                raise HostError("At least 24 GiB free is required before host provisioning")
-            if (os.cpu_count() or 0) < 4 or self.memory_kib() < 7 * 1024**2:
-                raise HostError("Require at least 4 CPUs and an 8 GiB-class host (7 GiB reported RAM)")
+            # Порог — как у самого движка (Hermes): 2 ядра и 2 GiB-class RAM с
+            # managed swap хватает для панели и нескольких профилей; 4 CPU / 8 GiB
+            # остаются рекомендацией, а не условием. Живой флот 2 vCPU / 3.8 GiB
+            # (Скрынник, Павлова) работает на этом пороге.
+            if shutil.disk_usage(parent).free < MIN_FREE_GIB * 1024**3:
+                raise HostError(f"At least {MIN_FREE_GIB} GiB free is required before host provisioning")
+            if (os.cpu_count() or 0) < MIN_CPUS or self.memory_kib() < MIN_RAM_KIB:
+                raise HostError(f"Require at least {MIN_CPUS} CPUs and a 2 GiB-class host ({MIN_RAM_KIB // 1024} MiB reported RAM)")
             if not o.plan:
                 self.firewall_preflight()
         return {"name": o.name, "data": str(self.data), "image": o.image, "admin": o.admin,
