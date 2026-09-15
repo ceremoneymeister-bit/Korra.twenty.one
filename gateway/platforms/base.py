@@ -1232,6 +1232,9 @@ _CACHE_DIR_IMPORT_DEFAULTS = {
     "SCREENSHOT_CACHE_DIR": SCREENSHOT_CACHE_DIR,
 }
 
+# Launch-time homes. Fine for the static ALLOW roots below — the per-profile
+# cache roots are enumerated at check time — but never on their own for the
+# credential DENY side, see _credential_home_roots.
 _HERMES_HOME = get_hermes_home()
 _HERMES_ROOT = get_default_hermes_root()
 MEDIA_DELIVERY_ALLOW_DIRS_ENV = "KORRA_MEDIA_ALLOW_DIRS"
@@ -1333,15 +1336,33 @@ def _profile_cache_roots() -> List[Path]:
     denied prefix and $HOME is not that prefix). See issue #31733.
     """
     roots: List[Path] = []
-    profiles_dir = _HERMES_ROOT / "profiles"
-    try:
-        profile_dirs = [p for p in profiles_dir.iterdir() if p.is_dir()]
-    except OSError:
-        return roots
-    for profile_dir in profile_dirs:
+    for profile_dir in _profile_dirs():
         for subdir in _MEDIA_DELIVERY_CACHE_SUBDIRS:
             roots.append(profile_dir / "cache" / subdir)
     return roots
+
+
+def _profile_dirs() -> List[Path]:
+    """Return every ``<root>/profiles/<name>`` directory, read at check time."""
+    try:
+        return [path for path in (_HERMES_ROOT / "profiles").iterdir() if path.is_dir()]
+    except OSError:
+        return []
+
+
+def _credential_home_roots() -> List[Path]:
+    """Return every Korra home whose credential stores the denylist must cover.
+
+    That is the ACTIVE home — under ``gateway.multiplex_profiles`` one process
+    serves every profile and ``gateway/run.py::_profile_runtime_scope`` installs
+    a per-turn HERMES_HOME override — plus the launch home, the shared root and
+    every ``<root>/profiles/*``. Enumerated at check time exactly like
+    ``_profile_cache_roots`` on the allow side: a denylist frozen at import
+    covers only the launch profile, so a ``MEDIA:<root>/profiles/<other>/.env``
+    emitted in any profile's turn would have uploaded it.
+    """
+    roots = [get_hermes_home(), _HERMES_HOME, _HERMES_ROOT, *_profile_dirs()]
+    return list(dict.fromkeys(roots))
 
 
 def _kanban_root() -> Path:
@@ -1506,7 +1527,7 @@ def _media_delivery_denied_paths() -> List[Path]:
         "sessions",
         "browser-profile",
     )
-    for hermes_root in (_HERMES_HOME, _HERMES_ROOT):
+    for hermes_root in _credential_home_roots():
         for rel in _ROOT_CREDENTIAL_FILES:
             denied.append(hermes_root / rel)
         for rel in _ROOT_CREDENTIAL_DIRS:
