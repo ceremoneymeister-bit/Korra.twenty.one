@@ -588,6 +588,32 @@ def display_achievement(item: Dict[str, Any]) -> Dict[str, Any]:
     return clean
 
 
+def _empty_scan(error: Optional[str] = None, mode: str = "full") -> Dict[str, Any]:
+    """A structurally complete scan result that contains no sessions.
+
+    Default: a genuine, successful scan of a store with no history yet — the
+    UI renders every badge locked. With ``error`` set (``mode="failed"``) it is
+    the degraded shape: ``_run_scan_and_update_cache`` keeps the previous
+    snapshot and ``/achievements`` passes the message through.
+    """
+    return {
+        "sessions": [],
+        # A failed scan keeps reporting no aggregate at all (unchanged
+        # behaviour); an empty one reports zeroed metrics, which is what the
+        # writable open used to return for a store with no sessions.
+        "aggregate": {} if error else aggregate_stats([]),
+        "error": error,
+        "scan_meta": {
+            "mode": mode,
+            "sessions_total": 0,
+            "sessions_rescanned": 0,
+            "sessions_reused": 0,
+            "sessions_scanned_so_far": 0,
+            "sessions_expected_total": 0,
+        },
+    }
+
+
 def scan_sessions(
     limit: Optional[int] = None,
     progress_callback: Optional[Any] = None,
@@ -616,9 +642,44 @@ def scan_sessions(
     at the end.
     """
     try:
-        from korra_state import SessionDB
+        from korra_state import SessionDB, _default_db_path
     except Exception as exc:
-        return {"sessions": [], "aggregate": {}, "error": f"Could not import SessionDB: {exc}", "scan_meta": {"mode": "failed", "sessions_total": 0, "sessions_rescanned": 0, "sessions_reused": 0}}
+        return _empty_scan(error=f"Could not import SessionDB: {exc}", mode="failed")
+
+    # The scan only ever SELECTs, so it attaches read-only (``mode=ro``).
+    #
+    # A plain ``SessionDB()`` here was a full WRITER next to whichever process
+    # actually owns the store: it runs `_init_schema` (the whole `SCHEMA_SQL`
+    # script, column reconciliation and an unconditional
+    # ``UPDATE messages SET active = 1 WHERE active IS NULL``), so it commits a
+    # write transaction and takes the write lock on every scan, and it asks for
+    # a WAL checkpoint at close. Measured on a real SQLite store in this tree:
+    #   * fresh install, no state.db yet — the scan CREATED state.db with 23
+    #     tables plus the quarantine/fts lock sidecars, i.e. a reader was doing
+    #     the writer's schema initialisation;
+    #   * a second process holding one ``BEGIN IMMEDIATE`` — the scan sat
+    #     behind it for the whole hold (5.8 s for a 6 s transaction) and then
+    #     raised an uncaught ``sqlite3.OperationalError: database is locked``
+    #     once the holder outlived ``SessionDB._WRITE_PATIENCE_S`` (20 s),
+    #     which the dashboard reports as a failed scan.
+    # A read-only attach skips schema init entirely and takes no write lock.
+    #
+    # Adapted from upstream Hermes PR #110934, commit
+    # 939a2f64b4627ff82332ecff4e1ced9b1812c4be ("fix: long-lived processes stop
+    # minting duplicate state.db writer handles").
+    # https://github.com/NousResearch/hermes-agent/pull/110934
+    # Korra has no state registry / read pool modules, so only the read-only
+    # attach is taken; handle sharing for the *writer* call sites is not part
+    # of this change.
+    db_path = Path(_default_db_path())
+    if not db_path.exists():
+        # Nothing has initialised the store yet (fresh install, dashboard
+        # opened before the first conversation). Creating the schema is the
+        # explicit writer's job — the agent, gateway or CLI — never this
+        # reader's, so report an empty history instead of minting a database.
+        # Same payload the writable open used to produce on a fresh install,
+        # minus the database it created as a side effect.
+        return _empty_scan()
 
     checkpoint = load_checkpoint()
     previous_sessions = checkpoint.get("sessions") if isinstance(checkpoint.get("sessions"), dict) else {}
@@ -630,7 +691,14 @@ def scan_sessions(
     # requests a small sample (e.g. a smoke test).
     db_limit = -1 if (limit is None or limit <= 0) else int(limit)
 
-    db = SessionDB()
+    try:
+        db = SessionDB(db_path=db_path, read_only=True)
+    except Exception as exc:
+        # A read-only attach against a present-but-unreadable store (corrupt
+        # header, unreadable file) must surface as a failed scan, not as an
+        # exception escaping into the caller's thread: the writable open used
+        # to raise straight out of this function.
+        return _empty_scan(error=f"Could not open SessionDB read-only: {exc}", mode="failed")
     try:
         sessions_meta = db.list_sessions_rich(limit=db_limit, include_children=True, project_compression_tips=False)
         total_sessions = len(sessions_meta)

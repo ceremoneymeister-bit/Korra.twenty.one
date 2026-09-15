@@ -8,6 +8,10 @@ These target the two behaviors that matter for official integration:
 * First-ever scans run in a background thread so the dashboard request
   path never blocks, even on 8000+ session databases where a cold scan
   takes minutes.
+* The scan attaches to ``state.db`` read-only. It is a pure reader, so it
+  must not initialise the schema, must not take the write lock, and must
+  not create the store on an install that has never written a session.
+  These run against a real SQLite file with a real second writer — no fakes.
 
 The upstream repo ships its own unittest suite under
 ``plugins/hermes-achievements/tests/`` covering the achievement engine
@@ -18,6 +22,7 @@ contract: the plugin scans ALL of your sessions, not the first 200.
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
 import sys
 import threading
 import time
@@ -56,6 +61,7 @@ def plugin_api(tmp_path, monkeypatch):
     # fake into later tests in the same xdist worker — breaking every
     # test that does ``from korra_state import SessionDB``.
     module._test_monkeypatch = monkeypatch
+    module._test_tmp_path = tmp_path
     yield module
 
 
@@ -123,8 +129,183 @@ def _install_fake_session_db(plugin_api, fake_db):
     and cannot leak into unrelated tests in the same xdist worker.
     """
     fake_module = type(sys)("korra_state")
-    fake_module.SessionDB = lambda: fake_db
+    # ``scan_sessions`` resolves the store path and then attaches read-only,
+    # so the stand-in module has to answer both names the real one does.
+    fake_module.SessionDB = lambda **_kw: fake_db
+    fake_db_path = plugin_api._test_tmp_path / "fake-state.db"
+    fake_db_path.touch()
+    fake_module._default_db_path = lambda: fake_db_path
     plugin_api._test_monkeypatch.setitem(sys.modules, "korra_state", fake_module)
+
+
+@pytest.fixture
+def real_store(tmp_path, monkeypatch):
+    """A real on-disk ``state.db`` that ``scan_sessions()`` will resolve to.
+
+    ``_default_db_path()`` honours a re-pointed ``DEFAULT_DB_PATH`` (the
+    established test escape hatch), so the plugin opens THIS file — no fake
+    module, no patched sqlite3.
+    """
+    import korra_state
+
+    home = tmp_path / "hermes-home"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    db_path = home / "state.db"
+    monkeypatch.setattr(korra_state, "DEFAULT_DB_PATH", db_path)
+    return db_path
+
+
+def _seed_store(db_path, session_id="s1"):
+    """Initialise the store the way a normal install does: an explicit writer."""
+    from korra_state import SessionDB
+
+    db = SessionDB(db_path=db_path)
+    try:
+        if session_id is not None:
+            db.create_session(session_id, source="cli")
+            db.append_message(session_id, "user", "hello")
+            db.append_message(session_id, "assistant", "hi")
+    finally:
+        db.close()
+
+
+def test_scan_sessions_attaches_read_only_and_never_writes(plugin_api, real_store, monkeypatch):
+    """The scan is a pure read; a writable open makes it a second WRITER.
+
+    ``SessionDB()`` runs ``_init_schema`` on every open — the whole
+    ``SCHEMA_SQL`` script, column reconciliation and an unconditional
+    ``UPDATE messages SET active = 1 WHERE active IS NULL`` — so the dashboard
+    scan committed a write transaction and took the write lock on the user's
+    live ``state.db`` each time it ran (per background scan, per ``/rescan``).
+    ``PRAGMA data_version`` on an independent connection changes only when
+    another connection COMMITS, so it is the direct evidence.
+
+    Port of upstream Hermes PR #110934 (939a2f64b4).
+    """
+    from korra_state import SessionDB
+
+    _seed_store(real_store)
+
+    writable_opens: List[Dict[str, Any]] = []
+    real_init = SessionDB.__init__
+
+    def spy(self, *args, **kwargs):
+        if not kwargs.get("read_only"):
+            writable_opens.append(kwargs)
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(SessionDB, "__init__", spy)
+
+    probe = sqlite3.connect(str(real_store))
+    try:
+        before = probe.execute("PRAGMA data_version").fetchone()[0]
+        result = plugin_api.scan_sessions()
+        after = probe.execute("PRAGMA data_version").fetchone()[0]
+    finally:
+        probe.close()
+
+    assert result.get("error") is None
+    assert [s["session_id"] for s in result["sessions"]] == ["s1"]
+    # The transcript read (``get_messages``) has to work on a ``mode=ro``
+    # handle too, not just the session listing.
+    assert result["sessions"][0]["message_count"] == 2
+    assert writable_opens == [], "the achievements scan must attach read-only"
+    assert after == before, (
+        "the scan committed a write transaction to state.db "
+        f"(data_version {before} -> {after}); a reader must not write"
+    )
+
+
+def test_scan_sessions_runs_while_a_writer_holds_the_state_db_lock(
+    plugin_api, real_store
+):
+    """A live turn must not stall the achievements scan.
+
+    A writable open has to get through ``_init_schema``'s DDL/UPDATE, so it
+    queues behind any held write transaction for up to
+    ``SessionDB._WRITE_PATIENCE_S`` (20 s) and then raises
+    ``sqlite3.OperationalError: database is locked``. A read-only attach takes
+    no write lock and returns immediately.
+
+    The holder is an independent connection running a real ``BEGIN IMMEDIATE``
+    — the same file lock a gateway turn takes while persisting a message. The
+    cross-PROCESS shape behaves identically (verified by hand against a
+    separate writer process); one connection keeps the test hermetic.
+    """
+    _seed_store(real_store)
+
+    holder = sqlite3.connect(str(real_store), timeout=30, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    holder.execute("INSERT INTO state_meta (key, value) VALUES ('scan_probe', '1')")
+
+    box: Dict[str, Any] = {}
+
+    def run_scan():
+        try:
+            box["result"] = plugin_api.scan_sessions()
+        except BaseException as exc:  # noqa: BLE001 - reported by the assertions
+            box["exc"] = f"{type(exc).__name__}: {exc}"
+
+    scan_thread = threading.Thread(target=run_scan, daemon=True)
+    try:
+        scan_thread.start()
+        # Loose bound: the read-only scan of a one-session store finishes in
+        # milliseconds, the writable open cannot finish before the holder
+        # releases (20 s of patience, then an error).
+        scan_thread.join(timeout=10)
+        still_blocked = scan_thread.is_alive()
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+
+    assert not still_blocked, (
+        "scan_sessions() was still blocked 10s into a concurrent write "
+        "transaction — it must not open a writer on state.db"
+    )
+    assert "exc" not in box, box.get("exc")
+    assert box["result"].get("error") is None
+    assert [s["session_id"] for s in box["result"]["sessions"]] == ["s1"]
+
+
+def test_scan_sessions_does_not_create_the_store_on_a_fresh_install(
+    plugin_api, real_store
+):
+    """Schema creation belongs to an explicit writer, never to this reader.
+
+    On an install where nothing has written a session yet, the writable open
+    created ``state.db`` with the full schema plus its lock sidecars — a
+    dashboard page view minting the agent's database. The scan now reports an
+    empty history and leaves the path alone.
+    """
+    assert not real_store.exists()
+
+    result = plugin_api.scan_sessions()
+
+    assert not real_store.exists(), (
+        "the achievements scan created state.db; schema initialisation is the "
+        "writer's job"
+    )
+    assert result.get("error") is None
+    assert result["sessions"] == []
+    assert result["scan_meta"]["sessions_total"] == 0
+
+
+def test_scan_sessions_reads_an_initialised_but_empty_store(plugin_api, real_store):
+    """Read-only attach must still work right after a normal first init.
+
+    The empty install is the case a ``mode=ro`` open can regress: the file
+    exists, the schema is there, but there is no history. The scan has to
+    return an empty result, not an error.
+    """
+    _seed_store(real_store, session_id=None)
+    assert real_store.exists()
+
+    result = plugin_api.scan_sessions()
+
+    assert result.get("error") is None
+    assert result["sessions"] == []
+    assert result["scan_meta"]["sessions_total"] == 0
 
 
 def test_scan_sessions_default_scans_all_history_not_first_200(plugin_api):
