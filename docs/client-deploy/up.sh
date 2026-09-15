@@ -24,7 +24,15 @@ NAME="${NAME:-korra}"                       # имя контейнера
 DATA="${DATA:-/opt/korra/data}"             # каталог данных на хосте
 PANEL_PORT="${PANEL_PORT:-9119}"            # панель, только на петле
 API_PORT="${API_PORT:-8650}"                # служебный API шлюза, только на петле
-TIMEZONE="${TIMEZONE:-Europe/Moscow}"       # часовой пояс контура и расписаний
+# Часовой пояс контура и расписаний: по нему агент понимает «сейчас» и по нему
+# срабатывает cron. Значение по умолчанию ниже — постоянная настройка ЭТОЙ
+# установки. Принимая новый launcher, перенесите её так же, как порты и UID:
+# 15.09.2026 потерянный default молча перевёл контур клиента из
+# Asia/Novosibirsk в Europe/Moscow, а job отчитался об успехе.
+TIMEZONE="${TIMEZONE:-Europe/Moscow}"
+# Часовой пояс владельца в панели. Обычно совпадает с контурным; отдельным
+# значением его передаёт обновлятор, если у установки они разошлись.
+OWNER_TIMEZONE="${OWNER_TIMEZONE:-$TIMEZONE}"
 ENGINE_UID="${ENGINE_UID:-10000}"           # владелец файлов данных
 ENGINE_GID="${ENGINE_GID:-10000}"
 WAIT_SECONDS="${WAIT_SECONDS:-120}"         # сколько ждать панель после старта
@@ -187,7 +195,7 @@ RUN_ARGS=(
     -e API_SERVER_PORT="$API_PORT"
     -e API_SERVER_PROXY_TARGET="http://127.0.0.1:$API_PORT"
     -e KORRA_TIMEZONE="$TIMEZONE"
-    -e KORRA_OWNER_TIMEZONE="$TIMEZONE"
+    -e KORRA_OWNER_TIMEZONE="$OWNER_TIMEZONE"
     -v "$DATA":/opt/data
     "$IMAGE" gateway run
 )

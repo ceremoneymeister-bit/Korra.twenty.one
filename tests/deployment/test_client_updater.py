@@ -849,6 +849,9 @@ def test_capabilities_is_unprivileged_without_data_or_docker(monkeypatch, capsys
     assert u.main(["--capabilities"]) == 0
     output = json.loads(capsys.readouterr().out)
     assert output["protocol"] == 1 and output["rollback_detach"] is True
+    # Кампания должна отличать хост, который сам держит договор о timezone,
+    # от хоста со старым kit, где эту проверку по-прежнему ведёт оператор.
+    assert output["runtime_timezone"] is True
 
 
 def test_job_cannot_be_loaded_for_different_data(updater):
@@ -1781,7 +1784,10 @@ def test_update_records_original_runtime_root_contract(updater, monkeypatch):
         return result
     monkeypatch.setattr(updater, "docker", docker)
     updater.update("registry.example/korra:latest")
-    assert updater.receipt["old_runtime"] == {"ENGINE_UID": "12345", "ENGINE_GID": "12346", "AGENT_SUDO": "0"}
+    # Контур без заданного часового пояса: его и нечего сохранять, поэтому обе
+    # timezone остаются пустыми, а не выдумываются из дефолта launcher.
+    assert updater.receipt["old_runtime"] == {"ENGINE_UID": "12345", "ENGINE_GID": "12346",
+                                              "AGENT_SUDO": "0", "TIMEZONE": "", "OWNER_TIMEZONE": ""}
 
 
 @pytest.mark.parametrize("key,value", [("ENGINE_UID", "12345"), ("ENGINE_GID", "12346"), ("AGENT_SUDO", "unknown")])
@@ -1869,3 +1875,257 @@ def test_recorded_runtime_requires_native_remappable_identity(field):
     value[field] = "65535"
     with pytest.raises(u.UpdateError, match="UID|GID"):
         u.validate_runtime_env(value)
+
+
+# ─── Оба timezone в договоре native update/rollback (K21-092) ───────────────
+#
+# 15.09.2026 адресное обновление клиента вернуло `succeeded`, а контур переехал
+# из Asia/Novosibirsk в Europe/Moscow: часовой пояс задаёт launcher, а его
+# постоянный host default не входил в сохраняемый runtime contract.
+NOVOSIBIRSK = "Asia/Novosibirsk"
+MOSCOW = "Europe/Moscow"
+LEGACY_RUNTIME = {"ENGINE_UID": "10000", "ENGINE_GID": "10000", "AGENT_SUDO": "1"}
+
+
+def _contour_timezone(updater, zone, owner=None):
+    """Пусть фиктивный контейнер сообщает то же, что настоящий docker inspect."""
+    updater.extra_env = [f"KORRA_TIMEZONE={zone}", f"KORRA_OWNER_TIMEZONE={owner or zone}"]
+
+
+def _installed_launcher(home, *, default=None, pinned=None):
+    """Launcher установки: настоящий up.sh за постоянными настройками хоста.
+
+    Обходится только проверка владельца DATA — к часовому поясу она отношения
+    не имеет, а весь путь timezone проходит поставляемый launcher.
+    `default` — постоянный host default установки (его и теряли при adoption);
+    `pinned` — launcher, который решает сам и договор игнорирует.
+    """
+    u.shutil.copy2(SOURCE.with_name("up.sh"), home / "launcher-core.sh")
+    lines = ["#!/usr/bin/env bash", "set -euo pipefail",
+             "ENGINE_UID=$(id -u); ENGINE_GID=$(id -g); export ENGINE_UID ENGINE_GID"]
+    if pinned is not None:
+        lines.append(f"TIMEZONE={shlex.quote(pinned)}; OWNER_TIMEZONE={shlex.quote(pinned)}")
+        lines.append("export TIMEZONE OWNER_TIMEZONE")
+    elif default is not None:
+        lines.append(f': "${{TIMEZONE:={default}}}"; export TIMEZONE')
+    lines.append(f'exec bash {shlex.quote(str(home / "launcher-core.sh"))} "$@"')
+    path = home / "up.sh"
+    path.write_text("\n".join(lines) + "\n")
+    path.chmod(0o755)
+    return path
+
+
+def _launcher_timezone(deploy, data, **passed):
+    """Что реальный launcher поставил бы контейнеру, без запуска Docker."""
+    env = {**os.environ, "DATA": str(data),
+           "ENGINE_UID": str(os.getuid()), "ENGINE_GID": str(os.getgid())}
+    # Именно этого не хватало при adoption: значение должно приходить из
+    # постоянной настройки установки, а не из оболочки проверяющего.
+    for key in ("TIMEZONE", "OWNER_TIMEZONE"):
+        env.pop(key, None)
+    env.update(passed)
+    result = subprocess.run(["bash", str(deploy / "up.sh"), "--dry-run"],
+                            env=env, text=True, capture_output=True, check=True)
+    return u.timezone_from_launch_argv(shlex.split(result.stdout.splitlines()[-1]))
+
+
+@pytest.fixture
+def launcher_home(tmp_path):
+    deploy, data = tmp_path / "deploy", tmp_path / "data"
+    deploy.mkdir()
+    data.mkdir()
+    u.shutil.copy2(SOURCE.with_name("up.sh"), deploy / "up.sh")
+    (deploy / "IMAGE").write_text(NEW)
+    return deploy, data
+
+
+@pytest.mark.parametrize("passed", [{}, {"TIMEZONE": "", "OWNER_TIMEZONE": ""}])
+def test_launcher_timezone_comes_from_its_own_default_not_from_the_shell(launcher_home, passed):
+    deploy, data = launcher_home
+
+    zones = _launcher_timezone(deploy, data, **passed)
+
+    # Контур никогда не поднимается без часового пояса, и оба значения
+    # приходят из одного постоянного default этой установки.
+    assert zones["TIMEZONE"] and zones["OWNER_TIMEZONE"] == zones["TIMEZONE"]
+
+
+@pytest.mark.parametrize("owner", [NOVOSIBIRSK, MOSCOW])
+def test_launcher_uses_the_exact_pair_the_updater_preserved(launcher_home, owner):
+    deploy, data = launcher_home
+
+    zones = _launcher_timezone(deploy, data, TIMEZONE=NOVOSIBIRSK, OWNER_TIMEZONE=owner)
+
+    assert zones == {"TIMEZONE": NOVOSIBIRSK, "OWNER_TIMEZONE": owner}
+
+
+def test_update_records_both_container_timezones_before_any_mutation(updater):
+    _contour_timezone(updater, NOVOSIBIRSK)
+    _installed_launcher(updater.home, default=NOVOSIBIRSK)
+
+    updater.update("registry.example/korra:latest", dry_run=True)
+
+    assert updater.receipt["old_runtime"]["TIMEZONE"] == NOVOSIBIRSK
+    assert updater.receipt["old_runtime"]["OWNER_TIMEZONE"] == NOVOSIBIRSK
+    assert updater.receipt["timezone_plan"] == {
+        "TIMEZONE": {"expected": NOVOSIBIRSK, "source": "preserved"},
+        "OWNER_TIMEZONE": {"expected": NOVOSIBIRSK, "source": "preserved"}}
+
+
+def test_update_preserves_a_divergent_owner_timezone(updater):
+    _contour_timezone(updater, NOVOSIBIRSK, owner=MOSCOW)
+    _installed_launcher(updater.home, default=NOVOSIBIRSK)
+
+    updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["status"] == "succeeded"
+    assert updater.receipt["old_runtime"]["TIMEZONE"] == NOVOSIBIRSK
+    assert updater.receipt["old_runtime"]["OWNER_TIMEZONE"] == MOSCOW
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_launcher_that_would_move_the_clock_refuses_before_pull_or_drain(updater, dry_run):
+    _contour_timezone(updater, NOVOSIBIRSK)
+    _installed_launcher(updater.home, pinned=MOSCOW)
+    before = u.tree_manifest(updater.data)
+
+    with pytest.raises(u.UpdateError, match="Europe/Moscow"):
+        updater.update("registry.example/korra:latest", dry_run=dry_run)
+
+    assert updater.receipt["error_code"] == "launcher_timezone_mismatch"
+    assert updater.receipt["status"] == "failed"
+    assert u.tree_manifest(updater.data) == before
+    assert not any(call[0] in {"pull", "native", "stop", "start_image"} for call in updater.calls)
+
+
+@pytest.mark.parametrize("key", ["TIMEZONE", "OWNER_TIMEZONE"])
+def test_update_refuses_a_timezone_left_over_in_the_operator_shell(updater, monkeypatch, key):
+    _contour_timezone(updater, NOVOSIBIRSK)
+    _installed_launcher(updater.home, default=NOVOSIBIRSK)
+    monkeypatch.setenv(key, MOSCOW)
+
+    with pytest.raises(u.UpdateError, match="launcher setting"):
+        updater.update("registry.example/korra:latest")
+
+    assert not any(call[0] in {"pull", "native", "stop", "start_image"} for call in updater.calls)
+
+
+def test_update_accepts_a_shell_that_agrees_with_the_contour(updater, monkeypatch):
+    _contour_timezone(updater, NOVOSIBIRSK)
+    _installed_launcher(updater.home, default=NOVOSIBIRSK)
+    monkeypatch.setenv("TIMEZONE", NOVOSIBIRSK)
+
+    updater.update("registry.example/korra:latest")
+
+    assert updater.receipt["status"] == "succeeded"
+
+
+@pytest.mark.parametrize("phase,rollback", [("recreate", False), ("rollback_recreate", True)])
+def test_native_launcher_receives_the_preserved_timezone_pair(updater, monkeypatch, phase, rollback):
+    updater.receipt.update(phase=phase, old_resources={"nano_cpus": 0, "memory_bytes": 0},
+                           old_runtime={**LEGACY_RUNTIME, "TIMEZONE": NOVOSIBIRSK,
+                                        "OWNER_TIMEZONE": MOSCOW})
+    if rollback:
+        # Откат возвращает зафиксированное, чем бы ни была занята оболочка.
+        monkeypatch.setenv("TIMEZONE", "Europe/Kaliningrad")
+    launches = []
+    monkeypatch.setattr(u.subprocess, "run", lambda *a, **kw:
+                        launches.append(kw["env"]) or types.SimpleNamespace(returncode=0, stdout=""))
+
+    u.Updater.start_image(updater, OLD)
+
+    assert launches[0]["TIMEZONE"] == NOVOSIBIRSK
+    assert launches[0]["OWNER_TIMEZONE"] == MOSCOW
+
+
+def test_receipt_without_timezone_hands_the_launcher_its_own_default(updater, monkeypatch):
+    updater.receipt.update(phase="rollback_recreate", old_runtime=dict(LEGACY_RUNTIME),
+                           old_resources={"nano_cpus": 0, "memory_bytes": 0})
+    monkeypatch.setenv("TIMEZONE", MOSCOW)
+    launches = []
+    monkeypatch.setattr(u.subprocess, "run", lambda *a, **kw:
+                        launches.append(kw["env"]) or types.SimpleNamespace(returncode=0, stdout=""))
+
+    u.Updater.start_image(updater, OLD)
+
+    # Старая квитанция ничего не обещает: решает постоянный default launcher,
+    # а не переменная, случайно оставшаяся в окружении оператора.
+    assert launches[0]["TIMEZONE"] == "" and launches[0]["OWNER_TIMEZONE"] == ""
+    assert updater.timezone_plan(rollback=True) == {
+        "TIMEZONE": {"expected": "", "source": "launcher_default"},
+        "OWNER_TIMEZONE": {"expected": "", "source": "launcher_default"}}
+
+
+def test_rollback_of_a_receipt_without_timezone_still_completes(updater):
+    updater.update("registry.example/korra:latest")
+    for key in ("TIMEZONE", "OWNER_TIMEZONE"):
+        updater.receipt["old_runtime"].pop(key)
+
+    updater.rollback()
+
+    assert updater.receipt["status"] == "rolled_back"
+    assert updater.image == OLD and updater.running
+
+
+def test_rollback_refuses_a_launcher_that_drifted_after_the_update(updater):
+    _contour_timezone(updater, NOVOSIBIRSK)
+    _installed_launcher(updater.home, default=NOVOSIBIRSK)
+    updater.update("registry.example/korra:latest")
+    _installed_launcher(updater.home, pinned=MOSCOW)
+
+    with pytest.raises(u.UpdateError, match="Europe/Moscow"):
+        updater.rollback()
+
+    # Исправный новый контур не остановлен ради отката, который вернул бы
+    # старый образ с чужими часами.
+    assert updater.receipt["error_code"] == "launcher_timezone_mismatch"
+    assert updater.receipt["status"] != "rolled_back"
+    assert updater.image == NEW and updater.running
+
+
+def test_smoke_refuses_a_contour_that_came_up_in_another_timezone(real_smoke_context):
+    updater, clock, models, _ = real_smoke_context
+    updater.receipt["old_runtime"] = {**LEGACY_RUNTIME, "TIMEZONE": NOVOSIBIRSK,
+                                      "OWNER_TIMEZONE": NOVOSIBIRSK}
+    _contour_timezone(updater, MOSCOW)
+
+    with pytest.raises(u.UpdateError, match="timezone differs"):
+        u.Updater.smoke(updater, OLD)
+
+    assert updater.receipt["error_code"] == "runtime_timezone_drift"
+    assert updater.receipt["active_timezone"] == {"TIMEZONE": MOSCOW, "OWNER_TIMEZONE": MOSCOW}
+    assert clock[0] == 0 and models == []
+
+
+def test_smoke_records_the_timezone_the_contour_actually_runs_on(real_smoke_context):
+    updater, _, models, _ = real_smoke_context
+    updater.receipt["old_runtime"] = {**LEGACY_RUNTIME, "TIMEZONE": NOVOSIBIRSK,
+                                      "OWNER_TIMEZONE": NOVOSIBIRSK}
+    _contour_timezone(updater, NOVOSIBIRSK)
+
+    u.Updater.smoke(updater, OLD)
+
+    assert updater.receipt["active_timezone"] == {"TIMEZONE": NOVOSIBIRSK,
+                                                 "OWNER_TIMEZONE": NOVOSIBIRSK}
+    assert models
+
+
+@pytest.mark.parametrize("environment,expected", [
+    ([], ("", "")),
+    (["KORRA_TIMEZONE=Asia/Novosibirsk"], ("Asia/Novosibirsk", "")),
+    (["HERMES_TIMEZONE=Asia/Novosibirsk"], ("Asia/Novosibirsk", "")),
+    (["KORRA_TIMEZONE=", "HERMES_TIMEZONE=Asia/Novosibirsk"], ("Asia/Novosibirsk", "")),
+    (["KORRA_TIMEZONE= Asia/Novosibirsk "], ("Asia/Novosibirsk", "")),
+    (["KORRA_TIMEZONE=Asia/Novosibirsk", "KORRA_OWNER_TIMEZONE=Europe/Moscow"],
+     ("Asia/Novosibirsk", "Europe/Moscow")),
+])
+def test_recorded_timezone_follows_the_environment_the_engine_reads(environment, expected):
+    result = u.runtime_env_from_info({"Config": {"Env": environment}})
+    assert (result["TIMEZONE"], result["OWNER_TIMEZONE"]) == expected
+
+
+@pytest.mark.parametrize("value", ["Europe/Moscow extra", "Europe/Moscow\nKORRA_UID=0",
+                                   "../../etc/localtime", "A" * 65])
+def test_unusable_container_timezone_is_refused_rather_than_guessed(value):
+    with pytest.raises(u.UpdateError, match="timezone"):
+        u.validate_runtime_env({**LEGACY_RUNTIME, "TIMEZONE": value, "OWNER_TIMEZONE": ""})
