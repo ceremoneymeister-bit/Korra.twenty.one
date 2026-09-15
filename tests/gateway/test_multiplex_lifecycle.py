@@ -61,7 +61,18 @@ class TestNamedProfileMultiplexerGuard:
         gw._guard_named_profile_under_multiplexer(force=False)
 
     def _fake_running_default_gateway(self, monkeypatch, tmp_path):
-        """Make the guard believe a live default gateway exists at tmp_path."""
+        """Make the guard believe a live default gateway exists at tmp_path.
+
+        Liveness is a VERIFIED identity, not bare PID existence (K21-088): a
+        stale record whose PID the OS recycled onto an unrelated process must
+        not keep lending its served set. So this pytest process stands in for
+        the gateway by wearing a gateway command line and a runtime record
+        that matches its real start time — the same shape a live gateway
+        writes — instead of stubbing ``_pid_exists``.
+        """
+        import json
+        import os
+
         from korra_cli import gateway as gw
         import gateway.status as status
 
@@ -69,10 +80,28 @@ class TestNamedProfileMultiplexerGuard:
         monkeypatch.setattr(
             "korra_constants.get_default_hermes_root", lambda: tmp_path
         )
-        (tmp_path / "gateway.pid").write_text("12345", encoding="utf-8")
-        monkeypatch.setattr(status, "_read_pid_record", lambda p: {"pid": 12345})
-        monkeypatch.setattr(status, "_pid_from_record", lambda rec: 12345)
-        monkeypatch.setattr(status, "_pid_exists", lambda pid: True)
+        (tmp_path / "gateway_state.json").write_text(
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "hermes_home": str(tmp_path),
+                    "gateway_state": "running",
+                    "start_time": status._get_process_start_time(os.getpid()),
+                }
+            ),
+            encoding="utf-8",
+        )
+        real_cmdline = status._read_process_cmdline
+        monkeypatch.setattr(
+            status,
+            "_read_process_cmdline",
+            lambda pid: (
+                "python -m korra_cli.main gateway run"
+                if pid == os.getpid()
+                else real_cmdline(pid)
+            ),
+        )
+        status._clear_running_pid_cache()
 
     def test_unset_allowlist_preserves_historical_guard(self, monkeypatch, tmp_path):
         self._fake_running_default_gateway(monkeypatch, tmp_path)

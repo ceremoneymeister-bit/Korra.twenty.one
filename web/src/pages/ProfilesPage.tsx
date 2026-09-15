@@ -42,6 +42,50 @@ function profileLabel(profile: ProfileInfo) {
   return profile.display_name?.trim() || (profile.is_default ? 'Главный агент' : profile.name)
 }
 
+/**
+ * Состояние шлюза агента человеческими словами.
+ *
+ * До K21-088 панель различала только «есть свой процесс» и «нет». Агента,
+ * которого ведёт общий шлюз, это показывало как остановленного — владелец
+ * видел «выключен» у агента, отвечающего в Telegram. Три состояния:
+ * работает сам, работает под общим шлюзом, не работает.
+ *
+ * `title` объясняет, почему у агента нет своего процесса и это нормально.
+ * Старый движок поля не отдаёт — откатываемся на `gateway_running`.
+ */
+function gatewayBadge(profile: ProfileInfo): {
+  label: string
+  tone: 'success' | 'outline'
+  title: string
+  detail: string
+} {
+  const status = profile.gateway_status ?? (profile.gateway_running ? 'running' : 'stopped')
+  if (status === 'served') {
+    return {
+      label: 'На связи — общий шлюз',
+      tone: 'success',
+      title:
+        'Агента ведёт общий шлюз основного профиля: отдельного процесса у него нет, и это не ошибка. Остановить или перезапустить общий шлюз можно только целиком — это затронет всех агентов.',
+      detail: 'Шлюз: общий шлюз основного профиля'
+    }
+  }
+  if (status === 'running') {
+    return {
+      label: 'На связи',
+      tone: 'success',
+      title: 'У агента работает собственный шлюз.',
+      detail: 'Шлюз: собственный'
+    }
+  }
+  return {
+    label: 'Не на связи',
+    tone: 'outline',
+    title:
+      'Шлюз агента не работает: сообщения из мессенджеров и задачи по расписанию сейчас не обрабатываются.',
+    detail: 'Шлюз: не работает'
+  }
+}
+
 /** Braille unicode spinner (`unicode-animations`); static first frame when reduced motion is preferred. */
 function ProfilesLoadingSpinner() {
   const { frames, interval } = spinners.braille
@@ -693,6 +737,19 @@ export default function ProfilesPage() {
                           <span className="font-medium text-sm truncate">{profileLabel(p)}</span>
 
                           {p.is_default && <Badge tone="secondary">Главный</Badge>}
+
+                          {(() => {
+                            const gw = gatewayBadge(p)
+                            return (
+                              <Badge
+                                tone={gw.tone}
+                                title={gw.title}
+                                aria-label={`Состояние агента: ${gw.label}`}
+                              >
+                                {gw.label}
+                              </Badge>
+                            )
+                          })()}
                         </div>
 
                         <ProfileActionsMenu
@@ -762,6 +819,7 @@ export default function ProfilesPage() {
                           <span>Адрес агента: {p.name}</span>
                           <span>Каталог: {p.path}</span>
                           {p.provider && <span>Подключение модели: {p.provider}</span>}
+                          <span>{gatewayBadge(p).detail}</span>
                           <span>Навыков и материалов: {p.skill_count}</span>
                           {active && <span>{L.activeBadge}</span>}
                           {p.has_alias && <span>Есть команда для запуска в терминале</span>}

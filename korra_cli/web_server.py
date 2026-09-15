@@ -103,8 +103,10 @@ from gateway.status import (
     get_running_pid_cached,
     get_running_pid,
     get_runtime_status_running_pid,
+    multiplexer_liveness_for_profile,
     normalize_updated_at,
     parse_active_agents,
+    profile_platforms_from_multiplexer,
     read_runtime_status,
     resolve_gateway_liveness,
 )
@@ -5751,6 +5753,18 @@ async def get_status(profile: Optional[str] = None):
         if runtime is None and remote_health_body and remote_health_body.get("gateway_state"):
             runtime = remote_health_body
 
+        # Профиль под общим шлюзом своей записи не пишет: его состояние и его
+        # адаптеры лежат в записи мультиплексора под ключами
+        # ``<профиль>:<платформа>`` (K21-088).
+        gateway_multiplexed = liveness.source == "multiplexer"
+        if gateway_multiplexed and liveness.runtime is not None and profile_dir is not None:
+            runtime = {
+                **liveness.runtime,
+                "platforms": profile_platforms_from_multiplexer(
+                    liveness.runtime, profile_dir.name
+                ),
+            }
+
         if runtime:
             gateway_state = runtime.get("gateway_state")
             gateway_platforms = runtime.get("platforms") or {}
@@ -5903,6 +5917,10 @@ async def get_status(profile: Optional[str] = None):
             "latest_config_version": latest_ver,
             "can_update_hermes": not _dashboard_local_update_managed_externally(),
             "gateway_running": gateway_running,
+            # True — шлюза у этого профиля своего нет, его ведёт общий шлюз.
+            # Интерфейс должен показать это отдельным состоянием, а не
+            # предлагать «запустить» уже работающего агента.
+            "gateway_multiplexed": gateway_multiplexed,
             "gateway_state": gateway_state,
             "gateway_platforms": gateway_platforms,
             "gateway_exit_reason": gateway_exit_reason,
@@ -6728,7 +6746,54 @@ def _durable_completed_update_action_id(lines: List[str]) -> Optional[str]:
 
 
 def _gateway_subcommand(profile: Optional[str], verb: str) -> List[str]:
+    """``korra [-p X] gateway <verb>`` для действия из панели.
+
+    Профиль остаётся адресом операции всегда. Мы сознательно НЕ подменяем
+    ``-p X gateway restart`` перезапуском общего шлюза: это увело бы в офлайн
+    всех остальных агентов по нажатию на карточке одного. Для обслуживаемого
+    профиля вызывающий получает отказ 409 (:func:`multiplexed_profile_refusal`)
+    с объяснением, где именно управлять общим шлюзом.
+    """
     return _profile_cli_args(profile) + ["gateway", verb]
+
+
+def multiplexed_profile_refusal(profile: Optional[str], verb: str) -> Optional[str]:
+    """Текст отказа для start/stop/restart профиля, который ведёт общий шлюз.
+
+    None — операция адресуется нормально: это основной профиль, профиль со
+    своим шлюзом (поднят с ``--force``) или общий шлюз его не обслуживает.
+
+    Без отказа панель отправляла ``korra -p X gateway stop``, который писал в
+    журнал действий «Шлюз этого профиля не запущен» и выходил с кодом 0, —
+    интерфейс переключался на «остановлен», а общий шлюз продолжал вести
+    профиль (K21-088).
+    """
+    requested = (profile or "").strip()
+    if not requested or requested.lower() in {"current", "default"}:
+        return None
+    try:
+        from korra_cli import profiles as profiles_mod
+        from korra_cli.gateway_multiplex_served import profile_served_by_live_multiplexer
+
+        if not profile_served_by_live_multiplexer(requested):
+            return None
+        if profiles_mod._check_gateway_running(_resolve_profile_dir(requested)):
+            return None
+    except HTTPException:
+        raise
+    except Exception:
+        _log.debug("shared-gateway refusal probe failed for %r", profile, exc_info=True)
+        return None
+    action = {
+        "start": "Запустить",
+        "stop": "Остановить",
+        "restart": "Перезапустить",
+    }.get(verb, "Изменить")
+    return (
+        f"Агента «{requested}» ведёт общий шлюз — отдельного шлюза у него нет. "
+        f"{action} общий шлюз можно только целиком, и это затронет всех агентов: "
+        "сделайте это в разделе «Система» основного профиля."
+    )
 
 
 def _gateway_display_command(profile: Optional[str], verb: str) -> str:
@@ -6876,6 +6941,13 @@ def _restart_gateway_after_webhook_enable(profile: Optional[str] = None) -> dict
 @app.post("/api/gateway/restart")
 async def restart_gateway(profile: Optional[str] = None):
     """Kick off a ``hermes gateway restart`` in the background."""
+    # Обслуживаемый профиль перезапускается только вместе с общим шлюзом, а
+    # это уводит в офлайн всех агентов сразу. Такое действие остаётся явным
+    # выбором владельца в основном профиле, а не побочным эффектом кнопки на
+    # карточке одного агента.
+    refusal = await run_in_threadpool(multiplexed_profile_refusal, profile, "restart")
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
     try:
         proc, _reused = _spawn_gateway_restart(profile)
     except HTTPException:
@@ -12612,6 +12684,19 @@ async def get_messaging_platforms(profile: Optional[str] = None):
                 if scoped_dir is not None
                 else read_runtime_status()
             )
+            if scoped_dir is not None and runtime is None:
+                # Профиль под общим шлюзом своей записи не пишет: его каналы
+                # живут в записи мультиплексора под ``<профиль>:<платформа>``.
+                # Без этого страница «Каналы» показывала «шлюз остановлен» у
+                # профиля с работающим Telegram (K21-088).
+                served = multiplexer_liveness_for_profile(scoped_dir)
+                if served is not None:
+                    runtime = {
+                        **served[1],
+                        "platforms": profile_platforms_from_multiplexer(
+                            served[1], scoped_dir.name
+                        ),
+                    }
             return {
                 "env_path": str(get_env_path()),
                 "gateway_start_command": _gateway_display_command(profile, "start"),
@@ -16086,6 +16171,12 @@ async def set_webhook_enabled(name: str, body: WebhookEnabledToggle):
 
 @app.post("/api/gateway/start")
 async def start_gateway(profile: Optional[str] = None):
+    # У профиля под общим шлюзом своего шлюза нет: отправленный дочерний
+    # процесс либо ничего не сделает, либо поднимет второго владельца тех же
+    # токенов бота. Отказываем здесь, чтобы интерфейс мог объяснить причину.
+    refusal = await run_in_threadpool(multiplexed_profile_refusal, profile, "start")
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
     try:
         proc = _spawn_hermes_action(_gateway_subcommand(profile, "start"), "gateway-start")
     except HTTPException:
@@ -16098,6 +16189,9 @@ async def start_gateway(profile: Optional[str] = None):
 
 @app.post("/api/gateway/stop")
 async def stop_gateway(profile: Optional[str] = None):
+    refusal = await run_in_threadpool(multiplexed_profile_refusal, profile, "stop")
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
     try:
         proc = _spawn_hermes_action(_gateway_subcommand(profile, "stop"), "gateway-stop")
     except HTTPException:
@@ -16896,7 +16990,12 @@ def _profile_to_dict(info) -> Dict[str, Any]:
         "provider": _profile_attr(info, "provider"),
         "has_env": bool(_profile_attr(info, "has_env", False)),
         "skill_count": int(_profile_attr(info, "skill_count", 0) or 0),
+        # ``gateway_running`` — есть ли у профиля СВОЙ процесс шлюза.
+        # ``gateway_status`` — что показать владельцу: running / served
+        # («ведёт общий шлюз») / stopped. Без второго поля рабочий агент под
+        # мультиплексором выглядел выключенным (K21-088).
         "gateway_running": bool(_profile_attr(info, "gateway_running", False)),
+        "gateway_status": str(_profile_attr(info, "gateway_status", "") or "stopped"),
         "description": _profile_attr(info, "description", "") or "",
         "description_auto": bool(_profile_attr(info, "description_auto", False)),
         "display_name": _profile_attr(info, "display_name", "") or "",
@@ -16927,6 +17026,9 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
             "has_env": (default_home / ".env").exists(),
             "skill_count": _safe(lambda: profiles_mod._count_skills(default_home), 0),
             "gateway_running": _safe(lambda: profiles_mod._check_gateway_running(default_home), False),
+            "gateway_status": _safe(
+                lambda: profiles_mod.resolve_profile_gateway_status(default_home), "stopped"
+            ),
             "description": _safe(lambda: profiles_mod.read_profile_meta(default_home).get("description", ""), ""),
             "description_auto": _safe(lambda: profiles_mod.read_profile_meta(default_home).get("description_auto", False), False),
             "distribution_name": None,
@@ -16957,6 +17059,10 @@ def _fallback_profile_dicts(profiles_mod) -> List[Dict[str, Any]]:
                 "has_env": _safe(lambda entry=entry_path: (entry / ".env").exists(), False),
                 "skill_count": _safe(lambda entry=entry_path: profiles_mod._count_skills(entry), 0),
                 "gateway_running": _safe(lambda entry=entry_path: profiles_mod._check_gateway_running(entry), False),
+                "gateway_status": _safe(
+                    lambda entry=entry_path: profiles_mod.resolve_profile_gateway_status(entry),
+                    "stopped",
+                ),
                 "description": _safe(lambda entry=entry_path: profiles_mod.read_profile_meta(entry).get("description", ""), ""),
                 "description_auto": _safe(lambda entry=entry_path: profiles_mod.read_profile_meta(entry).get("description_auto", False), False),
                 "distribution_name": None,
