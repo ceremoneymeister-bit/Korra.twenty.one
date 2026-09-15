@@ -141,7 +141,7 @@ export function WorkspaceFilePicker({ disabled, onPick, remaining = MAX_ATTACHME
               </div>
             ) : listing.entries.map(entry => (
               <button key={entry.path} type="button" role="listitem" disabled={busy}
-                className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:shadow-[var(--neo-inset-compact)] focus-visible:shadow-[var(--neo-focus-visible)] disabled:opacity-60"
+                className="flex min-h-[44px] w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:shadow-[var(--neo-inset-compact)] focus-visible:shadow-[var(--neo-focus-visible)] disabled:opacity-60"
                 onClick={() => {
                   setError("");
                   if (entry.is_directory) { setPath(fleetMode ? workspaceEntryTarget(root, entry.path) : entry.path); return; }
