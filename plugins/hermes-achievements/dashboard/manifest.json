@@ -1,7 +1,7 @@
 {
   "name": "hermes-achievements",
-  "label": "Польза от агентов",
-  "description": "Подтверждённые результаты и следующие шаги в освоении Korra.",
+  "label": "Достижения",
+  "description": "Результаты работы агентов: задачи, расписания и помощники, и следующий шаг.",
   "icon": "Star",
   "version": "0.4.0",
   "tab": { "path": "/achievements", "position": "after:analytics" },
