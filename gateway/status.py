@@ -1409,6 +1409,123 @@ class GatewayLiveness:
     source: str
     health_body: Optional[dict[str, Any]] = None
     probe_error: bool = False
+    # The multiplexer's own ``gateway_state.json`` when the ``multiplexer`` rung
+    # answered.  A served profile writes no runtime record of its own, so its
+    # platform states live in that record under ``<profile>:<platform>`` keys.
+    runtime: Optional[dict[str, Any]] = None
+
+
+def live_gateway_pid_for_home(home: Path, *, use_cache: bool = False) -> Optional[int]:
+    """PID of the gateway that owns ``home`` right now, or None.
+
+    One answer for every "is THIS home's gateway alive?" reader.  Two rungs,
+    both proving identity rather than trusting a file:
+
+    1. ``get_running_pid`` — PID file plus the runtime lock, with the
+       start-time reuse guard and the gateway command-line check.
+    2. the runtime record the gateway writes itself, validated against the live
+       process table with ``expected_home``.
+
+    Rung 2 is not a nicety: a gateway under a service manager (s6 in our
+    container, systemd/launchd on a host) can be alive with no ``gateway.pid``
+    at all — a ``--replace`` handoff or a cleanup path unlinks it while the
+    process keeps serving.  Keying liveness off the PID file alone then made
+    every surface say "not running" about the gateway that was in fact working.
+
+    The converse matters just as much: a stale record whose PID the OS has
+    recycled onto an unrelated process must NOT resolve, or a long-dead
+    gateway keeps lending its ``served_profiles`` to the profiles it once
+    served.  ``cleanup_stale=False`` — this is a read-side probe and may run
+    against another profile's files, where deleting them would be vandalism.
+
+    ``use_cache`` routes rung 1 through ``get_running_pid_cached`` (1s TTL,
+    invalidated by the PID/lock files changing).  Pass it from status readers
+    that ask about the same home once per profile in a loop; leave it off in
+    control paths that must see the authoritative lock state.
+    """
+    home = Path(home)
+    probe = get_running_pid_cached if use_cache else get_running_pid
+    try:
+        pid = probe(home / "gateway.pid", cleanup_stale=False)
+    except Exception:
+        pid = None
+    if pid is not None:
+        return pid
+    try:
+        runtime = read_runtime_status(home / "gateway_state.json")
+        if runtime is None:
+            # Never fall through to the *current* process's record: that is
+            # another profile's state and would answer for the wrong home.
+            return None
+        return get_runtime_status_running_pid(runtime, expected_home=home)
+    except Exception:
+        return None
+
+
+def multiplexer_liveness_for_profile(
+    profile_dir: Path,
+) -> Optional[tuple[int, dict[str, Any]]]:
+    """``(pid, the multiplexer's gateway_state.json)`` when the live default
+    multiplexer actually serves the named profile at ``profile_dir``; None for
+    the default home itself, a profile nobody serves, or no live multiplexer.
+
+    A served profile owns no ``gateway.pid`` / ``gateway_state.json``, so every
+    PID-file rung of the ladder reports it stopped while the shared gateway is
+    carrying its chat and its API (K21-088).  "Serves" is a fact about the
+    running process — the ``served_profiles`` it recorded, or, for a gateway
+    that predates that record, its config plus ``multiplex_profile_allowlist``.
+    """
+    profile_dir = Path(profile_dir)
+    name = _profile_name_for_home(profile_dir)
+    if not name or name == "default":
+        return None
+    try:
+        from korra_cli.gateway_multiplex_served import (
+            live_default_gateway_pid,
+            profile_served_by_live_multiplexer,
+        )
+        from korra_constants import get_default_hermes_root
+
+        if not profile_served_by_live_multiplexer(name):
+            return None
+        pid = live_default_gateway_pid()
+        if pid is None:
+            return None
+        default_root = get_default_hermes_root()
+        runtime = read_runtime_status(default_root / "gateway_state.json") or {}
+    except Exception:
+        logger.debug("multiplexer liveness probe failed for %s", profile_dir, exc_info=True)
+        return None
+    return pid, runtime
+
+
+def profile_platforms_from_multiplexer(
+    runtime: Optional[dict[str, Any]], profile: str
+) -> dict[str, Any]:
+    """The ``<profile>:<platform>`` entries of a multiplexer record, re-keyed to
+    bare platform names — the shape a standalone gateway for ``profile`` writes
+    into its own ``gateway_state.json``.
+
+    Entries with no profile prefix belong to the shared listener the
+    multiplexer runs for everybody (``api_server`` answers ``/p/<profile>/``),
+    so they are the served profile's too and are kept; a profile-specific entry
+    of the same name wins over the shared one.
+    """
+    plats = (runtime or {}).get("platforms")
+    if not isinstance(plats, dict):
+        return {}
+    prefix = f"{profile}:"
+    shared = {
+        key: value
+        for key, value in plats.items()
+        if isinstance(key, str) and ":" not in key and isinstance(value, dict)
+    }
+    own = {
+        key[len(prefix):]: value
+        for key, value in plats.items()
+        if isinstance(key, str) and key.startswith(prefix) and isinstance(value, dict)
+    }
+    return {**shared, **own}
 
 
 def resolve_gateway_liveness(
@@ -1444,6 +1561,11 @@ def resolve_gateway_liveness(
     3. **Runtime status PID** — validated against the live process table with
        ``expected_home`` so a recycled PID belonging to a *different*
        profile's gateway is never reported as this one's.
+    4. **Multiplexer** — for a named ``profile_dir`` only: the live default
+       gateway that records this profile in ``served_profiles``.  A profile the
+       multiplexer serves owns no identity files, so without this rung the
+       dashboard called it stopped while the shared gateway carried its chat
+       and API (K21-088).  ``runtime`` then carries the multiplexer's record.
 
     Rung 3 only ever runs against a LOCAL state record: the probe body's PID
     belongs to another host, and ``os.kill``-ing a remote PID is both wrong
@@ -1521,6 +1643,27 @@ def resolve_gateway_liveness(
             source="runtime_status",
             health_body=health_body,
         )
+
+    # 4. **Multiplexer** — for a NAMED ``profile_dir`` only: the live default
+    #    gateway that actually serves this profile IS its gateway.  A served
+    #    profile writes no identity files of its own, so rungs 1 and 3 have
+    #    nothing to read and the dashboard used to render "остановлен" over a
+    #    profile whose chat and API the shared gateway was carrying (K21-088).
+    if profile_dir is not None:
+        try:
+            served = multiplexer_liveness_for_profile(profile_dir)
+        except Exception:
+            served = None
+            probe_error = True
+        if served is not None:
+            mux_pid, mux_runtime = served
+            return GatewayLiveness(
+                running=True,
+                pid=mux_pid,
+                source="multiplexer",
+                health_body=health_body,
+                runtime=mux_runtime,
+            )
 
     return GatewayLiveness(
         running=False,
