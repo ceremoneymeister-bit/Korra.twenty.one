@@ -1027,6 +1027,8 @@ class TestDockerContainerMediaPathTranslation:
 
     def test_unresolved_container_secret_cannot_fall_back_to_host(self, tmp_path, monkeypatch):
         """A synthetic host twin proves the refusal without reading real auth."""
+        from pathlib import Path
+
         host_twin = tmp_path / "host-twin.json"
         host_twin.write_text('{"synthetic": true}')
         monkeypatch.setenv("TERMINAL_ENV", "docker")
