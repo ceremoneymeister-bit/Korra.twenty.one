@@ -39,6 +39,8 @@ from utils import atomic_json_write
 
 
 AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
+# Legacy spelling Google Console still writes into downloaded client JSON.
+ACCEPTED_AUTHORIZATION_ENDPOINTS = frozenset({AUTHORIZATION_ENDPOINT, "https://accounts.google.com/o/oauth2/auth"})
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 REVOCATION_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 REDIRECT_URI = "http://localhost"
@@ -205,7 +207,11 @@ def _app_block(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     token_uri = str(block.get("token_uri") or TOKEN_ENDPOINT).strip()
     if not client_id or not client_secret:
         raise GoogleWorkspaceError("app_invalid", "OAuth app is missing client_id or client_secret")
-    if auth_uri != AUTHORIZATION_ENDPOINT or token_uri != TOKEN_ENDPOINT:
+    # Google Console выдаёт JSON клиента с `https://accounts.google.com/o/oauth2/auth`
+    # (без `/v2/`); это тот же сервер авторизации, а сам поток всегда идёт на
+    # AUTHORIZATION_ENDPOINT. Отклонять такой файл значит отклонять каждый
+    # скачанный из консоли клиент (Виктория, 15.09.2026: `app_invalid`).
+    if auth_uri not in ACCEPTED_AUTHORIZATION_ENDPOINTS or token_uri != TOKEN_ENDPOINT:
         raise GoogleWorkspaceError("app_invalid", "OAuth app has unexpected Google endpoints")
     redirects = block.get("redirect_uris")
     if not isinstance(redirects, list) or REDIRECT_URI not in redirects:
