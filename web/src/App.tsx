@@ -848,6 +848,8 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => toggleGroup("settings")}
+                    aria-label="Настройки"
+                    title={isDesktopCollapsed ? "Настройки" : undefined}
                     aria-expanded={settingsOpen}
                     className={cn(
                       "flex items-center gap-2 px-5 pt-2.5 pb-1 text-left",
@@ -889,6 +891,8 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => toggleGroup("service")}
+                    aria-label="Служебное"
+                    title={isDesktopCollapsed ? "Служебное" : undefined}
                     aria-expanded={serviceOpen}
                     className={cn(
                       "flex items-center gap-2 px-5 pt-2.5 pb-1 text-left",
