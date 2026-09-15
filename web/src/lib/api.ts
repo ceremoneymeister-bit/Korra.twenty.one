@@ -2397,6 +2397,9 @@ export interface StatusResponse {
   gateway_pid: number | null;
   gateway_platforms: Record<string, PlatformStatus>;
   gateway_running: boolean;
+  /** Профиль ведёт общий шлюз основного профиля: своего процесса у него нет,
+   *  но он на связи. Отсутствует у движков старее K21-088. */
+  gateway_multiplexed?: boolean;
   gateway_state: string | null;
   gateway_updated_at: string | null;
   hermes_home: string;
@@ -2806,7 +2809,13 @@ export interface ProfileInfo {
   provider: string | null;
   has_env: boolean;
   skill_count: number;
+  /** Есть ли у профиля СВОЙ процесс шлюза. У агента под общим шлюзом его
+   *  нет — читайте `gateway_status`, иначе работающий агент выглядит
+   *  выключенным (K21-088). */
   gateway_running: boolean;
+  /** "running" — свой шлюз; "served" — ведёт общий шлюз основного профиля;
+   *  "stopped" — не работает. Отсутствует у панелей старее K21-088. */
+  gateway_status?: "running" | "served" | "stopped";
   description: string;
   description_auto: boolean;
   display_name?: string;
