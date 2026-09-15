@@ -5,8 +5,19 @@ import { afterEach, expect, it, vi } from "vitest";
 import { Markdown } from "../Markdown";
 
 const host = document.createElement("div");
+// Просмотр изображения возвращает фокус на карточку — для этого дерево должно
+// быть в документе, иначе focus() в jsdom не делает ничего.
+document.body.append(host);
 const root = createRoot(host);
 afterEach(async () => { await act(async () => root.render(null)); delete window.__HERMES_SESSION_TOKEN__; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+function opener(): HTMLButtonElement | null {
+  return host.querySelector<HTMLButtonElement>('button[aria-label^="Открыть изображение крупно"]');
+}
+
+function viewer(): HTMLElement | null {
+  return document.body.querySelector<HTMLElement>('[role="dialog"]');
+}
 
 it("показывает имя, размер и защищённое скачивание, восстанавливается после перезагрузки", async () => {
   const path = "/opt/data/workspace/report.xlsx";
@@ -57,6 +68,65 @@ it("изображение получает превью через тот же 
   await act(async () => root.render(<Markdown content={`MEDIA:${path}`} />));
   expect(host.querySelector("img")?.src).toContain("chat=1");
   expect(host.querySelector('a[download]')).not.toBeNull();
+});
+
+it("нажатие на картинку открывает просмотр поверх чата, Escape возвращает к карточке", async () => {
+  const path = "/opt/data/workspace/кот.png";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({path, name: "кот.png", kind: "png", size: 2048, reader: "image"}))));
+  await act(async () => root.render(<Markdown content={`MEDIA:${path}`} />));
+  const open = opener()!;
+  open.focus();
+  await act(async () => { open.click(); });
+  const view = viewer()!;
+  expect(view.getAttribute("aria-label")).toContain("кот.png");
+  // Просмотр показывает то же, что уже получила карточка: второго маршрута нет.
+  expect(view.querySelector("img")!.getAttribute("src")).toBe(host.querySelector("img")!.getAttribute("src"));
+  expect(view.contains(document.activeElement)).toBe(true);
+  await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect(viewer()).toBeNull();
+  expect(document.activeElement).toBe(open);
+  // Карточка осталась на месте вместе со своим «Скачать».
+  expect(host.querySelector('a[download]')).not.toBeNull();
+});
+
+it("картинка больше 25 МБ остаётся карточкой со скачиванием, без превью и просмотра", async () => {
+  const path = "/opt/data/workspace/огромная.png";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({path, name: "огромная.png", kind: "png", size: 26 * 1024 * 1024, reader: "image"}))));
+  await act(async () => root.render(<Markdown content={`MEDIA:${path}`} />));
+  expect(host.querySelector("img")).toBeNull();
+  expect(opener()).toBeNull();
+  expect(host.querySelector('a[download]')).not.toBeNull();
+});
+
+it("недоступное вложение не предлагает просмотр", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("denied")));
+  await act(async () => root.render(<Markdown content="MEDIA:/etc/secret.png" />));
+  expect(opener()).toBeNull();
+  expect(viewer()).toBeNull();
+});
+
+it("«Скачать» из просмотра идёт тем же авторизованным маршрутом, что и карточка", async () => {
+  window.__HERMES_SESSION_TOKEN__ = "private-session";
+  window.__KORRA_UI_MODE__ = "fleet";
+  const path = "/opt/data/workspace/кот.png";
+  const fetcher = vi.fn().mockImplementation((url: string) => Promise.resolve(url.includes("/attachment?")
+    ? new Response(JSON.stringify({path, name: "кот.png", kind: "png", size: 2048, reader: "image"}))
+    : new Response("bytes")));
+  vi.stubGlobal("fetch", fetcher);
+  vi.stubGlobal("URL", class extends URL { static createObjectURL() { return "blob:preview"; } static revokeObjectURL() {} });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  await act(async () => root.render(<Markdown content={`MEDIA:${path}`} />));
+  await act(async () => { opener()!.click(); });
+  const view = viewer()!;
+  expect(view.querySelector("img")!.getAttribute("src")).toBe("blob:preview");
+  const link = view.querySelector<HTMLAnchorElement>('a[download]')!;
+  expect(link.getAttribute("href")).not.toContain("token=");
+  await act(async () => { link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  expect(click).toHaveBeenCalledOnce();
+  const [url, options] = fetcher.mock.calls.find(([url]) => url.includes("/download?") && !url.includes("inline="))!;
+  expect(url).not.toContain("private-session");
+  expect(options.headers.get("X-Hermes-Session-Token")).toBe("private-session");
+  delete window.__KORRA_UI_MODE__;
 });
 
 it("прямой fleet скачивает с заголовком авторизации, не помещая токен в ссылку", async () => {

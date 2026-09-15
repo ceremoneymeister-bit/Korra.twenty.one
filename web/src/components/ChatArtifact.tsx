@@ -7,45 +7,13 @@
  */
 
 import { useState } from "react";
-import { Download, ExternalLink, X } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { artifactUrl, shortName, type ChatArtifact } from "@/lib/chat-artifacts";
 import { AttachmentCard } from "@/components/ChatAttachments";
 import { ApprovalCard, ApprovalSettled } from "@/components/chat/ApprovalCard";
-
-function Lightbox({
-  item,
-  onClose,
-}: {
-  item: ChatArtifact;
-  onClose: () => void;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={item.name}
-    >
-      <img
-        src={artifactUrl(item.path)}
-        alt={item.name}
-        className="max-h-full max-w-full rounded-md object-contain"
-        onClick={(e) => e.stopPropagation()}
-      />
-      <button
-        type="button"
-        onClick={onClose}
-        className="absolute top-4 right-4 rounded-md bg-white/10 p-2 text-white hover:bg-white/20"
-        aria-label="Закрыть"
-      >
-        <X size={16} />
-      </button>
-    </div>
-  );
-}
+import { ImageViewer } from "@/components/chat/ImageViewer";
 
 export type ArtifactDecision = "approve" | "change" | "defer";
 /** Возвращает false, если решение отправить не удалось — карточка тогда не
@@ -154,16 +122,24 @@ export function ChatArtifactView({
     return (
       <>
         <figure className="mt-2 mb-1">
-          <img
-            src={artifactUrl(item.path)}
-            alt={item.name}
-            loading="lazy"
+          {/* Кнопка, а не `<img onClick>`: увеличение должно открываться и с
+              клавиатуры, и ассистивной технологией. */}
+          <button
+            type="button"
             onClick={() => setZoom(true)}
-            className={cn(
-              "max-h-[420px] w-auto max-w-full cursor-zoom-in rounded-md",
-              "border border-border object-contain bg-background",
-            )}
-          />
+            aria-label={`Открыть изображение крупно: ${item.name}`}
+            className="block cursor-zoom-in rounded-md border-0 bg-transparent p-0 outline-none focus-visible:shadow-[var(--neo-inset-compact)]"
+          >
+            <img
+              src={artifactUrl(item.path)}
+              alt={item.name}
+              loading="lazy"
+              className={cn(
+                "max-h-[420px] w-auto max-w-full rounded-md",
+                "border border-border object-contain bg-background",
+              )}
+            />
+          </button>
           <figcaption className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground font-sans normal-case tracking-normal">
             <span className="truncate">{shortName(item.name, 40)}</span>
             <a
@@ -183,7 +159,14 @@ export function ChatArtifactView({
             />
           )}
         </figure>
-        {zoom && <Lightbox item={item} onClose={() => setZoom(false)} />}
+        {zoom && (
+          <ImageViewer
+            src={artifactUrl(item.path)}
+            name={item.name}
+            downloadHref={artifactUrl(item.path, false)}
+            onClose={() => setZoom(false)}
+          />
+        )}
       </>
     );
   }
