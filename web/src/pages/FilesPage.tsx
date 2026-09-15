@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type CSSProperties,
 } from "react";
 import {
   ArrowUp,
@@ -862,7 +863,8 @@ export default function FilesPage() {
         </label>
       </div>
 
-      <Card className="min-w-0 max-w-full overflow-hidden rounded-xl">
+      <Card className="min-w-0 max-w-full overflow-hidden rounded-xl"
+        style={{ "--file-actions-width": restrictedFiles ? "196px" : "292px" } as CSSProperties}>
         <CardContent className="p-0">
           {error && (
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
@@ -873,10 +875,10 @@ export default function FilesPage() {
             </div>
           )}
 
-          <div className="hidden grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem] items-center gap-3 border-b border-border px-4 py-3 text-xs font-semibold text-text-tertiary md:grid">
+          <div className="hidden grid-cols-[minmax(8rem,1fr)_6rem_var(--file-actions-width)] xl:grid-cols-[minmax(12rem,1fr)_7rem_10rem_var(--file-actions-width)] items-center gap-3 border-b border-border px-4 py-3 text-xs font-semibold text-text-tertiary md:grid">
             <span>Название</span>
             <span>Размер</span>
-            <span>Изменено</span>
+            <span className="hidden xl:block">Изменено</span>
             <span className="text-right">Действия</span>
           </div>
 
@@ -884,14 +886,14 @@ export default function FilesPage() {
             <button
               type="button"
               onClick={() => navigateTo((fleetMode ? workspaceParentPath(managedRoot, activePath, listing.parent) : listing.parent) ?? undefined)}
-              className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-left text-sm transition-colors hover:bg-background/40 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem]"
+              className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-left text-sm transition-colors hover:bg-background/40 md:grid-cols-[minmax(8rem,1fr)_6rem_var(--file-actions-width)] xl:grid-cols-[minmax(12rem,1fr)_7rem_10rem_var(--file-actions-width)]"
             >
               <span className="flex min-w-0 items-center gap-2 font-mono text-text-secondary">
                 <ArrowUp className="h-4 w-4 shrink-0 text-text-tertiary" />
                 ..
               </span>
               <span className="hidden md:block" />
-              <span className="hidden md:block" />
+              <span className="hidden xl:block" />
               <span className="hidden md:block" />
             </button>
           )}
@@ -915,7 +917,7 @@ export default function FilesPage() {
                 key={entry.path}
                 ref={highlight === entry.name ? highlightedRowRef : undefined}
                 data-highlighted={highlight === entry.name ? "true" : undefined}
-                className={`relative grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-sm last:border-b-0 hover:bg-background/35 md:grid-cols-[minmax(12rem,1fr)_7rem_10rem_11rem] ${
+                className={`relative grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-4 py-3 text-sm last:border-b-0 hover:bg-background/35 md:grid-cols-[minmax(8rem,1fr)_6rem_var(--file-actions-width)] xl:grid-cols-[minmax(12rem,1fr)_7rem_10rem_var(--file-actions-width)] ${
                   highlight === entry.name ? "bg-primary/10 shadow-[inset_3px_0_0_var(--primary)]" : ""
                 }`}
               >
@@ -945,10 +947,10 @@ export default function FilesPage() {
                   </span>
                 </button>
                 <span className="hidden text-xs tabular-nums text-text-secondary md:block">{formatBytes(entry.size)}</span>
-                <span className="hidden truncate text-xs text-text-secondary md:block">
+                <span className="hidden truncate text-xs text-text-secondary xl:block">
                   {Number.isFinite(entry.mtime) ? dateFormat.format(entry.mtime * 1000) : "-"}
                 </span>
-                <span className="relative z-10 flex max-w-[140px] flex-wrap justify-end gap-1 justify-self-end">
+                <span className="relative z-10 flex max-w-[140px] flex-wrap md:max-w-none md:flex-nowrap justify-end gap-1 justify-self-end">
                   <Button ghost size="icon" type="button" onClick={() => sendToAgent([entry.path])} aria-label={`Отправить в чат ${entryLabel(entry)}`}><MessageSquare /></Button>
                   <Button ghost size="icon" type="button" onClick={() => copyPaths([entry.path])} aria-label={`Копировать путь ${entryLabel(entry)}`}><Copy /></Button>
                   {entry.is_directory ? (

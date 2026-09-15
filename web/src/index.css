@@ -346,14 +346,23 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
    впервые, и «Изменено», «Размер», дату файла и шаг инструкции ему нужно
    прочитать, а не угадать. Канон требует 15–16 px для основного текста;
    13 px — граница, ниже которой не опускаемся нигде. */
+[data-client-ui="true"] .text-sm {
+  font-size: max(15px, 0.875rem);
+}
 [data-client-ui="true"] .text-xs {
-  font-size: 0.875rem;
+  font-size: max(13px, 0.8125rem);
 }
 
 /* Touch target по канону — 44 px. Правило про палец, поэтому и включается
    только там, где указатель грубый: на десктопе мышь попадает и в 38 px, и
    раздувать ради неё интерфейс незачем. */
 @media (pointer: coarse) {
+  .korra-chat-composer__control,
+  .neo-dialog-close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   [data-client-ui="true"] aside a,
   [data-client-ui="true"] aside button,
   [data-client-ui="true"] header button,
@@ -395,7 +404,7 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
    пользовательский zoom не затрагиваются. Телефон (≤ 768) и большой экран
    остаются на своей плотности. */
 @media (max-width: 1440px) and (min-width: 769px), (max-height: 900px) and (min-width: 769px) {
-  :root {
+  :root[data-density="comfortable"] {
     --korra-density-viewport: 0.94;
   }
 }

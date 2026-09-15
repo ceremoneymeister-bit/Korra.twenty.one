@@ -85,7 +85,7 @@ export function ImageViewer({ src, name, downloadHref, onDownload, downloading, 
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = overflow;
-      previous?.focus?.();
+      previous?.focus?.({ preventScroll: true });
     };
   }, []);
 

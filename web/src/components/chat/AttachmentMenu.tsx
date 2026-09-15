@@ -14,7 +14,7 @@ export function AttachmentMenu({ disabled, onPickFiles, originals, onOriginalsCh
   originals: boolean;
   onOriginalsChange: (value: boolean) => void;
 }) {
-  const item = "flex min-h-11 w-full cursor-pointer select-none items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-[var(--neo-text-primary)] outline-0 data-[highlighted]:shadow-[var(--neo-inset-compact)] data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50";
+  const item = "flex min-h-[44px] w-full cursor-pointer select-none items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-[var(--neo-text-primary)] outline-0 data-[highlighted]:shadow-[var(--neo-inset-compact)] data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50";
   return (
     <Menu.Root modal={false}>
       <Menu.Trigger asChild>

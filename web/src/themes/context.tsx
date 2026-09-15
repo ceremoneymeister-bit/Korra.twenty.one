@@ -86,9 +86,9 @@ function paletteVars(palette: ThemePalette): Record<string, string> {
  *  `--korra-density-viewport` в index.css. Плотность пользователю не
  *  предлагается, поэтому сдвиг стандарта не ломает сохранённых настроек. */
 const DENSITY_MULTIPLIERS: Record<ThemeDensity, string> = {
-  compact: "0.8",
+  compact: "0.85",
   comfortable: "0.9",
-  spacious: "1.05",
+  spacious: "1.2",
 };
 
 function typographyVars(typo: ThemeTypography): Record<string, string> {
@@ -316,6 +316,7 @@ function applyTheme(theme: DashboardTheme) {
     suppression.textContent = "*,*::before,*::after{transition:none!important}";
     document.head.append(suppression);
   }
+  root.dataset.density = theme.layout.density;
   root.style.colorScheme = theme.name === "dark" ? "dark" : "light";
   cancelAnimationFrame(transitionFrame);
   transitionFrame = requestAnimationFrame(() => {
