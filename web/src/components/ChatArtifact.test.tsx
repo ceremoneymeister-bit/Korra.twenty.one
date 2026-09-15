@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ChatArtifactList } from "./ChatArtifact";
 import { splitArtifacts } from "@/lib/chat-artifacts";
 
 const host = document.createElement("div");
 document.body.append(host);
 const root = createRoot(host);
-afterEach(async () => { await act(async () => root.render(null)); });
+beforeEach(() => { vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ path: "/opt/data/workspace/план.png", name: "план.png", kind: "png", size: 1024, reader: "image" })))); });
+afterEach(async () => { await act(async () => root.render(null)); vi.unstubAllGlobals(); });
 
 function opener(): HTMLButtonElement | null {
   return host.querySelector<HTMLButtonElement>('button[aria-label^="Открыть изображение крупно"]');
@@ -38,7 +39,7 @@ it("результат агента открывается тем же прос�
   expect(viewer()).toBeNull();
   expect(document.activeElement).toBe(open);
   // Скачивание из исходной карточки никуда не делось.
-  expect(host.querySelector('figcaption a[download]')).not.toBeNull();
+  expect(host.querySelector('a[download]')).not.toBeNull();
 });
 
 it("документ-артефакт остаётся карточкой без просмотра изображения", async () => {

@@ -4757,12 +4757,14 @@ def _chat_file_descriptor(reference: str, request: Request, *, folder_deadline: 
         return _chat_folder_descriptor(target, deadline=folder_deadline)
     if not target.is_file():
         raise HTTPException(404, "Файл удалён или перемещён. Попросите агента создать его снова.")
-    size = target.stat().st_size
+    stat = target.stat()
+    size = stat.st_size
     if size > _CHAT_MAX_FILE_BYTES:
         raise HTTPException(413, "Файл больше 2 ГБ. Попросите агента разделить его на части.")
     return {
         "path": str(target), "name": target.name,
         "kind": target.suffix.lstrip(".").lower() or "bin", "size": size,
+        "revision": _managed_file_revision_from_stat(stat),
         "reader": _CHAT_ATTACHMENT_READERS.get(target.suffix.lower(), "unknown"),
     }
 

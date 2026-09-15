@@ -186,3 +186,17 @@ def test_result_outside_workspace_explains_the_reason_and_the_next_step(files):
     missing = client.get('/api/files/attachment', params={'path': str(workspace / 'нет.pdf')})
     assert missing.status_code == 404
     assert 'удалён или перемещён' in missing.json()['detail']
+
+
+def test_attachment_revision_changes_for_same_size_edit_and_removal(files):
+    client, _, workspace = files
+    path = workspace / 'preview.png'
+    path.write_bytes(b'old-image')
+    def describe():
+        return client.get('/api/files/attachment', params={'path': str(path)})
+    first = describe().json()['revision']
+    assert describe().json()['revision'] == first
+    path.write_bytes(b'new-image')
+    assert describe().json()['revision'] != first
+    path.unlink()
+    assert describe().status_code == 404

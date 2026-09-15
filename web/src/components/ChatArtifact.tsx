@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { artifactUrl, shortName, type ChatArtifact } from "@/lib/chat-artifacts";
 import { AttachmentCard } from "@/components/ChatAttachments";
 import { ApprovalCard, ApprovalSettled } from "@/components/chat/ApprovalCard";
-import { ImageViewer } from "@/components/chat/ImageViewer";
+import { FileAttachment } from "@/components/chat/FileAttachment";
 
 export type ArtifactDecision = "approve" | "change" | "defer";
 /** Возвращает false, если решение отправить не удалось — карточка тогда не
@@ -116,59 +116,12 @@ export function ChatArtifactView({
   busy?: boolean;
   decided?: Map<string, ArtifactDecision>;
 }) {
-  const [zoom, setZoom] = useState(false);
-
   if (item.isImage) {
-    return (
-      <>
-        <figure className="mt-2 mb-1">
-          {/* Кнопка, а не `<img onClick>`: увеличение должно открываться и с
-              клавиатуры, и ассистивной технологией. */}
-          <button
-            type="button"
-            onClick={() => setZoom(true)}
-            aria-label={`Открыть изображение крупно: ${item.name}`}
-            className="block cursor-zoom-in rounded-md border-0 bg-transparent p-0 outline-none focus-visible:shadow-[var(--neo-inset-compact)]"
-          >
-            <img
-              src={artifactUrl(item.path)}
-              alt={item.name}
-              loading="lazy"
-              className={cn(
-                "max-h-[420px] w-auto max-w-full rounded-md",
-                "border border-border object-contain bg-background",
-              )}
-            />
-          </button>
-          <figcaption className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground font-sans normal-case tracking-normal">
-            <span className="truncate">{shortName(item.name, 40)}</span>
-            <a
-              href={artifactUrl(item.path, false)}
-              className="inline-flex items-center gap-1 hover:text-foreground"
-              download
-            >
-              <Download size={11} aria-hidden /> скачать
-            </a>
-          </figcaption>
-          {onDecision && (
-            <DecisionRow
-              item={item}
-              onDecision={onDecision}
-              busy={busy}
-              already={decided?.get(item.path) ?? decided?.get(item.name)}
-            />
-          )}
-        </figure>
-        {zoom && (
-          <ImageViewer
-            src={artifactUrl(item.path)}
-            name={item.name}
-            downloadHref={artifactUrl(item.path, false)}
-            onClose={() => setZoom(false)}
-          />
-        )}
-      </>
-    );
+    return <div>
+      <FileAttachment path={item.path} name={item.name} />
+      {onDecision && <DecisionRow item={item} onDecision={onDecision} busy={busy}
+        already={decided?.get(item.path) ?? decided?.get(item.name)} />}
+    </div>;
   }
 
   return (

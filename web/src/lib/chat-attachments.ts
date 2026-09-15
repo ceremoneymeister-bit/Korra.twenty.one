@@ -20,6 +20,8 @@ export interface UploadedAttachment {
   kind: string;
   size: number;
   reader: string;
+  /** Changes when the server file changes; absent on older engines. */
+  revision?: string;
   file_count?: number;
   truncated?: boolean;
 }

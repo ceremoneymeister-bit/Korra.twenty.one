@@ -22,14 +22,47 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
   useEffect(() => {
     const controller = new AbortController();
     setFile(null); setFailed(null); setImageFailed(false); setPreview(undefined); setViewing(false);
-    void describeAttachment(path, controller.signal).then(value => {
-      if (!controller.signal.aborted) setFile(value);
-    }).catch((error: unknown) => {
-      if (!controller.signal.aborted) setFailed(ownerFacingError(error, UNAVAILABLE_FALLBACK));
-    });
-    return () => controller.abort();
+    let pending = false;
+    let checkedAt = 0;
+    let loaded = false;
+    const refresh = async (force = false) => {
+      if (pending || (!force && (document.hidden || Date.now() - checkedAt < 30_000))) return;
+      pending = true;
+      checkedAt = Date.now();
+      try {
+        const value = await describeAttachment(path, controller.signal);
+        if (controller.signal.aborted) return;
+        loaded = true;
+        setFailed(null);
+        // Retain the same object and <img> for unchanged files. Only a new
+        // revision triggers the existing blob effect and its URL cleanup.
+        setFile(previous => JSON.stringify(previous) === JSON.stringify(value) ? previous : value);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        // Offline/5xx must not erase already visible content. An explicit
+        // access/deletion refusal invalidates it, including an open viewer.
+        if (!loaded || (error instanceof Error && /^(400|401|403|404|410|413):/.test(error.message))) {
+          setFile(null); setPreview(undefined); setViewing(false);
+          setFailed(ownerFacingError(error, UNAVAILABLE_FALLBACK));
+        }
+      } finally { pending = false; }
+    };
+    void refresh(true);
+    const onReturn = () => { void refresh(); };
+    const onOnline = () => { void refresh(true); };
+    const timer = window.setInterval(onReturn, 30_000);
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    window.addEventListener("online", onOnline);
+    return () => {
+      controller.abort(); window.clearInterval(timer);
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+      window.removeEventListener("online", onOnline);
+    };
   }, [path]);
   useEffect(() => {
+    setImageFailed(false);
     if (!file || !isImageKind(file.kind) || file.size > 25 * 1024 * 1024 || !window.__HERMES_SESSION_TOKEN__) return;
     const controller = new AbortController();
     let objectUrl: string | undefined;
@@ -50,7 +83,7 @@ export function FileAttachment({ path, name }: { path: string; name?: string }) 
   // токене сессии, иначе тот же проверяемый маршрут Files. Ограничение 25 МБ
   // остаётся здесь — большой файл по-прежнему только скачивается.
   const imageSrc = file && isImageKind(file.kind) && file.size <= 25 * 1024 * 1024 && !imageFailed && (!window.__HERMES_SESSION_TOKEN__ || preview)
-    ? preview || `${artifactUrl(file.path)}&chat=1`
+    ? preview || `${artifactUrl(file.path)}&chat=1&revision=${encodeURIComponent(file.revision ?? "")}`
     : undefined;
   // Токен сессии нельзя класть в ссылку, поэтому в таком контуре и карточка,
   // и просмотр скачивают одним и тем же авторизованным запросом.
