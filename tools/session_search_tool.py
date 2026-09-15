@@ -388,50 +388,6 @@ def _session_link(session_id: str, profile: str = None) -> str:
     return f"@session:{name}/{session_id}" if name else f"@session:{session_id}"
 
 
-def _locate_session_db(session_id: str):
-    """Scan every profile's ``state.db`` (read-only) for a session id.
-
-    Returns ``(db, profile_name)`` for the first profile that owns the id, or
-    ``(None, None)``. Session ids are globally unique (timestamp + random hex),
-    so the first hit is authoritative. This is the safety net for linked-session
-    reads where the model dropped the owning profile from the link and passed a
-    bare id — we find it wherever it actually lives instead of failing.
-    """
-    from pathlib import Path
-
-    try:
-        from korra_cli import profiles as profiles_mod
-        from korra_state import SessionDB
-    except Exception:
-        return None, None
-
-    targets = [("default", profiles_mod.get_profile_dir("default"))]
-    try:
-        targets += [(info.name, info.path) for info in profiles_mod.list_profiles()]
-    except Exception:
-        logging.debug("list_profiles failed during session locate", exc_info=True)
-
-    seen: set = set()
-    for name, home in targets:
-        db_path = Path(home) / "state.db"
-        key = str(db_path)
-        if key in seen or not db_path.exists():
-            continue
-        seen.add(key)
-        try:
-            pdb = SessionDB(db_path=db_path, read_only=True)
-        except Exception:
-            continue
-        try:
-            if pdb.get_session(session_id):
-                return pdb, name
-        except Exception:
-            logging.debug("get_session probe failed for %s in %s", session_id, name, exc_info=True)
-        pdb.close()
-
-    return None, None
-
-
 def _read_session(db, session_id: str, head: int = 20, tail: int = 10, link_profile: str = None) -> str:
     """Read shape: dump a whole session by id (head + tail when large).
 
@@ -1017,25 +973,23 @@ def _session_search_impl(
         )
 
     # Read shape: a session_id with no anchor → dump the whole session.
+    #
+    # Scoped to ONE store: the caller's own profile, or the profile the caller
+    # named. A miss stays a miss. Profiles are separate agents, so a bare id
+    # never falls through to a scan of every other profile's ``state.db`` —
+    # that returned another agent's whole transcript to anyone holding the id,
+    # and ids travel in logs and tool output. The hint names the two explicit
+    # forms of the cross-profile read we do support.
     if isinstance(session_id, str) and session_id.strip():
         sid = session_id.strip()
         result = _read_session(db, sid, link_profile=profile)
-        if json.loads(result).get("success"):
+        if (profile is not None and str(profile).strip()) or json.loads(result).get("success"):
             return result
-
-        # Miss in the target profile — the model may have dropped the owning
-        # profile from the link. Scan every profile and read it from wherever
-        # it lives, tagging the profile it was found in.
-        located, owner = _locate_session_db(sid)
-        if located is not None:
-            try:
-                found = json.loads(_read_session(located, sid, link_profile=owner))
-            finally:
-                located.close()
-            if found.get("success"):
-                found["profile"] = owner
-                return json.dumps(found, ensure_ascii=False)
-        return result
+        return tool_error(
+            f"session_id not found in this profile: {sid}. If it belongs to another "
+            "profile, pass profile=<name> (or the @session:<profile>/<id> link).",
+            success=False,
+        )
 
     # Limit clamp [1, 10]
     if not isinstance(limit, int):
