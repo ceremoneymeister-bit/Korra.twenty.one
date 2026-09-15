@@ -18,7 +18,7 @@ import {
 import { previewArguments, previewToolResult } from "@/components/chat/tool-labels";
 import { api, withBasePath, type SessionMessage } from "@/lib/api";
 import { splitSSEBuffer } from "@/lib/sse-parser";
-import { toDisplay, type UploadedAttachment } from "@/lib/chat-attachments";
+import { splitAttachments, toDisplay, type UploadedAttachment } from "@/lib/chat-attachments";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import {
   clearChatOutbox,
@@ -70,6 +70,15 @@ type StreamAction =
   | { type: "DISCARD_PENDING"; messageId: string }
   | { type: "SET_SESSION_ID"; sessionId: string | null }
   | { type: "LOAD_SESSION"; sessionId: string; messages: ChatMessage[] }
+  | {
+      type: "SYNC_SESSION";
+      sessionId: string;
+      messages: ChatMessage[];
+      streaming?: boolean;
+      /** Хвост списка — ход, который сейчас будет переигран из журнала.
+       *  Дописывать после него нечего: поток пишет в последнее сообщение. */
+      replay?: boolean;
+    }
   | { type: "APPEND_DELTA"; content: string }
   | { type: "UPSERT_TOOL"; toolData: SSEToolProgressData }
   | { type: "FINALIZE" }
@@ -104,6 +113,88 @@ function expirePendingApprovals(
       ? { ...entry, status: "expired" as const }
       : entry,
   );
+}
+
+/** Текст, который человек видит в пузыре. Блок `[вложения]` адресован модели:
+ *  живая копия сообщения его не содержит, а та же строка из истории — да. */
+function visibleText(message: ChatMessage): string {
+  return message.role === "user" ? splitAttachments(message.content).text : message.content;
+}
+
+/** Файлы сообщения ровно в том виде, в каком их берёт лента: свои из
+ *  отправки, чужие — разобранные из истории. */
+function attachmentKeys(message: ChatMessage): string {
+  const items =
+    message.attachments ??
+    (message.role === "user" ? splitAttachments(message.content).attachments : []);
+  return items.map((item) => item.key).join(" ");
+}
+
+function toolTrace(message: ChatMessage): string {
+  return (message.toolCalls ?? [])
+    .map((entry) => `${entry.id} | ${entry.status} | ${entry.context ?? ""} | ${entry.summary ?? ""}`)
+    .join(" ");
+}
+
+/** Один и тот же пузырь переписки. Живая копия и строка истории отличаются
+ *  служебными полями (id, отметка времени, блок вложений), но для человека
+ *  это одно сообщение — и один и тот же элемент ленты. */
+function sameChatTurn(previous: ChatMessage, next: ChatMessage): boolean {
+  return (
+    previous.role === next.role &&
+    visibleText(previous) === visibleText(next) &&
+    attachmentKeys(previous) === attachmentKeys(next)
+  );
+}
+
+/** Показывать заново нечего: совпадают и трасса вызовов, и размышление. */
+function sameRendered(previous: ChatMessage, next: ChatMessage): boolean {
+  return (
+    sameChatTurn(previous, next) &&
+    (previous.reasoning ?? "") === (next.reasoning ?? "") &&
+    toolTrace(previous) === toolTrace(next)
+  );
+}
+
+/**
+ * Свежий список сообщений поверх уже показанного.
+ *
+ * Возврат к чату не должен выглядеть как повторная прогрузка: неизменившиеся
+ * пузыри остаются теми же объектами, а изменившиеся сохраняют свой `id`. Для
+ * React это значит «тот же элемент», поэтому карточка вложения не монтируется
+ * заново — не перепроверяет файл и не качает превью второй раз. Если ничего
+ * не изменилось, возвращается прежний массив, и лента вообще не перерисуется.
+ */
+function mergeMessages(
+  previous: ChatMessage[],
+  next: ChatMessage[],
+  keepUndelivered: boolean,
+): ChatMessage[] {
+  let changed = previous.length !== next.length;
+  const merged = next.map((message, index) => {
+    const shown = previous[index];
+    if (!shown || !sameChatTurn(shown, message)) {
+      changed = true;
+      return message;
+    }
+    if (sameRendered(shown, message)) return shown;
+    changed = true;
+    return { ...message, id: shown.id };
+  });
+  // Сообщение, которое не дошло до сервера, в истории не появится. Убрать его
+  // на возврате значило бы спрятать и текст владельца, и кнопку «Повторить».
+  const undelivered = keepUndelivered
+    ? previous.filter(
+        (message) =>
+          message.delivery === "failed" &&
+          !merged.some((kept) => sameChatTurn(kept, message)),
+      )
+    : [];
+  if (undelivered.length > 0) {
+    changed = true;
+    merged.push(...undelivered);
+  }
+  return changed ? merged : previous;
 }
 
 function mapStatus(
@@ -200,6 +291,29 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         // переписке они относились бы к чужой команде.
         approvals: [],
       };
+    }
+
+    case "SYNC_SESSION": {
+      // Освежение уже открытого чата. Чужую переписку сюда не пускаем: если
+      // за время проверки открыли другой чат, ведём себя как обычная загрузка.
+      if (state.sessionId !== action.sessionId) {
+        return {
+          ...state,
+          sessionId: action.sessionId,
+          messages: action.messages,
+          isStreaming: action.streaming ?? false,
+          error: null,
+          approvals: [],
+        };
+      }
+      const messages = mergeMessages(state.messages, action.messages, action.replay !== true);
+      const isStreaming = action.streaming ?? false;
+      // Ничего не изменилось — нечего и перерисовывать. Живые карточки
+      // одобрения остаются на месте: их хозяин — сервер, а не эта проверка.
+      if (messages === state.messages && state.isStreaming === isStreaming && state.error === null) {
+        return state;
+      }
+      return { ...state, messages, isStreaming, error: null };
     }
 
     case "APPEND_DELTA": {
@@ -418,9 +532,17 @@ export interface UseChatStreamReturn {
   ) => Promise<boolean>;
   retryPending: () => Promise<boolean>;
   discardPending: () => void;
-  loadSession: (sessionId: string) => Promise<void>;
+  loadSession: (sessionId: string, options?: LoadSessionOptions) => Promise<void>;
   reset: () => void;
   abort: () => void;
+}
+
+export interface LoadSessionOptions {
+  /** Освежить уже открытый чат, не очищая ленту: новые сообщения и состояние
+   *  хода проверяются в фоне, показанное остаётся на месте. Для первого
+   *  открытия и перехода в другой чат это делать нельзя — там очистка
+   *  обязательна, иначе на мгновение видна чужая переписка. */
+  background?: boolean;
 }
 
 /** Строка истории со всем, что реально отдаёт панельный маршрут
@@ -622,7 +744,8 @@ export function useChatStream(
     })();
   }, [profile, state.sessionId]);
 
-  const loadSession = useCallback(async (sessionId: string): Promise<void> => {
+  const loadSession = useCallback(async (sessionId: string, options?: LoadSessionOptions): Promise<void> => {
+    const background = options?.background === true;
     writeChatView(selectionKey, sessionId);
     const generation = crypto.randomUUID();
     activeStreamIdRef.current = generation;
@@ -631,7 +754,17 @@ export function useChatStream(
     abortControllerRef.current = controller;
     streamingRef.current = true; // Loading also excludes a concurrent send.
     const current = () => mountedRef.current && activeStreamIdRef.current === generation;
-    dispatch({ type: "LOAD_SESSION", sessionId, messages: [] });
+    /** Первое открытие и переход в другой чат ленту очищают — показывать чужую
+     *  историю нельзя. Освежение текущего чата её не трогает: новое доезжает
+     *  поверх показанного, а неизменившееся остаётся тем же самым. */
+    const show = (messages: ChatMessage[], replay?: { streaming: boolean }) =>
+      dispatch(background
+        ? { type: "SYNC_SESSION", sessionId, messages, ...(replay ? { streaming: replay.streaming, replay: true } : {}) }
+        : { type: "LOAD_SESSION", sessionId, messages });
+    // Пустая лента на время проверки — это и есть «всё загружается заново»:
+    // пузыри монтируются с нуля, карточки вложений заново проверяют файл и
+    // заново качают превью, а место чтения теряется.
+    if (!background) dispatch({ type: "LOAD_SESSION", sessionId, messages: [] });
     try {
       // Read the run AFTER history: completion between these reads is replayed
       // from the same ledger, never from a stale history snapshot.
@@ -646,28 +779,43 @@ export function useChatStream(
         run = (await getChatRuns(profile ?? "", sessionId))[0];
       } catch {
         if (!current()) return;
-        dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages });
+        show(chatMessages);
         dispatch({ type: "SET_ERROR", error: "История загружена. Не удалось проверить, работает ли агент; связь будет проверена при возврате." });
         return;
       }
       if (!current()) return;
       const newerHistory = run?.status === "completed" && chatMessages.length > run.history_count + 2;
       if (!run || newerHistory || (!isRunBusy(run) && run.status !== "completed")) {
-        dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages });
+        show(chatMessages);
         if (run?.status === "interrupted") dispatch({ type: "SET_ERROR", error: "Связь с ходом потеряна. Проверьте историю перед повторной отправкой." });
         if (run?.status === "failed") dispatch({ type: "SET_ERROR", error: "Ответ завершился с ошибкой. Проверьте историю и сохранённое сообщение перед повторной отправкой." });
         return;
       }
-      // The durable stream replays from byte zero. Remove this turn's saved
-      // copy before replay, including tool messages, so it appears exactly once.
-      dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages.slice(0, run.history_count) });
+      // Ход закончен, и его ответ уже целиком лежит в истории. Перечитывать
+      // журнал на каждом возврате незачем: replay нужен, когда снимок истории
+      // мог отстать от журнала, а не чтобы заново нарисовать то же самое.
+      if (background && run.status === "completed" && chatMessages.length >= run.history_count + 2) {
+        show(chatMessages);
+        return;
+      }
       const pending = loadChatOutbox(profile ?? "", sessionId);
-      dispatch({ type: "SEND_USER", streaming: isRunBusy(run), userMsg: {
+      const userMsg: ChatMessage = {
         id: `user-${run.message_id}`, clientMessageId: run.message_id,
         role: "user", content: run.user_message.content,
         timestamp: run.updated_at * 1000, delivery: "delivered",
         ...(pending ? { attachments: toDisplay(pending.attachments) } : {}),
-      }, assistantMsg: { id: `asst-${run.message_id}`, role: "assistant", content: "", timestamp: Date.now() } });
+      };
+      const assistantMsg: ChatMessage = {
+        id: `asst-${run.message_id}`, role: "assistant", content: "", timestamp: Date.now(),
+      };
+      // The durable stream replays from byte zero. Remove this turn's saved
+      // copy before replay, including tool messages, so it appears exactly once.
+      if (background) {
+        show([...chatMessages.slice(0, run.history_count), userMsg, assistantMsg], { streaming: isRunBusy(run) });
+      } else {
+        dispatch({ type: "LOAD_SESSION", sessionId, messages: chatMessages.slice(0, run.history_count) });
+        dispatch({ type: "SEND_USER", streaming: isRunBusy(run), userMsg, assistantMsg });
+      }
       const response = await fetch(chatRunUrl(`/${encodeURIComponent(run.message_id)}/stream`, profile ?? "", sessionId), {
         headers: chatRunHeaders(), signal: controller.signal, cache: "no-store",
       });
@@ -1116,8 +1264,12 @@ export function useChatStream(
   }, [loadSession, profile, selectionKey]);
   useEffect(() => {
     if (!active) return;
+    // Возврат к вкладке — не повод показывать чат заново. Проверяем в фоне:
+    // новые сообщения и состояние хода доезжают поверх уже показанной ленты.
     const resume = () => {
-      if (!document.hidden && sessionRef.current && !streamingRef.current) void loadSession(sessionRef.current);
+      if (!document.hidden && sessionRef.current && !streamingRef.current) {
+        void loadSession(sessionRef.current, { background: true });
+      }
     };
     resume();
     window.addEventListener("online", resume);
