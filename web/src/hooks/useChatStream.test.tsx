@@ -14,9 +14,14 @@ vi.mock("@/lib/chat-runs", async importOriginal => ({
   refreshChatRuns: vi.fn(async () => {}),
 }));
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 let container: HTMLDivElement;
 let root: Root;
 let current: UseChatStreamReturn;
+/** Каждое состояние, которое лента реально успела показать. Мигание видно
+ *  только здесь: к концу загрузки сообщения снова на месте. */
+let shown: UseChatStreamReturn[] = [];
 
 function Probe({ onValue }: { onValue: (value: UseChatStreamReturn) => void }) {
   const value = useChatStream();
@@ -27,6 +32,7 @@ function Probe({ onValue }: { onValue: (value: UseChatStreamReturn) => void }) {
 beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
+  shown = [];
   let sequence = 0;
   vi.stubGlobal("crypto", {
     randomUUID: () => `12345678-1234-4234-8234-${String(++sequence).padStart(12, "0")}`,
@@ -35,7 +41,7 @@ beforeEach(async () => {
   document.body.append(container);
   root = createRoot(container);
   await act(async () =>
-    root.render(<Probe onValue={(value) => { current = value; }} />),
+    root.render(<Probe onValue={(value) => { current = value; shown.push(value); }} />),
   );
 });
 
@@ -586,6 +592,164 @@ describe("восстановление серверного хода", () => {
   });
 });
 
+
+describe("возврат к уже открытому чату", () => {
+  beforeEach(async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockReset().mockResolvedValue([]);
+  });
+
+  /** История отвечает не мгновенно — как настоящая сеть. Без этого пустое
+   *  состояние успевало бы схлопнуться в один коммит и мигание, которое
+   *  видит человек, из теста бы исчезло. */
+  function slowHistory(sessionId: string, messages: unknown[]) {
+    return vi.spyOn(api, "getSessionMessages").mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 1));
+      return { session_id: sessionId, messages: messages as SessionMessage[] };
+    });
+  }
+
+  /** Уход на соседнюю вкладку и возврат обратно. */
+  async function returnToTab() {
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await new Promise(resolve => setTimeout(resolve, 5));
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
+  }
+
+  const PHOTO =
+    "Вот файл\n\n[вложения]\n1. фото.png · png · 12 КБ · читать: read_file\n/opt/data/workspace/фото.png";
+
+  it("не очищает ленту и не пересобирает пузыри", async () => {
+    slowHistory("s-focus", [
+      { role: "user", content: PHOTO },
+      { role: "assistant", content: "Посмотрела.\nMEDIA:/opt/data/workspace/ответ.png" },
+    ]);
+    await act(async () => { await current.loadSession("s-focus"); });
+    const before = current.messages;
+    expect(before).toHaveLength(2);
+
+    shown.length = 0;
+    await returnToTab();
+    await returnToTab();
+
+    // Ни одного состояния с пустой лентой: человек не видит «прогрузку заново».
+    expect(shown.map(value => value.messages.length).filter(length => length === 0)).toEqual([]);
+    // Те же самые объекты сообщений — React не перемонтирует пузыри, карточки
+    // вложений остаются на месте вместе с уже скачанными превью.
+    expect(current.messages).toBe(before);
+    expect(current.sessionId).toBe("s-focus");
+  });
+
+  it("не перечитывает журнал завершённого хода при каждом возврате", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: "run-done-0001", session_id: "s-done", profile: "",
+      status: "completed", updated_at: 123, history_count: 2,
+      user_message: { role: "user", content: "Повторный вопрос" },
+    }]);
+    slowHistory("s-done", [
+      { role: "user", content: "Первый вопрос" }, { role: "assistant", content: "Первый ответ" },
+      { role: "user", content: "Повторный вопрос" }, { role: "assistant", content: "Второй ответ" },
+    ]);
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      requests.push(String(url));
+      if (String(url).includes("/stream")) {
+        return sseResponse('data: {"choices":[{"delta":{"content":"Второй ответ"}}]}\n\n', "data: [DONE]\n\n");
+      }
+      return new Response(JSON.stringify({ data: [] }), { headers: { "content-type": "application/json" } });
+    }));
+
+    await act(async () => { await current.loadSession("s-done"); });
+    // Первичная загрузка повторяет ход из журнала — это и есть durable replay.
+    expect(requests.filter(url => url.includes("/stream"))).toHaveLength(1);
+    const before = current.messages;
+
+    requests.length = 0;
+    await returnToTab();
+    await returnToTab();
+    await returnToTab();
+
+    // Ход уже закончен и целиком лежит в истории: перечитывать нечего.
+    expect(requests.filter(url => url.includes("/stream"))).toHaveLength(0);
+    expect(current.messages.map(message => message.content)).toEqual([
+      "Первый вопрос", "Первый ответ", "Повторный вопрос", "Второй ответ",
+    ]);
+    expect(current.messages[0]).toBe(before[0]);
+    expect(current.isStreaming).toBe(false);
+  });
+
+  it("подключается к работающему ходу, не убирая прежнюю переписку", async () => {
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: "run-live-0001", session_id: "s-live", profile: "",
+      status: "running", updated_at: 123, history_count: 2,
+      user_message: { role: "user", content: "Второй вопрос" },
+    }]);
+    slowHistory("s-live", [
+      { role: "user", content: "Первый вопрос" }, { role: "assistant", content: "Первый ответ" },
+    ]);
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/stream")) {
+        return sseResponse('data: {"choices":[{"delta":{"content":"Ответ"}}]}\n\n', "data: [DONE]\n\n");
+      }
+      return new Response(JSON.stringify({ data: [] }), { headers: { "content-type": "application/json" } });
+    }));
+
+    await act(async () => { await current.loadSession("s-live"); });
+    const before = current.messages;
+    expect(before.map(message => message.content)).toEqual([
+      "Первый вопрос", "Первый ответ", "Второй вопрос", "Ответ",
+    ]);
+
+    shown.length = 0;
+    await returnToTab();
+
+    expect(shown.map(value => value.messages.length).filter(length => length === 0)).toEqual([]);
+    // Ответ остаётся ровно один — реплей не дописывает его во второй раз.
+    expect(current.messages.map(message => message.content)).toEqual([
+      "Первый вопрос", "Первый ответ", "Второй вопрос", "Ответ",
+    ]);
+    // Прежняя переписка та же самая, перерисовывается только текущий ход.
+    expect(current.messages[0]).toBe(before[0]);
+    expect(current.messages[1]).toBe(before[1]);
+  });
+
+  it("сохраняет сообщение без ответа, которого ещё нет в истории", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("не принято", { status: 500 })));
+    slowHistory("12345678-1234-4234-8234-000000000001", []);
+    await act(async () => { await current.send("Посчитай смету"); });
+    const failed = current.messages.find(message => message.delivery === "failed");
+    expect(failed?.content).toBe("Посчитай смету");
+
+    slowHistory(current.sessionId!, []);
+    await returnToTab();
+
+    expect(current.messages.find(message => message.delivery === "failed")?.content)
+      .toBe("Посчитай смету");
+    expect(loadChatOutbox()).toMatchObject({ status: "failed" });
+  });
+
+  it("переход в другой чат не смешивает историю двух сессий", async () => {
+    slowHistory("s-one", [{ role: "user", content: "Первая сессия" }]);
+    await act(async () => { await current.loadSession("s-one"); });
+    expect(current.messages[0].content).toBe("Первая сессия");
+
+    // Возврат во вкладку и сразу выбор соседнего чата того же агента:
+    // запоздавший ответ фонового освежения не должен показаться в новом чате.
+    slowHistory("s-two", [{ role: "user", content: "Вторая сессия" }]);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await current.loadSession("s-two");
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+
+    expect(current.sessionId).toBe("s-two");
+    expect(current.messages.map(message => message.content)).toEqual(["Вторая сессия"]);
+  });
+});
 
 it("после возврата отказ сервера не превращается в молчание", async () => {
   const { getChatRuns } = await import("@/lib/chat-runs");
