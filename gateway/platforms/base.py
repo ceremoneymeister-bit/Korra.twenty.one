@@ -1923,6 +1923,14 @@ def validate_media_delivery_path(path: str, session_key: str = "") -> Optional[s
     if translated is not None:
         resolved = translated
     else:
+        # An unresolved container credential path must never fall through to
+        # an identically named host file. That file may exist on a root-run
+        # gateway even though the sandbox deliberately did not expose it.
+        if (
+            os.getenv("TERMINAL_ENV", "").strip().lower() == "docker"
+            and _path_is_within(expanded, Path("/root/.hermes"))
+        ):
+            return None
         try:
             resolved = expanded.resolve(strict=True)
         except (OSError, RuntimeError, ValueError):

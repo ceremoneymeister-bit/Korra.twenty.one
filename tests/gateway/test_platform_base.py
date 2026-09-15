@@ -1025,6 +1025,22 @@ class TestDockerContainerMediaPathTranslation:
         ) is None
 
 
+    def test_unresolved_container_secret_cannot_fall_back_to_host(self, tmp_path, monkeypatch):
+        """A synthetic host twin proves the refusal without reading real auth."""
+        host_twin = tmp_path / "host-twin.json"
+        host_twin.write_text('{"synthetic": true}')
+        monkeypatch.setenv("TERMINAL_ENV", "docker")
+        monkeypatch.setattr("gateway.platforms.base._translate_docker_container_media_path", lambda *a, **kw: None)
+        monkeypatch.setattr("gateway.platforms.base._media_delivery_allowed_roots", lambda: [tmp_path])
+        real_resolve = Path.resolve
+        def resolve(path, *args, **kwargs):
+            if str(path) == "/root/.hermes/auth.json":
+                return host_twin
+            return real_resolve(path, *args, **kwargs)
+        monkeypatch.setattr(Path, "resolve", resolve)
+        assert BasePlatformAdapter.validate_media_delivery_path("/root/.hermes/auth.json") is None
+
+
 # ---------------------------------------------------------------------------
 # should_send_media_as_audio
 # ---------------------------------------------------------------------------
