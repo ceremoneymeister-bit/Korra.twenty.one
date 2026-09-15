@@ -821,7 +821,16 @@ async def rename_session_endpoint(session_id: str, body: SessionRename):
                 db.set_session_title(sid, body.title or "")
             except ValueError as e:
                 # Title too long, invalid characters, or already in use.
-                raise HTTPException(status_code=400, detail=str(e))
+                reason = str(e)
+                if "already in use" in reason:
+                    detail = "Чат с таким названием уже есть. Выберите другое название."
+                elif "Title too long" in reason:
+                    detail = "Название слишком длинное. Оставьте не больше 100 символов."
+                elif "canonical Bot Chat" in reason:
+                    detail = "Это служебный чат бота. Его название менять нельзя. Создайте новый чат."
+                else:
+                    detail = "Не удалось сохранить название. Проверьте ввод и попробуйте ещё раз."
+                raise HTTPException(status_code=400, detail=detail) from e
         if body.archived is not None:
             db.set_session_archived(sid, body.archived)
         if body.hidden is not None:
