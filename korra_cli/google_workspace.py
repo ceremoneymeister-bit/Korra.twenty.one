@@ -708,7 +708,10 @@ def _credentials(
         expires_at = payload.get("expires_at")
         expiry = None
         if isinstance(expires_at, (int, float)) and expires_at > 0:
-            expiry = datetime.fromtimestamp(expires_at, tz=timezone.utc)
+            # google-auth 2.x compares expiry with its naive-UTC utcnow().
+            # Preserve the absolute UTC instant while matching that contract;
+            # an aware datetime raises TypeError before any API call.
+            expiry = datetime.fromtimestamp(expires_at, tz=timezone.utc).replace(tzinfo=None)
         creds = Credentials(
             token=payload.get("token"),
             refresh_token=payload.get("refresh_token"),

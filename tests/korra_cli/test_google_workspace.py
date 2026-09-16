@@ -463,6 +463,42 @@ def test_refresh_ignores_identity_scope_drift_and_preserves_legacy_inventory(
     assert saved["scopes"] == stored_scopes
 
 
+def test_credentials_pass_naive_utc_expiry_to_google_auth(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    _write_app(root)
+    _write_token(profile, ("drive",))
+    token_payload = json.loads(google.token_path(profile).read_text(encoding="utf-8"))
+    token_payload["expires_at"] = 1893456000  # 2030-01-01T00:00:00Z
+    google.token_path(profile).write_text(json.dumps(token_payload), encoding="utf-8")
+    google.token_path(profile).chmod(0o600)
+
+    class GoogleAuthCompatibleCredentials:
+        refresh_token = "refresh-value"
+
+        def __init__(self, **kwargs):
+            self.expiry = kwargs["expiry"]
+
+        @property
+        def expired(self):
+            if self.expiry.tzinfo is not None:
+                raise TypeError("google-auth compares expiry with naive UTC")
+            return False
+
+    credentials_module = types.ModuleType("google.oauth2.credentials")
+    credentials_module.Credentials = GoogleAuthCompatibleCredentials
+    request_module = types.ModuleType("google.auth.transport.requests")
+    request_module.Request = lambda: object()
+    monkeypatch.setitem(sys.modules, "google.oauth2.credentials", credentials_module)
+    monkeypatch.setitem(sys.modules, "google.auth.transport.requests", request_module)
+
+    credentials = google._credentials(profile)
+
+    assert credentials.expiry.isoformat() == "2030-01-01T00:00:00"
+    assert credentials.expired is False
+
+
 def test_revoke_waits_for_inflight_refresh_and_token_stays_deleted(tmp_path, monkeypatch):
     root = tmp_path / "install"
     profile = tmp_path / "profile"
