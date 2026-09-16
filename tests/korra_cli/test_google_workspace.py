@@ -467,6 +467,46 @@ def test_deployed_nine_scope_legacy_token_stays_bounded_and_requires_reconnect(t
     assert "never-returned" not in json.dumps(current)
 
 
+def test_nagrada_send_and_slides_legacy_grant_reports_only_usable_services(tmp_path):
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    legacy = {
+        "scopes": [
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/contacts.readonly",
+            "https://www.googleapis.com/auth/documents",
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/gmail.send",
+            "https://www.googleapis.com/auth/presentations",
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "openid",
+        ],
+        "refresh_token": "never-returned",
+    }
+    google.legacy_token_path(profile).write_text(json.dumps(legacy), encoding="utf-8")
+
+    inventory = legacy_scope_inventory(legacy)
+    current = google.status(profile_home=profile)
+    assert inventory == {
+        "kind": "legacy_untracked",
+        "scope_count": 9,
+        "unknown_scope_count": 0,
+        "usable_services": ["calendar", "drive", "contacts", "sheets", "docs"],
+        "compatible": True,
+        "requires_reauthorization": True,
+    }
+    assert current["connection"] == {
+        "state": "reauthorization_required",
+        "reason": "legacy_untracked",
+        "legacy_scope_count": 9,
+        "unknown_scope_count": 0,
+        "usable_services": ["calendar", "drive", "contacts", "sheets", "docs"],
+        "legacy_compatible": True,
+        "action": "revoke_reconnect",
+    }
+
+
 def test_recognized_mail_and_contacts_legacy_grant_keeps_only_actual_services(tmp_path, monkeypatch):
     root = tmp_path / "install"
     profile = tmp_path / "profile"

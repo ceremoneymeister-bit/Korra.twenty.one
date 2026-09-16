@@ -31,6 +31,11 @@ LEGACY_COMPAT_SCOPES = frozenset(
     {
         "https://mail.google.com/",
         "https://www.googleapis.com/auth/contacts",
+        # Older Nagrada grants included Slides even though Korra's current
+        # Google toolset reaches presentations through the Drive API.  Keep
+        # the recorded permission intact without advertising a Slides API
+        # capability that the toolset does not expose.
+        "https://www.googleapis.com/auth/presentations",
     }
 )
 # Google can append identity scopes to an OAuth grant.  They do not turn an old
@@ -131,7 +136,6 @@ def _legacy_services(granted: set[str]) -> tuple[str, ...]:
         "email": {
             "https://mail.google.com/",
             "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/gmail.send",
             "https://www.googleapis.com/auth/gmail.modify",
         },
         "calendar": {
