@@ -24,6 +24,8 @@ const SERVICE_LABELS: Record<string, string> = {
   email: "Gmail",
 };
 
+const DEFAULT_SERVICES = ["drive", "sheets", "calendar"];
+
 
 interface Props {
   onError: (message: string) => void;
@@ -35,7 +37,7 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
   const { profile, currentProfile } = useProfileScope();
   const profileKey = profile || currentProfile;
   const [status, setStatus] = useState<GoogleWorkspaceStatus | null>(null);
-  const [selected, setSelected] = useState<string[]>(["drive", "sheets", "calendar"]);
+  const [selected, setSelected] = useState<string[]>(DEFAULT_SERVICES);
   const [authUrl, setAuthUrl] = useState("");
   const [callbackUrl, setCallbackUrl] = useState("");
   const [busy, setBusy] = useState("");
@@ -49,6 +51,10 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
         setSelected(next.pending.services);
       } else if (next.connection.services?.length) {
         setSelected(next.connection.services.filter(service => service !== "all"));
+      } else if (next.connection.usable_services?.length) {
+        setSelected(next.connection.usable_services.filter(service => service !== "all"));
+      } else {
+        setSelected(DEFAULT_SERVICES);
       }
     } catch (error) {
       onError(ownerFacingError(error, "Не удалось получить статус Google."));
@@ -205,7 +211,7 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
           </div>
         ) : null}
 
-        {!connected ? (
+        {!connected && !needsReauth ? (
           <fieldset className="grid gap-2" disabled={!status?.app.configured || Boolean(busy)}>
             <legend className="mb-1 text-sm font-medium">Какие сервисы разрешить этому агенту</legend>
             <div className="flex flex-wrap gap-x-5 gap-y-2">
