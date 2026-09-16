@@ -948,35 +948,35 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key }),
     }),
-  getGoogleWorkspaceStatus: () =>
-    fetchJSON<GoogleWorkspaceStatus>("/api/google-workspace/status"),
-  startGoogleWorkspace: (services: string[]) =>
-    fetchJSON<GoogleWorkspaceStart>("/api/google-workspace/start", {
+  getGoogleWorkspaceStatus: (profile?: string) =>
+    fetchJSON<GoogleWorkspaceStatus>(appendProfileParam("/api/google-workspace/status", profile)),
+  startGoogleWorkspace: (services: string[], profile?: string) =>
+    fetchJSON<GoogleWorkspaceStart>(appendProfileParam("/api/google-workspace/start", profile), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ services }),
     }),
-  completeGoogleWorkspace: (callbackUrl: string) =>
-    fetchJSON<{ status: "connected"; services: string[] }>("/api/google-workspace/complete", {
+  completeGoogleWorkspace: (callbackUrl: string, profile?: string) =>
+    fetchJSON<{ status: "connected"; services: string[] }>(appendProfileParam("/api/google-workspace/complete", profile), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ callback_url: callbackUrl }),
     }),
-  cancelGoogleWorkspace: () =>
-    fetchJSON<{ status: "cancelled" }>("/api/google-workspace/cancel", {
+  cancelGoogleWorkspace: (profile?: string) =>
+    fetchJSON<{ status: "cancelled" }>(appendProfileParam("/api/google-workspace/cancel", profile), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "{}",
     }),
-  revokeGoogleWorkspace: () =>
-    fetchJSON<GoogleWorkspaceRevoke>("/api/google-workspace/revoke", {
+  revokeGoogleWorkspace: (profile?: string) =>
+    fetchJSON<GoogleWorkspaceRevoke>(appendProfileParam("/api/google-workspace/revoke", profile), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "{}",
     }),
-  checkGoogleWorkspaceService: (service: string) =>
+  checkGoogleWorkspaceService: (service: string, profile?: string) =>
     fetchJSON<{ service: string; status: "ok"; checked_at: string }>(
-      `/api/google-workspace/check/${encodeURIComponent(service)}`,
+      appendProfileParam(`/api/google-workspace/check/${encodeURIComponent(service)}`, profile),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

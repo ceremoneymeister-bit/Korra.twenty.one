@@ -181,12 +181,13 @@ def test_explicit_profiles_use_one_source_grant_without_token_copies(tmp_path, m
 
 def test_shared_consumer_detaches_without_revoking_source(tmp_path, monkeypatch):
     root = tmp_path / "install"
-    _installation_profiles(monkeypatch, root, "assistant", "rop")
+    _installation_profiles(monkeypatch, root, "assistant", "rop", "smm")
     _write_app(root)
     source = root / "profiles" / "assistant"
     consumer = root / "profiles" / "rop"
     _write_token(source, ("drive",))
-    google.configure_sharing(source_profile="assistant", profiles=["rop"])
+    google.configure_sharing(source_profile="assistant", profiles=["rop", "smm"])
+    original_token = google.token_path(source).read_bytes()
     remote_values: list[str] = []
 
     with pytest.raises(google.GoogleWorkspaceError) as in_use:
@@ -200,7 +201,9 @@ def test_shared_consumer_detaches_without_revoking_source(tmp_path, monkeypatch)
         profile_home=consumer,
         remote_revoke=lambda value: remote_values.append(value),
     ) == {"status": "detached", "remote_revoked": False}
-    assert google.token_path(source).exists()
+    assert google.token_path(source).read_bytes() == original_token
+    assert google.status(profile_home=root / "profiles/smm")["connection"]["state"] == "connected"
+    assert google.status(profile_home=source)["connection"]["shared_with"] == ["smm"]
     assert remote_values == []
     assert google.status(profile_home=consumer)["connection"]["state"] == "not_connected"
 

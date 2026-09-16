@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, ShieldCheck, ShieldOff } from "lucide-react";
 import { api, type GoogleWorkspaceStatus } from "@/lib/api";
 import { ownerFacingError } from "@/lib/owner-facing-error";
@@ -33,9 +33,19 @@ interface Props {
 }
 
 
-export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
-  const { profile, currentProfile } = useProfileScope();
-  const profileKey = profile || currentProfile;
+export function GoogleWorkspaceCard(props: Props) {
+  const { profile, currentProfile, profiles } = useProfileScope();
+  const profileKey = profile || currentProfile || "default";
+  const names = Object.fromEntries((profiles ?? []).map(item => [item.name, item.display_name?.trim() || item.name]));
+  return <GoogleWorkspaceCardBody key={profileKey} {...props} profileKey={profileKey} names={names} />;
+}
+
+function GoogleWorkspaceCardBody({ onError, onSuccess, profileKey, names }: Props & {
+  profileKey: string; names: Record<string, string>;
+}) {
+  const alive = useRef(true);
+  const loadRequest = useRef(0);
+  const label = (name: string) => names[name] || (name === "default" ? "главного агента" : name);
   const [status, setStatus] = useState<GoogleWorkspaceStatus | null>(null);
   const [selected, setSelected] = useState<string[]>(DEFAULT_SERVICES);
   const [authUrl, setAuthUrl] = useState("");
@@ -44,8 +54,11 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
   const [checks, setChecks] = useState<Record<string, "ok" | "error">>({});
 
   const load = useCallback(async () => {
+    if (!alive.current) return;
+    const ticket = ++loadRequest.current;
     try {
-      const next = await api.getGoogleWorkspaceStatus();
+      const next = await api.getGoogleWorkspaceStatus(profileKey);
+      if (!alive.current || ticket !== loadRequest.current) return;
       setStatus(next);
       if (next.pending.active && next.pending.services?.length) {
         setSelected(next.pending.services);
@@ -57,16 +70,14 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
         setSelected(DEFAULT_SERVICES);
       }
     } catch (error) {
-      onError(ownerFacingError(error, "Не удалось получить статус Google."));
+      if (alive.current && ticket === loadRequest.current) onError(ownerFacingError(error, "Не удалось получить статус Google."));
     }
   }, [onError, profileKey]);
 
   useEffect(() => {
-    setStatus(null);
-    setAuthUrl("");
-    setCallbackUrl("");
-    setChecks({});
+    alive.current = true;
     void load();
+    return () => { alive.current = false; loadRequest.current += 1; };
   }, [load]);
 
   const available = status?.available_services ?? [];
@@ -76,24 +87,27 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
   const legacyCompatible = Boolean(needsReauth && status?.connection.legacy_compatible);
   const sharedFrom = status?.connection.shared_from;
   const sharedWith = status?.connection.shared_with ?? [];
-  const canStart = Boolean(status?.app.configured && selected.length && !busy && !needsReauth);
+  const canStart = Boolean(status?.app.configured && selected.length && !busy && !needsReauth && !sharedFrom);
   const stateLabel = useMemo(() => {
     if (!status) return "Проверяем";
     if (!status.app.configured) return "Приложение не установлено";
     if (connected) return "Подключено";
+    if (legacyCompatible) return "Работает с текущими правами";
     if (needsReauth) return "Нужно переподключить";
     if (status.pending.active) return "Ожидает подтверждения";
     return "Не подключено";
-  }, [connected, needsReauth, status]);
+  }, [connected, legacyCompatible, needsReauth, status]);
 
   const start = async () => {
     setBusy("start");
     try {
-      const result = await api.startGoogleWorkspace(selected);
+      const result = await api.startGoogleWorkspace(selected, profileKey);
+      if (!alive.current) return;
       setAuthUrl(result.authorization_url);
       window.open(result.authorization_url, "_blank", "noopener,noreferrer");
       await load();
     } catch (error) {
+      if (!alive.current) return;
       onError(ownerFacingError(error, "Не удалось начать подключение Google."));
     } finally {
       setBusy("");
@@ -103,12 +117,14 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
   const complete = async () => {
     setBusy("complete");
     try {
-      await api.completeGoogleWorkspace(callbackUrl);
+      await api.completeGoogleWorkspace(callbackUrl, profileKey);
+      if (!alive.current) return;
       setCallbackUrl("");
       setAuthUrl("");
       onSuccess("Google Workspace подключён к выбранному агенту.");
       await load();
     } catch (error) {
+      if (!alive.current) return;
       onError(ownerFacingError(error, "Не удалось завершить подключение Google."));
     } finally {
       setBusy("");
@@ -118,11 +134,13 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
   const cancel = async () => {
     setBusy("cancel");
     try {
-      await api.cancelGoogleWorkspace();
+      await api.cancelGoogleWorkspace(profileKey);
+      if (!alive.current) return;
       setAuthUrl("");
       setCallbackUrl("");
       await load();
     } catch (error) {
+      if (!alive.current) return;
       onError(ownerFacingError(error, "Не удалось отменить подключение Google."));
     } finally {
       setBusy("");
@@ -132,7 +150,8 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
   const revoke = async () => {
     setBusy("revoke");
     try {
-      const result = await api.revokeGoogleWorkspace();
+      const result = await api.revokeGoogleWorkspace(profileKey);
+      if (!alive.current) return;
       setAuthUrl("");
       setCallbackUrl("");
       setChecks({});
@@ -147,6 +166,7 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
       }
       await load();
     } catch (error) {
+      if (!alive.current) return;
       onError(ownerFacingError(error, "Не удалось отключить Google."));
     } finally {
       setBusy("");
@@ -156,9 +176,11 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
   const check = async (service: string) => {
     setBusy(`check:${service}`);
     try {
-      await api.checkGoogleWorkspaceService(service);
+      await api.checkGoogleWorkspaceService(service, profileKey);
+      if (!alive.current) return;
       setChecks(value => ({ ...value, [service]: "ok" }));
     } catch (error) {
+      if (!alive.current) return;
       setChecks(value => ({ ...value, [service]: "error" }));
       onError(ownerFacingError(error, `Проверка ${SERVICE_LABELS[service] ?? service} не прошла.`));
     } finally {
@@ -167,17 +189,17 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
   };
 
   return (
-    <Card>
+    <Card role="region" aria-label="Подключение Google Workspace">
       <CardHeader className="bg-transparent">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            {connected ? <ShieldCheck className="h-5 w-5 text-success" /> : <ShieldOff className="h-5 w-5 text-muted-foreground" />}
+            {connected || legacyCompatible ? <ShieldCheck className="h-5 w-5 text-success" /> : <ShieldOff className="h-5 w-5 text-muted-foreground" />}
             <CardTitle className="text-base">Google Workspace</CardTitle>
           </div>
           <Badge>{stateLabel}</Badge>
         </div>
         <CardDescription>
-          Один OAuth-клиент установки, настроенный оператором. Grant хранится у одного агента; владелец может явно открыть его другим агентам без копирования токена.
+          Подключите Google-аккаунт и выберите, к каким сервисам агенту разрешён доступ. Одно подключение можно использовать для нескольких агентов.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 p-4">
@@ -185,33 +207,32 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
 
         {status && !status.app.configured ? (
           <div className="rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
-            OAuth-приложение ещё не установлено оператором. Секрет приложения нельзя добавлять через чат или эту страницу.
+            Подключение Google ещё не настроено на сервере. Обратитесь в поддержку Korra.
           </div>
         ) : null}
 
         {sharedFrom ? (
           <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
-            Этот агент использует общий доступ профиля <strong>{sharedFrom}</strong>. Отключение здесь снимет доступ только у выбранного агента.
+            Источник подключения: <strong>{label(sharedFrom)}</strong>. Отключение здесь снимет доступ только у этого агента; остальные продолжат работу.
           </div>
         ) : null}
 
         {sharedWith.length ? (
           <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
-            Доступ к этому grant также выдан: {sharedWith.join(", ")}.
+            Это подключение также используют: <strong>{sharedWith.map(label).join(", ")}</strong>. Чтобы отключить Google целиком, сначала отключите общий доступ у этих агентов.
           </div>
         ) : null}
 
         {needsReauth ? (
           <div className="rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
-            Найден прежний токен без нового списка сервисов
-            {status?.connection.legacy_scope_count ? ` (${status.connection.legacy_scope_count} разрешений)` : ""}.
             {legacyCompatible
-              ? " Текущие разрешения продолжают работать только для перечисленных сервисов. Для изменения доступа переподключите Google."
-              : " Разрешения нельзя безопасно распознать. Отключите Google и подключите сервисы заново."}
+              ? "Доступ к перечисленным сервисам сохранён — можно продолжать работу. Для дополнительных сервисов потребуется новое согласие Google."
+              : "Не удалось подтвердить разрешения этого подключения. Отключите Google и подключите сервисы заново."}
+            {legacyCompatible && sharedFrom ? " Расширять доступ нужно у агента, указанного как источник подключения." : ""}
           </div>
         ) : null}
 
-        {!connected && !needsReauth ? (
+        {!connected && !needsReauth && !sharedFrom ? (
           <fieldset className="grid gap-2" disabled={!status?.app.configured || Boolean(busy)}>
             <legend className="mb-1 text-sm font-medium">Какие сервисы разрешить этому агенту</legend>
             <div className="flex flex-wrap gap-x-5 gap-y-2">
@@ -229,7 +250,7 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
           </fieldset>
         ) : null}
 
-        {!connected && !needsReauth && status?.app.configured ? (
+        {!connected && !needsReauth && !sharedFrom && status?.app.configured ? (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" disabled={!canStart} onClick={() => void start()}>
               {busy === "start" ? "Открываем…" : "Подключить Google"}
@@ -265,18 +286,19 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
           </div>
         ) : null}
 
-        {connected || needsReauth ? (
+        {connected || needsReauth || sharedFrom ? (
           <div className="grid gap-3">
+            {(connected || legacyServices.length > 0) && <p className="text-sm font-medium">Доступны сейчас · нажмите, чтобы проверить</p>}
             <div className="flex flex-wrap gap-2">
               {(connected ? status?.connection.services ?? [] : legacyServices).filter(service => service !== "all").map(service => (
-                <Button key={service} size="sm" outlined disabled={Boolean(busy)} onClick={() => void check(service)}>
+                <Button key={service} size="sm" outlined title={`Проверить доступ к ${SERVICE_LABELS[service] ?? service}`} disabled={Boolean(busy)} onClick={() => void check(service)}>
                   <RefreshCw className="mr-1 h-3.5 w-3.5" />
                   {SERVICE_LABELS[service] ?? service}
                   {checks[service] === "ok" ? " ✓" : checks[service] === "error" ? " !" : ""}
                 </Button>
               ))}
             </div>
-            <Button size="sm" outlined disabled={Boolean(busy)} onClick={() => void revoke()} className="w-fit">
+            <Button size="sm" outlined disabled={Boolean(busy) || (!sharedFrom && sharedWith.length > 0)} onClick={() => void revoke()} className="w-fit">
               {sharedFrom ? "Отключить общий доступ" : needsReauth ? "Отключить для переподключения" : "Отключить Google"}
             </Button>
           </div>
