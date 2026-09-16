@@ -341,6 +341,8 @@ def _iter_external_files(base: Path) -> List[Path]:
                 continue
             if fpath.name in _EXCLUDED_NAMES or fpath.name.endswith(_EXCLUDED_SUFFIXES):
                 continue
+            if _is_runtime_ipc_file(fpath):
+                continue
             files.append(fpath)
     return files
 
@@ -370,6 +372,17 @@ def _should_exclude(rel_path: Path) -> bool:
     return False
 
 
+def _is_runtime_ipc_file(path: Path) -> bool:
+    """Exclude sockets/pipes by file type; an ordinary *.sock is user data."""
+    try:
+        mode = path.lstat().st_mode
+    except OSError:
+        # Let the archive writer report unreadable/missing user files through
+        # its existing error path, rather than silently treating them as IPC.
+        return False
+    return stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode)
+
+
 def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Path) -> bool:
     """Return True when a candidate file should not be written to a backup zip."""
     if _should_exclude(rel_path):
@@ -378,6 +391,8 @@ def _should_skip_backup_file(abs_path: Path, rel_path: Path, out_path: Path) -> 
     # zipfile.write() follows file symlinks, so skip links before any archive
     # write can copy data from outside HERMES_HOME.
     if abs_path.is_symlink():
+        return True
+    if _is_runtime_ipc_file(abs_path):
         return True
 
     try:
@@ -2543,15 +2558,19 @@ def _write_full_zip_backup_locked(out_path: Path, hermes_root: Path) -> Optional
                     else:
                         zf.write(abs_path, arcname=str(rel_path))
                 except (PermissionError, OSError, ValueError) as exc:
-                    logger.debug("Skipping %s in zip backup: %s", rel_path, exc)
-                    continue
+                    # Automatic snapshots must not advertise incomplete user
+                    # data as a successful rollback point. Runtime IPC was
+                    # filtered above; real read errors abort atomic publication
+                    # and leave any previous verified archive in place.
+                    logger.warning("Full-zip backup aborted at %s: %s", rel_path, exc)
+                    raise
                 if index % 500 == 0:
                     logger.info(
                         "automatic backup phase=archive status=progress completed=%d total=%d",
                         index,
                         len(files_to_add),
                     )
-    except (OSError, _SQLiteSnapshotError) as exc:
+    except (OSError, ValueError, _SQLiteSnapshotError) as exc:
         logger.warning("Full-zip backup: zip write failed: %s", exc)
         # ``_atomic_output_path`` already removed the hidden partial.  Do not
         # unlink ``out_path`` here: it may be a previous valid backup that the
