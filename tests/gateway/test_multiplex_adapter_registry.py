@@ -612,10 +612,11 @@ class TestSecondaryProfileConfigHandling:
         assert "8789" not in writes[0][1]["error_message"]
 
     @pytest.mark.asyncio
-    async def test_multiplexer_skips_bad_profile_and_continues(self, monkeypatch, caplog):
-        from pathlib import Path
+    async def test_multiplexer_skips_bad_profile_and_continues(self, monkeypatch, caplog, tmp_path):
         from gateway.config import GatewayConfig
 
+        for name in ("default", "bad", "good", "unsafe"):
+            (tmp_path / name).mkdir()
         runner = GatewayRunner.__new__(GatewayRunner)
         runner.config = GatewayConfig(
             multiplex_profiles=True,
@@ -641,9 +642,9 @@ class TestSecondaryProfileConfigHandling:
             assert multiplex is True
             assert profile_allowlist == ["bad", "good"]
             return [
-                ("default", Path("/tmp/default")),
-                ("bad", Path("/tmp/bad")),
-                ("good", Path("/tmp/good")),
+                ("default", tmp_path / "default"),
+                ("bad", tmp_path / "bad"),
+                ("good", tmp_path / "good"),
             ]
 
         monkeypatch.setattr(
@@ -671,11 +672,12 @@ class TestSecondaryProfileConfigHandling:
         assert "Skipping secondary profile 'bad'" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_multiplexer_propagates_security_config_error(self, monkeypatch):
-        from pathlib import Path
+    async def test_multiplexer_propagates_security_config_error(self, monkeypatch, tmp_path):
         from gateway.config import GatewayConfig
         from gateway.run import MultiplexConfigError
 
+        for name in ("default", "bad", "good", "unsafe"):
+            (tmp_path / name).mkdir()
         runner = GatewayRunner.__new__(GatewayRunner)
         runner.config = GatewayConfig(multiplex_profiles=True)
         runner.adapters = {}
@@ -689,8 +691,8 @@ class TestSecondaryProfileConfigHandling:
         monkeypatch.setattr(
             "korra_cli.profiles.profiles_to_serve",
             lambda multiplex, profile_allowlist=None: [
-                ("default", Path("/tmp/default")),
-                ("unsafe", Path("/tmp/unsafe")),
+                ("default", tmp_path / "default"),
+                ("unsafe", tmp_path / "unsafe"),
             ],
         )
         monkeypatch.setattr(

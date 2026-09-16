@@ -302,11 +302,17 @@ def _start_desktop_cron_ticker(stop_event: "threading.Event", interval: int = 60
     start_kwargs: dict = {"interval": interval}
     if isinstance(provider, InProcessCronScheduler):
         try:
-            from korra_cli.profiles import profiles_to_serve
+            from korra_cli.profiles import profiles_to_serve, profile_creation_lock
 
-            profile_homes = list(profiles_to_serve(multiplex=True))
+            def published_profiles():
+                with profile_creation_lock():
+                    return list(profiles_to_serve(multiplex=True))
+
+            profile_homes = published_profiles()
+            # Even a default-only installation may add its first named agent
+            # while this backend is running.
+            start_kwargs["profile_homes"] = published_profiles
             if len(profile_homes) > 1:
-                start_kwargs["profile_homes"] = profile_homes
                 from korra_logging import enable_profile_log_routing
 
                 enable_profile_log_routing(profile_homes)

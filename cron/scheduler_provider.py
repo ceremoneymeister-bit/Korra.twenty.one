@@ -65,27 +65,20 @@ def _note_tick_failure(exc: BaseException, consecutive_failures: int) -> int:
     return 0
 
 
-def _existing_profile_homes(profile_homes: list) -> list:
-    """Drop profile homes whose directory no longer exists on disk.
+def _existing_profile_homes(profile_homes) -> list:
+    """Resolve a live profile supplier or filter a legacy static snapshot.
 
-    The multiplex ticker's ``profile_homes`` is a snapshot taken at startup
-    (``web_server.py`` calls ``profiles_to_serve(multiplex=True)`` once, and
-    the gateway multiplex path does the same). If a profile is deleted while
-    the ticker runs — via ``hermes profile delete``, the desktop's DELETE
-    ``/api/profiles/<name>`` route, or any other path that removes the home
-    directory — that stale entry stays in the list.
-
-    Ticking or heartbeating a deleted home recreates its ``cron/`` workspace
-    (``record_ticker_heartbeat`` -> ``ensure_dirs`` -> ``mkdir(parents=True)``)
-    on every 60s cycle, so the "deleted" profile silently comes back on disk
-    and in ``hermes profile list`` (#47368). Filtering on directory existence
-    leaves a deleted profile's home untouched, which is the correct invariant:
-    a home that does not exist cannot hold jobs to fire.
+    Never heartbeat/tick a deleted home: those operations create cron/ and
+    could resurrect a removed profile. A supplier discovers newly published
+    profiles on the next cycle without restarting the scheduler (K21-101).
     """
+    from korra_cli.profiles import named_profile_is_deleted
+
+    entries = profile_homes() if callable(profile_homes) else profile_homes
     live = []
-    for entry in profile_homes:
+    for entry in entries:
         home = entry[1] if isinstance(entry, tuple) else entry
-        if Path(home).is_dir():
+        if Path(home).is_dir() and not named_profile_is_deleted(Path(home)):
             live.append(entry)
     return live
 
@@ -691,42 +684,46 @@ class InProcessCronScheduler(CronScheduler):
         from korra_constants import set_hermes_home_override, reset_hermes_home_override
 
         logger = logging.getLogger("cron.scheduler_provider")
-        logger.info(
-            "Multiplex cron scheduler started for %d profile(s): %s",
-            len(profile_homes),
-            [p[0] if isinstance(p, tuple) else p for p in profile_homes],
-        )
-
-        # Recovery + initial heartbeat for every profile.
-        # A profile may have been deleted since this snapshot was taken;
-        # never recreate a deleted home's cron workspace via the heartbeat
-        # below (#47368).
-        for entry in _existing_profile_homes(profile_homes):
-            home = entry[1] if isinstance(entry, tuple) else entry
-            home_token = set_hermes_home_override(str(home))
-            try:
-                with use_cron_store(home):
-                    recovered = self.recover_interrupted()
-                    if recovered:
-                        logger.warning(
-                            "Marked %d interrupted cron execution(s) for profile at %s",
-                            recovered,
-                            home,
-                        )
-                    record_ticker_heartbeat()
-            finally:
-                reset_hermes_home_override(home_token)
+        logger.info("Multiplex cron scheduler started (live profiles=%s)", callable(profile_homes))
+        initialized = set()
 
         consecutive_failures = 0
         while not stop_event.is_set():
             ok = False
             _tick_error = None
             _profile_errors: dict[str, str] = {}
+            cycle_homes = []
             try:
+                cycle_homes = _existing_profile_homes(profile_homes)
+                current_identities = set()
+                for entry in cycle_homes:
+                    home = entry[1] if isinstance(entry, tuple) else entry
+                    try:
+                        stat = Path(home).stat()
+                    except FileNotFoundError:
+                        continue
+                    identity = (str(home), stat.st_dev, stat.st_ino)
+                    current_identities.add(identity)
+                    if identity in initialized:
+                        continue
+                    home_token = set_hermes_home_override(str(home))
+                    try:
+                        with use_cron_store(home):
+                            recovered = self.recover_interrupted()
+                            if recovered:
+                                logger.warning(
+                                    "Marked %d interrupted cron execution(s) for profile at %s",
+                                    recovered, home,
+                                )
+                            record_ticker_heartbeat()
+                        initialized.add(identity)
+                    finally:
+                        reset_hermes_home_override(home_token)
+                initialized.intersection_update(current_identities)
                 if can_dispatch is not None and not can_dispatch():
                     logger.debug("Cron dispatch paused while gateway drains existing work")
                 else:
-                    for entry in _existing_profile_homes(profile_homes):
+                    for entry in _existing_profile_homes(cycle_homes):
                         _pname = entry[0] if isinstance(entry, tuple) else None
                         home = entry[1] if isinstance(entry, tuple) else entry
                         home_token = set_hermes_home_override(str(home))
@@ -774,7 +771,7 @@ class InProcessCronScheduler(CronScheduler):
             # beat reflects its own outcome, so a yielding profile does not
             # darken healthy siblings — from an aborted one (exception), where
             # no profile completed and all beats are unsuccessful (#32612).
-            for entry in _existing_profile_homes(profile_homes):
+            for entry in _existing_profile_homes(cycle_homes):
                 home = entry[1] if isinstance(entry, tuple) else entry
                 home_token = set_hermes_home_override(str(home))
                 try:

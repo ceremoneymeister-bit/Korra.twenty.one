@@ -14315,6 +14315,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # _ensure_reconnect_watcher_running never mistakes a superseded handle
         # for a dead watcher and spawns a duplicate.
         self._spawn_reconnect_watcher()
+        if self.config.multiplex_profiles:
+            self._spawn_supervised(
+                self._profile_membership_watcher,
+                "profile_membership_watcher",
+                on_spawn=lambda task: setattr(self, "_profile_watcher_task", task),
+            )
 
         # Start background handoff watcher — picks up CLI sessions marked
         # handoff_state='pending' in state.db and re-binds them to the
@@ -16050,6 +16056,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if callable(stop_watchdog):
                 await stop_watchdog()
 
+            from gateway.profile_lifecycle import stop_profile_watcher
+
+            await stop_profile_watcher(self)
             await self._cancel_secondary_profile_reconnect_tasks()
 
             # Notify all chats with active agents BEFORE draining.
@@ -16515,104 +16524,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         await self._shutdown_event.wait()
 
     async def _start_secondary_profile_adapters(self) -> int:
-        """Bring up adapters for every non-active profile this gateway serves.
+        """Reconcile live multiplex membership (also called during startup)."""
+        from gateway.profile_lifecycle import reconcile_profiles
 
-        Returns the number of secondary adapters that connected. No-op (returns
-        0) unless ``gateway.multiplex_profiles`` is on.
+        return await reconcile_profiles(self)
 
-        Each profile's adapters are created and connected under that profile's
-        HERMES_HOME + secret scope (``_profile_runtime_scope``), stored in
-        ``self._profile_adapters[profile]``, and given a message handler that
-        stamps ``source.profile`` before delegating to the shared
-        ``_handle_message`` — so the agent turn resolves that profile's config,
-        skills, and credentials. Same-platform credential collisions (two
-        profiles polling the same bot token) are detected and refused here, the
-        only point that sees every profile's resolved credentials together.
-        """
-        if not getattr(self.config, "multiplex_profiles", False):
-            return 0
+    async def _profile_membership_watcher(self) -> None:
+        from gateway.profile_lifecycle import watch_profiles
 
-        try:
-            from korra_cli.profiles import get_active_profile_name
-        except Exception:
-            return 0
-
-        active = get_active_profile_name() or "default"
-        connected = 0
-        # Resource claim -> profile that owns it. Credential claims prevent two
-        # profiles polling the same account; listener claims prevent sidecars
-        # with distinct credentials from binding the same endpoint.
-        claimed: Dict[tuple, str] = {}
-        for _plat, _ad in self.adapters.items():
-            fp = self._adapter_credential_fingerprint(_ad)
-            if fp is not None:
-                claimed[(_plat, fp)] = active
-            listener_claim = self._adapter_listener_claim(_plat, _ad)
-            if listener_claim is not None:
-                claimed[listener_claim] = active
-        # A retryable primary still owns its configured credential and listener.
-        # Reserve both while it is queued so a secondary cannot take the endpoint
-        # before the reconnect watcher retries the primary adapter.
-        for retry_info in getattr(self, "_failed_platforms", {}).values():
-            for claim_name in ("credential_claim", "listener_claim"):
-                retry_claim = retry_info.get(claim_name)
-                if isinstance(retry_claim, tuple):
-                    claimed[retry_claim] = active
-
-        profile_homes = _multiplex_profile_homes(self.config)
-        for profile_name, profile_home in profile_homes:
-            if profile_name == active:
-                continue  # handled by the primary startup loop
-            try:
-                connected += await self._start_one_profile_adapters(
-                    profile_name, profile_home, claimed
-                )
-            except SecondaryPortBindingConfigError as e:
-                logger.warning(
-                    "Skipping secondary profile '%s' due to port-binding config error: %s",
-                    profile_name,
-                    e,
-                )
-            except MultiplexConfigError:
-                raise
-            except Exception as e:
-                logger.error(
-                    "Failed to start adapters for profile '%s': %s",
-                    profile_name, e, exc_info=True,
-                )
-
-        # Record the authoritative served set in runtime status for `hermes status`.
-        # "Served" means eligible for shared routing, HTTP prefixes, cron, and
-        # profile runtime scope; it is intentionally broader than profiles with a
-        # successfully connected secondary adapter (or any adapter configured).
-        try:
-            from gateway.status import write_runtime_status
-            from gateway.pairing import PairingStore
-            served = [active] + sorted(
-                name for name, _home in profile_homes if name != active
-            )
-            # Per-profile PairingStores so authz_mixin can route pairing
-            # checks to the right whitelist. The active profile gets a store
-            # at its HERMES_HOME; additional served profiles resolve from
-            # their own profile homes. See gateway.pairing.PairingStore.
-            for name in served:
-                if name and name not in self.pairing_stores:
-                    self.pairing_stores[name] = (
-                        self.pairing_store
-                        if name == active
-                        else PairingStore(profile=name)
-                    )
-            write_runtime_status(served_profiles=served)
-        except Exception:
-            logger.debug("could not record served_profiles", exc_info=True)
-
-        return connected
+        await watch_profiles(self)
 
     async def _start_one_profile_adapters(
         self, profile_name: str, profile_home: "Path", claimed: Dict[tuple, str]
     ) -> int:
         """Create+connect one profile's adapters under its runtime scope."""
         from gateway.config import load_gateway_config
+        from gateway.profile_lifecycle import (
+            adapter_claims, profile_generation, profile_is_current,
+            release_connecting_adapter, reserve_connecting_adapter,
+        )
+
+        generation = profile_generation(self, profile_name)
 
         with _profile_runtime_scope(profile_home):
             profile_runtime_cfg = _load_gateway_runtime_config()
@@ -16650,6 +16582,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         profile_map = self._profile_adapters.setdefault(profile_name, {})
         connected = 0
         for platform, platform_config in profile_cfg.platforms.items():
+            if not profile_is_current(self, profile_name, generation):
+                return connected
             if not platform_config.enabled:
                 continue
             # Relay is shared process-level ingress in multiplex mode. The
@@ -16680,6 +16614,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 )
                 continue
 
+            # A reconnect may have acquired a resource during the previous await.
+            claimed.update(adapter_claims(self))
             # Same-token conflict detection — refuse a duplicate poll.
             credential_claim = self._adapter_credential_claim(platform, adapter)
             if credential_claim is not None:
@@ -16743,12 +16679,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     continue
 
             self._configure_profile_adapter(adapter, profile_name, platform)
+            reserve_connecting_adapter(self, profile_name, platform, adapter)
 
             try:
                 with _profile_runtime_scope(profile_home):
                     success = await self._connect_initial_adapter_with_timeout(
                         adapter, platform
                     )
+                if not profile_is_current(self, profile_name, generation):
+                    await self._safe_adapter_disconnect(adapter, platform)
+                    return connected
                 if success:
                     profile_map[platform] = adapter
                     if credential_claim is not None:
@@ -16763,12 +16703,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     self._schedule_secondary_profile_startup_reconnect(
                         profile_name, platform, adapter
                     )
+            except asyncio.CancelledError:
+                await self._safe_adapter_disconnect(adapter, platform)
+                raise
             except Exception as e:
                 logger.error("✗ %s error (profile: %s): %s", platform.value, profile_name, e)
                 await self._safe_adapter_disconnect(adapter, platform)
                 self._schedule_secondary_profile_startup_reconnect(
                     profile_name, platform, adapter
                 )
+            finally:
+                release_connecting_adapter(self, profile_name, platform, adapter)
         return connected
 
     def _configure_profile_adapter(
@@ -16778,6 +16723,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         platform: Platform,
     ) -> None:
         """Install the profile-scoped handlers shared by startup and reconnect."""
+        from gateway.profile_lifecycle import profile_generation
+
+        adapter._korra_profile_generation = profile_generation(self, profile_name)
         # Runtime status is process-scoped even while message/config work is
         # profile-scoped.  Preserve both dimensions in the key so dashboard
         # and NAS health aggregation can see which secondary profile failed.
@@ -16820,10 +16768,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         self, profile_name: str, platform: Platform
     ) -> None:
         """Reconnect a retryable secondary adapter under its own profile scope."""
+        from gateway.profile_lifecycle import (
+            adapter_claims, profile_generation, profile_is_current,
+            release_connecting_adapter, reserve_connecting_adapter,
+        )
+
+        generation = profile_generation(self, profile_name)
         attempts = 0
         current_task = asyncio.current_task()
         try:
-            while self._running:
+            while self._running and profile_is_current(self, profile_name, generation):
                 adapter = None
                 try:
                     from korra_cli.profiles import get_profile_dir
@@ -16842,14 +16796,32 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                                 profile_name,
                             )
                             return
+                        # A later live profile may now own the bot/listener
+                        # released by this adapter's failed initial connection.
+                        claimed = adapter_claims(self)
+                        for kind, claim in (
+                            ("credential", self._adapter_credential_claim(platform, adapter)),
+                            ("listener", self._adapter_listener_claim(platform, adapter)),
+                        ):
+                            if claim is not None and claim in claimed:
+                                self._update_platform_runtime_status(
+                                    f"{profile_name}:{platform.value}",
+                                    platform_state="fatal",
+                                    error_code=f"duplicate_{kind}",
+                                    error_message=f"Resource already owned by profile '{claimed[claim]}'",
+                                )
+                                # Never disconnect an unconnected duplicate: it
+                                # may shut down a shared sidecar owned elsewhere.
+                                return
                         self._configure_profile_adapter(
                             adapter, profile_name, platform
                         )
+                        reserve_connecting_adapter(self, profile_name, platform, adapter)
                         success = await self._connect_adapter_with_timeout(
                             adapter, platform, is_reconnect=True
                         )
 
-                    if success and self._running:
+                    if success and self._running and profile_is_current(self, profile_name, generation):
                         profile_map = self._profile_adapters.setdefault(profile_name, {})
                         if platform not in profile_map:
                             profile_map[platform] = adapter
@@ -16894,8 +16866,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         profile_name,
                         exc_info=True,
                     )
+                finally:
+                    if adapter is not None:
+                        release_connecting_adapter(self, profile_name, platform, adapter)
 
-                if not self._running:
+                if not self._running or not profile_is_current(self, profile_name, generation):
                     return
                 attempts += 1
                 backoff = _reconnect_backoff(attempts)
@@ -16936,8 +16911,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """
         if not getattr(adapter, "fatal_error_retryable", True):
             return
+        from gateway.profile_lifecycle import profile_is_current
+
+        generation = getattr(adapter, "_korra_profile_generation", None)
 
         async def _await_running_then_schedule() -> None:
+            if not profile_is_current(self, profile_name, generation):
+                return
             if self._running:
                 try:
                     self._schedule_secondary_profile_reconnect(
@@ -16991,6 +16971,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     ) -> None:
         """Schedule one runner-owned reconnect without sharing primary secrets."""
         if not self._running or not adapter.fatal_error_retryable:
+            return
+        from gateway.profile_lifecycle import profile_is_current
+
+        if not profile_is_current(self, profile_name, getattr(adapter, "_korra_profile_generation", None)):
             return
         pending = self._profile_failed_platforms
         if not isinstance(pending, dict):
@@ -17070,7 +17054,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             profile_home = None
 
+        from gateway.profile_lifecycle import profile_generation, profile_is_current
+
+        generation = profile_generation(self, profile_name)
+
         async def _handler(event):
+            if not profile_is_current(self, profile_name, generation):
+                return None
             try:
                 if getattr(event, "source", None) is not None and not event.source.profile:
                     event.source.profile = profile_name
@@ -17085,7 +17075,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
     def _make_profile_busy_session_handler(self, profile_name: str):
         """Stamp an owning adapter's profile before resolving busy policy."""
+        from gateway.profile_lifecycle import profile_generation, profile_is_current
+
+        generation = profile_generation(self, profile_name)
+
         async def _handler(event, _session_key):
+            if not profile_is_current(self, profile_name, generation):
+                return None
             try:
                 if getattr(event, "source", None) is not None and not event.source.profile:
                     event.source.profile = profile_name
@@ -17175,7 +17171,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             profile_home = None
 
+        from gateway.profile_lifecycle import profile_generation, profile_is_current
+
+        generation = profile_generation(self, profile_name)
+
         async def _handler(event, source):
+            if not profile_is_current(self, profile_name, generation):
+                return None
             if getattr(source, "profile", None) is None:
                 source.profile = profile_name
             if profile_home is not None:
@@ -33105,7 +33107,9 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
         try:
             profile_homes = _multiplex_profile_homes(runner.config)
             if profile_homes:
-                cron_start_kwargs["profile_homes"] = profile_homes
+                from gateway.profile_lifecycle import profile_homes_snapshot
+
+                cron_start_kwargs["profile_homes"] = lambda: profile_homes_snapshot(runner.config)
                 # Per-profile adapters so each profile's cron output is
                 # delivered via its own bot/adapter instead of the default
                 # profile's.

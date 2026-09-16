@@ -1226,6 +1226,13 @@ def write_runtime_status(
         # for a single-profile gateway. Lets `hermes status` show per-profile
         # coverage without a second probe.
         payload["served_profiles"] = list(served_profiles or [])
+        # A hot-removed profile must not keep the whole gateway degraded via
+        # its old fatal adapter entry. Keep primary and still-served health.
+        served = set(payload["served_profiles"])
+        payload["platforms"] = {
+            key: value for key, value in payload["platforms"].items()
+            if ":" not in key or key.split(":", 1)[0] in served
+        }
     if session_store is not _UNSET:
         state = "unknown"
         if isinstance(session_store, dict):
