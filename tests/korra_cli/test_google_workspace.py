@@ -647,7 +647,8 @@ def test_client_launcher_uses_exact_read_only_google_app_mount():
     assert "dst=/run/korra-secrets/google-oauth-client.json,readonly" in launcher
     assert "KORRA_GOOGLE_OAUTH_CLIENT_PATH=/run/korra-secrets/google-oauth-client.json" in launcher
     assert 'if [ "$AGENT_SUDO" != 0 ]' in launcher
-    assert "agent holds no host-root grant" in launcher
+    assert 'if [ "$GOOGLE_OAUTH_KIND" != installed ]' in launcher
+    assert "S256" in launcher
 
 
 def test_public_runtime_api_has_no_oauth_app_root_override():

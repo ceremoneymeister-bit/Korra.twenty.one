@@ -1,6 +1,7 @@
 """Operator CLI contract with synthetic homes and no live host mutations."""
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -576,6 +577,66 @@ def test_launcher_ignores_a_google_credential_path_override(tmp_path):
     assert result.returncode == 0, result.stderr
     assert str(outside) not in result.stdout
     assert "google-oauth-client.json" not in result.stdout
+
+
+def _write_launcher_google_app(home, kind):
+    directory = home / "google"
+    directory.mkdir()
+    path = directory / "oauth_client.json"
+    path.write_text(json.dumps({kind: {"client_id": "id", "client_secret": "secret"}}) + "\n")
+    os.chown(directory, 0, 10000)
+    directory.chmod(0o750)
+    os.chown(path, 0, 10000)
+    path.chmod(0o640)
+
+
+def _launcher_google_mount(stdout):
+    command = shlex.split(stdout.splitlines()[-1])
+    return command[command.index("--mount") + 1]
+
+
+def test_launcher_allows_installed_google_client_with_admin(tmp_path):
+    """Installed clients are public clients; admin mode keeps the exact RO mount."""
+    if os.geteuid() != 0:
+        pytest.skip("OAuth app ownership contract requires root")
+    home, _ = launcher(tmp_path)
+    _write_launcher_google_app(home, "installed")
+
+    _, result = launcher(tmp_path, AGENT_SUDO="1")
+
+    assert result.returncode == 0, result.stderr
+    assert _launcher_google_mount(result.stdout).endswith(
+        ",dst=/run/korra-secrets/google-oauth-client.json,readonly"
+    )
+    assert "KORRA_AGENT_SUDO=1" in result.stdout
+
+
+def test_launcher_rejects_web_google_client_with_admin(tmp_path):
+    """A confidential Web client must not enter an agent-held host-root contour."""
+    if os.geteuid() != 0:
+        pytest.skip("OAuth app ownership contract requires root")
+    home, _ = launcher(tmp_path)
+    _write_launcher_google_app(home, "web")
+
+    _, result = launcher(tmp_path, AGENT_SUDO="1")
+
+    assert result.returncode == 2
+    assert "accepts only a Desktop/Installed client" in result.stderr
+
+
+def test_launcher_keeps_web_google_client_available_without_admin(tmp_path):
+    if os.geteuid() != 0:
+        pytest.skip("OAuth app ownership contract requires root")
+    home, _ = launcher(tmp_path)
+    _write_launcher_google_app(home, "web")
+
+    _, result = launcher(tmp_path, AGENT_SUDO="0")
+
+    assert result.returncode == 0, result.stderr
+    assert _launcher_google_mount(result.stdout).endswith(
+        ",dst=/run/korra-secrets/google-oauth-client.json,readonly"
+    )
+    assert "KORRA_AGENT_SUDO=0" in result.stdout
 
 
 def test_wrong_image_arch_never_launches_native_container(host):

@@ -99,10 +99,6 @@ GOOGLE_OAUTH_ARGS=()
 # -L рядом с -e намеренно: оборванный symlink для -e не существует, и контур
 # поднимался бы без операторского клиента, ни слова об этом не сказав.
 if [ -e "$GOOGLE_OAUTH_CLIENT" ] || [ -L "$GOOGLE_OAUTH_CLIENT" ]; then
-    if [ "$AGENT_SUDO" != 0 ]; then
-        echo "Google OAuth requires the client --no-admin contour (AGENT_SUDO=0) so the agent holds no host-root grant." >&2
-        exit 2
-    fi
     if [ -L "$GOOGLE_OAUTH_CLIENT" ] || [ ! -f "$GOOGLE_OAUTH_CLIENT" ]; then
         echo "Google OAuth credential must be a regular, non-symlink file: $GOOGLE_OAUTH_CLIENT" >&2
         exit 2
@@ -111,6 +107,34 @@ if [ -e "$GOOGLE_OAUTH_CLIENT" ] || [ -L "$GOOGLE_OAUTH_CLIENT" ]; then
     if [ "$GOOGLE_OWNER_MODE" != "0:$ENGINE_GID:640" ]; then
         echo "Google OAuth credential must be root:$ENGINE_GID mode 0640; got $GOOGLE_OWNER_MODE" >&2
         exit 2
+    fi
+    if [ "$AGENT_SUDO" != 0 ]; then
+        # Google treats Desktop/Installed OAuth clients as public clients: they
+        # cannot keep client_secret confidential.  This flow also uses S256
+        # PKCE and state.  A Web client is confidential, so it remains barred
+        # from a contour whose agent holds the explicit host-root grant.
+        GOOGLE_OAUTH_KIND=$(python3 - "$GOOGLE_OAUTH_CLIENT" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as source:
+        payload = json.load(source)
+except (OSError, ValueError):
+    raise SystemExit(1)
+roots = [name for name in ("installed", "web") if isinstance(payload.get(name), dict)]
+if len(roots) != 1:
+    raise SystemExit(1)
+print(roots[0])
+PY
+        ) || {
+            echo "Google OAuth credential must contain exactly one installed or web client." >&2
+            exit 2
+        }
+        if [ "$GOOGLE_OAUTH_KIND" != installed ]; then
+            echo "Google Web OAuth credentials require a --no-admin contour; AGENT_SUDO!=0 accepts only a Desktop/Installed client." >&2
+            exit 2
+        fi
     fi
     GOOGLE_OAUTH_ARGS=(
         --mount "type=bind,src=$GOOGLE_OAUTH_CLIENT,dst=/run/korra-secrets/google-oauth-client.json,readonly"
