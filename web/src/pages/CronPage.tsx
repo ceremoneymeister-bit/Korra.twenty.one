@@ -427,6 +427,7 @@ function CronJobFormFields({
       </div>
 
       <ScheduleBuilder
+        ownerMode={ownerMode}
         value={form.scheduleState}
         onChange={(state) => update("scheduleState", state)}
       />
@@ -442,7 +443,9 @@ function CronJobFormFields({
         </Select>
         {onlyLocalAvailable && (
           <p className="text-xs text-muted-foreground">
-            {t.cron.delivery.noneConfigured ??
+            {ownerMode
+              ? "Результат сохранится в Korra. Чтобы получать его в мессенджере, подключите канал в настройках агента."
+              : t.cron.delivery.noneConfigured ??
               tr("No messaging platforms configured. Set one up under Channels to deliver reports.")}
           </p>
         )}
@@ -982,9 +985,9 @@ export default function CronPage() {
       {clientMode && (
         <div className="space-y-1 text-sm text-muted-foreground">
           <p>
-            Добавляйте и меняйте задачи прямо здесь. Новая задача сразу встаёт в
-            расписание — приостановите её, если хотите сперва проверить
-            формулировку и время.
+            Поручите агенту регулярный отчёт, напоминание или разовую задачу.
+            После добавления он начнёт выполнять её по расписанию. Задачу можно
+            приостановить или изменить.
           </p>
           <p className="text-xs">Даты показаны по часовому поясу {ownerTimeZoneLabel()}.</p>
         </div>
@@ -1040,7 +1043,7 @@ export default function CronPage() {
           aria-modal="true"
           aria-labelledby="create-cron-title"
         >
-          <div className={cn(themedBody, "relative w-full max-w-3xl max-h-[90vh] border border-border bg-card shadow-2xl flex flex-col")}>
+          <div className={cn(themedBody, "relative w-full max-w-3xl max-h-[90vh] border border-border bg-card shadow-2xl flex flex-col", clientMode && "rounded-2xl")}>
             <Button
               ghost
               size="icon"
@@ -1054,7 +1057,7 @@ export default function CronPage() {
             <header className="p-5 pb-3 border-b border-border">
               <h2
                 id="create-cron-title"
-                className="font-mondwest text-display text-base tracking-wider"
+                className={clientMode ? "text-lg font-semibold tracking-normal" : "font-mondwest text-display text-base tracking-wider"}
               >
                 {clientMode ? "Новая задача" : t.cron.newJob}
               </h2>
@@ -1092,7 +1095,7 @@ export default function CronPage() {
 
               <div className="flex justify-end">
                 <Button
-                  className="uppercase"
+                  className={clientMode ? undefined : "uppercase"}
                   size="sm"
                   onClick={handleCreate}
                   disabled={creating}
@@ -1120,7 +1123,7 @@ export default function CronPage() {
           aria-modal="true"
           aria-labelledby="edit-cron-title"
         >
-          <div className={cn(themedBody, "relative w-full max-w-3xl max-h-[90vh] border border-border bg-card shadow-2xl flex flex-col")}>
+          <div className={cn(themedBody, "relative w-full max-w-3xl max-h-[90vh] border border-border bg-card shadow-2xl flex flex-col", clientMode && "rounded-2xl")}>
             <Button
               ghost
               size="icon"
@@ -1134,7 +1137,7 @@ export default function CronPage() {
             <header className="p-5 pb-3 border-b border-border">
               <h2
                 id="edit-cron-title"
-                className="font-mondwest text-display text-base tracking-wider"
+                className={clientMode ? "text-lg font-semibold tracking-normal" : "font-mondwest text-display text-base tracking-wider"}
               >
                 {clientMode ? "Изменить задачу" : tr("Edit job")}
               </h2>
@@ -1155,12 +1158,12 @@ export default function CronPage() {
                 }}
               />
 
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground font-mono-ui truncate pr-4">
+              <div className="flex items-center justify-end gap-3">
+                {!clientMode && <span className="mr-auto text-xs text-muted-foreground font-mono-ui truncate pr-4">
                   {editJob.id}
-                </span>
+                </span>}
                 <Button
-                  className="uppercase"
+                  className={clientMode ? undefined : "uppercase"}
                   size="sm"
                   onClick={handleEdit}
                   disabled={saving}
@@ -1179,7 +1182,7 @@ export default function CronPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <H2
             variant="sm"
-            className="flex items-center gap-2 text-muted-foreground"
+            className={cn("flex items-center gap-2", clientMode ? "text-base font-semibold tracking-normal text-foreground" : "text-muted-foreground")}
           >
             <Clock className="h-4 w-4" />
             {t.cron.scheduledJobs} ({jobs.length})
@@ -1223,8 +1226,8 @@ export default function CronPage() {
 
           return (
             <Card key={jobKey}>
-              <CardContent className="flex items-start gap-4 py-4">
-                <div className="flex-1 min-w-0">
+              <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:gap-4">
+                <div className="w-full flex-1 min-w-0 sm:w-auto">
                   <div className="mb-1 flex flex-wrap items-center gap-2">
                     <span className="font-medium text-sm truncate">
                       {title}
@@ -1308,7 +1311,7 @@ export default function CronPage() {
                   )}
                 </div>
 
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1 shrink-0 self-end sm:self-start">
                   <Button
                     ghost
                     size="icon"

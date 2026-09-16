@@ -132,7 +132,7 @@ function actionButton(label: string, scope: ParentNode = container) {
 
 function findButton(text: string, scope: ParentNode = container) {
   return Array.from(scope.querySelectorAll("button")).find((button) =>
-    button.textContent?.includes(text),
+    button.textContent?.trim() === text,
   );
 }
 

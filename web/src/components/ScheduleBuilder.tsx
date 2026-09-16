@@ -36,7 +36,7 @@ import {
  *    power-user workflows discoverable without making everyone scroll
  *    past it.
  */
-export function ScheduleBuilder({ onChange, value }: ScheduleBuilderProps) {
+export function ScheduleBuilder({ onChange, value, ownerMode = false }: ScheduleBuilderProps) {
   const { t, tr } = useI18n();
   const cronStrings = t.cron;
   const modeStrings = cronStrings.scheduleModes;
@@ -145,7 +145,7 @@ export function ScheduleBuilder({ onChange, value }: ScheduleBuilderProps) {
                     outlined={!isOn}
                     aria-pressed={isOn}
                     onClick={() => toggleWeekday(d)}
-                    className="min-w-[2.5rem] font-mono-ui text-xs uppercase"
+                    className={ownerMode ? "min-w-[2.5rem] text-sm" : "min-w-[2.5rem] font-mono-ui text-xs uppercase"}
                   >
                     {modeStrings.weekdaysShort[d]}
                   </Button>
@@ -224,12 +224,12 @@ export function ScheduleBuilder({ onChange, value }: ScheduleBuilderProps) {
       {/* Inline preview of what we'll send to the backend. Helps users
           eyeball the result before hitting Create, and keeps the
           schedule grammar discoverable for the custom mode. */}
-      <p className="text-xs text-muted-foreground">
+      {(!ownerMode || value.mode === "custom") && <p className="text-xs text-muted-foreground">
         <span className="opacity-70">{modeStrings.preview}: </span>
         <span className="font-mono-ui text-foreground">
           {buildScheduleString(value) || modeStrings.previewEmpty}
         </span>
-      </p>
+      </p>}
     </div>
   );
 }
@@ -261,6 +261,7 @@ function TimeOfDayField({
 export { DEFAULT_SCHEDULE_STATE };
 
 interface ScheduleBuilderProps {
+  ownerMode?: boolean;
   onChange: (state: ScheduleBuilderState) => void;
   value: ScheduleBuilderState;
 }
