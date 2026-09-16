@@ -14,6 +14,7 @@ the profile grant is still declared, the operator app file deliberately is not
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -83,5 +84,69 @@ class TestGoogleWorkspaceCredentialFiles:
             mounts = get_credential_file_mounts()
             container_paths = {m["container_path"] for m in mounts}
             assert "/root/.hermes/google-workspace/token.json" in container_paths
+        finally:
+            clear_credential_files()
+
+    def test_shared_grant_is_mounted_for_consumer_without_token_copy(
+        self, tmp_path, monkeypatch
+    ):
+        root = tmp_path / "install"
+        source = root / "profiles" / "assistant"
+        consumer = root / "profiles" / "rop"
+        source_token = source / "google-workspace" / "token.json"
+        source_token.parent.mkdir(parents=True)
+        consumer.mkdir(parents=True)
+        source_token.write_text('{"refresh_token":"secret"}', encoding="utf-8")
+        policy = root / "google-workspace" / "shared-access.json"
+        policy.parent.mkdir(parents=True)
+        policy.write_text(
+            json.dumps({"version": 1, "profile_sources": {"rop": "assistant"}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("HERMES_HOME", str(consumer))
+
+        from tools.credential_files import (
+            clear_credential_files,
+            get_credential_file_mounts,
+            register_credential_files,
+        )
+
+        clear_credential_files()
+        try:
+            content = SKILL_MD.read_text(encoding="utf-8")
+            entries = _parse_frontmatter(content).get("required_credential_files", [])
+            missing = register_credential_files(entries)
+            mounts = get_credential_file_mounts()
+
+            assert missing == []
+            assert mounts == [{
+                "host_path": str(source_token),
+                "container_path": "/root/.hermes/google-workspace/token.json",
+            }]
+            assert not (consumer / "google-workspace" / "token.json").exists()
+        finally:
+            clear_credential_files()
+
+    def test_invalid_shared_policy_fails_closed(self, tmp_path, monkeypatch):
+        root = tmp_path / "install"
+        consumer = root / "profiles" / "rop"
+        consumer.mkdir(parents=True)
+        policy = root / "google-workspace" / "shared-access.json"
+        policy.parent.mkdir(parents=True)
+        policy.write_text('{"version":1,"profile_sources":{"rop":"rop"}}', encoding="utf-8")
+        monkeypatch.setenv("HERMES_HOME", str(consumer))
+
+        from tools.credential_files import (
+            clear_credential_files,
+            get_credential_file_mounts,
+            register_credential_files,
+        )
+
+        clear_credential_files()
+        try:
+            content = SKILL_MD.read_text(encoding="utf-8")
+            entries = _parse_frontmatter(content).get("required_credential_files", [])
+            assert register_credential_files(entries) == ["google-workspace/token.json"]
+            assert get_credential_file_mounts() == []
         finally:
             clear_credential_files()

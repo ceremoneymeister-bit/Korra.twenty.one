@@ -6,10 +6,12 @@ author: Nous Research
 license: MIT
 platforms: [linux, macos, windows]
 # Remote terminal backends (Docker, Modal, SSH) start with no host files, so
-# the profile's own Google grant has to be passed through or every `gws` call
-# in a sandbox fails unauthenticated (#16452). Only the profile-local grant is
-# listed: the operator's OAuth app file lives outside HERMES_HOME on a
-# read-only host mount and is deliberately never handed to a sandbox.
+# the profile's effective Google grant has to be passed through or every
+# `gws` call in a sandbox fails unauthenticated (#16452). Korra resolves an
+# explicit shared grant to its one source token and mounts it at this expected
+# sandbox path; it does not create another persistent token. The operator's
+# OAuth app file lives outside HERMES_HOME on a read-only host mount and is
+# deliberately never handed to a sandbox.
 required_credential_files:
   - path: google-workspace/token.json
     description: Profile-local Google OAuth grant (created by google_workspace_auth)
@@ -62,13 +64,18 @@ The installed Desktop OAuth credential belongs to the installation operator.
 It is managed outside profile DATA, shared by profiles, and never added to the
 image or repository. The host file is `root:<runtime-group>` mode `0640` and is mounted
 at `/run/korra-secrets/google-oauth-client.json` as an exact read-only file
-mount: the runtime can read it and cannot install or replace it. Each profile
-has its own mutable grant at `$HERMES_HOME/google-workspace/token.json` (mode
-`0600`), outside the operator-owned installation directory.
+mount: the runtime can read it and cannot install or replace it. By default
+each profile has its own mutable grant at
+`$HERMES_HOME/google-workspace/token.json` (mode `0600`), outside the
+operator-owned installation directory. During a controlled migration, the
+installation owner may explicitly give named profiles access to one source
+profile's grant. Korra keeps one token, and profiles created later remain
+isolated until the owner names them too.
 
-Client rollout must use the no-admin host policy so the agent has no host-root
-grant capable of changing the bind-mount source. The launcher rejects the
-Google mount when the coupled client `AGENT_SUDO=1` mode is active.
+The launcher requires the OAuth app source to remain an operator-owned exact
+read-only file mount. This remains valid when the separately managed
+`AGENT_SUDO=1` compatibility mode is enabled: container root still cannot
+write through that mount or replace its host source.
 
 Unknown names, empty items, duplicates, and combining `all` with another name
 are rejected before an OAuth URL is created. `all` expands to the same six
