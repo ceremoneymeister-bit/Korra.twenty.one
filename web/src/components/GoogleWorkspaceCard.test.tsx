@@ -155,3 +155,27 @@ it("explains and detaches shared access without reporting a failed remote revoke
     "Общий доступ к Google отключён для выбранного агента.",
   );
 });
+
+it("shows only the proven services for a compatible legacy grant", async () => {
+  apiMocks.getGoogleWorkspaceStatus.mockResolvedValue({
+    app: { configured: true, credential_type: "installed" },
+    connection: {
+      state: "reauthorization_required",
+      reason: "legacy_untracked",
+      legacy_scope_count: 2,
+      usable_services: ["drive", "docs"],
+      legacy_compatible: true,
+    },
+    pending: { active: false },
+    available_services: ["email", "calendar", "drive", "contacts", "sheets", "docs"],
+    completion_mode: "manual_localhost_url",
+  });
+
+  await renderCard();
+
+  expect(host.textContent).toContain("2 разрешений");
+  expect(host.textContent).toContain("Google Drive");
+  expect(host.textContent).toContain("Google Docs");
+  expect(host.querySelector('input[type="checkbox"]')).toBeNull();
+  expect(host.textContent).not.toContain("Какие сервисы разрешить этому агенту");
+});
