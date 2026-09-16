@@ -36,6 +36,9 @@ def test_secondary_profile_pairing_stores_created(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     (tmp_path / ".hermes").mkdir()
+    # Live discovery deliberately skips homes deleted after enumeration;
+    # the served profile in this fixture must therefore exist on disk.
+    (tmp_path / ".hermes" / "profiles" / "coder").mkdir(parents=True)
 
     runner = _bare_runner()
 
@@ -65,6 +68,7 @@ def test_pairing_store_scoped_to_profile_dir(tmp_path, monkeypatch):
     """The created store must live under the profile's pairing directory."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     (tmp_path / ".hermes").mkdir()
+    (tmp_path / ".hermes" / "profiles" / "ops").mkdir(parents=True)
 
     runner = _bare_runner()
 
