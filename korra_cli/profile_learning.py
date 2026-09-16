@@ -220,3 +220,47 @@ def delete_material(name: str) -> dict:
     if not ok:
         raise ValueError("Не удалось убрать материал: " + message)
     return {"ok": True}
+
+
+def apply_initial_knowledge(home: Path, knowledge) -> None:
+    """Populate an unpublished profile; the caller rolls back its stage on failure."""
+    if knowledge is None:
+        return
+    import base64
+    import binascii
+    from korra_constants import set_hermes_home_override, reset_hermes_home_override
+    from korra_cli.config import load_config, save_config
+    from korra_cli.web_server import _profile_scope
+    from tools.memory_tool import get_builtin_memory_config
+
+    token = set_hermes_home_override(str(home))
+    try:
+        with _profile_scope(None):
+            cfg = load_config()
+            section = get_builtin_memory_config(cfg)
+            changed_limits = False
+            for key in ("memory_char_limit", "user_char_limit"):
+                value = getattr(knowledge, key)
+                if value is not None:
+                    section[key] = value
+                    changed_limits = True
+            if changed_limits:
+                cfg["memory"] = section
+                save_config(cfg)
+            current = read_memory()
+            for target in ("memory", "user"):
+                if current["used"][target] > current["limits"][target]:
+                    raise ValueError("Лимит меньше уже сохранённой памяти исходного агента.")
+                for content in getattr(knowledge, target):
+                    change_memory("add", target, content)
+            material = knowledge.material
+            if material is not None:
+                data = None
+                if material.data_base64 is not None:
+                    try:
+                        data = base64.b64decode(material.data_base64, validate=True)
+                    except (binascii.Error, ValueError):
+                        raise ValueError("Не удалось прочитать файл материала. Выберите его заново.") from None
+                create_material(material.title, material.text, material.url, material.filename, data)
+    finally:
+        reset_hermes_home_override(token)

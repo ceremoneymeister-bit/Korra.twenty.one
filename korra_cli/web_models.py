@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 # --- from web_server.py (originally lines 1273-1372) ---
@@ -614,11 +614,37 @@ class SkillsUpdateRequest(BaseModel):
 
 # --- from web_server.py (originally lines 15116-15166) ---
 
+class InitialProfileMaterial(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    text: str = Field(default="", max_length=90_000)
+    url: str = Field(default="", max_length=2048)
+    filename: str = Field(default="", max_length=255)
+    # JSON keeps creation atomic: no second upload after the profile is live.
+    data_base64: Optional[str] = Field(default=None, max_length=13_981_016)
+
+
+class InitialProfileKnowledge(BaseModel):
+    memory_char_limit: Optional[int] = Field(default=None, ge=100, le=50_000)
+    user_char_limit: Optional[int] = Field(default=None, ge=100, le=50_000)
+    memory: List[str] = Field(default_factory=list, max_length=64)
+    user: List[str] = Field(default_factory=list, max_length=64)
+    material: Optional[InitialProfileMaterial] = None
+
+    @field_validator("memory", "user")
+    @classmethod
+    def bounded_entries(cls, entries):
+        if sum(len(item) for item in entries) > 50_000:
+            raise ValueError("Начальная память слишком велика. Большие тексты добавьте в материалы.")
+        return entries
+
+
 class ProfileCreate(BaseModel):
     name: str
+    initial_knowledge: Optional[InitialProfileKnowledge] = None
     # First-party catalogue only; never a filesystem path or remote URL.
     template_id: Optional[str] = None
     template_version: Optional[str] = None
+    # Required for templates/initial knowledge; supported for ordinary creates.
     idempotency_key: Optional[str] = None
     display_name: Optional[str] = None
     # Exact SOUL.md text. None preserves the default/cloned persona.

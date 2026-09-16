@@ -814,12 +814,48 @@ async def create_profile_endpoint(body: ProfileCreate):
         except Exception:
             _log.exception("Creating template profile failed")
             raise HTTPException(status_code=500, detail="Не удалось добавить готового агента. Повторите запрос с теми же параметрами.")
-    if body.template_version is not None or body.idempotency_key is not None:
+    if body.template_version is not None:
         raise HTTPException(status_code=400, detail="Не выбран готовый агент.")
+    if body.idempotency_key is not None:
+        from korra_cli.profile_creation import ProfileCreateConflict
+        try:
+            return await run_in_threadpool(_create_custom_profile_once, body)
+        except ProfileCreateConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except (ValueError, TimeoutError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except HTTPException:
+            raise
+        except Exception:
+            _log.exception("Creating profile with initial knowledge failed")
+            raise HTTPException(status_code=500, detail="Не удалось создать агента. Повторите запрос с теми же параметрами.")
+    if body.initial_knowledge is not None:
+        raise HTTPException(status_code=400, detail="Для создания с памятью нужен idempotency_key.")
     return await run_in_threadpool(_create_custom_profile, body)
 
 
-def _create_custom_profile(body: ProfileCreate):
+def _create_custom_profile_once(body: ProfileCreate):
+    from korra_cli import profiles as profiles_mod
+    from korra_cli.profile_creation import publish_profile
+    from korra_cli.profile_learning import apply_initial_knowledge
+
+    # Legacy hub installs are asynchronous and do not belong to the atomic
+    # first-response contract. Existing requests without a key remain supported.
+    if body.hub_skills:
+        raise ValueError("Навыки из внешнего каталога установите после создания агента.")
+    name = profiles_mod.normalize_profile_name(body.name)
+    request = body.model_dump(exclude={"idempotency_key"})
+    request["name"] = name
+    def populate(stage):
+        response = _create_custom_profile(body, _staging_dir=stage)
+        apply_initial_knowledge(stage, body.initial_knowledge)
+        response["path"] = str(profiles_mod.get_profile_dir(name))
+        response["knowledge_saved"] = body.initial_knowledge is not None
+        return response, {}
+    return publish_profile(body.idempotency_key, name, request, populate)
+
+
+def _create_custom_profile(body: ProfileCreate, *, _staging_dir=None):
     from korra_cli import profiles as profiles_mod
 
     explicit_source = (body.clone_from or "").strip()
@@ -849,6 +885,7 @@ def _create_custom_profile(body: ProfileCreate):
             description=body.description,
             display_name=body.display_name,
             soul=body.soul,
+            **({"_staging_dir": _staging_dir} if _staging_dir is not None else {}),
         )
         # Match the CLI's profile-create flow: fresh named profiles get the
         # bundled skills installed. When cloning from default, create_profile()
@@ -861,7 +898,7 @@ def _create_custom_profile(body: ProfileCreate):
         # Match the CLI's profile-create flow: named profiles should get a
         # wrapper in ~/.local/bin when the alias is safe to create.
         collision = profiles_mod.check_alias_collision(body.name)
-        if not collision:
+        if not collision and _staging_dir is None:
             profiles_mod.create_wrapper_script(body.name)
     except (ValueError, FileExistsError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))

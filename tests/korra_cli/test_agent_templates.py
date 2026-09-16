@@ -184,16 +184,16 @@ def test_concurrent_retries_publish_one_profile(client):
 
 def test_interruption_after_publication_replays_without_reinstall(client, monkeypatch):
     http, root, _ = client
-    from korra_cli import agent_templates
+    from korra_cli import profile_creation
 
     body = request_for(http)
-    atomic_write = agent_templates.atomic_write_text
+    atomic_write = profile_creation.atomic_write_text
     def fail_completion(path, *args, **kwargs):
         if path.name == "completed":
             raise OSError("synthetic response interruption")
         return atomic_write(path, *args, **kwargs)
     with monkeypatch.context() as scoped:
-        scoped.setattr(agent_templates, "atomic_write_text", fail_completion)
+        scoped.setattr(profile_creation, "atomic_write_text", fail_completion)
         assert http.post("/api/profiles", json=body).status_code == 500
     (root / "profiles/designer/SOUL.md").write_text("Already edited")
     assert http.post("/api/profiles", json=body).status_code == 200

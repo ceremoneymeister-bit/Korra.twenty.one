@@ -546,6 +546,43 @@ describe("ProfileBuilderPage — мастер создания агента", ()
     expect(nameInput().value).toBe("Учитель китайского");
   });
 
+  it("свой агент получает память и материал одним идемпотентным запросом", async () => {
+    apiMocks.createProfile.mockRejectedValueOnce(new Error("Network error"));
+    apiMocks.createProfile.mockResolvedValueOnce({ ok: true, name: "pomoschnik", model_set: true, knowledge_saved: true });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(okReply("Я помогаю магазину."));
+    await openWizard();
+    await enterText(nameInput(), "Помощник");
+    await click(findButton("Память и материалы"));
+    const field = (id: string) => container.querySelector<HTMLInputElement | HTMLTextAreaElement>(id)!;
+    await enterText(field("#pb-memory"), "Самовывоз с 11 до 18.");
+    await enterText(field("#pb-user-memory"), "Обращайтесь на вы.");
+    await enterText(field("#pb-memory-limit"), "6000");
+    await enterText(field("#pb-material-title"), "Доставка");
+    await enterText(field("#pb-material-text"), "Доставка по пятницам.");
+    await click(findButton("Создать агента"));
+    await click(findButton("Создать агента"));
+    expect(apiMocks.createProfile).toHaveBeenCalledTimes(2);
+    const body = apiMocks.createProfile.mock.calls[0][0];
+    expect(body).toEqual(apiMocks.createProfile.mock.calls[1][0]);
+    expect(body.idempotency_key).toMatch(/^[a-f0-9]{32}$/);
+    expect(body.initial_knowledge).toEqual({
+      memory: ["Самовывоз с 11 до 18."], user: ["Обращайтесь на вы."],
+      memory_char_limit: 6000, user_char_limit: undefined,
+      material: { title: "Доставка", text: "Доставка по пятницам.", url: "" },
+    });
+    expect(container.textContent).toContain("Начальная память");
+  });
+
+  it("не отправляет создание с незаполненным материалом", async () => {
+    await openWizard();
+    await enterText(nameInput(), "Помощник");
+    await click(findButton("Память и материалы"));
+    await enterText(container.querySelector<HTMLInputElement>("#pb-material-title")!, "Пустой материал");
+    await click(findButton("Создать агента"));
+    expect(apiMocks.createProfile).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Добавьте текст, ссылку или файл");
+  });
+
   it("готовый Дизайнер ставится пакетом и открывает собственный чат", async () => {
     apiMocks.createProfile.mockResolvedValueOnce({ ok: true, name: "dizayner", model_set: true });
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(okReply("Я — Дизайнер."));

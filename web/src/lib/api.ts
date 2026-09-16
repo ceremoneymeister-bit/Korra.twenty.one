@@ -1045,6 +1045,13 @@ export const api = {
     }),
   createProfile: (body: {
     name: string;
+    initial_knowledge?: {
+      memory_char_limit?: number;
+      user_char_limit?: number;
+      memory: string[];
+      user: string[];
+      material?: { title: string; text?: string; url?: string; filename?: string; data_base64?: string };
+    };
     template_id?: string;
     template_version?: string;
     idempotency_key?: string;
@@ -1069,6 +1076,7 @@ export const api = {
       template_id?: string;
       template_version?: string;
       generation_checked?: boolean;
+      knowledge_saved?: boolean;
       mcp_written?: number;
       skills_disabled?: number;
       hub_installs?: Array<{ identifier: string; pid: number | null }>;

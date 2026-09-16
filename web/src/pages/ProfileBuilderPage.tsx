@@ -63,6 +63,8 @@ import { cn } from "@/lib/utils";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { useTheme } from "@/themes";
+import { InitialKnowledgeFields } from "@/components/profiles/InitialKnowledgeFields";
+import { emptyKnowledge, prepareInitialKnowledge } from "@/lib/initial-knowledge";
 
 /**
  * Контрольный вопрос. Не «готов?», а «представься»: ответ показывает, что
@@ -102,6 +104,8 @@ interface CreatedAgent {
   model: ModelChoice | null;
   /** Сервер подтвердил запись модели (`model_set`). */
   modelSaved: boolean;
+  knowledgeSaved: boolean;
+  materialSaved: boolean;
 }
 
 /** Подпись профиля в списках: человеческое имя, а системное — в скобках. */
@@ -193,6 +197,7 @@ export default function ProfileBuilderPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [cloneFrom, setCloneFrom] = useState<string | null>(null);
   const [noSkills, setNoSkills] = useState(false);
+  const [knowledge, setKnowledge] = useState(emptyKnowledge);
 
   // ── Создание и проверка ────────────────────────────────────────────
   const [creating, setCreating] = useState(false);
@@ -375,24 +380,26 @@ export default function ProfileBuilderPage() {
     // Один POST на всё, что нужно агенту для первого ответа: модель и ключи,
     // имя для вкладки, роль. Второго вызова у мастера нет — упади он, агент
     // остался бы без роли молча (урок 8161d4b926).
-    const body = {
-      name: profileId,
-      clone_from: cloneFrom,
-      clone_all: false,
-      no_skills: cloneFrom ? false : noSkills,
-      description: descriptionFromRole(role) || undefined,
-      provider: picked?.provider,
-      model: picked?.model,
-      display_name: name,
-      soul: selectedTemplate ? undefined : composeSoul(name, role),
-      ...(selectedTemplate ? {
-        template_id: selectedTemplate.id,
-        template_version: selectedTemplate.version,
-        description: selectedTemplate.description,
-      } : {}),
-    };
     try {
-      if (selectedTemplate) {
+      const initialKnowledge = await prepareInitialKnowledge(knowledge);
+      const body = {
+        name: profileId,
+        ...(initialKnowledge ? { initial_knowledge: initialKnowledge } : {}),
+        clone_from: cloneFrom,
+        clone_all: false,
+        no_skills: cloneFrom ? false : noSkills,
+        description: descriptionFromRole(role) || undefined,
+        provider: picked?.provider,
+        model: picked?.model,
+        display_name: name,
+        soul: selectedTemplate ? undefined : composeSoul(name, role),
+        ...(selectedTemplate ? {
+          template_id: selectedTemplate.id,
+          template_version: selectedTemplate.version,
+          description: selectedTemplate.description,
+        } : {}),
+      };
+      {
         const payload = JSON.stringify(body);
         if (templateAttempt.current?.payload !== payload) {
           const key = Array.from(crypto.getRandomValues(new Uint8Array(16)),
@@ -402,7 +409,7 @@ export default function ProfileBuilderPage() {
       }
       const res = await api.createProfile({
         ...body,
-        ...(selectedTemplate ? { idempotency_key: templateAttempt.current!.key } : {}),
+        idempotency_key: templateAttempt.current!.key,
       });
       // Каноническое имя решает сервер — и вкладка, и контрольное сообщение
       // адресуются им, а не тем, что вывел транслит.
@@ -428,6 +435,8 @@ export default function ProfileBuilderPage() {
             : "own",
         model: picked,
         modelSaved,
+        knowledgeSaved: res.knowledge_saved === true,
+        materialSaved: res.knowledge_saved === true && Boolean(initialKnowledge?.material),
       });
       if (selectedTemplate && !modelSaved) {
         setProbeState("error");
@@ -451,6 +460,7 @@ export default function ProfileBuilderPage() {
     setProbeFor(null);
     setSelectedTemplate(null);
     templateAttempt.current = null;
+    setKnowledge(emptyKnowledge());
     ownDraft.current = { name: "", id: null };
     setProbeState("sending");
     setProbeReply("");
@@ -517,6 +527,10 @@ export default function ProfileBuilderPage() {
                 {probeFor.role === "none" &&
                   "не задана — только имя и правила общения. Добавьте роль в меню вкладки: «Роль и поведение»."}
               </dd>
+              {probeFor.knowledgeSaved && <>
+                <dt className="text-[var(--neo-text-secondary)]">Знания</dt>
+                <dd>Начальная память и её настройки сохранены.{probeFor.materialSaved && " Материал добавлен."}</dd>
+              </>}
               <dt className="text-[var(--neo-text-secondary)]">Модель</dt>
               <dd className="flex flex-wrap items-center gap-2">
                 {probeFor.modelSaved ? (
@@ -889,6 +903,8 @@ export default function ProfileBuilderPage() {
               </p>
             )}
           </div>
+
+          <InitialKnowledgeFields value={knowledge} onChange={setKnowledge} disabled={creating} cloning={cloneFrom !== null} />
 
           {!selectedTemplate && <div className="grid gap-3">
             <button

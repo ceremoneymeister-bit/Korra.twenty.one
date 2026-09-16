@@ -8,10 +8,7 @@ Only creation uses it: a replay never recopies a user's modified template.
 from __future__ import annotations
 
 import hashlib
-import json
-import logging
 import re
-import shutil
 from pathlib import Path
 from typing import Callable
 
@@ -19,9 +16,9 @@ from korra_cli import profiles
 from korra_cli.config import read_user_config_raw
 from korra_cli.profile_distribution import _copy_dist_payload, read_manifest
 from korra_cli.web_models import ProfileCreate
-from utils import atomic_write_text
+from korra_cli.profile_creation import ProfileCreateConflict as TemplateConflict, publish_profile
+from korra_cli.profile_learning import apply_initial_knowledge
 
-_log = logging.getLogger(__name__)
 _PACKAGES = Path(__file__).parent / "data" / "agent_templates"
 _CATALOGUE = {
     "korra.designer": {
@@ -36,10 +33,6 @@ _CATALOGUE = {
         ],
     },
 }
-
-
-class TemplateConflict(ValueError):
-    """The request conflicts with a previous operation or an existing agent."""
 
 
 def _template(template_id: str):
@@ -103,92 +96,41 @@ def create_template_profile(
         "provider": provider, "model": model,
         "description": body.description or entry["description"],
     }
-    fingerprint = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
-    key_hash = hashlib.sha256(body.idempotency_key.encode()).hexdigest()
-    root = profiles._get_profiles_root()
+    if body.initial_knowledge is not None:
+        request["initial_knowledge"] = body.initial_knowledge.model_dump()
     target = profiles.get_profile_dir(name)
 
-    with profiles.profile_creation_lock():
-        operations = root / ".template-requests"
-        operation = operations / key_hash
-        if root.is_symlink() or operations.is_symlink() or operation.is_symlink() or target.is_symlink():
-            raise TemplateConflict("Небезопасный путь профиля. Выберите другое имя.")
-        operation.mkdir(parents=True, exist_ok=True, mode=0o700)
-        record_path = operation / "request.json"
-        record = {"fingerprint": fingerprint, "name": name}
-        if record_path.exists():
-            if json.loads(record_path.read_text(encoding="utf-8")) != record:
-                raise TemplateConflict("Эта операция уже использована с другими параметрами.")
-        else:
-            atomic_write_text(record_path, json.dumps(record), create_mode=0o600)
-        receipt_path = target / ".agent-template.json"
-        if target.exists():
-            if receipt_path.is_file() and not receipt_path.is_symlink():
-                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-                if receipt.get("request") == key_hash and receipt.get("fingerprint") == fingerprint:
-                    profiles.clear_named_profile_deleted(target)
-                    atomic_write_text(operation / "completed", name, create_mode=0o600)
-                    _activate(name)
-                    return receipt["response"]
-            raise TemplateConflict("Агент с таким системным именем уже существует. Выберите другое имя.")
-        # A completed request must not recreate a deliberately deleted agent.
-        if (operation / "completed").exists():
-            raise TemplateConflict("Агент этой операции удалён или переименован. Начните новое добавление.")
-        stage = operation / "stage"
-        if stage.is_symlink():
-            raise TemplateConflict("Небезопасный временный каталог агента.")
-        if stage.exists():
-            shutil.rmtree(stage)  # only this recorded operation's unpublished work
-        try:
-            profiles.create_profile(
-                name, display_name=label, description=request["description"],
-                soul=(source / "SOUL.md").read_text(encoding="utf-8"),
-                _staging_dir=stage,
+    def populate(stage):
+        profiles.create_profile(
+            name, display_name=label, description=request["description"],
+            soul=(source / "SOUL.md").read_text(encoding="utf-8"),
+            _staging_dir=stage,
+        )
+        if profiles.seed_profile_skills(stage, quiet=True) is None:
+            raise RuntimeError("Не удалось подготовить навыки агента. Повторите добавление.")
+        _copy_dist_payload(source, stage, manifest, preserve_config=True)
+        seeded = []
+        if provider and model:
+            write_model(stage, provider, model)
+            seeded = profiles.seed_provider_credentials_from_root(
+                provider, read_user_config_raw(stage / "config.yaml"), profile_dir=stage,
             )
-            if profiles.seed_profile_skills(stage, quiet=True) is None:
-                raise RuntimeError("Не удалось подготовить навыки агента. Повторите добавление.")
-            _copy_dist_payload(source, stage, manifest, preserve_config=True)
-            seeded = []
-            if provider and model:
-                write_model(stage, provider, model)
-                seeded = profiles.seed_provider_credentials_from_root(
-                    provider, read_user_config_raw(stage / "config.yaml"), profile_dir=stage,
-                )
-            saved_model, saved_provider = profiles._read_config_model(stage)
-            response = {
-                "ok": True, "name": name, "path": str(target),
-                "model_set": bool(saved_model and saved_provider),
-                "seeded_credentials": seeded,
-                "template_id": body.template_id, "template_version": manifest.version,
-                "generation_checked": False,
-            }
-            receipt = {
-                "request": key_hash, "fingerprint": fingerprint, "response": response,
-                "files": {
-                    p.relative_to(source).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-                    for p in source.rglob("*") if p.is_file()
-                },
-            }
-            atomic_write_text(stage / ".agent-template.json", json.dumps(receipt), create_mode=0o600)
-            # Ordinary creates take the same lock. Existing profiles are never
-            # passed to the distribution copier; this rename publishes a whole
-            # role + skills + independent configuration on the same filesystem.
-            stage.rename(target)
-            profiles.clear_named_profile_deleted(target)
-            atomic_write_text(operation / "completed", name, create_mode=0o600)
-        finally:
-            if stage.exists():
-                shutil.rmtree(stage)
-        _activate(name)
-        return response
+        apply_initial_knowledge(stage, body.initial_knowledge)
+        saved_model, saved_provider = profiles._read_config_model(stage)
+        response = {
+            "ok": True, "name": name, "path": str(target),
+            "model_set": bool(saved_model and saved_provider),
+            "seeded_credentials": seeded,
+            "template_id": body.template_id, "template_version": manifest.version,
+            "generation_checked": False,
+            "knowledge_saved": body.initial_knowledge is not None,
+        }
+        return response, {
+            "files": {
+                p.relative_to(source).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in source.rglob("*") if p.is_file()
+            },
+        }
 
-
-def _activate(name: str) -> None:
-    # Registration is retryable and cannot turn a committed create into a
-    # destructive retry. No model call, Telegram startup or image generation.
-    profiles._maybe_register_gateway_service(name)
-    try:
-        if not profiles.check_alias_collision(name):
-            profiles.create_wrapper_script(name)
-    except Exception:
-        _log.warning("Agent %s saved, CLI alias not installed", name, exc_info=True)
+    return publish_profile(body.idempotency_key, name, request, populate,
+                           namespace=".template-requests", receipt_name=".agent-template.json")
