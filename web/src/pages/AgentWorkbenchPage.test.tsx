@@ -121,6 +121,8 @@ async function enterText(input: HTMLInputElement, value: string) {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
+  localStorage.clear();
   workbenchMocks.tabs = DEFAULT_TABS;
   workbenchMocks.hiddenTabs = [];
   workbenchMocks.refresh.mockReset();
@@ -139,6 +141,17 @@ beforeEach(() => {
   });
   apiMocks.updateProfileSoul.mockReset();
   apiMocks.updateProfileSoul.mockResolvedValue({ ok: true });
+});
+
+it("после закрытия вкладки возвращается к выбранному агенту", async () => {
+  await render(<MemoryRouter initialEntries={["/agents"]}><AgentWorkbenchPage /></MemoryRouter>);
+  await act(async () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+    .find(tab => tab.textContent === "Сметчик")!.click());
+  await act(async () => root.unmount());
+  container.remove();
+  sessionStorage.clear();
+  await render(<MemoryRouter initialEntries={["/agents"]}><AgentWorkbenchPage /></MemoryRouter>);
+  expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Сметчик");
 });
 
 /** Открыть меню вкладки и нажать пункт по тексту. */

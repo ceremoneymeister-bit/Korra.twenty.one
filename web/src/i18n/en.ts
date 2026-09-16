@@ -169,7 +169,7 @@ export const en: Translations = {
     deleteSession: "Delete session",
     confirmDeleteTitle: "Delete session?",
     confirmDeleteMessage:
-      "This permanently removes the conversation and all of its messages. This cannot be undone.",
+      "This conversation will disappear from history. Its context does not automatically carry over to new chats, so save any important conclusions first. Separately saved agent memory and files will remain. Copies may remain in logs and backups.",
     sessionDeleted: "Session deleted",
     failedToDelete: "Failed to delete session",
     deleteEmpty: "Delete empty",
@@ -185,7 +185,7 @@ export const en: Translations = {
     deleteSelected: "Delete {count}",
     deleteSelectedConfirmTitle: "Delete {count} sessions?",
     deleteSelectedConfirmMessage:
-      "This permanently removes {count} selected sessions and all their messages. This cannot be undone.",
+      "The {count} selected conversations and their messages will disappear from history. Their context does not automatically carry over to new chats, so save important conclusions first. Separately saved agent memory and files will remain. Copies may remain in logs and backups.",
     selectedSessionsDeleted: "{count} sessions deleted",
     failedToDeleteSelected: "Failed to delete selected sessions",
     resumeInChat: "Resume in Chat",

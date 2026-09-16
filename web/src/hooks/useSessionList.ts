@@ -34,20 +34,28 @@ export function useSessionList(
   const limit = options?.limit ?? DEFAULT_LIMIT;
   const pollIntervalMs = options?.pollIntervalMs ?? 0;
   const profile = options?.profile;
+  const profileRef = useRef(profile);
   const mountedRef = useRef(false);
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const requestRef = useRef(0);
+  const [result, setResult] = useState<{ profile: string | undefined; sessions: SessionInfo[] }>(
+    { profile, sessions: [] },
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    profileRef.current = profile;
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      requestRef.current += 1;
     };
-  }, []);
+  }, [profile]);
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || profileRef.current !== profile) return;
+    const request = ++requestRef.current;
+    const current = () => mountedRef.current && requestRef.current === request;
 
     setLoading(true);
     setError(null);
@@ -60,15 +68,15 @@ export function useSessionList(
         DEFAULT_OFFSET,
         profile === undefined ? undefined : profile || "default",
       );
-      if (!mountedRef.current) return;
+      if (!current()) return;
 
-      setSessions(sortByLastActiveDesc(response.sessions));
+      setResult({ profile, sessions: sortByLastActiveDesc(response.sessions) });
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (!current()) return;
 
       setError(errorToMessage(err));
     } finally {
-      if (mountedRef.current) {
+      if (current()) {
         setLoading(false);
       }
     }
@@ -94,7 +102,9 @@ export function useSessionList(
   }, [pollIntervalMs, refresh]);
 
   return {
-    sessions,
+    // A different profile's rows must never appear even during its first
+    // render before the new request's effect has run.
+    sessions: result.profile === profile ? result.sessions : [],
     loading,
     error,
     refresh,

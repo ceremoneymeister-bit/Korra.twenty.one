@@ -76,6 +76,7 @@ import { ChatUnreadMark } from "@/components/chat/SessionRunActivity";
 import { resumeUploadJob, excludeUploadFile, cancelUploadJob } from "@/store/upload-jobs";
 import { UploadJobsPanel } from "@/components/UploadJobsPanel";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
+import { useI18n } from "@/i18n";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { CopyTextButton } from "@/components/chat/CopyTextButton";
 import "@/components/chat/chat-answer.css";
@@ -1249,6 +1250,7 @@ export default function BubbleChatPage({
   resumeSession,
   active,
 }: BubbleChatPageProps = {}) {
+  const { t } = useI18n();
   // Live SSE state from useChatStream. Sends POST to /api/chat/completions
   // and streams response chunks back into messages[]. Tool progress events
   // update the last assistant message's toolCalls[].
@@ -1475,14 +1477,8 @@ export default function BubbleChatPage({
         onCancel={sessionDelete.cancel}
         onConfirm={sessionDelete.confirm}
         loading={sessionDelete.isDeleting}
-        title="Удалить чат?"
-        // Honest scope: api.deleteSession removes the session + messages
-        // rows from state.db, but raw transcript files on disk
-        // (.json/.jsonl/request_dump_*) are NOT touched by the server-side
-        // endpoint (delete_session_endpoint в web_server.py не передаёт
-        // sessions_dir в SessionDB.delete_session). Codex stop-gate #14
-        // caught the previous "удалены безвозвратно" wording as misleading.
-        description="Чат и сообщения удалятся из базы. Технические логи и архивы на диске сервера могут остаться."
+        title={t.sessions.confirmDeleteTitle}
+        description={t.sessions.confirmDeleteMessage}
       />
       <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label="Разговор с Коррой">
         <BubbleChatTranscript

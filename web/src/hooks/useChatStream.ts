@@ -1,6 +1,6 @@
 import { clearChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
+import { chatViewKey, readChatSelection, writeChatSelection, writeChatView } from "@/lib/chat-view-state";
 import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns } from "@/lib/chat-runs";
 import type { ToolEntry } from "@/components/ToolCall";
 import type {
@@ -691,7 +691,9 @@ export function useChatStream(
   }, []);
 
   useEffect(() => {
-    const pending = loadChatOutbox(profile ?? "");
+    const selection = readChatSelection(selectionKey);
+    if (selection === null) return;
+    const pending = loadChatOutbox(profile ?? "", selection);
     if (!pending) return;
     const restored: ChatOutboxRecord = {
       ...pending,
@@ -713,7 +715,7 @@ export function useChatStream(
       },
       error: "Сообщение сохранилось в черновиках. Проверьте доставку кнопкой «Повторить».",
     });
-  }, [profile]);
+  }, [profile, selectionKey]);
 
   const abort = useCallback(() => {
     const generation = activeStreamIdRef.current;
@@ -746,7 +748,7 @@ export function useChatStream(
 
   const loadSession = useCallback(async (sessionId: string, options?: LoadSessionOptions): Promise<void> => {
     const background = options?.background === true;
-    writeChatView(selectionKey, sessionId);
+    writeChatSelection(selectionKey, sessionId);
     const generation = crypto.randomUUID();
     activeStreamIdRef.current = generation;
     abortControllerRef.current?.abort();
@@ -862,7 +864,7 @@ export function useChatStream(
   }, [profile, selectionKey]);
 
   const reset = useCallback(() => {
-    writeChatView(selectionKey, "");
+    writeChatSelection(selectionKey, null);
     // Same triple-guard as loadSession — abort any active stream so its
     // residual APPEND_DELTAs don't leak into the new chat.
     activeStreamIdRef.current = null;
@@ -920,7 +922,7 @@ export function useChatStream(
       } else if (retryRecord && state.sessionId !== sessionId) {
         dispatch({ type: "SET_SESSION_ID", sessionId });
       }
-      writeChatView(selectionKey, sessionId);
+      writeChatSelection(selectionKey, sessionId);
       // Tag this stream as the one currently allowed to mutate state.
       // The read loop below re-checks this ref on every iteration so a
       // mid-stream loadSession()/reset() can invalidate us synchronously.
@@ -1259,9 +1261,14 @@ export function useChatStream(
   const sessionRef = useRef(state.sessionId);
   useEffect(() => { sessionRef.current = state.sessionId; }, [state.sessionId]);
   useEffect(() => {
-    const id = readChatView(selectionKey) || loadChatOutbox(profile ?? "")?.sessionId;
+    const selection = readChatSelection(selectionKey);
+    const id = selection === undefined ? loadChatOutbox(profile ?? "")?.sessionId : selection;
+    // The resume effect runs in this same commit, before RESET/LOAD_SESSION
+    // is rendered. Never let it refresh the previous profile's conversation.
+    sessionRef.current = id ?? null;
     if (id) void loadSession(id);
-  }, [loadSession, profile, selectionKey]);
+    else reset();
+  }, [loadSession, profile, selectionKey, reset]);
   useEffect(() => {
     if (!active) return;
     // Возврат к вкладке — не повод показывать чат заново. Проверяем в фоне:

@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type SessionMessage } from "@/lib/api";
-import { loadChatOutbox } from "@/lib/chat-outbox";
+import { loadChatOutbox, saveChatOutbox } from "@/lib/chat-outbox";
 import { useChatStream, type UseChatStreamReturn } from "./useChatStream";
 
 vi.mock("@/lib/chat-runs", async importOriginal => ({
@@ -23,8 +23,8 @@ let current: UseChatStreamReturn;
  *  только здесь: к концу загрузки сообщения снова на месте. */
 let shown: UseChatStreamReturn[] = [];
 
-function Probe({ onValue }: { onValue: (value: UseChatStreamReturn) => void }) {
-  const value = useChatStream();
+function Probe({ onValue, profile }: { onValue: (value: UseChatStreamReturn) => void; profile?: string }) {
+  const value = useChatStream({ profile });
   useEffect(() => onValue(value), [onValue, value]);
   return null;
 }
@@ -763,4 +763,69 @@ it("после возврата отказ сервера не превраща�
   expect(current.error).toContain("Ответ завершился с ошибкой");
   expect(current.isStreaming).toBe(false);
   expect(current.messages[0].content).toBe("Вопрос");
+});
+
+describe("K21-105 selected conversation recovery", () => {
+  async function reopenPage() {
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<Probe onValue={value => { current = value; shown.push(value); }} />));
+  }
+
+  it("сохраняет выбранный чат после закрытия вкладки и нового входа", async () => {
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({
+      session_id: "chosen", messages: [{ role: "user", content: "Моя выбранная беседа" }] as SessionMessage[],
+    });
+    await act(async () => { await current.loadSession("chosen"); });
+    sessionStorage.clear(); // A new tab has no previous tab's sessionStorage.
+    await reopenPage();
+    expect(current.sessionId).toBe("chosen");
+    expect(current.messages[0]?.content).toBe("Моя выбранная беседа");
+  });
+
+  it("Новый чат после F5 не подменяется старой недоставленной репликой", async () => {
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "old", messages: [] });
+    saveChatOutbox({
+      messageId: "undelivered-message-123456", sessionId: "old", profile: "",
+      text: "Не потерять этот черновик", attachments: [], createdAt: 123, status: "failed",
+    });
+    await act(async () => { await current.loadSession("old"); });
+    await act(async () => current.reset());
+    await reopenPage();
+    expect(current.sessionId).toBeNull();
+    expect(current.messages).toEqual([]);
+    expect(loadChatOutbox("", "old")?.text).toBe("Не потерять этот черновик");
+  });
+
+  it("не создаёт новый чат, пока выбранная история ещё загружается", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "chosen", messages: [] });
+    await act(async () => { await current.loadSession("chosen"); });
+    let finish!: (value: { session_id: string; messages: SessionMessage[] }) => void;
+    history.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const post = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () => sseResponse(
+      'data: {"choices":[{"delta":{"content":"Продолжаем"},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ));
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) =>
+      url.includes("/chat/completions") ? post(url, init) : Promise.resolve(new Response('{"approvals":[]}')),
+    );
+    await reopenPage();
+    await act(async () => { expect(await current.send("Не отправлять до восстановления")).toBe(false); });
+    expect(post).not.toHaveBeenCalled();
+    await act(async () => finish({ session_id: "chosen", messages: [{ role: "user", content: "Ранее согласованный план" }] as SessionMessage[] }));
+    await act(async () => { expect(await current.send("Продолжим план")).toBe(true); });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(new Headers((post.mock.calls[0] as unknown as [string, RequestInit])[1].headers).get("X-Hermes-Session-Id")).toBe("chosen");
+    expect(current.sessionId).toBe("chosen");
+  });
+
+  it("новый профиль без истории не наследует выбранную сессию другого агента", async () => {
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({
+      session_id: "first-agent-chat", messages: [{ role: "user", content: "Первый агент" }] as SessionMessage[],
+    });
+    await act(async () => { await current.loadSession("first-agent-chat"); });
+    await act(async () => root.render(<Probe profile="another-agent" onValue={value => { current = value; }} />));
+    expect(current.sessionId).toBeNull();
+    expect(current.messages).toEqual([]);
+  });
 });
