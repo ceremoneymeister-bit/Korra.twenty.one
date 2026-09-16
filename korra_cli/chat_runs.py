@@ -15,7 +15,25 @@ def _status(item, ledger):
     run = server._CHAT_DELIVERY_STREAMS.get(f"{ledger.path}:{item['message_id']}")
     if run and not run.done:
         return getattr(run, "status", "running")
+    task = server._CHAT_DELIVERY_TASKS.get(f"{ledger.path}:{item['message_id']}")
+    if task is not None and not task.done():
+        return "running"
     return "interrupted" if item["status"] == "pending" else item["status"]
+
+
+def _browser_sse(status_code: int, body: bytes, content_type: str) -> bytes:
+    from korra_cli.chat_delivery import openai_json_to_sse
+
+    if status_code < 400:
+        if content_type.startswith("text/event-stream"):
+            return body
+        try:
+            return openai_json_to_sse(body)
+        except (ValueError, TypeError, AttributeError):
+            pass
+    return (_server()._durable_stream_error_event(
+        "Не удалось получить результат задачи. Проверьте историю перед повторной отправкой."
+    ) + b"data: [DONE]\n\n")
 
 
 @router.get("/api/chat/runs")
@@ -46,7 +64,21 @@ async def resume_chat_run(message_id: str, session_id: str, profile: str = ""):
     if run is not None:
         return StreamingResponse(run.subscribe(), media_type="text/event-stream", headers=headers)
     if record.status == "completed" and record.response_body is not None:
-        return Response(record.response_body, media_type=record.content_type, headers=headers)
+        return Response(_browser_sse(record.status_code or 200, record.response_body, record.content_type or ""),
+                        media_type="text/event-stream", headers=headers)
+    task = server._CHAT_DELIVERY_TASKS.get(f"{ledger.path}:{message_id}")
+    if task is not None:
+        async def wait_for_result():
+            # Send headers immediately, then keep the browser/cabinet socket
+            # alive while the non-streaming upstream has no progress chunks.
+            yield b": agent is working\n\n"
+            while not task.done():
+                done, _ = await asyncio.wait((task,), timeout=10.0)
+                if not done:
+                    yield b": agent is working\n\n"
+            # Cancelling this reader never cancels the original agent task.
+            yield _browser_sse(*task.result())
+        return StreamingResponse(wait_for_result(), media_type="text/event-stream", headers=headers)
     raise HTTPException(409, "Связь с ходом потеряна. Проверьте историю перед повторной отправкой.")
 
 # Only admission (not the lifetime of the SSE reader) is serialised. Different
@@ -109,6 +141,9 @@ async def cancel_chat_run(message_id: str, session_id: str, profile: str = ""):
         raise HTTPException(404, "Ход пока не найден. Попробуйте остановить ещё раз.")
     run = server._CHAT_DELIVERY_STREAMS.get(f"{ledger.path}:{message_id}")
     if run is None or run.done:
+        task = server._CHAT_DELIVERY_TASKS.get(f"{ledger.path}:{message_id}")
+        if task is not None and not task.done():
+            raise HTTPException(409, "Эту задачу нельзя остановить из чата. Агент продолжает работу; дождитесь ответа.")
         return {"stopped": False}
     terminal = server._durable_stream_error_event("Остановка запрошена пользователем.") + b"data: [DONE]\n\n"
     await run.publish(terminal)

@@ -2846,6 +2846,13 @@ _CHAT_DELIVERY_STREAMS: dict[str, "_DurableBrowserChatStream"] = {}
 _CHAT_DELIVERY_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
 
 
+def _chat_upstream_timeout():
+    """A quiet tool/model is not a failed delivery; keep transport bounds."""
+    import httpx
+
+    return httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+
+
 def _chat_delivery_ledger():
     from korra_cli.chat_delivery import DeliveryLedger
 
@@ -2865,7 +2872,7 @@ async def _run_durable_browser_chat(
     ledger = _chat_delivery_ledger()
     upstream_headers = {**headers, "Idempotency-Key": message_id}
     try:
-        async with _httpx.AsyncClient(timeout=_httpx.Timeout(120.0)) as client:
+        async with _httpx.AsyncClient(timeout=_chat_upstream_timeout()) as client:
             response = await client.post(
                 upstream_url,
                 json={**body, "stream": False},
@@ -3012,7 +3019,7 @@ async def _run_durable_browser_chat_stream(
         # A tool-heavy agent turn may legitimately stay silent for minutes.
         # Bound connect/write/pool setup, but leave SSE reads unbounded; the
         # upstream agent owns its turn deadline and the browser has Stop.
-        timeout = _httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+        timeout = _chat_upstream_timeout()
         async with _httpx.AsyncClient(timeout=timeout) as client:
             async with queued_upstream_stream(client, run, upstream_url, body, upstream_headers) as response:
                 content_type = response.headers.get(
@@ -3363,7 +3370,7 @@ async def chat_completions_proxy(
 
     if do_stream:
         try:
-            client_cm = _httpx.AsyncClient(timeout=_httpx.Timeout(120.0))
+            client_cm = _httpx.AsyncClient(timeout=_chat_upstream_timeout())
             client = await client_cm.__aenter__()
             stream_cm = client.stream(
                 "POST", upstream_url, json=body, headers=upstream_headers
@@ -3401,7 +3408,7 @@ async def chat_completions_proxy(
         )
 
     try:
-        async with _httpx.AsyncClient(timeout=_httpx.Timeout(120.0)) as client:
+        async with _httpx.AsyncClient(timeout=_chat_upstream_timeout()) as client:
             response = await client.post(
                 upstream_url, json=body, headers=upstream_headers
             )
