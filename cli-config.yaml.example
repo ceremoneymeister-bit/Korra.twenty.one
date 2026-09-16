@@ -446,6 +446,11 @@ terminal:
 #   container_disk: 10240          # Daytona max is 10GB per sandbox
 
 #
+# Linux local commands: optional tighter RSS budget for the whole command tree.
+# The default reserves gateway memory and never exceeds half of host RAM / 4 GiB.
+# This sampled guard complements, but does not replace, container memory limits.
+#   local_memory_max_mb: 1024
+#
 # --- Container resource limits (docker, singularity, modal, daytona -- ignored for local/ssh) ---
 # These settings apply to all container backends. They control the resources
 # allocated to the sandbox and whether its filesystem persists across sessions.

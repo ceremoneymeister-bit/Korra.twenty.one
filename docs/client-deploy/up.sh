@@ -38,6 +38,8 @@ ENGINE_GID="${ENGINE_GID:-10000}"
 WAIT_SECONDS="${WAIT_SECONDS:-120}"         # сколько ждать панель после старта
 CONTAINER_CPUS="${CONTAINER_CPUS:-}"
 CONTAINER_MEMORY="${CONTAINER_MEMORY:-}"
+# Total RAM + swap, matching Docker --memory-swap. Equal to RAM disables swap.
+CONTAINER_MEMORY_SWAP="${CONTAINER_MEMORY_SWAP:-}"
 
 # Право sudo без пароля у агента ВНУТРИ контейнера.
 #   0 — снято (дефолт для клиентского контура);
@@ -196,6 +198,7 @@ fi
 RESOURCE_ARGS=()
 if [ -n "$CONTAINER_CPUS" ]; then RESOURCE_ARGS+=(--cpus "$CONTAINER_CPUS"); fi
 if [ -n "$CONTAINER_MEMORY" ]; then RESOURCE_ARGS+=(--memory "$CONTAINER_MEMORY"); fi
+if [ -n "$CONTAINER_MEMORY_SWAP" ]; then RESOURCE_ARGS+=(--memory-swap "$CONTAINER_MEMORY_SWAP"); fi
 RUN_ARGS=(
     docker run -d
     --name "$NAME"

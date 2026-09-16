@@ -3799,6 +3799,7 @@ TERMINAL_CONFIG_ENV_MAP = {
     "ssh_key": "TERMINAL_SSH_KEY",
     "container_cpu": "TERMINAL_CONTAINER_CPU",
     "container_memory": "TERMINAL_CONTAINER_MEMORY",
+    "local_memory_max_mb": "TERMINAL_LOCAL_MEMORY_MAX_MB",
     "container_disk": "TERMINAL_CONTAINER_DISK",
     "container_persistent": "TERMINAL_CONTAINER_PERSISTENT",
     "docker_volumes": "TERMINAL_DOCKER_VOLUMES",

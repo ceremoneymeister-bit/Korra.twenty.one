@@ -1300,7 +1300,7 @@ def test_preflight_records_original_resources(updater):
         return value
     updater.docker = inspect_limits
     updater.update("registry.example/korra:latest", dry_run=True)
-    assert updater.receipt["old_resources"] == {"nano_cpus": 6_000_000_000, "memory_bytes": 12 * 1024**3}
+    assert updater.receipt["old_resources"] == {"nano_cpus": 6_000_000_000, "memory_bytes": 12 * 1024**3, "memory_swap_bytes": 0}
 
 
 @pytest.mark.parametrize("explicit", [False, True])
@@ -2129,3 +2129,40 @@ def test_recorded_timezone_follows_the_environment_the_engine_reads(environment,
 def test_unusable_container_timezone_is_refused_rather_than_guessed(value):
     with pytest.raises(u.UpdateError, match="timezone"):
         u.validate_runtime_env({**LEGACY_RUNTIME, "TIMEZONE": value, "OWNER_TIMEZONE": ""})
+
+
+@pytest.mark.parametrize("swap", [-1, 0, 4 * 1024**3])
+def test_memory_swap_is_preserved_on_update_and_rollback(updater, monkeypatch, swap):
+    updater.receipt["old_resources"] = {"nano_cpus": 0, "memory_bytes": 3 * 1024**3,
+                                        "memory_swap_bytes": swap}
+    monkeypatch.delenv("CONTAINER_MEMORY_SWAP", raising=False)
+    assert updater.launch_resource_env()["CONTAINER_MEMORY_SWAP"] == str(swap)
+    monkeypatch.setenv("CONTAINER_MEMORY_SWAP", str(5 * 1024**3))
+    assert updater.launch_resource_env()["CONTAINER_MEMORY_SWAP"] == str(5 * 1024**3)
+    assert updater.launch_resource_env(rollback=True)["CONTAINER_MEMORY_SWAP"] == str(swap)
+
+
+def test_launcher_passes_explicit_swap_budget(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    data = tmp_path / "data"
+    data.mkdir()
+    u.shutil.copy2(SOURCE.with_name("up.sh"), deploy / "up.sh")
+    (deploy / "IMAGE").write_text(NEW)
+    env = {**os.environ, "DATA": str(data), "ENGINE_UID": str(os.getuid()),
+           "ENGINE_GID": str(os.getgid()), "CONTAINER_MEMORY": "3g",
+           "CONTAINER_MEMORY_SWAP": "3584m"}
+    result = subprocess.run(["bash", str(deploy / "up.sh"), "--dry-run"], env=env,
+                            text=True, capture_output=True, check=True)
+    args = shlex.split(next(line for line in result.stdout.splitlines() if line.startswith("docker run ")))
+    assert args[args.index("--memory") + 1] == "3g"
+    assert args[args.index("--memory-swap") + 1] == "3584m"
+
+
+def test_new_ram_budget_does_not_inherit_incompatible_old_swap(updater, monkeypatch):
+    updater.receipt["old_resources"] = {"nano_cpus": 0, "memory_bytes": 1024**3,
+                                        "memory_swap_bytes": 2 * 1024**3}
+    monkeypatch.setenv("CONTAINER_MEMORY", "4g")
+    monkeypatch.delenv("CONTAINER_MEMORY_SWAP", raising=False)
+    assert updater.launch_resource_env()["CONTAINER_MEMORY_SWAP"] == "0"
+    assert updater.launch_resource_env(rollback=True)["CONTAINER_MEMORY_SWAP"] == str(2 * 1024**3)

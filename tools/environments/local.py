@@ -17,6 +17,7 @@ from pathlib import Path
 
 from korra_constants import get_process_hermes_home, korra_env, korra_env_set, korra_env_pop, korra_env_aliases
 from tools.environments.base import BaseEnvironment, _pipe_stdin
+from tools.local_memory import LocalMemoryGuard
 from korra_cli._subprocess_compat import windows_hide_flags
 
 _IS_WINDOWS = platform.system() == "Windows"
@@ -2181,10 +2182,27 @@ class LocalEnvironment(BaseEnvironment):
             except ProcessLookupError:
                 pass
 
+        proc._korra_memory_guard = LocalMemoryGuard(
+            proc.pid, lambda _report: self._kill_process(proc),
+        )
+        proc._korra_memory_guard.start()
         if stdin_data is not None:
             _pipe_stdin(proc, stdin_data)
 
         return proc
+
+    def _wait_for_process(self, proc, timeout=120, **kwargs):
+        guard = getattr(proc, "_korra_memory_guard", None)
+        try:
+            result = super()._wait_for_process(proc, timeout=timeout, **kwargs)
+            if guard is not None and guard.report is not None:
+                result["resource_limit"] = guard.report
+                result["output"] += "\n" + guard.report["message"] + "\n"
+                result["returncode"] = result["returncode"] or 137
+            return result
+        finally:
+            if guard is not None:
+                guard.stop()
 
     def _kill_process(self, proc):
         """Kill the entire process group (all children)."""

@@ -43,6 +43,11 @@ import uuid
 from pathlib import Path
 
 _IS_WINDOWS = platform.system() == "Windows"
+from tools.local_memory import (
+    LocalMemoryGuard,
+    _worker_memory_max_bytes,
+    _DEFAULT_WORKER_MEMORY_MAX_BYTES as _DEFAULT_WORKER_MEMORY_MAX_BYTES,  # compatibility for existing callers/tests
+)
 from tools.environments.local import _find_shell, _resolve_safe_cwd, _sanitize_subprocess_env
 from korra_cli._subprocess_compat import windows_hide_flags
 from dataclasses import dataclass, field
@@ -110,72 +115,6 @@ _SYSTEMD_SCOPE_AVAILABLE: Optional[bool] = None
 _SYSTEMD_SCOPE_PROBE_LOCK = threading.Lock()
 _SYSTEMD_SCOPE_PROBED_AT = 0.0
 _SYSTEMD_SCOPE_FAILURE_TTL_SECONDS = 60.0
-_MIN_WORKER_MEMORY_MAX_BYTES = 64 * 1024 * 1024
-_DEFAULT_WORKER_MEMORY_MAX_BYTES = 1024 * 1024 * 1024
-_WORKER_MEMORY_MAX_CAP_BYTES = 4 * 1024 * 1024 * 1024
-
-
-def _worker_memory_max_bytes() -> int:
-    """Return a finite per-worker cgroup limit without widening host risk.
-
-    The proposed local-memory-guard environment override is honored when it
-    tightens the safe bound, so this isolation composes with PR #57121 instead
-    of inventing a second knob.  An oversized override cannot widen host risk.
-    Otherwise retain the tighter of the gateway's current cgroup-v2
-    ``memory.max`` and half of physical RAM, capped at 4 GiB.  This keeps the
-    sibling worker outside the gateway cgroup while ensuring the worker cannot
-    consume memory up to the enclosing user slice or host limit.
-    """
-    override_bound: Optional[int] = None
-    override = os.getenv("TERMINAL_LOCAL_MEMORY_MAX_MB", "").strip()
-    if override:
-        override_valid = False
-        try:
-            parsed = int(override) * 1024 * 1024
-            if parsed >= _MIN_WORKER_MEMORY_MAX_BYTES:
-                override_bound = parsed
-                override_valid = True
-        except ValueError:
-            pass
-        if not override_valid:
-            logger.warning(
-                "Ignoring invalid TERMINAL_LOCAL_MEMORY_MAX_MB=%r; "
-                "expected an integer representing at least %d MiB",
-                override,
-                _MIN_WORKER_MEMORY_MAX_BYTES // (1024 * 1024),
-            )
-
-    candidates: List[int] = []
-    try:
-        for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines():
-            if line.startswith("0::"):
-                relative = line.partition("::")[2].lstrip("/")
-                raw_limit = (
-                    Path("/sys/fs/cgroup") / relative / "memory.max"
-                ).read_text(encoding="utf-8").strip()
-                if raw_limit.isdigit():
-                    cgroup_limit = int(raw_limit)
-                    if cgroup_limit >= _MIN_WORKER_MEMORY_MAX_BYTES:
-                        candidates.append(cgroup_limit)
-                break
-    except (OSError, ValueError):
-        pass
-
-    try:
-        physical_bytes = int(os.sysconf("SC_PHYS_PAGES")) * int(
-            os.sysconf("SC_PAGE_SIZE")
-        )
-        physical_bound = min(
-            _WORKER_MEMORY_MAX_CAP_BYTES,
-            max(_MIN_WORKER_MEMORY_MAX_BYTES, physical_bytes // 2),
-        )
-        candidates.append(physical_bound)
-    except (OSError, ValueError, TypeError):
-        pass
-
-    safe_bound = min(candidates) if candidates else _DEFAULT_WORKER_MEMORY_MAX_BYTES
-    return min(override_bound, safe_bound) if override_bound else safe_bound
-
 
 def _systemd_run_user_scope_available() -> bool:
     """Return True if ``systemd-run --user --scope`` can create a cgroup.
@@ -432,6 +371,7 @@ class ProcessSession:
     _completion_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _reader_thread: Optional[threading.Thread] = field(default=None, repr=False)
+    _memory_guard: Any = field(default=None, repr=False)
     _pty: Any = field(default=None, repr=False)  # ptyprocess handle (when use_pty=True)
 
 
@@ -1137,11 +1077,11 @@ class ProcessRegistry:
                     name=f"proc-pty-reader-{session.id}",
                 )
                 session._reader_thread = reader
-                reader.start()
-
                 with self._lock:
                     self._prune_if_needed()
                     self._running[session.id] = session
+                self._start_memory_guard(session)
+                reader.start()
 
                 self._write_checkpoint()
                 return session
@@ -1243,11 +1183,11 @@ class ProcessRegistry:
                 name=f"proc-reader-{session.id}",
             )
             session._reader_thread = reader
-            reader.start()
-
             with self._lock:
                 self._prune_if_needed()
                 self._running[session.id] = session
+            self._start_memory_guard(session)
+            reader.start()
 
             self._write_checkpoint()
         except Exception:
@@ -1627,6 +1567,19 @@ class ProcessRegistry:
             session.completion_reason = "exited"
         self._move_to_finished(session)
 
+    def _start_memory_guard(self, session: ProcessSession):
+        def exceeded(report):
+            # Record before signalling: the reader can finish concurrently.
+            with session._lock:
+                session.completion_reason = "killed"
+                session.termination_source = "memory_limit"
+                session.exit_code = 137
+                session.output_buffer += "\n" + report["message"] + "\n"
+            self.kill_process(session.id, source="memory_limit", consume_output=False)
+
+        session._memory_guard = LocalMemoryGuard(session.pid, exceeded)
+        session._memory_guard.start()
+
     def _move_to_finished(self, session: ProcessSession):
         """Move a session from running to finished.
 
@@ -1634,6 +1587,8 @@ class ProcessRegistry:
         with the reader thread), the second call is a no-op — no duplicate
         completion notification is enqueued.
         """
+        if session._memory_guard is not None:
+            session._memory_guard.stop()
         with self._lock:
             was_running = self._running.pop(session.id, None) is not None
             self._finished[session.id] = session
@@ -2371,6 +2326,8 @@ class ProcessRegistry:
         # Kill via PTY, Popen (local), or env execute (non-local)
         try:
             if session._pty:
+                if source == "memory_limit":
+                    self._terminate_host_pid(session.pid, session.host_start_time)
                 # PTY process -- terminate via ptyprocess
                 try:
                     session._pty.terminate(force=True)

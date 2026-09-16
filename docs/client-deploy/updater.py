@@ -1107,8 +1107,15 @@ class Updater:
         cpus = f"{whole}.{fraction:09d}".rstrip("0").rstrip(".") if nanos else ""
         memory = int(baseline["memory_bytes"])
         env = {"CONTAINER_CPUS": cpus, "CONTAINER_MEMORY": str(memory) if memory else ""}
+        # Older receipts did not record swap; do not invent a rollback value.
+        if "memory_swap_bytes" in baseline:
+            env["CONTAINER_MEMORY_SWAP"] = str(int(baseline["memory_swap_bytes"]))
         if not rollback:
-            for key in env:
+            if os.environ.get("CONTAINER_MEMORY") and "memory_swap_bytes" in baseline:
+                # A new RAM budget must not inherit an incompatible older swap cap.
+                # Zero asks Docker for its bounded default (RAM + equal swap).
+                env["CONTAINER_MEMORY_SWAP"] = "0"
+            for key in (*env, "CONTAINER_MEMORY_SWAP"):
                 if os.environ.get(key):
                     env[key] = os.environ[key]
         return env
@@ -1220,9 +1227,13 @@ class Updater:
             limit = deadline if core_ready else core_deadline
             info = self.inspect_target(expected, timeout=min(10, max(0.1, limit - time.monotonic())))
             actual = {"nano_cpus": int(info["HostConfig"].get("NanoCpus", 0)),
-                      "memory_bytes": int(info["HostConfig"].get("Memory", 0))}
-            for key, environment in (("nano_cpus", "CONTAINER_CPUS"), ("memory_bytes", "CONTAINER_MEMORY")):
-                if key in baseline and (rollback or not os.environ.get(environment)) and actual[key] != baseline[key]:
+                      "memory_bytes": int(info["HostConfig"].get("Memory", 0)),
+                      "memory_swap_bytes": int(info["HostConfig"].get("MemorySwap", 0))}
+            for key, environment in (("nano_cpus", "CONTAINER_CPUS"), ("memory_bytes", "CONTAINER_MEMORY"),
+                                     ("memory_swap_bytes", "CONTAINER_MEMORY_SWAP")):
+                overridden = os.environ.get(environment) or (
+                    key == "memory_swap_bytes" and os.environ.get("CONTAINER_MEMORY"))
+                if key in baseline and (rollback or not overridden) and actual[key] != baseline[key]:
                     raise UpdateError("Container resource limits differ from the preserved baseline")
             self.receipt["active_resources"] = actual
             live = runtime_env_from_info(info)
@@ -1616,6 +1627,7 @@ print(json.dumps(changed))
             self.receipt["old_resources"] = {
                 "nano_cpus": int(initial["HostConfig"].get("NanoCpus", 0)),
                 "memory_bytes": int(initial["HostConfig"].get("Memory", 0)),
+                "memory_swap_bytes": int(initial["HostConfig"].get("MemorySwap", 0)),
             }
             self.receipt["old_runtime"] = runtime_env_from_info(initial)
             self.receipt["google_oauth_mount"] = self.google_oauth_mount_contract(initial)

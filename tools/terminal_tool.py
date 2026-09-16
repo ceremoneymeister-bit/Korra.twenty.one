@@ -3765,6 +3765,8 @@ def terminal_tool(
                 "exit_code": returncode,
                 "error": None,
             }
+            if result.get("resource_limit"):
+                result_dict["resource_limit"] = result["resource_limit"]
             # cwd echo: when the command changed the session's working
             # directory (cd, pushd, ...), tell the model where it ended up.
             # Production mining shows 60% of terminal calls carry a
