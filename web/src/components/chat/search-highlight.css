@@ -1,0 +1,5 @@
+.korra-search-match {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--neo-accent) 28%, var(--neo-surface));
+  color: var(--neo-text-primary);
+}

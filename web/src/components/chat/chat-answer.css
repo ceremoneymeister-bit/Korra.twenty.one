@@ -35,6 +35,17 @@
 .korra-chat-history__search input::-webkit-search-cancel-button { display: none; }
 .korra-chat-history__search button { display: flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; border-radius: 8px; }
 .korra-chat-history__title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.4; overflow-wrap: anywhere; }
+.korra-chat-history__snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.korra-chat-history__status { margin: 4px 14px; font-size: 12px; color: var(--neo-text-secondary); }
 .korra-chat-history__item[aria-current='page'] { background: color-mix(in srgb, var(--neo-accent) 9%, var(--neo-surface)); }
 .korra-chat-history__item[aria-current='page'] .korra-chat-history__title { font-weight: 600; }
 .korra-chat-history__search:focus-within { box-shadow: var(--neo-inset); }

@@ -87,6 +87,7 @@ import { useChatStream, type ChatApprovalEntry } from "@/hooks/useChatStream";
 import { useDictation, type DictationState } from "@/hooks/useDictation";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useSessionSearch } from "@/hooks/useSessionSearch";
+import { SearchHighlight } from "@/components/chat/SearchHighlight";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 import { useTheme } from "@/themes";
 import "./bubble-chat-composer.css";
@@ -328,6 +329,7 @@ interface BubbleChatSidebarProps {
   onNewChat: () => void;
   onRequestDelete: (id: string) => void;
   onRenamed?: () => void;
+  historyRevision?: number;
 }
 
 export function BubbleChatSidebar({
@@ -340,16 +342,24 @@ export function BubbleChatSidebar({
   onNewChat,
   onRequestDelete,
   onRenamed,
+  historyRevision = 0,
 }: BubbleChatSidebarProps) {
   const [searchInput, setSearchInput] = useState({ profile, value: "" });
   const query = searchInput.profile === profile ? searchInput.value : "";
-  const revision = JSON.stringify(sessions.map(session => [session.id, session.title]));
+  const revision = JSON.stringify([historyRevision, sessions.map(session => [session.id, session.title])]);
   const search = useSessionSearch(profile, query, revision);
   const searching = Boolean(query.trim());
-  const visibleSessions = searching ? search.sessions : sessions;
+  const visibleSessions = searching && search.hasResults ? search.sessions : sessions;
   const visibleLoading = searching ? search.loading : loading;
   const visibleError = searching ? search.error : error;
   const searchId = useId();
+  const resultsRef = useRef<HTMLElement>(null);
+  const hits = new Map(search.sessions.map(session => [session.id, session]));
+  const focusResult = (index: number) => {
+    const button = resultsRef.current?.querySelectorAll<HTMLButtonElement>(".korra-chat-history__item")[index];
+    button?.focus({ preventScroll: true });
+    button?.scrollIntoView?.({ block: "nearest" });
+  };
   return (
     // No bg- override — let the parent dashboard background show through.
     <aside
@@ -372,12 +382,29 @@ export function BubbleChatSidebar({
         <Search size={16} aria-hidden />
         <label className="sr-only" htmlFor={searchId}>Поиск в чатах этого агента</label>
         <input id={searchId} className="korra-chat-history__input" type="search" value={query} placeholder="Поиск в чатах"
+          aria-controls={`${searchId}-results`} aria-describedby={searching ? `${searchId}-status` : undefined}
           onChange={event => setSearchInput({ profile, value: event.target.value })}
-          onKeyDown={event => { if (event.key === "Escape") setSearchInput({ profile, value: "" }); }} />
+          onKeyDown={event => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === "Escape") setSearchInput({ profile, value: "" });
+            if (search.loading || search.error || !visibleSessions.length) return;
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault(); focusResult(event.key === "ArrowDown" ? 0 : visibleSessions.length - 1);
+            }
+            if (event.key === "Enter" && searching) {
+              event.preventDefault(); onSelect(visibleSessions[0].id);
+            }
+          }} />
         {query && <button type="button" aria-label="Очистить поиск"
           onClick={() => { setSearchInput({ profile, value: "" }); document.getElementById(searchId)?.focus(); }}><X size={15} aria-hidden /></button>}
       </div>
+      {searching && <p id={`${searchId}-status`} role="status" className="korra-chat-history__status">
+        {search.loading ? (search.hasResults ? "Обновляем результаты…" : "Ищем в истории…")
+          : search.error ? "Поиск не завершён" : `Показано чатов: ${search.sessions.length}`}
+      </p>}
       <nav
+        id={`${searchId}-results`}
+        ref={resultsRef}
         aria-label="Список чатов"
         // Отступ под тень выбранной карточки держим ВНУТРИ прокрутки со всех
         // четырёх сторон: `--neo-depth-1` смещает блик на -1px вверх и влево,
@@ -386,9 +413,9 @@ export function BubbleChatSidebar({
         className="mt-1 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1"
         aria-busy={visibleLoading}
       >
-        {visibleLoading && visibleSessions.length === 0 && (
+        {!searching && visibleLoading && visibleSessions.length === 0 && (
           <p className="px-5 py-2 text-sm text-[var(--neo-text-secondary)]">
-            {searching ? "Ищем в истории…" : "Загрузка…"}
+            Загрузка…
           </p>
         )}
         {visibleError && (
@@ -403,14 +430,23 @@ export function BubbleChatSidebar({
         {searching && !visibleLoading && !visibleError && visibleSessions.length === 0 && (
           <p role="status" className="px-4 py-3 text-sm text-[var(--neo-text-secondary)]">Ничего не найдено. Попробуйте другое название или слово из переписки.</p>
         )}
-        {visibleSessions.map((s) => {
+        {visibleSessions.map((s, index) => {
           const active = s.id === activeId;
           const Icon = iconForSource(s.source);
+          const hit = searching ? hits.get(s.id) : undefined;
           return (
             <div key={s.id} className="group relative w-full">
               <button
                 type="button"
                 onClick={() => onSelect(s.id)}
+                onKeyDown={event => {
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault(); focusResult(Math.max(0, Math.min(visibleSessions.length - 1, index + (event.key === "ArrowDown" ? 1 : -1))));
+                  }
+                  if (event.key === "Escape") {
+                    setSearchInput({ profile, value: "" }); document.getElementById(searchId)?.focus();
+                  }
+                }}
                 className={cn(
                   "korra-chat-history__item relative w-full rounded-[var(--neo-radius-control)] border-0 bg-transparent text-left outline-0",
                   "px-3 py-2.5 pr-11 flex items-start gap-2",
@@ -429,7 +465,13 @@ export function BubbleChatSidebar({
                   aria-hidden
                 />
                 <span className="flex-1 min-w-0 relative">
-                  <span className="korra-chat-history__title" title={titleFor(s)}>{titleFor(s)}</span>
+                  <span className="korra-chat-history__title" title={titleFor(s)}>
+                    {hit ? <SearchHighlight text={titleFor(s)} query={search.resultQuery} /> : titleFor(s)}
+                  </span>
+                  {hit?.role && hit.snippet && <span className="korra-chat-history__snippet">
+                    <span className="sr-only">В переписке: </span>
+                    <SearchHighlight text={hit.snippet} query={search.resultQuery} />
+                  </span>}
                   <span className="mt-0.5 flex items-center gap-2 text-xs text-[var(--neo-text-secondary)]">
                     <span className="min-w-0 truncate">{formatRelative(s.last_active)}</span>
                     {/* «Выбран», «В работе» и «Есть непрочитанный ответ» — разные
@@ -1247,6 +1289,7 @@ export default function BubbleChatPage({
   // сводку», — и решение остаётся в истории разговора наравне со всем
   // остальным, переживая перезагрузку.
   const [prefill, setPrefill] = useState<string | null>(null);
+  const [historyRevision, setHistoryRevision] = useState(0);
   const handledNewChatRequestRef = useRef(newChatRequest);
 
   useEffect(() => {
@@ -1399,6 +1442,7 @@ export default function BubbleChatPage({
   const sessionDelete = useConfirmDelete<string>({
     onDelete: async (id) => {
       await api.deleteSession(id, agentProfile || undefined);
+      setHistoryRevision(value => value + 1);
       if (id === sessionId) reset();
       void sessionList.refresh();
     },
@@ -1424,6 +1468,7 @@ export default function BubbleChatPage({
         onNewChat={handleNewChat}
         onRequestDelete={sessionDelete.requestDelete}
         onRenamed={() => void sessionList.refresh()}
+        historyRevision={historyRevision}
       />
       <DeleteConfirmDialog
         open={sessionDelete.isOpen}

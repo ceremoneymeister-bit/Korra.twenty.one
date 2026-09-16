@@ -211,9 +211,9 @@ async def search_sessions(
     sources: str = None,
     exclude_sources: str = None,
 ):
-    """Search sessions by ID plus full-text message content using FTS5.
+    """Search sessions by ID, title and full-text message content using FTS5.
 
-    Direct session-id matches are surfaced first, then FTS message-content
+    Direct session-id matches are surfaced first, then titles and FTS message-content
     matches. Results are deduped by compression lineage, not by raw
     ``session_id``. Auto-compression rotates a conversation onto a fresh
     session id (and leaves the old segment's messages in the FTS index), so one
@@ -272,13 +272,20 @@ async def search_sessions(
                     if not parent_session:
                         root = cur
                         break
-                    parent_ended_at = parent_session.get("ended_at")
-                    started_at = s.get("started_at")
+                    config = s.get("model_config") or {}
+                    if isinstance(config, str):
+                        try:
+                            config = json.loads(config)
+                        except (TypeError, ValueError):
+                            config = {}
+                    # Match the forward walk in get_compression_tip: explicit
+                    # branches/delegates stay separate, regardless of timing.
                     is_compression_edge = (
                         parent_session.get("end_reason") == "compression"
-                        and parent_ended_at is not None
-                        and started_at is not None
-                        and started_at >= parent_ended_at
+                        and isinstance(config, dict)
+                        and config.get("_branched_from") is None
+                        and config.get("_delegate_from") is None
+                        and s.get("source") != "tool"
                     )
                     if not is_compression_edge:
                         root = cur
@@ -375,6 +382,29 @@ async def search_sessions(
                         "session_started": row.get("started_at"),
                     },
                 )
+
+            # Reuse the SQL-bounded sidebar search, including titles of older
+            # compression segments. No first-page filtering or second index.
+            for row in db.list_sessions_rich(
+                search_query=q,
+                limit=safe_limit,
+                include_archived=True,
+                order_by_last_active=True,
+                compact_rows=True,
+                source=source_filter,
+                sources=source_list or None,
+                exclude_sources=exclude_list or None,
+            ):
+                add_lineage_result(row.get("id"), {
+                    "snippet": row.get("title") or row.get("preview") or "",
+                    "role": None,
+                    "source": row.get("source"),
+                    "model": row.get("model"),
+                    "session_started": row.get("started_at"),
+                })
+
+            if len(seen) >= safe_limit:
+                return {"results": list(seen.values())}
 
             # Auto-add prefix wildcards so partial words match
             # e.g. "nimb" → "nimb*" matches "nimby"

@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type SessionInfo } from "@/lib/api";
+import { api, type SessionSearchResult } from "@/lib/api";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 
-interface SearchState { key: string; sessions: SessionInfo[]; error: string | null }
+interface SearchState {
+  key: string;
+  scope: string;
+  query: string;
+  sessions: SessionSearchResult[];
+  error: string | null;
+}
 
 /** Search the whole history of this agent, including older, unloaded chats. */
 export function useSessionSearch(profile: string, query: string, revision = "") {
@@ -25,13 +31,21 @@ export function useSessionSearch(profile: string, query: string, revision = "") 
           seen.add(id);
           return [{ ...item, id }];
         });
-        setResult({ key, sessions, error: null });
+        setResult({ key, scope, query: q, sessions, error: null });
       }).catch(cause => {
-        if (current) setResult({ key, sessions: [], error: ownerFacingError(cause, "Не удалось выполнить поиск. Попробуйте ещё раз.") });
+        if (current) setResult({ key, scope, query: q, sessions: [], error: ownerFacingError(cause, "Не удалось выполнить поиск. Попробуйте ещё раз.") });
       });
     }, 250);
     return () => { current = false; window.clearTimeout(timer); };
   }, [key, q, scope]);
   const settled = Boolean(q && result?.key === key);
-  return { sessions: settled ? result!.sessions : [], loading: Boolean(q && !settled), error: settled ? result!.error : null, refresh };
+  const available = Boolean(q && result?.scope === scope);
+  return {
+    sessions: available ? result!.sessions : [],
+    resultQuery: available ? result!.query : "",
+    hasResults: available,
+    loading: Boolean(q && !settled),
+    error: settled ? result!.error : null,
+    refresh,
+  };
 }

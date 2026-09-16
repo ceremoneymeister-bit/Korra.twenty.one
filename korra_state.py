@@ -10998,7 +10998,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         # order_by_last_active path (which builds the chain CTE); other callers
         # pass id_query=None.
         id_needle = (id_query or "").strip().lower()
-        search_needle = (search_query or "").strip().lower()
+        search_needle = (search_query or "").strip().casefold()
         if order_by_last_active:
             # Compute effective_last_active by walking each surfaced session's
             # compression-continuation chain forward in SQL and taking the MAX
@@ -11038,14 +11038,14 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 # (punctuation-stripped) variant lets `an94` match `AN-94`.
                 compact_needle = re.sub(r"[\W_]+", "", search_needle)
                 compact_sql = (
-                    "REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE({0}, '')),"
+                    "REPLACE(REPLACE(REPLACE(REPLACE(korra_casefold(COALESCE({0}, '')),"
                     " '-', ''), '_', ''), '.', ''), ' ', '')"
                 )
                 search_clause = (
                     "EXISTS (SELECT 1 FROM chain cq"
                     " JOIN sessions cs ON cs.id = cq.cur_id"
                     " WHERE cq.root_id = s.id"
-                    " AND (LOWER(COALESCE(cs.title, '')) LIKE ? ESCAPE '\\'"
+                    " AND (korra_casefold(COALESCE(cs.title, '')) LIKE ? ESCAPE '\\'"
                     " OR LOWER(cq.cur_id) LIKE ? ESCAPE '\\'"
                 )
                 id_params.extend([_like_pattern(search_needle)] * 2)
@@ -11123,6 +11123,10 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             """
             params.extend([limit, offset])
         with self._read_ctx() as conn:
+            if search_needle and order_by_last_active:
+                # SQLite's built-in LOWER only folds ASCII. Register on the
+                # actual read connection (also works for read-only snapshots).
+                conn.create_function("korra_casefold", 1, str.casefold, deterministic=True)
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
         sessions = []

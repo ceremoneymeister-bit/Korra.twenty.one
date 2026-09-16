@@ -80,7 +80,11 @@ export function installDemo() {
     if (route === "/sessions/search") {
       const q = (url.searchParams.get("q") || "").toLocaleLowerCase("ru");
       const results = sessions.filter(s => s.profile === profile && (s.title.toLocaleLowerCase("ru").includes(q) || messages.get(s.id)?.some(m => m.content.toLocaleLowerCase("ru").includes(q))));
-      return json({ results:results.map(s => ({ ...s, session_id:s.id, snippet:s.title, role:"user", session_started:s.started_at })) });
+      return json({ results:results.map(s => {
+        const hit = s.title.toLocaleLowerCase("ru").includes(q) ? undefined
+          : messages.get(s.id)?.find(m => m.content.toLocaleLowerCase("ru").includes(q));
+        return { ...s, session_id:s.id, snippet:hit?.content.slice(0,240) || s.title, role:hit?.role || null, session_started:s.started_at };
+      }) });
     }
     const session = route.match(/^\/sessions\/([^/]+)(\/.*)?$/);
     if (session) {

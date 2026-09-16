@@ -64,4 +64,26 @@ describe("search in an agent's chat history", () => {
     await render("план", "default", "after"); await tick();
     expect(search).toHaveBeenCalledTimes(2);
   });
+  it("keeps previous matches while typing and ignores superseded requests", async () => {
+    search.mockResolvedValueOnce({ results: [result("first")] });
+    await render("план"); await tick();
+    let resolve!: (value: SessionSearchResponse) => void;
+    search.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
+    await render("план сайта"); await tick();
+    expect(latest.sessions.map(s => s.id)).toEqual(["first"]);
+    expect(latest.loading).toBe(true);
+    expect(latest.resultQuery).toBe("план");
+    search.mockResolvedValueOnce({ results:[result("latest")] });
+    await render("план сайта осень"); await tick();
+    await act(async () => resolve({ results:[result("superseded")] }));
+    expect(latest.sessions.map(s => s.id)).toEqual(["latest"]);
+    expect(latest.loading).toBe(false);
+  });
+  it("discards cached matches when clearing or switching profiles", async () => {
+    search.mockResolvedValue({ results:[result("designer-only")] });
+    await render("план"); await tick();
+    await render(""); expect(latest.hasResults).toBe(false);
+    await render("план", "lawyer");
+    expect(latest.sessions).toEqual([]); expect(latest.hasResults).toBe(false);
+  });
 });
