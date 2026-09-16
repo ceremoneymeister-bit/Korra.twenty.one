@@ -2510,6 +2510,8 @@ export interface GoogleWorkspaceStatus {
     unknown_scope_count?: number;
     usable_services?: string[];
     legacy_compatible?: boolean;
+    shared_from?: string;
+    shared_with?: string[];
     action?: string | null;
   };
   pending: { active: boolean; services?: string[]; expires_at?: number };
@@ -2526,7 +2528,7 @@ export interface GoogleWorkspaceStart {
 }
 
 export interface GoogleWorkspaceRevoke {
-  status: "revoked";
+  status: "revoked" | "detached";
   remote_revoked: boolean;
 }
 

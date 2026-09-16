@@ -68,6 +68,8 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
   const needsReauth = status?.connection.state === "reauthorization_required";
   const legacyServices = status?.connection.usable_services ?? [];
   const legacyCompatible = Boolean(needsReauth && status?.connection.legacy_compatible);
+  const sharedFrom = status?.connection.shared_from;
+  const sharedWith = status?.connection.shared_with ?? [];
   const canStart = Boolean(status?.app.configured && selected.length && !busy && !needsReauth);
   const stateLabel = useMemo(() => {
     if (!status) return "Проверяем";
@@ -128,7 +130,9 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
       setAuthUrl("");
       setCallbackUrl("");
       setChecks({});
-      if (result.remote_revoked) {
+      if (result.status === "detached") {
+        onSuccess("Общий доступ к Google отключён для выбранного агента.");
+      } else if (result.remote_revoked) {
         onSuccess("Google Workspace отключён от выбранного агента.");
       } else {
         onError(
@@ -167,7 +171,7 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
           <Badge>{stateLabel}</Badge>
         </div>
         <CardDescription>
-          Один OAuth-клиент установки, настроенный оператором. Доступ и токены изолированы внутри выбранного агента.
+          Один OAuth-клиент установки, настроенный оператором. Grant хранится у одного агента; владелец может явно открыть его другим агентам без копирования токена.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 p-4">
@@ -176,6 +180,18 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
         {status && !status.app.configured ? (
           <div className="rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
             OAuth-приложение ещё не установлено оператором. Секрет приложения нельзя добавлять через чат или эту страницу.
+          </div>
+        ) : null}
+
+        {sharedFrom ? (
+          <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+            Этот агент использует общий доступ профиля <strong>{sharedFrom}</strong>. Отключение здесь снимет доступ только у выбранного агента.
+          </div>
+        ) : null}
+
+        {sharedWith.length ? (
+          <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+            Доступ к этому grant также выдан: {sharedWith.join(", ")}.
           </div>
         ) : null}
 
@@ -255,7 +271,7 @@ export function GoogleWorkspaceCard({ onError, onSuccess }: Props) {
               ))}
             </div>
             <Button size="sm" outlined disabled={Boolean(busy)} onClick={() => void revoke()} className="w-fit">
-              {needsReauth ? "Отключить для переподключения" : "Отключить Google"}
+              {sharedFrom ? "Отключить общий доступ" : needsReauth ? "Отключить для переподключения" : "Отключить Google"}
             </Button>
           </div>
         ) : null}

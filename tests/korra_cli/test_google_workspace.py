@@ -113,6 +113,16 @@ def _write_token(profile: Path, services: tuple[str, ...]) -> None:
     )
 
 
+def _installation_profiles(monkeypatch, root: Path, *names: str) -> None:
+    import korra_constants
+
+    root.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (root / "profiles" / name).mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(google, "get_default_hermes_root", lambda: root)
+    monkeypatch.setattr(korra_constants, "get_default_hermes_root", lambda: root)
+
+
 def test_one_installation_app_and_profile_tokens_are_isolated(tmp_path):
     root = tmp_path / "install"
     first = root / "profiles" / "first"
@@ -136,6 +146,123 @@ def test_one_installation_app_and_profile_tokens_are_isolated(tmp_path):
     assert stat.S_IMODE(os.stat(google.token_path(first)).st_mode) == 0o600
     assert not google.token_path(second).exists()
     assert "client_secret" not in google.token_path(first).read_text(encoding="utf-8")
+
+
+def test_explicit_profiles_use_one_source_grant_without_token_copies(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    _installation_profiles(monkeypatch, root, "assistant", "rop", "smm")
+    _write_app(root)
+    source = root / "profiles" / "assistant"
+    rop = root / "profiles" / "rop"
+    smm = root / "profiles" / "smm"
+    _write_token(source, ("drive", "sheets"))
+
+    result = google.configure_sharing(
+        source_profile="assistant",
+        profiles=["smm", "rop"],
+    )
+
+    assert result == {"source_profile": "assistant", "profiles": ["rop", "smm"]}
+    assert google._active_token_path(rop) == google.token_path(source)
+    assert google._active_token_path(smm) == google.token_path(source)
+    assert not google.token_path(rop).exists()
+    assert not google.token_path(smm).exists()
+    assert stat.S_IMODE(google.sharing_policy_path().stat().st_mode) == 0o600
+    assert google.status(profile_home=rop)["connection"] == {
+        "state": "connected",
+        "services": ["drive", "sheets"],
+        "expires_at": None,
+        "action": None,
+        "shared_from": "assistant",
+    }
+    assert google.status(profile_home=source)["connection"]["shared_with"] == ["rop", "smm"]
+    assert google.check_service("drive", profile_home=rop, probe=lambda *_args: None)["status"] == "ok"
+
+
+def test_shared_consumer_detaches_without_revoking_source(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    _installation_profiles(monkeypatch, root, "assistant", "rop")
+    _write_app(root)
+    source = root / "profiles" / "assistant"
+    consumer = root / "profiles" / "rop"
+    _write_token(source, ("drive",))
+    google.configure_sharing(source_profile="assistant", profiles=["rop"])
+    remote_values: list[str] = []
+
+    with pytest.raises(google.GoogleWorkspaceError) as in_use:
+        google.revoke(
+            profile_home=source,
+            remote_revoke=lambda value: remote_values.append(value),
+        )
+    assert in_use.value.code == "shared_grant_in_use"
+
+    assert google.revoke(
+        profile_home=consumer,
+        remote_revoke=lambda value: remote_values.append(value),
+    ) == {"status": "detached", "remote_revoked": False}
+    assert google.token_path(source).exists()
+    assert remote_values == []
+    assert google.status(profile_home=consumer)["connection"]["state"] == "not_connected"
+
+
+def test_shared_consumer_cannot_start_its_own_flow_until_detached(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    _installation_profiles(monkeypatch, root, "assistant", "rop")
+    _write_app(root)
+    _write_token(root / "profiles" / "assistant", ("drive",))
+    google.configure_sharing(source_profile="assistant", profiles=["rop"])
+
+    with pytest.raises(google.GoogleWorkspaceError) as denied:
+        google.start("drive", profile_home=root / "profiles" / "rop")
+    assert denied.value.code == "shared_access_active"
+    assert not google.pending_path(root / "profiles" / "rop").exists()
+
+
+def test_sharing_rejects_local_target_and_malformed_policy(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    _installation_profiles(monkeypatch, root, "assistant", "rop")
+    _write_app(root)
+    _write_token(root / "profiles" / "assistant", ("drive",))
+    _write_token(root / "profiles" / "rop", ("sheets",))
+
+    with pytest.raises(google.GoogleWorkspaceError) as connected:
+        google.configure_sharing(source_profile="assistant", profiles=["rop"])
+    assert connected.value.code == "sharing_target_connected"
+
+    google.token_path(root / "profiles" / "rop").unlink()
+    policy_path = google.sharing_policy_path()
+    policy_path.write_text('{"version":1,"profile_sources":{"rop":"rop"}}', encoding="utf-8")
+    with pytest.raises(google.GoogleWorkspaceError) as invalid:
+        google.status(profile_home=root / "profiles" / "rop")
+    assert invalid.value.code == "sharing_policy_invalid"
+
+
+def test_profile_rename_and_delete_keep_sharing_policy_safe(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    _installation_profiles(monkeypatch, root, "assistant", "rop", "sales")
+    _write_token(root / "profiles" / "assistant", ("drive",))
+    google.configure_sharing(source_profile="assistant", profiles=["rop"])
+
+    google.rename_profile_sharing("rop", "sales")
+    assert google._read_sharing_policy()["profile_sources"] == {"sales": "assistant"}
+
+    google.remove_profile_sharing("assistant")
+    assert google._read_sharing_policy()["profile_sources"] == {}
+    assert not google.sharing_policy_path().exists()
+
+
+def test_sharing_policy_symlink_is_not_followed(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    _installation_profiles(monkeypatch, root, "rop")
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"version":1,"profile_sources":{}}', encoding="utf-8")
+    google.profile_google_dir(root).mkdir(mode=0o700)
+    google.sharing_policy_path().symlink_to(outside)
+
+    with pytest.raises(google.GoogleWorkspaceError) as denied:
+        google.status(profile_home=root / "profiles" / "rop")
+    assert denied.value.code == "state_path_unsafe"
+    assert outside.read_text(encoding="utf-8") == '{"version":1,"profile_sources":{}}'
 
 
 def test_default_profile_state_is_separate_from_operator_app_directory(tmp_path):
@@ -883,10 +1010,33 @@ def test_dashboard_status_translates_google_workspace_errors(monkeypatch):
 
 def test_dashboard_bodies_cannot_smuggle_a_profile_selector():
     from pydantic import ValidationError
-    from korra_cli.web_routers.google_workspace import GoogleStartBody
+    from korra_cli.web_routers.google_workspace import GoogleSharingBody, GoogleStartBody
 
     with pytest.raises(ValidationError):
         GoogleStartBody.model_validate({"services": ["drive"], "profile": "foreign"})
+    with pytest.raises(ValidationError):
+        GoogleSharingBody.model_validate({"profiles": ["rop"], "source": "foreign"})
+
+
+def test_dashboard_sharing_uses_selected_profile_as_source(monkeypatch, tmp_path):
+    from korra_cli.web_routers import google_workspace as routes
+
+    selected_home = tmp_path / "profiles" / "assistant"
+    calls = []
+    monkeypatch.setattr(routes, "_profile_home", lambda profile: selected_home)
+    monkeypatch.setattr(routes.google, "_profile_name_for_home", lambda home: "assistant")
+    monkeypatch.setattr(
+        routes.google,
+        "configure_sharing",
+        lambda **kwargs: calls.append(kwargs) or {"source_profile": "assistant", "profiles": ["rop"]},
+    )
+
+    result = asyncio.run(
+        routes.google_configure_sharing(routes.GoogleSharingBody(profiles=["rop"]), profile="assistant")
+    )
+
+    assert result == {"source_profile": "assistant", "profiles": ["rop"]}
+    assert calls == [{"source_profile": "assistant", "profiles": ["rop"]}]
 
 
 def test_google_console_legacy_auth_uri_is_accepted(tmp_path):

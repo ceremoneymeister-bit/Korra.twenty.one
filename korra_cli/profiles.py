@@ -2208,6 +2208,9 @@ def delete_profile(name: str, yes: bool = False) -> Path:
                 raise
 
         _rmtree_with_retry(profile_dir, _make_writable)
+        from korra_cli import google_workspace
+
+        google_workspace.remove_profile_sharing(canon)
         print(f'✓ Удалено: {profile_dir}')
     except Exception as e:
         print(f'⚠ Не удалось удалить {profile_dir}: {e}')
@@ -2822,6 +2825,13 @@ def rename_profile(old_name: str, new_name: str) -> Path:
 
     # 2. Rename directory
     old_dir.rename(new_dir)
+    try:
+        from korra_cli import google_workspace
+
+        google_workspace.rename_profile_sharing(old_canon, new_canon)
+    except Exception:
+        new_dir.rename(old_dir)
+        raise
     print(f'✓ Переименовано: {old_dir.name} → {new_dir.name}')
 
     # 3. Update profile-scoped Honcho host blocks, preserving aiPeer identity

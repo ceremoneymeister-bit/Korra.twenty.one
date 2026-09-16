@@ -115,3 +115,43 @@ it("warns when only the local grant was removed", async () => {
   expect(onError).toHaveBeenCalledWith(expect.stringContaining("Google не подтвердил отзыв"));
   expect(onError).toHaveBeenCalledWith(expect.stringContaining("настройках Google Аккаунта"));
 });
+
+it("explains and detaches shared access without reporting a failed remote revoke", async () => {
+  apiMocks.getGoogleWorkspaceStatus.mockResolvedValue({
+    app: { configured: true, credential_type: "installed" },
+    connection: {
+      state: "connected",
+      services: ["drive"],
+      shared_from: "assistant",
+    },
+    pending: { active: false },
+    available_services: ["drive"],
+    completion_mode: "manual_localhost_url",
+  });
+  apiMocks.revokeGoogleWorkspace.mockResolvedValue({
+    status: "detached",
+    remote_revoked: false,
+  });
+  const onError = vi.fn();
+  const onSuccess = vi.fn();
+
+  await act(async () => {
+    root.render(<GoogleWorkspaceCard onError={onError} onSuccess={onSuccess} />);
+    await Promise.resolve();
+  });
+  expect(host.textContent).toContain("общий доступ профиля");
+  expect(host.textContent).toContain("assistant");
+  const button = Array.from(host.querySelectorAll("button")).find(element =>
+    element.textContent?.includes("Отключить общий доступ"),
+  );
+  await act(async () => {
+    button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(onError).not.toHaveBeenCalled();
+  expect(onSuccess).toHaveBeenCalledWith(
+    "Общий доступ к Google отключён для выбранного агента.",
+  );
+});

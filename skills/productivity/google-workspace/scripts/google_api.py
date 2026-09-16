@@ -46,14 +46,9 @@ from google_oauth_scopes import (
 )
 
 HERMES_HOME = get_hermes_home()
-_NATIVE_TOKEN_PATH = _native_google.token_path(HERMES_HOME)
-_LEGACY_TOKEN_PATH = _native_google.legacy_token_path(HERMES_HOME)
-TOKEN_PATH = (
-    _NATIVE_TOKEN_PATH
-    if _NATIVE_TOKEN_PATH.exists() or not _LEGACY_TOKEN_PATH.exists()
-    else _LEGACY_TOKEN_PATH
-)
-_native_google._private_dir(_native_google.profile_google_dir(HERMES_HOME))
+GRANT_HOME = _native_google._grant_profile_home(HERMES_HOME)
+TOKEN_PATH = _native_google._active_token_path(HERMES_HOME)
+_native_google._private_dir(_native_google.profile_google_dir(GRANT_HOME))
 
 SCOPES = list(MINIMUM_SCOPES)
 def _ensure_authenticated():
@@ -151,7 +146,7 @@ def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None 
         # Hold the same profile lifecycle lock used by refresh/revoke. Recheck
         # the selected service after taking it so a revoke/reconnect between
         # native refresh and this block cannot dispatch with stale authority.
-        with _native_google._state_lock(HERMES_HOME):
+        with _native_google._state_lock(GRANT_HOME):
             _require_selected_service(parts[0])
             original_token_bytes = TOKEN_PATH.read_bytes()
             result = subprocess.run(
