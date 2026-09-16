@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import types
+from contextlib import contextmanager
 from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -75,6 +76,65 @@ def _write_token(path: Path, *, token="ya29.test", expiry=None, **extra):
     }
     data["expiry"] = expiry
     path.write_text(json.dumps(data))
+
+
+def test_skill_wrappers_use_shared_source_token_and_lock(monkeypatch, tmp_path):
+    root = tmp_path / "install"
+    source = root / "profiles" / "assistant"
+    consumer = root / "profiles" / "rop"
+    source_google = source / "google-workspace"
+    consumer.mkdir(parents=True)
+    source_google.mkdir(parents=True)
+    scopes = ["https://www.googleapis.com/auth/drive"]
+    _write_token(
+        source_google / "token.json",
+        scopes=scopes,
+        korra_services=["drive"],
+        korra_requested_scopes=scopes,
+    )
+    root_google = root / "google-workspace"
+    root_google.mkdir()
+    (root_google / "shared-access.json").write_text(
+        json.dumps({"version": 1, "profile_sources": {"rop": "assistant"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(consumer))
+
+    spec = importlib.util.spec_from_file_location("gws_api_shared_test", API_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    locked_homes = []
+
+    @contextmanager
+    def capture_lock(home):
+        locked_homes.append(home)
+        yield
+
+    monkeypatch.setattr(module._native_google, "_state_lock", capture_lock)
+    monkeypatch.setattr(
+        module._native_google,
+        "_credentials",
+        lambda *_args, **_kwargs: SimpleNamespace(token="ya29.shared"),
+    )
+    monkeypatch.setattr(module, "_gws_binary", lambda: "/usr/bin/gws")
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: MagicMock(returncode=0, stdout="{}", stderr=""),
+    )
+
+    assert module.GRANT_HOME == source
+    assert module.TOKEN_PATH == source_google / "token.json"
+    assert module._run_gws(["drive", "files", "list"]) == {}
+    assert locked_homes == [source]
+
+    bridge_spec = importlib.util.spec_from_file_location("gws_bridge_shared_test", BRIDGE_PATH)
+    bridge = importlib.util.module_from_spec(bridge_spec)
+    assert bridge_spec.loader is not None
+    bridge_spec.loader.exec_module(bridge)
+    assert bridge.get_token_path() == source_google / "token.json"
 
 
 def test_bridge_returns_valid_token(bridge_module, tmp_path):

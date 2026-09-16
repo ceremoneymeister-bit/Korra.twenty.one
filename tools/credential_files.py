@@ -107,6 +107,41 @@ def register_credential_file(
         )
         return False
 
+    # Google Workspace can explicitly lend one profile grant to selected
+    # sibling profiles.  The skill still expects its credential at the
+    # profile-local destination inside a remote sandbox, but the host source
+    # must be the grant selected by the same policy as native Google calls.
+    # Keep this resolver exact and built in: arbitrary skill declarations
+    # cannot nominate a different host file, and the resolved grant must stay
+    # inside this Korra installation.
+    if relative_path == "google-workspace/token.json":
+        try:
+            from korra_cli import google_workspace
+            from korra_constants import get_default_hermes_root
+        except ImportError:
+            logger.exception(
+                "credential_files: refusing Google grant because its resolver "
+                "could not be imported"
+            )
+            return False
+        try:
+            host_path = google_workspace._active_token_path(hermes_home)
+            installation_root = get_default_hermes_root()
+            containment_error = validate_within_dir(host_path, installation_root)
+        except (OSError, google_workspace.GoogleWorkspaceError):
+            logger.warning(
+                "credential_files: refusing Google grant because shared access "
+                "could not be resolved safely"
+            )
+            return False
+        if containment_error:
+            logger.warning(
+                "credential_files: rejected Google grant outside installation %s (%s)",
+                host_path,
+                containment_error,
+            )
+            return False
+
     resolved = host_path.resolve()
     if not resolved.is_file():
         logger.debug("credential_files: skipping %s (not found)", resolved)
@@ -599,5 +634,3 @@ def iter_cache_files(
 def clear_credential_files() -> None:
     """Reset the skill-scoped registry (e.g. on session reset)."""
     _get_registered().clear()
-
-

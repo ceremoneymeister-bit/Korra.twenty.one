@@ -1,8 +1,10 @@
-"""Native, profile-isolated Google Workspace OAuth service.
+"""Native Google Workspace OAuth service with explicit profile sharing.
 
 The OAuth client belongs to one Korra installation.  User grants belong to a
-single profile.  Public methods return status and URLs only; app secrets,
-authorization codes, access tokens, and refresh tokens never leave this layer.
+single profile by default.  The installation owner may explicitly let named
+profiles use one source profile's grant without copying its token.  Public
+methods return status and URLs only; app secrets, authorization codes, access
+tokens, and refresh tokens never leave this layer.
 """
 
 from __future__ import annotations
@@ -90,10 +92,18 @@ def legacy_app_path(profile_home: Path | None = None) -> Path:
     return (profile_home or get_hermes_home()) / "google_client_secret.json"
 
 
-def _active_token_path(profile_home: Path | None = None) -> Path:
+def sharing_policy_path(root: Path | None = None) -> Path:
+    return profile_google_dir(root or get_default_hermes_root()) / "shared-access.json"
+
+
+def _local_active_token_path(profile_home: Path | None = None) -> Path:
     current = token_path(profile_home)
     _reject_symlink(current)
-    return current if current.exists() else legacy_token_path(profile_home)
+    if current.exists():
+        return current
+    old = legacy_token_path(profile_home)
+    _reject_symlink(old)
+    return old
 
 
 def _confined_child(base: Path, name: str) -> Path:
@@ -329,6 +339,279 @@ def _state_lock(profile_home: Path | None = None) -> Iterator[None]:
         _safe_unlink(path)
 
 
+@contextmanager
+def _sharing_lock(root: Path | None = None) -> Iterator[None]:
+    directory = profile_google_dir(root or get_default_hermes_root())
+    _private_dir(directory)
+    path = directory / ".sharing.lock"
+    deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+    fd: int | None = None
+    while fd is None:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            try:
+                age = time.time() - path.stat().st_mtime
+                if age > PENDING_TTL_SECONDS:
+                    _safe_unlink(path)
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() >= deadline:
+                raise GoogleWorkspaceError(
+                    "sharing_busy",
+                    "Another Google sharing operation is in progress",
+                    status_code=409,
+                ) from None
+            time.sleep(0.02)
+    try:
+        os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+        os.fsync(fd)
+        yield
+    finally:
+        os.close(fd)
+        _safe_unlink(path)
+
+
+@contextmanager
+def _sharing_guard(profile_home: Path | None = None) -> Iterator[None]:
+    if _profile_name_for_home(profile_home) is None:
+        yield
+        return
+    with _sharing_lock():
+        yield
+
+
+def _profile_name_for_home(profile_home: Path | None = None) -> str | None:
+    """Return a canonical installation profile id, or None for custom homes."""
+    from korra_cli import profiles
+
+    try:
+        home = Path(profile_home or get_hermes_home()).expanduser().resolve(strict=False)
+        root = Path(get_default_hermes_root()).expanduser().resolve(strict=False)
+        if home == root:
+            return "default"
+        relative = home.relative_to(root / "profiles")
+        if len(relative.parts) != 1:
+            return None
+        name = profiles.normalize_profile_name(relative.parts[0])
+        profiles.validate_profile_name(name)
+        return name
+    except (OSError, ValueError):
+        return None
+
+
+def _profile_home_for_name(name: str) -> Path:
+    from korra_cli import profiles
+
+    canonical = profiles.normalize_profile_name(name)
+    profiles.validate_profile_name(canonical)
+    return profiles.get_profile_dir(canonical)
+
+
+def _empty_sharing_policy() -> dict[str, Any]:
+    return {"version": 1, "profile_sources": {}}
+
+
+def _read_sharing_policy(root: Path | None = None) -> dict[str, Any]:
+    path = sharing_policy_path(root)
+    _reject_symlink(path)
+    if not path.exists():
+        return _empty_sharing_policy()
+    try:
+        payload = _read_json(path, label="sharing policy")
+        if payload.get("version") != 1 or set(payload) != {"version", "profile_sources"}:
+            raise ValueError("unsupported schema")
+        raw_sources = payload.get("profile_sources")
+        if not isinstance(raw_sources, dict):
+            raise ValueError("profile_sources must be an object")
+        sources: dict[str, str] = {}
+        for consumer, source in raw_sources.items():
+            if not isinstance(consumer, str) or not isinstance(source, str):
+                raise ValueError("profile ids must be strings")
+            consumer_home = _profile_home_for_name(consumer)
+            source_home = _profile_home_for_name(source)
+            canonical_consumer = _profile_name_for_home(consumer_home)
+            canonical_source = _profile_name_for_home(source_home)
+            if (
+                canonical_consumer is None
+                or canonical_source is None
+                or canonical_consumer != consumer
+                or canonical_source != source
+                or consumer == source
+            ):
+                raise ValueError("profile id is not canonical")
+            sources[consumer] = source
+        if set(sources).intersection(sources.values()):
+            raise ValueError("shared grants cannot be chained")
+        return {"version": 1, "profile_sources": sources}
+    except (GoogleWorkspaceError, ValueError) as exc:
+        if isinstance(exc, GoogleWorkspaceError) and exc.code == "state_path_unsafe":
+            raise
+        raise GoogleWorkspaceError(
+            "sharing_policy_invalid",
+            "Google shared-access policy is unreadable or invalid",
+            status_code=409,
+        ) from exc
+
+
+def _write_sharing_policy(payload: dict[str, Any], root: Path | None = None) -> None:
+    path = sharing_policy_path(root)
+    sources = payload.get("profile_sources")
+    if not sources:
+        _safe_unlink(path)
+        return
+    _atomic_private_json(path, payload)
+
+
+def _shared_source_name(profile_home: Path | None = None) -> str | None:
+    # A local grant always wins.  This also keeps old installations isolated
+    # when an operator manually leaves stale policy behind.
+    if _local_active_token_path(profile_home).exists():
+        return None
+    name = _profile_name_for_home(profile_home)
+    if name is None:
+        return None
+    return _read_sharing_policy()["profile_sources"].get(name)
+
+
+def _grant_profile_home(profile_home: Path | None = None) -> Path:
+    home = Path(profile_home or get_hermes_home())
+    source = _shared_source_name(home)
+    return _profile_home_for_name(source) if source else home
+
+
+def _active_token_path(profile_home: Path | None = None) -> Path:
+    return _local_active_token_path(_grant_profile_home(profile_home))
+
+
+def configure_sharing(*, source_profile: str, profiles: list[str]) -> dict[str, Any]:
+    """Replace the explicit consumer set for one source grant."""
+    from korra_cli import profiles as profile_store
+
+    source = profile_store.normalize_profile_name(source_profile)
+    profile_store.validate_profile_name(source)
+    if not profile_store.profile_exists(source):
+        raise GoogleWorkspaceError("profile_missing", f"Profile '{source}' does not exist", status_code=404)
+
+    consumers: list[str] = []
+    for value in profiles:
+        canonical = profile_store.normalize_profile_name(value)
+        profile_store.validate_profile_name(canonical)
+        if canonical == source:
+            raise GoogleWorkspaceError("sharing_profile_invalid", "A source profile cannot share with itself")
+        if canonical in consumers:
+            raise GoogleWorkspaceError("sharing_profile_duplicate", f"Profile '{canonical}' is duplicated")
+        if not profile_store.profile_exists(canonical):
+            raise GoogleWorkspaceError("profile_missing", f"Profile '{canonical}' does not exist", status_code=404)
+        consumers.append(canonical)
+
+    source_home = profile_store.get_profile_dir(source)
+    with _sharing_lock():
+        policy = _read_sharing_policy()
+        mappings = dict(policy["profile_sources"])
+        for consumer, mapped_source in list(mappings.items()):
+            if mapped_source == source:
+                mappings.pop(consumer)
+
+        for consumer in consumers:
+            other_source = mappings.get(consumer)
+            if other_source is not None and other_source != source:
+                raise GoogleWorkspaceError(
+                    "sharing_profile_conflict",
+                    f"Profile '{consumer}' already uses the grant from '{other_source}'",
+                    status_code=409,
+                )
+
+        if source in mappings:
+            raise GoogleWorkspaceError(
+                "sharing_source_conflict",
+                f"Profile '{source}' already uses another profile's grant",
+                status_code=409,
+            )
+        existing_sources = set(mappings.values())
+        source_targets = sorted(set(consumers).intersection(existing_sources))
+        if source_targets:
+            raise GoogleWorkspaceError(
+                "sharing_profile_conflict",
+                "A grant source cannot also consume another shared grant: " + ", ".join(source_targets),
+                status_code=409,
+            )
+
+        if consumers:
+            with _state_lock(source_home):
+                source_status = _token_status(source_home)
+                if source_status["state"] == "not_connected" or (
+                    source_status["state"] == "reauthorization_required"
+                    and not source_status.get("legacy_compatible", False)
+                ):
+                    raise GoogleWorkspaceError(
+                        "sharing_source_unusable",
+                        f"Profile '{source}' has no usable Google Workspace grant",
+                        status_code=409,
+                    )
+
+        for consumer in consumers:
+            consumer_home = profile_store.get_profile_dir(consumer)
+            with _state_lock(consumer_home):
+                if _local_active_token_path(consumer_home).exists():
+                    raise GoogleWorkspaceError(
+                        "sharing_target_connected",
+                        f"Profile '{consumer}' already has its own Google Workspace grant",
+                        status_code=409,
+                    )
+                if _pending_record(consumer_home) is not None:
+                    raise GoogleWorkspaceError(
+                        "sharing_target_pending",
+                        f"Profile '{consumer}' has an active Google authorization flow",
+                        status_code=409,
+                    )
+            mappings[consumer] = source
+
+        updated = {"version": 1, "profile_sources": dict(sorted(mappings.items()))}
+        _write_sharing_policy(updated)
+    return {"source_profile": source, "profiles": sorted(consumers)}
+
+
+def remove_profile_sharing(profile: str) -> None:
+    """Remove a deleted profile from both sides of the sharing policy."""
+    from korra_cli import profiles as profile_store
+
+    canonical = profile_store.normalize_profile_name(profile)
+    profile_store.validate_profile_name(canonical)
+    with _sharing_lock():
+        policy = _read_sharing_policy()
+        mappings = {
+            consumer: source
+            for consumer, source in policy["profile_sources"].items()
+            if consumer != canonical and source != canonical
+        }
+        _write_sharing_policy({"version": 1, "profile_sources": mappings})
+
+
+def rename_profile_sharing(old_profile: str, new_profile: str) -> None:
+    """Keep explicit grants bound to the same profile across an id rename."""
+    from korra_cli import profiles as profile_store
+
+    old = profile_store.normalize_profile_name(old_profile)
+    new = profile_store.normalize_profile_name(new_profile)
+    profile_store.validate_profile_name(old)
+    profile_store.validate_profile_name(new)
+    with _sharing_lock():
+        policy = _read_sharing_policy()
+        if new in policy["profile_sources"] or new in policy["profile_sources"].values():
+            raise GoogleWorkspaceError(
+                "sharing_profile_conflict",
+                f"Google shared-access policy already refers to '{new}'",
+                status_code=409,
+            )
+        mappings = {
+            (new if consumer == old else consumer): (new if source == old else source)
+            for consumer, source in policy["profile_sources"].items()
+        }
+        _write_sharing_policy({"version": 1, "profile_sources": dict(sorted(mappings.items()))})
+
+
 def _pending_record(profile_home: Path | None = None) -> dict[str, Any] | None:
     path = pending_path(profile_home)
     _reject_symlink(path)
@@ -423,7 +706,20 @@ def status(*, profile_home: Path | None = None) -> dict[str, Any]:
         if legacy_app_path(profile_home).exists():
             app["legacy_profile_credential"] = True
             app["operator_action"] = "Provision one verified OAuth app through the operator-only read-only mount"
-    token = _token_status(profile_home)
+    source = _shared_source_name(profile_home)
+    grant_home = _profile_home_for_name(source) if source else Path(profile_home or get_hermes_home())
+    token = _token_status(grant_home)
+    if source:
+        token["shared_from"] = source
+    profile_name = _profile_name_for_home(profile_home)
+    if profile_name is not None and not source:
+        shared_with = sorted(
+            consumer
+            for consumer, mapped_source in _read_sharing_policy()["profile_sources"].items()
+            if mapped_source == profile_name
+        )
+        if shared_with:
+            token["shared_with"] = shared_with
     with _state_lock(profile_home):
         pending = _pending_record(profile_home)
     return {
@@ -455,31 +751,38 @@ def start(
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
     now = int(time.time())
-    with _state_lock(profile_home):
-        _reject_symlink(token_path(profile_home))
-        _reject_symlink(legacy_token_path(profile_home))
-        _reject_symlink(pending_path(profile_home))
-        if token_path(profile_home).exists() or legacy_token_path(profile_home).exists():
+    with _sharing_guard(profile_home):
+        if _shared_source_name(profile_home):
             raise GoogleWorkspaceError(
-                "revoke_required",
-                "Disconnect the existing Google grant before selecting services again",
+                "shared_access_active",
+                "Disconnect shared Google access before starting a separate authorization",
                 status_code=409,
             )
-        directory = profile_google_dir(profile_home)
-        _atomic_private_json(
-            pending_path(profile_home),
-            {
-                "version": 1,
-                "state": state,
-                "code_verifier": verifier,
-                "redirect_uri": REDIRECT_URI,
-                "services": list(selected),
-                "scopes": scopes,
-                "created_at": now,
-                "expires_at": now + PENDING_TTL_SECONDS,
-            },
-        )
-        directory.chmod(0o700)
+        with _state_lock(profile_home):
+            _reject_symlink(token_path(profile_home))
+            _reject_symlink(legacy_token_path(profile_home))
+            _reject_symlink(pending_path(profile_home))
+            if token_path(profile_home).exists() or legacy_token_path(profile_home).exists():
+                raise GoogleWorkspaceError(
+                    "revoke_required",
+                    "Disconnect the existing Google grant before selecting services again",
+                    status_code=409,
+                )
+            directory = profile_google_dir(profile_home)
+            _atomic_private_json(
+                pending_path(profile_home),
+                {
+                    "version": 1,
+                    "state": state,
+                    "code_verifier": verifier,
+                    "redirect_uri": REDIRECT_URI,
+                    "services": list(selected),
+                    "scopes": scopes,
+                    "created_at": now,
+                    "expires_at": now + PENDING_TTL_SECONDS,
+                },
+            )
+            directory.chmod(0o700)
     query = urllib.parse.urlencode(
         {
             "client_id": app["client_id"],
@@ -565,7 +868,13 @@ def complete(
     code, returned_state, callback_scopes = _parse_callback(callback_url)
     _, app = _load_app()
     consumed: dict[str, Any]
-    with _state_lock(profile_home):
+    with _sharing_guard(profile_home), _state_lock(profile_home):
+        if _shared_source_name(profile_home):
+            raise GoogleWorkspaceError(
+                "shared_access_active",
+                "Disconnect shared Google access before completing a separate authorization",
+                status_code=409,
+            )
         pending = _pending_record(profile_home)
         if pending is None:
             raise GoogleWorkspaceError("flow_missing", "Authorization flow is missing, expired, or already consumed", status_code=409)
@@ -650,29 +959,53 @@ def revoke(
     profile_home: Path | None = None,
     remote_revoke: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    with _state_lock(profile_home):
-        path = token_path(profile_home)
-        old_path = legacy_token_path(profile_home)
-        payload: dict[str, Any] = {}
-        target = path if path.exists() else old_path
-        target_exists = target.exists()
-        remote_ok = not target_exists
-        if target_exists:
-            try:
-                payload = _read_json(target, label="token")
-            except GoogleWorkspaceError:
-                payload = {}
-        value = str(payload.get("refresh_token") or payload.get("token") or "").strip()
-        if value:
-            try:
-                (remote_revoke or _revoke_remote)(value)
-                remote_ok = True
-            except Exception:
-                remote_ok = False
-        _safe_unlink(path)
-        _safe_unlink(old_path)
-        _safe_unlink(pending_path(profile_home))
-        return {"status": "revoked", "remote_revoked": remote_ok}
+    with _sharing_guard(profile_home):
+        source = _shared_source_name(profile_home)
+        profile_name = _profile_name_for_home(profile_home)
+        policy = _read_sharing_policy()
+        if source and profile_name:
+            mappings = dict(policy["profile_sources"])
+            mappings.pop(profile_name, None)
+            _write_sharing_policy({"version": 1, "profile_sources": mappings})
+            with _state_lock(profile_home):
+                _safe_unlink(pending_path(profile_home))
+            return {"status": "detached", "remote_revoked": False}
+
+        shared_with = sorted(
+            consumer
+            for consumer, mapped_source in policy["profile_sources"].items()
+            if mapped_source == profile_name
+        )
+        if shared_with:
+            raise GoogleWorkspaceError(
+                "shared_grant_in_use",
+                "Disconnect shared access from these profiles first: " + ", ".join(shared_with),
+                status_code=409,
+            )
+
+        with _state_lock(profile_home):
+            path = token_path(profile_home)
+            old_path = legacy_token_path(profile_home)
+            payload: dict[str, Any] = {}
+            target = path if path.exists() else old_path
+            target_exists = target.exists()
+            remote_ok = not target_exists
+            if target_exists:
+                try:
+                    payload = _read_json(target, label="token")
+                except GoogleWorkspaceError:
+                    payload = {}
+            value = str(payload.get("refresh_token") or payload.get("token") or "").strip()
+            if value:
+                try:
+                    (remote_revoke or _revoke_remote)(value)
+                    remote_ok = True
+                except Exception:
+                    remote_ok = False
+            _safe_unlink(path)
+            _safe_unlink(old_path)
+            _safe_unlink(pending_path(profile_home))
+            return {"status": "revoked", "remote_revoked": remote_ok}
 
 
 def _credentials(
@@ -684,8 +1017,9 @@ def _credentials(
     from google.auth.transport.requests import Request
 
     _, app = _load_app()
-    with _state_lock(profile_home):
-        path = _active_token_path(profile_home)
+    grant_home = _grant_profile_home(profile_home)
+    with _state_lock(grant_home):
+        path = _local_active_token_path(grant_home)
         payload = _read_json(path, label="token")
         try:
             services, scopes = validate_scope_contract(payload)

@@ -32,6 +32,12 @@ class GoogleProfileBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class GoogleSharingBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profiles: list[str]
+
+
 def _profile_home(profile: str | None) -> Path:
     requested = (profile or "").strip()
     if not requested or requested.lower() == "current":
@@ -56,6 +62,14 @@ def _translate(exc: google.GoogleWorkspaceError) -> HTTPException:
         status_code=exc.status_code,
         detail={"code": exc.code, "message": str(exc)},
     )
+
+
+def _profile_name(profile: str | None) -> str:
+    home = _profile_home(profile)
+    name = google._profile_name_for_home(home)
+    if name is None:
+        raise HTTPException(status_code=409, detail="Google sharing requires a standard installation profile.")
+    return name
 
 
 @router.get("/api/google-workspace/status")
@@ -106,6 +120,20 @@ async def google_revoke(body: GoogleProfileBody, profile: Optional[str] = None):
         return await asyncio.to_thread(google.revoke, profile_home=_profile_home(profile))
     except google.GoogleWorkspaceError as exc:
         raise _translate(exc) from exc
+
+
+@router.put("/api/google-workspace/sharing")
+async def google_configure_sharing(body: GoogleSharingBody, profile: Optional[str] = None):
+    try:
+        return await asyncio.to_thread(
+            google.configure_sharing,
+            source_profile=_profile_name(profile),
+            profiles=body.profiles,
+        )
+    except google.GoogleWorkspaceError as exc:
+        raise _translate(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/google-workspace/check/{service}")
