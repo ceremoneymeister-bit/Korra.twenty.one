@@ -31,7 +31,7 @@ it("opens a compact menu with the device picker and the originals toggle chosen 
   // Меню не закрылось: состояние переключателя видно после нажатия.
   expect(document.querySelector('[role="menu"]')).not.toBeNull();
   const pick = menu!.querySelector('[role="menuitem"]')!;
-  expect(pick.textContent).toContain("Прикрепить файл с устройства");
+  expect(pick.textContent).toContain("Загрузить с устройства");
   await act(async () => { pick.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   expect(onPickFiles).toHaveBeenCalledOnce();
 });
@@ -45,4 +45,14 @@ it("shows the enabled state and stays disabled with the composer", async () => {
   await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   await act(async () => root.render(<AttachmentMenu disabled onPickFiles={vi.fn()} originals onOriginalsChange={vi.fn()} />));
   expect(host.querySelector<HTMLButtonElement>('button[aria-label="Прикрепить файл"]')!.disabled).toBe(true);
+});
+
+it("opens existing files separately from the device file chooser", async () => {
+  const onPickFiles = vi.fn(), onPickWorkspace = vi.fn();
+  await act(async () => root.render(<AttachmentMenu disabled={false} onPickFiles={onPickFiles} onPickWorkspace={onPickWorkspace} originals={false} onOriginalsChange={vi.fn()} />));
+  const menu = await open();
+  const item = Array.from(menu!.querySelectorAll('[role="menuitem"]')).find(node => node.textContent?.includes("Выбрать из файлов Korra"))!;
+  await act(async () => item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  expect(onPickWorkspace).toHaveBeenCalledOnce();
+  expect(onPickFiles).not.toHaveBeenCalled();
 });

@@ -1,7 +1,7 @@
 /* У ответа своя спокойная поверхность, служебный ход остаётся снаружи. */
 .korra-chat-answer {
   min-width: 0;
-  padding: 28px 32px 16px;
+  padding: 16px 24px 10px;
   border: 0;
   border-radius: 24px;
   background: var(--neo-surface);
@@ -11,12 +11,56 @@
 .korra-chat-answer__footer {
   display: flex;
   justify-content: flex-start;
-  margin-top: 24px;
+  margin-top: 6px;
 }
 
 @media (max-width: 640px) {
   .korra-chat-answer {
-    padding: 20px 18px 12px;
+    padding: 14px 18px 8px;
     border-radius: 20px;
   }
 }
+
+.korra-chat-answer .korra-chat-copy { min-height: 30px; padding: 4px 6px; font-size: 13px; }
+.korra-chat-history { width: clamp(230px, 20vw, 286px); }
+.korra-chat-history__search {
+  display: flex; align-items: center; gap: 8px; min-height: 40px;
+  margin: 12px 12px 4px; padding: 0 10px; border-radius: 12px;
+  color: var(--neo-text-secondary); box-shadow: var(--neo-inset-compact);
+}
+.korra-chat-history__search input {
+  width: 100%; min-width: 0; padding: 8px 0; font: inherit; font-size: 14px;
+  background: transparent; color: var(--neo-text-primary); outline: none; border: 0;
+}
+.korra-chat-history__search input::-webkit-search-cancel-button { display: none; }
+.korra-chat-history__search button { display: flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; border-radius: 8px; }
+.korra-chat-history__title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.4; overflow-wrap: anywhere; }
+.korra-chat-history__item[aria-current='page'] { background: color-mix(in srgb, var(--neo-accent) 9%, var(--neo-surface)); }
+.korra-chat-history__item[aria-current='page'] .korra-chat-history__title { font-weight: 600; }
+.korra-chat-history__search:focus-within { box-shadow: var(--neo-inset); }
+.korra-chat-history :is(button, input):focus-visible { background: var(--neo-text-primary); color: var(--neo-surface); }
+.korra-chat-history__item:focus-visible span { color: inherit; }
+.korra-agent-tabs [role='tab'][aria-selected='true'] {
+  background: color-mix(in srgb, var(--neo-accent) 14%, var(--neo-surface)); box-shadow: var(--neo-depth-2);
+}
+.korra-agent-tabs button:focus-visible { background: var(--neo-text-primary); color: var(--neo-surface); }
+@media (hover: hover) and (pointer: fine) {
+  .korra-chat-history [aria-haspopup='menu'], .korra-agent-tabs [data-agent-tab-menu-trigger][aria-label^='Меню'] { opacity: .78; }
+  .korra-chat-history .group:is(:hover, :focus-within) [aria-haspopup='menu'],
+  .korra-chat-history [aria-haspopup='menu'][aria-expanded='true'],
+  .korra-agent-tabs [role='presentation']:is(:hover, :focus-within) > [data-agent-tab-menu-trigger],
+  .korra-agent-tabs [data-agent-tab-menu-trigger][aria-expanded='true'] { opacity: 1; }
+}
+@media (pointer: coarse) {
+  .korra-chat-answer .korra-chat-copy { min-height: 44px; }
+  .korra-chat-history__search button { min-width: 44px; min-height: 44px; }
+}
+
+/* The wrapper owns the search field's depth; avoid two nested inset fields. */
+[data-client-ui='true'] .korra-chat-history input.korra-chat-history__input {
+  background: transparent; box-shadow: none;
+}
+[data-client-ui='true'] .korra-chat-history input.korra-chat-history__input:focus-visible {
+  background: transparent; color: var(--neo-text-primary); box-shadow: none;
+}
+.korra-chat-history__search:focus-within { background: color-mix(in srgb, var(--neo-accent) 12%, var(--neo-surface)); }

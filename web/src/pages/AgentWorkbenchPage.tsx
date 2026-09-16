@@ -414,7 +414,7 @@ export default function AgentWorkbenchPage() {
           role="tablist"
           aria-label="Агенты"
           onKeyDown={onTabKeyDown}
-          className="neo-tabs-list flex min-h-14 items-center gap-2 p-2"
+          className="korra-agent-tabs neo-tabs-list flex min-h-14 items-center gap-2 p-2"
         >
           <div
             role="presentation"

@@ -1,5 +1,6 @@
 import { DropdownMenu as Menu } from "radix-ui";
-import { Check, ImageIcon, Paperclip, Plus } from "lucide-react";
+import { Check, FolderOpen, ImageIcon, Paperclip, Plus } from "lucide-react";
+import { useRef } from "react";
 
 /**
  * Компактное меню вложений на кнопке «+»: прикрепить файл с устройства и
@@ -8,12 +9,14 @@ import { Check, ImageIcon, Paperclip, Plus } from "lucide-react";
  * не пересобирает — об этом говорит подпись. Раньше это был голый
  * <input type="checkbox"> под полем ввода, вне общего стиля контролов.
  */
-export function AttachmentMenu({ disabled, onPickFiles, originals, onOriginalsChange }: {
+export function AttachmentMenu({ disabled, onPickFiles, onPickWorkspace, originals, onOriginalsChange }: {
   disabled: boolean;
   onPickFiles: () => void;
+  onPickWorkspace?: () => void;
   originals: boolean;
   onOriginalsChange: (value: boolean) => void;
 }) {
+  const openingPicker = useRef(false);
   const item = "flex min-h-[44px] w-full cursor-pointer select-none items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-[var(--neo-text-primary)] outline-0 data-[highlighted]:shadow-[var(--neo-inset-compact)] data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50";
   return (
     <Menu.Root modal={false}>
@@ -34,16 +37,24 @@ export function AttachmentMenu({ disabled, onPickFiles, originals, onOriginalsCh
           align="start"
           sideOffset={8}
           collisionPadding={12}
+          onCloseAutoFocus={event => { if (openingPicker.current) { event.preventDefault(); openingPicker.current = false; } }}
           aria-label="Вложения"
           className="z-50 w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl bg-[var(--neo-surface)] p-2 text-[var(--neo-text-primary)] shadow-[var(--neo-depth-3)] outline-0"
         >
           <Menu.Item className={item} onSelect={onPickFiles}>
             <Paperclip size={16} aria-hidden className="shrink-0 text-[var(--neo-text-secondary)]" />
             <span className="min-w-0 flex-1">
-              <span className="block">Прикрепить файл с устройства</span>
+              <span className="block">Загрузить с устройства</span>
               <span className="block text-xs text-[var(--neo-text-secondary)]">Файлы, фото, документы — до 30 вложений</span>
             </span>
           </Menu.Item>
+          {onPickWorkspace && <Menu.Item className={item} onSelect={() => { openingPicker.current = true; onPickWorkspace(); }}>
+            <FolderOpen size={16} aria-hidden className="shrink-0 text-[var(--neo-text-secondary)]" />
+            <span className="min-w-0 flex-1">
+              <span className="block">Выбрать из файлов Korra</span>
+              <span className="block text-xs text-[var(--neo-text-secondary)]">Материалы, которые уже есть у вас</span>
+            </span>
+          </Menu.Item>}
           <Menu.Separator className="my-1 h-px bg-[var(--neo-shadow)] opacity-40" />
           <Menu.CheckboxItem
             className={item}

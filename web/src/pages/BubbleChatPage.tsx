@@ -38,6 +38,8 @@ import {
   Paperclip,
   RotateCcw,
   Mic,
+  Search,
+  X,
 } from "lucide-react";
 import type { ComponentType } from "react";
 import { ThinkingOrb } from "thinking-orbs";
@@ -84,6 +86,7 @@ import { api, type SessionInfo } from "@/lib/api";
 import { useChatStream, type ChatApprovalEntry } from "@/hooks/useChatStream";
 import { useDictation, type DictationState } from "@/hooks/useDictation";
 import { useSessionList } from "@/hooks/useSessionList";
+import { useSessionSearch } from "@/hooks/useSessionSearch";
 import { useConfirmDelete } from "@/hooks/useConfirmDelete";
 import { useTheme } from "@/themes";
 import "./bubble-chat-composer.css";
@@ -338,12 +341,21 @@ export function BubbleChatSidebar({
   onRequestDelete,
   onRenamed,
 }: BubbleChatSidebarProps) {
+  const [searchInput, setSearchInput] = useState({ profile, value: "" });
+  const query = searchInput.profile === profile ? searchInput.value : "";
+  const revision = JSON.stringify(sessions.map(session => [session.id, session.title]));
+  const search = useSessionSearch(profile, query, revision);
+  const searching = Boolean(query.trim());
+  const visibleSessions = searching ? search.sessions : sessions;
+  const visibleLoading = searching ? search.loading : loading;
+  const visibleError = searching ? search.error : error;
+  const searchId = useId();
   return (
     // No bg- override — let the parent dashboard background show through.
     <aside
       // Список чатов — вдавленная панель на холсте: отделяет его от переписки
       // без линии-разделителя (владелец 03.09: «слились»).
-      className="mb-3 ml-3 mt-3 hidden w-60 shrink-0 flex-col rounded-[var(--neo-radius-card)] bg-[var(--neo-surface)] shadow-[var(--neo-inset-compact)] md:flex"
+      className="korra-chat-history mb-3 ml-3 mt-3 hidden shrink-0 flex-col rounded-[var(--neo-radius-card)] bg-[var(--neo-surface)] shadow-[var(--neo-inset-compact)] md:flex"
     >
       <div className="p-3 pb-0">
         <Button
@@ -356,29 +368,42 @@ export function BubbleChatSidebar({
           <span>Новый чат</span>
         </Button>
       </div>
+      <div className="korra-chat-history__search">
+        <Search size={16} aria-hidden />
+        <label className="sr-only" htmlFor={searchId}>Поиск в чатах этого агента</label>
+        <input id={searchId} className="korra-chat-history__input" type="search" value={query} placeholder="Поиск в чатах"
+          onChange={event => setSearchInput({ profile, value: event.target.value })}
+          onKeyDown={event => { if (event.key === "Escape") setSearchInput({ profile, value: "" }); }} />
+        {query && <button type="button" aria-label="Очистить поиск"
+          onClick={() => { setSearchInput({ profile, value: "" }); document.getElementById(searchId)?.focus(); }}><X size={15} aria-hidden /></button>}
+      </div>
       <nav
         aria-label="Список чатов"
         // Отступ под тень выбранной карточки держим ВНУТРИ прокрутки со всех
         // четырёх сторон: `--neo-depth-1` смещает блик на -1px вверх и влево,
         // и у крайней карточки внешний `mt` места не даёт — scrollport срезал
-        // её верх ровной линией (скриншоты владельца 15.09). Зазор под «Новым
-        // чатом» прежний: mt-3 + pt-1 = mt-4.
-        className="mt-3 flex flex-1 flex-col gap-1 overflow-y-auto p-1"
+        // её верх ровной линией (скриншоты владельца 15.09).
+        className="mt-1 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1"
+        aria-busy={visibleLoading}
       >
-        {loading && sessions.length === 0 && (
+        {visibleLoading && visibleSessions.length === 0 && (
           <p className="px-5 py-2 text-sm text-[var(--neo-text-secondary)]">
-            Загрузка…
+            {searching ? "Ищем в истории…" : "Загрузка…"}
           </p>
         )}
-        {error && (
+        {visibleError && (
           <p
             role="alert"
             className="px-5 py-2 text-sm text-destructive"
           >
-            {error}
+            {visibleError}
+            {searching && <button type="button" className="mt-2 block underline" onClick={search.refresh}>Повторить поиск</button>}
           </p>
         )}
-        {sessions.map((s) => {
+        {searching && !visibleLoading && !visibleError && visibleSessions.length === 0 && (
+          <p role="status" className="px-4 py-3 text-sm text-[var(--neo-text-secondary)]">Ничего не найдено. Попробуйте другое название или слово из переписки.</p>
+        )}
+        {visibleSessions.map((s) => {
           const active = s.id === activeId;
           const Icon = iconForSource(s.source);
           return (
@@ -387,8 +412,8 @@ export function BubbleChatSidebar({
                 type="button"
                 onClick={() => onSelect(s.id)}
                 className={cn(
-                  "relative w-full rounded-[var(--neo-radius-control)] border-0 bg-transparent text-left outline-0",
-                  "px-5 py-2.5 pr-9 flex items-start gap-2.5",
+                  "korra-chat-history__item relative w-full rounded-[var(--neo-radius-control)] border-0 bg-transparent text-left outline-0",
+                  "px-3 py-2.5 pr-11 flex items-start gap-2",
                   "cursor-pointer",
                   "font-sans text-sm transition-[box-shadow,color]",
                   "focus:outline-0 focus-visible:outline-0",
@@ -404,7 +429,7 @@ export function BubbleChatSidebar({
                   aria-hidden
                 />
                 <span className="flex-1 min-w-0 relative">
-                  <span className="block truncate">{titleFor(s)}</span>
+                  <span className="korra-chat-history__title" title={titleFor(s)}>{titleFor(s)}</span>
                   <span className="mt-0.5 flex items-center gap-2 text-xs text-[var(--neo-text-secondary)]">
                     <span className="min-w-0 truncate">{formatRelative(s.last_active)}</span>
                     {/* «Выбран», «В работе» и «Есть непрочитанный ответ» — разные
@@ -414,7 +439,7 @@ export function BubbleChatSidebar({
                 </span>
               </button>
               <SessionActions key={`${profile}:${s.id}`} sessionId={s.id} profile={profile}
-                title={titleFor(s)} onRenamed={onRenamed} onDelete={() => onRequestDelete(s.id)} />
+                title={titleFor(s)} onRenamed={() => { onRenamed?.(); search.refresh(); }} onDelete={() => onRequestDelete(s.id)} />
             </div>
           );
         })}
@@ -474,7 +499,7 @@ function BubbleChatTranscript({
       awaitingApproval={approvals?.some(entry => entry.status === "pending")}
     >
       <div className="px-4">
-        <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-8 pt-6">
+        <div className="korra-chat-transcript__content mx-auto w-full max-w-[880px] space-y-5 pt-6">
           {pendingElsewhere && (
             <div
               role="status"
@@ -594,7 +619,7 @@ interface BubbleChatComposerProps {
   draftKey?: string;
 }
 
-const TEXTAREA_MIN_HEIGHT = 56;
+const TEXTAREA_MIN_HEIGHT = 40;
 const TEXTAREA_MAX_HEIGHT = 200;
 
 /** Подписи кнопки-микрофона по состоянию диктовки. */
@@ -965,7 +990,7 @@ export function BubbleChatComposer({
           <textarea
             ref={taRef}
             id={textareaId}
-            rows={2}
+            rows={1}
             value={value}
             onChange={(e) => {
               setValue(e.target.value);
@@ -1039,19 +1064,18 @@ export function BubbleChatComposer({
                 onPick={pickWorkspaceFile}
                 remaining={MAX_ATTACHMENTS - attachments.length}
                 profile={profile}
-              />}
-              {allowAttachments && (
-                <AttachmentMenu
+                renderTrigger={openPicker => <AttachmentMenu
                   disabled={
                     disabled ||
                     submitting ||
                     attachments.length >= MAX_ATTACHMENTS
                   }
                   onPickFiles={() => fileRef.current?.click()}
+                  onPickWorkspace={openPicker}
                   originals={originals}
                   onOriginalsChange={value => { setOriginals(value); setSendOriginals(value); }}
-                />
-              )}
+                />}
+              />}
               <button
                 type="button"
                 onClick={dictation.toggle}

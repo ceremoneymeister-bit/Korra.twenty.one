@@ -215,7 +215,7 @@ describe("BubbleChatComposer", () => {
     const controls = container.querySelector<HTMLElement>(
       ".korra-chat-composer__controls",
     )!;
-    expect(textarea.rows).toBe(2);
+    expect(textarea.rows).toBe(1);
     expect(surface.contains(textarea)).toBe(true);
     expect(surface.contains(controls)).toBe(true);
     // Без микрофона в окружении диктовка честно выключена и говорит почему.
@@ -278,7 +278,7 @@ describe("BubbleChatComposer", () => {
     ).toBeTruthy();
 
     await enterText(textarea, "Первая\nвторая");
-    expect(textarea.rows).toBe(2);
+    expect(textarea.rows).toBe(1);
     expect(controls.dataset.attachments).toBe("true");
   });
 
@@ -308,7 +308,7 @@ describe("BubbleChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Проверь расчёт", []);
   });
 
-  it("grows smoothly from 56px to 200px, then scrolls", async () => {
+  it("grows smoothly from a compact draft to 200px, then scrolls", async () => {
     await render(<BubbleChatComposer onSend={vi.fn()} />);
     const textarea = container.querySelector("textarea")!;
     let scrollHeight = 88;
@@ -328,7 +328,7 @@ describe("BubbleChatComposer", () => {
 
     scrollHeight = 40;
     await enterText(textarea, "Коротко");
-    expect(textarea.style.height).toBe("56px");
+    expect(textarea.style.height).toBe("40px");
     expect(textarea.style.overflowY).toBe("hidden");
   });
 

@@ -22,7 +22,7 @@
   position: relative;
   isolation: isolate;
   display: flex;
-  min-height: calc(var(--korra-space, 0.25rem) * 30);
+  min-height: calc(var(--korra-space, 0.25rem) * 25);
   flex-direction: column;
   gap: calc(var(--korra-space, 0.25rem) * 2);
   padding: calc(var(--korra-space, 0.25rem) * 2) calc(var(--korra-space, 0.25rem) * 3);
@@ -49,7 +49,7 @@
 
 .korra-chat-composer__textarea {
   box-sizing: border-box;
-  min-height: 56px;
+  min-height: 40px;
   max-height: 200px;
   margin: 0;
   padding: 4px;
@@ -367,4 +367,8 @@
   .korra-chat-composer__surface:focus-within {
     box-shadow: none;
   }
+}
+
+.korra-chat-composer__control:focus-visible {
+  color: var(--neo-surface); background: var(--neo-text-primary); box-shadow: var(--neo-depth-2);
 }

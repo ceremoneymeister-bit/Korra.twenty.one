@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { ChevronRight, FileIcon, Folder, FolderOpen, MessageSquare } from "lucide-react";
 import { api, type ManagedFilesResponse } from "@/lib/api";
@@ -20,12 +20,14 @@ import { useStore } from "@nanostores/react";
  * поверх физических `client/inbox` и дат показываются «Мои файлы» и
  * «Загрузки из чатов» — те же имена, что на странице «Файлы».
  */
-export function WorkspaceFilePicker({ disabled, onPick, remaining = MAX_ATTACHMENTS, profile }: {
+export function WorkspaceFilePicker({ disabled, onPick, remaining = MAX_ATTACHMENTS, profile, renderTrigger }: {
   disabled: boolean;
   remaining?: number;
   profile?: string;
   onPick: (file: UploadedAttachment) => void;
+  renderTrigger?: (open: () => void) => ReactNode;
 }) {
+  const trigger = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
   const [path, setPath] = useState<string>();
   const [listing, setListing] = useState<ManagedFilesResponse>();
@@ -93,12 +95,13 @@ export function WorkspaceFilePicker({ disabled, onPick, remaining = MAX_ATTACHME
   };
 
   return <>
-    <button type="button" disabled={disabled} onClick={() => setOpen(true)}
+    <span ref={trigger} className="inline-flex">{renderTrigger ? renderTrigger(() => { if (!disabled) setOpen(true); }) : <button type="button" disabled={disabled} onClick={() => setOpen(true)}
       className="korra-chat-composer__control" aria-label="Выбрать из Файлов" title="Выбрать из Файлов">
       <FolderOpen size={20} aria-hidden />
-    </button>
+    </button>}</span>
     <Dialog open={open} onOpenChange={openDialog}>
-      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-1.5rem)] max-w-lg flex-col overflow-hidden" aria-label="Выбрать из Файлов">
+      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-1.5rem)] max-w-lg flex-col overflow-hidden" aria-label="Выбрать из Файлов"
+        onCloseAutoFocus={event => { event.preventDefault(); trigger.current?.querySelector("button")?.focus({ preventScroll: true }); }}>
         <DialogHeader className="pr-12">
           <DialogTitle>Файлы рабочей папки</DialogTitle>
           <DialogDescription>Файл или папка прикрепится к сообщению без повторной загрузки.</DialogDescription>
