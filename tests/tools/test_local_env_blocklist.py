@@ -978,7 +978,11 @@ class TestPythonpathSelectiveStrip:
             captured["staging"] = os.path.dirname(cmd[1])
             proc = MagicMock()
             proc.stdout.read.return_value = b""
+            # Session kernels use read1; a default MagicMock crashes the
+            # reader and can leave the caller waiting for a missing frame.
+            proc.stdout.read1.return_value = b""
             proc.stderr.read.return_value = b""
+            proc.stderr.read1.return_value = b""
             proc.wait.return_value = 0
             proc.returncode = 0
             proc.poll.return_value = 0
