@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ownerFacingError } from "./owner-facing-error";
 
 import {
   composeSoul,
@@ -215,4 +216,18 @@ describe("explainProbeFailure", () => {
     expect(unknown.kind).toBe("unknown");
     expect(unknown.keys).toBe(false);
   });
+});
+
+
+it.each([
+  ["502: HTTP 401: OAuth access token has expired", "access", true],
+  ["429: insufficient_quota", "busy", false],
+  ["429: rate_limit_exceeded", "busy", false],
+  ["503: overloaded_error", "busy", false],
+  ["504: timeout", "timeout", false],
+  ["Failed to fetch", "network", false],
+] as const)("keeps recovery advice after translation: %s", (raw, kind, keys) => {
+  const advice = explainProbeFailure(ownerFacingError(new Error(raw)));
+  expect(advice).toMatchObject({ kind, keys });
+  expect(advice.advice).toContain("Сам агент сохранён");
 });

@@ -385,7 +385,7 @@ export function explainProbeFailure(
       keys: true,
     };
   }
-  if (/\b(401|403)\b|unauthori[sz]ed|forbidden|expired|invalid (x-)?api[- ]key|re-?authenticate|auth cool-?down|authentication/i.test(text)) {
+  if (/\b(401|403)\b|unauthori[sz]ed|forbidden|expired|invalid (x-)?api[- ]key|re-?authenticate|auth cool-?down|authentication|заново войти в аккаунт модели|подключение к модели больше не даёт доступа|у подключённого аккаунта нет доступа/i.test(text)) {
     return {
       kind: "access",
       title: "Нет доступа к модели",
@@ -397,15 +397,15 @@ export function explainProbeFailure(
   if (/insufficient_quota|usage_limit_reached|quota exceeded|объём работы.*закончился|лимит использования модели исчерпан/i.test(text)) {
     return { kind: "busy", title: "Лимит использования модели исчерпан", advice: `${saved} ${ownerFacingError(text)}`, keys: false };
   }
-  if (/\b(429|503|502)\b|rate[- ]?limit|too many requests|overloaded|cool-?down|temporarily unavailable|capacity/i.test(text)) {
+  if (/\b(429|503|502)\b|rate[- ]?limit|too many requests|overloaded|cool-?down|temporarily unavailable|capacity|модель временно не принимает|сервис модели.*(перегружен|недоступен)|сервис временно недоступен/i.test(text)) {
     return {
       kind: "busy",
-      title: /rate[- ]?limit|cool-?down|429/i.test(text) ? "Модель временно достигла лимита" : "Сервис модели временно недоступен",
+      title: /rate[- ]?limit|cool-?down|429|модель временно не принимает/i.test(text) ? "Модель временно достигла лимита" : "Сервис модели временно недоступен",
       advice: `${saved} Попробуйте позже. Переподключать аккаунт из-за этой ошибки не нужно.`,
       keys: false,
     };
   }
-  if (/\b504\b|time[d]? ?out|deadline/i.test(text)) {
+  if (/\b504\b|time[d]? ?out|deadline|не удалось дождаться ответа сервера|модель не ответила за отведённое время/i.test(text)) {
     return {
       kind: "timeout",
       title: "Модель не ответила вовремя",

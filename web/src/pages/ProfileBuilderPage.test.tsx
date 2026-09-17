@@ -446,9 +446,8 @@ describe("ProfileBuilderPage — мастер создания агента", ()
   it("отказ доступа (401 подписки) объясняет как доступ, а не как сломанного агента", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        failedReply(502, "HTTP 401: OAuth access token has expired. Re-authenticate to continue."),
-      ),
+      // Each HTTP attempt has a fresh, readable body.
+      vi.fn(async () => failedReply(502, "HTTP 401: OAuth access token has expired. Re-authenticate to continue.")),
     );
     await openWizard();
     await enterText(nameInput(), "Учитель китайского");

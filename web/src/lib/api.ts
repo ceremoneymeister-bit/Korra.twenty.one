@@ -218,7 +218,7 @@ function safeApiErrorMessage(status: number, raw: string): string {
   if (status === 413) return "Переданные данные слишком велики.";
   if (status === 422) return "Данные не прошли проверку.";
   if (status === 429) return "Слишком много запросов. Повторите чуть позже.";
-  if (status >= 500) return "Сервис временно недоступен. Повторите через минуту.";
+  if (status >= 500) return ownerFacingError(`${status}: ${raw}`);
   return "Запрос завершился с ошибкой.";
 }
 
