@@ -394,8 +394,8 @@ export function explainProbeFailure(
       keys: true,
     };
   }
-  if (/insufficient_quota|usage_limit_reached|quota exceeded|объём работы.*закончился/i.test(text)) {
-    return { kind: "busy", title: "Закончился доступный объём работы с моделью", advice: `${saved} ${ownerFacingError(text)}`, keys: false };
+  if (/insufficient_quota|usage_limit_reached|quota exceeded|объём работы.*закончился|лимит использования модели исчерпан/i.test(text)) {
+    return { kind: "busy", title: "Лимит использования модели исчерпан", advice: `${saved} ${ownerFacingError(text)}`, keys: false };
   }
   if (/\b(429|503|502)\b|rate[- ]?limit|too many requests|overloaded|cool-?down|temporarily unavailable|capacity/i.test(text)) {
     return {

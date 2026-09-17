@@ -18,13 +18,13 @@ export function ownerFacingError(
   } catch { /* Older endpoints send plain text. */ }
   const signal = `${code} ${payload}`;
   if (/insufficient_quota|usage_limit_reached|usage limit.*reached|exceeded your current quota|quota exceeded/i.test(signal)) {
-    return "Доступный объём работы с моделью закончился. Проверьте лимиты и срок действия подписки в аккаунте модели. Если лимит обновляется автоматически, дождитесь его обновления.";
+    return "Лимит использования модели исчерпан. Проверьте в аккаунте модели, когда он обновится и действует ли подписка.";
   }
   if (/rate_limit|rate[- ]limited|too many requests|лимит.*запрос|временно ограничил запросы/i.test(signal)) {
-    return "Модель временно не принимает новые запросы: достигнут лимит использования. Попробуйте позже. Точное время восстановления доступа не сообщено.";
+    return "Модель временно не принимает запросы: достигнут лимит. Попробуйте позже. Точное время, когда можно продолжить, пока неизвестно.";
   }
   if (/token.*expired|invalid.*api.?key|authentication_error|invalid_api_key/i.test(signal)) {
-    return "Подключение к модели больше не даёт доступа. Откройте настройки подключения и войдите в аккаунт модели заново.";
+    return "Нужно заново войти в аккаунт модели. Откройте настройки подключения и повторите вход.";
   }
   if (/context_length_exceeded|context window|maximum context length/i.test(signal)) {
     return "В этой беседе слишком много текста для одного запроса. Сократите запрос или начните новый чат, добавив нужные материалы и краткое описание задачи.";

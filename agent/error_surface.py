@@ -281,15 +281,15 @@ def format_error_for_user(message: Any, *, reason: str = "") -> str:
     if reason == "billing_unverified":
         guidance = "Модель не приняла запрос. Пока не удалось выяснить, связан ли отказ с лимитом подписки. Проверьте состояние подключения модели в настройках."
     elif reason == "billing" or (not reason and re.search(r"insufficient_quota|usage_limit_reached|usage limit.*reached|quota exceeded|exceeded your current quota", lower)):
-        guidance = "Доступный объём работы с моделью закончился. Проверьте лимиты и срок действия подписки в аккаунте модели. Если лимит обновляется автоматически, дождитесь его обновления."
+        guidance = "Лимит использования модели исчерпан. Проверьте в аккаунте модели, когда он обновится и действует ли подписка."
     elif (reason in {"auth", "auth_permanent"} and not re.search(r"\bhttp\s*403\b", lower)) or re.search(r"\bhttp\s*401\b", lower):
-        guidance = "Подключение к модели больше не даёт доступа. Откройте настройки подключения и войдите в аккаунт модели заново."
+        guidance = "Нужно заново войти в аккаунт модели. Откройте настройки подключения и повторите вход."
     elif re.search(r"\bhttp\s*403\b", lower):
         guidance = "У подключённого аккаунта нет доступа к этой модели. Проверьте доступные модели и выберите подходящую в настройках агента."
     elif reason == "model_not_found" or re.search(r"\bhttp\s*404\b", lower):
         guidance = "Выбранная модель недоступна. Откройте настройки агента и выберите доступную модель."
     elif reason in {"rate_limit", "upstream_rate_limit"} or re.search(r"\bhttp\s*429\b", lower):
-        guidance = "Модель временно не принимает новые запросы: достигнут лимит использования. Попробуйте позже. Точное время восстановления доступа не сообщено."
+        guidance = "Модель временно не принимает запросы: достигнут лимит. Попробуйте позже. Точное время, когда можно продолжить, пока неизвестно."
     elif reason in {"overloaded", "server_error"}:
         guidance = "Сервис модели сейчас перегружен или временно недоступен. Попробуйте позже; переподключать аккаунт из-за этого не нужно."
     elif reason == "context_length" or reason == "context_overflow":

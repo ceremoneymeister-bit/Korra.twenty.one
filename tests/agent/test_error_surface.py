@@ -217,11 +217,11 @@ def test_exception_never_raises_on_weird_input():
 
 
 @pytest.mark.parametrize("reason,message,expected", [
-    ("billing", "HTTP 429: insufficient_quota", "объём работы"),
+    ("billing", "HTTP 429: insufficient_quota", "Лимит использования модели исчерпан"),
     ("billing_unverified", "quota maybe", "Пока не удалось выяснить"),
     ("rate_limit", "HTTP 429", "временно не принимает"),
     ("overloaded", "HTTP 503", "перегружен"),
-    ("auth", "HTTP 401", "войдите в аккаунт"),
+    ("auth", "HTTP 401", "заново войти в аккаунт"),
     ("context_overflow", "too long", "В этой беседе"),
 ])
 def test_owner_guidance_separates_causes_without_billing_advice(monkeypatch, reason, message, expected):

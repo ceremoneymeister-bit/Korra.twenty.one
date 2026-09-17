@@ -890,7 +890,7 @@ it("retains the next undelivered message when the ledger still describes the pre
 
 
 it("keeps a confirmed model failure and its explanation after remount", async () => {
-  const explanation = "Доступный объём работы с моделью закончился.";
+  const explanation = "Лимит использования модели исчерпан.";
   saveChatOutbox({ messageId: "quota-message-123456", sessionId: "quota-chat", text: "Запрос", attachments: [], createdAt: 124, status: "failed", terminal: true, error: explanation });
   writeChatSelection(`${chatViewKey()}:selected`, "quota-chat");
   vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "quota-chat", messages: [] });

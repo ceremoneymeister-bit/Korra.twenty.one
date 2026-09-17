@@ -60,12 +60,12 @@ async def test_russian_failed_turn_keeps_wire_failure_semantics(monkeypatch, str
             if truncated:
                 assert data["choices"][0]["message"]["content"] == final_text
             else:
-                assert "Подключение к модели больше не даёт доступа" in data["choices"][0]["message"]["content"]
+                assert "Нужно заново войти в аккаунт модели" in data["choices"][0]["message"]["content"]
         assert data["choices"][0]["finish_reason"] == ("length" if truncated else "error")
         assert data["hermes"]["error_code"] == ("output_truncated" if truncated else "agent_error")
         assert "Техническая причина:" not in data["hermes"]["error"]
         assert diagnostic not in data["hermes"]["error"]
-        assert "Ответ не поместился" in data["hermes"]["error"] if truncated else "Подключение к модели больше не даёт доступа" in data["hermes"]["error"]
+        assert "Ответ не поместился" in data["hermes"]["error"] if truncated else "Нужно заново войти в аккаунт модели" in data["hermes"]["error"]
         if not stream:
             assert response.headers["X-Hermes-Error"] == " ".join(diagnostic.split())
         assert data["hermes"]["partial"] is truncated
@@ -76,7 +76,7 @@ async def test_russian_failed_turn_keeps_wire_failure_semantics(monkeypatch, str
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("reason,diagnostic,expected", [
-    ("billing", "HTTP 429: insufficient_quota", "объём работы"),
+    ("billing", "HTTP 429: insufficient_quota", "Лимит использования модели исчерпан"),
     ("rate_limit", "HTTP 429: slow down", "временно не принимает"),
     ("overloaded", "HTTP 503", "перегружен"),
 ])

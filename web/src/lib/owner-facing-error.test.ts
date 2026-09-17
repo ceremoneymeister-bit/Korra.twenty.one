@@ -27,7 +27,7 @@ describe("ownerFacingError", () => {
 describe("specific recovery advice", () => {
   it("quota wins over HTTP 429 without inventing a reset time or asking for credits", () => {
     const text = ownerFacingError('429: {"error":{"code":"insufficient_quota","message":"quota exceeded"}}');
-    expect(text).toContain("объём работы");
+    expect(text).toContain("Лимит использования модели исчерпан");
     expect(text).not.toMatch(/минут|кредит|пополн|API|провайдер/i);
   });
   it("distinguishes a short request limit from quota and an expired login", () => {
