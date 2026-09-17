@@ -40,3 +40,17 @@ export function useChatAttachmentDraft(key?: string) {
   }, [draft]);
   return [value, set] as const;
 }
+
+
+/** Restore sent files without replacing the next message's existing attachments. */
+export function restoreChatAttachmentDraft(key: string, files: UploadedAttachment[]): boolean {
+  const draft = draftFor(key);
+  const existing = draft.get();
+  const missing = files.filter(file => !existing.some(item => item.uploaded?.path === file.path));
+  if (existing.length + missing.length > MAX_ATTACHMENTS) return false;
+  draft.set([...existing, ...missing.map(file => ({
+    id: crypto.randomUUID(), name: file.name, size: file.size, kind: file.kind,
+    status: "ready" as const, progress: 100, uploaded: file, file: new File([], file.name),
+  }))]);
+  return true;
+}

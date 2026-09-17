@@ -276,29 +276,32 @@ def format_error_for_user(message: Any, *, reason: str = "") -> str:
         return detail
     lower = detail.lower()
     known_failure = True
-    if (
-        reason in {"auth", "auth_permanent"}
-        and not re.search(r"\bhttp\s*403\b", lower)
-    ) or re.search(r"\bhttp\s*401\b", lower):
-        guidance = (
-            "Провайдер не принял данные входа. Проверьте API-ключ в разделе «Ключи» "
-            "или войдите заново через `korra model`."
-        )
+    # A quota verdict takes precedence over HTTP 429: the status alone does
+    # not tell us whether a short request burst or a subscription window ended.
+    if reason == "billing_unverified":
+        guidance = "Модель не приняла запрос. Пока не удалось выяснить, связан ли отказ с лимитом подписки. Проверьте состояние подключения модели в настройках."
+    elif reason == "billing" or (not reason and re.search(r"insufficient_quota|usage_limit_reached|usage limit.*reached|quota exceeded|exceeded your current quota", lower)):
+        guidance = "Доступный объём работы с моделью закончился. Проверьте лимиты и срок действия подписки в аккаунте модели. Если лимит обновляется автоматически, дождитесь его обновления."
+    elif (reason in {"auth", "auth_permanent"} and not re.search(r"\bhttp\s*403\b", lower)) or re.search(r"\bhttp\s*401\b", lower):
+        guidance = "Подключение к модели больше не даёт доступа. Откройте настройки подключения и войдите в аккаунт модели заново."
     elif re.search(r"\bhttp\s*403\b", lower):
-        guidance = (
-            "Провайдер отказал в доступе. Проверьте разрешения ключа и доступность "
-            "модели для вашей подписки либо выберите другую модель через `/model`."
-        )
+        guidance = "У подключённого аккаунта нет доступа к этой модели. Проверьте доступные модели и выберите подходящую в настройках агента."
     elif reason == "model_not_found" or re.search(r"\bhttp\s*404\b", lower):
-        guidance = "Модель или адрес сервиса не найдены. Проверьте настройки модели через `korra model`."
-    elif reason == "rate_limit" or re.search(r"\bhttp\s*429\b", lower):
-        guidance = "Провайдер временно ограничил запросы. Подождите до сброса лимита или выберите другую модель через `/model`."
+        guidance = "Выбранная модель недоступна. Откройте настройки агента и выберите доступную модель."
+    elif reason in {"rate_limit", "upstream_rate_limit"} or re.search(r"\bhttp\s*429\b", lower):
+        guidance = "Модель временно не принимает новые запросы: достигнут лимит использования. Попробуйте позже. Точное время восстановления доступа не сообщено."
+    elif reason in {"overloaded", "server_error"}:
+        guidance = "Сервис модели сейчас перегружен или временно недоступен. Попробуйте позже; переподключать аккаунт из-за этого не нужно."
+    elif reason == "context_length" or reason == "context_overflow":
+        guidance = "В этой беседе накопилось больше текста, чем модель может обработать за один раз. Сократите запрос или начните новый чат, добавив нужные материалы и краткое описание задачи."
+    elif reason in {"content_policy_blocked", "provider_policy_blocked"}:
+        guidance = "Модель отказалась выполнять этот запрос по своим правилам. Уточните задачу или измените формулировку."
     elif "truncat" in lower:
-        guidance = "Ответ обрезан из-за ограничения длины. Попросите продолжить или выберите модель с большим лимитом ответа."
+        guidance = "Ответ не поместился целиком. Попросите продолжить с того места, где он оборвался."
     elif reason == "timeout" or "timed out" in lower or "timeout" in lower:
-        guidance = "Провайдер не ответил вовремя. Повторите запрос позже или выберите другую модель через `/model`."
+        guidance = "Модель не ответила за отведённое время. Попробуйте позже. Если ошибка повторяется, обратитесь в поддержку."
     elif reason == "ssl_cert_verification":
-        guidance = "Не удалось проверить сертификат сервиса модели. Проверьте настройки соединения и сертификатов."
+        guidance = "Не удалось установить защищённое соединение с сервисом модели. Обратитесь в поддержку — нужно проверить подключение."
     elif re.search(r"[А-Яа-яЁё]", detail):
         return detail
     else:

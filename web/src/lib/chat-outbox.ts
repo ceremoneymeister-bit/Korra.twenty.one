@@ -1,5 +1,5 @@
 import { HERMES_BASE_PATH } from "@/lib/api";
-import type { UploadedAttachment } from "@/lib/chat-attachments";
+import { MAX_ATTACHMENTS, type UploadedAttachment } from "@/lib/chat-attachments";
 
 /* v2: запись на чат (профиль + сессия), а не одна на всю панель — иначе
  * отправка в другом чате затирала упавшее сообщение (ревью 03.09).
@@ -32,6 +32,8 @@ export interface ChatOutboxRecord {
   createdAt: number;
   status: "sending" | "failed";
   error?: string;
+  /** Server explicitly ended the attempt; repeating the same ID only replays it. */
+  terminal?: boolean;
   /** Профиль (вкладка агента), из которой ушло сообщение; "" — главный. */
   profile?: string;
 }
@@ -55,10 +57,11 @@ function validRecord(value: unknown): value is ChatOutboxRecord {
     typeof item.messageId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{15,79}$/.test(item.messageId) &&
     typeof item.sessionId === "string" && item.sessionId.length > 0 && item.sessionId.length <= 200 &&
     typeof item.text === "string" && item.text.length <= 100_000 &&
-    Array.isArray(item.attachments) && item.attachments.length <= 5 && item.attachments.every(validAttachment) &&
+    Array.isArray(item.attachments) && item.attachments.length <= MAX_ATTACHMENTS && item.attachments.every(validAttachment) &&
     typeof item.createdAt === "number" && Number.isFinite(item.createdAt) &&
     (item.status === "sending" || item.status === "failed") &&
     (item.error === undefined || typeof item.error === "string") &&
+    (item.terminal === undefined || typeof item.terminal === "boolean") &&
     (item.profile === undefined || (typeof item.profile === "string" && item.profile.length <= 100))
   );
 }

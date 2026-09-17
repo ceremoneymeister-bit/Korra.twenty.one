@@ -308,7 +308,7 @@ describe("BubbleChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Проверь расчёт", []);
   });
 
-  it("grows smoothly from a compact draft to 200px, then scrolls", async () => {
+  it("keeps a long draft compact and scrollable", async () => {
     await render(<BubbleChatComposer onSend={vi.fn()} />);
     const textarea = container.querySelector("textarea")!;
     let scrollHeight = 88;
@@ -323,7 +323,7 @@ describe("BubbleChatComposer", () => {
 
     scrollHeight = 240;
     await enterText(textarea, "Очень\nдлинный\nтекст\nна\nмного\nстрок\nниже");
-    expect(textarea.style.height).toBe("200px");
+    expect(textarea.style.height).toBe("120px");
     expect(textarea.style.overflowY).toBe("auto");
 
     scrollHeight = 40;
@@ -656,4 +656,26 @@ describe("BubbleChatSidebar", () => {
       ),
     ).toBe(true);
   });
+});
+
+
+it("lets the next draft be edited during a reply without sending or clearing it at completion", async () => {
+  let finish: (value: boolean) => void = () => {};
+  const onSend = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
+  const onAbort = vi.fn();
+  await render(<BubbleChatComposer onSend={onSend} onAbort={onAbort} />);
+  const textarea = container.querySelector("textarea")!;
+  await enterText(textarea, "Первое сообщение");
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Отправить"]')!.click());
+  await act(async () => root.render(<MemoryRouter><BubbleChatComposer onSend={onSend} onAbort={onAbort} streaming responding /></MemoryRouter>));
+  expect(textarea.value).toBe("");
+  expect(textarea.disabled).toBe(false);
+  await enterText(textarea, "Следующий вопрос");
+  await act(async () => textarea.dispatchEvent(new KeyboardEvent("keydown", {key:"Enter", bubbles:true})));
+  expect(onSend).toHaveBeenCalledTimes(1);
+  expect(container.querySelector<HTMLButtonElement>('button[aria-label="Остановить генерацию"]')?.disabled).toBe(false);
+  await act(async () => finish(true));
+  await act(async () => root.render(<MemoryRouter><BubbleChatComposer onSend={onSend} onAbort={onAbort} /></MemoryRouter>));
+  expect(textarea.value).toBe("Следующий вопрос");
+  expect(container.querySelector<HTMLButtonElement>('button[aria-label="Отправить"]')?.disabled).toBe(false);
 });

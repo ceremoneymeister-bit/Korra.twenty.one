@@ -1,3 +1,4 @@
+import { ownerFacingError } from "./owner-facing-error";
 /**
  * Чистые функции мастера создания агента.
  *
@@ -376,9 +377,9 @@ export function explainProbeFailure(
   if (/unknown provider|no llm provider configured|no credentials found|provider .* not configured/i.test(text)) {
     return {
       kind: "config",
-      title: "Провайдер не подключён к агенту",
+      title: "Модель не подключена к агенту",
       advice:
-        `${saved} Настройки выбранного провайдера не перенеслись в агента. ` +
+        `${saved} Подключение выбранной модели не настроено для этого агента. ` +
         "Откройте «Модель» в меню вкладки и выберите модель ещё раз; если не " +
         "поможет — проверьте «Ключи» этого агента.",
       keys: true,
@@ -389,16 +390,18 @@ export function explainProbeFailure(
       kind: "access",
       title: "Нет доступа к модели",
       advice:
-        `${saved} Провайдер не принял ключ или подписку — проверьте их в «Ключах» ` +
-        "или продлите подписку, затем повторите проверку.",
+        `${saved} Войдите в аккаунт модели заново и проверьте, действует ли подписка. Затем повторите проверку.`,
       keys: true,
     };
+  }
+  if (/insufficient_quota|usage_limit_reached|quota exceeded|объём работы.*закончился/i.test(text)) {
+    return { kind: "busy", title: "Закончился доступный объём работы с моделью", advice: `${saved} ${ownerFacingError(text)}`, keys: false };
   }
   if (/\b(429|503|502)\b|rate[- ]?limit|too many requests|overloaded|cool-?down|temporarily unavailable|capacity/i.test(text)) {
     return {
       kind: "busy",
-      title: "Провайдер перегружен или исчерпан лимит",
-      advice: `${saved} Повторите проверку через несколько минут.`,
+      title: /rate[- ]?limit|cool-?down|429/i.test(text) ? "Модель временно достигла лимита" : "Сервис модели временно недоступен",
+      advice: `${saved} Попробуйте позже. Переподключать аккаунт из-за этой ошибки не нужно.`,
       keys: false,
     };
   }
@@ -414,8 +417,7 @@ export function explainProbeFailure(
     kind: "unknown",
     title: "Агент не ответил",
     advice:
-      `${saved} Повторите проверку; если ответа нет — посмотрите ключ провайдера ` +
-      "в «Ключах» или выберите другую модель.",
-    keys: true,
+      `${saved} Повторите проверку; если ошибка повторяется, обратитесь в поддержку.`,
+    keys: false,
   };
 }

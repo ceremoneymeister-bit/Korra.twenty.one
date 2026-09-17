@@ -214,3 +214,19 @@ def test_exception_never_raises_on_weird_input():
 
     # Must not raise, whatever it returns.
     build_error_surface_from_exception(Hostile("x"))
+
+
+@pytest.mark.parametrize("reason,message,expected", [
+    ("billing", "HTTP 429: insufficient_quota", "объём работы"),
+    ("billing_unverified", "quota maybe", "Пока не удалось выяснить"),
+    ("rate_limit", "HTTP 429", "временно не принимает"),
+    ("overloaded", "HTTP 503", "перегружен"),
+    ("auth", "HTTP 401", "войдите в аккаунт"),
+    ("context_overflow", "too long", "В этой беседе"),
+])
+def test_owner_guidance_separates_causes_without_billing_advice(monkeypatch, reason, message, expected):
+    from agent.error_surface import format_error_for_user
+    monkeypatch.setenv("KORRA_LANGUAGE", "ru")
+    text = format_error_for_user(message, reason=reason)
+    assert expected in text
+    assert not any(word in text.lower() for word in ("провайдер", "api-ключ", "пополните", "купите", "/model"))

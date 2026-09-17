@@ -28,6 +28,7 @@ export interface ChatMessage {
   /** Honest browser-to-agent delivery state for the durable owner outbox. */
   delivery?: "sending" | "failed" | "delivered";
   clientMessageId?: string;
+  failureConfirmed?: boolean;
 }
 
 export interface ChatSession {

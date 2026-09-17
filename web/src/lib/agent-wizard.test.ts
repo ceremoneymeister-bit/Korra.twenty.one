@@ -213,6 +213,6 @@ describe("explainProbeFailure", () => {
     expect(explainProbeFailure("Проверка не дождалась ответа.", "timeout 90s").kind).toBe("timeout");
     const unknown = explainProbeFailure("Агент промолчал: ответ пришёл пустым.", "");
     expect(unknown.kind).toBe("unknown");
-    expect(unknown.keys).toBe(true);
+    expect(unknown.keys).toBe(false);
   });
 });

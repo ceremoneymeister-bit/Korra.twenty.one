@@ -67,7 +67,7 @@ afterEach(async () => {
 });
 
 describe("AgentTrace — сворачивание", () => {
-  it("уступает место поступающему ответу и снова открывается при новом вызове", async () => {
+  it("сворачивает детали при смене этапа, сохраняя видимым число ошибок", async () => {
     const done = tool({ id: "1", name: "read_file", status: "error", error: "Файл не найден" });
     await render(<AgentTrace tools={[done]} active answering startedAt={0} />);
     expect(panel().dataset.open).toBe("false");
@@ -75,18 +75,20 @@ describe("AgentTrace — сворачивание", () => {
     await click(container.querySelector<HTMLButtonElement>("button[aria-expanded]")!);
     expect(panel().dataset.open).toBe("true");
     await render(<AgentTrace tools={[done, tool({ id: "2", name: "terminal", status: "running" })]} active answering startedAt={0} />);
-    expect(panel().dataset.open).toBe("true");
+    expect(panel().dataset.open).toBe("false");
     expect(text()).toContain("Думаю… · 1 с ошибкой");
     await render(<AgentTrace tools={[done]} startedAt={0} />);
     expect(panel().dataset.open).toBe("false");
   });
 
-  it("свёрнут после ответа и раскрыт, пока агент работает", async () => {
+  it("детали скрыты по умолчанию и доступны по запросу во время работы", async () => {
     const tools = [tool({ id: "1", name: "terminal", context: "ls -la" })];
 
     await render(<AgentTrace tools={tools} active startedAt={1_000} />);
+    expect(panel().dataset.open).toBe("false");
+    expect(panel().hasAttribute("inert")).toBe(true);
+    await click(container.querySelector<HTMLButtonElement>("button[aria-expanded]")!);
     expect(panel().dataset.open).toBe("true");
-    expect(panel().hasAttribute("inert")).toBe(false);
     expect(container.querySelector("[data-testid='orb']")).not.toBeNull();
     expect(text()).toContain("Думаю");
 

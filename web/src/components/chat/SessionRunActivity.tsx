@@ -13,10 +13,13 @@ export function AgentRunBadge({ profile }: { profile: string }) {
   const reachable = useStore($chatRunsReachable);
   const busy = runs.filter(run => run.profile === profile && isRunBusy(run));
   const ready = unread.some(run => run.profile === profile);
-  if (reachable === false && busy.length) return <span className="text-xs" title="Статус работы не подтверждён: нет связи">Нет связи</span>;
+  if (reachable === false && busy.length) return <span className="text-xs" title="Не удалось обновить статус работы">?<span className="sr-only"> Нет связи</span></span>;
   return <>
-    {busy.length > 0 && <span className="rounded-full bg-[var(--neo-accent)] px-2 py-0.5 text-xs text-[#1f1f1f]" aria-label="Агент работает">{busy.length > 1 ? `В работе: ${busy.length}` : busy[0].status === "queued" ? "В очереди" : "В работе"}</span>}
-    {ready && <span className="inline-flex items-center gap-1 text-xs" aria-label="Есть непрочитанный ответ"><span aria-hidden className="size-2 rounded-full bg-[var(--neo-accent-line)]" />Ответ готов</span>}
+    {busy.length > 0 && <span className="inline-flex min-w-5 justify-center rounded-full bg-[var(--neo-accent)] px-1 text-xs text-[#1f1f1f]" title={busy[0].status === "queued" ? "В очереди" : `В работе: ${busy.length}`}>
+      <span aria-hidden>{busy.length}</span><span className="sr-only">{busy[0].status === "queued" ? "В очереди" : "В работе"}</span>
+    </span>}
+    {ready && <span className="inline-flex" title="Есть непрочитанный ответ"><span aria-hidden className="size-2 rounded-full bg-[var(--neo-accent-line)]" /><span className="sr-only">Ответ готов</span></span>}
+
   </>;
 }
 
@@ -39,12 +42,21 @@ export function SessionRunActivity({ tabs }: { tabs: AgentTabConfig[] }) {
   const busy = runs.filter(isRunBusy);
   const toast = unread.filter(run => !dismissed.includes(run.message_id));
   return <>
-    {busy.length > 0 && <div className="flex shrink-0 flex-wrap items-center gap-3 py-2 text-sm" aria-label="Сейчас в работе">
-      <span className="text-muted-foreground">{reachable === false ? "Проверяем связь с агентами" : "Сейчас в работе"}</span>
-      {busy.map(run => <Link key={run.message_id} to={agentChatHref(run.profile, run.session_id)} className="neo-tab rounded-full px-3 py-2" title={run.user_message.content}>
-        {name(run.profile)} · {run.user_message.content.slice(0, 35)}{run.status === "queued" ? " — в очереди, начнёт автоматически" : ""}
-      </Link>)}
-    </div>}
+    {busy.length > 0 && <details className="relative shrink-0" onKeyDown={event => {
+      if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
+    }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}>
+      <summary className="neo-tab cursor-pointer list-none rounded-full px-3 py-2 text-sm" aria-label={`Работающие чаты: ${busy.length}`}>
+        Задачи: {busy.length}
+      </summary>
+      <div className="absolute right-0 top-full z-40 mt-2 max-h-[50dvh] w-[min(340px,calc(100vw-32px))] overflow-y-auto rounded-2xl bg-[var(--neo-surface)] p-3 shadow-[var(--neo-depth-3)]" aria-label="Работающие чаты">
+        <p className="mb-2 text-sm">{reachable === false ? "Не удалось обновить статус. Ниже — последнее известное состояние." : "Работающие чаты"}</p>
+        {busy.map(run => <Link key={run.message_id} to={agentChatHref(run.profile, run.session_id)} className="mb-2 block rounded-xl p-2 text-sm focus-visible:outline" onClick={event => { const panel = event.currentTarget.closest("details"); if (panel) panel.open = false; }}>
+          <span className="block font-medium">{name(run.profile)}</span>
+          <span className="block break-words text-xs text-muted-foreground">Запрос: {run.user_message.content}</span>
+          <span className="block text-xs">{reachable === false ? "Статус требует проверки" : run.status === "queued" ? "В очереди — начнёт автоматически" : "Выполняется"} · Открыть чат</span>
+        </Link>)}
+      </div>
+    </details>}
     {/* Краткое уведомление — в верхней безопасной области, не над composer /
         Send / Stop / вложениями, без перехвата фокуса и автоперехода. Основной
         долговременный сигнал — отметка у чата в списке (ChatUnreadMark). */}

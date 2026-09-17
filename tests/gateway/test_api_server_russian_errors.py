@@ -60,14 +60,45 @@ async def test_russian_failed_turn_keeps_wire_failure_semantics(monkeypatch, str
             if truncated:
                 assert data["choices"][0]["message"]["content"] == final_text
             else:
-                assert "Провайдер не принял данные входа" in data["choices"][0]["message"]["content"]
+                assert "Подключение к модели больше не даёт доступа" in data["choices"][0]["message"]["content"]
         assert data["choices"][0]["finish_reason"] == ("length" if truncated else "error")
         assert data["hermes"]["error_code"] == ("output_truncated" if truncated else "agent_error")
         assert "Техническая причина:" not in data["hermes"]["error"]
         assert diagnostic not in data["hermes"]["error"]
-        assert "Ответ обрезан" in data["hermes"]["error"] if truncated else "Провайдер не принял данные входа" in data["hermes"]["error"]
+        assert "Ответ не поместился" in data["hermes"]["error"] if truncated else "Подключение к модели больше не даёт доступа" in data["hermes"]["error"]
         if not stream:
             assert response.headers["X-Hermes-Error"] == " ".join(diagnostic.split())
         assert data["hermes"]["partial"] is truncated
         assert data["hermes"]["failed"] is (not truncated)
     assert result["error"] == diagnostic
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("reason,diagnostic,expected", [
+    ("billing", "HTTP 429: insufficient_quota", "объём работы"),
+    ("rate_limit", "HTTP 429: slow down", "временно не принимает"),
+    ("overloaded", "HTTP 503", "перегружен"),
+])
+async def test_model_limits_cross_http_with_distinct_guidance(monkeypatch, stream, reason, diagnostic, expected):
+    monkeypatch.setenv("KORRA_LANGUAGE", "ru")
+    adapter = APIServerAdapter(PlatformConfig(enabled=True))
+    async def run_agent(**kwargs):
+        return {"final_response": diagnostic, "error": diagnostic, "failed": True,
+                "completed": False, "messages": [], "failure_reason": reason}, {}
+    monkeypatch.setattr(adapter, "_run_agent", run_agent)
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", adapter._handle_chat_completions)
+    async with TestClient(TestServer(app)) as client:
+        response = await client.post("/v1/chat/completions", json={"model":"korra-agent", "stream":stream,
+            "messages":[{"role":"user", "content":"Проверка"}]})
+        assert response.status == 200
+        if stream:
+            chunks = [json.loads(line[6:]) for line in (await response.text()).splitlines()
+                      if line.startswith("data: ") and line != "data: [DONE]"]
+            body = chunks[-1]
+        else:
+            body = await response.json()
+        assert body["choices"][0]["finish_reason"] == "error"
+        assert expected in body["error"]["message"] if stream else expected in body["hermes"]["error"]
+        assert "пополн" not in json.dumps(body, ensure_ascii=False).lower()

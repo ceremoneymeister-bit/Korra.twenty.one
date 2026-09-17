@@ -117,7 +117,7 @@ export interface AgentTraceProps {
   tools: ToolEntry[];
   /** Размышление модели. Только из истории: живой поток его не передаёт. */
   reasoning?: string;
-  /** Агент ещё работает: заголовок с бликом, блок раскрыт сам. */
+  /** Агент ещё работает: краткий статус; детали раскрываются по запросу. */
   active?: boolean;
   /** Текст уже приходит; завершённые шаги уступают место чтению. */
   answering?: boolean;
@@ -146,7 +146,7 @@ export function AgentTrace({
     setPreviousPhase(phase);
     setOverride(null);
   }
-  const open = override ?? working;
+  const open = override ?? false;
   const elapsedMs = measuredElapsed(tools, startedAt);
 
   const trimmedReasoning = reasoning?.trim() ?? "";
@@ -161,6 +161,8 @@ export function AgentTrace({
     errors: tools.filter((tool) => tool.status === "error").length,
     hasReasoning,
   });
+
+  const currentTool = tools.findLast(tool => tool.status === "running");
 
   return (
     <div className="mb-4 font-sans normal-case tracking-normal">
@@ -187,7 +189,7 @@ export function AgentTrace({
           <Sparkles size={14} className="text-[var(--neo-text-secondary)]" aria-hidden />
         )}
         <span className={cn("font-medium", active && "korra-trace__shimmer")}>
-          {summary}
+          {summary}{!open && currentTool ? ` · ${toolMeta(currentTool.name).label}` : ""}
         </span>
         <ChevronDown
           size={13}

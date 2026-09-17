@@ -409,12 +409,12 @@ export default function AgentWorkbenchPage() {
     <div className="flex h-full min-h-0 flex-col">
       {/* Полоса вкладок тянется от края до края — отрицательные поля гасят
           горизонтальный padding обёртки, внутренние возвращают его тексту. */}
-      <div className="shrink-0 -mx-3 px-3 py-2 sm:-mx-6 sm:px-6">
+      <div className="flex shrink-0 items-center gap-2 -mx-3 px-3 py-2 sm:-mx-6 sm:px-6">
         <div
           role="tablist"
           aria-label="Агенты"
           onKeyDown={onTabKeyDown}
-          className="korra-agent-tabs neo-tabs-list flex min-h-14 items-center gap-2 p-2"
+          className="korra-agent-tabs neo-tabs-list flex min-w-0 flex-1 min-h-14 items-center gap-2 p-2"
         >
           <div
             role="presentation"
@@ -484,6 +484,7 @@ export default function AgentWorkbenchPage() {
             <Plus size={18} aria-hidden />
           </button>
         </div>
+        <SessionRunActivity tabs={mountedTabs} />
       </div>
 
       {openMenu?.kind === "tab" && menuTab &&
@@ -719,7 +720,6 @@ export default function AgentWorkbenchPage() {
         )}
 
       <Toast toast={toast} />
-      <SessionRunActivity tabs={mountedTabs} />
 
       <div className="flex min-h-0 flex-1 flex-col">
         {mountedTabs.map((tab) => (

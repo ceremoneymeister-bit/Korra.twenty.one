@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type SessionMessage } from "@/lib/api";
+import { chatViewKey, writeChatSelection } from "@/lib/chat-view-state";
 import { loadChatOutbox, saveChatOutbox } from "@/lib/chat-outbox";
 import { useChatStream, type UseChatStreamReturn } from "./useChatStream";
 
@@ -760,7 +761,7 @@ it("после возврата отказ сервера не превраща�
   }]);
   vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "failed-session", messages: [{ role: "user", content: "Вопрос" }] as SessionMessage[] });
   await act(async () => { await current.loadSession("failed-session"); });
-  expect(current.error).toContain("Ответ завершился с ошибкой");
+  expect(current.error).toContain("Предыдущая попытка завершилась с ошибкой");
   expect(current.isStreaming).toBe(false);
   expect(current.messages[0].content).toBe("Вопрос");
 });
@@ -828,4 +829,74 @@ describe("K21-105 selected conversation recovery", () => {
     expect(current.sessionId).toBeNull();
     expect(current.messages).toEqual([]);
   });
+});
+
+describe("message-specific recovery", () => {
+  const pending = (sessionId: string, createdAt: number) => ({
+    messageId: `pending-message-${sessionId}-123456`, sessionId, text: `Запрос ${sessionId}`,
+    attachments: [], status: "failed" as const, createdAt,
+  });
+  it("retry and discard target the visible message, not an older sibling chat", async () => {
+    const a = pending("chat-a", 1), b = pending("chat-b", 2);
+    saveChatOutbox(a); saveChatOutbox(b);
+    saveChatOutbox({ ...a, profile: "neighbor" });
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "chat-b", messages: [] });
+    await act(async () => { await current.loadSession("chat-b"); });
+    const fetcher = vi.fn<typeof fetch>(async () => sseResponse('data: [DONE]\n\n'));
+    vi.stubGlobal("fetch", fetcher);
+    await act(async () => {
+      await current.retryPending({ sessionId: "chat-b", messageId: "obsolete-message" });
+      current.discardPending({ sessionId: "chat-b", messageId: "obsolete-message" });
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(loadChatOutbox("", "chat-b")?.messageId).toBe(b.messageId);
+    await act(async () => { await current.retryPending(); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const init = fetcher.mock.calls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>)["X-Hermes-Session-Id"]).toBe("chat-b");
+    expect((init.headers as Record<string, string>)["X-Korra-Client-Message-Id"]).toBe(b.messageId);
+    expect(loadChatOutbox("", "chat-a")?.messageId).toBe(a.messageId);
+    saveChatOutbox(b);
+    await act(async () => current.discardPending());
+    expect(loadChatOutbox("", "chat-b")).toBeNull();
+    expect(loadChatOutbox("", "chat-a")?.messageId).toBe(a.messageId);
+    expect(loadChatOutbox("neighbor", "chat-a")?.messageId).toBe(a.messageId);
+  });
+  it("foreground history restore retains the local message and attachments", async () => {
+    const record = { ...pending("restore", 1), attachments: Array.from({length:6}, (_, i) => ({path:`/workspace/test-${i}.txt`,name:`test-${i}.txt`,kind:"document",size:12,reader:"text"})) };
+    saveChatOutbox(record);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id:"restore", messages:[] });
+    await act(async () => { await current.loadSession("restore"); });
+    expect(current.messages).toEqual([expect.objectContaining({content:record.text, clientMessageId:record.messageId, delivery:"failed", attachments:expect.arrayContaining([expect.objectContaining({name:"test-5.txt"})])})]);
+  });
+});
+
+
+it("retains the next undelivered message when the ledger still describes the previous completed answer", async () => {
+  const { getChatRuns } = await import("@/lib/chat-runs");
+  vi.mocked(getChatRuns).mockResolvedValueOnce([{
+    message_id:"old-completed-message",session_id:"same-chat",profile:"",status:"completed",updated_at:123,history_count:0,
+    user_message:{role:"user",content:"Старый вопрос"},
+  }]);
+  saveChatOutbox({messageId:"new-pending-message-1234",sessionId:"same-chat",text:"Новый вопрос",attachments:[],createdAt:124,status:"failed"});
+  vi.spyOn(api,"getSessionMessages").mockResolvedValue({session_id:"same-chat",messages:[{role:"user",content:"Старый вопрос"},{role:"assistant",content:"Старый ответ"}] as SessionMessage[]});
+  const fetcher=vi.fn<typeof fetch>(async () => Response.json({approvals:[]}));vi.stubGlobal("fetch",fetcher);
+  await act(async()=>{await current.loadSession("same-chat");});
+  expect(current.messages.map(message=>message.content)).toEqual(["Старый вопрос","Старый ответ","Новый вопрос"]);
+  expect(current.messages[2].delivery).toBe("failed");
+  expect(fetcher.mock.calls.filter(([url]) => String(url).includes("/stream") || String(url).includes("/completions"))).toHaveLength(0);
+  expect(loadChatOutbox("","same-chat")?.messageId).toBe("new-pending-message-1234");
+});
+
+
+it("keeps a confirmed model failure and its explanation after remount", async () => {
+  const explanation = "Доступный объём работы с моделью закончился.";
+  saveChatOutbox({ messageId: "quota-message-123456", sessionId: "quota-chat", text: "Запрос", attachments: [], createdAt: 124, status: "failed", terminal: true, error: explanation });
+  writeChatSelection(`${chatViewKey()}:selected`, "quota-chat");
+  vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: "quota-chat", messages: [] });
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await act(async () => root.render(<Probe onValue={value => { current = value; }} />));
+  expect(loadChatOutbox("", "quota-chat")).toMatchObject({ terminal: true, error: explanation });
+  expect(current.messages).toEqual([expect.objectContaining({ failureConfirmed: true, content: "Запрос" })]);
 });

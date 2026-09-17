@@ -1,4 +1,4 @@
-import { useChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
+import { useChatAttachmentDraft, restoreChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
 import { useSessionRun } from "@/hooks/useSessionRun";
 import { chatViewKey, readChatView, writeChatView } from "@/lib/chat-view-state";
 /**
@@ -84,7 +84,7 @@ import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import type { ApprovalChoiceValue, ChatMessage } from "@/lib/chat-types";
 import { api, type SessionInfo } from "@/lib/api";
-import { useChatStream, type ChatApprovalEntry } from "@/hooks/useChatStream";
+import { useChatStream, type PendingMessageTarget, type ChatApprovalEntry } from "@/hooks/useChatStream";
 import { useDictation, type DictationState } from "@/hooks/useDictation";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useSessionSearch } from "@/hooks/useSessionSearch";
@@ -156,7 +156,9 @@ function UserBubble({
   message,
   onRetry,
   onDiscard,
+  busy,
 }: {
+  busy?: boolean;
   message: ChatMessage;
   onRetry?: () => void;
   onDiscard?: () => void;
@@ -207,6 +209,8 @@ function UserBubble({
             size="sm"
             outlined
             onClick={onRetry}
+            disabled={busy}
+            title={busy ? "Дождитесь завершения текущего ответа или остановите его" : undefined}
             prefix={<RotateCcw aria-hidden />}
             className="normal-case tracking-normal"
           >
@@ -214,16 +218,18 @@ function UserBubble({
                 доставки. Ход, который сервер принял и завершил отказом
                 (например, ключ провайдера ещё не введён), тоже приходит
                 сюда — и такому сообщению надпись врала. */}
-            Без ответа · Повторить
+            {message.failureConfirmed ? "Вернуть в поле" : "Проверить и повторить"}
           </Button>
           <Button
             type="button"
             size="sm"
             ghost
             onClick={onDiscard}
+            disabled={busy}
+            title="Убрать сохранённую в браузере копию. Это не отменяет работу агента."
             className="normal-case tracking-normal"
           >
-            Историю проверил(а) · убрать
+            Убрать сохранённую копию
           </Button>
         </div>
       ) : null}
@@ -506,6 +512,7 @@ function BubbleChatTranscript({
   onDiscard,
   pendingElsewhere,
   scrollKey,
+  sessionId,
   agentLabel,
   approvals,
   onApprovalDecision,
@@ -515,14 +522,15 @@ function BubbleChatTranscript({
   /** Черновик этого профиля из другого чата — напоминаем баннером. */
   pendingElsewhere?: ChatOutboxRecord | null;
   scrollKey?: string;
+  sessionId: string | null;
   messages: ChatMessage[];
   streaming?: boolean;
   error?: string | null;
   onDecision?: ArtifactDecisionHandler;
   busy?: boolean;
   decided?: Map<string, "approve" | "defer">;
-  onRetry?: () => void;
-  onDiscard?: () => void;
+  onRetry?: (target: PendingMessageTarget) => void;
+  onDiscard?: (target: PendingMessageTarget) => void;
   /** Вопросы агента по опасным командам этого чата — живые и отвеченные. */
   approvals?: ChatApprovalEntry[];
   onApprovalDecision?: (requestId: string, choice: ApprovalChoiceValue) => void;
@@ -549,13 +557,13 @@ function BubbleChatTranscript({
               className="flex flex-wrap items-center gap-3 rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-4 py-3 text-sm shadow-[var(--neo-inset-compact)]"
             >
               <span className="min-w-0 flex-1 text-[var(--neo-text-secondary)]">
-                Неотправленное сообщение в другом чате: «{pendingElsewhere.text.slice(0, 80)}
+                {pendingElsewhere.sessionId === sessionId ? "Сохранённое сообщение в этом чате" : "Сохранённое сообщение в другом чате"}: «{pendingElsewhere.text.slice(0, 80)}
                 {pendingElsewhere.text.length > 80 ? "…" : ""}»
               </span>
-              <Button size="sm" onClick={onRetry}>
-                Повторить
+              <Button size="sm" disabled={busy} onClick={() => onRetry?.({ sessionId: pendingElsewhere.sessionId, messageId: pendingElsewhere.messageId })}>
+                {pendingElsewhere.sessionId === sessionId ? "Проверить отправку" : "Открыть этот чат"}
               </Button>
-              <Button ghost size="sm" onClick={onDiscard}>
+              <Button ghost size="sm" disabled={busy} onClick={() => onDiscard?.({ sessionId: pendingElsewhere.sessionId, messageId: pendingElsewhere.messageId })}>
                 Убрать
               </Button>
             </div>
@@ -572,8 +580,9 @@ function BubbleChatTranscript({
                 <UserBubble
                   key={m.id}
                   message={m}
-                  onRetry={onRetry}
-                  onDiscard={onDiscard}
+                  busy={busy}
+                  onRetry={() => { if (sessionId && m.clientMessageId) onRetry?.({ sessionId, messageId: m.clientMessageId }); }}
+                  onDiscard={() => { if (sessionId && m.clientMessageId) onDiscard?.({ sessionId, messageId: m.clientMessageId }); }}
                 />
               ) : (
                 <AssistantBubble
@@ -625,7 +634,7 @@ function BubbleChatTranscript({
               role="alert"
               className="mx-auto max-w-[85%] rounded-[var(--neo-radius-control)] bg-[var(--neo-surface)] px-4 py-3 text-sm text-[var(--destructive)] shadow-[var(--neo-inset-compact)]"
             >
-              Корра не смогла ответить: {error}
+              {error}
             </div>
           )}
         </div>
@@ -663,7 +672,8 @@ interface BubbleChatComposerProps {
 }
 
 const TEXTAREA_MIN_HEIGHT = 40;
-const TEXTAREA_MAX_HEIGHT = 200;
+const TEXTAREA_MAX_HEIGHT = 120;
+const TEXTAREA_EXPANDED_HEIGHT = 320;
 
 /** Подписи кнопки-микрофона по состоянию диктовки. */
 const DICTATION_LABEL: Record<DictationState, string> = {
@@ -695,6 +705,7 @@ export function BubbleChatComposer({
   // не могут — обе операции запускает владелец, по одной за раз.
   const [composerError, setComposerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [originals, setOriginals] = useState(sendOriginals);
@@ -749,6 +760,7 @@ export function BubbleChatComposer({
   );
 
   const resizeTextarea = useCallback((el: HTMLTextAreaElement) => {
+    const maxHeight = expanded ? TEXTAREA_EXPANDED_HEIGHT : TEXTAREA_MAX_HEIGHT;
     const previousHeight = Math.min(
       Math.max(
         Number.parseFloat(el.style.height) ||
@@ -756,23 +768,28 @@ export function BubbleChatComposer({
           TEXTAREA_MIN_HEIGHT,
         TEXTAREA_MIN_HEIGHT,
       ),
-      TEXTAREA_MAX_HEIGHT,
+      maxHeight,
     );
 
     // A pixel start and end are required because CSS cannot interpolate from
     // `auto`. Collapse only for measurement, then restore the current height
     // before releasing the transition toward the new content height.
+    // Measuring during a CSS height transition reads the old animated size,
+    // making an emptied field stay tall. Measure with transitions disabled.
+    const previousTransition = el.style.transition;
+    el.style.transition = "none";
     el.style.height = "0px";
     const naturalHeight = el.scrollHeight;
     const nextHeight = Math.min(
       Math.max(naturalHeight, TEXTAREA_MIN_HEIGHT),
-      TEXTAREA_MAX_HEIGHT,
+      maxHeight,
     );
     el.style.height = `${previousHeight}px`;
     void el.offsetHeight;
+    el.style.transition = previousTransition;
     el.style.height = `${nextHeight}px`;
-    el.style.overflowY = naturalHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
-  }, []);
+    el.style.overflowY = naturalHeight > maxHeight ? "auto" : "hidden";
+  }, [expanded]);
 
   useEffect(() => {
     const input = taRef.current;
@@ -850,6 +867,7 @@ export function BubbleChatComposer({
   const acceptedRef = useRef(false);
   const clearComposer = useCallback(() => {
     setValue("");
+    setExpanded(false);
     setAttachments((current) => {
       current.forEach((item) => {
         if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
@@ -869,7 +887,7 @@ export function BubbleChatComposer({
     // Sending while a file is still uploading would hand the agent a message
     // whose attachments do not exist yet — the exact failure this feature is
     // meant to prevent. The button is disabled too; this is the second gate.
-    if (disabled || submitting || uploading || failed) return;
+    if (disabled || streaming || submitting || uploading || failed) return;
     if (!text && ready.length === 0) return;
     setSubmitting(true);
     acceptedRef.current = false;
@@ -897,6 +915,7 @@ export function BubbleChatComposer({
   }, [
     value,
     disabled,
+    streaming,
     submitting,
     onSend,
     uploading,
@@ -909,6 +928,7 @@ export function BubbleChatComposer({
     if (submitting && streaming && !acceptedRef.current) {
       acceptedRef.current = true;
       clearComposer();
+      setSubmitting(false);
     }
   }, [submitting, streaming, clearComposer]);
 
@@ -922,6 +942,7 @@ export function BubbleChatComposer({
 
   const canSend =
     !disabled &&
+    !streaming &&
     !submitting &&
     !uploading &&
     !failed &&
@@ -1034,9 +1055,11 @@ export function BubbleChatComposer({
             ref={taRef}
             id={textareaId}
             rows={1}
+            style={{ maxHeight: expanded ? TEXTAREA_EXPANDED_HEIGHT : TEXTAREA_MAX_HEIGHT }}
             value={value}
             onChange={(e) => {
               setValue(e.target.value);
+              if (!e.target.value) setExpanded(false);
             }}
             onPaste={
               allowAttachments
@@ -1060,13 +1083,16 @@ export function BubbleChatComposer({
               }
             }}
             placeholder={
-              recording ? "Слушаю…" : agentLabel ? `Напишите агенту «${agentLabel}»…` : "Напишите Корре…"
+              recording ? "Слушаю…" : streaming ? "Можно написать следующее сообщение — отправите после ответа…" : agentLabel ? `Напишите агенту «${agentLabel}»…` : "Напишите Корре…"
             }
             disabled={disabled || submitting}
             className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent text-sm leading-6 normal-case tracking-normal"
             aria-describedby={shortcutId}
           />
 
+          {(value.includes("\n") || value.length > 180) && <button type="button" className="self-end px-2 py-1 text-xs underline" onClick={() => setExpanded(open => !open)} aria-expanded={expanded}>
+            {expanded ? "Свернуть поле" : "Развернуть поле"}
+          </button>}
           {attachments.length > 0 && (
             <div
               className="korra-chat-composer__attachments flex flex-wrap gap-1.5"
@@ -1263,6 +1289,7 @@ export default function BubbleChatPage({
     send,
     resolveApproval,
     retryPending,
+    isLoading,
     discardPending,
     abort,
     loadSession,
@@ -1280,6 +1307,8 @@ export default function BubbleChatPage({
     ? (scopeProfiles.find((item) => item.name === agentProfile)?.display_name?.trim() || agentProfile)
     : undefined;
   const pendingElsewhere = useMemo(() => {
+    const currentPending = sessionId ? loadChatOutbox(agentProfile ?? "", sessionId) : null;
+    if (currentPending && !messages.some(message => message.clientMessageId === currentPending.messageId)) return currentPending;
     const pending = loadChatOutbox(agentProfile ?? "");
     return pending && pending.status === "failed" && pending.sessionId !== sessionId ? pending : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1292,6 +1321,24 @@ export default function BubbleChatPage({
   // остальным, переживая перезагрузку.
   const [prefill, setPrefill] = useState<string | null>(null);
   const [historyRevision, setHistoryRevision] = useState(0);
+  const recoveryKey = chatViewKey(agentProfile, sessionId);
+  const [recovery, setRecovery] = useState<{ key: string; text: string } | null>(null);
+  const recoveryNotice = recovery?.key === recoveryKey ? recovery.text : "";
+  const setRecoveryNotice = (text: string) => setRecovery(text ? { key: recoveryKey, text } : null);
+  const handleRetry = (target: PendingMessageTarget) => {
+    const pending = loadChatOutbox(agentProfile ?? "", target.sessionId);
+    if (!pending || pending.messageId !== target.messageId || isStreaming || isLoading) return;
+    if (target.sessionId !== sessionId || !pending.terminal) { void retryPending(target); return; }
+    const key = chatViewKey(agentProfile, sessionId);
+    if (!restoreChatAttachmentDraft(key, pending.attachments)) {
+      setRecoveryNotice("В поле уже много вложений. Уберите лишние файлы и верните сообщение ещё раз — сохранённая копия пока на месте.");
+      return;
+    }
+    const draft = readChatView(key);
+    setPrefill(draft && draft !== pending.text ? `${draft}\n\n${pending.text}` : pending.text);
+    discardPending(target);
+    setRecoveryNotice("Текст и вложения возвращены в поле. Ничего не отправлено. Если агент успел выполнить часть задачи, учтите это перед новой отправкой.");
+  };
   const handledNewChatRequestRef = useRef(newChatRequest);
 
   useEffect(() => {
@@ -1487,22 +1534,26 @@ export default function BubbleChatPage({
           streaming={isStreaming && !queued}
           error={error}
           onDecision={handleDecision}
-          busy={isStreaming}
+          busy={isStreaming || isLoading}
           decided={decidedArtifacts}
-          onRetry={() => void retryPending()}
-          onDiscard={discardPending}
+          sessionId={sessionId}
+          onRetry={handleRetry}
+          onDiscard={target => discardPending(target)}
           pendingElsewhere={pendingElsewhere}
           agentLabel={agentLabel}
           approvals={approvals}
           onApprovalDecision={handleApprovalDecision}
         />
         {queued && <p role="status" className="px-5 py-3 text-sm text-muted-foreground">Все места заняты. Сообщение в очереди — агент начнёт автоматически, можно перейти в другой чат.</p>}
+        {recoveryNotice && <p role="status" className="px-5 py-2 text-sm">{recoveryNotice}<button className="ml-2 underline" onClick={() => setRecoveryNotice("")}>Скрыть</button></p>}
+        {isLoading && <p role="status" className="px-5 py-2 text-sm">Обновляем переписку…</p>}
         <BubbleChatComposer
           active={active}
           key={sessionId ?? "new"}
           draftKey={chatViewKey(agentProfile, sessionId)}
           agentLabel={agentLabel}
           onSend={send}
+          disabled={isLoading}
           prefill={prefill}
           onPrefillConsumed={() => setPrefill(null)}
           streaming={isStreaming}
@@ -1515,11 +1566,10 @@ export default function BubbleChatPage({
           onAbort={abort}
           profile={agentProfile}
           allowAttachments
-          // UI guard: disable Enter-key submits during streaming. The
-          // composer also swaps the Send button for Stop, but a stray
+          // Draft stays editable; the composer blocks Enter while a turn runs.
+          // The Send button becomes Stop.
           // Enter would still call submit() and bypass the swap. Pair
           // with the ref-guard in useChatStream.send (Codex review #7).
-          disabled={isStreaming}
         />
       </section>
     </div>
