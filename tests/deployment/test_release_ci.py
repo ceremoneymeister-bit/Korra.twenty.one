@@ -143,6 +143,39 @@ def test_host_dependency_gate_allows_matching_core_and_packages_for_warmup():
     ci.validate_host_dependencies(pins, {"core-package": "2.0", "optional-package": None})
 
 
+def test_office_gate_requires_real_results_and_downloadable_artifacts():
+    report = {
+        "status": "PASS", "model_calls": 0,
+        "calc": {
+            "status": "PASS", "formula_cells": 3,
+            "cached_values": {"C1": 60.0, "C2": 200.0, "C3": 260.0},
+            "formulas_preserved": True, "formatting_preserved": True,
+            "spreadsheet_errors": [],
+        },
+        "writer": {"status": "PASS", "pages": 2, "cyrillic_text": True,
+                   "table_layout": True, "page_layout": True},
+        "artifacts": {
+            "xlsx": {"name": "formula-recalculated.xlsx", "bytes": 10, "sha256": "a" * 64},
+            "pdf": {"name": "writer-source.pdf", "bytes": 20, "sha256": "b" * 64},
+        },
+    }
+    ci.validate_office_report(report)
+    ci.validate_download(
+        {"bytes": 10, "sha256": "a" * 64, "content_disposition": "attachment; filename=x.xlsx"},
+        report["artifacts"]["xlsx"],
+    )
+
+    broken = json.loads(json.dumps(report))
+    broken["calc"]["cached_values"]["C3"] = 0
+    with pytest.raises(ci.AcceptanceError, match="cached values"):
+        ci.validate_office_report(broken)
+    with pytest.raises(ci.AcceptanceError, match="downloadable"):
+        ci.validate_download(
+            {"bytes": 10, "sha256": "a" * 64, "content_disposition": "inline; filename=x.xlsx"},
+            report["artifacts"]["xlsx"],
+        )
+
+
 @pytest.mark.parametrize("packages", [[], [{"spec": "package>=1"}], [{"spec": "package==1"}, {"spec": "package==2"}], [None]])
 def test_host_dependency_gate_refuses_malformed_or_duplicate_pins(packages):
     with pytest.raises(ci.AcceptanceError):
@@ -168,6 +201,7 @@ def test_ci_container_is_offline_bounded_and_has_no_host_state():
         assert command[command.index(flag) + 1] == value
     assert command[-3:] == [IMAGE_ID, "gateway", "run"]
     assert command[command.index("--tmpfs") + 1].startswith("/opt/data:")
+    assert "KORRA_DASHBOARD_SESSION_TOKEN=release-ci-synthetic-session" in command
     assert not {"--volume", "-v", "--mount", "--publish", "-p", "--env-file"}.intersection(command)
 
 
@@ -204,12 +238,32 @@ def test_probe_failure_cleans_only_generated_container(monkeypatch):
 
 def image_daemon(release_note, help_text="usage: korra", host_versions=None):
     """Docker, отвечающий как на живом образе. Пробы подменены целиком."""
+    artifacts = {
+        "xlsx": {"name": "formula-recalculated.xlsx", "bytes": 10, "sha256": "a" * 64},
+        "pdf": {"name": "writer-source.pdf", "bytes": 20, "sha256": "b" * 64},
+    }
+    office = {
+        "status": "PASS", "model_calls": 0,
+        "calc": {"status": "PASS", "formula_cells": 3,
+                 "cached_values": {"C1": 60.0, "C2": 200.0, "C3": 260.0},
+                 "formulas_preserved": True, "formatting_preserved": True,
+                 "spreadsheet_errors": []},
+        "writer": {"status": "PASS", "pages": 2, "cyrillic_text": True,
+                   "table_layout": True, "page_layout": True},
+        "artifacts": artifacts,
+    }
+
     def docker(*args, **kwargs):
         if args[:3] == ("docker", "image", "inspect"):
             return json.dumps([INFO])
         if args[:2] == ("docker", "inspect"):
             return json.dumps([{"State": {"Running": True}, "Image": IMAGE_ID}])
         if args[:2] == ("docker", "exec"):
+            if "/opt/hermes/scripts/office_preflight.py" in args:
+                return json.dumps(office)
+            if len(args) >= 2 and args[-2] == "download":
+                artifact = next(item for item in artifacts.values() if item["name"] == args[-1])
+                return json.dumps({**artifact, "content_disposition": "attachment; filename=synthetic"})
             if args[-2] == "host-dependencies":
                 return json.dumps({name: (host_versions or {}).get(name) for name in json.loads(args[-1])})
             if args[-1] == "health":

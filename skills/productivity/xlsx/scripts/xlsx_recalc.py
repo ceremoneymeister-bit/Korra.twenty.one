@@ -30,23 +30,65 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
+
+
+_SHEET_NS = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+ET.register_namespace("", _SHEET_NS["x"])
+
+
+def invalidate_formula_caches(source, destination):
+    """Copy an XLSX while clearing formula caches so Calc must recompute.
+
+    A normal headless format conversion can trust a stale cached ``<v>`` and
+    simply preserve it. Clearing only formula results in the disposable copy
+    leaves formulas, values, formatting and the user's original untouched.
+    """
+    cleared = 0
+    with zipfile.ZipFile(source) as source_archive, zipfile.ZipFile(
+        destination, "w"
+    ) as destination_archive:
+        for member in source_archive.infolist():
+            body = source_archive.read(member)
+            if member.filename.startswith("xl/worksheets/") and member.filename.endswith(".xml"):
+                root = ET.fromstring(body)
+                for cell in root.findall(".//x:c", _SHEET_NS):
+                    if cell.find("x:f", _SHEET_NS) is None:
+                        continue
+                    cached = cell.find("x:v", _SHEET_NS)
+                    if cached is not None:
+                        cell.remove(cached)
+                    cleared += 1
+                body = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+            destination_archive.writestr(member, body)
+    return cleared
 
 
 def count_cached(path):
-    """Number of formula cells with a cached value present."""
-    from openpyxl import load_workbook
-    wb_f = load_workbook(path, data_only=False)
-    wb_v = load_workbook(path, data_only=True)
+    """Return formula/cached-value counts without another Python dependency.
+
+    Cached results live beside formulas in worksheet XML. Reading them
+    directly keeps this helper able to verify LibreOffice in a clean image;
+    openpyxl remains the creation/editing dependency of the wider XLSX skill.
+    """
     formulas = cached = 0
-    for name in wb_f.sheetnames:
-        ws_f, ws_v = wb_f[name], wb_v[name]
-        for row in ws_f.iter_rows():
-            for cell in row:
-                if isinstance(cell.value, str) and cell.value.startswith("="):
-                    formulas += 1
-                    if ws_v[cell.coordinate].value is not None:
-                        cached += 1
+    with zipfile.ZipFile(path) as archive:
+        sheets = sorted(
+            name for name in archive.namelist()
+            if name.startswith("xl/worksheets/") and name.endswith(".xml")
+        )
+        for name in sheets:
+            root = ET.fromstring(archive.read(name))
+            for cell in root.findall(".//x:c", _SHEET_NS):
+                formula = cell.find("x:f", _SHEET_NS)
+                if formula is None:
+                    continue
+                formulas += 1
+                value = cell.find("x:v", _SHEET_NS)
+                if value is not None and value.text not in (None, ""):
+                    cached += 1
     return formulas, cached
 
 
@@ -78,21 +120,35 @@ def main(argv=None):
         return 0
 
     with tempfile.TemporaryDirectory() as tmp:
+        prepared_dir = Path(tmp) / "input"
+        prepared_dir.mkdir()
+        prepared = prepared_dir / src.name
+        formulas_to_recalculate = invalidate_formula_caches(src, prepared)
         proc = subprocess.run(
             [soffice, "--headless", "--calc", "--convert-to", "xlsx:Calc "
-             "MS Excel 2007 XML", "--outdir", tmp, str(src)],
+             "MS Excel 2007 XML", "--outdir", tmp, str(prepared)],
             capture_output=True, text=True, encoding="utf-8",
             timeout=args.timeout,
             env={"HOME": tmp, "PATH": Path(soffice).parent.as_posix()
                  + ":/usr/bin:/bin"})
         produced = Path(tmp) / (src.stem + ".xlsx")
         if proc.returncode != 0 or not produced.exists():
+            diagnostic = "\n".join(
+                part.strip() for part in (proc.stdout, proc.stderr) if part.strip()
+            )
             print(json.dumps({"ok": False,
                               "error": "soffice conversion failed",
-                              "stderr": proc.stderr.strip()[-500:]}),
+                              "diagnostic": diagnostic[-500:]}),
                   file=sys.stderr)
             return 1
         formulas, cached = count_cached(produced)
+        if formulas != formulas_to_recalculate or cached != formulas_to_recalculate:
+            print(json.dumps({"ok": False,
+                              "error": "soffice changed formulas or left caches incomplete",
+                              "formula_cells": formulas,
+                              "with_cached_values": cached}),
+                  file=sys.stderr)
+            return 1
         dest = Path(args.out).resolve() if args.out else src
         shutil.copyfile(produced, dest)
 

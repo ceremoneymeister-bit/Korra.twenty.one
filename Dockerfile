@@ -71,7 +71,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 RUN apt-get -o Acquire::Retries=3 update && \
     apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
     ca-certificates curl iputils-ping python3 python-is-python3 ripgrep ffmpeg gcc g++ make cmake python3-dev python3-venv libffi-dev libolm-dev libatomic1 procps git openssh-client docker-cli sudo xz-utils \
-    libreoffice-impress poppler-utils fonts-dejavu-core fonts-liberation2 && \
+    libreoffice-calc libreoffice-writer libreoffice-impress \
+    poppler-utils fonts-dejavu-core fonts-liberation2 && \
     rm -rf /var/lib/apt/lists/*
 
 # Prefer the fixed SQLite over Debian's vulnerable libsqlite3.so.0. Keep the
@@ -317,10 +318,12 @@ RUN cd plugins/platforms/photon/sidecar && \
 # чтение. Тянет ddgs + primp (abi3-колесо) + lxml, ~15 МБ, системных
 # библиотек не требует.
 #
-# Korra Designer: editable PPTX creation plus PDF export and slide previews.
-# [design] supplies python-pptx; the apt layer above supplies headless Impress,
-# poppler and Cyrillic-capable fonts. Runtime installation is disabled, so a
-# bundled skill alone is insufficient (scripts/designer_preflight.py).
+# Korra documents: editable XLSX/DOCX/PPTX production plus PDF export and
+# previews. [design] supplies python-pptx; the apt layer above supplies the
+# actual headless Calc, Writer and Impress components, poppler and
+# Cyrillic-capable fonts. A soffice launcher without the matching component is
+# not usable (K21-108), so exact-image acceptance runs real formula and
+# DOCX-to-PDF probes rather than checking `soffice --version`.
 #
 # The editable link is created after the source copy below.
 COPY pyproject.toml uv.lock ./

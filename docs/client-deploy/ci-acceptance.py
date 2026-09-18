@@ -151,10 +151,52 @@ def validate_host_dependencies(pins: dict[str, str], installed: dict[str, str | 
         raise AcceptanceError("Host dependency pins conflict with immutable image core")
 
 
+def validate_office_report(report: dict) -> None:
+    """Require real Calc/Writer results, not launcher/package presence."""
+    calc = report.get("calc") if isinstance(report, dict) else None
+    writer = report.get("writer") if isinstance(report, dict) else None
+    artifacts = report.get("artifacts") if isinstance(report, dict) else None
+    if not isinstance(report, dict) or report.get("status") != "PASS" or report.get("model_calls") != 0:
+        raise AcceptanceError("Offline office preflight did not pass without model calls")
+    if not isinstance(calc, dict) or (
+        calc.get("status"), calc.get("formula_cells"), calc.get("formulas_preserved"),
+        calc.get("formatting_preserved"), calc.get("spreadsheet_errors")
+    ) != ("PASS", 3, True, True, []):
+        raise AcceptanceError("Calc did not preserve formulas, cached values and formatting")
+    expected = {"C1": 60.0, "C2": 200.0, "C3": 260.0}
+    if calc.get("cached_values") != expected:
+        raise AcceptanceError("Calc cached values differ from independent expected results")
+    if not isinstance(writer, dict) or (
+        writer.get("status"), writer.get("pages"), writer.get("cyrillic_text"),
+        writer.get("table_layout"), writer.get("page_layout")
+    ) != ("PASS", 2, True, True, True):
+        raise AcceptanceError("Writer did not preserve DOCX text or layout in PDF")
+    if not isinstance(artifacts, dict) or set(artifacts) != {"xlsx", "pdf"}:
+        raise AcceptanceError("Office preflight artifact inventory is incomplete")
+    for artifact in artifacts.values():
+        if (
+            not isinstance(artifact, dict)
+            or not artifact.get("name")
+            or not isinstance(artifact.get("bytes"), int)
+            or artifact["bytes"] <= 0
+            or not re.fullmatch(r"[0-9a-f]{64}", artifact.get("sha256", ""))
+        ):
+            raise AcceptanceError("Office preflight artifact metadata is invalid")
+
+
+def validate_download(download: dict, artifact: dict) -> None:
+    if not isinstance(download, dict) or (
+        download.get("bytes"), download.get("sha256")
+    ) != (artifact["bytes"], artifact["sha256"]):
+        raise AcceptanceError("Downloaded office artifact differs from runtime output")
+    if not str(download.get("content_disposition", "")).lower().startswith("attachment;"):
+        raise AcceptanceError("Office artifact is not downloadable as an attachment")
+
+
 # Executed by the image's own Python, as the normal runtime UID. Only synthetic
 # local API auth is read, and it is never returned to the runner.
 PROBE = r'''
-import json, os, pathlib, re, sys, urllib.request
+import hashlib, json, os, pathlib, re, sys, urllib.parse, urllib.request
 data = pathlib.Path('/opt/data')
 mode = sys.argv[1]
 def get(url, **kwargs):
@@ -215,6 +257,16 @@ elif mode == 'chat':
     payload = json.dumps({'model': 'test', 'messages': [{'role': 'user', 'content': 'Привет!'}], 'stream': True}).encode()
     print(get('http://127.0.0.1:8642/v1/chat/completions', data=payload,
               headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}))
+elif mode == 'download':
+    query = urllib.parse.urlencode({'path': 'release-office-preflight/' + sys.argv[2]})
+    request = urllib.request.Request(
+        'http://127.0.0.1:9119/api/files/download?' + query,
+        headers={'X-Hermes-Session-Token': os.environ['KORRA_DASHBOARD_SESSION_TOKEN']},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        body = response.read()
+        print(json.dumps({'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest(),
+                          'content_disposition': response.headers.get('Content-Disposition', '')}))
 '''
 
 
@@ -228,6 +280,7 @@ def container_command(name: str, info: dict) -> list[str]:
         f"{prefix}HOME": "/opt/data", f"{prefix}DASHBOARD": "1",
         f"{prefix}DASHBOARD_HOST": "127.0.0.1", f"{prefix}DASHBOARD_PORT": "9119",
         f"{prefix}DISABLE_LAZY_INSTALLS": "1", "KORRA_UI_MODE": "fleet",
+        "KORRA_DASHBOARD_SESSION_TOKEN": "release-ci-synthetic-session",
         "API_SERVER_HOST": "127.0.0.1", "API_SERVER_PORT": "8642",
         "API_SERVER_PROXY_TARGET": "http://127.0.0.1:8642",
     }
@@ -283,6 +336,18 @@ def check_image(image: str, timeout: int = 180, revision: str = "") -> list[str]
         installed = json.loads(run("docker", "exec", "--user", "10000:10000", name, "python", "-c", PROBE,
                                    "host-dependencies", json.dumps(list(pins)), timeout=40))
         validate_host_dependencies(pins, installed)
+        office = json.loads(run(
+            "docker", "exec", "--user", "10000:10000", "--env", "KORRA_OFFICE_PREFLIGHT=isolated",
+            name, "python", "/opt/hermes/scripts/office_preflight.py", "--out",
+            "/opt/data/workspace/release-office-preflight", timeout=240,
+        ))
+        validate_office_report(office)
+        for artifact in office["artifacts"].values():
+            downloaded = json.loads(run(
+                "docker", "exec", "--user", "10000:10000", name, "python", "-c", PROBE,
+                "download", artifact["name"], timeout=40,
+            ))
+            validate_download(downloaded, artifact)
         if revision:
             validate_release_note(json.loads(probe("release")), revision)
         help_text = run("docker", "exec", "--user", "10000:10000", name, "korra", "--help")
@@ -295,7 +360,9 @@ def check_image(image: str, timeout: int = 180, revision: str = "") -> list[str]
         return ["dashboard and API JSON readiness", "clean bootstrap and empty credentials/cron",
                 "Korra CLI, skill and dashboard assets", "missing-provider SSE error with Ключи hint",
                 "no Telegram connection; network disabled",
-                "host dependency pins compatible with immutable image core"] + (
+                "host dependency pins compatible with immutable image core",
+                "Calc formulas/cache/formatting and Writer DOCX-to-PDF from runtime UID",
+                "generated XLSX and PDF downloadable through dashboard boundary"] + (
                     ["release notes stamped with this build revision"] if revision else [])
     finally:
         # The name is generated above, never supplied by the operator. --volumes
