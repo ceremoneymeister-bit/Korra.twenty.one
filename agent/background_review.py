@@ -868,6 +868,24 @@ def summarize_background_review_actions(
         target = data.get("target", "") or detail.get("target", "")
         is_skill = detail.get("tool") == "skill_manage"
 
+        ledger_statuses = []
+        ledger = data.get("ledger")
+        if isinstance(ledger, dict):
+            ledger_statuses.append(ledger.get("status"))
+        batch_results = data.get("results")
+        if isinstance(batch_results, list):
+            for batch_result in batch_results:
+                if not isinstance(batch_result, dict):
+                    continue
+                batch_ledger = batch_result.get("ledger")
+                if isinstance(batch_ledger, dict):
+                    ledger_statuses.append(batch_ledger.get("status"))
+        if is_skill and "failed" in ledger_statuses:
+            actions.append(
+                "⚠️ Skill changed, but its automatic rollback receipt "
+                "was not recorded"
+            )
+
         message_lower = message.lower()
         if not verbose:
             if "created" in message_lower:

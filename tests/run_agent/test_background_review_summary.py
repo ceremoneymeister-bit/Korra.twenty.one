@@ -58,6 +58,41 @@ def test_includes_genuinely_new_actions():
     assert actions == ["Memory entry created."]
 
 
+def test_surfaces_missing_skill_rollback_receipt():
+    review_messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_skill",
+                    "function": {
+                        "name": "skill_manage",
+                        "arguments": json.dumps(
+                            {"action": "patch", "name": "documents"}
+                        ),
+                    },
+                }
+            ],
+        },
+        _tool_msg(
+            "call_skill",
+            {
+                "success": True,
+                "message": "Skill 'documents' patched.",
+                "ledger": {
+                    "status": "failed",
+                    "rollback_available": False,
+                },
+            },
+        ),
+    ]
+
+    actions = _summarize(review_messages, [])
+
+    assert any("rollback receipt" in action for action in actions)
+    assert "Skill 'documents' patched." in actions
+
+
 def test_falls_back_to_content_equality_when_tool_call_id_missing():
     """If a tool message has no tool_call_id, match prior entries by content."""
     payload = {"success": True, "message": "Cron job 'X' created."}

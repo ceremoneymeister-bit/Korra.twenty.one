@@ -85,12 +85,15 @@ def test_background_review_patch_ledgers_and_rolls_back(ledger_env, monkeypatch)
         reset_current_write_origin(token)
 
     assert patched["success"] is True
+    assert patched["ledger"]["status"] == "recorded"
+    assert patched["ledger"]["rollback_available"] is True
     assert "Updated body." in skill_md.read_text(encoding="utf-8")
 
     rows = skill_ledger.list_entries(skill="my-skill")
     patch_rows = [r for r in rows if r["action"] == "patch"]
     assert len(patch_rows) == 1
     entry = patch_rows[0]
+    assert patched["ledger"]["entry_id"] == entry["id"]
     assert entry["actor"] == "curator"
     assert any(i["path"].endswith("SKILL.md") for i in entry["before"])
 
@@ -319,6 +322,8 @@ def test_config_gate_off_no_ledger_writes(ledger_env, monkeypatch):
         )
     )
     assert patched["success"] is True  # mutation unaffected
+    assert patched["ledger"]["status"] == "disabled"
+    assert patched["ledger"]["rollback_available"] is False
     assert not skill_ledger.ledger_path().exists()
     assert not skill_ledger.blobs_dir().exists()
 
@@ -342,6 +347,9 @@ def test_ledger_failure_never_blocks_the_mutation(ledger_env, monkeypatch):
         )
     )
     assert patched["success"] is True
+    assert patched["ledger"]["status"] == "failed"
+    assert patched["ledger"]["rollback_available"] is False
+    assert "Do not promise automatic rollback" in patched["ledger"]["message"]
 
 
 def test_list_entries_filtering_and_limit(ledger_env):

@@ -50,6 +50,11 @@ class TestSkillManageBatch(unittest.TestCase):
         ])
         self.assertTrue(r["success"], r)
         self.assertEqual(r["operations_applied"], 3)
+        self.assertTrue(r["rollback_receipts_complete"])
+        self.assertTrue(all(
+            item["ledger"]["status"] == "recorded"
+            for item in r["results"]
+        ))
         base = os.path.join(self.home, "skills", "probe")
         for rel in ("SKILL.md", "references/a.md", "scripts/r.py"):
             self.assertTrue(os.path.exists(os.path.join(base, rel)), rel)

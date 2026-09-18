@@ -1828,9 +1828,15 @@ def _skill_manage_batch(
                     if k not in ("success", "error") and v is not None:
                         fail.setdefault(k, v)
                 return json.dumps(fail, ensure_ascii=False)
-            results.append({"name": names[i], "action": op["action"],
-                            "file_path": op.get("file_path"),
-                            "success": True})
+            op_result = {
+                "name": names[i],
+                "action": op["action"],
+                "file_path": op.get("file_path"),
+                "success": True,
+            }
+            if parsed.get("ledger") is not None:
+                op_result["ledger"] = parsed["ledger"]
+            results.append(op_result)
     finally:
         _skill_gate_bypass.reset(token)
         if rollback_failed:
@@ -1844,9 +1850,14 @@ def _skill_manage_batch(
         else:
             shutil.rmtree(snap_root, ignore_errors=True)
 
+    rollback_receipts_complete = all(
+        result.get("ledger", {}).get("rollback_available") is True
+        for result in results
+    )
     return json.dumps(
         {"success": True, "operations_applied": len(results),
-         "results": results},
+         "results": results,
+         "rollback_receipts_complete": rollback_receipts_complete},
         ensure_ascii=False,
     )
 
@@ -1954,19 +1965,25 @@ def skill_manage(
     # error, and record_mutation below swallows everything).
     _ledger_before = None
     _ledger_before_dir = None
+    _ledger_enabled = None
+    _ledger_before_captured = False
     try:
         from tools import skill_ledger as _ledger
-        _pre = _find_skill(name)
-        _ledger_before_dir = _pre["path"] if _pre else None
-        # delete destroys the whole package; consolidation may have re-homed
-        # support files out of the tree first, so complete the capture from
-        # the newest curator backup or rollback restores a hollow skill
-        # (#96962). Other actions capture disk state only.
-        _ledger_before = _ledger.capture_before(
-            _ledger_before_dir,
-            complete_package=(action == "delete"),
-            skill=name,
-        )
+
+        _ledger_enabled = _ledger.ledger_enabled()
+        if _ledger_enabled:
+            _pre = _find_skill(name)
+            _ledger_before_dir = _pre["path"] if _pre else None
+            # delete destroys the whole package; consolidation may have
+            # re-homed support files out of the tree first, so complete the
+            # capture from the newest curator backup or rollback restores a
+            # hollow skill (#96962). Other actions capture disk state only.
+            _ledger_before = _ledger.capture_before(
+                _ledger_before_dir,
+                complete_package=(action == "delete"),
+                skill=name,
+            )
+            _ledger_before_captured = _ledger_before is not None
     except Exception:
         pass
 
@@ -2020,6 +2037,7 @@ def skill_manage(
 
     if result.get("success"):
         # Audit ledger append (best-effort; never blocks the mutation).
+        _ledger_entry_id = None
         try:
             from tools import skill_ledger as _ledger
             _post = _find_skill(name)
@@ -2034,7 +2052,7 @@ def skill_manage(
                 _evidence["session_id"] = session_id
             if file_path:
                 _evidence["file_path"] = file_path
-            _ledger.record_mutation(
+            _ledger_entry_id = _ledger.record_mutation(
                 action,
                 name,
                 before=_ledger_before if _ledger_before is not None else [],
@@ -2043,6 +2061,31 @@ def skill_manage(
             )
         except Exception:
             pass
+        if _ledger_enabled is False:
+            result["ledger"] = {
+                "status": "disabled",
+                "rollback_available": False,
+                "message": (
+                    "Skill ledger is disabled by configuration; this write "
+                    "has no automatic rollback receipt."
+                ),
+            }
+        elif _ledger_before_captured and _ledger_entry_id:
+            result["ledger"] = {
+                "status": "recorded",
+                "entry_id": _ledger_entry_id,
+                "rollback_available": True,
+            }
+        else:
+            result["ledger"] = {
+                "status": "failed",
+                "rollback_available": False,
+                "message": (
+                    "The skill write succeeded, but its audit receipt could "
+                    "not be recorded completely. Do not promise automatic "
+                    "rollback for this change."
+                ),
+            }
         try:
             from agent.prompt_builder import clear_skills_system_prompt_cache
             clear_skills_system_prompt_cache(clear_snapshot=True)
