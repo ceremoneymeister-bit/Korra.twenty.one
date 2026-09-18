@@ -115,6 +115,146 @@ for home in homes:
 print(json.dumps(result))
 '''
 
+# Runs in a pinned engine image against stopped, read-only DATA.  The host kit
+# must not guess profile intent from a live gateway's cached served_profiles:
+# that cache can still name a deleted profile, and it cannot see a newly
+# configured gateway that should come up on the next boot.
+GATEWAY_EXPECTATIONS_CODE = r'''
+import json, os, re, subprocess, sys
+from pathlib import Path
+
+root = Path(sys.argv[1] if len(sys.argv) > 1 else '/opt/data')
+profiles_root = root / 'profiles'
+name_re = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
+
+profile_probe = r"""
+import json, os, sys
+from pathlib import Path
+from dotenv import load_dotenv
+
+home = Path(sys.argv[1])
+os.environ['HERMES_HOME'] = str(home)
+os.environ['HOME'] = str(home / 'home')
+load_dotenv(home / '.env', override=True)
+from gateway.config import load_gateway_config
+
+config = load_gateway_config()
+channels = sorted(
+    platform.value
+    for platform in config.get_connected_platforms()
+    if platform.value not in {'local', 'api_server'}
+)
+print(json.dumps({
+    'multiplex': bool(config.multiplex_profiles),
+    'multiplex_profile_allowlist': config.multiplex_profile_allowlist,
+    'channels': channels,
+}))
+"""
+
+
+def inspect_profile(home):
+    # Do not lend the root profile's secrets to a named profile.  Each child
+    # loads only its own .env and emits channel names, never credential values.
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in {'PATH', 'PYTHONPATH', 'LANG', 'LC_ALL', 'TZ'}
+    }
+    env.update({
+        'HERMES_HOME': str(home),
+        'HOME': str(home / 'home'),
+        'HERMES_SKIP_CHMOD': '1',
+        'HERMES_DISABLE_LAZY_INSTALLS': '1',
+    })
+    result = subprocess.run(
+        [sys.executable, '-c', profile_probe, str(home)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=45,
+    )
+    if result.returncode:
+        raise RuntimeError(
+            'gateway config probe failed for ' + home.name + ': '
+            + result.stderr[-500:]
+        )
+    return json.loads(result.stdout.splitlines()[-1])
+
+
+def desired_state(home):
+    path = home / 'gateway_state.json'
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    state = value.get('desired_state')
+    if not isinstance(state, str):
+        state = value.get('gateway_state')
+        if state in {'draining', 'degraded'}:
+            state = 'running'
+    return state if isinstance(state, str) else None
+
+
+root_config = inspect_profile(root)
+allowlist = root_config.get('multiplex_profile_allowlist')
+allowed = None if allowlist is None else set(allowlist)
+multiplex = root_config['multiplex']
+expected = {'default'}
+profiles = []
+
+if profiles_root.is_dir() and not profiles_root.is_symlink():
+    for home in sorted(profiles_root.iterdir()):
+        if (
+            not home.is_dir()
+            or home.is_symlink()
+            or home.name == 'default'
+            or not name_re.fullmatch(home.name)
+        ):
+            continue
+        tombstone = profiles_root / '.deleted' / home.name
+        if tombstone.exists():
+            profiles.append({
+                'profile': home.name,
+                'desired_state': desired_state(home),
+                'channels': [],
+                'expected': False,
+                'reason': 'deleted',
+            })
+            continue
+        config = inspect_profile(home)
+        state = desired_state(home)
+        channels = config['channels']
+        if multiplex:
+            selected = allowed is None or home.name in allowed
+            reason = 'multiplex_member' if selected else 'multiplex_allowlist'
+        else:
+            selected = state == 'running' and bool(channels)
+            if state != 'running':
+                reason = 'gateway_not_desired'
+            elif not channels:
+                reason = 'no_enabled_channel'
+            else:
+                reason = 'dedicated_gateway'
+        if selected:
+            expected.add(home.name)
+        profiles.append({
+            'profile': home.name,
+            'desired_state': state,
+            'channels': channels,
+            'expected': selected,
+            'reason': reason,
+        })
+
+print(json.dumps({
+    'source': 'stopped_data_desired_state_and_effective_gateway_config',
+    'multiplex': multiplex,
+    'multiplex_profile_allowlist': allowlist,
+    'expected_profiles': sorted(expected),
+    'profiles': profiles,
+}))
+'''
+
 
 
 # Execute only inside the selected container. Provider values and credentials
@@ -552,29 +692,6 @@ def gateway_intent(root):
     return intent
 
 
-def autostart_profiles(intent):
-    """Named profiles the engine brings up on the next boot, by its own rule.
-
-    Mirrors korra_cli.container_boot._read_desired_state: an explicit
-    desired_state is the operator's durable intent and is honoured verbatim;
-    otherwise a transient sub-state of a gateway that was running (draining,
-    degraded) still reads as running.
-    """
-    running = set()
-    for relative, value in intent.items():
-        home = Path(relative).parent
-        if home == Path("."):
-            continue
-        state = value.get("desired_state")
-        if state is None:
-            state = value.get("gateway_state")
-            if state in ("draining", "degraded"):
-                state = "running"
-        if state == "running":
-            running.add(home.name)
-    return running
-
-
 def credential_path(relative):
     p = Path(relative)
     low = p.name.lower()
@@ -994,6 +1111,39 @@ class Updater:
 
     def native_states(self, action="status", timeout=120):
         return json.loads(self.execute(DRAIN_CODE, action, "host-updater:" + self.receipt["job_id"], timeout=timeout).splitlines()[-1])
+
+    def gateway_expectations(self, image):
+        """Resolve the gateways the next boot must serve from stopped DATA."""
+        output = self.docker(
+            "run", "--rm", "--network", "none", "--cpus", "1", "--memory", "768m",
+            "--user", self.runtime_user(), "--entrypoint", PYTHON,
+            "-v", str(self.data) + ":/opt/data:ro", image,
+            "-c", GATEWAY_EXPECTATIONS_CODE, "/opt/data", timeout=180,
+        )
+        try:
+            result = json.loads(output.splitlines()[-1])
+        except (ValueError, IndexError):
+            raise UpdateError("Gateway expectations probe returned invalid output") from None
+        expected = result.get("expected_profiles") if isinstance(result, dict) else None
+        if (
+            not isinstance(expected, list)
+            or "default" not in expected
+            or any(not isinstance(name, str) or not IDENTIFIER.fullmatch(name) for name in expected)
+            or len(expected) != len(set(expected))
+        ):
+            raise UpdateError("Gateway expectations probe returned invalid profiles")
+        return result
+
+    def record_gateway_expectations(self, image, phase, observed=()):
+        topology = self.gateway_expectations(image)
+        expected = set(topology["expected_profiles"])
+        observed = {str(name) for name in observed}
+        topology["observed_served_profiles"] = sorted(observed)
+        topology["expected_not_served_before"] = sorted(expected - observed)
+        topology["served_but_not_expected"] = sorted(observed - expected)
+        self.receipt["expected_profiles"] = sorted(expected)
+        self.receipt["gateway_expectations_" + phase] = topology
+        return topology
 
     def drain(self):
         self.native_states("drain")
@@ -1672,14 +1822,6 @@ print(json.dumps(changed))
                 served.update(state.get("served_profiles")
                               or ["default" if item["home"] == "/opt/data" else Path(item["home"]).name])
             self.receipt["served_profiles"] = sorted(served)
-            # Ждём после обновления ровно то, что работало до него. Брать сюда
-            # намерение из DATA нельзя: профиль, лежавший ещё до операции,
-            # обновление поднять не обязано, а требование поднять его уронило бы
-            # в rollback_failed и сам откат. Расхождение «намерен работать, но не
-            # обслуживается» не гейт, а диагностика — она едет в квитанции.
-            self.receipt["expected_profiles"] = sorted({"default"} | served)
-            self.receipt["profiles_down_before"] = sorted(
-                autostart_profiles(gateway_intent(self.data)) - served)
             if target == old:
                 self.phase("already_current", status="succeeded")
                 return
@@ -1691,6 +1833,10 @@ print(json.dumps(changed))
             self.docker("stop", "--time", "60", self.name, timeout=90)
             stopped = True
             self.inspect_target(old, running=False)
+            # DATA is now quiescent.  Resolve current intent/config here rather
+            # than from the earlier gateway cache: profile create/delete and
+            # channel toggles immediately before the operation are included.
+            self.record_gateway_expectations(old, "forward", served)
             self.phase("backup")
             backup = self.verified_snapshot("before")
             self.receipt["backup_path"] = str(backup)
@@ -1761,9 +1907,16 @@ print(json.dumps(changed))
             self.docker("stop", "--time", "60", self.name, timeout=90)
         self.phase("rollback_restore")
         self.restore()
+        # Restore may bring back a different profile/config topology than the
+        # failed candidate observed.  Recompute before booting the old image so
+        # rollback smoke does not repeat a stale forward expectation.
+        self.record_gateway_expectations(self.receipt["old_image_id"], "rollback")
         self.phase("rollback_recreate")
+        rollback_from_image = info["Image"]
         self.start_image(self.receipt["old_image_id"])
         self.smoke(self.receipt["old_image_id"])
+        if rollback_from_image != self.receipt["old_image_id"]:
+            (self.home / "IMAGE.prev").write_text(rollback_from_image + "\n")
         self.phase("rollback_complete", status="rolled_back")
 
 

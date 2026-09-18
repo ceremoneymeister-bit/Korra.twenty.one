@@ -42,6 +42,7 @@ class FakeDockerUpdater(u.Updater):
         # а лежачий профиль в ответе просто отсутствует.
         self.multiplex = True
         self.profile_gateways = ()
+        self.expected_profiles_override = None
 
     def free_space(self, *args):
         pass
@@ -115,6 +116,22 @@ class FakeDockerUpdater(u.Updater):
         return [{"home": "/opt/data", "state": dict(state)}] + [
             {"home": "/opt/data/profiles/" + name, "state": dict(state)}
             for name in sorted(self.profile_gateways)]
+
+    def gateway_expectations(self, image):
+        names = self.expected_profiles_override
+        if names is None:
+            names = (
+                ["default", "secretary"]
+                if self.multiplex
+                else ["default", *sorted(self.profile_gateways)]
+            )
+        return {
+            "source": "synthetic_stopped_data",
+            "multiplex": self.multiplex,
+            "multiplex_profile_allowlist": None,
+            "expected_profiles": list(names),
+            "profiles": [],
+        }
 
     def start_image(self, image):
         self.calls.append(("start_image", image))
@@ -1094,8 +1111,21 @@ def test_rollback_retry_after_old_image_start_failure_preserves_all_exports(upda
     updater.rollback()
     assert updater.receipt["status"] == "rolled_back" and updater.running
     assert updater.image == OLD
+    assert (updater.home / "IMAGE.prev").read_text().strip() == NEW
     assert len(updater.receipt["displaced_data_history"]) == 2
     assert (updater.job / "after/new-message.txt").read_text() == "new image business write"
+
+
+def test_rollback_recomputes_gateway_expectations_from_restored_data(updater):
+    updater.update("registry.example/korra:latest")
+    updater.expected_profiles_override = ["default"]
+
+    updater.rollback()
+
+    assert updater.receipt["expected_profiles"] == ["default"]
+    topology = updater.receipt["gateway_expectations_rollback"]
+    assert topology["source"] == "synthetic_stopped_data"
+    assert (updater.home / "IMAGE.prev").read_text().strip() == NEW
 
 
 def saved_image_archive(path, *, oci=True, corrupt=False):
@@ -1489,22 +1519,108 @@ def real_smoke_context(updater, monkeypatch):
     return updater, clock, models, settings
 
 
-def test_preflight_expects_every_profile_that_its_own_gateway_serves(updater):
-    # Контур без мультиплекса: свой шлюз у каждого профиля, свой served_profiles
-    # он не сообщает — имя профиля видно только по его home.
+def test_forward_smoke_uses_stopped_data_expectations_for_dedicated_gateways(updater):
     updater.multiplex = False
     updater.profile_gateways = ("figma-storybook", "secretary")
+    updater.expected_profiles_override = ["default", "figma-storybook", "secretary"]
     for name in ("figma-storybook", "secretary", "archive"):
         _profile_with_gateway_state(updater, name, "running")
 
     updater.update("registry.example/korra:latest")
 
     assert updater.receipt["served_profiles"] == ["default", "figma-storybook", "secretary"]
-    # `archive` намерен работать, но лежал ещё до обновления: обновление не
-    # обязано его поднять, а откат по такому требованию встал бы в
-    # rollback_failed на исправном контуре. Гейтом он не становится, но виден.
     assert updater.receipt["expected_profiles"] == ["default", "figma-storybook", "secretary"]
-    assert updater.receipt["profiles_down_before"] == ["archive"]
+    assert updater.receipt["gateway_expectations_forward"]["source"] == "synthetic_stopped_data"
+
+
+def _gateway_profile(root, name, *, desired="running", telegram=False):
+    home = root / "profiles" / name
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "SOUL.md").write_text("synthetic profile\n")
+    (home / "config.yaml").write_text(
+        "telegram:\n  enabled: true\n" if telegram else "model: {}\n"
+    )
+    (home / ".env").write_text(
+        "TELEGRAM_BOT_TOKEN=synthetic-token\n" if telegram else ""
+    )
+    (home / "gateway_state.json").write_text(json.dumps({
+        "gateway_state": desired,
+        "desired_state": desired,
+    }))
+    return home
+
+
+def _run_gateway_expectations(root):
+    env = {
+        "PATH": os.environ["PATH"],
+        "PYTHONPATH": str(SOURCE.parents[2]),
+        "HERMES_SKIP_CHMOD": "1",
+        "HERMES_DISABLE_LAZY_INSTALLS": "1",
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", u.GATEWAY_EXPECTATIONS_CODE, str(root)],
+        cwd=SOURCE.parents[2], env=env, capture_output=True, text=True, timeout=90,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.splitlines()[-1])
+
+
+def test_gateway_expectations_use_current_intent_channels_and_tombstones(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "config.yaml").write_text("gateway:\n  multiplex_profiles: false\n")
+    (root / ".env").write_text("")
+    _gateway_profile(root, "sales", telegram=True)
+    _gateway_profile(root, "dashboard-only")
+    _gateway_profile(root, "stopped-bot", desired="stopped", telegram=True)
+    _gateway_profile(root, "deleted-bot", telegram=True)
+    deleted = root / "profiles" / ".deleted"
+    deleted.mkdir()
+    (deleted / "deleted-bot").write_text("deleted\n")
+
+    result = _run_gateway_expectations(root)
+
+    assert result["expected_profiles"] == ["default", "sales"]
+    reasons = {row["profile"]: row["reason"] for row in result["profiles"]}
+    assert reasons == {
+        "dashboard-only": "no_enabled_channel",
+        "deleted-bot": "deleted",
+        "sales": "dedicated_gateway",
+        "stopped-bot": "gateway_not_desired",
+    }
+
+
+def test_gateway_expectations_use_current_multiplex_allowlist(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    (root / "config.yaml").write_text(
+        "gateway:\n"
+        "  multiplex_profiles: true\n"
+        "  multiplex_profile_allowlist: [new-agent]\n"
+    )
+    (root / ".env").write_text("")
+    _gateway_profile(root, "new-agent")
+    _gateway_profile(root, "old-agent", telegram=True)
+
+    result = _run_gateway_expectations(root)
+
+    assert result["expected_profiles"] == ["default", "new-agent"]
+    reasons = {row["profile"]: row["reason"] for row in result["profiles"]}
+    assert reasons == {
+        "new-agent": "multiplex_member",
+        "old-agent": "multiplex_allowlist",
+    }
+
+
+def test_update_receipt_explains_stale_and_new_gateway_membership(updater):
+    updater.expected_profiles_override = ["default", "new-agent"]
+
+    updater.update("registry.example/korra:latest")
+
+    topology = updater.receipt["gateway_expectations_forward"]
+    assert topology["expected_not_served_before"] == ["new-agent"]
+    assert topology["served_but_not_expected"] == ["secretary"]
+    assert updater.receipt["expected_profiles"] == ["default", "new-agent"]
 
 
 def test_smoke_is_red_with_the_name_of_a_profile_that_never_came_up(real_smoke_context, monkeypatch):

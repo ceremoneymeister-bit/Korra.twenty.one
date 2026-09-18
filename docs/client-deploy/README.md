@@ -782,8 +782,13 @@ Asia/Novosibirsk в Europe/Moscow при `succeeded`.
 
 После запуска одинаковый smoke для forward и rollback проверяет панель,
 обязательные gateway/dashboard/storage/platforms components и overall=ok,
-точную актуальную config schema, live gateway socket, список и покрытие прежних
-served_profiles. Затем capability должна совпасть с baseline. Foundation
+точную актуальную config schema, live gateway socket и актуальный состав
+gateway-профилей. Состав вычисляется отдельным read-only probe по остановленному
+DATA: tombstone удалённого профиля, durable desired_state, эффективные включённые
+каналы и multiplex allowlist; прежний served_profiles остаётся наблюдением для
+diff в receipt, а не источником ожиданий. После восстановления rollback повторно
+вычисляет состав из восстановленных DATA/config. Затем capability должна совпасть
+с baseline. Foundation
 проверяет stateless SSE с ожидаемым русским missing-provider error и [DONE],
 без model ACK; configured обязан получить KORRA_UPDATE_OK от модели.
 Degraded/malformed/missing health не маскируется успешной моделью.
