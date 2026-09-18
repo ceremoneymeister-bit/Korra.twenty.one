@@ -175,7 +175,7 @@ from agent.model_metadata import (
 )
 from korra_cli.config import get_hermes_home
 from korra_constants import OPENROUTER_BASE_URL, korra_env
-from utils import base_url_host_matches, base_url_hostname, env_float, is_truthy_value, model_forces_max_completion_tokens, normalize_proxy_env_vars
+from utils import base_url_host_matches, base_url_hostname, base_url_origin, env_float, is_truthy_value, model_forces_max_completion_tokens, normalize_proxy_env_vars
 
 logger = logging.getLogger(__name__)
 
@@ -4879,9 +4879,34 @@ def _recoverable_pool_provider(
 ) -> Optional[str]:
     """Infer which provider pool can recover the current auxiliary client."""
     normalized = _normalize_aux_provider(resolved_provider)
+    base = str(getattr(client, "base_url", "") or "")
+    runtime = _normalize_main_runtime(main_runtime)
+    runtime_base = str(runtime.get("base_url") or "")
+    runtime_key = runtime.get("api_key")
+    client_key = getattr(client, "api_key", None)
+    # Shield only the active session's own credential, and compare its full
+    # origin (scheme + host + port). An independently owned auxiliary pool is
+    # still allowed to rotate at its configured origin.
+    if (
+        base
+        and runtime_base
+        and normalized == runtime.get("provider")
+        and isinstance(runtime_key, str)
+        and runtime_key
+        and client_key == runtime_key
+        and base_url_origin(base) != base_url_origin(runtime_base)
+    ):
+        logger.info(
+            "Auxiliary: %s rejected the session key at %s, but the session's "
+            "endpoint is %s — endpoint mismatch, not a dead key; skipping "
+            "credential rotation",
+            normalized,
+            base_url_hostname(base),
+            base_url_hostname(runtime_base),
+        )
+        return None
     if normalized not in {"", "auto", "custom"}:
         return normalized
-    base = str(getattr(client, "base_url", "") or "")
     if base_url_host_matches(base, "chatgpt.com"):
         return "openai-codex"
     if base_url_host_matches(base, "openrouter.ai"):
@@ -4900,7 +4925,7 @@ def _recoverable_pool_provider(
     # the client base URL against all registered api_key providers so that
     # credential-pool rotation works for any provider the user configured.
     if main_runtime:
-        rt = _normalize_main_runtime(main_runtime)
+        rt = runtime
         rt_provider = rt.get("provider", "")
         if rt_provider and rt_provider not in {"", "auto", "custom"}:
             try:
@@ -5688,6 +5713,8 @@ def _try_payment_fallback(
     # Also skip Step-1 main-provider path if it maps to the same backend.
     # (e.g. main_provider="openrouter" → skip "openrouter" in chain)
     main_provider = _read_main_provider()
+    if not _discovery_chain_allowed(main_provider, task):
+        return None, None, ""
     skip_labels = {skip}
     if main_provider and main_provider.lower() in skip:
         skip_labels.add(main_provider.lower())
@@ -5719,6 +5746,29 @@ def _try_payment_fallback(
         task or "call", reason, failed_provider, ", ".join(tried),
     )
     return None, None, ""
+
+
+def _discovery_chain_allowed(
+    main_provider: Optional[str],
+    task: Optional[str] = None,
+) -> bool:
+    """Allow provider discovery only when no main provider was selected.
+
+    Once a user selects a main provider, auxiliary work may use that route or
+    an explicitly configured task/top-level fallback. It must not guess a
+    different logged-in provider merely because credentials happen to exist:
+    that can silently move background work onto another paid account.
+    """
+    if (main_provider or "").strip().lower() in {"", "auto"}:
+        return True
+    logger.warning(
+        "Auxiliary %s: main provider %s is unavailable and no fallback_chain / "
+        "fallback_providers is configured — refusing to guess another logged-in "
+        "provider. Re-authenticate with `hermes model` or declare a fallback.",
+        task or "call",
+        main_provider,
+    )
+    return False
 
 
 def _try_main_agent_model_fallback(
@@ -6341,6 +6391,9 @@ def _resolve_auto_route(
         task, main_provider or "auto", reason="main provider unavailable")
     if fb_client is not None:
         return fb_client, fb_model, fb_label
+
+    if not _discovery_chain_allowed(main_provider, task):
+        return None, None, ""
 
     # ── Step 3: aggregator / fallback chain ──────────────────────────────
     tried = []
