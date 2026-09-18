@@ -128,17 +128,21 @@ def _install_stub_server(name: str = "wpcom"):
 
 
 @pytest.mark.parametrize(
-    "transport_config, expected_route",
+    "transport_config, expected_route, expect_retry",
     [
-        ({"command": "librarian-mcp"}, "stdio"),
-        ({"url": "https://neo4j.example.test/mcp", "skip_preflight": True}, "http"),
+        ({"command": "librarian-mcp"}, "stdio", False),
+        (
+            {"url": "https://neo4j.example.test/mcp", "skip_preflight": True},
+            "http",
+            True,
+        ),
     ],
-    ids=["stdio", "http"],
+    ids=["stdio-ambiguous", "http-retry"],
 )
 def test_call_tool_handler_rebuilds_configured_server_transport(
-    monkeypatch, tmp_path, transport_config, expected_route
+    monkeypatch, tmp_path, transport_config, expected_route, expect_retry
 ):
-    """The real server run loop selects and rebuilds its configured transport."""
+    """HTTP retries a stale session; dispatched stdio is never replayed."""
     from anyio import ClosedResourceError
     from tools import mcp_tool
     from tools.mcp_tool import MCPServerTask, _make_tool_handler
@@ -193,8 +197,13 @@ def test_call_tool_handler_rebuilds_configured_server_transport(
         handler = _make_tool_handler("resumed", "health", 10.0)
         parsed = json.loads(handler({}))
 
-        assert parsed == {"result": "reconnected"}
-        assert call_count["n"] == 2
+        if expect_retry:
+            assert parsed == {"result": "reconnected"}
+            assert call_count["n"] == 2
+        else:
+            assert parsed["outcome_uncertain"] is True
+            assert "did not replay" in parsed["error"]
+            assert call_count["n"] == 1
         assert routes == [expected_route, expected_route]
         assert configs == [transport_config, transport_config]
         assert len(sessions) == 2
