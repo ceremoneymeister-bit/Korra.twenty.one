@@ -4229,6 +4229,96 @@ def _normalize_main_runtime(main_runtime: Optional[Dict[str, Any]]) -> Dict[str,
     return normalized
 
 
+def _effective_selected_provider(
+    main_runtime: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Return the provider actually selected for the current main session.
+
+    A persisted ``provider: auto`` is only a request policy. Once resolution
+    selected a concrete live runtime, every fallback phase must use that
+    concrete provider instead of re-reading the stale config value.
+    """
+    runtime = _normalize_main_runtime(main_runtime)
+    runtime_provider = str(runtime.get("provider") or "").strip().lower()
+    if runtime_provider not in {"", "auto"}:
+        return runtime_provider
+    return (_read_main_provider() or runtime_provider).strip().lower()
+
+
+def _runtime_uses_subscription(
+    main_runtime: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Whether the live main route is one of Korra's subscription routes."""
+    # This policy is tied to a captured live runtime, not a bare config read.
+    # Generic callers without a runtime keep the product's API-compatible
+    # routing surface; call_llm/async_call_llm always pass their snapshot.
+    if not isinstance(main_runtime, dict) or not main_runtime:
+        return False
+    runtime = _normalize_main_runtime(main_runtime)
+    provider = _effective_selected_provider(runtime)
+    if provider in {"openai-codex", "codex"}:
+        return True
+    if provider != "anthropic":
+        return False
+    auth_mode = str(runtime.get("auth_mode") or "").strip().lower()
+    if "oauth" in auth_mode or auth_mode in {"subscription", "max"}:
+        return True
+    token = runtime.get("api_key")
+    if not isinstance(token, str) or not token.strip():
+        return False
+    try:
+        from agent.anthropic_adapter import _is_oauth_token
+
+        return bool(_is_oauth_token(token.strip()))
+    except Exception:
+        return False
+
+
+def _subscription_fallback_entry_may_resolve(
+    entry: Dict[str, Any],
+    main_runtime: Optional[Dict[str, Any]],
+) -> bool:
+    """Preflight a configured fallback under subscription-only runtime.
+
+    Old config rows are not billing consent. Non-subscription providers and
+    inline credentials are rejected before client construction. Anthropic is
+    checked again after resolution because its ambient pool can contain either
+    OAuth or API-key credentials.
+    """
+    if not _runtime_uses_subscription(main_runtime):
+        return True
+    provider = _normalize_aux_provider(str(entry.get("provider") or ""))
+    if provider in {"openai-codex", "codex"}:
+        return not bool(entry.get("api_key") or entry.get("base_url"))
+    if provider == "anthropic":
+        return not bool(entry.get("api_key") or entry.get("base_url"))
+    return False
+
+
+def _subscription_fallback_client_allowed(
+    provider: str,
+    client: Any,
+    main_runtime: Optional[Dict[str, Any]],
+) -> bool:
+    """Verify that a resolved fallback still uses subscription credentials."""
+    if not _runtime_uses_subscription(main_runtime):
+        return True
+    normalized = _normalize_aux_provider(provider)
+    if normalized in {"openai-codex", "codex"}:
+        return isinstance(client, (CodexAuxiliaryClient, AsyncCodexAuxiliaryClient))
+    if normalized != "anthropic":
+        return False
+    token = getattr(client, "api_key", None)
+    if not isinstance(token, str):
+        return False
+    try:
+        from agent.anthropic_adapter import _is_oauth_token
+
+        return bool(_is_oauth_token(token))
+    except Exception:
+        return False
+
+
 def _get_provider_chain() -> List[tuple]:
     """Return the ordered provider detection chain.
 
@@ -5699,6 +5789,7 @@ def _try_payment_fallback(
     failed_provider: str,
     task: str = None,
     reason: str = "payment error",
+    main_runtime: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Any], Optional[str], str]:
     """Try alternative providers after a payment/credit or connection error.
 
@@ -5712,7 +5803,7 @@ def _try_payment_fallback(
     skip = failed_provider.lower().strip()
     # Also skip Step-1 main-provider path if it maps to the same backend.
     # (e.g. main_provider="openrouter" → skip "openrouter" in chain)
-    main_provider = _read_main_provider()
+    main_provider = _effective_selected_provider(main_runtime)
     if not _discovery_chain_allowed(main_provider, task):
         return None, None, ""
     skip_labels = {skip}
@@ -5776,6 +5867,7 @@ def _try_main_agent_model_fallback(
     task: str = None,
     reason: str = "error",
     failed_model: Optional[str] = None,
+    main_runtime: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Any], Optional[str], str]:
     """Last-resort fallback to the user's main agent provider + model.
 
@@ -5805,8 +5897,9 @@ def _try_main_agent_model_fallback(
     Returns:
         (client, model, provider_label) or (None, None, "") if no fallback.
     """
-    main_provider = (_read_main_provider() or "").strip()
-    main_model = (_read_main_model() or "").strip()
+    runtime = _normalize_main_runtime(main_runtime)
+    main_provider = _effective_selected_provider(runtime)
+    main_model = str(runtime.get("model") or _read_main_model() or "").strip()
     if main_provider.lower() == "moa":
         # MoA virtual provider: fall back to the preset's aggregator — the
         # acting model — instead of the unreachable "moa"/<preset-name> pair.
@@ -5944,6 +6037,7 @@ def _try_configured_fallback_chain(
     failed_provider: str,
     reason: str = "error",
     failed_model: Optional[str] = None,
+    main_runtime: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Any], Optional[str], str]:
     """Try user-configured fallback_chain for a specific auxiliary task.
 
@@ -6023,12 +6117,36 @@ def _try_configured_fallback_chain(
 
         label = f"fallback_chain[{i}]({fb_provider})"
 
+        if not _subscription_fallback_entry_may_resolve(entry, main_runtime):
+            logger.warning(
+                "Auxiliary %s: ignoring legacy configured fallback %s because "
+                "the live main route is subscription-only; an old config row "
+                "is not API-billing consent.",
+                task,
+                label,
+            )
+            tried.append(f"{label} (not an allowed subscription route)")
+            continue
+
         try:
             fb_client, resolved_model = _resolve_fallback_entry(entry)
         except Exception:
             fb_client, resolved_model = None, None
 
         if fb_client is not None:
+            if not _subscription_fallback_client_allowed(
+                fb_provider,
+                fb_client,
+                main_runtime,
+            ):
+                logger.warning(
+                    "Auxiliary %s: ignoring configured fallback %s because "
+                    "its resolved credential is not a subscription.",
+                    task,
+                    label,
+                )
+                tried.append(f"{label} (API credential not allowed)")
+                continue
             if min_ctx is not None and resolved_model:
                 fb_ctx = _candidate_context_window(
                     fb_provider,
@@ -6061,6 +6179,7 @@ def _try_configured_fallback_chain(
 def _try_configured_fallback_for_unavailable_client(
     task: Optional[str],
     failed_provider: str,
+    main_runtime: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Any], Optional[str], str]:
     """Try task fallback_chain when an explicit aux provider cannot build.
 
@@ -6077,6 +6196,7 @@ def _try_configured_fallback_for_unavailable_client(
         task,
         explicit,
         reason="provider unavailable",
+        main_runtime=main_runtime,
     )
 
 
@@ -6122,6 +6242,7 @@ def _try_main_fallback_chain(
     task: Optional[str],
     failed_provider: str = "",
     reason: str = "error",
+    main_runtime: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Any], Optional[str], str]:
     """Try the top-level main-agent fallback chain for an auxiliary call.
 
@@ -6144,7 +6265,7 @@ def _try_main_fallback_chain(
         return None, None, ""
 
     failed_norm = (failed_provider or "").strip().lower()
-    main_norm = (_read_main_provider() or "").strip().lower()
+    main_norm = _effective_selected_provider(main_runtime)
     skip = {p for p in (failed_norm, main_norm, "auto") if p}
     tried: List[str] = []
     min_ctx = _task_minimum_context_length(task)
@@ -6165,12 +6286,35 @@ def _try_main_fallback_chain(
             _log_skip_unhealthy(fb_norm, task)
             tried.append(f"{label} (unhealthy)")
             continue
+        if not _subscription_fallback_entry_may_resolve(entry, main_runtime):
+            logger.warning(
+                "Auxiliary %s: ignoring legacy main fallback %s because the "
+                "live main route is subscription-only; an old config row is "
+                "not API-billing consent.",
+                task or "call",
+                label,
+            )
+            tried.append(f"{label} (not an allowed subscription route)")
+            continue
         try:
             fb_client, resolved_model = _resolve_fallback_entry(entry)
         except Exception as exc:
             logger.debug("Auxiliary %s: main fallback %s failed to resolve: %s", task or "call", label, exc)
             fb_client, resolved_model = None, None
         if fb_client is not None:
+            if not _subscription_fallback_client_allowed(
+                fb_provider,
+                fb_client,
+                main_runtime,
+            ):
+                logger.warning(
+                    "Auxiliary %s: ignoring main fallback %s because its "
+                    "resolved credential is not a subscription.",
+                    task or "call",
+                    label,
+                )
+                tried.append(f"{label} (API credential not allowed)")
+                continue
             if min_ctx is not None:
                 fb_ctx = _candidate_context_window(
                     fb_provider,
@@ -6272,7 +6416,7 @@ def _resolve_auto_route(
     # on aggregators (OpenRouter, Nous) who previously got routed to a
     # cheap provider-side default.  Explicit per-task overrides set via
     # config.yaml (auxiliary.<task>.provider) still win over this.
-    main_provider = str(runtime_provider or _read_main_provider() or "")
+    main_provider = _effective_selected_provider(runtime)
     main_model = str(runtime_model or _read_main_model() or "")
 
     # Latency-critical tasks can explicitly prefer the provider's registered
@@ -6384,11 +6528,19 @@ def _resolve_auto_route(
     # for users who have not declared a fallback policy.
     if task:
         fb_client, fb_model, fb_label = _try_configured_fallback_chain(
-            task, main_provider or "auto", reason="main provider unavailable")
+            task,
+            main_provider or "auto",
+            reason="main provider unavailable",
+            main_runtime=runtime,
+        )
         if fb_client is not None:
             return fb_client, fb_model, _fallback_provider_from_label(fb_label)
     fb_client, fb_model, fb_label = _try_main_fallback_chain(
-        task, main_provider or "auto", reason="main provider unavailable")
+        task,
+        main_provider or "auto",
+        reason="main provider unavailable",
+        main_runtime=runtime,
+    )
     if fb_client is not None:
         return fb_client, fb_model, fb_label
 
@@ -10004,7 +10156,9 @@ def _call_llm_impl(
             _explicit = (resolved_provider or "").strip().lower()
             if _explicit and _explicit not in {"auto", "openrouter", "custom"}:
                 fb_client, fb_model, fb_label = _try_configured_fallback_for_unavailable_client(
-                    task, _explicit,
+                    task,
+                    _explicit,
+                    main_runtime=main_runtime,
                 )
                 if fb_client is not None:
                     client, final_model = fb_client, fb_model
@@ -10612,21 +10766,30 @@ def _call_llm_impl(
             if is_auto:
                 fb_client, fb_model, fb_label = _try_configured_fallback_chain(
                     task, resolved_provider or "auto", reason=reason,
-                    failed_model=_chain_failed_model)
+                    failed_model=_chain_failed_model,
+                    main_runtime=main_runtime)
                 if fb_client is None:
                     fb_client, fb_model, fb_label = _try_main_fallback_chain(
-                        task, resolved_provider or "auto", reason=reason)
+                        task,
+                        resolved_provider or "auto",
+                        reason=reason,
+                        main_runtime=main_runtime)
                 if fb_client is None:
                     fb_client, fb_model, fb_label = _try_payment_fallback(
-                        resolved_provider, task, reason=reason)
+                        resolved_provider,
+                        task,
+                        reason=reason,
+                        main_runtime=main_runtime)
             else:
                 fb_client, fb_model, fb_label = _try_configured_fallback_chain(
                     task, resolved_provider or "auto", reason=reason,
-                    failed_model=_chain_failed_model)
+                    failed_model=_chain_failed_model,
+                    main_runtime=main_runtime)
                 if fb_client is None:
                     fb_client, fb_model, fb_label = _try_main_agent_model_fallback(
                         resolved_provider, task, reason=reason,
-                        failed_model=_chain_failed_model)
+                        failed_model=_chain_failed_model,
+                        main_runtime=main_runtime)
 
             if fb_client is not None:
                 _record_route_info(
@@ -10645,7 +10808,10 @@ def _call_llm_impl(
                 # quarantined — walk the discovery chain once more; unhealthy
                 # entries are skipped so the next viable candidate serves.
                 fb_client, fb_model, fb_label = _try_payment_fallback(
-                    resolved_provider, task, reason="stale fallback credential")
+                    resolved_provider,
+                    task,
+                    reason="stale fallback credential",
+                    main_runtime=main_runtime)
                 if fb_client is not None:
                     _record_route_info(
                         route_info, _fallback_provider_from_label(fb_label), fb_model
@@ -10855,7 +11021,9 @@ async def _async_call_llm_impl(
             _explicit = (resolved_provider or "").strip().lower()
             if _explicit and _explicit not in {"auto", "openrouter", "custom"}:
                 fb_client, fb_model, fb_label = _try_configured_fallback_for_unavailable_client(
-                    task, _explicit,
+                    task,
+                    _explicit,
+                    main_runtime=main_runtime,
                 )
                 if fb_client is not None:
                     client, final_model = _to_async_client(
@@ -11279,7 +11447,12 @@ async def _async_call_llm_impl(
             elif _is_payment_error(first_err):
                 reason = "payment error"
                 _mark_provider_unhealthy(
-                    _recoverable_pool_provider(resolved_provider, client) or resolved_provider
+                    _recoverable_pool_provider(
+                        resolved_provider,
+                        client,
+                        main_runtime=main_runtime,
+                    )
+                    or resolved_provider
                 )
             elif _is_rate_limit_error(first_err):
                 reason = "rate limit"
@@ -11310,21 +11483,30 @@ async def _async_call_llm_impl(
             if is_auto:
                 fb_client, fb_model, fb_label = _try_configured_fallback_chain(
                     task, resolved_provider or "auto", reason=reason,
-                    failed_model=_chain_failed_model)
+                    failed_model=_chain_failed_model,
+                    main_runtime=main_runtime)
                 if fb_client is None:
                     fb_client, fb_model, fb_label = _try_main_fallback_chain(
-                        task, resolved_provider or "auto", reason=reason)
+                        task,
+                        resolved_provider or "auto",
+                        reason=reason,
+                        main_runtime=main_runtime)
                 if fb_client is None:
                     fb_client, fb_model, fb_label = _try_payment_fallback(
-                        resolved_provider, task, reason=reason)
+                        resolved_provider,
+                        task,
+                        reason=reason,
+                        main_runtime=main_runtime)
             else:
                 fb_client, fb_model, fb_label = _try_configured_fallback_chain(
                     task, resolved_provider or "auto", reason=reason,
-                    failed_model=_chain_failed_model)
+                    failed_model=_chain_failed_model,
+                    main_runtime=main_runtime)
                 if fb_client is None:
                     fb_client, fb_model, fb_label = _try_main_agent_model_fallback(
                         resolved_provider, task, reason=reason,
-                        failed_model=_chain_failed_model)
+                        failed_model=_chain_failed_model,
+                        main_runtime=main_runtime)
 
             if fb_client is not None:
                 # Convert sync fallback client to async
@@ -11348,7 +11530,10 @@ async def _async_call_llm_impl(
                 # Stale/unrefreshable candidate credential — quarantined; walk
                 # the discovery chain once more (unhealthy entries skipped).
                 fb_client, fb_model, fb_label = _try_payment_fallback(
-                    resolved_provider, task, reason="stale fallback credential")
+                    resolved_provider,
+                    task,
+                    reason="stale fallback credential",
+                    main_runtime=main_runtime)
                 if fb_client is not None:
                     async_fb, async_fb_model = _to_async_client(
                         fb_client, fb_model or "", is_vision=(task == "vision")
