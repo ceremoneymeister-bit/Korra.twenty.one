@@ -791,7 +791,7 @@ def bundle_non_core_tools(toolset_name: str) -> Set[str]:
 
 
 # Resolution memo keyed on (toolset name, include_registry, registry
-# generation). resolve_toolset() recursively walks toolset includes and, with
+# generation, profile scope). resolve_toolset() recursively walks toolset includes and, with
 # include_registry=True, merges registry-registered tools on every call —
 # measured ~2us/toolset in isolation but called dozens of times per
 # _get_platform_tools() (per-keystroke /tools completion) and per picker
@@ -800,7 +800,7 @@ def bundle_non_core_tools(toolset_name: str) -> Set[str]:
 # cache entry is valid for as long as the generation is unchanged; external
 # callers never pass ``visited``, so the memo engages exactly at the public
 # entry and the internal cycle-detection recursion stays untouched.
-_resolve_toolset_memo: Dict[Tuple[str, bool, int, int], List[str]] = {}
+_resolve_toolset_memo: Dict[Tuple[str, bool, int, int, str], List[str]] = {}
 
 
 def resolve_toolset(name: str, visited: Set[str] = None, *, include_registry: bool = True) -> List[str]:
@@ -830,10 +830,18 @@ def resolve_toolset(name: str, visited: Set[str] = None, *, include_registry: bo
 
             registry_id = id(registry)
             generation = getattr(registry, "_generation", 0)
+            scope_key = registry.current_scope_key()
         except Exception:
             registry_id = 0
             generation = 0
-        memo_key = (name, include_registry, registry_id, generation)
+            scope_key = ""
+        memo_key = (
+            name,
+            include_registry,
+            registry_id,
+            generation,
+            scope_key,
+        )
         cached = _resolve_toolset_memo.get(memo_key)
         if cached is not None:
             return list(cached)
@@ -904,14 +912,18 @@ def resolve_toolset(name: str, visited: Set[str] = None, *, include_registry: bo
 
             registry_id = id(registry)
             generation = getattr(registry, "_generation", 0)
+            scope_key = registry.current_scope_key()
         except Exception:
             registry_id = 0
             generation = 0
+            scope_key = ""
         # Entries from previous registry generations are never hit again;
         # keep the memo bounded across long sessions with many MCP refreshes.
         if len(_resolve_toolset_memo) >= 256:
             _resolve_toolset_memo.clear()
-        _resolve_toolset_memo[(name, include_registry, registry_id, generation)] = list(result)
+        _resolve_toolset_memo[
+            (name, include_registry, registry_id, generation, scope_key)
+        ] = list(result)
     return result
 
 

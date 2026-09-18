@@ -1,4 +1,4 @@
-"""Same-name MCP servers have separate connections and tools per profile."""
+"""Same-name MCP servers keep profile-owned identity, policy, and overlays."""
 import asyncio
 import json
 from contextlib import contextmanager
@@ -30,7 +30,9 @@ def setup_profiles(tmp_path, monkeypatch):
     for attr in ("_servers", "_lazy_server_configs", "_lazy_server_tool_names", "_lazy_server_fingerprints",
                  "_server_connect_errors", "_server_connect_retry_after", "_server_connect_failures",
                  "_mcp_tool_server_names", "_server_error_counts", "_server_breaker_opened_at",
-                 "_server_profile_bindings", "_native_profile_discovery_locks"):
+                 "_server_profile_bindings", "_server_tool_scopes", "_server_adoptions",
+                 "_orphaned_adopters", "_server_trust_levels", "_tool_read_only_hints",
+                 "_native_profile_discovery_locks"):
         monkeypatch.setattr(mcp_tool, attr, {})
     for attr in ("_server_connecting", "_parallel_safe_servers", "_native_profiles_discovered"):
         monkeypatch.setattr(mcp_tool, attr, set())
@@ -90,11 +92,15 @@ def test_same_name_profiles_keep_exact_tools_and_dispatch(setup_profiles):
 
 def test_identical_tool_names_dispatch_and_teardown_stay_profile_owned(setup_profiles):
     registry, connected, root, analysis = setup_profiles
+    cfg_a = config("shared")
+    cfg_a["metal_calc"]["headers"] = {"Authorization": "Bearer A"}
+    cfg_b = config("shared")
+    cfg_b["metal_calc"]["headers"] = {"Authorization": "Bearer B"}
     with home(root):
-        mcp_tool.register_mcp_servers(config("shared"))
+        mcp_tool.register_mcp_servers(cfg_a)
         root_entry = registry.get_entry("mcp__metal_calc__shared")
     with home(analysis):
-        mcp_tool.register_mcp_servers(config("shared"))
+        mcp_tool.register_mcp_servers(cfg_b)
         child_entry = registry.get_entry("mcp__metal_calc__shared")
         assert child_entry is not root_entry
         child_entry.handler({})
@@ -131,13 +137,18 @@ def test_circuit_and_parallel_policy_do_not_cross_same_name_profiles(setup_profi
     registry, connected, root, analysis = setup_profiles
     with home(root):
         cfg = config("shared")
+        cfg["metal_calc"]["headers"] = {"Authorization": "Bearer A"}
         cfg["metal_calc"]["supports_parallel_tool_calls"] = True
         mcp_tool.register_mcp_servers(cfg)
         assert mcp_tool.is_mcp_tool_parallel_safe("mcp__metal_calc__shared")
         for _ in range(mcp_tool._CIRCUIT_BREAKER_THRESHOLD):
             mcp_tool._bump_server_error(connected[0].name)
+        mcp_tool._record_connect_failure(connected[0].name)
     with home(analysis):
-        mcp_tool.register_mcp_servers(config("shared"))
+        cfg = config("shared")
+        cfg["metal_calc"]["headers"] = {"Authorization": "Bearer B"}
+        mcp_tool.register_mcp_servers(cfg)
+        assert not mcp_tool._connect_cooldown_active(connected[1].name)
         assert not mcp_tool.is_mcp_tool_parallel_safe("mcp__metal_calc__shared")
         assert "error" not in json.loads(registry.get_entry("mcp__metal_calc__shared").handler({}))
     with home(root):
@@ -158,3 +169,170 @@ def test_transient_initial_discovery_does_not_poison_native_marker(setup_profile
         mcp_tool.ensure_native_profile_mcp_tools()
         mcp_tool.ensure_native_profile_mcp_tools()
     assert len(calls) == 2
+
+
+def test_toolset_resolution_memo_is_profile_scoped(setup_profiles):
+    registry, _, root, analysis = setup_profiles
+    import toolsets
+
+    with home(root):
+        mcp_tool.register_mcp_servers(config("shared"))
+        assert toolsets.resolve_toolset("mcp-metal_calc") == [
+            "mcp__metal_calc__shared"
+        ]
+    with home(analysis):
+        assert registry.get_tool_names_for_toolset("mcp-metal_calc") == []
+        assert toolsets.resolve_toolset("mcp-metal_calc") == []
+
+
+def test_same_static_identity_shares_one_connection(setup_profiles, monkeypatch):
+    registry, connected, root, analysis = setup_profiles
+    cfg = config("shared")
+    cfg["metal_calc"]["env"] = {"ACCOUNT": "same", "TOKEN": "same-token"}
+    monkeypatch.setattr(mcp_tool, "_load_mcp_config", lambda: cfg)
+
+    with home(root):
+        mcp_tool.register_mcp_servers(cfg)
+        root_entry = registry.get_entry("mcp__metal_calc__shared")
+    with home(analysis):
+        mcp_tool.register_mcp_servers(cfg)
+        adopter_entry = registry.get_entry("mcp__metal_calc__shared")
+        assert adopter_entry is not root_entry
+        assert json.loads(adopter_entry.handler({}))["result"] == "shared"
+        assert mcp_tool.get_mcp_status()[0]["status"] == "connected"
+
+    assert len(connected) == 1
+    assert connected[0].session.call_tool.call_count == 1
+
+
+def test_different_static_credentials_never_share_connection(setup_profiles):
+    registry, connected, root, analysis = setup_profiles
+    cfg_a = config("shared")
+    cfg_a["metal_calc"]["headers"] = {"Authorization": "Bearer A"}
+    cfg_b = config("shared")
+    cfg_b["metal_calc"]["headers"] = {"Authorization": "Bearer B"}
+
+    with home(root):
+        mcp_tool.register_mcp_servers(cfg_a)
+        root_entry = registry.get_entry("mcp__metal_calc__shared")
+    with home(analysis):
+        mcp_tool.register_mcp_servers(cfg_b)
+        profile_entry = registry.get_entry("mcp__metal_calc__shared")
+        assert profile_entry is not root_entry
+        assert json.loads(profile_entry.handler({}))["result"] == "shared"
+
+    assert len(connected) == 2
+    assert connected[0].session.call_tool.call_count == 0
+    assert connected[1].session.call_tool.call_count == 1
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {"url": "https://mcp.example/x", "auth": "oauth"},
+        {
+            "url": "https://mcp.example/x",
+            "client_cert": "/certs/shared.pem",
+            "client_key": "/certs/shared.key",
+        },
+    ],
+    ids=["oauth", "mtls"],
+)
+def test_profile_bound_auth_never_shares_connection(setup_profiles, identity):
+    _, connected, root, analysis = setup_profiles
+    cfg = config("shared")
+    cfg["metal_calc"].update(identity)
+
+    with home(root):
+        mcp_tool.register_mcp_servers(cfg)
+    with home(analysis):
+        mcp_tool.register_mcp_servers(cfg)
+
+    assert len(connected) == 2
+
+
+def test_adopter_keeps_its_own_trust_policy(
+    setup_profiles, monkeypatch
+):
+    registry, connected, root, analysis = setup_profiles
+    route = config("shared")
+    route["metal_calc"]["headers"] = {"Authorization": "Bearer shared"}
+    cfg_a = {"metal_calc": dict(route["metal_calc"], trust="full")}
+    cfg_b = {"metal_calc": dict(route["metal_calc"], trust="untrusted")}
+    asked = []
+
+    monkeypatch.setattr(
+        "tools.approval.request_elicitation_consent",
+        lambda *args, **_kwargs: asked.append(args) or "deny",
+    )
+
+    with home(root):
+        mcp_tool.register_mcp_servers(cfg_a)
+        root_entry = registry.get_entry("mcp__metal_calc__shared")
+    with home(analysis):
+        mcp_tool.register_mcp_servers(cfg_b)
+        adopter_entry = registry.get_entry("mcp__metal_calc__shared")
+        assert "error" in json.loads(adopter_entry.handler({}))
+        assert asked
+        assert connected[0].session.call_tool.call_count == 0
+    with home(root):
+        assert "error" not in json.loads(root_entry.handler({}))
+
+    assert len(connected) == 1
+    assert len(asked) == 1
+
+
+def test_owner_reload_restores_adopter_tools(
+    setup_profiles, monkeypatch
+):
+    registry, connected, root, analysis = setup_profiles
+    cfg = config("shared")
+    cfg["metal_calc"]["headers"] = {"Authorization": "Bearer shared"}
+    monkeypatch.setattr(mcp_tool, "_load_mcp_config", lambda: cfg)
+
+    with home(root):
+        mcp_tool.register_mcp_servers(cfg)
+    with home(analysis):
+        mcp_tool.register_mcp_servers(cfg)
+        assert registry.get_tool_names_for_toolset("mcp-metal_calc") == [
+            "mcp__metal_calc__shared"
+        ]
+    assert len(connected) == 1
+
+    with home(root):
+        mcp_tool.shutdown_mcp_servers()
+    with home(analysis):
+        assert registry.get_tool_names_for_toolset("mcp-metal_calc") == []
+
+    with home(root):
+        mcp_tool.register_mcp_servers(cfg)
+    with home(analysis):
+        assert registry.get_tool_names_for_toolset("mcp-metal_calc") == [
+            "mcp__metal_calc__shared"
+        ]
+        assert mcp_tool.get_mcp_status()[0]["status"] == "connected"
+
+    assert len(connected) == 2
+
+
+def test_adopter_reload_keeps_owner_connection_alive(setup_profiles):
+    registry, connected, root, analysis = setup_profiles
+    cfg = config("shared")
+    cfg["metal_calc"]["headers"] = {"Authorization": "Bearer shared"}
+
+    with home(root):
+        mcp_tool.register_mcp_servers(cfg)
+        owner_entry = registry.get_entry("mcp__metal_calc__shared")
+    with home(analysis):
+        mcp_tool.register_mcp_servers(cfg)
+        mcp_tool.shutdown_mcp_servers()
+        assert registry.get_entry("mcp__metal_calc__shared") is None
+
+    connected[0].shutdown.assert_not_called()
+    with home(root):
+        assert registry.get_entry("mcp__metal_calc__shared") is owner_entry
+    with home(analysis):
+        mcp_tool.register_mcp_servers(cfg)
+        assert registry.get_entry("mcp__metal_calc__shared") is not None
+
+    assert len(connected) == 1
