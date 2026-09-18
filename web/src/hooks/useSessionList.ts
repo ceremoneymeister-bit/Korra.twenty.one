@@ -35,6 +35,7 @@ export function useSessionList(
   const pollIntervalMs = options?.pollIntervalMs ?? 0;
   const profile = options?.profile;
   const profileRef = useRef(profile);
+  const previousPollIntervalRef = useRef(pollIntervalMs);
   const mountedRef = useRef(false);
   const requestRef = useRef(0);
   const [result, setResult] = useState<{ profile: string | undefined; sessions: SessionInfo[] }>(
@@ -87,8 +88,12 @@ export function useSessionList(
   }, [refresh]);
 
   useEffect(() => {
+    const previous = previousPollIntervalRef.current;
+    previousPollIntervalRef.current = pollIntervalMs;
     if (pollIntervalMs <= 0) return;
-    void refresh(); // The selected agent may have completed while hidden.
+    // The ordinary load effect handles the initial render.  This extra read
+    // is specifically the hidden (0) -> active (>0) transition.
+    if (previous <= 0) void refresh();
 
     const intervalId = window.setInterval(() => {
       // Скрытая вкладка браузера не опрашивает сервер.

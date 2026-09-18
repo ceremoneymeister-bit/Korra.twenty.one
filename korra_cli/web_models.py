@@ -810,6 +810,12 @@ class ThemeSetBody(BaseModel):
     evening_action: Optional[Literal["later", "disable", "enable"]] = None
 
 
+class AgentTabsSetBody(BaseModel):
+    revision: int = Field(ge=0)
+    order: List[str] = []
+    hidden: List[str] = []
+
+
 # --- from web_server.py (originally lines 19449-19450) ---
 
 class FontSetBody(BaseModel):

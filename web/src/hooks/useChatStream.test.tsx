@@ -24,8 +24,8 @@ let current: UseChatStreamReturn;
  *  только здесь: к концу загрузки сообщения снова на месте. */
 let shown: UseChatStreamReturn[] = [];
 
-function Probe({ onValue, profile }: { onValue: (value: UseChatStreamReturn) => void; profile?: string }) {
-  const value = useChatStream({ profile });
+function Probe({ onValue, profile, active = true }: { onValue: (value: UseChatStreamReturn) => void; profile?: string; active?: boolean }) {
+  const value = useChatStream({ profile, active });
   useEffect(() => onValue(value), [onValue, value]);
   return null;
 }
@@ -883,6 +883,31 @@ describe("K21-105 selected conversation recovery", () => {
     await act(async () => root.render(<Probe profile="another-agent" onValue={value => { current = value; }} />));
     expect(current.sessionId).toBeNull();
     expect(current.messages).toEqual([]);
+  });
+});
+
+describe("K21-117 activation reconciliation", () => {
+  it("refreshes durable runs and history even when the old reader ref is stuck", async () => {
+    const history = vi.spyOn(api, "getSessionMessages").mockResolvedValue({
+      session_id: "chosen", messages: [{ role: "user", content: "План" }] as SessionMessage[],
+    });
+    await act(async () => { await current.loadSession("chosen"); });
+    history.mockClear();
+
+    // The POST never settles, reproducing a browser-suspended reader whose
+    // catch/finally did not get a chance to clear streamingRef.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+    await act(async () => { void current.send("Продолжить в фоне"); });
+    expect(current.isStreaming).toBe(true);
+
+    const onValue = (value: UseChatStreamReturn) => { current = value; };
+    await act(async () => root.render(<Probe active={false} onValue={onValue} />));
+    const { refreshChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(refreshChatRuns).mockClear();
+    await act(async () => root.render(<Probe active onValue={onValue} />));
+
+    expect(refreshChatRuns).toHaveBeenCalled();
+    expect(history).toHaveBeenCalledWith("chosen", "default");
   });
 });
 

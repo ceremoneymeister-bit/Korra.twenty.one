@@ -18,11 +18,13 @@ import { AgentRunBadge, SessionRunActivity } from "@/components/chat/SessionRunA
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
@@ -55,6 +57,7 @@ import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import { agentSettingsHref, MAIN_AGENT_TAB } from "@/lib/agent-tabs";
 import { useAgentTabs } from "@/hooks/useAgentTabs";
+import { $activeAgentProfile } from "@/lib/active-agent";
 
 /* ------------------------------------------------------------------ */
 /*  AgentWorkbenchPage (default export)                                */
@@ -64,6 +67,7 @@ import { useAgentTabs } from "@/hooks/useAgentTabs";
 const TAB_MENU_WIDTH = 250;
 /** Отступ от края экрана, чтобы меню не липло к рамке окна. */
 const TAB_MENU_VIEWPORT_MARGIN = 12;
+const TAB_SCROLL_KEY = `${chatViewKey()}:agent-tabs-scroll`;
 
 /**
  * Левый край меню под кнопкой, которая его открыла.
@@ -97,6 +101,7 @@ export default function AgentWorkbenchPage() {
     hideTab,
     showTab,
     moveTab,
+    reorderTab,
   } = useAgentTabs();
   const [selectedId, setActiveId] = useState<string>(() => readChatSelection(`${chatViewKey()}:agent`) || MAIN_AGENT_TAB.profile);
   useEffect(() => { writeChatSelection(`${chatViewKey()}:agent`, selectedId); }, [selectedId]);
@@ -112,6 +117,15 @@ export default function AgentWorkbenchPage() {
   const [renameValue, setRenameValue] = useState("");
   const [savingName, setSavingName] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const tabsScrollerRef = useRef<HTMLDivElement | null>(null);
+  const tabDragRef = useRef<{
+    profile: string;
+    pointerId: number;
+    startX: number;
+    moved: boolean;
+    lastTarget: string;
+  } | null>(null);
+  const suppressTabClickRef = useRef(false);
   const navigate = useNavigate();
   const { toast, showToast } = useToast();
   // Профиль удалили, пока его вкладка была выбрана, — показываем главную,
@@ -172,6 +186,69 @@ export default function AgentWorkbenchPage() {
   // экране и вернулся сюда — вкладка должна быть уже здесь, а не через
   // полминуты опроса.
   const onAgentsRoute = (pathname.replace(/\/$/, "") || "/") === "/agents";
+
+  useEffect(() => {
+    $activeAgentProfile.set(onAgentsRoute ? activeId : null);
+  }, [activeId, onAgentsRoute]);
+
+  useEffect(() => {
+    return () => {
+      $activeAgentProfile.set(null);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!onAgentsRoute || !tabsScrollerRef.current) return;
+    try {
+      const saved = Number(window.localStorage.getItem(TAB_SCROLL_KEY));
+      if (Number.isFinite(saved) && saved >= 0) tabsScrollerRef.current.scrollLeft = saved;
+    } catch {
+      // Device storage is optional; the strip remains normally scrollable.
+    }
+  }, [onAgentsRoute]);
+
+  const rememberTabScroll = useCallback(() => {
+    try {
+      window.localStorage.setItem(TAB_SCROLL_KEY, String(tabsScrollerRef.current?.scrollLeft ?? 0));
+    } catch {
+      // Private browsing may reject persistence.
+    }
+  }, []);
+
+  const startTabDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>, profile: string) => {
+    if (event.button !== 0 || (event.target as Element).closest("[data-agent-tab-menu-trigger]")) return;
+    tabDragRef.current = {
+      profile,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      moved: false,
+      lastTarget: profile,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, []);
+
+  const moveTabDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = tabDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.moved && Math.abs(event.clientX - drag.startX) < 8) return;
+    drag.moved = true;
+    event.preventDefault();
+    const target = document.elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>("[data-agent-tab-profile]")
+      ?.dataset.agentTabProfile;
+    if (target === undefined || target === drag.profile || target === drag.lastTarget) return;
+    drag.lastTarget = target;
+    reorderTab(drag.profile, target);
+  }, [reorderTab]);
+
+  const finishTabDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = tabDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    tabDragRef.current = null;
+    if (!drag.moved) return;
+    suppressTabClickRef.current = true;
+    window.requestAnimationFrame(() => { suppressTabClickRef.current = false; });
+  }, []);
   useEffect(() => {
     if (onAgentsRoute) void refresh();
   }, [onAgentsRoute, refresh]);
@@ -417,7 +494,9 @@ export default function AgentWorkbenchPage() {
           className="korra-agent-tabs neo-tabs-list flex min-w-0 flex-1 min-h-14 items-center gap-2 p-2"
         >
           <div
+            ref={tabsScrollerRef}
             role="presentation"
+            onScroll={rememberTabScroll}
             className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1.5 py-1.5"
           >
             {tabs.map((tab) => {
@@ -426,7 +505,12 @@ export default function AgentWorkbenchPage() {
                 <div
                   key={tab.profile}
                   role="presentation"
-                  className="relative flex shrink-0 items-center"
+                  data-agent-tab-profile={tab.profile}
+                  onPointerDown={(event) => startTabDrag(event, tab.profile)}
+                  onPointerMove={moveTabDrag}
+                  onPointerUp={finishTabDrag}
+                  onPointerCancel={finishTabDrag}
+                  className="relative flex shrink-0 touch-pan-y items-center"
                 >
                   <button
                     id={`agent-tab-${tab.profile}`}
@@ -437,7 +521,9 @@ export default function AgentWorkbenchPage() {
                     tabIndex={active ? 0 : -1}
                     title={tab.description}
                     data-active={active ? "true" : undefined}
-                    onClick={() => setActiveId(tab.profile)}
+                    onClick={() => {
+                      if (!suppressTabClickRef.current) setActiveId(tab.profile);
+                    }}
                     className={cn(
                       "neo-tab flex min-h-9 items-center gap-2 px-3 py-2",
                       "font-sans text-[0.9375rem] leading-snug normal-case tracking-normal",

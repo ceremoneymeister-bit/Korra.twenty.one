@@ -636,6 +636,9 @@ export const api = {
    *  явный пустой profile= отключает подстановку, иначе выбор в чипе
    *  «Секретарь» зажигал ложное «Корра сейчас недоступна» (QA 03.09). */
   getPanelStatus: () => fetchJSON<StatusResponse>("/api/status?profile="),
+  /** Status for the selected /agents tab; an empty profile is the owner. */
+  getProfileStatus: (profile: string) =>
+    fetchJSON<StatusResponse>(`/api/status?profile=${encodeURIComponent(profile)}`),
   /**
    * Identity probe for the dashboard auth gate (Phase 7).
    *
@@ -1471,6 +1474,14 @@ export const api = {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, revision, evening_action }),
+    }),
+  getAgentTabs: () =>
+    fetchJSON<AgentTabsPreference>("/api/dashboard/agent-tabs"),
+  setAgentTabs: (layout: Pick<AgentTabsPreference, "revision" | "order" | "hidden">) =>
+    fetchJSON<AgentTabsPreference>("/api/dashboard/agent-tabs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(layout),
     }),
   getFontPref: () =>
     fetchJSON<DashboardFontResponse>("/api/dashboard/font"),
@@ -3236,6 +3247,14 @@ export interface DashboardThemesResponse {
 export interface DashboardFontResponse {
   /** Active font-override id, or "theme" when no override is set. */
   font: string;
+}
+
+export interface AgentTabsPreference {
+  version: 1;
+  revision: number;
+  initialized: boolean;
+  order: string[];
+  hidden: string[];
 }
 
 // ── Dashboard plugin types ─────────────────────────────────────────────

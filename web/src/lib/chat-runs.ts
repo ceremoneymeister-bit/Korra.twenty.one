@@ -6,10 +6,17 @@ export interface ChatRun {
   message_id: string;
   session_id: string;
   profile: string;
-  status: "running" | "queued" | "completed" | "failed" | "interrupted";
+  status: "running" | "queued" | "waiting_decision" | "completed" | "failed" | "interrupted" | "stale";
   updated_at: number;
+  started_at?: number;
   history_count: number;
   user_message: { role: "user"; content: string };
+  source?: string | null;
+  channel?: string | null;
+  title?: string | null;
+  delivery?: "pending" | "delivered" | "failed" | "unknown";
+  unread?: boolean;
+  event_revision?: string;
   failure?: {
     message?: string;
     type?: string;
@@ -58,10 +65,23 @@ export async function getChatRuns(profile?: string, sessionId?: string): Promise
 }
 
 export function isRunBusy(run: ChatRun): boolean {
-  return run.status === "running" || run.status === "queued";
+  return run.status === "running" || run.status === "queued" || run.status === "waiting_decision";
 }
 
-const monitoringStarted = Date.now();
+const serverReadInFlight = new Set<string>();
+
+function markServerSessionRead(profile: string, sessionId: string): void {
+  if (typeof fetch !== "function") return;
+  const key = `${profile}\0${sessionId}`;
+  if (serverReadInFlight.has(key)) return;
+  serverReadInFlight.add(key);
+  void fetch(withBasePath(`/api/sessions/${encodeURIComponent(sessionId)}`), {
+    method: "PATCH",
+    headers: { ...chatRunHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ unread: false, profile: profile || undefined }),
+  }).catch(() => undefined).finally(() => serverReadInFlight.delete(key));
+}
+
 let refreshing: Promise<void> | null = null;
 export function refreshChatRuns(): Promise<void> {
   if (refreshing) return refreshing;
@@ -71,10 +91,15 @@ export function refreshChatRuns(): Promise<void> {
     const newlyReady = runs.filter(run => run.status === "completed" &&
       (previous.some(old => old.message_id === run.message_id && isRunBusy(old)) ||
         (!previous.some(old => old.message_id === run.message_id) &&
-          (run.updated_at * 1000 >= monitoringStarted || loadChatOutboxRecords(run.profile, run.session_id).some(item => item.messageId === run.message_id)))) &&
+          (run.unread === true || loadChatOutboxRecords(run.profile, run.session_id).some(item => item.messageId === run.message_id)))) &&
       !(viewed?.profile === run.profile && viewed.sessionId === run.session_id));
     if (newlyReady.length) {
       $unreadChatRuns.set([...newlyReady, ...$unreadChatRuns.get()].filter((run, i, all) => all.findIndex(r => r.message_id === run.message_id) === i));
+    }
+    for (const run of runs) {
+      if (run.unread && viewed?.profile === run.profile && viewed.sessionId === run.session_id) {
+        markServerSessionRead(run.profile, run.session_id);
+      }
     }
     $chatRuns.set(runs);
     $chatRunsReachable.set(true);
@@ -85,6 +110,7 @@ export function refreshChatRuns(): Promise<void> {
 export function markChatViewed(profile: string, sessionId: string | null): void {
   $viewedChat.set({ profile, sessionId });
   $unreadChatRuns.set($unreadChatRuns.get().filter(run => run.profile !== profile || run.session_id !== sessionId));
+  if (sessionId) markServerSessionRead(profile, sessionId);
 }
 
 onMount($chatRuns, () => {

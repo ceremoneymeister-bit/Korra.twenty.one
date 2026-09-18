@@ -7,8 +7,8 @@ import { useSessionList } from "./useSessionList";
 
 let root: Root, container: HTMLDivElement;
 let current: ReturnType<typeof useSessionList>;
-function Probe({ profile }: { profile: string }) {
-  const value = useSessionList({ profile });
+function Probe({ profile, pollIntervalMs = 0 }: { profile: string; pollIntervalMs?: number }) {
+  const value = useSessionList({ profile, pollIntervalMs });
   useEffect(() => { current = value; }, [value]);
   return null;
 }
@@ -59,5 +59,20 @@ describe("K21-105 history refresh", () => {
     await act(async () => current.refresh());
     await act(async () => { finishOld(response("stale")); await old; });
     expect(current.sessions.map(row => row.id)).toEqual(["newest"]);
+  });
+});
+
+describe("K21-117 hidden agent polling", () => {
+  it("does not grow polling across hidden tabs and refreshes when activated", async () => {
+    vi.useFakeTimers();
+    const get = vi.spyOn(api, "getSessions").mockResolvedValue(response("chat"));
+    await act(async () => root.render(<Probe profile="lawyer" pollIntervalMs={0} />));
+    const hiddenCalls = get.mock.calls.length;
+    await act(async () => { vi.advanceTimersByTime(45_000); });
+    expect(get).toHaveBeenCalledTimes(hiddenCalls);
+
+    await act(async () => root.render(<Probe profile="lawyer" pollIntervalMs={15_000} />));
+    expect(get.mock.calls.length).toBeGreaterThan(hiddenCalls);
+    vi.useRealTimers();
   });
 });

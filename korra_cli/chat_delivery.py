@@ -190,9 +190,14 @@ class DeliveryLedger:
             ).fetchall()
         result, seen = [], set()
         for message_id, sid, prof, status, updated_at, meta in rows:
-            if session_id is None and (prof, sid) in seen:
-                continue
-            seen.add((prof, sid))
+            if session_id is None:
+                # Keep every accepted in-flight intent: two parallel turns
+                # must remain two rows.  For terminal history one latest row
+                # per conversation is enough for the global shell poll.
+                if status != "pending" and (prof, sid) in seen:
+                    continue
+                if status != "pending":
+                    seen.add((prof, sid))
             result.append(dict(message_id=message_id, session_id=sid, profile=prof,
                                status=status, updated_at=updated_at, **json.loads(meta)))
         return result

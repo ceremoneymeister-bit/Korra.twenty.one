@@ -11,6 +11,7 @@ const workbenchMocks = vi.hoisted(() => ({
   hideTab: vi.fn(),
   showTab: vi.fn(),
   moveTab: vi.fn(),
+  reorderTab: vi.fn(),
   tabs: [
     { profile: "", label: "Корра" },
     {
@@ -35,6 +36,7 @@ vi.mock("@/hooks/useAgentTabs", () => ({
     hideTab: workbenchMocks.hideTab,
     showTab: workbenchMocks.showTab,
     moveTab: workbenchMocks.moveTab,
+    reorderTab: workbenchMocks.reorderTab,
   }),
 }));
 
@@ -68,6 +70,7 @@ vi.mock("@/pages/BubbleChatPage", () => ({
 
 import AgentWorkbenchPage from "./AgentWorkbenchPage";
 import { composeSoul } from "@/lib/agent-wizard";
+import { $activeAgentProfile } from "@/lib/active-agent";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -132,6 +135,7 @@ beforeEach(() => {
   workbenchMocks.hideTab.mockReset();
   workbenchMocks.showTab.mockReset();
   workbenchMocks.moveTab.mockReset();
+  workbenchMocks.reorderTab.mockReset();
   apiMocks.deleteProfile.mockReset();
   apiMocks.deleteProfile.mockResolvedValue({ ok: true });
   apiMocks.getProfileSoul.mockReset();
@@ -192,6 +196,54 @@ afterEach(async () => {
 });
 
 describe("AgentWorkbenchPage", () => {
+  it("publishes the selected tab profile for shell status", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    expect($activeAgentProfile.get()).toBe("");
+    await act(async () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+      .find(tab => tab.textContent === "Сметчик")!.click());
+    expect($activeAgentProfile.get()).toBe("calculator");
+  });
+
+  it.each(["mouse", "touch"])("перетаскивает вкладку pointer-событиями (%s)", async (pointerType) => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const source = container.querySelector<HTMLElement>('[data-agent-tab-profile="calculator"]')!;
+    const target = container.querySelector<HTMLElement>('[data-agent-tab-profile=""]')!;
+    const tabButton = source.querySelector<HTMLElement>('[role="tab"]')!;
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => target),
+    });
+    const fire = (type: string, clientX: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        button: { value: 0 },
+        pointerId: { value: 17 },
+        pointerType: { value: pointerType },
+        clientX: { value: clientX },
+        clientY: { value: 10 },
+      });
+      tabButton.dispatchEvent(event);
+    };
+    await act(async () => {
+      fire("pointerdown", 100);
+      fire("pointermove", 60);
+      fire("pointerup", 60);
+    });
+    expect(workbenchMocks.reorderTab).toHaveBeenCalledWith("calculator", "");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
   it("показывает display_name как подпись вкладки", async () => {
     await render(
       <MemoryRouter initialEntries={["/agents"]}>

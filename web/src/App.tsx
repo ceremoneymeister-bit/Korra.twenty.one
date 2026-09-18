@@ -68,6 +68,8 @@ import { SidebarFooter } from "@/components/SidebarFooter";
 import { SidebarStatusStrip, gatewayLine } from "@/components/SidebarStatusStrip";
 import { useBelowBreakpoint } from "@nous-research/ui/hooks/use-below-breakpoint";
 import { useSidebarStatus } from "@/hooks/useSidebarStatus";
+import { useStore } from "@nanostores/react";
+import { $activeAgentProfile } from "@/lib/active-agent";
 import { AuthWidget } from "@/components/AuthWidget";
 import { PageHeaderProvider } from "@/contexts/PageHeaderProvider";
 import { ProfileProvider } from "@/contexts/ProfileProvider";
@@ -469,8 +471,9 @@ export default function App() {
   const isMobile = useBelowBreakpoint(1024);
   const isDesktopCollapsed = collapsed && !isMobile;
   const tooltipWarmRef = useRef(0);
+  const activeAgentProfile = useStore($activeAgentProfile);
   const { status: sidebarStatus, reachable: sidebarReachable } =
-    useSidebarStatus();
+    useSidebarStatus(activeAgentProfile);
   const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const uiMode = productUiMode();

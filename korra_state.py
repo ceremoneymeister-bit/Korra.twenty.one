@@ -8573,6 +8573,30 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
 
         self._execute_write(_do)
 
+    def list_session_turn_leases(self) -> List[Dict[str, Any]]:
+        """Return the durable cross-process turn leases for diagnostics/UI.
+
+        This is deliberately a read-only snapshot.  Callers must compare
+        ``expires_at`` with their own server clock; merely finding a row is
+        never proof that work is still alive.  Expired rows are included so a
+        status projector can distinguish ``stale`` from an orderly finish
+        without mutating the locking protocol from a polling endpoint.
+        """
+        with self._read_ctx() as conn:
+            rows = conn.execute(
+                "SELECT conversation_id, holder, acquired_at, expires_at "
+                "FROM session_turn_leases ORDER BY acquired_at DESC"
+            ).fetchall()
+        return [
+            {
+                "conversation_id": row["conversation_id"],
+                "holder": row["holder"],
+                "acquired_at": row["acquired_at"],
+                "expires_at": row["expires_at"],
+            }
+            for row in rows
+        ]
+
     def get_compression_lock_holder(self, session_id: str) -> Optional[str]:
         """Return the current (non-expired) holder for ``session_id``, or None.
 

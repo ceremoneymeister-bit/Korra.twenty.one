@@ -1861,6 +1861,7 @@ from korra_cli.web_models import (  # noqa: F401
     TerminalBackendSelect,
     RawConfigUpdate,
     ThemeSetBody,
+    AgentTabsSetBody,
     FontSetBody,
     _AgentPluginInstallBody,
     _PluginProvidersPutBody,
@@ -20515,6 +20516,52 @@ async def set_dashboard_theme(body: ThemeSetBody, request: Request = None):
             if pref["revision"] != expected["revision"]:
                 raise HTTPException(status_code=409, detail="Выбор не сохранён. Настройка ограничена или изменилась; повторите после проверки.")
         return {"ok": True, "theme": pref["theme"], "preference": pref}
+
+    return await asyncio.to_thread(_run)
+
+
+@app.get("/api/dashboard/agent-tabs")
+async def get_dashboard_agent_tabs():
+    """Return the owner's shared tab order/visibility preference."""
+    from korra_cli.dashboard_agent_tabs import preference
+
+    return await asyncio.to_thread(preference, load_config())
+
+
+@app.put("/api/dashboard/agent-tabs")
+async def set_dashboard_agent_tabs(body: AgentTabsSetBody):
+    """CAS-update the shared layout using a server-owned monotonic revision."""
+    from korra_cli.dashboard_agent_tabs import preference, updated
+
+    def _run():
+        with _CONFIG_MUTATION_LOCK:
+            config = load_config()
+            before = preference(config)
+            if body.revision != before["revision"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Расположение вкладок уже изменилось в другом окне.",
+                )
+            next_value = updated(before, order=body.order, hidden=body.hidden)
+            dashboard = config.get("dashboard")
+            if not isinstance(dashboard, dict):
+                dashboard = config["dashboard"] = {}
+            dashboard["agent_tabs"] = next_value
+            preserve = {
+                ("dashboard", "agent_tabs", "version"),
+                ("dashboard", "agent_tabs", "revision"),
+                ("dashboard", "agent_tabs", "initialized"),
+                ("dashboard", "agent_tabs", "order"),
+                ("dashboard", "agent_tabs", "hidden"),
+            }
+            save_config(config, preserve_keys=preserve)
+            saved = preference(load_config())
+            if saved != next_value:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Расположение вкладок не сохранилось; обновите экран.",
+                )
+            return saved
 
     return await asyncio.to_thread(_run)
 

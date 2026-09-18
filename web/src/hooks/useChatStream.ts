@@ -1398,6 +1398,7 @@ export function useChatStream(
   // Page and profile switches detach only the reader. A fresh visit resolves
   // the session again; a remembered browser flag never proves agent liveness.
   const sessionRef = useRef(state.sessionId);
+  const selectionLoadRef = useRef<Promise<void> | null>(null);
   useEffect(() => { sessionRef.current = state.sessionId; }, [state.sessionId]);
   useEffect(() => {
     const selection = readChatSelection(selectionKey);
@@ -1405,26 +1406,53 @@ export function useChatStream(
     // The resume effect runs in this same commit, before RESET/LOAD_SESSION
     // is rendered. Never let it refresh the previous profile's conversation.
     sessionRef.current = id ?? null;
-    if (id) void loadSession(id);
-    else reset();
+    if (id) {
+      const pending = loadSession(id).finally(() => {
+        if (selectionLoadRef.current === pending) selectionLoadRef.current = null;
+      });
+      selectionLoadRef.current = pending;
+      void pending;
+    } else reset();
   }, [loadSession, profile, selectionKey, reset]);
   useEffect(() => {
     if (!active) return;
     // Возврат к вкладке — не повод показывать чат заново. Проверяем в фоне:
     // новые сообщения и состояние хода доезжают поверх уже показанной ленты.
-    const resume = () => {
-      if (!document.hidden && sessionRef.current && !streamingRef.current) {
-        void loadSession(sessionRef.current, { background: true });
+    const reconcile = async (forceHistory = false) => {
+      if (document.hidden) return;
+      void refreshChatRuns();
+      const sessionId = sessionRef.current;
+      if (!sessionId) return;
+      // The profile/selection effect in this same commit already started the
+      // authoritative load.  Do not abort it with a duplicate activation
+      // load; this guard is only for the current in-flight promise and cannot
+      // mask a reader that became stuck on an earlier visit.
+      if (forceHistory && selectionLoadRef.current) {
+        await selectionLoadRef.current;
+        return;
+      }
+      if (forceHistory || !streamingRef.current) {
+        await loadSession(sessionId, { background: true });
+        return;
+      }
+      // A browser can kill a hidden SSE reader without running our catch/
+      // finally path.  The ref then still says "streaming" forever.  Durable
+      // server state is authoritative: once no run is busy, reconnect the
+      // history even while that stale local lock remains set.
+      try {
+        const runs = await getChatRuns(profile ?? "", sessionId);
+        if (!runs.some(isRunBusy)) await loadSession(sessionId, { background: true });
+      } catch {
+        // refreshChatRuns exposes reachability; keep the visible transcript.
       }
     };
-    resume();
+    void reconcile(true);
+    const resume = () => { void reconcile(false); };
     window.addEventListener("online", resume);
     window.addEventListener("focus", resume);
     document.addEventListener("visibilitychange", resume);
     const syncOutbox = (event: StorageEvent) => {
-      if (isChatOutboxStorageKey(event.key) && sessionRef.current && !streamingRef.current) {
-        void loadSession(sessionRef.current, { background: true });
-      }
+      if (isChatOutboxStorageKey(event.key)) void reconcile(false);
     };
     window.addEventListener("storage", syncOutbox);
     return () => {
@@ -1433,7 +1461,7 @@ export function useChatStream(
       document.removeEventListener("visibilitychange", resume);
       window.removeEventListener("storage", syncOutbox);
     };
-  }, [active, loadSession]);
+  }, [active, loadSession, profile]);
   useEffect(() => {
     if (!active) return;
     markChatViewed(profile ?? "", state.sessionId);

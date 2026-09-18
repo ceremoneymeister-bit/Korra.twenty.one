@@ -109,7 +109,15 @@ async def chat_runs(profile: str | None = None, session_id: str | None = None):
             # explicitly opened conversation, not every two-second update.
             summary["user_message"] = {"role": "user", "content": str(item["user_message"].get("content", ""))[:160]}
         result.append(summary)
-    return {"runs": result}
+    from korra_cli.chat_activity import project_chat_activity
+
+    projected = await server.run_in_threadpool(
+        project_chat_activity,
+        result,
+        profile=profile,
+        session_id=session_id,
+    )
+    return {"runs": projected}
 
 
 @router.get("/api/chat/runs/{message_id}/stream")

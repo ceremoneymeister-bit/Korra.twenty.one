@@ -37,6 +37,58 @@ it("после F5 готовый ответ из сохранённого исх
 });
 
 
+it("серверный unread не зависит от часов браузера и чтение ставит watermark", async () => {
+  const completed = {
+    ...run,
+    message_id: "message-server-revision",
+    status: "completed",
+    updated_at: 1, // намеренно намного старше часов браузера
+    unread: true,
+    event_revision: "1.000000",
+  } as ChatRun;
+  const fetcher = vi.fn<typeof fetch>(async (input) => {
+    if (String(input).includes("/api/chat/runs")) {
+      return Response.json({ runs: [completed] });
+    }
+    return Response.json({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetcher);
+
+  await refreshChatRuns();
+  expect($unreadChatRuns.get().map(item => item.message_id)).toContain(completed.message_id);
+  markChatViewed("lawyer", "session-lawyer");
+  await Promise.resolve();
+  const patch = fetcher.mock.calls.find(([url, init]) =>
+    String(url).includes("/api/sessions/session-lawyer") && init?.method === "PATCH");
+  expect(JSON.parse(String(patch?.[1]?.body))).toMatchObject({
+    unread: false,
+    profile: "lawyer",
+  });
+});
+
+
+it("показывает ожидание решения и подтверждённые metadata задачи", async () => {
+  const waiting = {
+    ...run,
+    status: "waiting_decision",
+    title: "Договор клиента",
+    channel: "telegram",
+    started_at: 1,
+  } as ChatRun;
+  $chatRuns.set([waiting]);
+  $chatRunsReachable.set(true);
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(<MemoryRouter>
+    <SessionRunActivity tabs={[{ profile: "lawyer", label: "Юрист" }]} />
+  </MemoryRouter>));
+  expect(container.textContent).toContain("Ожидает вашего решения");
+  expect(container.textContent).toContain("Договор клиента");
+  expect(container.textContent).toContain("telegram");
+  await act(async () => root.unmount()); container.remove();
+});
+
+
 it("отметка стоит у конкретного чата; «Скрыть уведомление» не читает ответ, а открытие чата снимает только его отметку", async () => {
   const a = { ...run, message_id: "m-a", session_id: "session-a", status: "completed" } as ChatRun;
   const c = { ...run, message_id: "m-c", session_id: "session-c", status: "completed" } as ChatRun;

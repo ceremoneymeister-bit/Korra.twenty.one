@@ -7,11 +7,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentTabs, type UseAgentTabsReturn } from "./useAgentTabs";
 
 const getProfiles = vi.fn();
+const getAgentTabs = vi.fn();
+const setAgentTabs = vi.fn();
 const updateProfileDisplayName = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
     getProfiles: () => getProfiles(),
+    getAgentTabs: () => getAgentTabs(),
+    setAgentTabs: (layout: { revision: number; order: string[]; hidden: string[] }) =>
+      setAgentTabs(layout),
     updateProfileDisplayName: (name: string, displayName: string) =>
       updateProfileDisplayName(name, displayName),
   },
@@ -20,6 +25,13 @@ vi.mock("@/lib/api", () => ({
 let container: HTMLDivElement;
 let root: Root;
 let current: UseAgentTabsReturn;
+let serverLayout: {
+  version: 1;
+  revision: number;
+  initialized: boolean;
+  order: string[];
+  hidden: string[];
+};
 
 function Probe({ onValue }: { onValue: (value: UseAgentTabsReturn) => void }) {
   const value = useAgentTabs();
@@ -45,6 +57,26 @@ async function mount() {
 beforeEach(() => {
   window.localStorage.clear();
   getProfiles.mockReset();
+  getAgentTabs.mockReset();
+  setAgentTabs.mockReset();
+  serverLayout = {
+    version: 1,
+    revision: 0,
+    initialized: false,
+    order: [],
+    hidden: [],
+  };
+  getAgentTabs.mockImplementation(async () => ({ ...serverLayout }));
+  setAgentTabs.mockImplementation(async (layout) => {
+    serverLayout = {
+      version: 1,
+      revision: serverLayout.revision + 1,
+      initialized: true,
+      order: [...layout.order],
+      hidden: [...layout.hidden],
+    };
+    return { ...serverLayout };
+  });
   updateProfileDisplayName.mockReset();
   updateProfileDisplayName.mockResolvedValue({
     ok: true,
@@ -119,6 +151,16 @@ describe("useAgentTabs", () => {
     expect(current.tabs).toEqual([{ profile: "", label: "Корра" }]);
   });
 
+  it("сбой layout endpoint не прячет реальные профили", async () => {
+    getProfiles.mockResolvedValue({
+      profiles: [{ name: "designer", is_default: false, display_name: "Дизайнер" }],
+    });
+    getAgentTabs.mockRejectedValue(new Error("layout unavailable"));
+    await mount();
+    await act(async () => {});
+    expect(current.tabs.map((tab) => tab.profile)).toEqual(["", "designer"]);
+  });
+
   it("битый ответ без списка — тоже только главная вкладка", async () => {
     getProfiles.mockResolvedValue({ profiles: "not-a-list" });
     await mount();
@@ -190,9 +232,12 @@ describe("useAgentTabs", () => {
       "analyst",
       "newcomer",
     ]);
-    expect(
-      JSON.parse(window.localStorage.getItem("korra.agentTabs.order")!),
-    ).toEqual(["", "writer", "analyst", "newcomer"]);
+    expect(setAgentTabs).toHaveBeenLastCalledWith({
+      revision: 1,
+      order: ["", "writer", "analyst", "newcomer"],
+      hidden: [],
+    });
+    expect(window.localStorage.getItem("korra.agentTabs.order")).toBeNull();
   });
 
   it("скрывает вкладку, не скрывает Корру и возвращает профиль", async () => {
@@ -207,9 +252,11 @@ describe("useAgentTabs", () => {
     await act(async () => current.hideTab("writer"));
     expect(current.tabs.map((tab) => tab.profile)).toEqual([""]);
     expect(current.hiddenTabs.map((tab) => tab.profile)).toEqual(["writer"]);
-    expect(
-      JSON.parse(window.localStorage.getItem("korra.agentTabs.hidden")!),
-    ).toEqual(["writer"]);
+    expect(setAgentTabs).toHaveBeenLastCalledWith({
+      revision: 1,
+      order: ["", "writer"],
+      hidden: ["writer"],
+    });
 
     await act(async () => current.hideTab(""));
     expect(current.tabs.map((tab) => tab.profile)).toEqual([""]);
@@ -236,11 +283,66 @@ describe("useAgentTabs", () => {
 
     expect(current.tabs.map((tab) => tab.profile)).toEqual(["", "keep"]);
     expect(current.hiddenTabs).toEqual([]);
-    expect(
-      JSON.parse(window.localStorage.getItem("korra.agentTabs.order")!),
-    ).toEqual(["", "keep"]);
-    expect(
-      JSON.parse(window.localStorage.getItem("korra.agentTabs.hidden")!),
-    ).toEqual([]);
+    expect(setAgentTabs).toHaveBeenCalledWith({
+      revision: 0,
+      order: ["", "keep"],
+      hidden: [],
+    });
+    expect(window.localStorage.getItem("korra.agentTabs.order")).toBeNull();
+    expect(window.localStorage.getItem("korra.agentTabs.hidden")).toBeNull();
+  });
+
+  it("при конфликте revision принимает серверный порядок, а не часы браузера", async () => {
+    serverLayout = {
+      version: 1,
+      revision: 7,
+      initialized: true,
+      order: ["", "writer", "analyst"],
+      hidden: [],
+    };
+    getProfiles.mockResolvedValue({
+      profiles: [
+        { name: "writer", is_default: false },
+        { name: "analyst", is_default: false },
+      ],
+    });
+    await mount();
+    await act(async () => {});
+    setAgentTabs.mockRejectedValueOnce(new Error("409"));
+    serverLayout = { ...serverLayout, revision: 8, order: ["analyst", "", "writer"] };
+
+    await act(async () => {
+      current.moveTab("writer", "left");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(current.tabs.map((tab) => tab.profile)).toEqual(["analyst", "", "writer"]);
+  });
+
+  it("переставляет вкладку pointer/touch-операцией через общий server layout", async () => {
+    serverLayout = {
+      version: 1,
+      revision: 3,
+      initialized: true,
+      order: ["", "writer", "analyst"],
+      hidden: [],
+    };
+    getProfiles.mockResolvedValue({
+      profiles: [
+        { name: "writer", is_default: false },
+        { name: "analyst", is_default: false },
+      ],
+    });
+    await mount();
+    await act(async () => {});
+    await act(async () => current.reorderTab("analyst", "writer"));
+
+    expect(current.tabs.map((tab) => tab.profile)).toEqual(["", "analyst", "writer"]);
+    expect(setAgentTabs).toHaveBeenLastCalledWith({
+      revision: 3,
+      order: ["", "analyst", "writer"],
+      hidden: [],
+    });
   });
 });

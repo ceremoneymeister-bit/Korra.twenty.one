@@ -53,6 +53,24 @@ def test_turn_lease_serializes_separate_session_db_instances(tmp_path):
     second.release_session_turn_lease("shared", second_holder)
 
 
+def test_turn_lease_snapshot_includes_expiry_without_mutating_owner(tmp_path):
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("shared", source="test")
+    holder = f"pid={os.getpid()}:turn=visible"
+    assert db.try_acquire_session_turn_lease("shared", holder, ttl_seconds=5)
+
+    assert db.list_session_turn_leases() == [{
+        "conversation_id": "shared",
+        "holder": holder,
+        "acquired_at": pytest.approx(time.time(), abs=2),
+        "expires_at": pytest.approx(time.time() + 5, abs=2),
+    }]
+    # A read-side status poll must not release or refresh execution ownership.
+    assert not db.try_acquire_session_turn_lease(
+        "shared", f"pid={os.getpid()}:turn=other", ttl_seconds=5
+    )
+
+
 def test_turn_lease_is_scoped_to_conversation_root(tmp_path):
     """Compression descendants share one durable serialization domain."""
     db = SessionDB(tmp_path / "state.db")
