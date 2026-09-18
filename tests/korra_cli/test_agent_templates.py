@@ -62,6 +62,8 @@ def test_add_loads_role_and_skills_without_user_state_and_replay_preserves_edits
     (root / "config.yaml").write_text(yaml.safe_dump({
         "model": {"provider": "custom:chosen", "default": "test-model"},
         "custom_providers": [{"name": "chosen", "base_url": "https://model.invalid/v1", "key_env": "CHOSEN_API_KEY"}],
+        # A private/root image route must never leak into the ready agent.
+        "image_gen": {"provider": "private-owner-route", "model": "private-model"},
         "gateway": {"multiplex_profiles": True},
     }))
     (root / ".env").write_text("CHOSEN_API_KEY=synthetic-key\nTELEGRAM_BOT_TOKEN=never-copy\n")
@@ -76,6 +78,15 @@ def test_add_loads_role_and_skills_without_user_state_and_replay_preserves_edits
     saved = response.json()
     target = Path(saved["path"])
     assert saved["model_set"] and not saved["generation_checked"]
+    assert saved["generation"] == {
+        "configured": True,
+        "available": saved["generation"]["available"],
+        "status": "ready" if saved["generation"]["available"] else "needs_auth",
+        "provider": "openai-codex",
+        "model": "gpt-image-2.5-sunburst",
+        "platforms": ["cli", "api_server"],
+        "live_tested": False,
+    }
     assert "Дизайнер" in load_soul_md(home_override=target)
     assert (target / "skills/visual-design/SKILL.md").is_file()
     assert list((target / "skills").rglob("powerpoint/SKILL.md"))
@@ -91,7 +102,15 @@ def test_add_loads_role_and_skills_without_user_state_and_replay_preserves_edits
     assert profiles.read_profile_meta(target)["display_name"] == "Наш дизайнер"
     assert "TELEGRAM_BOT_TOKEN" not in load_env_file(target / ".env")
     assert load_env_file(target / ".env")["CHOSEN_API_KEY"] == "synthetic-key"
-    assert yaml.safe_load((target / "config.yaml").read_text())["platforms"]["api_server"]["enabled"] is False
+    config = yaml.safe_load((target / "config.yaml").read_text())
+    assert config["platforms"]["api_server"]["enabled"] is False
+    assert config["image_gen"] == {
+        "provider": "openai-codex",
+        "model": "gpt-image-2.5-sunburst",
+    }
+    from korra_cli.tools_config import _get_platform_tools
+    assert "image_gen" in _get_platform_tools(config, "cli")
+    assert "image_gen" in _get_platform_tools(config, "api_server")
     for rel, text in protected.items():
         assert (root / rel).read_text() == text
         assert not (target / rel).exists() or (target / rel).read_text() != text
@@ -169,6 +188,44 @@ def test_failed_preparation_is_invisible_and_retry_recovers(client, monkeypatch)
     assert response.status_code == 200, response.text
     assert response.json()["model_set"] is False
     assert not (root / "profiles/designer/partial.txt").exists()
+
+
+def test_ready_generator_status_is_local_check_without_live_generation(client, monkeypatch):
+    http, root, _ = client
+    from korra_cli import agent_templates
+
+    checks = []
+    monkeypatch.setattr(
+        agent_templates,
+        "_template_image_generation_available",
+        lambda provider: checks.append(provider) or True,
+    )
+    response = http.post("/api/profiles", json=request_for(http))
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert checks == ["openai-codex"]
+    assert saved["generation_checked"] is False
+    assert saved["generation"]["status"] == "ready"
+    assert saved["generation"]["live_tested"] is False
+    assert not list((root / "profiles/designer").rglob("*.png"))
+
+
+def test_generator_status_cannot_be_satisfied_by_an_unrelated_fal_route(monkeypatch):
+    from types import SimpleNamespace
+    from korra_cli import agent_templates
+
+    monkeypatch.setattr("korra_cli.plugins._ensure_plugins_discovered", lambda: None)
+    monkeypatch.setattr(
+        "agent.image_gen_registry.get_provider",
+        lambda name: SimpleNamespace(is_available=lambda: False),
+    )
+    # The generic gate may be true because FAL_KEY exists. The template chose
+    # openai-codex, so its own provider must still be ready.
+    monkeypatch.setattr(
+        "tools.image_generation_tool.check_image_generation_requirements",
+        lambda: True,
+    )
+    assert agent_templates._template_image_generation_available("openai-codex") is False
 
 
 def test_concurrent_retries_publish_one_profile(client):

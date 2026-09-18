@@ -43,6 +43,7 @@ def test_package_contains_only_reviewable_content():
         "skills/visual-design/references/production-and-delivery.md",
         "skills/visual-design/references/presentations-and-social.md",
         "skills/visual-design/references/project-memory.md",
+        "skills/visual-design/scripts/review_board.py",
     }
 
 
@@ -101,3 +102,31 @@ def test_native_payload_copy_excludes_author_docs_and_preserves_user_data(tmp_pa
     assert not (target / "README.md").exists()
     assert not (target / "cron").exists()
     assert read_manifest(target).version == manifest.version
+
+
+def test_review_board_shows_both_inputs_and_preserves_existing_files(tmp_path, monkeypatch):
+    import importlib.util
+    import sys
+    from PIL import Image
+
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    script = PACKAGE / "skills/visual-design/scripts/review_board.py"
+    spec = importlib.util.spec_from_file_location("designer_review_board", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    candidate, reference, output = (
+        tmp_path / name for name in ("result.png", "source.png", "board.png")
+    )
+    Image.new("RGB", (400, 600), "red").save(candidate)
+    Image.new("RGBA", (600, 400), (0, 0, 255, 255)).save(reference)
+    before = [path.read_bytes() for path in (candidate, reference)]
+    module.build_board(candidate, [reference], output)
+    with Image.open(output) as board:
+        assert board.width > board.height
+        assert board.getpixel((765, 1100)) == (255, 0, 0)
+        assert board.getpixel((1955, 1100)) == (0, 0, 255)
+    assert [path.read_bytes() for path in (candidate, reference)] == before
+    saved = output.read_bytes()
+    with pytest.raises(FileExistsError):
+        module.build_board(candidate, [reference], output)
+    assert output.read_bytes() == saved

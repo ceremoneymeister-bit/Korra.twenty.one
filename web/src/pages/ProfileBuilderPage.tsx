@@ -39,7 +39,7 @@ import { Textarea } from "@nous-research/ui/ui/components/textarea";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { api, probeProfileChat } from "@/lib/api";
-import type { AgentTemplate, ProfileInfo } from "@/lib/api";
+import type { AgentGenerationSetup, AgentTemplate, ProfileInfo } from "@/lib/api";
 import {
   composeSoul,
   descriptionFromRole,
@@ -104,6 +104,8 @@ interface CreatedAgent {
   model: ModelChoice | null;
   /** Сервер подтвердил запись модели (`model_set`). */
   modelSaved: boolean;
+  /** Локальная готовность генератора; не означает живую генерацию. */
+  generation?: AgentGenerationSetup | null;
   knowledgeSaved: boolean;
   materialSaved: boolean;
 }
@@ -435,6 +437,7 @@ export default function ProfileBuilderPage() {
             : "own",
         model: picked,
         modelSaved,
+        generation: selectedTemplate ? res.generation : undefined,
         knowledgeSaved: res.knowledge_saved === true,
         materialSaved: res.knowledge_saved === true && Boolean(initialKnowledge?.material),
       });
@@ -544,13 +547,38 @@ export default function ProfileBuilderPage() {
                   </>
                 )}
               </dd>
+              {probeFor.role === "template" && probeFor.generation && (
+                <>
+                  <dt className="text-[var(--neo-text-secondary)]">Изображения</dt>
+                  <dd className="flex flex-wrap items-center gap-2">
+                    <Badge tone={probeFor.generation.available ? "success" : "warning"} className="shrink-0">
+                      {probeFor.generation.available ? READY_MARK : "нужен вход"}
+                    </Badge>
+                    {probeFor.generation.available
+                      ? "GPT Image 2.5 подключён в панели и CLI"
+                      : "GPT Image 2.5 выбран; подключите ChatGPT OAuth"}
+                  </dd>
+                </>
+              )}
             </dl>
             {probeFor.role === "template" && (
-              <p className="text-sm text-[var(--neo-text-secondary)]">
-                Роль и навыки можно менять — обновления каталога их не перезапишут.
-                Проверка ответа ниже проверяет только чат. Генерация изображений,
-                GPT Image 2.5 и экспорт презентаций ещё не проверены.
-              </p>
+              <div className="grid gap-2 text-sm text-[var(--neo-text-secondary)]">
+                <p>
+                  Роль и навыки можно менять — обновления каталога их не перезапишут.
+                  Проверка ответа ниже проверяет только чат. {probeFor.generation
+                    ? "Настройка генератора проверена без создания картинки; экспорт презентаций ещё не проверен."
+                    : "Генерация изображений, GPT Image 2.5 и экспорт презентаций ещё не проверены."}
+                </p>
+                {probeFor.generation && !probeFor.generation.available && (
+                  <Button
+                    ghost
+                    className="justify-self-start"
+                    onClick={() => navigate(`/models?profile=${encodeURIComponent(probeFor.id)}`)}
+                  >
+                    Подключить ChatGPT
+                  </Button>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>

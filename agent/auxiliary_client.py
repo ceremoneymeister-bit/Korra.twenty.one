@@ -4655,6 +4655,13 @@ def _is_connection_error(exc: Exception) -> bool:
     return False
 
 
+def _auxiliary_transport_is_closed(client: Any) -> bool:
+    """A watchdog may close the SDK transport behind a cached Codex wrapper."""
+    transport = getattr(client, "_real_client", client)
+    closed = getattr(transport, "is_closed", False)
+    return (closed() if callable(closed) else closed) is True
+
+
 def _is_transient_transport_error(exc: Exception) -> bool:
     """Return True for a one-off transport blip worth retrying ON the
     same provider before any provider/model fallback.
@@ -10399,6 +10406,11 @@ def _call_llm_impl(
         except Exception as transient_err:
             if not _is_transient_transport_error(transient_err):
                 raise
+            if _auxiliary_transport_is_closed(client):
+                # Preserve the watchdog timeout for recovery/diagnostics. A
+                # same-instance retry cannot succeed once its transport closed;
+                # the watchdog already evicted it for subsequent calls.
+                raise
             # Compression is on the critical preflight path: a user cannot
             # continue or resume an oversized session until it compacts. A
             # same-provider retry on a timeout means another full ``timeout``-
@@ -10453,6 +10465,8 @@ def _call_llm_impl(
                         task)
                 except Exception as retry_transient:
                     if not _is_transient_transport_error(retry_transient):
+                        raise
+                    if _auxiliary_transport_is_closed(client):
                         raise
                     _last_transient = retry_transient
             # Retries exhausted — fall through to first_err fallback handling.
@@ -11195,6 +11209,8 @@ async def _async_call_llm_impl(
                 provider=request_provider, base_url=_client_base)
         except Exception as transient_err:
             if not _is_transient_transport_error(transient_err):
+                raise
+            if _auxiliary_transport_is_closed(client):
                 raise
             # See call_llm(): compression is on the critical preflight path,
             # so skip the same-provider retry on a full-budget timeout and

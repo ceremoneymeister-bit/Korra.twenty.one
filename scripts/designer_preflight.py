@@ -84,9 +84,44 @@ def powerpoint_probe(profile: Path, output: Path) -> dict:
             "visual_review": "NOT_RUN", "designer_generated": False}
 
 
+def review_board_probe(profile: Path, output: Path) -> dict:
+    """Exercise the installed comparison helper without model or user data."""
+    from PIL import Image
+
+    matches = list((profile / "skills").rglob("visual-design/scripts/review_board.py"))
+    if len(matches) != 1:
+        raise RuntimeError("Expected one installed Designer review-board helper")
+    output.mkdir(parents=True, exist_ok=False)
+    candidate = output / "candidate.png"
+    reference = output / "reference.png"
+    board = output / "board.png"
+    Image.new("RGB", (400, 600), "red").save(candidate)
+    Image.new("RGBA", (600, 400), (0, 0, 255, 255)).save(reference)
+    before = [path.read_bytes() for path in (candidate, reference)]
+    command([
+        sys.executable, str(matches[0]),
+        "--candidate", str(candidate),
+        "--reference", str(reference),
+        "--output", str(board),
+    ])
+    with Image.open(board) as image:
+        image.load()
+        if image.size != (2400, 2200):
+            raise RuntimeError("Designer review board has an unexpected size")
+        if image.getpixel((765, 1100)) != (255, 0, 0):
+            raise RuntimeError("Designer review board lost the candidate")
+        if image.getpixel((1955, 1100)) != (0, 0, 255):
+            raise RuntimeError("Designer review board lost the reference")
+    if [path.read_bytes() for path in (candidate, reference)] != before:
+        raise RuntimeError("Designer review board changed an input image")
+    return {"status": "PASS", "size": [2400, 2200], "inputs_preserved": True}
+
+
 def install_template(home: Path, *, model: str | None = None) -> dict:
     from fastapi.testclient import TestClient
     from agent.prompt_builder import load_soul_md
+    from korra_cli.config import load_config
+    from korra_cli.tools_config import _get_platform_tools
     from korra_cli.web_server import app
     from korra_constants import set_hermes_home_override, reset_hermes_home_override
     from tools.skills_tool import skills_list, skill_view
@@ -114,8 +149,33 @@ def install_template(home: Path, *, model: str | None = None) -> dict:
         raise RuntimeError("Profile created outside the test home")
     if "Дизайнер" not in load_soul_md(home_override=profile):
         raise RuntimeError("Designer role not loaded")
+    payload = response.json()
+    generation = payload.get("generation")
+    if generation != {
+        "configured": True,
+        "available": False,
+        "status": "needs_auth",
+        "provider": "openai-codex",
+        "model": "gpt-image-2.5-sunburst",
+        "platforms": ["cli", "api_server"],
+        "live_tested": False,
+    } or payload.get("generation_checked") is not False:
+        raise RuntimeError(
+            "Offline Designer must configure GPT Image without claiming a live test"
+        )
     scope = set_hermes_home_override(str(profile))
     try:
+        config = load_config()
+        if config.get("image_gen") != {
+            "provider": "openai-codex",
+            "model": "gpt-image-2.5-sunburst",
+        }:
+            raise RuntimeError("Designer image route was not saved in its profile")
+        for platform in generation["platforms"]:
+            if "image_gen" not in _get_platform_tools(config, platform):
+                raise RuntimeError(
+                    f"Designer image tool is disabled on the {platform} surface"
+                )
         listed = json.loads(skills_list())
         names = {skill["name"] for skill in listed["skills"]}
         if not {"visual-design", "powerpoint"}.issubset(names):
@@ -125,7 +185,8 @@ def install_template(home: Path, *, model: str | None = None) -> dict:
     finally:
         reset_hermes_home_override(scope)
     return {"status": "PASS", "template_id": template["id"], "version": template["version"],
-            "model_configured": response.json()["model_set"], "skill_count": len(names)}
+            "model_configured": payload["model_set"], "generation": generation,
+            "skill_count": len(names)}
 
 
 def native_terminal_probe(profile: Path) -> dict:
@@ -169,7 +230,9 @@ def main() -> int:
     sys.path.insert(0, str(ENGINE))
     report = {"kind": "offline_designer_preflight", "model_calls": 0,
               "image_calls": 0, "behavioral_acceptance": "NOT_RUN",
-              "dependencies": dependencies(), "production": {"status": "NOT_RUN"}}
+              "dependencies": dependencies(),
+              "review_board": {"status": "NOT_RUN"},
+              "production": {"status": "NOT_RUN"}}
     started = time.monotonic()
     try:
         report["installation"] = install_template(home)
@@ -179,6 +242,9 @@ def main() -> int:
             report["missing"] = missing
         else:
             report["native_terminal"] = native_terminal_probe(home / "profiles/designer")
+            report["review_board"] = review_board_probe(
+                home / "profiles/designer", output / "review-board",
+            )
             report["production"] = powerpoint_probe(home / "profiles/designer", output / "production")
             report["status"] = "PASS"
     except Exception as exc:

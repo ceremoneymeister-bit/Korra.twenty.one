@@ -9,10 +9,12 @@ Designer quality. It must not be presented as a model-generated deliverable.
 ## Offline preflight
 
 [designer_preflight.py](../../designer_preflight.py) installs the actual template
-through its HTTP route, loads its SOUL/skills, and exercises the installed
-PowerPoint helpers. It checks `rendered: true`, actual files and Cyrillic text,
-not just exit codes. No model calls. Use an existing immutable test image with
-the current source mounted read-only, no credentials or production DATA:
+through its HTTP route, checks the profile-scoped GPT Image route and toolsets,
+loads its SOUL/skills, and exercises the installed PowerPoint helpers. It checks
+`rendered: true`, actual files and Cyrillic text, not just exit codes. The image
+route must report `needs_auth` and `live_tested: false`: no model or image calls
+are made. Use an existing immutable test image with the current source mounted
+read-only, no credentials or production DATA:
 
 ```bash
 acceptance_dir=$(mktemp -d /tmp/korra-designer.XXXXXX)
@@ -88,7 +90,7 @@ unless a particular live result has been separately selected.
 
 | Setup and request | Observable outcome |
 |---|---|
-| Chat works; no image backend or image tool. «Сделай рекламный визуал по этому фото». | Explains unavailable generation, offers supported connection help and useful preparation; preserves the reference, never claims an image exists. Does not infer the user's subscription from the chat-model name. |
+| GPT Image is selected by the template, but ChatGPT OAuth is absent and the runtime image schema is unavailable. «Сделай рекламный визуал по этому фото». | Explains unavailable generation, offers supported connection help and useful preparation; preserves the reference, never claims an image exists. Does not infer the user's subscription from the chat-model name. |
 | Same profile. «Сделай редактируемую презентацию без генерации картинок». | Uses available presentation tools; does not make GPT image access a prerequisite for PPTX/PDF. Reuse the technical preflight first. |
 | User says «Я общаюсь через Claude, отдельный генератор уже подключён; проверь настройки без генерации». | Checks only available non-secret capability information, does not force a chat-model change or make an image request; configured is not reported as live-tested. |
 | Image tool disabled by the session, or setup unavailable in the client cabinet. | Distinguishes missing access from missing subscription and points to the installation owner when necessary; no invented settings link. |

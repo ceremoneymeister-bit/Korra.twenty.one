@@ -218,9 +218,9 @@ const location = () => container.querySelector('[data-testid="location"]')?.text
 
 beforeEach(() => {
   apiMocks.getAgentTemplates.mockResolvedValue({ templates: [{
-    id: "korra.designer", version: "0.1.0", name: "Дизайнер",
+    id: "korra.designer", version: "0.2.0", name: "Дизайнер",
     description: "Презентации, визуалы, сторис, карусели и референсы",
-    requirements: ["Подключите GPT Image 2.5 отдельно"],
+    requirements: ["GPT Image 2.5 настраивается автоматически без генерации"],
   }] });
   vi.stubGlobal(
     "matchMedia",
@@ -583,25 +583,68 @@ describe("ProfileBuilderPage — мастер создания агента", ()
   });
 
   it("готовый Дизайнер ставится пакетом и открывает собственный чат", async () => {
-    apiMocks.createProfile.mockResolvedValueOnce({ ok: true, name: "dizayner", model_set: true });
+    apiMocks.createProfile.mockResolvedValueOnce({
+      ok: true,
+      name: "dizayner",
+      model_set: true,
+      generation_checked: false,
+      generation: {
+        configured: true,
+        available: true,
+        status: "ready",
+        provider: "openai-codex",
+        model: "gpt-image-2.5-sunburst",
+        platforms: ["cli", "api_server"],
+        live_tested: false,
+      },
+    });
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(okReply("Я — Дизайнер."));
     await openWizard();
     await click(findButton("Дизайнер"));
     expect(nameInput().value).toBe("Дизайнер");
     expect(roleInput()).toBeNull();
     expect(findButton("Дополнительно")).toBeUndefined();
-    expect(container.textContent).toContain("GPT Image 2.5 отдельно");
+    expect(container.textContent).toContain("GPT Image 2.5 настраивается автоматически");
     await click(findButton("Добавить агента"));
     await flush();
     expect(apiMocks.createProfile).toHaveBeenCalledWith(expect.objectContaining({
-      template_id: "korra.designer", template_version: "0.1.0",
+      template_id: "korra.designer", template_version: "0.2.0",
       idempotency_key: expect.any(String), display_name: "Дизайнер",
       clone_from: null, no_skills: false, soul: undefined,
     }));
     expect(container.textContent).toContain("роль и навыки");
-    expect(container.textContent).toContain("ещё не проверены");
+    expect(container.textContent).toContain("GPT Image 2.5 подключён в панели и CLI");
+    expect(container.textContent).toContain("без создания картинки");
     await click(findButton("Открыть чат"));
     expect(location()).toBe("/agents?agent=dizayner");
+  });
+
+  it("готовый Дизайнер объясняет отсутствующий ChatGPT OAuth без ложного успеха", async () => {
+    apiMocks.createProfile.mockResolvedValueOnce({
+      ok: true,
+      name: "designer",
+      model_set: true,
+      generation_checked: false,
+      generation: {
+        configured: true,
+        available: false,
+        status: "needs_auth",
+        provider: "openai-codex",
+        model: "gpt-image-2.5-sunburst",
+        platforms: ["cli", "api_server"],
+        live_tested: false,
+      },
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(okReply("Я — Дизайнер."));
+    await openWizard();
+    await click(findButton("Дизайнер"));
+    await click(findButton("Добавить агента"));
+    await flush();
+
+    expect(container.textContent).toContain("GPT Image 2.5 выбран; подключите ChatGPT OAuth");
+    expect(container.textContent).not.toContain("GPT Image 2.5 подключён в панели и CLI");
+    await click(findButton("Подключить ChatGPT"));
+    expect(location()).toBe("/models?profile=designer");
   });
 
   it("после потерянного ответа повторяет ту же операцию", async () => {

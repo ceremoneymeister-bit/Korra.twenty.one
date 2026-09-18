@@ -1101,6 +1101,7 @@ export const api = {
       template_id?: string;
       template_version?: string;
       generation_checked?: boolean;
+      generation?: AgentGenerationSetup | null;
       knowledge_saved?: boolean;
       mcp_written?: number;
       skills_disabled?: number;
@@ -2923,6 +2924,17 @@ export interface AgentTemplate {
   name: string;
   description: string;
   requirements: string[];
+}
+
+export interface AgentGenerationSetup {
+  configured: boolean;
+  available: boolean;
+  status: "ready" | "needs_auth";
+  provider: string;
+  model: string;
+  platforms: string[];
+  /** False until a user request actually creates an image. */
+  live_tested: boolean;
 }
 
 export interface ProfileInfo {
