@@ -2299,56 +2299,27 @@ def run_conversation(
         # steers sent during an API call only land after the NEXT tool batch,
         # which may never come if the model returns a final response.
         #
-        # We scan backwards for the last tool-role message in the messages
-        # list.  If found, the steer is appended there.  If not (first
-        # iteration, no tools yet), the steer stays pending for the next
-        # tool batch — injecting into a user message would break role
-        # alternation, and there's no tool output to piggyback on.
+        # Deliver it as a standalone user row after the newest tool result.
+        # The tool row may already be durable, so it must remain byte-identical
+        # or resumed history will diverge from the live request. With no tool
+        # yet, keep the steer pending for the normal fallback path.
         _pre_api_steer = agent._drain_pending_steer()
         if _pre_api_steer:
-            _injected = False
-            for _si in range(len(messages) - 1, -1, -1):
-                _sm = messages[_si]
-                if isinstance(_sm, dict) and _sm.get("role") == "tool":
-                    from agent.prompt_builder import format_steer_marker
-                    marker = format_steer_marker(_pre_api_steer)
-                    existing = _sm.get("content", "")
-                    if isinstance(existing, str):
-                        _sm["content"] = existing + marker
-                    else:
-                        # Multimodal content blocks — append text block
-                        try:
-                            blocks = list(existing) if existing else []
-                            blocks.append({"type": "text", "text": marker})
-                            _sm["content"] = blocks
-                        except Exception:
-                            pass
-                    _injected = True
-                    logger.debug(
-                        "Pre-API-call steer drain: injected into tool msg at index %d",
-                        _si,
-                    )
-                    break
-            if not _injected:
-                # No tool message to inject into — put it back so
-                # the post-tool-execution drain picks it up later.
-                _lock = getattr(agent, "_pending_steer_lock", None)
-                if _lock is not None:
-                    with _lock:
-                        if agent._pending_steer:
-                            agent._pending_steer = agent._pending_steer + "\n" + _pre_api_steer
-                        else:
-                            agent._pending_steer = _pre_api_steer
-                else:
-                    existing = getattr(agent, "_pending_steer", None)
-                    agent._pending_steer = (existing + "\n" + _pre_api_steer) if existing else _pre_api_steer
+            from agent.agent_runtime_helpers import _inject_steer_after_newest_tool_result
+
+            if _inject_steer_after_newest_tool_result(
+                agent, messages, _pre_api_steer
+            ):
+                logger.debug(
+                    "Pre-API-call steer drain: appended standalone user row"
+                )
 
         # ── Wall-clock run-budget wrap-up notice ───────────────────────
         # One-shot: when a run budget (agent.run_budget_seconds /
         # --run-budget) is active and 80% of it has elapsed, ask the model
-        # to wrap up and deliver from the state it already has. Same
-        # cache-safe channel as /steer (appended to the newest tool
-        # result); dormant when no budget is set.
+        # to wrap up and deliver from the state it already has. This internal
+        # notice still appends to the newest tool result; /steer itself is a
+        # standalone durable user row. Dormant when no budget is set.
         if getattr(agent, "run_budget_seconds", None):
             _maybe_inject_run_budget_wrapup(agent, messages)
 

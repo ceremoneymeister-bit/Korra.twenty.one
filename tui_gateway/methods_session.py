@@ -3445,8 +3445,8 @@ def _(rid, params: dict) -> dict:
     """Queue steering text into a live delegated child without stopping it.
 
     The redirection-side mirror of subagent.interrupt: resolves the child in
-    the delegation registry and calls AIAgent.steer(), which appends the text
-    to the child's last tool result at its next iteration boundary — the
+    the delegation registry and calls AIAgent.steer(), which appends a durable
+    user row after the child's next tool result at the iteration boundary — the
     in-flight tool call is never cut. "queued" is not "delivered": a child
     already past its final tool batch has no boundary left to drain into,
     and that race surfaces as ``missed_steer`` on the parent's completion
@@ -3606,12 +3606,11 @@ def _(rid, params: dict) -> dict:
 
 @method("session.steer")
 def _(rid, params: dict) -> dict:
-    """Inject a user message into the next tool result without interrupting.
+    """Queue a standalone user correction after the next tool result.
 
     Mirrors AIAgent.steer(). Safe to call while a turn is running — the text
-    lands on the last tool result of the next tool batch and the model sees
-    it on its next iteration. No interrupt, no new user turn, no role
-    alternation violation.
+    lands in a durable user row after the next tool batch and the model sees it
+    on its next iteration without interrupting the active call.
     """
     text = (params.get("text") or "").strip()
     if not text:

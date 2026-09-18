@@ -9644,6 +9644,17 @@ def _history_to_messages(history: list[dict]) -> list[dict]:
                     tool_call_args[tc_id] = (fn["name"], args)
             if not content_text.strip():
                 continue
+        if role == "user":
+            from agent.prompt_builder import STEER_DISPLAY_KIND
+
+            if m.get("display_kind") == STEER_DISPLAY_KIND:
+                from agent.conversation_compression import (
+                    _extract_steer_text_from_message,
+                )
+
+                content_text = (
+                    _extract_steer_text_from_message(m) or content_text
+                )
         if role == "tool":
             tc_id = m.get("tool_call_id", "")
             tc_info = tool_call_args.get(tc_id) if tc_id else None

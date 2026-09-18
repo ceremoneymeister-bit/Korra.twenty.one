@@ -2750,6 +2750,43 @@ def _is_real_user_message(message: Any) -> bool:
     return not ContextCompressor._is_synthetic_compression_user_turn(message)
 
 
+_STEER_FALLBACK_OPEN = "[OUT-OF-BAND USER MESSAGE"
+_STEER_FALLBACK_CLOSE = "[/OUT-OF-BAND USER MESSAGE]"
+
+
+def _steer_markers() -> Tuple[str, str]:
+    """Return current steer markers, with stable literals for old histories."""
+    try:
+        from agent.prompt_builder import STEER_MARKER_CLOSE, STEER_MARKER_OPEN
+
+        return STEER_MARKER_OPEN, STEER_MARKER_CLOSE
+    except Exception:
+        return _STEER_FALLBACK_OPEN, _STEER_FALLBACK_CLOSE
+
+
+def _extract_steer_text_from_message(message: Any) -> Optional[str]:
+    """Extract the user's text from a steer marker, or ``None``."""
+    text = _message_text(message)
+    if not text:
+        return None
+    open_marker, close_marker = _steer_markers()
+    start = text.find(open_marker)
+    if start == -1:
+        start = text.find(_STEER_FALLBACK_OPEN)
+        if start == -1:
+            return None
+        newline = text.find("\n", start)
+        start = newline + 1 if newline != -1 else start + len(_STEER_FALLBACK_OPEN)
+    else:
+        start += len(open_marker)
+    end = text.find(close_marker, start)
+    if end == -1:
+        end = text.find(_STEER_FALLBACK_CLOSE, start)
+        if end == -1:
+            return None
+    return text[start:end].strip() or None
+
+
 def _strip_stale_todo_snapshot(content: Any) -> Any:
     """Remove a previously merged todo-snapshot block from message content.
 

@@ -1112,18 +1112,23 @@ class SessionSearchMixin:
         caller that needs real user-turn targets.
 
         Bookkeeping timeline rows (``display_kind`` set — e.g. model_switch,
-        async_delegation_complete, auto_continue, hidden) are excluded. They
+        async_delegation_complete, auto_continue, hidden) are excluded. Those
         are durable ``role='user'`` rows for the API transcript, but no client
         counts them as user turns (desktop demotes them to system / drops them;
-        the CLI already uses ``not m.get("display_kind")``). Including them here
-        made ``/undo`` soft-delete from a marker instead of the last real turn —
+        the CLI already uses ``not m.get("display_kind")``). A typed ``steer``
+        row is retained because it carries real user input. Including the other
+        typed rows here made ``/undo`` soft-delete from a marker instead of the last real turn —
         same class of index skew as the prompt.submit ordinal bug.
 
         By default only active messages are returned.
         """
         active_clause = "" if include_inactive else " AND active = 1"
         # Match CLI/desktop: only real user turns, not timeline bookkeeping.
-        display_clause = " AND (display_kind IS NULL OR display_kind = '')"
+        # A typed /steer row still carries full user authority.
+        display_clause = (
+            " AND (display_kind IS NULL OR display_kind = '' "
+            "OR display_kind = 'steer')"
+        )
         # Legacy standalone compaction handoffs (persisted pre-#80622) are
         # durable role='user' rows with NO display_kind — SQL can't see them,
         # so fetch with headroom and drop them in the decode loop below.
@@ -1133,7 +1138,7 @@ class SessionSearchMixin:
         fetch_limit = int(limit) * 2 + 5
         with self._lock:
             cursor = self._conn.execute(
-                "SELECT id, timestamp, content FROM messages "
+                "SELECT id, timestamp, content, display_kind FROM messages "
                 "WHERE session_id = ? AND role = 'user'"
                 f"{active_clause}{display_clause} "
                 "ORDER BY id DESC LIMIT ?",
@@ -1151,7 +1156,16 @@ class SessionSearchMixin:
             if ContextCompressor._is_context_summary_content(decoded):
                 # Compaction handoff — never a user-originated turn (#80622).
                 continue
-            if isinstance(decoded, list):
+            if row["display_kind"] == "steer":
+                from agent.conversation_compression import (
+                    _extract_steer_text_from_message,
+                )
+
+                preview = (
+                    _extract_steer_text_from_message({"content": decoded})
+                    or ""
+                )
+            elif isinstance(decoded, list):
                 # Multimodal — flatten text parts.
                 text_parts = [
                     p.get("text", "") for p in decoded

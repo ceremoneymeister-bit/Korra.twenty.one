@@ -3561,12 +3561,12 @@ class AIAgent:
 
     def steer(self, text: str) -> bool:
         """
-        Inject a user message into the next tool result without interrupting.
+        Queue a standalone user correction after the next tool result.
 
         Unlike interrupt(), this does NOT stop the current tool call. The
-        text is stashed and the agent loop appends it to the LAST tool
-        result's content once the current tool batch finishes. The model
-        sees the steer as part of the tool output on its next iteration.
+        text is stashed and the agent loop emits a new durable user row once
+        the current tool batch finishes. The model sees it on its next
+        iteration without rewriting the tool result.
 
         Thread-safe: callable from gateway/CLI/TUI threads. Multiple calls
         before the drain point concatenate with newlines.
@@ -3633,8 +3633,8 @@ class AIAgent:
                     return False
 
         # Never kill a tool merely to deliver conversational guidance. The
-        # existing steer drain puts it on the final tool result before the next
-        # model decision, including delegate_task children.
+        # existing steer drain emits it after the final tool result before the
+        # next model decision, including delegate_task children.
         if getattr(self, "_executing_tools", False):
             return self.steer(cleaned)
 

@@ -910,13 +910,11 @@ def init_agent(
     agent._model_request_active = threading.Event()
     agent._supports_active_turn_redirect = True
 
-    # /steer mechanism — inject a user note into the next tool result
-    # without interrupting the agent. Unlike interrupt(), steer() does
-    # NOT set _interrupt_requested; it waits for the current tool batch
-    # to finish naturally, then the drain hook appends the text to the
-    # last tool result's content so the model sees it on its next
-    # iteration. Message-role alternation is preserved (we modify an
-    # existing tool message rather than inserting a new user turn).
+    # /steer mechanism — deliver a durable user correction after the next tool
+    # result without interrupting the agent. Unlike interrupt(), steer() does
+    # NOT set _interrupt_requested; it waits for the current tool batch to
+    # finish naturally, then the drain hook appends a standalone user row so
+    # the model sees it on its next iteration without rewriting tool history.
     agent._pending_steer: Optional[str] = None
     agent._pending_steer_lock = threading.Lock()
 

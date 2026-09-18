@@ -39,7 +39,7 @@ from agent.message_sanitization import (
     tool_call_id_variants,
     tool_result_id_variants,
 )
-from agent.prompt_builder import format_steer_marker
+from agent.prompt_builder import STEER_DISPLAY_KIND, steer_user_row
 from agent.tool_dispatch_helpers import _trajectory_normalize_msg, make_tool_result_message
 from agent.trajectory import convert_scratchpad_to_think
 from agent.credential_pool import (
@@ -901,6 +901,13 @@ def repair_message_sequence(agent, messages: List[Dict]) -> int:
 
             handoff, _ = split_user_originated_turn(prev)
             if handoff is not None:
+                merged.append(msg)
+                continue
+
+            # A /steer row that ended the previous run is already durable.
+            # Merging the next real prompt into it would rewrite only the
+            # in-memory copy and reintroduce live/replay divergence.
+            if prev.get("display_kind") == STEER_DISPLAY_KIND:
                 merged.append(msg)
                 continue
 
@@ -4873,14 +4880,44 @@ def extract_api_error_context(error: Exception) -> Dict[str, Any]:
 
 
 
+def _requeue_pending_steer(agent, steer_text: str) -> None:
+    """Put drained steer text back for the normal next-turn fallback."""
+    lock = getattr(agent, "_pending_steer_lock", None)
+    if lock is not None:
+        with lock:
+            if agent._pending_steer:
+                agent._pending_steer = agent._pending_steer + "\n" + steer_text
+            else:
+                agent._pending_steer = steer_text
+        return
+    existing = getattr(agent, "_pending_steer", None)
+    agent._pending_steer = (existing + "\n" + steer_text) if existing else steer_text
+
+
+def _inject_steer_after_newest_tool_result(agent, messages: list, steer_text: str) -> bool:
+    """Insert a standalone steer row after the newest tool result.
+
+    Returns ``True`` when inserted. With no tool result, the text is requeued
+    so the existing interrupt/no-tool fallback can deliver it as a normal next
+    turn instead of losing it.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if isinstance(message, dict) and message.get("role") == "tool":
+            messages.insert(index + 1, steer_user_row(steer_text))
+            return True
+    _requeue_pending_steer(agent, steer_text)
+    return False
+
+
 def apply_pending_steer_to_tool_results(agent, messages: list, num_tool_msgs: int) -> None:
-    """Append any pending /steer text to the last tool result in this turn.
+    """Persist pending ``/steer`` text as a standalone user message.
 
     Called at the end of a tool-call batch, before the next API call.
-    The steer is appended to the last ``role:"tool"`` message's content
-    with a clear marker so the model understands it came from the user
-    and NOT from the tool itself. Role alternation is preserved —
-    nothing new is inserted, we only modify existing content.
+
+    The new row has no persistence marker, so the next flush appends it to the
+    session store. Existing tool rows remain byte-identical, keeping the live
+    request and a resumed transcript in sync.
 
     Args:
         messages: The running messages list.
@@ -4895,43 +4932,20 @@ def apply_pending_steer_to_tool_results(agent, messages: list, num_tool_msgs: in
     # Find the last tool-role message in the recent tail. Skipping
     # non-tool messages defends against future code appending
     # something else at the boundary.
-    target_idx = None
+    target_found = False
     for j in range(len(messages) - 1, max(len(messages) - num_tool_msgs - 1, -1), -1):
         msg = messages[j]
         if isinstance(msg, dict) and msg.get("role") == "tool":
-            target_idx = j
+            target_found = True
             break
-    if target_idx is None:
+    if not target_found:
         # No tool result in this batch (e.g. all skipped by interrupt);
-        # put the steer back so the caller's fallback path can deliver
-        # it as a normal next-turn user message.
-        _lock = getattr(agent, "_pending_steer_lock", None)
-        if _lock is not None:
-            with _lock:
-                if agent._pending_steer:
-                    agent._pending_steer = agent._pending_steer + "\n" + steer_text
-                else:
-                    agent._pending_steer = steer_text
-        else:
-            existing = getattr(agent, "_pending_steer", None)
-            agent._pending_steer = (existing + "\n" + steer_text) if existing else steer_text
+        # requeue so the fallback delivers it as a normal next-turn message.
+        _requeue_pending_steer(agent, steer_text)
         return
-    marker = format_steer_marker(steer_text)
-    existing_content = messages[target_idx].get("content", "")
-    if not isinstance(existing_content, str):
-        # Anthropic multimodal content blocks — preserve them and append
-        # a text block at the end.
-        try:
-            blocks = list(existing_content) if existing_content else []
-            blocks.append({"type": "text", "text": marker.lstrip()})
-            messages[target_idx]["content"] = blocks
-        except Exception:
-            # Fall back to string replacement if content shape is unexpected.
-            messages[target_idx]["content"] = f"{existing_content}{marker}"
-    else:
-        messages[target_idx]["content"] = existing_content + marker
+    messages.append(steer_user_row(steer_text))
     _ra().logger.info(
-        "Delivered /steer to agent after tool batch (%d chars): %s",
+        "Delivered /steer to agent after tool batch (%d chars) as new user message: %s",
         len(steer_text),
         steer_text[:120] + ("..." if len(steer_text) > 120 else ""),
     )
@@ -5026,6 +5040,8 @@ __all__ = [
     "copy_reasoning_content_for_api",
     "cleanup_dead_connections",
     "extract_api_error_context",
+    "_requeue_pending_steer",
+    "_inject_steer_after_newest_tool_result",
     "apply_pending_steer_to_tool_results",
     "_iter_pool_sockets",
     "force_close_tcp_sockets",

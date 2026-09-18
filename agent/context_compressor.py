@@ -37,6 +37,7 @@ from agent.auxiliary_client import (
 from agent.context_engine import ContextEngine, sanitize_memory_context
 from agent.error_classifier import FailoverReason, classify_api_error
 from agent.message_sanitization import tool_result_id_variants
+from agent.prompt_builder import STEER_DISPLAY_KIND
 from agent.model_metadata import (
     MINIMUM_CONTEXT_LENGTH,
     get_model_context_length,
@@ -5835,7 +5836,8 @@ This compaction should PRIORITISE preserving all information related to the focu
         # lets routine operational traffic anchor the compaction tail or become
         # the auto-focus source instead of the user's real objective (#92703).
         # Mirrors the exclusion in ``is_user_originated_turn``.
-        if message.get("display_kind"):
+        display_kind = message.get("display_kind")
+        if display_kind and display_kind != STEER_DISPLAY_KIND:
             return False
         if cls._has_compressed_summary_metadata(message):
             return False
@@ -5883,7 +5885,8 @@ This compaction should PRIORITISE preserving all information related to the focu
             # traffic, not user intent -- exclude them from the focus hint so
             # routine notifications don't shadow the user's real objective
             # (#92703).
-            if msg.get("display_kind"):
+            display_kind = msg.get("display_kind")
+            if display_kind and display_kind != STEER_DISPLAY_KIND:
                 continue
             content = msg.get("content")
             text = _redact_compaction_text(_content_text_for_contains(content).strip())
@@ -8653,7 +8656,10 @@ def split_user_originated_turn(
         if candidate is None:
             return handoff, None
     else:
-        if message.get("display_kind"):
+        if (
+            message.get("display_kind")
+            and message.get("display_kind") != STEER_DISPLAY_KIND
+        ):
             return None, None
         candidate = message.copy()
 

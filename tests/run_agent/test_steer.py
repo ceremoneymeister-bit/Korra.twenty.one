@@ -1,9 +1,8 @@
-"""Tests for AIAgent.steer() — mid-run user message injection.
+"""Tests for AIAgent.steer() — durable mid-run user message injection.
 
-/steer lets the user add a note to the agent's next tool result without
-interrupting the current tool call. The agent sees the note inline with
-tool output on its next iteration, preserving message-role alternation
-and prompt-cache integrity.
+/steer lets the user add a standalone user correction after the next tool
+result without interrupting the current call. Existing tool rows stay
+byte-identical so live and resumed transcripts share the same prompt prefix.
 """
 from __future__ import annotations
 
@@ -11,7 +10,12 @@ import threading
 
 import pytest
 
-from agent.prompt_builder import STEER_MARKER_OPEN, format_steer_marker
+from agent.prompt_builder import (
+    STEER_DISPLAY_KIND,
+    STEER_MARKER_OPEN,
+    format_steer_marker,
+    steer_user_row,
+)
 from run_agent import AIAgent
 
 
@@ -486,7 +490,7 @@ class TestEmptyHiddenAssistantRehealRegression:
 
 
 class TestSteerInjection:
-    def test_appends_to_last_tool_result(self):
+    def test_appends_standalone_user_message_after_tool_results(self):
         agent = _bare_agent()
         agent.steer("please also check auth.log")
         messages = [
@@ -496,11 +500,13 @@ class TestSteerInjection:
             {"role": "tool", "content": "ls output B", "tool_call_id": "b"},
         ]
         agent._apply_pending_steer_to_tool_results(messages, num_tool_msgs=2)
-        # The LAST tool result is modified; earlier ones are untouched.
+        # Existing tool rows are untouched; the steer is a new user row.
         assert messages[2]["content"] == "ls output A"
-        assert "ls output B" in messages[3]["content"]
-        assert STEER_MARKER_OPEN in messages[3]["content"]
-        assert "please also check auth.log" in messages[3]["content"]
+        assert messages[3]["content"] == "ls output B"
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["display_kind"] == STEER_DISPLAY_KIND
+        assert STEER_MARKER_OPEN in messages[-1]["content"]
+        assert "please also check auth.log" in messages[-1]["content"]
         # And pending_steer is consumed.
         assert agent._pending_steer is None
 
@@ -513,13 +519,25 @@ class TestSteerInjection:
         agent._apply_pending_steer_to_tool_results(messages, num_tool_msgs=1)
         assert messages[-1]["content"] == "output"  # unchanged
 
+    def test_appended_user_message_is_flushable(self):
+        from agent.context_compressor import _DB_PERSISTED_MARKER
+
+        agent = _bare_agent()
+        agent.steer("remember this decision")
+        messages = [{"role": "tool", "content": "output", "tool_call_id": "a"}]
+
+        agent._apply_pending_steer_to_tool_results(messages, num_tool_msgs=1)
+
+        assert messages[-1]["role"] == "user"
+        assert _DB_PERSISTED_MARKER not in messages[-1]
+
 
     def test_marker_labels_text_as_out_of_band_user_message(self):
         """The injection marker must attribute the appended text to the user
         via the explicit out-of-band marker (which the system prompt tells the
         model to trust) — otherwise the model reads it as untrusted tool output
-        and refuses it as suspected prompt injection.  Cache-safe: it only
-        rewrites existing tool content, never the message-role sequence.
+        and refuses it as suspected prompt injection. Cache-safe: it becomes a
+        new row rather than rewriting already-persisted tool content.
         """
         agent = _bare_agent()
         agent.steer("stop after next step")
@@ -528,10 +546,10 @@ class TestSteerInjection:
         content = messages[-1]["content"]
         assert STEER_MARKER_OPEN in content
         assert "stop after next step" in content
+        assert messages[0]["content"] == "x"
 
     def test_multimodal_content_list_preserved(self):
-        """Anthropic-style list content should be preserved, with the steer
-        appended as a text block."""
+        """Anthropic-style tool content remains byte-identical."""
         agent = _bare_agent()
         agent.steer("extra note")
         original_blocks = [{"type": "text", "text": "existing output"}]
@@ -539,12 +557,118 @@ class TestSteerInjection:
             {"role": "tool", "content": list(original_blocks), "tool_call_id": "1"}
         ]
         agent._apply_pending_steer_to_tool_results(messages, num_tool_msgs=1)
-        new_content = messages[-1]["content"]
-        assert isinstance(new_content, list)
-        assert len(new_content) == 2
-        assert new_content[0] == {"type": "text", "text": "existing output"}
-        assert new_content[1]["type"] == "text"
-        assert "extra note" in new_content[1]["text"]
+        assert messages[0]["content"] == original_blocks
+        assert messages[-1]["role"] == "user"
+        assert "extra note" in messages[-1]["content"]
+
+    def test_no_tool_result_requeues_without_losing_an_existing_steer(self):
+        from agent.agent_runtime_helpers import _inject_steer_after_newest_tool_result
+
+        agent = _bare_agent()
+        agent._pending_steer = "newer correction"
+
+        inserted = _inject_steer_after_newest_tool_result(
+            agent,
+            [{"role": "user", "content": "first prompt"}],
+            "earlier correction",
+        )
+
+        assert inserted is False
+        assert agent._pending_steer == "newer correction\nearlier correction"
+
+    def test_persisted_steer_is_not_merged_with_next_prompt(self):
+        agent = _bare_agent()
+        steer = steer_user_row("focus on error handling")
+        before = dict(steer)
+        messages = [steer, {"role": "user", "content": "next question"}]
+
+        repairs = agent._repair_message_sequence(messages)
+
+        assert repairs == 0
+        assert steer == before
+        assert [message["role"] for message in messages] == ["user", "user"]
+
+    def test_flush_restart_search_and_review_see_steer_once(self, tmp_path):
+        """A persisted tool row plus steer survives a real SQLite restart."""
+        from copy import deepcopy
+        from unittest.mock import patch
+
+        from agent.background_review import _digest_history, _msg_text
+        from agent.context_compressor import _DB_PERSISTED_MARKER
+        from korra_state import SessionDB
+
+        db_path = tmp_path / "state.db"
+        db = SessionDB(db_path=db_path)
+        with (
+            patch("run_agent.get_tool_definitions", return_value=[]),
+            patch("run_agent.check_toolset_requirements", return_value={}),
+            patch("run_agent.OpenAI"),
+        ):
+            durable_agent = AIAgent(
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                model="test/model",
+                quiet_mode=True,
+                session_db=db,
+                session_id="steer-durable",
+                skip_context_files=True,
+                skip_memory=True,
+            )
+        durable_agent._ensure_db_session()
+        messages = [
+            {"role": "user", "content": "inspect the service"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "terminal", "arguments": "{}"},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "content": "service is running",
+                "tool_call_id": "call-1",
+                "tool_name": "terminal",
+            },
+        ]
+        assert durable_agent._flush_messages_to_session_db(messages, []) is True
+        assert messages[-1][_DB_PERSISTED_MARKER] is True
+        persisted_tool = deepcopy(messages[-1])
+
+        durable_agent.steer("check the error path too")
+        durable_agent._apply_pending_steer_to_tool_results(messages, 1)
+        assert messages[-2] == persisted_tool
+        assert durable_agent._flush_messages_to_session_db(messages, []) is True
+        db.close()
+
+        reopened = SessionDB(db_path=db_path)
+        try:
+            resumed = reopened.get_messages_as_conversation(
+                "steer-durable", repair_alternation=True
+            )
+            steer_rows = [
+                message
+                for message in resumed
+                if message.get("display_kind") == STEER_DISPLAY_KIND
+            ]
+            assert len(steer_rows) == 1
+            assert "check the error path too" in steer_rows[0]["content"]
+            tool_rows = [message for message in resumed if message.get("role") == "tool"]
+            assert len(tool_rows) == 1
+            assert tool_rows[0]["content"] == "service is running"
+
+            recents = reopened.list_recent_user_messages("steer-durable", limit=5)
+            assert "check the error path too" in recents[0]["preview"]
+
+            review_history = _digest_history(resumed)
+            review_text = "\n".join(_msg_text(message) for message in review_history)
+            assert review_text.count("check the error path too") == 1
+        finally:
+            reopened.close()
 
 
 
@@ -599,12 +723,13 @@ class TestPreApiCallSteerDrain:
     fix for the scenario where /steer sent during model thinking only lands
     after the agent is completely done."""
 
-    def test_pre_api_drain_injects_into_last_tool_result(self):
-        """If a steer is pending when the main loop starts building
-        api_messages, it should be injected into the last tool result
-        in the messages list."""
+    def test_pre_api_drain_appends_user_row_and_preserves_tool(self):
+        """The pre-API path follows the same append-only contract."""
+        from copy import deepcopy
+
+        from agent.agent_runtime_helpers import _inject_steer_after_newest_tool_result
+
         agent = _bare_agent()
-        # Simulate messages after a tool batch completed
         messages = [
             {"role": "user", "content": "do something"},
             {"role": "assistant", "content": "ok", "tool_calls": [
@@ -612,16 +737,16 @@ class TestPreApiCallSteerDrain:
             ]},
             {"role": "tool", "content": "output here", "tool_call_id": "tc1"},
         ]
-        # Steer arrives during API call (set after tool execution)
+        tool_before = deepcopy(messages[-1])
         agent.steer("focus on error handling")
-        # Simulate what the pre-API-call drain does:
         _pre_api_steer = agent._drain_pending_steer()
         assert _pre_api_steer == "focus on error handling"
-        # Inject into last tool msg (mirrors the new code in run_conversation)
-        for _si in range(len(messages) - 1, -1, -1):
-            if messages[_si].get("role") == "tool":
-                messages[_si]["content"] += format_steer_marker(_pre_api_steer)
-                break
+        assert _inject_steer_after_newest_tool_result(
+            agent, messages, _pre_api_steer
+        ) is True
+
+        assert messages[-2] == tool_before
+        assert messages[-1]["role"] == "user"
         assert STEER_MARKER_OPEN in messages[-1]["content"]
         assert "focus on error handling" in messages[-1]["content"]
         assert agent._pending_steer is None
@@ -636,15 +761,11 @@ class TestPreApiCallSteerDrain:
         agent.steer("early steer")
         _pre_api_steer = agent._drain_pending_steer()
         assert _pre_api_steer == "early steer"
-        # No tool message found — put it back
-        found = False
-        for _si in range(len(messages) - 1, -1, -1):
-            if messages[_si].get("role") == "tool":
-                found = True
-                break
-        assert not found
-        # Restash
-        agent._pending_steer = _pre_api_steer
+        from agent.agent_runtime_helpers import _inject_steer_after_newest_tool_result
+
+        assert _inject_steer_after_newest_tool_result(
+            agent, messages, _pre_api_steer
+        ) is False
         assert agent._pending_steer == "early steer"
 
 
@@ -667,13 +788,13 @@ class TestSteerMarkerContract:
         split (#95681 diet): the MARKER carries its own replay rule at
         delivery time ("delivered once at this position", "not a new
         delivery when replayed"), while the prompt note keeps only the
-        summary clause scoping action to the latest tool results. The
+        summary clause scoping action to the latest steer row. The
         detailed only-if-no-later-assistant-message teaching moved out of
         the prompt because the marker already says it on every delivery.
         """
         from agent.prompt_builder import STEER_CHANNEL_NOTE
 
-        assert "latest tool results" in STEER_CHANNEL_NOTE
+        assert "latest steer row" in STEER_CHANNEL_NOTE
         assert "history" in STEER_CHANNEL_NOTE
 
         emitted = format_steer_marker("deploy once")
@@ -684,6 +805,37 @@ class TestSteerMarkerContract:
         """Regression: the bare 'User guidance:' line read as tool content and
         got refused as injection — it must not come back."""
         assert "User guidance:" not in format_steer_marker("hi")
+
+
+class TestSteerRowIsHumanInput:
+    def test_all_user_turn_predicates_accept_typed_steer(self):
+        from agent.context_compressor import (
+            ContextCompressor,
+            is_user_originated_turn,
+        )
+        from agent.conversation_compression import _is_real_user_message
+
+        row = steer_user_row("focus on the error handling")
+
+        assert _is_real_user_message(row)
+        assert is_user_originated_turn(row)
+        assert ContextCompressor._is_actionable_user_turn(row)
+        focus = ContextCompressor._derive_auto_focus_topic([row])
+        assert focus is not None
+        assert "focus on the error handling" in focus
+
+    def test_history_projects_only_the_users_words(self):
+        from tui_gateway.server import _history_to_messages
+
+        projected = _history_to_messages([steer_user_row("keep the rollback safe")])
+
+        assert projected == [
+            {
+                "role": "user",
+                "text": "keep the rollback safe",
+                "display_kind": STEER_DISPLAY_KIND,
+            }
+        ]
 
 
 class TestSteerCommandRegistry:
