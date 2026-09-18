@@ -305,6 +305,48 @@ class TestRunConversationCodexPath:
         # Counter should be reset after the review fires
         assert agent._iters_since_skill == 0
 
+    def test_skip_background_review_blocks_codex_runtime_fork(
+        self, monkeypatch
+    ):
+        """Codex early-return path honors the same skip flag as finalizer."""
+        from agent.transports.codex_app_server_session import (
+            CodexAppServerSession,
+            TurnResult,
+        )
+
+        def fake_run_turn(self, user_input: str, **kwargs):
+            return TurnResult(
+                final_text=f"echo: {user_input}",
+                projected_messages=[
+                    {"role": "assistant", "content": f"echo: {user_input}"},
+                ],
+                tool_iterations=10,
+                turn_id="t-skip",
+                thread_id="th-skip",
+            )
+
+        monkeypatch.setattr(CodexAppServerSession, "run_turn", fake_run_turn)
+        monkeypatch.setattr(
+            CodexAppServerSession,
+            "ensure_started",
+            lambda self: "th-skip",
+        )
+
+        agent = _make_codex_agent(skip_background_review=True)
+        agent._skill_nudge_interval = 10
+        agent._iters_since_skill = 0
+        agent.valid_tool_names = set(agent.valid_tool_names)
+        agent.valid_tool_names.add("skill_manage")
+
+        with patch.object(
+            agent,
+            "_spawn_background_review",
+            return_value=None,
+        ) as spawn:
+            agent.run_conversation("do unattended work")
+
+        spawn.assert_not_called()
+
     def test_background_review_signature_never_breaks(self, fake_session):
         """Even when no trigger fires, the helper must never call
         _spawn_background_review with the wrong signature. Run a turn,
