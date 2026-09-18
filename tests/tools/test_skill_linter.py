@@ -187,3 +187,36 @@ def test_format_findings_renders():
     findings = lint_content(CLEAN.replace("name: my-skill", "name: BAD"))
     out = format_findings(findings)
     assert "name-format" in out
+
+
+def test_incident_log_shape_flagged_and_rule_shape_not():
+    incident_log = CLEAN.replace(
+        "1. Use `read_file` to load it.",
+        "In #12345 the watcher died; #23456 repeated it; PR #34567 and "
+        "issue #45678 record the eventual fix.",
+    )
+    reusable_rule = CLEAN.replace(
+        "1. Use `read_file` to load it.",
+        "Launch the watcher from a directory that outlives the watch because "
+        "a deleted working directory looks like a stalled process.",
+    )
+
+    assert "incident-log-shape" in _rules(lint_content(incident_log))
+    assert "incident-log-shape" not in _rules(lint_content(reusable_rule))
+
+
+def test_references_sprawl_flagged_only_above_cap(tmp_path):
+    from tools.skill_linter import _MAX_REFERENCE_FILES
+
+    skill_dir = tmp_path / "my-skill"
+    references_dir = skill_dir / "references"
+    references_dir.mkdir(parents=True)
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(CLEAN)
+    for index in range(_MAX_REFERENCE_FILES + 1):
+        (references_dir / f"note-{index}.md").write_text("x")
+
+    assert "references-sprawl" in _rules(lint_skill(skill_md))
+
+    (references_dir / f"note-{_MAX_REFERENCE_FILES}.md").unlink()
+    assert "references-sprawl" not in _rules(lint_skill(skill_md))

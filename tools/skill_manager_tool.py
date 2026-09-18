@@ -1068,7 +1068,7 @@ def _attach_lint_findings(result: Dict[str, Any], skill_md: Path) -> None:
         for f in findings
     ]
     result["lint_hint"] = (
-        "The skill was created. These are advisory authoring-convention "
+        "The skill write succeeded. These are advisory authoring-convention "
         "findings (not blockers) — fix them with skill_manage(action='patch') "
         "to match Korra skill standards."
     )
@@ -1448,6 +1448,10 @@ def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
     if org_note:
         result["org_sharing"] = org_note
         result["message"] = f"{result['message']} {org_note}"
+    # references/ is where per-session hoarding appears. Surface the advisory
+    # finding on the write that crosses the threshold; never block the write.
+    if file_path.startswith("references/"):
+        _attach_lint_findings(result, existing["path"] / "SKILL.md")
     return result
 
 
@@ -2113,8 +2117,10 @@ SKILL_MANAGE_SCHEMA = {
         "first), write_file/remove_file (supporting files), delete (sole "
         "op only). Existing skills are modified wherever they live. Keep "
         "the description's first 57 chars a self-contained trigger: 'Use "
-        "when <trigger>. <one-line behavior>.' — skill_view() shows "
-        "format conventions."
+        "when <trigger>. <one-line behavior>.' Write procedures and lessons, "
+        "not logs: task-ordered steps, imperative rule plus why, no incident "
+        "IDs/dates/narration, one rule per lesson, and references/ named by "
+        "topic (extend before adding). skill_view() shows format conventions."
     ),
     "parameters": {
         "type": "object",

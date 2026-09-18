@@ -340,6 +340,26 @@ class TestWriteFile:
         assert result["success"] is True
         assert (tmp_path / "my-skill" / "references" / "api.md").exists()
 
+    def test_reference_sprawl_warning_is_advisory_and_immediate(self, tmp_path):
+        from tools.skill_linter import _MAX_REFERENCE_FILES
+
+        with _skill_dir(tmp_path):
+            _create_skill("my-skill", VALID_SKILL_CONTENT)
+            references_dir = tmp_path / "my-skill" / "references"
+            references_dir.mkdir()
+            for index in range(_MAX_REFERENCE_FILES):
+                (references_dir / f"topic-{index}.md").write_text("depth")
+
+            result = _write_file(
+                "my-skill",
+                f"references/topic-{_MAX_REFERENCE_FILES}.md",
+                "more depth",
+            )
+
+        assert result["success"] is True
+        rules = {warning["rule"] for warning in result["lint_warnings"]}
+        assert "references-sprawl" in rules
+
     def test_write_symlink_escape_blocked(self, tmp_path):
         outside_dir = tmp_path / "outside"
         outside_dir.mkdir()

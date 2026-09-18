@@ -96,6 +96,12 @@ _FORBIDDEN_FILES = (
 # bearing ones, not exact ordering, to avoid being a change-detector.
 _EXPECTED_SECTIONS = ("When to Use", "When to use")
 
+# A handful of citations can be useful. Dense incident identifiers and a very
+# large references/ tree indicate that a skill is becoming a session log.
+_INCIDENT_REF_MIN = 4
+_INCIDENT_REF_PER_KCHAR = 0.5
+_MAX_REFERENCE_FILES = 60
+
 ERROR = "error"
 WARNING = "warning"
 
@@ -259,6 +265,29 @@ def _check_sections(body: str) -> List[LintFinding]:
     return []
 
 
+def _check_incident_log_shape(body: str) -> List[LintFinding]:
+    """Warn when prose is dense with incident IDs instead of reusable rules."""
+    prose = _strip_code_blocks(body)
+    references = len(
+        re.findall(
+            r"(?<![\w/])#\d{3,6}\b|\b(?:PR|issue)\s*#?\d{3,6}\b",
+            prose,
+            flags=re.I,
+        )
+    )
+    density = references / max(len(prose), 1) * 1000
+    if references < _INCIDENT_REF_MIN or density < _INCIDENT_REF_PER_KCHAR:
+        return []
+    return [
+        LintFinding(
+            WARNING,
+            "incident-log-shape",
+            f"{references} PR/issue references in prose; write the reusable "
+            "rule plus why and drop incident IDs so it stands without the story.",
+        )
+    ]
+
+
 def _check_reference_links(body: str, skill_dir: Optional[Path]) -> List[LintFinding]:
     """Flag references/ links in the body that don't resolve on disk."""
     if skill_dir is None:
@@ -341,6 +370,33 @@ def _check_forbidden_files(skill_dir: Optional[Path]) -> List[LintFinding]:
     return findings
 
 
+def _check_reference_sprawl(skill_dir: Optional[Path]) -> List[LintFinding]:
+    """Warn when topical depth has drifted into one file per session."""
+    if skill_dir is None:
+        return []
+    references_dir = skill_dir / "references"
+    if not references_dir.is_dir():
+        return []
+    reference_files = sum(
+        1
+        for path in references_dir.rglob("*.md")
+        if not any(
+            part.startswith("_")
+            for part in path.relative_to(references_dir).parts
+        )
+    )
+    if reference_files <= _MAX_REFERENCE_FILES:
+        return []
+    return [
+        LintFinding(
+            WARNING,
+            "references-sprawl",
+            f"{reference_files} files under references/; merge same-topic "
+            "files into reusable rule sets instead of keeping a session log.",
+        )
+    ]
+
+
 def _check_platform_list_valid(frontmatter: Dict[str, Any]) -> List[LintFinding]:
     platforms = frontmatter.get("platforms")
     if not platforms:
@@ -390,9 +446,11 @@ def lint_content(
     findings += _check_platform_list_valid(frontmatter)
     findings += _check_shell_utilities(body)
     findings += _check_sections(body)
+    findings += _check_incident_log_shape(body)
     findings += _check_reference_links(body, skill_dir)
     findings += _check_platforms_gating(frontmatter, skill_dir)
     findings += _check_forbidden_files(skill_dir)
+    findings += _check_reference_sprawl(skill_dir)
     return findings
 
 

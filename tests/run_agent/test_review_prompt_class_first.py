@@ -182,6 +182,51 @@ def test_combined_review_prompt_teaches_read_before_write():
     _assert_read_before_write_guidance(AIAgent._COMBINED_REVIEW_PROMPT, "_COMBINED_REVIEW_PROMPT")
 
 
+def _assert_lesson_layer_guidance(prompt: str, label: str) -> None:
+    """Skill writes describe transferable procedure, not incident storage."""
+    lower = prompt.lower()
+    assert "specifications" in lower and "procedure" in lower, (
+        f"{label}: must state the purpose as reusable work to user specifications"
+    )
+    assert "why" in lower and "rule" in lower, (
+        f"{label}: must ask for a rule plus its mechanism"
+    )
+    assert "pr/issue numbers" in lower or "incident ids" in lower, (
+        f"{label}: must reject incident identifiers as lesson content"
+    )
+    assert "one rule" in lower, (
+        f"{label}: repeated lessons must collapse into one rule"
+    )
+    assert "agents.md" in lower, (
+        f"{label}: must not duplicate always-loaded context"
+    )
+    assert "per-session" in lower or "per-incident" in lower, (
+        f"{label}: must reject one reference file per incident"
+    )
+
+
+def test_skill_review_prompt_teaches_lesson_layer():
+    _assert_lesson_layer_guidance(
+        AIAgent._SKILL_REVIEW_PROMPT,
+        "_SKILL_REVIEW_PROMPT",
+    )
+
+
+def test_combined_review_prompt_teaches_lesson_layer():
+    _assert_lesson_layer_guidance(
+        AIAgent._COMBINED_REVIEW_PROMPT,
+        "_COMBINED_REVIEW_PROMPT",
+    )
+
+
+def test_curator_consolidates_by_distilling():
+    from agent.curator import CURATOR_REVIEW_PROMPT
+
+    lower = CURATOR_REVIEW_PROMPT.lower()
+    assert "distill" in lower
+    assert "verbatim" in lower and "per-incident" in lower
+
+
 
 
 
