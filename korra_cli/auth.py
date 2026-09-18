@@ -1525,67 +1525,53 @@ def _load_provider_state_with_source(
     return None, None
 
 
-def _codex_grant_identity(state: Optional[Dict[str, Any]]) -> Optional[str]:
-    tokens = (state or {}).get("tokens")
-    if not isinstance(tokens, dict):
-        return None
-    for raw_token in (tokens.get("access_token"), tokens.get("id_token")):
-        claims = _decode_jwt_claims(raw_token)
-        nested = claims.get("https://api.openai.com/auth")
-        account = (
-            nested.get("chatgpt_account_id") if isinstance(nested, dict) else None
-        )
-        for value in (account, claims.get("sub"), claims.get("email")):
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return None
-
-
-def _codex_grant_freshness(state: Optional[Dict[str, Any]]) -> float:
-    if not isinstance(state, dict):
-        return 0.0
-    refreshed = _parse_iso_timestamp(state.get("last_refresh")) or 0.0
-    tokens = state.get("tokens")
-    if isinstance(tokens, dict):
-        exp = _decode_jwt_claims(tokens.get("access_token")).get("exp")
-        if isinstance(exp, (int, float)):
-            refreshed = max(refreshed, float(exp))
-    return refreshed
-
-
 def _choose_forked_codex_grant(
     profile_state: Optional[Dict[str, Any]],
     root_state: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    """Return the canonical state when profile/root are copies of one grant."""
+    """Return root state only for a provable byte-for-byte grant copy.
+
+    Account, subject, and email claims identify an account, not an OAuth grant
+    lineage. Two independent logins can legitimately share those claims while
+    owning different rotating refresh tokens, so they must never be merged.
+    """
     if not isinstance(profile_state, dict) or not isinstance(root_state, dict):
         return None
     profile_tokens = profile_state.get("tokens")
     root_tokens = root_state.get("tokens")
     if not isinstance(profile_tokens, dict) or not isinstance(root_tokens, dict):
         return None
-    same_material = any(
-        profile_tokens.get(field)
-        and profile_tokens.get(field) == root_tokens.get(field)
-        for field in ("refresh_token", "access_token")
-    )
-    profile_identity = _codex_grant_identity(profile_state)
-    root_identity = _codex_grant_identity(root_state)
-    same_identity = bool(
-        profile_identity
-        and root_identity
-        and profile_identity == root_identity
-    )
-    if not same_material and not same_identity:
+    profile_access = str(profile_tokens.get("access_token") or "").strip()
+    profile_refresh = str(profile_tokens.get("refresh_token") or "").strip()
+    if not profile_access or not profile_refresh:
         return None
-    if same_identity and not same_material:
-        profile_freshness = _codex_grant_freshness(profile_state)
-        root_freshness = _codex_grant_freshness(root_state)
-        if profile_freshness == root_freshness == 0.0:
-            return None
-        if profile_freshness > root_freshness:
-            return dict(profile_state)
+    if profile_access != str(root_tokens.get("access_token") or "").strip():
+        return None
+    if profile_refresh != str(root_tokens.get("refresh_token") or "").strip():
+        return None
     return dict(root_state)
+
+
+def _codex_pool_row_matches_grant(
+    row: Any,
+    grant_tokens: Optional[Dict[str, Any]],
+) -> bool:
+    """Return whether an OAuth pool row is a proven alias of ``grant_tokens``.
+
+    Source labels and account claims are intentionally insufficient: both are
+    shared by independent logins. Requiring the complete token pair makes an
+    upgrade migration non-destructive when provenance is unknown.
+    """
+    if not _is_oauth_pool_payload(row) or not isinstance(grant_tokens, dict):
+        return False
+    access = str(grant_tokens.get("access_token") or "").strip()
+    refresh = str(grant_tokens.get("refresh_token") or "").strip()
+    if not access or not refresh:
+        return False
+    return (
+        str(row.get("access_token") or "").strip() == access
+        and str(row.get("refresh_token") or "").strip() == refresh
+    )
 
 
 @contextmanager
@@ -1609,9 +1595,9 @@ def _provider_state_transaction(
         active_path = _auth_file_path()
         if source_path is None or _same_path(source_path, active_path):
             # Upgrade installs that cloned a Codex singleton before clone-time
-            # hygiene existed. Exact token material or matching account claims
-            # identify one forked grant; keep its freshest copy at root and
-            # remove the profile shadow before any single-use refresh POST.
+            # hygiene existed. Only an exact token-pair match proves that the
+            # profile state is an alias of the root grant. Account claims alone
+            # also match independent logins and must not trigger migration.
             if provider_id == "openai-codex" and source_path is not None:
                 root_path = _global_auth_file_path()
                 if root_path is not None and root_path.exists():
@@ -1628,6 +1614,12 @@ def _provider_state_transaction(
                         )
                         winner = _choose_forked_codex_grant(state, root_state)
                         if winner is not None:
+                            local_grant_tokens = (
+                                state.get("tokens")
+                                if isinstance(state, dict)
+                                and isinstance(state.get("tokens"), dict)
+                                else None
+                            )
                             previous_root_tokens = (
                                 root_state.get("tokens")
                                 if isinstance(root_state, dict)
@@ -1658,7 +1650,10 @@ def _provider_state_transaction(
                                     kept = [
                                         row
                                         for row in rows
-                                        if not _is_oauth_pool_payload(row)
+                                        if not _codex_pool_row_matches_grant(
+                                            row,
+                                            local_grant_tokens,
+                                        )
                                     ]
                                     if kept:
                                         local_pool[provider_id] = kept

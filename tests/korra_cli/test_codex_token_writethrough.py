@@ -23,12 +23,25 @@ def _pair(prefix: str) -> dict[str, str]:
     }
 
 
-def _jwt(subject: str, exp: int) -> str:
+def _jwt(
+    subject: str,
+    exp: int,
+    *,
+    account_id: str | None = None,
+    email: str | None = None,
+) -> str:
     def encode(payload: dict) -> str:
         raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
-    return f"{encode({'alg': 'none'})}.{encode({'sub': subject, 'exp': exp})}.sig"
+    payload = {"sub": subject, "exp": exp}
+    if account_id:
+        payload["https://api.openai.com/auth"] = {
+            "chatgpt_account_id": account_id,
+        }
+    if email:
+        payload["email"] = email
+    return f"{encode({'alg': 'none'})}.{encode(payload)}.sig"
 
 
 def _write(path: Path, payload: dict) -> None:
@@ -205,16 +218,71 @@ def test_profile_owned_account_refresh_stays_local(profile_tree, monkeypatch):
     assert profile_state["tokens"] == _pair("new")
 
 
-def test_existing_fork_adopts_fresher_profile_copy_into_root(profile_tree, monkeypatch):
+@pytest.mark.parametrize(
+    (
+        "root_subject",
+        "profile_subject",
+        "root_account",
+        "profile_account",
+        "root_email",
+        "profile_email",
+    ),
+    [
+        ("same-subject", "same-subject", None, None, None, None),
+        ("", "", None, None, "same@example.test", "same@example.test"),
+        (
+            "root-subject",
+            "profile-subject",
+            "shared-account",
+            "shared-account",
+            None,
+            None,
+        ),
+        (
+            "root-subject",
+            "profile-subject",
+            "root-account",
+            "profile-account",
+            None,
+            None,
+        ),
+    ],
+    ids=[
+        "same-subject",
+        "same-email",
+        "shared-account-different-subjects",
+        "different-accounts",
+    ],
+)
+def test_independent_logins_are_never_consolidated_from_identity_claims(
+    profile_tree,
+    monkeypatch,
+    root_subject,
+    profile_subject,
+    root_account,
+    profile_account,
+    root_email,
+    profile_email,
+):
     root, profiles = profile_tree
     root_auth = root / "auth.json"
     root_tokens = {
-        "access_token": _jwt("same-account", 100),
-        "refresh_token": "root-stale-refresh",
+        "access_token": _jwt(
+            root_subject,
+            100,
+            account_id=root_account,
+            email=root_email,
+        ),
+        "refresh_token": "root-independent-refresh",
     }
     profile_tokens = {
-        "access_token": _jwt("same-account", 200),
-        "refresh_token": "profile-fresh-refresh",
+        "access_token": _jwt(
+            profile_subject,
+            200,
+            account_id=profile_account,
+            email=profile_email,
+        ),
+        "refresh_token": "profile-independent-refresh",
     }
     _write(
         root_auth,
@@ -253,11 +321,92 @@ def test_existing_fork_adopts_fresher_profile_copy_into_root(profile_tree, monke
     monkeypatch.setattr(auth.httpx, "Client", lambda **_kwargs: endpoint)
 
     assert _refresh_from(profiles[0], profile_tokens) == _pair("new")
-    assert endpoint.seen == ["profile-fresh-refresh"]
-    assert _read(root_auth)["providers"]["openai-codex"]["tokens"] == _pair("new")
+    assert endpoint.seen == ["profile-independent-refresh"]
+    assert _read(root_auth)["providers"]["openai-codex"]["tokens"] == root_tokens
+    profile_store = _read(profiles[0] / "auth.json")
+    assert profile_store["providers"]["openai-codex"]["tokens"] == _pair("new")
+    assert profile_store["credential_pool"]["openai-codex"][0]["id"] == "forked-row"
+
+
+@pytest.mark.parametrize("endpoint_fails", [False, True], ids=["success", "endpoint-failure"])
+def test_exact_copy_migration_removes_only_its_pool_alias(
+    profile_tree,
+    monkeypatch,
+    endpoint_fails,
+):
+    root, profiles = profile_tree
+    root_auth = root / "auth.json"
+    copied_tokens = _pair("copied")
+    independent_oauth = {
+        "id": "independent-account-b",
+        "source": "manual:device_code",
+        "auth_type": "oauth",
+        "access_token": "account-b-access",
+        "refresh_token": "account-b-refresh",
+        "label": "Account B",
+        "last_status": "exhausted",
+        "last_error_reason": "rate_limit",
+    }
+    static_credential = {
+        "id": "static-api-key",
+        "source": "manual:api_key",
+        "auth_type": "api_key",
+        "access_token": "static-secret",
+        "label": "Static key",
+    }
+    _write(
+        root_auth,
+        {
+            "version": 1,
+            "providers": {
+                "openai-codex": {
+                    "auth_mode": "chatgpt",
+                    "tokens": copied_tokens,
+                }
+            },
+        },
+    )
+    _write(
+        profiles[0] / "auth.json",
+        {
+            "version": 1,
+            "providers": {
+                "openai-codex": {
+                    "auth_mode": "chatgpt",
+                    "tokens": copied_tokens,
+                }
+            },
+            "credential_pool": {
+                "openai-codex": [
+                    {
+                        "id": "copied-alias-a",
+                        "source": "device_code",
+                        "auth_type": "oauth",
+                        **copied_tokens,
+                    },
+                    independent_oauth,
+                    static_credential,
+                ]
+            },
+        },
+    )
+    endpoint = _RotatingEndpoint(fail_first=endpoint_fails)
+    monkeypatch.setattr(auth.httpx, "Client", lambda **_kwargs: endpoint)
+
+    if endpoint_fails:
+        with pytest.raises(httpx.ConnectTimeout, match="synthetic pre-send"):
+            _refresh_from(profiles[0], copied_tokens)
+    else:
+        assert _refresh_from(profiles[0], copied_tokens) == _pair("new")
+
+    root_tokens = _read(root_auth)["providers"]["openai-codex"]["tokens"]
+    assert root_tokens == (copied_tokens if endpoint_fails else _pair("new"))
     profile_store = _read(profiles[0] / "auth.json")
     assert "openai-codex" not in profile_store["providers"]
-    assert "openai-codex" not in profile_store.get("credential_pool", {})
+    assert profile_store["credential_pool"]["openai-codex"] == [
+        independent_oauth,
+        static_credential,
+    ]
 
 
 def test_timeout_releases_root_lock_and_preserves_grant(profile_tree, monkeypatch):
