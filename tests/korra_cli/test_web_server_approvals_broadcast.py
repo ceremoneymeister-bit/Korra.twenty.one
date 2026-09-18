@@ -63,7 +63,7 @@ class TestApprovalsSaveBroadcast:
             "every settings autosave would walk all live sessions"
         )
 
-        flipped = {**record, "approvals": {**record["approvals"], "mode": "off"}}
+        flipped = {**record, "approvals": {**record["approvals"], "mode": "manual"}}
         resp = client.put("/api/config", json={"config": flipped})
         assert resp.status_code == 200
         assert len(broadcast_calls) == 1, (
@@ -72,7 +72,9 @@ class TestApprovalsSaveBroadcast:
         )
 
     def test_approvals_mode_change_broadcasts(self, client, broadcast_calls):
-        resp = client.put("/api/config", json={"config": {"approvals": {"mode": "off"}}})
+        resp = client.put(
+            "/api/config", json={"config": {"approvals": {"mode": "manual"}}}
+        )
         assert resp.status_code == 200
         assert broadcast_calls, (
             "PUT /api/config changed approvals.mode but no session.info "
@@ -104,7 +106,7 @@ class TestApprovalsSaveBroadcast:
         own home. That is not an other-profile save and must still emit."""
         resp = client.put(
             "/api/config?profile=default",
-            json={"config": {"approvals": {"mode": "off"}}},
+            json={"config": {"approvals": {"mode": "manual"}}},
         )
         assert resp.status_code == 200
         assert broadcast_calls, (
@@ -121,7 +123,7 @@ class TestApprovalsSaveBroadcast:
 
         resp = client.put(
             "/api/config",
-            json={"config": {"approvals": {"mode": "off"}}, "profile": "other"},
+            json={"config": {"approvals": {"mode": "manual"}}, "profile": "other"},
         )
         assert resp.status_code == 200
         assert not broadcast_calls, (
@@ -144,13 +146,13 @@ class TestApprovalsSaveBroadcast:
     def test_raw_save_deleting_approvals_block_broadcasts(self, client, broadcast_calls):
         seed = client.put(
             "/api/config/raw",
-            json={"yaml_text": "approvals:\n  mode: 'off'\n"},
+            json={"yaml_text": "approvals:\n  mode: 'manual'\n"},
         )
         assert seed.status_code == 200
         broadcast_calls.clear()
 
         # Full-document replacement that drops the approvals block entirely:
-        # effective mode falls back to default (manual), so indicators must
+        # effective mode falls back to the autonomous default (off), so indicators must
         # repaint.
         resp = client.put(
             "/api/config/raw",
@@ -165,7 +167,7 @@ class TestApprovalsSaveBroadcast:
     def test_raw_save_approvals_change_broadcasts(self, client, broadcast_calls):
         resp = client.put(
             "/api/config/raw",
-            json={"yaml_text": "approvals:\n  mode: 'off'\n"},
+            json={"yaml_text": "approvals:\n  mode: 'manual'\n"},
         )
         assert resp.status_code == 200
         assert broadcast_calls, (

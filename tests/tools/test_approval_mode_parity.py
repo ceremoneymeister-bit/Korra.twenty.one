@@ -10,8 +10,8 @@ must resolve identically on every surface that consults them:
   - the codex app-server surface: ``agent/codex_runtime.py`` feeds
     ``auto_approve_*`` from ``tools.approval.is_approval_bypass_active()``,
     which itself reads the core resolver — so parity there reduces to
-    ``is_approval_bypass_active() == (mode == "off")`` when no yolo
-    source is active.
+    ``is_approval_bypass_active() == (mode == "off")`` when no yolo source
+    or explicit unattended deny policy is active.
 
 Historic drift class: tui_gateway re-read config raw and normalized
 locally (see commits f9cd577915, 1e652cca7a, bd246db10d — repeated parity
@@ -129,7 +129,7 @@ def test_mode_and_timeout_parity_across_surfaces(
     # whenever no yolo source is active in this process.
     if not approval_mod._YOLO_MODE_FROZEN:
         with patch.object(
-            approval_mod, "is_current_session_yolo_enabled", return_value=False
+            approval_mod, "is_session_yolo_enabled", return_value=False
         ):
             assert approval_mod.is_approval_bypass_active() == (
                 core_mode == "off"
@@ -154,3 +154,38 @@ def test_tui_loader_delegates_to_core(hermes_home, tui_server):
         approval_mod, "_get_approval_mode", return_value="weird"
     ):
         assert tui_server._load_approval_mode() == "manual"
+
+
+@pytest.mark.parametrize(
+    "context_predicate,mode_resolver",
+    [
+        ("_is_single_query_approval_context", "_get_single_query_approval_mode"),
+        ("_is_cron_approval_context", "_get_cron_approval_mode"),
+        (
+            "_is_unattended_platform_approval_context",
+            "_get_unattended_approval_mode",
+        ),
+    ],
+)
+def test_explicit_unattended_deny_overrides_global_autonomous_mode(
+    monkeypatch, context_predicate, mode_resolver
+):
+    approval_mod = _approval_module()
+    monkeypatch.setattr(approval_mod, "_YOLO_MODE_FROZEN", False)
+    monkeypatch.setattr(
+        approval_mod, "is_session_yolo_enabled", lambda _session_key: False
+    )
+    monkeypatch.setattr(approval_mod, "_get_approval_mode", lambda: "off")
+    for predicate in (
+        "_is_single_query_approval_context",
+        "_is_cron_approval_context",
+        "_is_unattended_platform_approval_context",
+    ):
+        monkeypatch.setattr(approval_mod, predicate, lambda: False)
+    monkeypatch.setattr(approval_mod, context_predicate, lambda: True)
+    monkeypatch.setattr(approval_mod, mode_resolver, lambda: "deny")
+
+    assert approval_mod.is_approval_bypass_active() is False
+
+    monkeypatch.setattr(approval_mod, mode_resolver, lambda: "approve")
+    assert approval_mod.is_approval_bypass_active() is True

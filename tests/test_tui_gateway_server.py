@@ -8135,7 +8135,7 @@ def test_config_set_yolo_global_scope_writes_approvals_mode(tmp_path, monkeypatc
     assert yaml.safe_load(cfg_path.read_text())["approvals"]["mode"] == "manual"
 
 
-def test_config_get_approval_mode_uses_smart_default_when_key_is_missing(
+def test_config_get_approval_mode_uses_autonomous_default_when_key_is_missing(
     tmp_path, monkeypatch
 ):
     import yaml
@@ -8152,7 +8152,7 @@ def test_config_get_approval_mode_uses_smart_default_when_key_is_missing(
     response = server.handle_request(
         {"id": "1", "method": "config.get", "params": {"key": "approvals.mode"}}
     )
-    assert response["result"]["value"] == "smart"
+    assert response["result"]["value"] == "off"
 
 
 def test_config_get_approval_mode_fails_safe_to_manual_for_invalid_explicit_value(

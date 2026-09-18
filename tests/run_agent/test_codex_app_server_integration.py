@@ -547,8 +547,28 @@ class TestRunConversationCodexPath:
         this fix is a no-op for users who haven't opted out."""
         captured = self._capture_routing_agent(monkeypatch)
         with patch(
-            "korra_cli.config.load_config",
+            "korra_cli.config.load_config_readonly",
             return_value={"approvals": {"mode": "manual"}},
+        ):
+            agent = _make_codex_agent()
+            with patch.object(
+                agent, "_spawn_background_review", return_value=None
+            ):
+                agent.run_conversation("write something")
+        routing = captured["request_routing"]
+        assert routing.auto_approve_exec is False
+        assert routing.auto_approve_apply_patch is False
+
+    def test_explicit_cron_deny_overrides_autonomous_codex_default(
+        self, monkeypatch
+    ):
+        captured = self._capture_routing_agent(monkeypatch)
+        monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+        with patch(
+            "korra_cli.config.load_config_readonly",
+            return_value={
+                "approvals": {"mode": "off", "cron_mode": "deny"}
+            },
         ):
             agent = _make_codex_agent()
             with patch.object(

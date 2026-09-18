@@ -385,6 +385,16 @@ class TestSensitiveRedirectPattern:
             assert dangerous is True, command
             assert key is not None, command
 
+    def test_root_home_absolute_ssh_target_is_folded(self, monkeypatch):
+        monkeypatch.setenv("HOME", "/root")
+        with mock_patch("tools.approval.os.path.expanduser", return_value="/root"):
+            dangerous, key, _ = detect_dangerous_command(
+                "cat key >> /root/.ssh/authorized_keys"
+            )
+
+        assert dangerous is True
+        assert key is not None
+
 
     def test_project_env_config_write_requires_approval(self):
         for command in (
@@ -715,7 +725,8 @@ class TestWebhookApprovalExclusion:
 
     Fix: ``_is_gateway_approval_context()`` returns ``False`` for platforms
     in ``_UNATTENDED_APPROVAL_PLATFORMS``; the decision is governed by
-    ``approvals.unattended_mode`` (default deny) instead.
+    ``approvals.unattended_mode`` instead. Korra defaults it to ``approve``;
+    an explicit legacy ``deny`` must remain authoritative.
     """
 
     def test_webhook_platform_returns_false(self, monkeypatch):
@@ -771,16 +782,19 @@ class TestWebhookApprovalExclusion:
         assert _is_gateway_approval_context() is False
 
     def _isolate(self, monkeypatch):
-        """Neutralize host leakage: yolo frozen at import time + real config."""
+        """Use an explicit legacy deny policy independent of Korra defaults."""
         import tools.approval as approval_mod
 
         monkeypatch.setattr(approval_mod, "_YOLO_MODE_FROZEN", False)
         monkeypatch.setattr(approval_mod, "_get_approval_mode", lambda: "smart")
+        monkeypatch.setattr(
+            approval_mod, "_get_unattended_approval_mode", lambda: "deny"
+        )
 
-    def test_webhook_dangerous_command_denies_by_default(self, monkeypatch):
+    def test_webhook_dangerous_command_honors_explicit_deny(self, monkeypatch):
         """Webhook sessions that trigger dangerous commands DENY instantly.
 
-        Deny-by-default (approvals.unattended_mode: deny) mirrors cron: an
+        An explicit ``approvals.unattended_mode: deny`` mirrors cron: an
         unattended session must never silently execute a flagged command,
         and must never block waiting for an approval nobody can answer.
         The deny message tells the agent how the operator can opt in.
@@ -830,7 +844,7 @@ class TestWebhookApprovalExclusion:
         result = check_all_command_guards("ls -la /tmp", "local")
         assert result["approved"] is True
 
-    def test_api_server_dangerous_command_denies_by_default(self, monkeypatch):
+    def test_api_server_dangerous_command_honors_explicit_deny(self, monkeypatch):
         """api_server sessions get the same instant deny (#87509)."""
         from tools.approval import check_all_command_guards
 

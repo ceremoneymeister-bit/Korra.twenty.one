@@ -1445,8 +1445,11 @@ def _home_prefix_fold_regex(path: str):
     # Require at least two non-empty components below the root. For POSIX this
     # mirrors the historical ``count("/") >= 2`` guard (``/home/alice`` folds,
     # ``/home`` does not); for Windows it rejects a bare drive root (``C:\\``)
-    # while accepting a real home (``C:\\Users\\alice``).
-    if len(components) < 2:
+    # while accepting a real home (``C:\\Users\\alice``). ``/root`` is the
+    # one valid single-component POSIX home: rejecting it leaves writes to the
+    # root user's SSH credentials outside the sensitive-path gate.
+    normalized_path = path.replace("\\", "/").rstrip("/")
+    if len(components) < 2 and normalized_path != "/root":
         return None
     body = r"[/\\]+".join(re.escape(c) for c in components)
     # Optional leading root separator (POSIX ``/`` or UNC ``\\``); a Windows
@@ -3640,10 +3643,31 @@ def is_approval_bypass_active_for_session(session_key: str) -> bool:
 
 
 def is_approval_bypass_active() -> bool:
-    """Return whether the current approval context has bypass enabled."""
-    return is_approval_bypass_active_for_session(
-        get_current_session_key(default="")
-    )
+    """Return whether the current approval context has bypass enabled.
+
+    Process/session YOLO remains the strongest explicit override. Global
+    ``mode=off`` is otherwise narrowed by explicit unattended deny policies;
+    this is the resolver used by Codex app-server routing, so those restrictions
+    cannot be bypassed before the regular terminal guard gets control.
+    """
+    session_key = get_current_session_key(default="")
+    if _YOLO_MODE_FROZEN or is_session_yolo_enabled(session_key):
+        return True
+    if _get_approval_mode() != "off":
+        return False
+    if (
+        _is_single_query_approval_context()
+        and _get_single_query_approval_mode() == "deny"
+    ):
+        return False
+    if _is_cron_approval_context() and _get_cron_approval_mode() == "deny":
+        return False
+    if (
+        _is_unattended_platform_approval_context()
+        and _get_unattended_approval_mode() == "deny"
+    ):
+        return False
+    return True
 
 
 def _get_approval_timeout() -> int:
@@ -4065,6 +4089,12 @@ def _run_approval_gate(
             "HERMES_GATEWAY_SESSION to require approval.",
             autoapprove_log_prefix, pattern_key, description,
         )
+        return {"approved": True, "message": None}
+
+    # Global autonomous mode applies only after the more specific unattended
+    # policies above. This preserves an operator's explicit cron/single-query/
+    # unattended ``deny`` while keeping ordinary interactive work autonomous.
+    if _get_approval_mode() == "off":
         return {"approved": True, "message": None}
 
     if is_gateway or env_var_enabled("KORRA_EXEC_ASK"):
@@ -4930,10 +4960,12 @@ def check_all_command_guards(command: str, env_type: str,
                        deny_pattern, command[:200])
         return _user_deny_block_result(deny_pattern)
 
-    # --yolo or approvals.mode=off: bypass all approval prompts.
-    # Gateway /yolo is session-scoped; CLI --yolo remains process-scoped.
+    # --yolo bypasses all approval prompts. Gateway /yolo is session-scoped;
+    # CLI --yolo remains process-scoped. Global mode=off is applied only after
+    # explicit unattended deny policies below, so user restrictions survive
+    # the autonomous default.
     approval_mode = _get_approval_mode()
-    if _YOLO_MODE_FROZEN or is_current_session_yolo_enabled() or approval_mode == "off":
+    if _YOLO_MODE_FROZEN or is_current_session_yolo_enabled():
         return {"approved": True, "message": None}
 
     if _command_matches_permanent_allowlist(command):
@@ -5149,6 +5181,9 @@ def check_all_command_guards(command: str, env_type: str,
                             ),
                         }
                     # else: tirith_fail_open is True — allow as before
+        return {"approved": True, "message": None}
+
+    if approval_mode == "off":
         return {"approved": True, "message": None}
 
     # --- Phase 1: Gather findings from both checks ---
@@ -5627,9 +5662,10 @@ def check_execute_code_guard(code: str, env_type: str,
     if _should_skip_container_guards(env_type, has_host_access=has_host_access):
         return {"approved": True, "message": None}
 
-    # --yolo or approvals.mode=off: bypass (session- or process-scoped).
+    # --yolo bypasses immediately. Global mode=off waits until the explicit
+    # unattended policies below have had a chance to deny arbitrary code.
     approval_mode = _get_approval_mode()
-    if _YOLO_MODE_FROZEN or is_current_session_yolo_enabled() or approval_mode == "off":
+    if _YOLO_MODE_FROZEN or is_current_session_yolo_enabled():
         return {"approved": True, "message": None}
 
     is_gateway = _is_gateway_approval_context()
@@ -5699,6 +5735,9 @@ def check_execute_code_guard(code: str, env_type: str,
                 "outcome": "blocked",
                 "user_consent": False,
             }
+        return {"approved": True, "message": None}
+
+    if approval_mode == "off":
         return {"approved": True, "message": None}
 
     # Only gateway/ask contexts get the one-shot whole-script approval.
