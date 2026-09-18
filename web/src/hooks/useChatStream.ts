@@ -1,7 +1,7 @@
 import { clearChatAttachmentDraft } from "@/hooks/useChatAttachmentDraft";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { chatViewKey, readChatSelection, writeChatSelection, writeChatView } from "@/lib/chat-view-state";
-import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns } from "@/lib/chat-runs";
+import { $viewedChat, markChatViewed, chatRunHeaders, chatRunUrl, getChatRuns, isRunBusy, refreshChatRuns, type ChatRun } from "@/lib/chat-runs";
 import type { ToolEntry } from "@/components/ToolCall";
 import type {
   ApprovalChoiceValue,
@@ -22,7 +22,9 @@ import { splitAttachments, toDisplay, type UploadedAttachment } from "@/lib/chat
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import {
   clearChatOutbox,
+  isChatOutboxStorageKey,
   loadChatOutbox,
+  loadChatOutboxRecords,
   saveChatOutbox,
   type ChatOutboxRecord,
 } from "@/lib/chat-outbox";
@@ -66,7 +68,7 @@ type StreamAction =
   | { type: "SEND_USER"; userMsg: ChatMessage; assistantMsg: ChatMessage; streaming?: boolean }
   | { type: "RETRY_USER"; userMsg: ChatMessage; assistantMsg: ChatMessage }
   | { type: "RESTORE_PENDING"; sessionId: string; userMsg: ChatMessage; error: string }
-  | { type: "MARK_DELIVERY"; messageId: string; delivery: "sending" | "failed" | "delivered"; terminal?: boolean }
+  | { type: "MARK_DELIVERY"; messageId: string; delivery: "sending" | "failed" | "delivered"; terminal?: boolean; error?: string }
   | { type: "DISCARD_PENDING"; messageId: string }
   | { type: "SET_SESSION_ID"; sessionId: string | null }
   | { type: "LOAD_SESSION"; sessionId: string; messages: ChatMessage[] }
@@ -259,7 +261,14 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
         ...state,
         messages: state.messages.map((message) =>
           message.clientMessageId === action.messageId
-            ? { ...message, delivery: action.delivery, failureConfirmed: action.terminal ?? message.failureConfirmed }
+            ? {
+                ...message,
+                delivery: action.delivery,
+                failureConfirmed: action.terminal ?? message.failureConfirmed,
+                failureReason: action.delivery === "failed"
+                  ? (action.error ?? message.failureReason)
+                  : undefined,
+              }
             : message,
         ),
       };
@@ -658,6 +667,33 @@ export interface UseChatStreamOptions {
   profile?: string;
 }
 
+function outboxFailure(record: ChatOutboxRecord, failure?: ChatRun["failure"]): string {
+  if (failure) {
+    return ownerFacingError(
+      JSON.stringify({ error: failure }),
+      record.error || "Предыдущая попытка завершилась с ошибкой.",
+    );
+  }
+  if (record.terminal) {
+    return ownerFacingError(record.error, "Предыдущая попытка завершилась с ошибкой.");
+  }
+  return record.error || "Доставка не подтверждена. Проверьте историю перед повторной отправкой.";
+}
+
+function outboxMessage(record: ChatOutboxRecord, failure?: ChatRun["failure"]): ChatMessage {
+  return {
+    id: `user-${record.messageId}`,
+    clientMessageId: record.messageId,
+    role: "user",
+    content: record.text,
+    timestamp: record.createdAt,
+    attachments: toDisplay(record.attachments),
+    delivery: "failed",
+    failureConfirmed: record.terminal || Boolean(failure),
+    failureReason: outboxFailure(record, failure),
+  };
+}
+
 export function useChatStream(
   options?: UseChatStreamOptions,
 ): UseChatStreamReturn {
@@ -697,29 +733,23 @@ export function useChatStream(
   useEffect(() => {
     const selection = readChatSelection(selectionKey);
     if (selection === null) return;
-    const pending = loadChatOutbox(profile ?? "", selection);
-    if (!pending) return;
-    const restored: ChatOutboxRecord = {
-      ...pending,
-      status: "failed",
-      error: pending.error || "Доставка не подтверждена после перезагрузки",
-    };
-    saveChatOutbox(restored);
-    dispatch({
-      type: "RESTORE_PENDING",
-      sessionId: restored.sessionId,
-      userMsg: {
-        id: `user-${restored.messageId}`,
-        role: "user",
-        content: restored.text,
-        timestamp: restored.createdAt,
-        attachments: toDisplay(restored.attachments),
-        delivery: "failed",
-        clientMessageId: restored.messageId,
-        failureConfirmed: restored.terminal,
-      },
-      error: pending.terminal ? ownerFacingError(pending.error, "Предыдущая попытка завершилась с ошибкой.") : "Сообщение сохранено в этом браузере. Нажмите «Проверить и повторить», чтобы выяснить результат прежней отправки.",
-    });
+    for (const pending of loadChatOutboxRecords(profile ?? "", selection)) {
+      const restored: ChatOutboxRecord = {
+        ...pending,
+        status: "failed",
+        error: pending.error || "Доставка не подтверждена после перезагрузки",
+      };
+      saveChatOutbox(restored);
+      const explanation = outboxFailure(restored);
+      dispatch({
+        type: "RESTORE_PENDING",
+        sessionId: restored.sessionId,
+        userMsg: outboxMessage(restored),
+        error: restored.terminal
+          ? explanation
+          : "Сообщение сохранено в этом браузере. «Проверить и повторить» сначала сверит прежнюю отправку.",
+      });
+    }
   }, [profile, selectionKey]);
 
   const abort = useCallback(() => {
@@ -772,30 +802,47 @@ export function useChatStream(
     // Пустая лента на время проверки — это и есть «всё загружается заново»:
     // пузыри монтируются с нуля, карточки вложений заново проверяют файл и
     // заново качают превью, а место чтения теряется.
-    const pendingMessage = () => {
-      const pending = loadChatOutbox(profile ?? "", sessionId);
-      return pending ? {
-        id: `user-${pending.messageId}`, clientMessageId: pending.messageId,
-        role: "user" as const, content: pending.text, timestamp: pending.createdAt,
-        attachments: toDisplay(pending.attachments), delivery: "failed" as const, failureConfirmed: pending.terminal,
-      } : null;
+    const pendingMessages = (runs: ChatRun[] = []) => {
+      const runsById = new Map(runs.map((run) => [run.message_id, run]));
+      return loadChatOutboxRecords(profile ?? "", sessionId).map((record) => {
+        const run = runsById.get(record.messageId);
+        const failure = run?.status === "failed" ? run.failure : undefined;
+        const failureExplanation = failure ? outboxFailure(record, failure) : record.error;
+        if (run?.status === "failed" && (
+          !record.terminal || (failureExplanation && record.error !== failureExplanation)
+        )) {
+          const updated = {
+            ...record,
+            status: "failed" as const,
+            terminal: true,
+            error: failureExplanation || "Предыдущая попытка завершилась с ошибкой.",
+          };
+          saveChatOutbox(updated);
+          return outboxMessage(updated, failure);
+        }
+        return outboxMessage(record, failure);
+      });
     };
-    const showWithPending = (messages: ChatMessage[], run?: { message_id: string; history_count: number }) => {
-      const pending = pendingMessage();
-      if (pending && run?.message_id === pending.clientMessageId &&
-          messages[run.history_count]?.role === "user" &&
-          sameChatTurn(messages[run.history_count], pending)) {
-        const restored = [...messages];
-        restored[run.history_count] = pending;
-        show(restored);
-        return;
+    const showWithPending = (messages: ChatMessage[], runs: ChatRun[] = []) => {
+      const restored = [...messages];
+      const runsById = new Map(runs.map((run) => [run.message_id, run]));
+      for (const pending of pendingMessages(runs)) {
+        const run = runsById.get(pending.clientMessageId ?? "");
+        if (run?.status === "completed" && restored.length >= run.history_count + 2) {
+          clearChatOutbox(run.message_id, profile ?? "");
+          continue;
+        }
+        if (run && restored[run.history_count]?.role === "user" &&
+            sameChatTurn(restored[run.history_count], pending)) {
+          restored[run.history_count] = pending;
+        } else if (!restored.some((message) => message.clientMessageId === pending.clientMessageId)) {
+          restored.push(pending);
+        }
       }
-      show(pending && !messages.some(message => message.clientMessageId === pending.clientMessageId)
-        ? [...messages, pending] : messages);
+      show(restored);
     };
     if (!background) {
-      const pending = pendingMessage();
-      dispatch({ type: "LOAD_SESSION", sessionId, messages: pending ? [pending] : [] });
+      dispatch({ type: "LOAD_SESSION", sessionId, messages: pendingMessages() });
     }
     try {
       // Read the run AFTER history: completion between these reads is replayed
@@ -806,9 +853,9 @@ export function useChatStream(
       });
       if (!current()) return;
       const chatMessages = sessionMessagesToChat(sessionId, resp.messages as HistoryMessage[]);
-      let run;
+      let runs: ChatRun[];
       try {
-        run = (await getChatRuns(profile ?? "", sessionId))[0];
+        runs = await getChatRuns(profile ?? "", sessionId);
       } catch {
         if (!current()) return;
         showWithPending(chatMessages);
@@ -816,16 +863,24 @@ export function useChatStream(
         return;
       }
       if (!current()) return;
+      const run = runs[0];
       setIsLoading(false);
-      const savedIntent = loadChatOutbox(profile ?? "", sessionId);
-      if (run?.status === "completed" && chatMessages.length >= run.history_count + 2) clearChatOutbox(run.message_id, profile ?? "");
+      const savedIntents = loadChatOutboxRecords(profile ?? "", sessionId);
+      for (const item of runs) {
+        if (item.status === "completed" && chatMessages.length >= item.history_count + 2) {
+          clearChatOutbox(item.message_id, profile ?? "");
+        }
+      }
       const newerHistory = run?.status === "completed" && chatMessages.length > run.history_count + 2;
       if (!run || newerHistory || (!isRunBusy(run) && run.status !== "completed")) {
-        showWithPending(chatMessages, run);
+        showWithPending(chatMessages, runs);
         if (run?.status === "interrupted") dispatch({ type: "SET_ERROR", error: "Связь с ходом потеряна. Проверьте историю перед повторной отправкой." });
         if (run?.status === "failed") {
-          const pending = loadChatOutbox(profile ?? "", sessionId);
-          const explanation = pending?.error ? ownerFacingError(pending.error, "Предыдущая попытка завершилась с ошибкой.") : "Предыдущая попытка завершилась с ошибкой.";
+          const pending = loadChatOutboxRecords(profile ?? "", sessionId)
+            .find((record) => record.messageId === run.message_id);
+          const explanation = pending
+            ? outboxFailure(pending, run.failure)
+            : ownerFacingError(JSON.stringify({ error: run.failure }), "Предыдущая попытка завершилась с ошибкой.");
           dispatch({ type: "SET_ERROR", error: `${explanation} Если задача уже выполнялась частично, проверьте результат перед новой отправкой.` });
         }
         return;
@@ -833,12 +888,14 @@ export function useChatStream(
       // Ход закончен, и его ответ уже целиком лежит в истории. Перечитывать
       // журнал на каждом возврате незачем: replay нужен, когда снимок истории
       // мог отстать от журнала, а не чтобы заново нарисовать то же самое.
-      if ((background || (savedIntent && savedIntent.messageId !== run.message_id)) && run.status === "completed" && chatMessages.length >= run.history_count + 2) {
+      const hasOtherIntent = savedIntents.some((record) => record.messageId !== run.message_id);
+      if ((background || hasOtherIntent) && run.status === "completed" && chatMessages.length >= run.history_count + 2) {
         clearChatOutbox(run.message_id, profile ?? "");
-        showWithPending(chatMessages);
+        showWithPending(chatMessages, runs);
         return;
       }
-      const pending = loadChatOutbox(profile ?? "", sessionId);
+      const pending = loadChatOutboxRecords(profile ?? "", sessionId)
+        .find((record) => record.messageId === run.message_id);
       const userMsg: ChatMessage = {
         id: `user-${run.message_id}`, clientMessageId: run.message_id,
         role: "user", content: run.user_message.content,
@@ -877,10 +934,15 @@ export function useChatStream(
             if (choice?.delta?.content && choice.finish_reason !== "error") dispatch({ type: "APPEND_DELTA", content: choice.delta.content });
             if (choice?.finish_reason === "error") {
               void reader.cancel();
-              const explanation = ownerFacingError(choice.delta?.content || event.data.error?.message, "Агент завершил ответ с ошибкой");
+              const explanation = ownerFacingError(JSON.stringify({
+                error: {
+                  ...event.data.error,
+                  message: choice.delta?.content || event.data.error?.message,
+                },
+              }), "Агент завершил ответ с ошибкой");
               if (pending?.messageId === run.message_id) {
                 saveChatOutbox({ ...pending, terminal: true, status: "failed", error: explanation });
-                dispatch({ type: "MARK_DELIVERY", messageId: pending.messageId, delivery: "failed", terminal: true });
+                dispatch({ type: "MARK_DELIVERY", messageId: pending.messageId, delivery: "failed", terminal: true, error: explanation });
               }
               throw new Error(explanation);
             }
@@ -895,13 +957,14 @@ export function useChatStream(
       if (!done) throw new Error("Связь с ответом прервалась. Агент может продолжать работу; вернитесь в чат для подключения.");
       clearChatOutbox(run.message_id, profile ?? "");
       dispatch({ type: "FINALIZE" });
-      const remaining = pendingMessage();
-      if (remaining) dispatch({ type: "RESTORE_PENDING", sessionId, userMsg: remaining, error: "Ответ получен. Следующее сохранённое сообщение ещё не отправлено." });
+      for (const remaining of pendingMessages(runs).filter((message) => message.clientMessageId !== run.message_id)) {
+        dispatch({ type: "RESTORE_PENDING", sessionId, userMsg: remaining, error: "Ответ получен. Сохранённое сообщение ещё требует проверки." });
+      }
       void refreshChatRuns();
     } catch (err) {
       if (current()) {
-        const pending = pendingMessage();
-        if (pending?.clientMessageId) dispatch({ type: "MARK_DELIVERY", messageId: pending.clientMessageId, delivery: "failed" });
+        const pending = loadChatOutboxRecords(profile ?? "", sessionId)[0];
+        if (pending) dispatch({ type: "MARK_DELIVERY", messageId: pending.messageId, delivery: "failed", error: outboxFailure(pending) });
         dispatch({ type: "SET_ERROR", error: `Не удалось обновить переписку. ${ownerFacingError(err, "Проверьте связь и откройте чат ещё раз. Работа агента могла продолжиться.")}` });
       }
     } finally {
@@ -936,31 +999,6 @@ export function useChatStream(
       // programmatic callers (tests, plugins) can call send() directly.
       // This ref-based guard is the source of truth.
       if (streamingRef.current) return false;
-      if (!retryRecord) {
-        // Блокирует только черновик ТОЙ ЖЕ сессии; черновик другого чата
-        // этого профиля показывает баннер и не мешает писать здесь.
-        const pending = state.sessionId
-          ? loadChatOutbox(profile ?? "", state.sessionId)
-          : null;
-        if (pending) {
-          dispatch({
-            type: "RESTORE_PENDING",
-            sessionId: pending.sessionId,
-            userMsg: {
-              id: `user-${pending.messageId}`,
-              role: "user",
-              content: pending.text,
-              timestamp: pending.createdAt,
-              attachments: toDisplay(pending.attachments),
-              delivery: "failed",
-              clientMessageId: pending.messageId,
-              failureConfirmed: pending.terminal,
-            },
-            error: "Сначала проверьте сохранённое сообщение: повторите его или уберите после проверки истории.",
-          });
-          return false;
-        }
-      }
       // Явный признак доставки: у send() много точек выхода, и без него
       // undefined читался бы вызывающим кодом как успех. Кнопка «Согласовать»
       // именно так и показывала «отправлено» при оборванной сети.
@@ -1036,7 +1074,9 @@ export function useChatStream(
       // We append the new user message so the server sees it
       const historyMessages = [
         ...state.messages
-          .filter((message) => message.id !== userMsg.id && (message.content || message.role === "user"))
+          // Локальная копия с неподтверждённой доставкой остаётся в интерфейсе,
+          // но не становится контекстом нового запроса модели.
+          .filter((message) => message.id !== userMsg.id && message.delivery !== "failed" && (message.content || message.role === "user"))
           .map((m) => ({ role: m.role, content: m.content })),
         { role: userMsg.role, content: userMsg.content },
       ];
@@ -1090,20 +1130,21 @@ export function useChatStream(
           ) {
             activeStreamIdRef.current = null;
             streamingRef.current = false;
+            const explanation = response.status === 429 && /queue|capacity|concurrent|места заняты|очеред/i.test(errText)
+              ? "Сейчас выполняется слишком много задач. Повторите, когда одна из задач завершится."
+              : response.status === 409
+              ? "Доставка требует проверки. Откройте историю или повторите это же сообщение."
+              : ownerFacingError(`${response.status}: ${errText}`, "Не удалось подтвердить отправку.");
             const failedRecord: ChatOutboxRecord = {
               ...outboxRecord,
               status: "failed",
-              error: errText.slice(0, 500),
+              error: explanation,
             };
             saveChatOutbox(failedRecord);
-            dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed" });
+            dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed", error: explanation });
             dispatch({
               type: "SET_ERROR",
-              error: response.status === 429 && /queue|capacity|concurrent|места заняты|очеред/i.test(errText)
-                ? "Сейчас выполняется слишком много задач. Сообщение сохранено в этом браузере — повторите, когда одна из задач завершится."
-                : response.status === 409
-                ? "Доставка требует проверки. Откройте историю или нажмите «Повторить» с тем же сообщением."
-                : `${ownerFacingError(`${response.status}: ${errText}`, "Не удалось подтвердить отправку.")} Сообщение сохранено в этом браузере.`,
+              error: `${explanation} Сообщение сохранено в этом браузере.`,
             });
           }
           return delivered;
@@ -1183,7 +1224,15 @@ export function useChatStream(
                 // его человеку, а не общую фразу. Если content пуст, причина
                 // приходит отдельным полем `error` финального чанка (так
                 // выглядит отказ провайдера на свежем контуре без ключа).
-                terminalErrorMessage = ownerFacingError(content.trim() || event.data.error?.message?.trim(), "Ответ агента завершился с ошибкой");
+                terminalErrorMessage = ownerFacingError(
+                  JSON.stringify({
+                    error: {
+                      ...event.data.error,
+                      message: content.trim() || event.data.error?.message?.trim(),
+                    },
+                  }),
+                  "Ответ агента завершился с ошибкой",
+                );
                 void reader.cancel();
                 break;
               }
@@ -1254,7 +1303,7 @@ export function useChatStream(
                 terminalErrorMessage ||
                 "Ответ завершился без подтверждения доставки",
             });
-            dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed", terminal: sawTerminalError });
+            dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed", terminal: sawTerminalError, error: terminalErrorMessage || "Ответ завершился без подтверждения доставки" });
           }
         }
       } catch (err) {
@@ -1276,7 +1325,7 @@ export function useChatStream(
             status: "failed",
             error: "Отправка остановлена до подтверждения доставки",
           });
-          dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed" });
+          dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed", error: "Отправка остановлена до подтверждения доставки" });
           dispatch({ type: "RESET_STREAMING" });
         } else {
           saveChatOutbox({
@@ -1284,7 +1333,7 @@ export function useChatStream(
             status: "failed",
             error: "Соединение прервалось",
           });
-          dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed" });
+          dispatch({ type: "MARK_DELIVERY", messageId, delivery: "failed", error: "Соединение прервалось" });
           dispatch({
             type: "SET_ERROR",
             error: "Связь прервалась. Сообщение сохранено в этом браузере. Агент мог уже принять его — «Проверить и повторить» проверит прежнюю отправку.",
@@ -1332,10 +1381,17 @@ export function useChatStream(
     window.addEventListener("online", resume);
     window.addEventListener("focus", resume);
     document.addEventListener("visibilitychange", resume);
+    const syncOutbox = (event: StorageEvent) => {
+      if (isChatOutboxStorageKey(event.key) && sessionRef.current && !streamingRef.current) {
+        void loadSession(sessionRef.current, { background: true });
+      }
+    };
+    window.addEventListener("storage", syncOutbox);
     return () => {
       window.removeEventListener("online", resume);
       window.removeEventListener("focus", resume);
       document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("storage", syncOutbox);
     };
   }, [active, loadSession]);
   useEffect(() => {
@@ -1354,8 +1410,11 @@ export function useChatStream(
       return false;
     }
     if (!sessionId) return false;
-    const pending = loadChatOutbox(profile ?? "", sessionId);
-    if (!pending || (target && pending.messageId !== target.messageId)) return false;
+    const records = loadChatOutboxRecords(profile ?? "", sessionId);
+    const pending = target
+      ? records.find((record) => record.messageId === target.messageId)
+      : records[0];
+    if (!pending) return false;
     // Cross-chat banners navigate first. Never POST with the currently open
     // chat's history captured in send()'s closure.
     if (sessionId !== state.sessionId) {
@@ -1372,8 +1431,11 @@ export function useChatStream(
     }
     const sessionId = target?.sessionId ?? state.sessionId;
     if (!sessionId) return;
-    const pending = loadChatOutbox(profile ?? "", sessionId);
-    if (!pending || (target && pending.messageId !== target.messageId)) return;
+    const records = loadChatOutboxRecords(profile ?? "", sessionId);
+    const pending = target
+      ? records.find((record) => record.messageId === target.messageId)
+      : records[0];
+    if (!pending) return;
     clearChatOutbox(pending.messageId, profile ?? "");
     dispatch({ type: "DISCARD_PENDING", messageId: pending.messageId });
   }, [profile, state.sessionId]);

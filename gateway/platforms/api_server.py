@@ -5852,6 +5852,10 @@ class APIServerAdapter(BasePlatformAdapter):
                 "error": err_msg,
                 "error_code": "output_truncated" if finish_reason == "length" else "agent_error",
             }
+            if result.get("failure_reason"):
+                response_data["hermes"]["failure_reason"] = result["failure_reason"]
+            if result.get("failure_reset_at") is not None:
+                response_data["hermes"]["reset_at"] = result["failure_reset_at"]
             response_headers["X-Hermes-Completed"] = "false"
             response_headers["X-Hermes-Partial"] = "true" if is_partial else "false"
             if err_msg:
@@ -6051,6 +6055,10 @@ class APIServerAdapter(BasePlatformAdapter):
                         "message": err_msg,
                         "type": type(agent_error).__name__ if agent_error else "agent_error",
                     }
+                    if isinstance(result, dict) and result.get("failure_reason"):
+                        finish_chunk["error"]["reason"] = result["failure_reason"]
+                    if isinstance(result, dict) and result.get("failure_reset_at") is not None:
+                        finish_chunk["error"]["resets_at"] = result["failure_reset_at"]
                 finish_chunk["hermes"] = {
                     "completed": completed,
                     "partial": is_partial,

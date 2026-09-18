@@ -101,6 +101,20 @@ class TestTerminalResponse:
         if block is not None:  # None only if billing_links is unavailable
             assert block.get("unverified") is True
 
+    def test_terminal_response_carries_provider_reset_for_ui(self):
+        result = _billing_failure_result(
+            classified=_classified_confirmed(),
+            summary="HTTP 429: usage limit reached",
+            messages=[],
+            api_call_count=1,
+            provider="anthropic",
+            base_url="https://api.anthropic.com",
+            model="claude-opus-5",
+            reset_at="2026-09-19T10:30:00Z",
+        )
+
+        assert result["failure_reset_at"] == "2026-09-19T10:30:00Z"
+
     def test_confirmed_terminal_response_stays_assertive(self):
         """A confirmed billing verdict keeps the original terminal label and
         carries no ambiguity flag."""

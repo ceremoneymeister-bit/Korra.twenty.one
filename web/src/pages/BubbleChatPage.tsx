@@ -50,7 +50,7 @@ import { TranscriptViewport } from "@/components/chat/TranscriptViewport";
 import { AgentTrace } from "@/components/chat/AgentTrace";
 import { CommandApprovalCard } from "@/components/chat/CommandApprovalCard";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
-import { loadChatOutbox, type ChatOutboxRecord } from "@/lib/chat-outbox";
+import { loadChatOutbox, loadChatOutboxRecords, type ChatOutboxRecord } from "@/lib/chat-outbox";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import {
   ChatArtifactList,
@@ -187,6 +187,14 @@ function UserBubble({
           </p>
         )}
       </div>
+      {message.delivery === "failed" && message.failureReason ? (
+        <p
+          role="status"
+          className="max-w-[75%] text-right text-xs leading-relaxed text-[var(--neo-text-secondary)]"
+        >
+          {message.failureReason}
+        </p>
+      ) : null}
       {message.delivery === "sending" ? (
         <Button
           type="button"
@@ -501,7 +509,7 @@ export function BubbleChatSidebar({
 /*  BubbleChatTranscript                                               */
 /* ------------------------------------------------------------------ */
 
-function BubbleChatTranscript({
+export function BubbleChatTranscript({
   messages,
   streaming,
   error,
@@ -1326,8 +1334,9 @@ export default function BubbleChatPage({
   const recoveryNotice = recovery?.key === recoveryKey ? recovery.text : "";
   const setRecoveryNotice = (text: string) => setRecovery(text ? { key: recoveryKey, text } : null);
   const handleRetry = (target: PendingMessageTarget) => {
-    const pending = loadChatOutbox(agentProfile ?? "", target.sessionId);
-    if (!pending || pending.messageId !== target.messageId || isStreaming || isLoading) return;
+    const pending = loadChatOutboxRecords(agentProfile ?? "", target.sessionId)
+      .find((record) => record.messageId === target.messageId);
+    if (!pending || isStreaming || isLoading) return;
     if (target.sessionId !== sessionId || !pending.terminal) { void retryPending(target); return; }
     const key = chatViewKey(agentProfile, sessionId);
     if (!restoreChatAttachmentDraft(key, pending.attachments)) {

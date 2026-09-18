@@ -84,8 +84,11 @@ async def test_model_limits_cross_http_with_distinct_guidance(monkeypatch, strea
     monkeypatch.setenv("KORRA_LANGUAGE", "ru")
     adapter = APIServerAdapter(PlatformConfig(enabled=True))
     async def run_agent(**kwargs):
-        return {"final_response": diagnostic, "error": diagnostic, "failed": True,
-                "completed": False, "messages": [], "failure_reason": reason}, {}
+        result = {"final_response": diagnostic, "error": diagnostic, "failed": True,
+                  "completed": False, "messages": [], "failure_reason": reason}
+        if reason == "rate_limit":
+            result["failure_reset_at"] = "2026-09-19T10:30:00Z"
+        return result, {}
     monkeypatch.setattr(adapter, "_run_agent", run_agent)
     app = web.Application()
     app.router.add_post("/v1/chat/completions", adapter._handle_chat_completions)
@@ -102,3 +105,10 @@ async def test_model_limits_cross_http_with_distinct_guidance(monkeypatch, strea
         assert body["choices"][0]["finish_reason"] == "error"
         assert expected in body["error"]["message"] if stream else expected in body["hermes"]["error"]
         assert "пополн" not in json.dumps(body, ensure_ascii=False).lower()
+        if reason == "rate_limit":
+            if stream:
+                assert body["error"]["reason"] == "rate_limit"
+                assert body["error"]["resets_at"] == "2026-09-19T10:30:00Z"
+            else:
+                assert body["hermes"]["failure_reason"] == "rate_limit"
+                assert body["hermes"]["reset_at"] == "2026-09-19T10:30:00Z"

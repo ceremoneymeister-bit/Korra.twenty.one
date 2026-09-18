@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type SessionMessage } from "@/lib/api";
 import { chatViewKey, writeChatSelection } from "@/lib/chat-view-state";
-import { loadChatOutbox, saveChatOutbox } from "@/lib/chat-outbox";
+import { loadChatOutbox, loadChatOutboxRecords, saveChatOutbox } from "@/lib/chat-outbox";
 import { useChatStream, type UseChatStreamReturn } from "./useChatStream";
 
 vi.mock("@/lib/chat-runs", async importOriginal => ({
@@ -899,4 +899,116 @@ it("keeps a confirmed model failure and its explanation after remount", async ()
   await act(async () => root.render(<Probe onValue={value => { current = value; }} />));
   expect(loadChatOutbox("", "quota-chat")).toMatchObject({ terminal: true, error: explanation });
   expect(current.messages).toEqual([expect.objectContaining({ failureConfirmed: true, content: "Запрос" })]);
+});
+
+describe("K21-115 multi-message outbox", () => {
+  it("does not put old failed messages into a new request or overwrite either copy", async () => {
+    const requests: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (!String(url).includes("/chat/completions")) return Response.json({ data: [] });
+      const body = JSON.parse(String(init?.body ?? "{}")) as { messages: Array<{ role: string; content: string }> };
+      requests.push(body);
+      return new Response("не принято", { status: 500 });
+    }));
+
+    await act(async () => { expect(await current.send("Первый сохранённый текст")).toBe(false); });
+    await act(async () => { expect(await current.send("Второй сохранённый текст")).toBe(false); });
+
+    const records = loadChatOutboxRecords("", current.sessionId!);
+    expect(records.map((item) => item.text)).toEqual([
+      "Первый сохранённый текст",
+      "Второй сохранённый текст",
+    ]);
+    expect(requests).toHaveLength(2);
+    expect(requests[1].messages.map((item) => item.content)).toEqual(["Второй сохранённый текст"]);
+    expect(current.messages.filter((message) => message.delivery === "failed").map((message) => message.content))
+      .toEqual(["Первый сохранённый текст", "Второй сохранённый текст"]);
+
+    await act(async () => current.discardPending({
+      sessionId: current.sessionId!,
+      messageId: records[1].messageId,
+    }));
+    expect(loadChatOutboxRecords("", current.sessionId!).map((item) => item.text))
+      .toEqual(["Первый сохранённый текст"]);
+  });
+
+  it("keeps a known reset across F5, allows new text, and retries one selected ID once", async () => {
+    const completions = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      void init;
+      const call = completions.mock.calls.length;
+      if (call === 1) {
+        return sseResponse(
+          'data: {"choices":[{"delta":{},"finish_reason":"error"}],"error":' +
+            '{"message":"Модель временно не принимает запросы: достигнут лимит.",' +
+            '"reason":"rate_limit","resets_at":"2026-09-19T10:30:00Z"}}\n\n',
+          "data: [DONE]\n\n",
+        );
+      }
+      return sseResponse(
+        'data: {"choices":[{"delta":{"content":"Готово"},"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      );
+    });
+    vi.stubGlobal("fetch", (url: string | URL | Request, init?: RequestInit) =>
+      String(url).includes("/chat/completions")
+        ? completions(url, init)
+        : Promise.resolve(Response.json({ data: [] })),
+    );
+
+    await act(async () => { expect(await current.send("Повторить после сброса")).toBe(false); });
+    const failed = loadChatOutboxRecords("", current.sessionId!)[0];
+    expect(failed.error).toContain("2026");
+
+    await act(async () => { expect(await current.send("Новый независимый текст")).toBe(true); });
+    expect(loadChatOutboxRecords("", current.sessionId!).map((item) => item.messageId))
+      .toEqual([failed.messageId]);
+    const secondBody = JSON.parse(String((completions.mock.calls[1][1] as RequestInit).body)) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(secondBody.messages.map((item) => item.content)).not.toContain("Повторить после сброса");
+
+    // Legacy 0.21.9 could leave the local copy without the terminal reason.
+    // The durable run must restore the structured cause and reset time.
+    saveChatOutbox({ ...failed, error: undefined });
+    const { getChatRuns } = await import("@/lib/chat-runs");
+    vi.mocked(getChatRuns).mockResolvedValue([{
+      message_id: failed.messageId,
+      session_id: current.sessionId!,
+      profile: "",
+      status: "failed",
+      updated_at: 123,
+      history_count: 0,
+      user_message: { role: "user", content: failed.text },
+      failure: {
+        message: "Модель временно не принимает запросы: достигнут лимит.",
+        reason: "rate_limit",
+        resets_at: "2026-09-19T10:30:00Z",
+      },
+    }]);
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({ session_id: current.sessionId!, messages: [] });
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<Probe onValue={value => { current = value; }} />));
+    const restored = current.messages.find((message) => message.clientMessageId === failed.messageId);
+    expect(restored).toMatchObject({
+      content: "Повторить после сброса",
+      delivery: "failed",
+      failureConfirmed: true,
+    });
+    expect(restored?.failureReason).toContain("2026");
+    expect(restored?.failureReason).not.toContain("пока неизвестно");
+
+    await act(async () => {
+      const results = await Promise.all([
+        current.retryPending({ sessionId: current.sessionId!, messageId: failed.messageId }),
+        current.retryPending({ sessionId: current.sessionId!, messageId: failed.messageId }),
+      ]);
+      expect(results.sort()).toEqual([false, true]);
+    });
+    expect(completions).toHaveBeenCalledTimes(3);
+    expect((completions.mock.calls[2][1] as RequestInit).headers).toMatchObject({
+      "X-Korra-Client-Message-Id": failed.messageId,
+    });
+    expect(loadChatOutboxRecords("", current.sessionId!)).toEqual([]);
+  });
 });

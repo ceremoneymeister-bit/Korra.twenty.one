@@ -955,6 +955,7 @@ def _billing_failure_result(
     base_url,
     model: str,
     guidance: Optional[str] = None,
+    reset_at: Any = None,
 ) -> dict:
     """Structured terminal result for a billing-classified failure.
 
@@ -974,7 +975,7 @@ def _billing_failure_result(
     final = _billing_terminal_label(summary, unverified)
     if guidance:
         final += f"\n\n{guidance}"
-    return {
+    result = {
         "final_response": final,
         "messages": messages,
         "api_calls": api_call_count,
@@ -993,6 +994,9 @@ def _billing_failure_result(
             provider, base_url, model, guidance, unverified=unverified
         ),
     }
+    if isinstance(reset_at, (str, int, float)):
+        result["failure_reset_at"] = reset_at
+    return result
 
 
 def _print_billing_or_entitlement_guidance(
@@ -6566,6 +6570,7 @@ def run_conversation(
                             provider=_provider,
                             base_url=_base,
                             model=_model,
+                            reset_at=error_context.get("reset_at"),
                         )
                     from agent.error_surface import format_error_for_user
 
@@ -6800,6 +6805,7 @@ def run_conversation(
                         # different exit code. ``rate_limit`` / ``billing`` here
                         # mean "quota wall, not a task error".
                         "failure_reason": classified.reason.value,
+                        "failure_reset_at": error_context.get("reset_at"),
                         # The classifier's own retry verdict — UI surfaces use
                         # this instead of re-deriving from the reason string.
                         "failure_retryable": bool(classified.retryable),

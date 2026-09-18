@@ -37,10 +37,11 @@ vi.mock("thinking-orbs", () => ({
   ),
 }));
 
-import { BubbleChatComposer, BubbleChatSidebar } from "./BubbleChatPage";
+import { BubbleChatComposer, BubbleChatSidebar, BubbleChatTranscript } from "./BubbleChatPage";
 import { $uploadJobs, dismissUploadJob } from "@/store/upload-jobs";
 import type { SessionInfo } from "@/lib/api";
 import type { UploadManifest } from "@/lib/upload-session";
+import type { ChatMessage } from "@/lib/chat-types";
 
 /** `MediaRecorder` из jsdom не существует — подменяем предсказуемым. */
 class FakeMediaRecorder {
@@ -606,6 +607,49 @@ function session(id: string, title: string): SessionInfo {
     tool_call_count: 0, input_tokens: 0, output_tokens: 0, preview: null,
   };
 }
+
+describe("failed message recovery", () => {
+  it("shows the persisted reason and addresses both actions to the selected message at 390px", async () => {
+    const retry = vi.fn();
+    const discard = vi.fn();
+    const message: ChatMessage = {
+      id: "user-failed-message-123456",
+      clientMessageId: "failed-message-123456",
+      role: "user",
+      content: "Продолжить после обновления лимита",
+      timestamp: 1,
+      delivery: "failed",
+      failureConfirmed: true,
+      failureReason: "Лимит модели обновится 19 сент. 2026 г. в 10:30.",
+    };
+
+    await render(
+      <BubbleChatTranscript
+        messages={[message]}
+        sessionId="chat-at-390px"
+        onRetry={retry}
+        onDiscard={discard}
+      />,
+    );
+    container.style.width = "390px";
+
+    const reason = container.querySelector('[role="status"]');
+    expect(reason?.textContent).toContain("19 сент. 2026");
+    const actions = container.querySelector('[aria-label="Действия с сообщением, оставшимся без ответа"]')!;
+    expect(actions.className).toContain("flex-wrap");
+    const buttons = actions.querySelectorAll("button");
+    expect(buttons[0].textContent).toContain("Вернуть в поле");
+    expect(buttons[1].textContent).toContain("Убрать сохранённую копию");
+
+    await act(async () => {
+      buttons[0].click();
+      buttons[1].click();
+    });
+    const target = { sessionId: "chat-at-390px", messageId: "failed-message-123456" };
+    expect(retry).toHaveBeenCalledWith(target);
+    expect(discard).toHaveBeenCalledWith(target);
+  });
+});
 
 describe("BubbleChatSidebar", () => {
   const sessions = [

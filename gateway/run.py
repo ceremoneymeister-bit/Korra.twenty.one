@@ -7156,6 +7156,7 @@ class TurnRunner:
                 # persistence) lose the structured reason exactly when
                 # the run produced no text.
                 "failure_reason": result.get("failure_reason"),
+                "failure_reset_at": result.get("failure_reset_at"),
                 "partial": result.get("partial", False),
                 "completed": result.get("completed"),
                 "interrupted": result.get("interrupted", False),
@@ -7228,6 +7229,9 @@ class TurnRunner:
             "failed": ctx.result_holder[0].get("failed", False) if ctx.result_holder[0] else False,
             "failure_reason": (
                 ctx.result_holder[0].get("failure_reason") if ctx.result_holder[0] else None
+            ),
+            "failure_reset_at": (
+                ctx.result_holder[0].get("failure_reset_at") if ctx.result_holder[0] else None
             ),
             "completed": ctx.result_holder[0].get("completed") if ctx.result_holder[0] else None,
             "interrupted": ctx.result_holder[0].get("interrupted", False) if ctx.result_holder[0] else False,

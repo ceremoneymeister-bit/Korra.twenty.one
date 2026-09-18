@@ -29,6 +29,8 @@ export interface ChatMessage {
   delivery?: "sending" | "failed" | "delivered";
   clientMessageId?: string;
   failureConfirmed?: boolean;
+  /** Понятная причина именно этой неудачной отправки; переживает F5 в outbox. */
+  failureReason?: string;
 }
 
 export interface ChatSession {
@@ -54,7 +56,15 @@ export interface SSEChatChunkData {
   };
   /** Финальный чанк отказа: движок кладёт причину сюда, а `delta` оставляет
    *  пустой (`gateway/platforms/api_server.py`, ветка finish_reason != stop). */
-  error?: { message?: string; type?: string };
+  error?: {
+    message?: string;
+    type?: string;
+    code?: string;
+    reason?: string;
+    resets_at?: string | number;
+    reset_at?: string | number;
+    resets_in_seconds?: number;
+  };
 }
 
 /** Korra-specific tool progress event.

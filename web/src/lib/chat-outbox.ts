@@ -1,25 +1,33 @@
 import { HERMES_BASE_PATH } from "@/lib/api";
 import { MAX_ATTACHMENTS, type UploadedAttachment } from "@/lib/chat-attachments";
 
-/* v2: запись на чат (профиль + сессия), а не одна на всю панель — иначе
- * отправка в другом чате затирала упавшее сообщение (ревью 03.09).
- * Старые v1-записи не читаем: у них нет профиля, и повтор ушёл бы не туда. */
-const STORAGE_PREFIX = `korra-browser-chat-outbox-v2:${HERMES_BASE_PATH || "root"}`;
+/* v3: отдельная запись на client_message_id. v2 держал только одну запись на
+ * чат, поэтому новая отправка либо блокировалась, либо затирала прежнюю. */
+const STORAGE_PREFIX = `korra-browser-chat-outbox-v3:${HERMES_BASE_PATH || "root"}`;
+const LEGACY_STORAGE_PREFIX = `korra-browser-chat-outbox-v2:${HERMES_BASE_PATH || "root"}`;
 
-function profilePrefix(profile: string | undefined): string {
-  return `${STORAGE_PREFIX}:${profile || "main"}:`;
+function profilePrefix(prefix: string, profile: string | undefined): string {
+  return `${prefix}:${profile || "main"}:`;
 }
 
-function storageKey(profile: string | undefined, sessionId: string): string {
-  return `${profilePrefix(profile)}${sessionId}`;
+function sessionPrefix(profile: string | undefined, sessionId: string): string {
+  return `${profilePrefix(STORAGE_PREFIX, profile)}${sessionId}:`;
 }
 
-function profileKeys(profile: string | undefined): string[] {
-  const prefix = profilePrefix(profile);
+function storageKey(profile: string | undefined, sessionId: string, messageId: string): string {
+  return `${sessionPrefix(profile, sessionId)}${messageId}`;
+}
+
+function legacyStorageKey(profile: string | undefined, sessionId: string): string {
+  return `${profilePrefix(LEGACY_STORAGE_PREFIX, profile)}${sessionId}`;
+}
+
+function profileKeys(prefix: string, profile: string | undefined): string[] {
+  const scopedPrefix = profilePrefix(prefix, profile);
   const keys: string[] = [];
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
-    if (key && key.startsWith(prefix)) keys.push(key);
+    if (key && key.startsWith(scopedPrefix)) keys.push(key);
   }
   return keys;
 }
@@ -69,7 +77,13 @@ function validRecord(value: unknown): value is ChatOutboxRecord {
 function readRecord(key: string, profile: string): ChatOutboxRecord | null {
   const raw = localStorage.getItem(key);
   if (!raw) return null;
-  const parsed: unknown = JSON.parse(raw);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
   if (!validRecord(parsed) || (parsed.profile ?? "") !== profile) {
     localStorage.removeItem(key);
     return null;
@@ -77,23 +91,47 @@ function readRecord(key: string, profile: string): ChatOutboxRecord | null {
   return parsed;
 }
 
-/** Черновик конкретного чата, либо — без sessionId — самый старый черновик профиля. */
-export function loadChatOutbox(profile = "", sessionId?: string): ChatOutboxRecord | null {
+/** Однократно переносит прежнюю единственную запись чата в коллекцию v3. */
+function migrateLegacyRecords(profile: string, sessionId?: string): void {
+  for (const key of profileKeys(LEGACY_STORAGE_PREFIX, profile)) {
+    if (sessionId && key !== legacyStorageKey(profile, sessionId)) continue;
+    const record = readRecord(key, profile);
+    if (record) {
+      const target = storageKey(profile, record.sessionId, record.messageId);
+      if (localStorage.getItem(target) === null) {
+        localStorage.setItem(target, JSON.stringify(record));
+      }
+    }
+    localStorage.removeItem(key);
+  }
+}
+
+/** Все сохранённые сообщения чата/профиля в порядке отправки. */
+export function loadChatOutboxRecords(profile = "", sessionId?: string): ChatOutboxRecord[] {
   try {
-    if (sessionId) return readRecord(storageKey(profile, sessionId), profile);
-    const records = profileKeys(profile)
+    migrateLegacyRecords(profile, sessionId);
+    const records = profileKeys(STORAGE_PREFIX, profile)
+      .filter((key) => !sessionId || key.startsWith(sessionPrefix(profile, sessionId)))
       .map((key) => readRecord(key, profile))
       .filter((record): record is ChatOutboxRecord => record !== null)
-      .sort((a, b) => a.createdAt - b.createdAt);
-    return records[0] ?? null;
+      .filter((record) => !sessionId || record.sessionId === sessionId)
+      .sort((a, b) => a.createdAt - b.createdAt || a.messageId.localeCompare(b.messageId));
+    return records;
   } catch {
-    return null;
+    return [];
   }
+}
+
+/** Самая старая запись — совместимый сокращённый доступ для баннеров. */
+export function loadChatOutbox(profile = "", sessionId?: string): ChatOutboxRecord | null {
+  return loadChatOutboxRecords(profile, sessionId)[0] ?? null;
 }
 
 export function saveChatOutbox(record: ChatOutboxRecord): boolean {
   try {
-    localStorage.setItem(storageKey(record.profile ?? "", record.sessionId), JSON.stringify(record));
+    const profile = record.profile ?? "";
+    migrateLegacyRecords(profile, record.sessionId);
+    localStorage.setItem(storageKey(profile, record.sessionId, record.messageId), JSON.stringify(record));
     return true;
   } catch {
     return false;
@@ -102,7 +140,8 @@ export function saveChatOutbox(record: ChatOutboxRecord): boolean {
 
 export function clearChatOutbox(messageId: string, profile = ""): void {
   try {
-    for (const key of profileKeys(profile)) {
+    migrateLegacyRecords(profile);
+    for (const key of profileKeys(STORAGE_PREFIX, profile)) {
       const record = readRecord(key, profile);
       if (!record || record.messageId === messageId) localStorage.removeItem(key);
     }
@@ -111,6 +150,18 @@ export function clearChatOutbox(messageId: string, profile = ""): void {
   }
 }
 
-export function chatOutboxStorageKeyForTests(profile = "", sessionId = ""): string {
-  return storageKey(profile, sessionId);
+export function isChatOutboxStorageKey(key: string | null): boolean {
+  return Boolean(key && (key.startsWith(`${STORAGE_PREFIX}:`) || key.startsWith(`${LEGACY_STORAGE_PREFIX}:`)));
+}
+
+export function chatOutboxStorageKeyForTests(
+  profile = "",
+  sessionId = "",
+  messageId = "test-message-id-123456",
+): string {
+  return storageKey(profile, sessionId, messageId);
+}
+
+export function legacyChatOutboxStorageKeyForTests(profile = "", sessionId = ""): string {
+  return legacyStorageKey(profile, sessionId);
 }

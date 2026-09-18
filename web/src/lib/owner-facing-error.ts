@@ -1,5 +1,41 @@
 import { russianInterfaceText } from "./russian-interface-text";
 
+type ErrorPayload = {
+  detail?: unknown;
+  message?: unknown;
+  code?: unknown;
+  type?: unknown;
+  reason?: unknown;
+  resets_at?: unknown;
+  reset_at?: unknown;
+  resets_in_seconds?: unknown;
+  error?: ErrorPayload;
+};
+
+function resetDate(payload: ErrorPayload): Date | null {
+  const nested = payload.error && typeof payload.error === "object" ? payload.error : undefined;
+  const relative = nested?.resets_in_seconds ?? payload.resets_in_seconds;
+  if (typeof relative === "number" && Number.isFinite(relative) && relative >= 0) {
+    return new Date(Date.now() + relative * 1000);
+  }
+  const raw = nested?.resets_at ?? nested?.reset_at ?? payload.resets_at ?? payload.reset_at;
+  if (typeof raw !== "string" && typeof raw !== "number") return null;
+  const millis = typeof raw === "number"
+    ? (raw > 10_000_000_000 ? raw : raw * 1000)
+    : Date.parse(raw);
+  const date = new Date(millis);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function resetText(payload: ErrorPayload): string | null {
+  const date = resetDate(payload);
+  if (!date) return null;
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
 /** Known machine signals before prose. A bare 429 never proves expired billing. */
 export function ownerFacingError(
   exception: unknown,
@@ -10,18 +46,35 @@ export function ownerFacingError(
   const status = statusMatch ? Number(statusMatch[1]) : null;
   let payload = (statusMatch?.[2] ?? raw).trim();
   let code = "";
+  let parsedPayload: ErrorPayload = {};
   try {
-    const parsed = JSON.parse(payload) as { detail?: unknown; error?: { message?: unknown; code?: unknown; type?: unknown } };
-    code = [parsed.error?.code, parsed.error?.type].filter(value => typeof value === "string").join(" ");
-    if (typeof parsed.detail === "string") payload = parsed.detail;
-    else if (typeof parsed.error?.message === "string") payload = parsed.error.message;
+    const parsed: unknown = JSON.parse(payload);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError("not an error object");
+    parsedPayload = parsed as ErrorPayload;
+    const error = parsedPayload.error;
+    code = [
+      error?.code,
+      error?.type,
+      error?.reason,
+      parsedPayload.code,
+      parsedPayload.type,
+      parsedPayload.reason,
+    ].filter(value => typeof value === "string").join(" ");
+    if (typeof parsedPayload.detail === "string") payload = parsedPayload.detail;
+    else if (typeof error?.message === "string") payload = error.message;
+    else if (typeof parsedPayload.message === "string") payload = parsedPayload.message;
   } catch { /* Older endpoints send plain text. */ }
   const signal = `${code} ${payload}`;
+  const knownReset = resetText(parsedPayload);
   if (/insufficient_quota|usage_limit_reached|usage limit.*reached|exceeded your current quota|quota exceeded/i.test(signal)) {
-    return "Лимит использования модели исчерпан. Проверьте в аккаунте модели, когда он обновится и действует ли подписка.";
+    return knownReset
+      ? `Лимит использования модели исчерпан. Он обновится ${knownReset} по времени этого устройства.`
+      : "Лимит использования модели исчерпан. Проверьте в аккаунте модели, когда он обновится и действует ли подписка.";
   }
   if (/rate_limit|rate[- ]limited|too many requests|лимит.*запрос|временно ограничил запросы/i.test(signal)) {
-    return "Модель временно не принимает запросы: достигнут лимит. Попробуйте позже. Точное время, когда можно продолжить, пока неизвестно.";
+    return knownReset
+      ? `Модель временно не принимает запросы: достигнут лимит. Можно продолжить после ${knownReset} по времени этого устройства.`
+      : "Модель временно не принимает запросы: достигнут лимит. Попробуйте позже. Точное время, когда можно продолжить, пока неизвестно.";
   }
   if (/token.*expired|invalid.*api.?key|authentication_error|invalid_api_key/i.test(signal)) {
     return "Нужно заново войти в аккаунт модели. Откройте настройки подключения и повторите вход.";

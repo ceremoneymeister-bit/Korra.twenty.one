@@ -93,6 +93,34 @@ def test_run_conversation_returns_russian_rate_limit_explanation(monkeypatch):
     assert "Rate limit exceeded" in result["error"]
 
 
+def test_run_conversation_carries_known_subscription_reset(monkeypatch):
+    monkeypatch.setenv("HERMES_LANGUAGE", "ru")
+    agent = _make_failing_agent(provider="openai-codex", base_url="http://codex.local")
+    error = Exception("The usage limit has been reached")
+    error.status_code = 429
+    error.body = {
+        "error": {
+            "type": "usage_limit_reached",
+            "message": str(error),
+            "resets_at": "2026-09-19T10:30:00Z",
+        }
+    }
+    error.response = MagicMock(headers={})
+    agent.client.chat.completions.create.side_effect = error
+
+    with (
+        patch.object(agent, "_persist_session"),
+        patch.object(agent, "_save_trajectory"),
+        patch.object(agent, "_cleanup_task_resources"),
+        patch("agent.conversation_loop.time.sleep"),
+    ):
+        result = agent.run_conversation("Продолжай работу")
+
+    assert result["failed"] is True
+    assert result["failure_reason"] == "rate_limit"
+    assert result["failure_reset_at"] == "2026-09-19T10:30:00Z"
+
+
 def test_run_conversation_returns_russian_confirmed_billing_explanation(monkeypatch):
     monkeypatch.setenv("HERMES_LANGUAGE", "ru")
     agent = _make_failing_agent(

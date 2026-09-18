@@ -143,3 +143,39 @@ def test_explicit_cancel_stops_queued_task_and_retains_terminal_replay(isolated)
         assert b"[DONE]" in record.response_body
         assert (await chat_runs("lawyer", "session-a"))["runs"][0]["status"] == "failed"
     asyncio.run(scenario())
+
+
+def test_open_session_lists_every_intent_but_global_poll_keeps_latest_only(isolated):
+    first = remember(isolated, "first-message-1234567890")
+    isolated.fail(first)
+    second = remember(isolated, "second-message-123456789")
+    isolated.fail(second)
+
+    opened = asyncio.run(chat_runs("lawyer", "session-a"))["runs"]
+    assert [item["message_id"] for item in opened] == [second, first]
+    polled = asyncio.run(chat_runs("lawyer"))["runs"]
+    assert [item["message_id"] for item in polled] == [second]
+
+
+def test_failed_run_projects_reset_metadata_for_browser_recovery(isolated):
+    mid = remember(isolated, "quota-message-123456789")
+    body = (
+        b'data: {"choices":[{"delta":{},"finish_reason":"error"}],'
+        b'"error":{"message":"Model usage limit reached",'
+        b'"reason":"rate_limit","resets_at":"2026-09-19T10:30:00Z"}}\n\n'
+        b"data: [DONE]\n\n"
+    )
+    isolated.complete(
+        mid,
+        response_body=body,
+        status_code=200,
+        content_type="text/event-stream",
+    )
+
+    run = asyncio.run(chat_runs("lawyer", "session-a"))["runs"][0]
+    assert run["status"] == "failed"
+    assert run["failure"] == {
+        "message": "Model usage limit reached",
+        "reason": "rate_limit",
+        "resets_at": "2026-09-19T10:30:00Z",
+    }

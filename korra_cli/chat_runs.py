@@ -1,8 +1,20 @@
 """Read-only discovery and reattachment for the dashboard's durable chat turns."""
+import json
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response, StreamingResponse
 
 router = APIRouter()
+
+_FAILURE_FIELDS = (
+    "message",
+    "type",
+    "code",
+    "reason",
+    "resets_at",
+    "reset_at",
+    "resets_in_seconds",
+)
 
 
 def _server():
@@ -19,6 +31,44 @@ def _status(item, ledger):
     if task is not None and not task.done():
         return "running"
     return "interrupted" if item["status"] == "pending" else item["status"]
+
+
+def _failure_payload(record):
+    """Project only actionable, non-secret failure fields from a saved reply."""
+    if record is None or not record.response_body:
+        return None
+    payloads = []
+    if (record.content_type or "").startswith("text/event-stream"):
+        for line in record.response_body.splitlines():
+            if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
+                continue
+            try:
+                payloads.append(json.loads(line[6:]))
+            except (ValueError, TypeError):
+                continue
+    else:
+        try:
+            payloads.append(json.loads(record.response_body))
+        except (ValueError, TypeError):
+            return None
+    for payload in reversed(payloads):
+        if not isinstance(payload, dict):
+            continue
+        error = payload.get("error")
+        if isinstance(error, str):
+            error = {"message": error}
+        if not isinstance(error, dict):
+            continue
+        failure = {
+            field: error[field]
+            for field in _FAILURE_FIELDS
+            if isinstance(error.get(field), (str, int, float))
+        }
+        if isinstance(failure.get("message"), str):
+            failure["message"] = failure["message"][:1000]
+        if failure:
+            return failure
+    return None
 
 
 def _browser_sse(status_code: int, body: bytes, content_type: str) -> bytes:
@@ -44,6 +94,16 @@ async def chat_runs(profile: str | None = None, session_id: str | None = None):
     result = []
     for item in items:
         summary = {**item, "status": _status(item, ledger)}
+        if session_id is not None and summary["status"] == "failed":
+            record = await server.run_in_threadpool(
+                ledger.response,
+                item["message_id"],
+                item["profile"],
+                item["session_id"],
+            )
+            failure = _failure_payload(record)
+            if failure:
+                summary["failure"] = failure
         if session_id is None:
             # The shell polls summaries. Full prompts belong only to the
             # explicitly opened conversation, not every two-second update.

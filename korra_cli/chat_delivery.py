@@ -169,7 +169,12 @@ class DeliveryLedger:
             )
 
     def runs(self, profile: str | None = None, session_id: str | None = None) -> list[dict]:
-        """Latest intent per conversation; reads never claim or restart work."""
+        """List intents without claiming or restarting work.
+
+        Fleet-wide polling needs only the latest intent per conversation.  An
+        explicitly opened conversation gets every intent so its browser outbox
+        can reconcile two independent failed messages by ``message_id``.
+        """
         where = ["request_meta IS NOT NULL"]
         args = []
         if profile is not None:
@@ -185,7 +190,7 @@ class DeliveryLedger:
             ).fetchall()
         result, seen = [], set()
         for message_id, sid, prof, status, updated_at, meta in rows:
-            if (prof, sid) in seen:
+            if session_id is None and (prof, sid) in seen:
                 continue
             seen.add((prof, sid))
             result.append(dict(message_id=message_id, session_id=sid, profile=prof,
