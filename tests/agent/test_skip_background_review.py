@@ -60,14 +60,19 @@ def _stub_agent_for_finalize(agent: AIAgent) -> None:
     agent._db_flush_scan_prefix = None
 
 
-def _run_finalize(agent: AIAgent) -> None:
+def _run_finalize(
+    agent: AIAgent,
+    *,
+    failed: bool = False,
+    interrupted: bool = False,
+) -> None:
     """Call finalize_turn with conditions that would trigger background review."""
     finalize_turn(
         agent,
         final_response="ok",
         api_call_count=1,
-        interrupted=False,
-        failed=False,
+        interrupted=interrupted,
+        failed=failed,
         messages=[{"role": "assistant", "content": "ok"}],
         conversation_history=[],
         effective_task_id="test",
@@ -109,6 +114,26 @@ def test_finalize_turn_fires_review_when_flag_unset() -> None:
     _stub_agent_for_finalize(agent)
     _run_finalize(agent)
     agent._spawn_background_review.assert_called_once()
+
+
+def test_finalize_turn_skips_review_on_failed_turn() -> None:
+    """A non-empty error response is not evidence worth learning from."""
+    agent = _make_agent(skip_background_review=False)
+    _stub_agent_for_finalize(agent)
+
+    _run_finalize(agent, failed=True)
+
+    agent._spawn_background_review.assert_not_called()
+
+
+def test_finalize_turn_skips_review_on_interrupted_turn() -> None:
+    """A cancelled partial response must not launch background learning."""
+    agent = _make_agent(skip_background_review=False)
+    _stub_agent_for_finalize(agent)
+
+    _run_finalize(agent, interrupted=True)
+
+    agent._spawn_background_review.assert_not_called()
 
 
 def test_cron_construction_sets_skip_background_review() -> None:

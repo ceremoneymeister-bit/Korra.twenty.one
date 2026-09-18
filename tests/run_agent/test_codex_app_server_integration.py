@@ -347,6 +347,61 @@ class TestRunConversationCodexPath:
 
         spawn.assert_not_called()
 
+    @pytest.mark.parametrize(
+        ("interrupted", "error"),
+        [
+            (False, "provider failed after partial output"),
+            (True, None),
+        ],
+    )
+    def test_failed_or_interrupted_codex_turn_does_not_spawn_review(
+        self,
+        monkeypatch,
+        interrupted,
+        error,
+    ):
+        """Codex partial/error output cannot become a learned success."""
+        from agent.transports.codex_app_server_session import (
+            CodexAppServerSession,
+            TurnResult,
+        )
+
+        def fake_run_turn(self, user_input: str, **kwargs):
+            return TurnResult(
+                final_text="partial output",
+                projected_messages=[
+                    {"role": "assistant", "content": "partial output"},
+                ],
+                tool_iterations=10,
+                interrupted=interrupted,
+                error=error,
+                turn_id="t-incomplete",
+                thread_id="th-incomplete",
+            )
+
+        monkeypatch.setattr(CodexAppServerSession, "run_turn", fake_run_turn)
+        monkeypatch.setattr(
+            CodexAppServerSession,
+            "ensure_started",
+            lambda self: "th-incomplete",
+        )
+
+        agent = _make_codex_agent()
+        agent._skill_nudge_interval = 10
+        agent._iters_since_skill = 0
+        agent.valid_tool_names = set(agent.valid_tool_names)
+        agent.valid_tool_names.add("skill_manage")
+
+        with patch.object(
+            agent,
+            "_spawn_background_review",
+            return_value=None,
+        ) as spawn:
+            result = agent.run_conversation("incomplete work")
+
+        spawn.assert_not_called()
+        assert result["completed"] is False
+
     def test_background_review_signature_never_breaks(self, fake_session):
         """Even when no trigger fires, the helper must never call
         _spawn_background_review with the wrong signature. Run a turn,
