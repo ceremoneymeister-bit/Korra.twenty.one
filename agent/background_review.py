@@ -503,6 +503,16 @@ _LESSON_LAYER_BLOCK = (
     "Extend an existing topical file before creating another.\n"
     "  • Fix a wrong instruction in place; do not append 'UPDATE: actually...' "
     "beneath the sentence that misled.\n\n"
+    "When the user supplied an incorrect/source result and a clearly approved "
+    "corrected result, attach `learning` metadata to the ONE skill_manage op "
+    "that writes the reusable rule. Classify it as `owner_preference` or "
+    "`reusable_method`; a one-off document correction gets no learning receipt. "
+    "The `rule` must be the exact generalized instruction written into the "
+    "skill, and `private_markers` must name client parties, requisites, amounts, "
+    "or exceptional terms that must not leak into it. Give 1-8 observable "
+    "rubric checks for a different deferred example. This records 'saved, not "
+    "yet verified' — never call it learned or verified until that separate "
+    "example passes.\n\n"
 )
 
 _SKILL_REVIEW_PROMPT = (

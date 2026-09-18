@@ -5,6 +5,7 @@
 """
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import re
 import shutil
@@ -23,6 +24,264 @@ _CATEGORY = "business-materials"
 
 class LearningConflict(ValueError):
     """Выбранная запись успела измениться."""
+
+
+def _learning_candidate(candidate_id: str) -> dict:
+    from tools.skill_learning import find_candidate
+    from tools.skill_ledger import list_entries
+
+    candidate = find_candidate(list_entries(), candidate_id)
+    if candidate is None:
+        raise FileNotFoundError("Запись обучения не найдена.")
+    return candidate
+
+
+def _check_learning_revision(candidate: dict, revision: str) -> None:
+    if not revision or revision != candidate.get("revision"):
+        raise LearningConflict(
+            "Правило уже изменилось. Обновите историю обучения и повторите действие."
+        )
+
+
+def _check_learning_skill_version(candidate: dict) -> None:
+    from tools.skill_learning import snapshot_digest
+    from tools.skill_ledger import current_snapshot
+    from tools.skill_manager_tool import _find_skill
+
+    found = _find_skill(str(candidate.get("skill") or ""))
+    if not found:
+        raise LearningConflict(
+            "Навык, в котором сохранено правило, уже перемещён или удалён."
+        )
+    current = snapshot_digest(current_snapshot(found["path"]))
+    if current != candidate.get("applied_skill_version"):
+        raise LearningConflict(
+            "Навык изменился после этой версии. Обновите историю: старая правка "
+            "не будет применена поверх более новой работы."
+        )
+
+
+def list_learning_lessons() -> dict:
+    """Project learning receipts from the profile-owned skill ledger."""
+    from tools.skill_learning import project_candidates
+    from tools.skill_ledger import list_entries
+
+    return {"lessons": project_candidates(list_entries())}
+
+
+def verify_learning_lesson(
+    candidate_id: str,
+    revision: str,
+    example: str,
+    response: str,
+    outcome: str,
+    checks: list[str],
+    no_foreign_identifiers: bool,
+    corrections_count: int = 0,
+    elapsed_ms: int = 0,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_tokens: int | None = None,
+) -> dict:
+    """Append a user/rubric-backed deferred-example result.
+
+    The raw example and model response are hashed, not retained.  A PASS is
+    accepted only when every predeclared rubric item was explicitly checked
+    and the caller confirmed that no source-party identifiers leaked.
+    """
+    from tools.skill_learning import MAX_EXAMPLE_CHARS, text_hash
+    from tools.skill_ledger import append_entry
+
+    candidate = _learning_candidate(candidate_id)
+    _check_learning_revision(candidate, revision)
+    if candidate.get("status") == "cancelled":
+        raise ValueError("Отменённое правило нельзя проверить.")
+    _check_learning_skill_version(candidate)
+
+    example = example.strip()
+    response = response.strip()
+    if not example or not response:
+        raise ValueError("Для проверки нужны другой пример и фактический ответ агента.")
+    if len(example) > MAX_EXAMPLE_CHARS or len(response) > MAX_EXAMPLE_CHARS:
+        raise ValueError("Пример или ответ слишком большой для этой проверки.")
+    if outcome not in {"pass", "fail"}:
+        raise ValueError("Неизвестный исход проверки.")
+    example_hash = text_hash(example)
+    if example_hash in {candidate.get("source_hash"), candidate.get("approved_hash")}:
+        raise ValueError("Проверка должна использовать другой, отложенный пример.")
+
+    rubric = [str(item) for item in candidate.get("rubric") or []]
+    checked = list(dict.fromkeys(str(item) for item in checks if str(item) in rubric))
+    if outcome == "pass" and (
+        set(checked) != set(rubric) or no_foreign_identifiers is not True
+    ):
+        raise ValueError(
+            "Нельзя отметить проверку успешной: подтвердите все пункты рубрики "
+            "и отсутствие чужих реквизитов."
+        )
+    if corrections_count < 0 or elapsed_ms < 0:
+        raise ValueError("Метрики проверки не могут быть отрицательными.")
+    usage_values = (prompt_tokens, completion_tokens, total_tokens)
+    if any(value is not None and value < 0 for value in usage_values):
+        raise ValueError("Метрики нагрузки не могут быть отрицательными.")
+    model_usage = None
+    if any(value is not None for value in usage_values):
+        model_usage = {
+            "prompt_tokens": int(prompt_tokens or 0),
+            "completion_tokens": int(completion_tokens or 0),
+            "total_tokens": int(total_tokens or 0),
+        }
+
+    event_id = append_entry(
+        "learning-verification",
+        str(candidate.get("skill") or "?"),
+        evidence={
+            "learning_candidate_id": candidate_id,
+            "outcome": outcome,
+            "example_hash": example_hash,
+            "response_hash": text_hash(response),
+            "checks": checked,
+            "no_foreign_identifiers": bool(no_foreign_identifiers),
+            "corrections_count": int(corrections_count),
+            "elapsed_ms": int(elapsed_ms),
+            "model_usage": model_usage,
+        },
+    )
+    if not event_id:
+        raise OSError(
+            "Ответ проверен, но запись результата не сохранилась. Статус не изменён."
+        )
+    return {"ok": True, "event_id": event_id, "outcome": outcome}
+
+
+def revise_learning_lesson(
+    candidate_id: str,
+    revision: str,
+    rule: str,
+    applies_to: str,
+) -> dict:
+    """Edit the exact reusable rule and reset verification to pending."""
+    from tools.skill_learning import MAX_APPLIES_TO_CHARS, MAX_RULE_CHARS
+    from tools.skill_ledger import capture_before, get_entry, record_mutation
+    from tools.skill_manager_tool import _find_skill, skill_manage
+
+    candidate = _learning_candidate(candidate_id)
+    _check_learning_revision(candidate, revision)
+    if candidate.get("status") == "cancelled":
+        raise ValueError("Отменённое правило нельзя изменить.")
+    _check_learning_skill_version(candidate)
+
+    rule = " ".join(rule.split())
+    applies_to = " ".join(applies_to.split())
+    if len(rule) < 10 or len(rule) > MAX_RULE_CHARS:
+        raise ValueError(f"Правило должно содержать от 10 до {MAX_RULE_CHARS} знаков.")
+    if not applies_to or len(applies_to) > MAX_APPLIES_TO_CHARS:
+        raise ValueError("Укажите короткую область применения правила.")
+    if rule == candidate.get("rule") and applies_to == candidate.get("applies_to"):
+        raise ValueError("Правило не изменилось.")
+
+    target_path = str(candidate.get("target_path") or "SKILL.md")
+    revision_evidence = {
+        "candidate_id": candidate_id,
+        "rule": rule,
+        "applies_to": applies_to,
+        "target_path": target_path,
+    }
+    skill_name = str(candidate.get("skill") or "")
+    if rule == candidate.get("rule"):
+        # Scope-only edits still need a versioned receipt, but patching the
+        # exact rule to itself is correctly rejected by the text patcher.
+        found = _find_skill(skill_name)
+        before = capture_before(found["path"] if found else None)
+        if found is None or before is None:
+            raise OSError("Не удалось записать безопасную версию области применения.")
+        mutation_id = record_mutation(
+            "learning-metadata",
+            skill_name,
+            before=before,
+            after_root=found["path"],
+            evidence={"_learning_revision": revision_evidence},
+        )
+        result = {
+            "success": mutation_id is not None,
+            "ledger": {"entry_id": mutation_id} if mutation_id else {},
+        }
+    else:
+        raw = skill_manage(
+            action="patch",
+            name=skill_name,
+            old_string=str(candidate.get("rule") or ""),
+            new_string=rule,
+            file_path=None if target_path == "SKILL.md" else target_path,
+            learning_revision=revision_evidence,
+        )
+        result = json.loads(raw)
+    if not result.get("success"):
+        raise LearningConflict(
+            "Не удалось адресно изменить правило: "
+            + str(result.get("error") or "обновите историю и повторите действие")
+        )
+    ledger = result.get("ledger") if isinstance(result.get("ledger"), dict) else {}
+    mutation_id = str(ledger.get("entry_id") or "")
+    mutation = get_entry(mutation_id) if mutation_id else None
+    if not mutation:
+        raise OSError(
+            "Правило изменено, но rollback receipt не записан. Обновите историю "
+            "перед следующей правкой; автоматическую отмену обещать нельзя."
+        )
+    learning_evidence = mutation.get("evidence", {})
+    stored_revision = (
+        learning_evidence.get("learning_revision")
+        if isinstance(learning_evidence, dict)
+        else None
+    )
+    if not isinstance(stored_revision, dict):
+        raise OSError(
+            "Правило изменено, но новая версия истории не сохранилась."
+        )
+    return {"ok": True, "event_id": mutation_id, "mutation_id": mutation_id}
+
+
+def cancel_learning_lesson(candidate_id: str, revision: str) -> dict:
+    """Undo all mutations belonging to one candidate, newest first."""
+    from tools.skill_ledger import (
+        append_entry,
+        preflight_rollback_chain,
+        rollback_entry,
+    )
+
+    candidate = _learning_candidate(candidate_id)
+    _check_learning_revision(candidate, revision)
+    if candidate.get("status") == "cancelled":
+        return {"ok": True, "already_cancelled": True}
+    _check_learning_skill_version(candidate)
+
+    mutation_ids = [str(item) for item in candidate.get("mutation_ids") or []]
+    ready, message = preflight_rollback_chain(mutation_ids)
+    if not ready:
+        raise LearningConflict("Не удалось безопасно отменить правило: " + message)
+
+    rolled_back: list[str] = []
+    for mutation_id in reversed(mutation_ids):
+        ok, message = rollback_entry(str(mutation_id), require_current_match=True)
+        if not ok:
+            raise LearningConflict(
+                "Не удалось безопасно отменить правило: " + message
+            )
+        rolled_back.append(str(mutation_id))
+    event_id = append_entry(
+        "learning-cancelled",
+        str(candidate.get("skill") or "?"),
+        evidence={
+            "learning_candidate_id": candidate_id,
+            "rolled_back_mutations": rolled_back,
+        },
+    )
+    if not event_id:
+        raise OSError(
+            "Правило отменено, но итоговая отметка истории не сохранилась."
+        )
+    return {"ok": True, "event_id": event_id, "rolled_back": rolled_back}
 
 
 def _memory_store():

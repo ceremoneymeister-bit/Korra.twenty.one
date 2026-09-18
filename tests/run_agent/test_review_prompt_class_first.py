@@ -219,6 +219,31 @@ def test_combined_review_prompt_teaches_lesson_layer():
     )
 
 
+def _assert_verifiable_learning_receipt(prompt: str, label: str) -> None:
+    lower = prompt.lower()
+    assert "learning" in lower and "metadata" in lower, (
+        f"{label}: approved source/correction pairs must create a receipt"
+    )
+    assert "one-off" in lower and "no learning receipt" in lower, (
+        f"{label}: one-off corrections must stay outside reusable learning"
+    )
+    assert "private_markers" in prompt and "rubric" in lower, (
+        f"{label}: the receipt must generalize identifiers and predeclare checks"
+    )
+    assert "not yet verified" in lower and "separate" in lower, (
+        f"{label}: saving a rule must not be called successful transfer"
+    )
+
+
+def test_review_prompts_require_verifiable_learning_receipts():
+    _assert_verifiable_learning_receipt(
+        AIAgent._SKILL_REVIEW_PROMPT, "_SKILL_REVIEW_PROMPT"
+    )
+    _assert_verifiable_learning_receipt(
+        AIAgent._COMBINED_REVIEW_PROMPT, "_COMBINED_REVIEW_PROMPT"
+    )
+
+
 def test_curator_consolidates_by_distilling():
     from agent.curator import CURATOR_REVIEW_PROMPT
 

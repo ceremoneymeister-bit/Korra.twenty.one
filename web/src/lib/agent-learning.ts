@@ -55,3 +55,35 @@ export function materialFileProblem(file: Pick<File, "name" | "size">): string |
 export function formatChars(value: number): string {
   return String(Math.max(0, Math.round(value))).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
+
+/** Explicit owner-initiated learning turn. The current corrected work is
+ * already complete; this bounded turn may only distil reusable guidance. */
+export function correctionLearningPrompt(
+  source: string,
+  approved: string,
+  note = "",
+): string {
+  const ownerNote = note.trim()
+    ? `\nПояснение владельца:\n${note.trim()}\n`
+    : "";
+  return [
+    "Это уже исправленный и утверждённый владельцем результат. Не переделывай текущую работу и не подменяй её обучением.",
+    "Сравни исходный и утверждённый варианты. Отдели разовую правку от предпочтения владельца и повторяемого способа.",
+    "Если есть переносимое правило, обнови одну подходящую методику через skill_manage и обязательно приложи learning receipt:",
+    "scope, ограниченную область applies_to, точное правило rule из записанного skill, исходный и утверждённый примеры, private_markers (стороны, реквизиты, суммы и особые условия) и 1–8 наблюдаемых rubric-пунктов для другого примера.",
+    "Не переноси private_markers в правило. Если это разовая правка или данных недостаточно, не меняй skill и честно скажи об этом. До отдельной проверки называй результат только «сохранено, ещё не проверено».",
+    ownerNote,
+    `Исходный результат:\n${source.trim()}`,
+    `\nУтверждённый результат:\n${approved.trim()}`,
+  ].join("\n\n");
+}
+
+/** A deferred example deliberately omits the learned rule. Selection and
+ * transfer must come from the profile's actual skill in a fresh chat. */
+export function deferredLearningPrompt(example: string): string {
+  return [
+    "Выполни это как новый самостоятельный пример, используя актуальные навыки профиля.",
+    "Не проси повторить сохранённое правило и не оценивай собственный ответ — верни только готовый результат.",
+    example.trim(),
+  ].join("\n\n");
+}

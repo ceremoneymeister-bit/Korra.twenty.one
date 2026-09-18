@@ -3,7 +3,7 @@
  *
  * Сердце миссии: предприниматель без технических навыков должен сам
  * научить агента своему делу и увидеть, что агент это усвоил. Панель
- * собирает в одном месте четыре настоящих механизма движка и называет их
+ * собирает в одном месте пять настоящих механизмов движка и называет их
  * человеческими словами (парная работа с Астрой, РЕШЕНО 06.09):
  *
  * - **Роль и правила** — `SOUL.md` профиля: правила, которые попадают в
@@ -16,6 +16,8 @@
  * - **Материалы и инструкции** — обычные навыки (`SKILL.md` + references):
  *   текст, ссылка или файл. Сохранение не значит чтения: агент открывает
  *   материал, когда его об этом просят, — поэтому рядом «Проверить вопросом».
+ * - **Исправления** — обезличенные receipts поверх обычного skill ledger:
+ *   правило остаётся непроверенным до другого примера в новом разговоре.
  * - **Проверить вопросом** — тот же маршрут, что и чат (`probeProfileChat`):
  *   каждая проверка — новый разговор, агент читает роль и память заново.
  *
@@ -43,11 +45,15 @@ import { Textarea } from "@nous-research/ui/ui/components/textarea";
 import { api, probeProfileChat } from "@/lib/api";
 import type {
   ProfileInfo,
+  ProfileLearningLesson,
   ProfileMaterialInfo,
   ProfileMemoryData,
+  ProfileProbeOutcome,
 } from "@/lib/api";
 import {
   formatChars,
+  correctionLearningPrompt,
+  deferredLearningPrompt,
   MATERIAL_FILE_EXTENSIONS,
   materialFileProblem,
   materialProbePrompt,
@@ -65,12 +71,13 @@ type MemoryTarget = "memory" | "user";
 type MaterialKind = ProfileMaterialInfo["kind"];
 type CreateMaterialBody = Parameters<typeof api.createProfileMaterial>[1];
 
-export type LearningSection = "role" | "memory" | "materials" | "check";
+export type LearningSection = "role" | "memory" | "materials" | "corrections" | "check";
 
 const SECTIONS: ReadonlyArray<{ id: LearningSection; label: string }> = [
   { id: "role", label: "Роль и правила" },
   { id: "memory", label: "Что важно помнить" },
   { id: "materials", label: "Материалы и инструкции" },
+  { id: "corrections", label: "Исправления" },
   { id: "check", label: "Проверить вопросом" },
 ];
 
@@ -251,6 +258,9 @@ export default function ProfileLearningPanel({
         )}
         {section === "materials" && (
           <MaterialsSection profileName={profile.name} onCheck={openCheck} />
+        )}
+        {section === "corrections" && (
+          <CorrectionsSection profileName={profile.name} />
         )}
         {section === "check" && (
           <CheckSection
@@ -940,6 +950,392 @@ function MaterialsSection({
           </Button>
         </div>
       </form>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Исправления → проверяемые правила                                 */
+/* ------------------------------------------------------------------ */
+
+function LessonCard({
+  lesson,
+  profileName,
+  onChanged,
+}: {
+  lesson: ProfileLearningLesson;
+  profileName: string;
+  onChanged: () => Promise<void>;
+}) {
+  const [mode, setMode] = useState<"idle" | "edit" | "cancel" | "verify">("idle");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [rule, setRule] = useState(lesson.rule);
+  const [appliesTo, setAppliesTo] = useState(lesson.applies_to);
+  const [example, setExample] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [usage, setUsage] = useState<ProfileProbeOutcome["usage"]>();
+  const [checked, setChecked] = useState<string[]>([]);
+  const [noForeignIdentifiers, setNoForeignIdentifiers] = useState(false);
+
+  const revise = async () => {
+    if (busy || !rule.trim() || !appliesTo.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.reviseProfileLearningLesson(profileName, lesson.id, {
+        revision: lesson.revision,
+        rule: rule.trim(),
+        applies_to: appliesTo.trim(),
+      });
+      await onChanged();
+      setMode("idle");
+    } catch (caught) {
+      setError(ownerFacingError(caught, "Не удалось изменить правило."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.cancelProfileLearningLesson(profileName, lesson.id, lesson.revision);
+      await onChanged();
+      setMode("idle");
+    } catch (caught) {
+      setError(ownerFacingError(caught, "Не удалось безопасно отменить правило."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runDeferredExample = async () => {
+    if (busy || !example.trim()) return;
+    setBusy(true);
+    setError("");
+    setAnswer("");
+    setUsage(undefined);
+    setChecked([]);
+    setNoForeignIdentifiers(false);
+    const started = Date.now();
+    try {
+      const result = await probeProfileChat(
+        profileName,
+        deferredLearningPrompt(example),
+      );
+      setElapsedMs(Math.max(0, Date.now() - started));
+      if (!result.ok) {
+        setError(result.error || result.detail || "Агент не ответил на проверку.");
+      } else {
+        setAnswer(result.reply);
+        setUsage(result.usage);
+      }
+    } catch (caught) {
+      setError(ownerFacingError(caught, "Не удалось выполнить отложенный пример."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const recordVerification = async (outcome: "pass" | "fail") => {
+    if (busy || !answer) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.verifyProfileLearningLesson(profileName, lesson.id, {
+        revision: lesson.revision,
+        example,
+        response: answer,
+        outcome,
+        checks: checked,
+        no_foreign_identifiers: noForeignIdentifiers,
+        corrections_count: outcome === "pass" ? 0 : 1,
+        elapsed_ms: elapsedMs,
+        prompt_tokens: usage?.prompt_tokens,
+        completion_tokens: usage?.completion_tokens,
+        total_tokens: usage?.total_tokens,
+      });
+      await onChanged();
+      setMode("idle");
+      setExample("");
+      setAnswer("");
+      setUsage(undefined);
+    } catch (caught) {
+      setError(ownerFacingError(caught, "Не удалось сохранить результат проверки."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const passReady =
+    checked.length === lesson.rubric.length && noForeignIdentifiers;
+  const badgeTone =
+    lesson.status === "verified"
+      ? "success"
+      : lesson.status === "cancelled"
+        ? "secondary"
+        : "warning";
+
+  return (
+    <li className="neo-field grid gap-3 px-3 py-3 text-sm" data-learning-lesson={lesson.id}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="grid min-w-0 gap-1">
+          <p className="font-medium">Учёл: {lesson.rule}</p>
+          <p className="text-[var(--neo-text-secondary)]">
+            Где применяется: {lesson.applies_to} · навык {lesson.skill}
+          </p>
+        </div>
+        <Badge tone={badgeTone} className="shrink-0">
+          {lesson.status_label}
+        </Badge>
+      </div>
+
+      {error && <p role="alert" className="text-destructive">{error}</p>}
+
+      {mode === "edit" && (
+        <div className="grid gap-2">
+          <Label htmlFor={`learning-rule-${lesson.id}`}>Правило</Label>
+          <Textarea
+            id={`learning-rule-${lesson.id}`}
+            value={rule}
+            disabled={busy}
+            onChange={(event) => setRule(event.target.value)}
+          />
+          <Label htmlFor={`learning-scope-${lesson.id}`}>Где применяется</Label>
+          <Input
+            id={`learning-scope-${lesson.id}`}
+            value={appliesTo}
+            disabled={busy}
+            onChange={(event) => setAppliesTo(event.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <Button ghost size="sm" disabled={busy} onClick={() => setMode("idle")}>Отмена</Button>
+            <Button size="sm" disabled={busy || !rule.trim() || !appliesTo.trim()} onClick={() => void revise()}>
+              Сохранить правило
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {mode === "cancel" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mr-auto">Отменить именно эту версию правила?</span>
+          <Button ghost size="sm" disabled={busy} onClick={() => setMode("idle")}>Не отменять</Button>
+          <Button size="sm" disabled={busy} onClick={() => void cancel()}>Да, отменить</Button>
+        </div>
+      )}
+
+      {mode === "verify" && (
+        <div className="grid gap-3">
+          <p className="text-[var(--neo-text-secondary)]">
+            Дайте другой пример с другими сторонами и суммами. Новый разговор
+            не получит текст правила — перенос должен прийти из навыка агента.
+          </p>
+          <Label htmlFor={`learning-example-${lesson.id}`}>Другой пример</Label>
+          <Textarea
+            id={`learning-example-${lesson.id}`}
+            className="min-h-24"
+            value={example}
+            disabled={busy || Boolean(answer)}
+            onChange={(event) => setExample(event.target.value)}
+          />
+          {!answer && (
+            <div className="flex justify-end">
+              <Button size="sm" disabled={busy || !example.trim()} onClick={() => void runDeferredExample()}>
+                {busy ? "Проверяю…" : "Проверить на другом примере"}
+              </Button>
+            </div>
+          )}
+          {answer && (
+            <>
+              <div className="grid gap-1">
+                <strong>Фактический ответ нового разговора</strong>
+                <p className="whitespace-pre-wrap">{answer}</p>
+              </div>
+              <fieldset className="grid gap-2">
+                <legend className="font-medium">Сверьте по рубрике</legend>
+                {lesson.rubric.map((item) => (
+                  <label key={item} className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={checked.includes(item)}
+                      onChange={(event) => setChecked((previous) =>
+                        event.target.checked
+                          ? [...previous, item]
+                          : previous.filter((value) => value !== item),
+                      )}
+                    />
+                    <span>{item}</span>
+                  </label>
+                ))}
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={noForeignIdentifiers}
+                    onChange={(event) => setNoForeignIdentifiers(event.target.checked)}
+                  />
+                  <span>Реквизиты, стороны и особые условия исходного примера не перенесены.</span>
+                </label>
+              </fieldset>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button ghost size="sm" disabled={busy} onClick={() => void recordVerification("fail")}>
+                  Нужно исправить
+                </Button>
+                <Button size="sm" disabled={busy || !passReady} onClick={() => void recordVerification("pass")}>
+                  Рубрика выполнена
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {mode === "idle" && lesson.status !== "cancelled" && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button ghost size="sm" onClick={() => setMode("verify")}>Проверить</Button>
+          <Button ghost size="sm" onClick={() => setMode("edit")}>Изменить</Button>
+          <Button ghost size="sm" disabled={!lesson.rollback_available} onClick={() => setMode("cancel")}>
+            Отменить
+          </Button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function CorrectionsSection({ profileName }: { profileName: string }) {
+  const resource = useProfileResource(profileName, api.getProfileLearningLessons);
+  const lessons = resource.value?.lessons ?? null;
+  const [source, setSource] = useState("");
+  const [approved, setApproved] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "ok" | "error" | "warning"; text: string } | null>(null);
+  const reloadLessons = resource.reload;
+
+  const refresh = useCallback(async () => {
+    await reloadLessons();
+  }, [reloadLessons]);
+
+  const learn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy || !source.trim() || !approved.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    const before = new Map((lessons ?? []).map((item) => [item.id, item.updated_at]));
+    try {
+      const outcome = await probeProfileChat(
+        profileName,
+        correctionLearningPrompt(source, approved, note),
+      );
+      if (!outcome.ok) {
+        setMessage({ tone: "error", text: outcome.error || outcome.detail });
+        return;
+      }
+      const fresh = await api.getProfileLearningLessons(profileName);
+      resource.setValue(fresh);
+      const changed = fresh.lessons.find(
+        (item) => !before.has(item.id) || before.get(item.id) !== item.updated_at,
+      );
+      if (changed) {
+        setMessage({
+          tone: "ok",
+          text: `Учёл: ${changed.rule} · ${changed.status_label}.`,
+        });
+        setSource("");
+        setApproved("");
+        setNote("");
+      } else {
+        setMessage({
+          tone: "warning",
+          text: "Агент ответил, но проверяемое правило не записал. Возможно, это разовая правка или данных недостаточно.",
+        });
+      }
+    } catch (caught) {
+      setMessage({ tone: "error", text: ownerFacingError(caught, "Не удалось учесть исправление.") });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-4">
+      <p className="text-sm text-[var(--neo-text-secondary)]">
+        Сначала завершите и утвердите исправленную работу. Здесь агент сравнит
+        исходный и правильный результат, сохранит только переносимое правило и
+        честно оставит его непроверенным до другого примера.
+      </p>
+
+      <form className="grid gap-3" onSubmit={(event) => void learn(event)} aria-label="Учесть исправленный результат">
+        <Label htmlFor="learning-correction-source">Как было</Label>
+        <Textarea
+          id="learning-correction-source"
+          className="min-h-24"
+          value={source}
+          disabled={busy}
+          onChange={(event) => setSource(event.target.value)}
+        />
+        <Label htmlFor="learning-correction-approved">Как правильно — утверждённый результат</Label>
+        <Textarea
+          id="learning-correction-approved"
+          className="min-h-24"
+          value={approved}
+          disabled={busy}
+          onChange={(event) => setApproved(event.target.value)}
+        />
+        <Label htmlFor="learning-correction-note">Пояснение, если нужно</Label>
+        <Textarea
+          id="learning-correction-note"
+          className="min-h-16"
+          value={note}
+          disabled={busy}
+          onChange={(event) => setNote(event.target.value)}
+        />
+        <div className="flex justify-end">
+          <Button type="submit" size="sm" disabled={busy || !source.trim() || !approved.trim()}>
+            {busy ? "Сравниваю…" : "Учесть исправление"}
+          </Button>
+        </div>
+      </form>
+
+      {message && (
+        <p
+          role={message.tone === "error" ? "alert" : "status"}
+          className={message.tone === "error" ? "text-sm text-destructive" : "text-sm"}
+        >
+          {message.text}
+        </p>
+      )}
+
+      <section className="grid gap-2" aria-labelledby="learning-lessons-title">
+        <h3 id="learning-lessons-title" className="text-sm font-semibold">История правил</h3>
+        {resource.state === "loading" && <p role="status">Загружаю историю…</p>}
+        {resource.state === "error" && (
+          <div role="alert" className="grid gap-2 text-sm">
+            <p>Не удалось загрузить историю обучения.</p>
+            <div><Button size="sm" onClick={resource.retry}>Повторить</Button></div>
+          </div>
+        )}
+        {lessons?.length === 0 && (
+          <p className="text-sm text-[var(--neo-text-secondary)]">Проверяемых правил пока нет.</p>
+        )}
+        {lessons && lessons.length > 0 && (
+          <ul className="grid gap-2">
+            {lessons.map((lesson) => (
+              <LessonCard
+                key={`${lesson.id}:${lesson.revision}`}
+                lesson={lesson}
+                profileName={profileName}
+                onChanged={refresh}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

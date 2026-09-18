@@ -27,6 +27,30 @@ class ProfileMemoryMutation(BaseModel):
     old_text: str = ""
 
 
+class ProfileLearningVerification(BaseModel):
+    revision: str
+    example: str = Field(min_length=1, max_length=100_000)
+    response: str = Field(min_length=1, max_length=100_000)
+    outcome: Literal["pass", "fail"]
+    checks: List[str] = Field(default_factory=list)
+    no_foreign_identifiers: bool = False
+    corrections_count: int = Field(default=0, ge=0, le=10_000)
+    elapsed_ms: int = Field(default=0, ge=0, le=86_400_000)
+    prompt_tokens: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+    completion_tokens: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+    total_tokens: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+
+
+class ProfileLearningRevision(BaseModel):
+    revision: str
+    rule: str = Field(min_length=10, max_length=1_000)
+    applies_to: str = Field(min_length=1, max_length=240)
+
+
+class ProfileLearningCancel(BaseModel):
+    revision: str
+
+
 class EnvVarUpdate(BaseModel):
     key: str
     value: str

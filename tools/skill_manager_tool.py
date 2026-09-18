@@ -1543,7 +1543,18 @@ def _apply_skill_write_gate(action, name, **payload_kwargs):
 
     # stage — record the full skill_manage kwargs so approval can replay it.
     payload = {"action": action, "name": name}
-    payload.update({k: v for k, v in payload_kwargs.items() if v is not None})
+    staged_kwargs = dict(payload_kwargs)
+    learning = staged_kwargs.pop("learning", None)
+    if learning is not None:
+        try:
+            from tools.skill_learning import sanitise_for_staging
+
+            staged_kwargs["learning_receipt"] = sanitise_for_staging(learning)
+        except Exception as exc:
+            # The skill write itself remains valid. Persist only the generic
+            # error, never the raw examples that made the receipt invalid.
+            staged_kwargs["learning_receipt"] = {"_learning_error": str(exc)}
+    payload.update({k: v for k, v in staged_kwargs.items() if v is not None})
     gist = wa.skill_gist(
         action, name,
         content=payload_kwargs.get("content") or "",
@@ -1576,6 +1587,9 @@ def apply_skill_pending(payload: Dict[str, Any]) -> str:
             new_string=payload.get("new_string"),
             replace_all=payload.get("replace_all", False),
             absorbed_into=payload.get("absorbed_into"),
+            learning=payload.get("learning"),
+            learning_receipt=payload.get("learning_receipt"),
+            learning_revision=payload.get("learning_revision"),
             operations=payload.get("operations"),
         )
     finally:
@@ -1701,7 +1715,8 @@ def _skill_manage_batch(
         touched_files.add(key)
 
     # --- approval gate: stage the WHOLE batch as one pending write ---
-    if not _skill_gate_bypass.get():
+    replaying_staged_batch = _skill_gate_bypass.get()
+    if not replaying_staged_batch:
         try:
             from tools import write_approval as wa
         except Exception:
@@ -1711,7 +1726,23 @@ def _skill_manage_batch(
             if decision.blocked:
                 return tool_error(decision.message, success=False)
             if not decision.allow:
-                payload = {"action": "batch", "operations": operations}
+                staged_operations = []
+                for op in operations:
+                    staged = dict(op)
+                    learning = staged.pop("learning", None)
+                    if learning is not None:
+                        try:
+                            from tools.skill_learning import sanitise_for_staging
+
+                            staged["learning_receipt"] = sanitise_for_staging(
+                                learning
+                            )
+                        except Exception as exc:
+                            staged["learning_receipt"] = {
+                                "_learning_error": str(exc)
+                            }
+                    staged_operations.append(staged)
+                payload = {"action": "batch", "operations": staged_operations}
                 acts = ", ".join(op["action"] for op in operations)
                 skills = ", ".join(sorted(set(names)))
                 gist = f"batch({len(operations)} ops: {acts}) on {skills}"
@@ -1801,6 +1832,10 @@ def _skill_manage_batch(
                 old_string=op.get("old_string"),
                 new_string=op.get("new_string"),
                 replace_all=op.get("replace_all", False),
+                learning=op.get("learning"),
+                learning_receipt=(
+                    op.get("learning_receipt") if replaying_staged_batch else None
+                ),
                 task_id=task_id,
                 session_id=session_id,
             )
@@ -1836,6 +1871,8 @@ def _skill_manage_batch(
             }
             if parsed.get("ledger") is not None:
                 op_result["ledger"] = parsed["ledger"]
+            if parsed.get("learning") is not None:
+                op_result["learning"] = parsed["learning"]
             results.append(op_result)
     finally:
         _skill_gate_bypass.reset(token)
@@ -1925,6 +1962,9 @@ def skill_manage(
     absorbed_into: str = None,
     task_id: str = None,
     session_id: str = None,
+    learning=None,
+    learning_receipt=None,
+    learning_revision=None,
     operations=None,
 ) -> str:
     """
@@ -1954,6 +1994,8 @@ def skill_manage(
         file_path=file_path, file_content=file_content,
         old_string=old_string, new_string=new_string,
         replace_all=replace_all, absorbed_into=absorbed_into,
+        learning=learning,
+        learning_revision=learning_revision,
     )
     if gate_result is not None:
         return gate_result
@@ -2052,6 +2094,17 @@ def skill_manage(
                 _evidence["session_id"] = session_id
             if file_path:
                 _evidence["file_path"] = file_path
+            if learning is not None:
+                _evidence["_learning_request"] = learning
+            elif isinstance(learning_receipt, dict):
+                if learning_receipt.get("_learning_error"):
+                    _evidence["learning_error"] = str(
+                        learning_receipt["_learning_error"]
+                    )
+                else:
+                    _evidence["_learning_receipt"] = learning_receipt
+            if learning_revision is not None:
+                _evidence["_learning_revision"] = learning_revision
             _ledger_entry_id = _ledger.record_mutation(
                 action,
                 name,
@@ -2076,6 +2129,32 @@ def skill_manage(
                 "entry_id": _ledger_entry_id,
                 "rollback_available": True,
             }
+            try:
+                _learning_evidence = (
+                    _ledger.get_entry(_ledger_entry_id) or {}
+                ).get("evidence", {})
+                if isinstance(_learning_evidence.get("learning_candidate"), dict):
+                    result["learning"] = {
+                        "status": "saved_unverified",
+                        "candidate_id": _ledger_entry_id,
+                        "message": "Saved, not verified on a second example yet.",
+                    }
+                elif isinstance(_learning_evidence.get("learning_revision"), dict):
+                    result["learning"] = {
+                        "status": "saved_unverified",
+                        "candidate_id": _learning_evidence["learning_revision"].get(
+                            "candidate_id"
+                        ),
+                        "deduplicated": True,
+                        "message": "Updated the existing candidate; second-example verification is pending.",
+                    }
+                elif _learning_evidence.get("learning_error"):
+                    result["learning"] = {
+                        "status": "failed",
+                        "message": str(_learning_evidence["learning_error"]),
+                    }
+            except Exception:
+                pass
         else:
             result["ledger"] = {
                 "status": "failed",
@@ -2226,6 +2305,50 @@ SKILL_MANAGE_SCHEMA = {
                         "file_content": {
                             "type": "string",
                             "description": "Content for write_file."
+                        },
+                        "learning": {
+                            "type": "object",
+                            "description": (
+                                "Optional receipt ONLY when this op turns a user-approved correction into reusable guidance. "
+                                "Do not use it for one-off edits. Raw examples are hashed and not retained. The rule must "
+                                "exactly occur in the written target file."
+                            ),
+                            "properties": {
+                                "scope": {
+                                    "type": "string",
+                                    "enum": ["owner_preference", "reusable_method"]
+                                },
+                                "applies_to": {
+                                    "type": "string",
+                                    "description": "Bounded task class where the rule applies."
+                                },
+                                "rule": {
+                                    "type": "string",
+                                    "description": "The exact generalized instruction written into the skill."
+                                },
+                                "source_example": {
+                                    "type": "string",
+                                    "description": "The incorrect/source result; hashed, never retained in the ledger."
+                                },
+                                "approved_example": {
+                                    "type": "string",
+                                    "description": "The user-approved result; hashed, never retained in the ledger."
+                                },
+                                "private_markers": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "Client names, requisites, amounts, or special terms that must not appear in the generalized rule."
+                                },
+                                "rubric": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "1-8 observable checks for a different deferred example."
+                                }
+                            },
+                            "required": [
+                                "scope", "applies_to", "rule", "source_example",
+                                "approved_example", "rubric"
+                            ]
                         }
                     },
                     "required": ["name", "action"]
@@ -2262,6 +2385,7 @@ registry.register(
         new_string=args.get("new_string"),
         replace_all=args.get("replace_all", False),
         absorbed_into=args.get("absorbed_into"),
+        learning=args.get("learning"),
         operations=args.get("operations"),
         task_id=kw.get("task_id"),
         session_id=kw.get("session_id")),

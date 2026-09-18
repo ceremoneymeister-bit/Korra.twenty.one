@@ -375,6 +375,197 @@ def test_user_actor_override(ledger_env):
     assert entry["actor"] == "user"
 
 
+def _contract_learning(rule: str):
+    return {
+        "scope": "reusable_method",
+        "applies_to": "проверка договоров поставки",
+        "rule": rule,
+        "source_example": (
+            "ООО Альфа оплачивает 100 000 рублей до проверки товара; "
+            "штраф покупателю начисляется без встречной ответственности."
+        ),
+        "approved_example": (
+            "Оплата производится после приёмки; ответственность сторон "
+            "сформулирована взаимно и с одинаковым пределом."
+        ),
+        "private_markers": ["ООО Альфа", "100 000 рублей"],
+        "rubric": [
+            "Оплата привязана к приёмке.",
+            "Ответственность сформулирована взаимно.",
+            "Реквизиты исходного договора не перенесены.",
+        ],
+    }
+
+
+def test_learning_receipt_is_anonymised_versioned_and_deduplicated(ledger_env):
+    from tools import skill_ledger
+    from tools.skill_learning import project_candidates
+    from tools.skill_manager_tool import skill_manage
+
+    assert _create()["success"] is True
+    first_rule = "Проверяй, что оплата привязана к приёмке, а ответственность сторон взаимна."
+    first = json.loads(skill_manage(
+        action="batch",
+        name="",
+        operations=[{
+            "action": "patch",
+            "name": "my-skill",
+            "old_string": "Original body.",
+            "new_string": first_rule,
+            "learning": _contract_learning(first_rule),
+        }],
+    ))
+    first_learning = first["results"][0]["learning"]
+    assert first_learning["status"] == "saved_unverified"
+    assert first_learning["candidate_id"]
+
+    rows = skill_ledger.list_entries()
+    candidates = project_candidates(rows)
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["status_label"] == "сохранено, ещё не проверено"
+    assert candidate["base_skill_version"] != candidate["applied_skill_version"]
+    assert candidate["rule"] == first_rule
+    ledger_text = skill_ledger.ledger_path().read_text(encoding="utf-8")
+    assert "ООО Альфа" not in ledger_text
+    assert "100 000 рублей" not in ledger_text
+    assert "source_example" not in ledger_text
+
+    # The same source+approved pair updates one candidate instead of creating
+    # a second lesson card, even when the generalized wording is improved.
+    second_rule = "Связывай оплату с приёмкой и проверяй симметрию ответственности обеих сторон."
+    second = json.loads(skill_manage(
+        action="batch",
+        name="",
+        operations=[{
+            "action": "patch",
+            "name": "my-skill",
+            "old_string": first_rule,
+            "new_string": second_rule,
+            "learning": _contract_learning(second_rule),
+        }],
+    ))
+    assert second["results"][0]["learning"]["deduplicated"] is True
+    candidates = project_candidates(skill_ledger.list_entries())
+    assert len(candidates) == 1
+    assert candidates[0]["id"] == candidate["id"]
+    assert candidates[0]["rule"] == second_rule
+    assert len(candidates[0]["mutation_ids"]) == 2
+
+
+def test_learning_receipt_rejects_specific_marker_without_persisting_raw_data(ledger_env):
+    from tools import skill_ledger
+    from tools.skill_manager_tool import skill_manage
+
+    assert _create()["success"] is True
+    leaking_rule = "Для ООО Альфа всегда оставляй оплату после приёмки."
+    result = json.loads(skill_manage(
+        action="patch",
+        name="my-skill",
+        old_string="Original body.",
+        new_string=leaking_rule,
+        learning=_contract_learning(leaking_rule),
+    ))
+    assert result["success"] is True  # mutation truth is not hidden
+    assert result["learning"]["status"] == "failed"
+    assert "client-specific marker" in result["learning"]["message"]
+    assert "ООО Альфа" not in skill_ledger.ledger_path().read_text(encoding="utf-8")
+
+    rubric_leak = _contract_learning("Проверяй общую взаимность обязательств сторон.")
+    rubric_leak["rubric"][0] = "Оплата ООО Альфа привязана к приёмке."
+    second = json.loads(
+        skill_manage(
+            action="patch",
+            name="my-skill",
+            old_string=leaking_rule,
+            new_string="Проверяй общую взаимность обязательств сторон.",
+            learning=rubric_leak,
+        )
+    )
+    assert second["success"] is True
+    assert second["learning"]["status"] == "failed"
+    assert "ООО Альфа" not in skill_ledger.ledger_path().read_text(encoding="utf-8")
+
+
+def test_learning_approval_queue_persists_only_anonymised_receipt(
+    ledger_env, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from tools import write_approval
+    from tools.skill_manager_tool import apply_skill_pending, skill_manage
+
+    assert _create()["success"] is True
+    captured = {}
+
+    monkeypatch.setattr(
+        write_approval,
+        "evaluate_gate",
+        lambda _area: SimpleNamespace(
+            allow=False, blocked=False, message="approval required"
+        ),
+    )
+
+    def stage_write(_area, payload, **_kwargs):
+        captured["payload"] = payload
+        return {"id": "pending-learning"}
+
+    monkeypatch.setattr(write_approval, "stage_write", stage_write)
+    rule = "Проверяй связь оплаты с приёмкой и взаимность ответственности сторон."
+    staged = json.loads(
+        skill_manage(
+            action="batch",
+            name="",
+            operations=[{
+                "action": "patch",
+                "name": "my-skill",
+                "old_string": "Original body.",
+                "new_string": rule,
+                "learning": _contract_learning(rule),
+            }],
+        )
+    )
+    assert staged["staged"] is True
+    payload_text = json.dumps(captured["payload"], ensure_ascii=False)
+    assert "ООО Альфа" not in payload_text
+    assert "100 000 рублей" not in payload_text
+    assert "source_example" not in payload_text
+    assert "learning_receipt" in captured["payload"]["operations"][0]
+
+    applied = json.loads(apply_skill_pending(captured["payload"]))
+    assert applied["success"] is True
+    assert applied["results"][0]["learning"]["status"] == "saved_unverified"
+
+
+def test_version_safe_rollback_refuses_to_erase_newer_skill_work(ledger_env):
+    from tools import skill_ledger
+    from tools.skill_manager_tool import skill_manage
+
+    assert _create()["success"] is True
+    rule = "Проверяй, что оплата привязана к приёмке, а ответственность сторон взаимна."
+    learned = json.loads(skill_manage(
+        action="patch",
+        name="my-skill",
+        old_string="Original body.",
+        new_string=rule,
+        learning=_contract_learning(rule),
+    ))
+    candidate_id = learned["learning"]["candidate_id"]
+    assert json.loads(skill_manage(
+        action="write_file",
+        name="my-skill",
+        file_path="references/newer.md",
+        file_content="Newer owner-authored guidance.",
+    ))["success"]
+
+    ok, message = skill_ledger.rollback_entry(
+        candidate_id, require_current_match=True
+    )
+    assert ok is False
+    assert "overwrite newer work" in message
+    assert (ledger_env["skills"] / "my-skill" / "references" / "newer.md").exists()
+
+
 # ---------------------------------------------------------------------------
 # Package-completeness fill from the newest curator backup (issue #96962)
 # ---------------------------------------------------------------------------

@@ -38,6 +38,49 @@ def change(client, action, content="", old_text="", target="memory", profile="le
     })
 
 
+def create_contract_lesson(profile="learning-one"):
+    from korra_cli.web_server import _profile_scope
+    from tools.skill_manager_tool import skill_manage
+
+    content = """---
+name: contract-review
+description: Review contracts against owner-approved rules.
+---
+
+# Contract Review
+
+Review the supplied contract.
+"""
+    rule = "Связывай оплату с приёмкой и проверяй симметрию ответственности обеих сторон."
+    learning = {
+        "scope": "reusable_method",
+        "applies_to": "проверка договоров поставки",
+        "rule": rule,
+        "source_example": "ООО Альфа платит 100 000 рублей до приёмки; штраф есть только у покупателя.",
+        "approved_example": "Оплата после приёмки; ответственность сторон взаимна и ограничена одинаково.",
+        "private_markers": ["ООО Альфа", "100 000 рублей"],
+        "rubric": [
+            "Оплата привязана к приёмке.",
+            "Ответственность сформулирована взаимно.",
+            "Реквизиты исходного договора не перенесены.",
+        ],
+    }
+    with _profile_scope(profile):
+        created = json.loads(skill_manage(
+            action="create", name="contract-review", content=content
+        ))
+        assert created["success"] is True, created
+        result = json.loads(skill_manage(
+            action="patch",
+            name="contract-review",
+            old_string="Review the supplied contract.",
+            new_string=rule,
+            learning=learning,
+        ))
+    assert result["success"] is True, result
+    return result["learning"]["candidate_id"], rule, learning
+
+
 def test_memory_is_profile_owned_and_frozen_for_existing_conversation(client):
     from korra_cli.web_server import _profile_scope
     from tools.memory_tool import load_on_disk_store, ENTRY_DELIMITER
@@ -98,6 +141,192 @@ def test_unknown_profile_never_falls_back_to_main(client):
         assert client.get(f"/api/profiles/{name}/memory").status_code == 404
         assert client.get(f"/api/profiles/{name}/materials").status_code == 404
         assert change(client, "add", "Чужой факт", profile=name).status_code == 404
+
+
+def test_learning_lesson_deferred_contract_rubric_is_profile_owned_and_durable(client):
+    candidate_id, rule, learning = create_contract_lesson()
+
+    response = client.get("/api/profiles/learning-one/learning-lessons")
+    assert response.status_code == 200, response.text
+    lesson = response.json()["lessons"][0]
+    assert lesson["id"] == candidate_id
+    assert lesson["rule"] == rule
+    assert lesson["status"] == "saved_unverified"
+    assert lesson["status_label"] == "сохранено, ещё не проверено"
+    assert client.get("/api/profiles/learning-two/learning-lessons").json() == {
+        "lessons": []
+    }
+
+    # Readback is reconstructed from JSONL each time (the restart contract),
+    # not from an in-process candidate cache.
+    assert client.get("/api/profiles/learning-one/learning-lessons").json()[
+        "lessons"
+    ][0]["id"] == candidate_id
+
+    verify_url = (
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}/verification"
+    )
+    common = {
+        "revision": lesson["revision"],
+        "example": "ООО Бета поставляет товар за 275 000 рублей после осмотра.",
+        "response": "Оплата после приёмки; предел ответственности одинаков для обеих сторон.",
+        "outcome": "pass",
+        "checks": learning["rubric"],
+        "no_foreign_identifiers": True,
+        "corrections_count": 0,
+        "elapsed_ms": 1_250,
+        "prompt_tokens": 740,
+        "completion_tokens": 180,
+        "total_tokens": 920,
+    }
+    incomplete = client.post(verify_url, json={**common, "checks": learning["rubric"][:1]})
+    assert incomplete.status_code == 400
+    verified = client.post(verify_url, json=common)
+    assert verified.status_code == 200, verified.text
+    state = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
+    assert state["status"] == "verified"
+    assert state["status_label"] == "проверено"
+    assert state["verification"]["checks"] == learning["rubric"]
+    assert state["verification"]["corrections_count"] == 0
+    assert state["verification"]["elapsed_ms"] == 1_250
+    assert state["verification"]["model_usage"] == {
+        "prompt_tokens": 740,
+        "completion_tokens": 180,
+        "total_tokens": 920,
+    }
+
+    ledger = (home() / "skills" / ".curator_ledger.jsonl").read_text(encoding="utf-8")
+    assert "ООО Альфа" not in ledger
+    assert "ООО Бета" not in ledger
+    assert "275 000 рублей" not in ledger
+
+
+def test_learning_lesson_revision_then_addressed_cancel_restores_pre_lesson(client):
+    candidate_id, old_rule, _learning = create_contract_lesson()
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
+    new_rule = "Связывай оплату с документированной приёмкой и устанавливай взаимный предел ответственности."
+    revised = client.put(
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
+        json={
+            "revision": lesson["revision"],
+            "rule": new_rule,
+            "applies_to": "договоры поставки с приёмкой товара",
+        },
+    )
+    assert revised.status_code == 200, revised.text
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
+    assert lesson["rule"] == new_rule
+    assert lesson["status"] == "saved_unverified"
+    assert len(lesson["mutation_ids"]) == 2
+
+    cancelled = client.request(
+        "DELETE",
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
+        json={"revision": lesson["revision"]},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
+    assert lesson["status"] == "cancelled"
+    skill_md = home() / "skills" / "contract-review" / "SKILL.md"
+    text = skill_md.read_text(encoding="utf-8")
+    assert old_rule not in text and new_rule not in text
+    assert "Review the supplied contract." in text
+
+
+def test_learning_scope_only_revision_is_versioned_and_cancelled(client):
+    candidate_id, rule, _learning = create_contract_lesson()
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()[
+        "lessons"
+    ][0]
+    revised = client.put(
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
+        json={
+            "revision": lesson["revision"],
+            "rule": rule,
+            "applies_to": "рамочные договоры поставки",
+        },
+    )
+    assert revised.status_code == 200, revised.text
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()[
+        "lessons"
+    ][0]
+    assert lesson["applies_to"] == "рамочные договоры поставки"
+    assert lesson["rule"] == rule
+    assert len(lesson["mutation_ids"]) == 2
+
+    cancelled = client.request(
+        "DELETE",
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
+        json={"revision": lesson["revision"]},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    text = (home() / "skills" / "contract-review" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert rule not in text
+    assert "Review the supplied contract." in text
+
+
+def test_learning_cancel_refuses_concurrent_skill_change(client):
+    candidate_id, _rule, _learning = create_contract_lesson()
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()["lessons"][0]
+    newer = home() / "skills" / "contract-review" / "references" / "owner-note.md"
+    newer.parent.mkdir()
+    newer.write_text("Новая независимая правка владельца.", encoding="utf-8")
+
+    cancelled = client.request(
+        "DELETE",
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
+        json={"revision": lesson["revision"]},
+    )
+    assert cancelled.status_code == 409
+    assert "более новой" in cancelled.json()["detail"] or "новой" in cancelled.json()["detail"]
+    assert newer.read_text(encoding="utf-8") == "Новая независимая правка владельца."
+
+
+def test_learning_cancel_preflights_every_old_backup_before_changing_files(client):
+    candidate_id, old_rule, _learning = create_contract_lesson()
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()[
+        "lessons"
+    ][0]
+    new_rule = (
+        "Связывай оплату с актом приёмки и применяй одинаковые ограничения "
+        "ответственности к обеим сторонам."
+    )
+    revised = client.put(
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
+        json={
+            "revision": lesson["revision"],
+            "rule": new_rule,
+            "applies_to": "договоры поставки с актом приёмки",
+        },
+    )
+    assert revised.status_code == 200, revised.text
+    lesson = client.get("/api/profiles/learning-one/learning-lessons").json()[
+        "lessons"
+    ][0]
+
+    rows = [
+        json.loads(line)
+        for line in (home() / "skills" / ".curator_ledger.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    original = next(row for row in rows if row["id"] == lesson["mutation_ids"][0])
+    old_blob = home() / ".curator_backups" / "blobs" / original["before"][0]["sha256"]
+    old_blob.unlink()
+
+    cancelled = client.request(
+        "DELETE",
+        f"/api/profiles/learning-one/learning-lessons/{candidate_id}",
+        json={"revision": lesson["revision"]},
+    )
+    assert cancelled.status_code == 409
+    text = (home() / "skills" / "contract-review" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    assert new_rule in text
+    assert old_rule not in text
 
 
 def test_material_is_a_pinned_native_skill_readable_by_engine(client):

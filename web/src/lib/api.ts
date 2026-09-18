@@ -460,6 +460,8 @@ export interface ProfileProbeOutcome {
    *  («HTTP 401: invalid x-api-key») именно он и есть диагноз, а
    *  `ownerFacingError` английскую прозу вырезает. */
   detail: string;
+  /** Server-reported model usage for this exact control turn. */
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }
 
 /** ID сообщения для журнала доставки: 16–80 символов из `[A-Za-z0-9._:-]`
@@ -550,6 +552,11 @@ export async function probeProfileChat(
       message?: { content?: unknown };
     }>;
     hermes?: { failed?: unknown; error?: unknown };
+    usage?: {
+      prompt_tokens?: unknown;
+      completion_tokens?: unknown;
+      total_tokens?: unknown;
+    };
   } | null;
   const choice = body?.choices?.[0];
   const content =
@@ -580,7 +587,22 @@ export async function probeProfileChat(
     };
   }
 
-  return { ok: true, reply: content, error: "", detail: "" };
+  const usage = body?.usage;
+  const numberOrZero = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+  return {
+    ok: true,
+    reply: content,
+    error: "",
+    detail: "",
+    usage: usage
+      ? {
+          prompt_tokens: numberOrZero(usage.prompt_tokens),
+          completion_tokens: numberOrZero(usage.completion_tokens),
+          total_tokens: numberOrZero(usage.total_tokens),
+        }
+      : undefined,
+  };
 }
 
 export interface SessionQueryOptions {
@@ -1139,6 +1161,45 @@ export const api = {
     fetchJSON<{ ok: true }>(`/api/profiles/${encodeURIComponent(name)}/materials/${encodeURIComponent(materialName)}`, {
       method: "DELETE",
     }),
+  getProfileLearningLessons: (name: string) =>
+    fetchJSON<{ lessons: ProfileLearningLesson[] }>(
+      `/api/profiles/${encodeURIComponent(name)}/learning-lessons`,
+    ),
+  verifyProfileLearningLesson: (
+    name: string,
+    candidateId: string,
+    body: ProfileLearningVerificationInput,
+  ) =>
+    fetchJSON<{ ok: true; event_id: string; outcome: "pass" | "fail" }>(
+      `/api/profiles/${encodeURIComponent(name)}/learning-lessons/${encodeURIComponent(candidateId)}/verification`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  reviseProfileLearningLesson: (
+    name: string,
+    candidateId: string,
+    body: { revision: string; rule: string; applies_to: string },
+  ) =>
+    fetchJSON<{ ok: true; event_id: string; mutation_id: string }>(
+      `/api/profiles/${encodeURIComponent(name)}/learning-lessons/${encodeURIComponent(candidateId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  cancelProfileLearningLesson: (name: string, candidateId: string, revision: string) =>
+    fetchJSON<{ ok: true; event_id?: string }>(
+      `/api/profiles/${encodeURIComponent(name)}/learning-lessons/${encodeURIComponent(candidateId)}`,
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision }),
+      },
+    ),
   describeProfileAuto: (name: string, overwrite = true) =>
     fetchJSON<ProfileDescribeAutoResult>(
       `/api/profiles/${encodeURIComponent(name)}/describe-auto`,
@@ -2812,6 +2873,48 @@ export interface ProfileMaterialInfo {
   filename?: string;
   updated_at?: string;
   url?: string;
+}
+
+export interface ProfileLearningVerificationInput {
+  revision: string;
+  example: string;
+  response: string;
+  outcome: "pass" | "fail";
+  checks: string[];
+  no_foreign_identifiers: boolean;
+  corrections_count?: number;
+  elapsed_ms?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
+
+export interface ProfileLearningLesson {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  skill: string;
+  scope: "owner_preference" | "reusable_method";
+  applies_to: string;
+  rule: string;
+  rubric: string[];
+  status: "saved_unverified" | "verified" | "verification_failed" | "cancelled";
+  status_label: string;
+  revision: string;
+  rollback_available: boolean;
+  verification: {
+    status: string;
+    outcome: "pass" | "fail" | null;
+    checks?: string[];
+    corrections_count?: number;
+    elapsed_ms?: number;
+    model_usage?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    } | null;
+    verified_at?: string;
+  };
 }
 
 export interface AgentTemplate {

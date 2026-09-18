@@ -444,8 +444,68 @@ def record_mutation(
                 before_root, before, skill=skill
             )
         after = snapshot_paths(after_root)
+        entry_evidence = dict(evidence or {})
+        learning_request = entry_evidence.pop("_learning_request", None)
+        learning_receipt = entry_evidence.pop("_learning_receipt", None)
+        learning_revision = entry_evidence.pop("_learning_revision", None)
+        if isinstance(learning_revision, dict):
+            try:
+                from tools.skill_learning import snapshot_digest
+
+                entry_evidence["learning_revision"] = {
+                    "candidate_id": str(learning_revision["candidate_id"]),
+                    "rule": str(learning_revision["rule"]),
+                    "applies_to": str(learning_revision["applies_to"]),
+                    "target_path": str(
+                        learning_revision.get("target_path") or "SKILL.md"
+                    ),
+                    "applied_skill_version": snapshot_digest(after),
+                }
+            except Exception as exc:
+                entry_evidence["learning_error"] = str(exc)
+        if learning_request is not None or learning_receipt is not None:
+            try:
+                from tools.skill_learning import (
+                    find_active_by_dedupe,
+                    prepare_candidate,
+                )
+
+                candidate = prepare_candidate(
+                    learning_request if learning_request is not None else learning_receipt,
+                    skill=skill,
+                    action=action,
+                    before=before or [],
+                    after=after,
+                    file_path=entry_evidence.get("file_path"),
+                    prehashed=learning_request is None,
+                )
+                existing = find_active_by_dedupe(
+                    list_entries(), str(candidate.get("dedupe_key") or "")
+                )
+                if existing is None:
+                    entry_evidence["learning_candidate"] = candidate
+                else:
+                    # Same source/result pair for the same skill is a new
+                    # version of one candidate, never another lesson card.
+                    entry_evidence["learning_revision"] = {
+                        "candidate_id": existing["id"],
+                        "rule": candidate["rule"],
+                        "applies_to": candidate["applies_to"],
+                        "target_path": candidate["target_path"],
+                        "applied_skill_version": candidate["applied_skill_version"],
+                    }
+            except Exception as exc:
+                # The skill mutation already succeeded.  Keep that truth in
+                # the normal ledger entry and surface why it cannot be called
+                # a tracked/undoable learning candidate.
+                entry_evidence["learning_error"] = str(exc)
         return append_entry(
-            action, skill, before=before, after=after, actor=actor, evidence=evidence
+            action,
+            skill,
+            before=before,
+            after=after,
+            actor=actor,
+            evidence=entry_evidence,
         )
     except Exception as e:
         logger.warning("skill_ledger: record_mutation failed (%s) — mutation unaffected", e)
@@ -542,7 +602,105 @@ def _validate_entry_paths(entry: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def rollback_entry(entry_id: str) -> Tuple[bool, str]:
+def _entry_skill_root(entry: Dict[str, Any]) -> Optional[Path]:
+    """Best-effort package root for exact-current-version checks."""
+    items = list(entry.get("after") or []) + list(entry.get("before") or [])
+    for item in items:
+        path = Path(str(item.get("path", "")))
+        if path.name == "SKILL.md":
+            return path.parent
+    paths = [Path(str(item.get("path", ""))) for item in items if item.get("path")]
+    if not paths:
+        return None
+    try:
+        return Path(os.path.commonpath([str(path) for path in paths]))
+    except (OSError, ValueError):
+        return None
+
+
+def current_snapshot(root: Optional[Path]) -> List[Dict[str, str]]:
+    """Read a content-hash manifest without writing rollback blobs."""
+    if root is None:
+        return []
+    root = Path(root)
+    if root.is_file():
+        files = [root]
+    elif root.is_dir():
+        files = sorted(path for path in root.rglob("*") if path.is_file())
+    else:
+        files = []
+    return [
+        {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        for path in files
+    ]
+
+
+def entry_current_matches_after(entry: Dict[str, Any]) -> bool:
+    """Whether the package is still exactly the version this entry wrote."""
+    root = _entry_skill_root(entry)
+    current = current_snapshot(root)
+    expected = list(entry.get("after") or [])
+    current_map = {str(item.get("path")): str(item.get("sha256")) for item in current}
+    expected_map = {str(item.get("path")): str(item.get("sha256")) for item in expected}
+    return current_map == expected_map
+
+
+def preflight_rollback_chain(entry_ids: List[str]) -> Tuple[bool, str]:
+    """Validate an oldest-to-newest rollback chain before changing files.
+
+    Learning candidates can contain the original mutation plus one or more
+    owner revisions. Rolling those entries back one at a time is safe only
+    when every older backup is readable and every adjacent manifest joins
+    exactly. Check the whole chain first so a missing old blob cannot be
+    discovered after the newest revision has already been undone.
+    """
+    if not entry_ids:
+        return False, "rollback chain is empty"
+    if len(set(entry_ids)) != len(entry_ids):
+        return False, "rollback chain contains a duplicate ledger entry"
+
+    entries: List[Dict[str, Any]] = []
+    for entry_id in entry_ids:
+        entry = get_entry(entry_id)
+        if entry is None:
+            return False, f"no ledger entry with id '{entry_id}'"
+        path_err = _validate_entry_paths(entry)
+        if path_err:
+            return False, f"refusing rollback: {path_err}"
+        for item in entry.get("before") or []:
+            if read_blob(str(item.get("sha256", ""))) is None:
+                return False, (
+                    f"missing blob {item.get('sha256')} for {item.get('path')}; "
+                    "rollback chain aborted, nothing was changed"
+                )
+        entries.append(entry)
+
+    def manifest(entry: Dict[str, Any], section: str) -> Dict[str, str]:
+        return {
+            str(item.get("path")): str(item.get("sha256"))
+            for item in entry.get(section) or []
+        }
+
+    for older, newer in zip(entries, entries[1:]):
+        if manifest(older, "after") != manifest(newer, "before"):
+            return False, (
+                "learning versions do not form one continuous skill history; "
+                "rollback chain aborted, nothing was changed"
+            )
+
+    if not entry_current_matches_after(entries[-1]):
+        return False, (
+            "the skill changed after this learning version; safe rollback "
+            "would overwrite newer work, so nothing was changed"
+        )
+    return True, "rollback chain is complete and current"
+
+
+def rollback_entry(
+    entry_id: str,
+    *,
+    require_current_match: bool = False,
+) -> Tuple[bool, str]:
     """Restore the before-state of the single mutation *entry_id*.
 
     Fail-closed semantics (mirrors agent/curator_backup.rollback + #63366):
@@ -558,6 +716,12 @@ def rollback_entry(entry_id: str) -> Tuple[bool, str]:
     path_err = _validate_entry_paths(entry)
     if path_err:
         return False, f"refusing rollback: {path_err}"
+
+    if require_current_match and not entry_current_matches_after(entry):
+        return False, (
+            "the skill changed after this learning version; safe rollback "
+            "would overwrite newer work, so nothing was changed"
+        )
 
     before = list(entry.get("before") or [])
     after = list(entry.get("after") or [])

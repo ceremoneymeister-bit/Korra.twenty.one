@@ -305,7 +305,7 @@ export default function ProfilesPage() {
     ['role', 'learning'].includes(addressedEditor ?? '') && profiles.some(p => p.name === addressedAgent)
       ? addressedAgent
       : null
-  const learningSection: LearningSection = ['role', 'memory', 'materials', 'check'].includes(addressedSection ?? '')
+  const learningSection: LearningSection = ['role', 'memory', 'materials', 'corrections', 'check'].includes(addressedSection ?? '')
     ? (addressedSection as LearningSection)
     : 'role'
 

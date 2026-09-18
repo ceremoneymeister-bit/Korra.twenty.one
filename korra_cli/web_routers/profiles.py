@@ -41,6 +41,9 @@ from korra_cli.web_models import (
     ProfileDescriptionUpdate,
     ProfileModelUpdate,
     ProfileMemoryMutation,
+    ProfileLearningVerification,
+    ProfileLearningRevision,
+    ProfileLearningCancel,
     ProfileDescribeAuto,
     SessionPrScanBody,
 )
@@ -1448,6 +1451,77 @@ async def get_profile_materials(name: str):
     from korra_cli.profile_learning import list_materials
 
     return await _run_profile_learning(name, list_materials)
+
+
+@router.get("/api/profiles/{name}/learning-lessons")
+async def get_profile_learning_lessons(name: str):
+    from korra_cli.profile_learning import list_learning_lessons
+
+    return await _run_profile_learning(name, list_learning_lessons)
+
+
+@router.post("/api/profiles/{name}/learning-lessons/{candidate_id}/verification")
+async def verify_profile_learning_lesson(
+    name: str,
+    candidate_id: str,
+    body: ProfileLearningVerification,
+):
+    from korra_cli.profile_learning import verify_learning_lesson
+
+    return await _run_profile_learning(
+        name,
+        verify_learning_lesson,
+        candidate_id,
+        body.revision,
+        body.example,
+        body.response,
+        body.outcome,
+        body.checks,
+        body.no_foreign_identifiers,
+        body.corrections_count,
+        body.elapsed_ms,
+        body.prompt_tokens,
+        body.completion_tokens,
+        body.total_tokens,
+    )
+
+
+@router.put("/api/profiles/{name}/learning-lessons/{candidate_id}")
+async def revise_profile_learning_lesson(
+    name: str,
+    candidate_id: str,
+    body: ProfileLearningRevision,
+):
+    from korra_cli.profile_learning import revise_learning_lesson
+
+    result = await _run_profile_learning(
+        name,
+        revise_learning_lesson,
+        candidate_id,
+        body.revision,
+        body.rule,
+        body.applies_to,
+    )
+    _clear_skills_prompt_cache()
+    return result
+
+
+@router.delete("/api/profiles/{name}/learning-lessons/{candidate_id}")
+async def cancel_profile_learning_lesson(
+    name: str,
+    candidate_id: str,
+    body: ProfileLearningCancel,
+):
+    from korra_cli.profile_learning import cancel_learning_lesson
+
+    result = await _run_profile_learning(
+        name,
+        cancel_learning_lesson,
+        candidate_id,
+        body.revision,
+    )
+    _clear_skills_prompt_cache()
+    return result
 
 
 @router.post("/api/profiles/{name}/materials")

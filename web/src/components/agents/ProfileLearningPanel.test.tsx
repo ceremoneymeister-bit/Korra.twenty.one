@@ -17,6 +17,10 @@ const apiMocks = vi.hoisted(() => ({
   getProfileMaterials: vi.fn(),
   createProfileMaterial: vi.fn(),
   deleteProfileMaterial: vi.fn(),
+  getProfileLearningLessons: vi.fn(),
+  verifyProfileLearningLesson: vi.fn(),
+  reviseProfileLearningLesson: vi.fn(),
+  cancelProfileLearningLesson: vi.fn(),
   probeProfileChat: vi.fn(),
 }));
 
@@ -68,6 +72,25 @@ const MATERIALS = [
   },
 ];
 
+const LESSON = {
+  id: "lesson-1",
+  created_at: "2026-09-18T10:00:00Z",
+  updated_at: "2026-09-18T10:00:00Z",
+  skill: "contract-review",
+  scope: "reusable_method" as const,
+  applies_to: "проверка договоров поставки",
+  rule: "Связывай оплату с приёмкой и проверяй взаимность ответственности.",
+  rubric: [
+    "Оплата привязана к приёмке.",
+    "Ответственность сформулирована взаимно.",
+  ],
+  status: "saved_unverified" as const,
+  status_label: "сохранено, ещё не проверено",
+  revision: "revision-1",
+  rollback_available: true,
+  verification: { status: "pending", outcome: null },
+};
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
@@ -96,7 +119,7 @@ async function flush() {
   });
 }
 
-async function open(section?: "role" | "memory" | "materials" | "check", profile = PROFILE) {
+async function open(section?: "role" | "memory" | "materials" | "corrections" | "check", profile = PROFILE) {
   await render(
     <MemoryRouter initialEntries={["/profiles?agent=sekretar&edit=learning"]}>
       <ProfileLearningPanel
@@ -160,11 +183,16 @@ beforeEach(() => {
   apiMocks.getProfileMaterials.mockResolvedValue({ materials: MATERIALS });
   apiMocks.createProfileMaterial.mockResolvedValue({ ok: true, name: "korra-material-new" });
   apiMocks.deleteProfileMaterial.mockResolvedValue({ ok: true });
+  apiMocks.getProfileLearningLessons.mockResolvedValue({ lessons: [LESSON] });
+  apiMocks.verifyProfileLearningLesson.mockResolvedValue({ ok: true, event_id: "verify-1", outcome: "pass" });
+  apiMocks.reviseProfileLearningLesson.mockResolvedValue({ ok: true, event_id: "revise-1", mutation_id: "mutation-2" });
+  apiMocks.cancelProfileLearningLesson.mockResolvedValue({ ok: true, event_id: "cancel-1" });
   apiMocks.probeProfileChat.mockResolvedValue({
     ok: true,
     reply: "Минимальный заказ — 12 изделий, срок — 10 рабочих дней.",
     error: "",
     detail: "",
+    usage: { prompt_tokens: 740, completion_tokens: 180, total_tokens: 920 },
   });
 });
 
@@ -186,6 +214,7 @@ describe("ProfileLearningPanel — роль и правила", () => {
       "Роль и правила",
       "Что важно помнить",
       "Материалы и инструкции",
+      "Исправления",
       "Проверить вопросом",
     ]);
     expect(apiMocks.getProfileSoul).toHaveBeenCalledWith("sekretar");
@@ -378,6 +407,92 @@ describe("ProfileLearningPanel — материалы и инструкции", 
     expect(apiMocks.deleteProfileMaterial).not.toHaveBeenCalled();
     await click(findButton("Да, удалить"));
     expect(apiMocks.deleteProfileMaterial).toHaveBeenCalledWith("sekretar", "korra-material-rules");
+  });
+});
+
+describe("ProfileLearningPanel — исправления и проверяемые правила", () => {
+  it("показывает честный статус и записывает правило только если появился receipt", async () => {
+    apiMocks.getProfileLearningLessons
+      .mockResolvedValueOnce({ lessons: [] })
+      .mockResolvedValueOnce({ lessons: [LESSON] });
+    await open("corrections");
+
+    expect(container.textContent).toContain("Проверяемых правил пока нет");
+    await enterText(
+      field<HTMLTextAreaElement>("#learning-correction-source"),
+      "Оплата до приёмки, штраф только покупателю.",
+    );
+    await enterText(
+      field<HTMLTextAreaElement>("#learning-correction-approved"),
+      "Оплата после приёмки, ответственность взаимна.",
+    );
+    await click(findButton("Учесть исправление"));
+
+    const prompt = apiMocks.probeProfileChat.mock.calls[0][1] as string;
+    expect(prompt).toContain("сохранено, ещё не проверено");
+    expect(prompt).toContain("private_markers");
+    expect(container.textContent).toContain(`Учёл: ${LESSON.rule}`);
+    expect(container.textContent).toContain("сохранено, ещё не проверено");
+    expect(container.textContent).toContain("Где применяется: проверка договоров поставки");
+  });
+
+  it("проверяет на другом примере без повторной вставки правила и сохраняет рубрику", async () => {
+    await open("corrections");
+    await click(findButton("Проверить"));
+    await enterText(
+      field<HTMLTextAreaElement>(`#learning-example-${LESSON.id}`),
+      "Проверь договор ООО Бета с оплатой 275 000 рублей после осмотра.",
+    );
+    await click(findButton("Проверить на другом примере"));
+
+    const deferredPrompt = apiMocks.probeProfileChat.mock.calls[0][1] as string;
+    expect(deferredPrompt).toContain("ООО Бета");
+    expect(deferredPrompt).not.toContain(LESSON.rule);
+    expect(container.textContent).toContain("Фактический ответ нового разговора");
+
+    const checkboxes = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+    expect(checkboxes).toHaveLength(LESSON.rubric.length + 1);
+    for (const checkbox of checkboxes) await click(checkbox);
+    await click(findButton("Рубрика выполнена"));
+
+    expect(apiMocks.verifyProfileLearningLesson).toHaveBeenCalledWith(
+      "sekretar",
+      LESSON.id,
+      expect.objectContaining({
+        revision: LESSON.revision,
+        outcome: "pass",
+        checks: LESSON.rubric,
+        no_foreign_identifiers: true,
+        prompt_tokens: 740,
+        completion_tokens: 180,
+        total_tokens: 920,
+      }),
+    );
+  });
+
+  it("правит точную версию и требует отдельного подтверждения адресной отмены", async () => {
+    await open("corrections");
+    await click(findButton("Изменить"));
+    await enterText(
+      field<HTMLTextAreaElement>(`#learning-rule-${LESSON.id}`),
+      "Связывай оплату с документированной приёмкой и взаимным пределом ответственности.",
+    );
+    await click(findButton("Сохранить правило"));
+    expect(apiMocks.reviseProfileLearningLesson).toHaveBeenCalledWith(
+      "sekretar",
+      LESSON.id,
+      expect.objectContaining({ revision: LESSON.revision }),
+    );
+
+    await click(findButton("Отменить"));
+    expect(apiMocks.cancelProfileLearningLesson).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Отменить именно эту версию правила?");
+    await click(findButton("Да, отменить"));
+    expect(apiMocks.cancelProfileLearningLesson).toHaveBeenCalledWith(
+      "sekretar",
+      LESSON.id,
+      LESSON.revision,
+    );
   });
 });
 
