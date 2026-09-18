@@ -755,6 +755,10 @@ def test_real_binding_correlates_plugin_approval_denial_to_tool_metric(
     monkeypatch.setattr(approval, "is_current_session_yolo_enabled", lambda: False)
     monkeypatch.setattr(approval, "is_approved", lambda *args: False)
     monkeypatch.setattr(approval, "get_current_session_key", lambda: "session-key")
+    # This scenario measures a denied manual approval.  The 0.21.10 product
+    # default is autonomous mode, so pin the policy being exercised instead
+    # of inheriting the clean-home default from CI.
+    monkeypatch.setattr(approval, "_get_approval_mode", lambda: "manual")
     monkeypatch.setattr(approval, "_is_interactive_cli", lambda: True)
     monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
     monkeypatch.setattr(approval, "prompt_dangerous_approval", lambda *args, **kwargs: "deny")

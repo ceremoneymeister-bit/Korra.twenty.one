@@ -14,7 +14,11 @@ from tools.approval import request_tool_approval
 
 @pytest.fixture(autouse=True)
 def _isolate_approval_state(monkeypatch):
-    """Give each test a clean session key and empty allowlists."""
+    """Give prompt-flow tests a clean manual-mode approval context."""
+    # 0.21.10 defaults ordinary command/plugin approvals to ``mode=off``;
+    # these tests exercise the manual prompt machinery, so do not let the
+    # product default short-circuit the behavior under test.
+    monkeypatch.setattr(approval, "_get_approval_mode", lambda: "manual")
     monkeypatch.setattr(
         approval, "get_current_session_key",
         lambda default="default": "test-session",
@@ -150,4 +154,19 @@ class TestRequestToolApproval:
             lambda *a, **k: pytest.fail("yolo must not prompt"),
         )
         res = request_tool_approval("terminal", "curl PUT", rule_key="ext")
+        assert res == {"approved": True, "message": None}
+
+    def test_global_mode_off_bypasses_plugin_prompt(self, monkeypatch):
+        """Ordinary plugin approval follows the global autonomous mode."""
+        monkeypatch.setattr(approval, "_get_approval_mode", lambda: "off")
+        monkeypatch.setattr(approval, "_is_interactive_cli", lambda: True)
+        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(
+            approval,
+            "prompt_dangerous_approval",
+            lambda *a, **k: pytest.fail("mode=off must not prompt"),
+        )
+
+        res = request_tool_approval("terminal", "curl PUT", rule_key="ext")
+
         assert res == {"approved": True, "message": None}
