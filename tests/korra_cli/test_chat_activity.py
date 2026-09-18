@@ -3,6 +3,8 @@ import time
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from korra_state import SessionDB
 from korra_cli import chat_activity
 from tools.effect_decisions import create_pending
@@ -187,3 +189,24 @@ def test_gateway_heartbeat_requires_fresh_live_producer(tmp_path):
     old = time.time() - 120
     os.utime(heartbeat, (old, old))
     assert chat_activity._gateway_heartbeat_live(tmp_path, time.time()) is False
+
+
+def test_gateway_heartbeat_pid_probe_never_signals_process(monkeypatch, tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "gateway.heartbeat").write_text('{"pid": 4242}', encoding="utf-8")
+    observed = []
+
+    monkeypatch.setattr(
+        chat_activity.psutil,
+        "pid_exists",
+        lambda pid: observed.append(pid) or True,
+    )
+    monkeypatch.setattr(
+        os,
+        "kill",
+        lambda *_args: pytest.fail("PID liveness probe must not signal a process"),
+    )
+
+    assert chat_activity._gateway_heartbeat_live(tmp_path, time.time()) is True
+    assert observed == [4242]

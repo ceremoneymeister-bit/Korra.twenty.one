@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Iterable
+
+import psutil
 
 from korra_constants import get_hermes_home
 
@@ -70,9 +71,8 @@ def _gateway_heartbeat_live(home: Path, now: float) -> bool:
         pid = int(payload.get("pid", 0))
         if pid <= 0:
             return False
-        os.kill(pid, 0)
-        return True
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return bool(psutil.pid_exists(pid))
+    except (OSError, psutil.Error, ValueError, TypeError, json.JSONDecodeError):
         return False
 
 
