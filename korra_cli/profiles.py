@@ -1602,6 +1602,9 @@ def create_profile(
         # Strip runtime files
         for stale in _CLONE_ALL_STRIP:
             (profile_dir / stale).unlink(missing_ok=True)
+        from korra_cli.auth import strip_cloned_single_use_oauth_grants
+
+        strip_cloned_single_use_oauth_grants(profile_dir)
     else:
         # Bootstrap directory structure
         # Own this directory exclusively, including when two requests use the

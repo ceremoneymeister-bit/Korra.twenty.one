@@ -458,6 +458,9 @@ def _(rid, params: dict) -> dict:
                     os.chmod(str(dst_auth), 0o600)
                 except OSError:
                     pass
+                from korra_cli.auth import strip_cloned_single_use_oauth_grants
+
+                strip_cloned_single_use_oauth_grants(path)
                 mirrored["auth"] = True
         except Exception:
             pass
