@@ -221,6 +221,87 @@ def test_background_review_shuts_down_memory_provider_before_close(monkeypatch):
     ]
 
 
+def test_parallel_review_threads_keep_profile_memory_isolated(
+    monkeypatch,
+    tmp_path,
+):
+    """The thread wrapper carries each profile ContextVar into real writes."""
+    from agent import background_review as background_review_module
+    from korra_constants import (
+        reset_hermes_home_override,
+        set_hermes_home_override,
+    )
+    from tools.memory_tool import MemoryStore
+
+    profiles = {
+        "profile-a": tmp_path / "profile-a",
+        "profile-b": tmp_path / "profile-b",
+    }
+    for profile_home in profiles.values():
+        profile_home.mkdir()
+
+    def write_profile_memory(
+        agent,
+        messages_snapshot,
+        prompt,
+        task_cfg=None,
+        review_run=None,
+        review_memory=False,
+    ):
+        try:
+            assert review_memory is True
+            store = MemoryStore(user_profile_enabled=False)
+            store.load_from_disk()
+            result = store.add("memory", f"memory for {agent.session_id}")
+            assert result["success"] is True
+        finally:
+            background_review_module.finish_background_review_run(
+                agent,
+                review_run,
+            )
+
+    monkeypatch.setattr(
+        background_review_module,
+        "_run_review_in_thread",
+        write_profile_memory,
+    )
+    CapturingThread.targets = []
+    monkeypatch.setattr(run_agent_module.threading, "Thread", CapturingThread)
+
+    agents = {}
+    targets = []
+    for profile_name, profile_home in profiles.items():
+        agent = _bare_agent()
+        agent.session_id = profile_name
+        agents[profile_name] = agent
+        token = set_hermes_home_override(profile_home)
+        try:
+            AIAgent._spawn_background_review(
+                agent,
+                messages_snapshot=[{"role": "user", "content": "remember"}],
+                review_memory=True,
+                focus="profile isolation test",
+            )
+        finally:
+            reset_hermes_home_override(token)
+        targets.append(CapturingThread.targets[-1])
+
+    workers = [_REAL_THREAD(target=target, daemon=True) for target in targets]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=5.0)
+
+    assert all(not worker.is_alive() for worker in workers)
+    for profile_name, profile_home in profiles.items():
+        own_memory = (profile_home / "memories" / "MEMORY.md").read_text()
+        assert f"memory for {profile_name}" in own_memory
+        for other_name in profiles:
+            if other_name != profile_name:
+                assert f"memory for {other_name}" not in own_memory
+        assert agents[profile_name]._background_review_run is None
+
+
 def test_background_review_fork_opts_out_of_session_finalization(monkeypatch):
     """The review fork shares the parent's live session_id, so it must set
     ``_end_session_on_close = False``. Otherwise close() (now finalizing owned
