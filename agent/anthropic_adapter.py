@@ -18,6 +18,8 @@ import platform
 import secrets
 import stat
 import subprocess
+import threading
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -1220,6 +1222,7 @@ def create_anthropic_message(
     prefer_stream: bool = True,
     on_stream_event=None,
     on_response=None,
+    stream_deadline_monotonic: float | None = None,
 ) -> Any:
     """Create an Anthropic message, aggregating via stream when available.
 
@@ -1243,6 +1246,10 @@ def create_anthropic_message(
     parsed ``Message`` drops — Nous Portal's ``x-nous-credits-*`` balance family
     in particular. Only fires on the streaming path, which is the one the main
     turn loop takes.
+
+    ``stream_deadline_monotonic``: optional absolute host deadline. A daemon
+    timer closes only this attempt's stream/response at the deadline so a
+    completely silent connection cannot outlive its waiting caller.
     """
     sanitize_anthropic_kwargs(api_kwargs, log_prefix=log_prefix)
 
@@ -1251,30 +1258,86 @@ def create_anthropic_message(
     if prefer_stream and callable(stream_fn):
         stream_kwargs = dict(api_kwargs)
         stream_kwargs.pop("stream", None)
+        deadline_expired = threading.Event()
+        stream_finished = threading.Event()
+        deadline_timer = None
+
+        def _deadline_timeout() -> TimeoutError:
+            return TimeoutError(
+                "Anthropic auxiliary stream timed out at the host compression "
+                "deadline (the caller already stopped waiting)"
+            )
+
         try:
             with stream_fn(**stream_kwargs) as stream:
-                if callable(on_response):
-                    try:
-                        on_response(getattr(stream, "response", None))
-                    except Exception:
-                        logger.debug(
-                            "%son_response callback failed",
-                            log_prefix, exc_info=True,
-                        )
-                if callable(on_stream_event):
-                    # Consume the event stream manually so each event can
-                    # tick the caller's progress callback; get_final_message
-                    # then returns the accumulated snapshot.
-                    for _event in stream:
+                def _close_stream_at_deadline() -> None:
+                    if stream_finished.is_set():
+                        return
+                    deadline_expired.set()
+                    for target in (stream, getattr(stream, "response", None)):
+                        close = getattr(target, "close", None)
+                        if not callable(close):
+                            continue
                         try:
-                            on_stream_event(_event)
+                            close()
+                            return
                         except Exception:
                             logger.debug(
-                                "%son_stream_event callback failed",
+                                "%sAnthropic attempt stream close at host "
+                                "deadline failed",
+                                log_prefix,
+                                exc_info=True,
+                            )
+                try:
+                    if isinstance(stream_deadline_monotonic, (int, float)):
+                        deadline_timer = threading.Timer(
+                            max(
+                                float(stream_deadline_monotonic) - time.monotonic(),
+                                0.0,
+                            ),
+                            _close_stream_at_deadline,
+                        )
+                        deadline_timer.daemon = True
+                        deadline_timer.start()
+                    if callable(on_response):
+                        try:
+                            on_response(getattr(stream, "response", None))
+                        except Exception:
+                            logger.debug(
+                                "%son_response callback failed",
                                 log_prefix, exc_info=True,
                             )
-                return stream.get_final_message()
+                    if callable(on_stream_event):
+                        # Consume the event stream manually so each event can
+                        # tick the caller's progress callback; get_final_message
+                        # then returns the accumulated snapshot.
+                        for _event in stream:
+                            try:
+                                on_stream_event(_event)
+                            except TimeoutError:
+                                # This callback is the caller's deadline seam.
+                                # The stream context closes as it unwinds.
+                                raise
+                            except Exception:
+                                logger.debug(
+                                    "%son_stream_event callback failed",
+                                    log_prefix, exc_info=True,
+                                )
+                    if deadline_expired.is_set():
+                        raise _deadline_timeout()
+                    message = stream.get_final_message()
+                    if deadline_expired.is_set():
+                        raise _deadline_timeout()
+                    return message
+                finally:
+                    stream_finished.set()
+                    if deadline_timer is not None:
+                        deadline_timer.cancel()
+        except TimeoutError:
+            raise
         except Exception as exc:
+            if deadline_expired.is_set():
+                raise _deadline_timeout() from exc
             if not _is_stream_unavailable_error(exc):
                 raise
             logger.debug(

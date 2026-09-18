@@ -452,6 +452,10 @@ class _AuxiliaryCancellationDecision:
 _aux_progress = threading.local()
 _aux_dispatch = threading.local()
 _aux_provider_response = threading.local()
+# Absolute monotonic deadline of the host waiting for this auxiliary stream.
+# Compression publishes its commit-fence ceiling here so provider consumers
+# stop when their result can no longer be committed.
+_aux_stream_deadline = threading.local()
 
 
 def _notify_aux_progress() -> None:
@@ -525,6 +529,28 @@ def _anthropic_event_has_content(event: Any) -> bool:
     return False
 
 
+def _anthropic_aux_stream_event_hook() -> Callable[[Any], None]:
+    """Track Anthropic progress and stop at the host deadline or hard cancel."""
+    host_deadline = _current_aux_stream_deadline()
+    started = time.monotonic()
+
+    def _on_event(event: Any) -> None:
+        if _anthropic_event_has_content(event):
+            _notify_aux_provider_response()
+        else:
+            _notify_aux_timing_response()
+        if _aux_interrupt_cancel_requested():
+            raise AuxiliaryExplicitCancellation()
+        if host_deadline is not None and time.monotonic() >= host_deadline:
+            raise TimeoutError(
+                "Anthropic auxiliary stream timed out at the host compression "
+                f"deadline after {time.monotonic() - started:.0f}s "
+                "(the caller already stopped waiting)"
+            )
+
+    return _on_event
+
+
 _CODEX_PROGRESS_DELTA_TYPES = frozenset(
     {
         "response.output_text.delta",
@@ -587,6 +613,30 @@ def aux_progress_hook(hook):
         yield
 
 
+def _current_aux_stream_deadline() -> Optional[float]:
+    """Return the waiting host's absolute monotonic deadline, if installed."""
+    return getattr(_aux_stream_deadline, "value", None)
+
+
+@contextlib.contextmanager
+def aux_stream_deadline(deadline: Optional[float]):
+    """Publish a host deadline to every stream consumer in this aux attempt.
+
+    ``None`` inherits an outer deadline, so nested auxiliary work cannot
+    accidentally escape the compression host's ceiling. The previous value is
+    always restored when the attempt unwinds.
+    """
+    previous = getattr(_aux_stream_deadline, "value", None)
+    effective = deadline if isinstance(deadline, (int, float)) else previous
+    if isinstance(previous, (int, float)) and isinstance(effective, (int, float)):
+        effective = min(float(previous), float(effective))
+    _aux_stream_deadline.value = effective
+    try:
+        yield
+    finally:
+        _aux_stream_deadline.value = previous
+
+
 # Back-compat alias — the timing hooks were introduced with this name.
 _aux_timing_hook = _aux_thread_local_hook
 
@@ -629,6 +679,9 @@ def _run_protected_sync_provider_call(
     # the protected daemon path is taken.
     dispatch_hook = getattr(_aux_dispatch, "hook", None)
     provider_response_hook = getattr(_aux_provider_response, "hook", None)
+    # Stream consumption happens on the isolated daemon below. Thread-locals
+    # do not cross that boundary without this explicit propagation.
+    host_deadline = _current_aux_stream_deadline()
     provider_context = contextvars.copy_context()
     done = threading.Event()
     outcome: dict[str, Any] = {}
@@ -639,6 +692,7 @@ def _run_protected_sync_provider_call(
                 aux_progress_hook(progress_hook),
                 _aux_thread_local_hook(_aux_dispatch, dispatch_hook),
                 _aux_thread_local_hook(_aux_provider_response, provider_response_hook),
+                aux_stream_deadline(host_deadline),
                 aux_interrupt_protection(cancel_check=cancel_check),
             ):
                 outcome["result"] = callback(kwargs)
@@ -1811,6 +1865,15 @@ class _CodexCompletionsAdapter:
         if total_timeout is not None:
             no_progress_timeout = min(no_progress_timeout, float(total_timeout))
         hard_deadline = _start_monotonic + _aux_stream_total_ceiling(total_timeout)
+        # A live stream can continuously re-arm its idle watchdog. Clamp its
+        # absolute backstop to the host's commit deadline so it cannot keep a
+        # socket open after compression has already abandoned the result.
+        _host_deadline = _current_aux_stream_deadline()
+        if (
+            isinstance(_host_deadline, (int, float))
+            and _host_deadline < hard_deadline
+        ):
+            hard_deadline = float(_host_deadline)
         deadline_lock = threading.Lock()
         progress_deadline = [_start_monotonic + no_progress_timeout]
         saw_content = threading.Event()
@@ -2357,16 +2420,11 @@ class _AnthropicCompletionsAdapter:
             # stalled summary open. No-op when no hook is installed (None
             # keeps the fast get_final_message path).
             on_stream_event=(
-                (
-                    lambda event: (
-                        _notify_aux_provider_response()
-                        if _anthropic_event_has_content(event)
-                        else _notify_aux_timing_response()
-                    )
-                )
+                _anthropic_aux_stream_event_hook()
                 if _aux_progress_active()
                 else None
             ),
+            stream_deadline_monotonic=_current_aux_stream_deadline(),
         )
         _transport = get_transport("anthropic_messages")
         _nr = _transport.normalize_response(
@@ -9731,7 +9789,11 @@ def _aggregate_chat_stream(
     Accumulation is shared with the async mirror via
     :class:`_ChatStreamAccumulator`.
     """
-    acc = _ChatStreamAccumulator(model=model, total_ceiling=total_ceiling)
+    acc = _ChatStreamAccumulator(
+        model=model,
+        total_ceiling=total_ceiling,
+        host_deadline=_current_aux_stream_deadline(),
+    )
     try:
         for chunk in chunks:
             acc.feed(chunk)
@@ -9753,9 +9815,15 @@ class _ChatStreamAccumulator:
     tool-call delta reassembly, same "timed out" ceiling phrasing).
     """
 
-    def __init__(self, model: str = "", total_ceiling: Optional[float] = None):
+    def __init__(
+        self,
+        model: str = "",
+        total_ceiling: Optional[float] = None,
+        host_deadline: Optional[float] = None,
+    ):
         self._started = time.monotonic()
         self._total_ceiling = total_ceiling
+        self._host_deadline = host_deadline
         self.content_parts: List[str] = []
         self.reasoning_parts: List[str] = []
         self.reasoning_details: List[Any] = []
@@ -9778,6 +9846,16 @@ class _ChatStreamAccumulator:
             raise TimeoutError(
                 f"Auxiliary streamed call timed out after {self._total_ceiling:.0f}s "
                 "total ceiling (stream still open but over budget)"
+            )
+        if (
+            self._host_deadline is not None
+            and time.monotonic() >= self._host_deadline
+        ):
+            raise TimeoutError(
+                "Auxiliary streamed call timed out at the host compression "
+                f"deadline after {time.monotonic() - self._started:.0f}s "
+                "(the caller already stopped waiting; streaming on would only "
+                "pin its session lease)"
             )
         self.resp_id = getattr(chunk, "id", None) or self.resp_id
         self.resp_model = getattr(chunk, "model", None) or self.resp_model
@@ -9890,7 +9968,11 @@ async def _aggregate_chat_stream_async(
     the sync helper raises. Same accumulation and ceiling semantics via
     :class:`_ChatStreamAccumulator`.
     """
-    acc = _ChatStreamAccumulator(model=model, total_ceiling=total_ceiling)
+    acc = _ChatStreamAccumulator(
+        model=model,
+        total_ceiling=total_ceiling,
+        host_deadline=_current_aux_stream_deadline(),
+    )
     try:
         async for chunk in chunks:
             acc.feed(chunk)

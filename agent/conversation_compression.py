@@ -749,6 +749,11 @@ class CompressionCommitFence:
         deadline = self._deadline
         return deadline is not None and time.monotonic() >= deadline
 
+    @property
+    def deadline_monotonic(self) -> float | None:
+        """Return the armed deadline as an absolute monotonic timestamp."""
+        return self._deadline
+
     def seconds_since_progress(self) -> float:
         """Seconds since the worker last reported forward progress."""
         return max(0.0, time.monotonic() - self._last_progress)
@@ -1478,7 +1483,6 @@ def run_compress_context_with_progress_timeout(
     ceiling = max(float(total_ceiling_seconds), float(idle_timeout_seconds))
     idle = float(idle_timeout_seconds)
     fence = fence if fence is not None else CompressionCommitFence()
-    fence.set_total_ceiling_seconds(ceiling)
     # Sync mirror of gateway session-hygiene's run_in_executor(None, ...) +
     # wait_for loop (gateway/run.py): offload compress_context onto the shared
     # daemon pool, poll with an inactivity budget + total ceiling, then
@@ -1532,14 +1536,18 @@ def run_compress_context_with_progress_timeout(
     # Bare pool workers start with an empty ContextVar map; propagate the
     # parent conversation/approval context into the worker.
     try:
-        future = executor.submit(
-            propagate_context_to_thread(_fence_gated_worker), fence
-        )
+        # Context/callback capture can import provider and approval modules on
+        # the first attempt. Prepare it before arming the shared deadline so
+        # cold local setup does not consume the provider/host budget or make a
+        # freshly submitted worker look stale before it can start.
+        threaded_worker = propagate_context_to_thread(_fence_gated_worker)
+        wait_started = time.monotonic()
+        fence.set_total_ceiling_seconds(ceiling)
+        future = executor.submit(threaded_worker, fence)
     except BaseException:
         _release_compression_admission()
         raise
     future.add_done_callback(_release_compression_admission)
-    wait_started = time.monotonic()
     # F2: EVERY host unwind (KeyboardInterrupt, task cancellation, unexpected
     # exception while waiting) must revoke future commit admission before the
     # host resumes, or a detached worker could later commit and mutate durable
@@ -3953,10 +3961,14 @@ def compress_context(
         from agent.auxiliary_client import (
             aux_interrupt_protection,
             aux_progress_hook,
+            aux_stream_deadline,
         )
         _progress_hook = (
             commit_fence.touch_progress if commit_fence is not None
             else (lambda: None)
+        )
+        _host_stream_deadline = (
+            commit_fence.deadline_monotonic if commit_fence is not None else None
         )
         # F4 state-ordering (#76354): a LATE successful summary must not undo
         # the timeout cooldown the host recorded. Install a cancellation
@@ -3984,8 +3996,10 @@ def compress_context(
                 )
                 compressed = messages
             else:
-                with aux_progress_hook(_progress_hook), aux_interrupt_protection(
-                    cancel_event=_hard_cancel_event
+                with (
+                    aux_progress_hook(_progress_hook),
+                    aux_stream_deadline(_host_stream_deadline),
+                    aux_interrupt_protection(cancel_event=_hard_cancel_event),
                 ):
                     compressed = compress_fn(messages, **compress_kwargs)
                     # Freeze a hard stop that arrived after the final provider
