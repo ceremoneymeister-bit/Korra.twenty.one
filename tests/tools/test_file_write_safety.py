@@ -383,21 +383,28 @@ class TestBomHandling:
 
 
 class TestProtectedInstructionFiles:
-    """Writes to agent-instruction files ALWAYS require approval.
+    """Manual policy gates agent-instruction files one operation at a time.
 
     AGENTS.md / CLAUDE.md / SOUL.md / .cursorrules / project-local .hermes
     config steer future agent behavior, so a prompt-injected agent writing
-    them is a persistence vector. The gate must ask the human every time —
-    even under yolo/auto-approve — and fail closed when no human channel
-    exists. Ported from: RooCodeInc/Roo-Code RooProtectedController
-    (Apache-2.0); symlink lesson from #41351.
+    them is a persistence vector. Explicit manual policy therefore asks every
+    time and fails closed without a human channel. Korra's autonomous mode
+    bypasses ordinary local writes; only external messages and payments keep
+    mandatory durable decisions. Ported from: RooCodeInc/Roo-Code
+    RooProtectedController (Apache-2.0); symlink lesson from #41351.
     """
 
     @pytest.fixture(autouse=True)
     def _gate_on(self, monkeypatch):
         import tools.file_tools as ft
+        import tools.approval as approval
         monkeypatch.setattr(
             ft, "_protected_instruction_config", lambda: (True, [])
+        )
+        monkeypatch.setattr(
+            approval,
+            "is_approval_bypass_active_for_session",
+            lambda _session_key: False,
         )
         yield
 
@@ -444,16 +451,22 @@ class TestProtectedInstructionFiles:
         assert target.read_text(encoding="utf-8") == "approved content"
         assert len(approvals["calls"]) == 1
 
-    def test_prompts_even_under_yolo(self, tmp_path, approvals, monkeypatch):
-        """The whole point: auto-approve/yolo must NOT bypass this gate."""
+    def test_yolo_bypasses_ordinary_protected_write(
+        self, tmp_path, approvals, monkeypatch
+    ):
+        """Autonomous mode must not leave a hidden non-effect confirmation."""
         import tools.approval as A
-        monkeypatch.setattr(A, "_YOLO_MODE_FROZEN", True)
+        monkeypatch.setattr(
+            A,
+            "is_approval_bypass_active_for_session",
+            lambda _session_key: True,
+        )
         target = tmp_path / "AGENTS.md"
         approvals["answer"] = "deny"
         res = self._write(target)
-        assert res.get("error") and "BLOCKED" in res["error"]
-        assert not target.exists()
-        assert len(approvals["calls"]) == 1, "yolo bypassed the protected gate"
+        assert not res.get("error"), res
+        assert target.read_text(encoding="utf-8") == "injected"
+        assert approvals["calls"] == []
 
     def test_second_write_prompts_again(self, tmp_path, approvals):
         """One-operation approval: no session stickiness."""

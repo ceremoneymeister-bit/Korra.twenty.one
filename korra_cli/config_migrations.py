@@ -863,6 +863,81 @@ def _migrate_to_39(results: Dict[str, Any], quiet: bool) -> None:
             )
 
 
+def _migrate_to_40(results: Dict[str, Any], quiet: bool) -> None:
+    """Move legacy command-approval overrides to Korra's autonomy contract.
+
+    User ``approvals.deny`` rules and every unrelated setting are preserved.
+    The exact pre-change file and a secret-free receipt make the mutation
+    reviewable and reversible per profile.
+    """
+    _c = _cfg()
+    config = _c.read_raw_config()
+    approvals = config.get("approvals")
+    if not isinstance(approvals, dict):
+        return
+
+    desired = {
+        "mode": "off",
+        "cron_mode": "approve",
+        "single_query_mode": "approve",
+        "unattended_mode": "approve",
+    }
+    changes: Dict[str, Dict[str, Any]] = {}
+    for key, value in desired.items():
+        if key in approvals and approvals.get(key) != value:
+            changes[key] = {"before": approvals.get(key), "after": value}
+            approvals[key] = value
+    if not changes:
+        return
+
+    import hashlib
+    import json
+    import time
+    from pathlib import Path
+
+    from utils import atomic_write_text
+
+    config_path = Path(_c.get_config_path())
+    source = config_path.read_bytes()
+    source_sha = hashlib.sha256(source).hexdigest()
+    receipt_dir = config_path.parent / "logs" / "migration_receipts"
+    receipt_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    backup = receipt_dir / f"config.pre-autonomy-v40.{source_sha[:12]}.yaml"
+    if not backup.exists():
+        atomic_write_text(
+            backup,
+            source.decode("utf-8"),
+            create_mode=0o600,
+        )
+
+    config["approvals"] = approvals
+    _c._persist_migration(config)
+    written = config_path.read_bytes()
+    receipt = {
+        "migration": "approvals-autonomy-v40",
+        "created_at": time.time(),
+        "config": str(config_path),
+        "backup": str(backup),
+        "before_sha256": source_sha,
+        "after_sha256": hashlib.sha256(written).hexdigest(),
+        "changes": changes,
+        "preserved_deny_rules": len(approvals.get("deny") or []),
+    }
+    atomic_write_text(
+        receipt_dir / "approvals-autonomy-v40.json",
+        json.dumps(receipt, ensure_ascii=False, indent=2) + "\n",
+        create_mode=0o600,
+    )
+    results["config_added"].append(
+        "approvals: ordinary work is autonomous; outbound messages and payments still require exact decisions"
+    )
+    if not quiet:
+        print(
+            "  ✓ Enabled autonomous ordinary work. External messages and "
+            "payments still require an exact durable decision."
+        )
+
+
 #: Registry of (target_version, migration_fn), strictly ascending. The driver
 #: applies every entry whose target version is greater than the on-disk
 #: observe earlier steps' writes via read_raw_config() (filesystem state).
@@ -890,6 +965,7 @@ MIGRATIONS: Tuple[Tuple[int, Callable[[Dict[str, Any], bool], None]], ...] = (
     (37, _migrate_to_37),
     (38, _migrate_to_38),
     (39, _migrate_to_39),
+    (40, _migrate_to_40),
 )
 
 

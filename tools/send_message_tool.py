@@ -6,11 +6,14 @@ human-friendly channel names to IDs. Works in both CLI and gateway contexts.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
+import tempfile
 import time
+from pathlib import Path
 
 
 from agent.redact import redact_sensitive_text
@@ -265,7 +268,7 @@ def send_message_tool(args, **kw):
     if action == "unreact":
         return _handle_react(args, remove=True)
 
-    return _handle_send(args)
+    return _handle_send(args, owner_initiated=bool(kw.get("owner_initiated")))
 
 
 def _handle_list():
@@ -367,7 +370,433 @@ def _handle_react(args, remove=False):
     return json.dumps({"success": bool(result)})
 
 
-def _handle_send(args):
+def _configured_account_identity(platform_name, pconfig) -> str:
+    """Stable non-secret identity of the account that will perform a send."""
+    extra = getattr(pconfig, "extra", None) or {}
+    for key in (
+        "account_id",
+        "phone_number_id",
+        "bot_id",
+        "username",
+        "email",
+    ):
+        value = str(extra.get(key) or "").strip()
+        if value:
+            return f"{key}:{value}"
+    token = str(getattr(pconfig, "token", "") or "")
+    if token:
+        # A fingerprint detects credential/account rotation without persisting
+        # the credential itself in the decision ledger or UI payload.
+        return "credential:" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+    return f"configured:{platform_name}"
+
+
+def _attachment_snapshot(media_files, *, durable: bool = False) -> list[dict]:
+    snapshots = []
+    for descriptor in media_files or []:
+        path = str(descriptor[0])
+        is_voice = bool(descriptor[1]) if len(descriptor) > 1 else False
+        digest = hashlib.sha256()
+        size = 0
+        temp_path = ""
+        output = None
+        if durable:
+            from korra_constants import get_hermes_home
+
+            spool = Path(get_hermes_home()) / "effect_attachments"
+            spool.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd, temp_path = tempfile.mkstemp(prefix=".snapshot-", dir=spool)
+            os.chmod(temp_path, 0o600)
+            output = os.fdopen(fd, "wb")
+        try:
+            with open(path, "rb") as handle:
+                while chunk := handle.read(1024 * 1024):
+                    size += len(chunk)
+                    digest.update(chunk)
+                    if output is not None:
+                        output.write(chunk)
+            if output is not None:
+                output.flush()
+                os.fsync(output.fileno())
+                output.close()
+                output = None
+        except BaseException:
+            if output is not None:
+                output.close()
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+            raise
+        digest_hex = digest.hexdigest()
+        snapshot_path = str(Path(path).resolve())
+        if durable:
+            suffix = Path(path).suffix.lower()
+            if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+                suffix = ""
+            final_path = Path(temp_path).parent / f"{digest_hex}{suffix}"
+            os.replace(temp_path, final_path)
+            os.chmod(final_path, 0o600)
+            snapshot_path = str(final_path)
+        snapshots.append({
+            "path": snapshot_path,
+            "name": Path(path).name,
+            "size": size,
+            "sha256": digest_hex,
+            "is_voice": is_voice,
+        })
+    return snapshots
+
+
+def _attachment_snapshots_match(snapshots: list[dict]) -> bool:
+    try:
+        for item in snapshots:
+            digest = hashlib.sha256()
+            size = 0
+            with open(item["path"], "rb") as handle:
+                while chunk := handle.read(1024 * 1024):
+                    size += len(chunk)
+                    digest.update(chunk)
+            if size != item["size"] or digest.hexdigest() != item["sha256"]:
+                return False
+    except (OSError, KeyError, TypeError):
+        return False
+    return True
+
+
+def _is_originating_chat(platform_name: str, chat_id: str, thread_id) -> bool:
+    """The agent's ordinary reply to its current owner chat is not external."""
+    from gateway.session_context import get_session_env
+
+    source_platform = get_session_env("KORRA_SESSION_PLATFORM", "").strip().lower()
+    source_chat_id = get_session_env("KORRA_SESSION_CHAT_ID", "").strip()
+    source_thread_id = get_session_env("KORRA_SESSION_THREAD_ID", "").strip()
+    if source_platform != platform_name or source_chat_id != str(chat_id):
+        return False
+    return source_thread_id == str(thread_id or "")
+
+
+def _queue_outbound_decision(
+    *,
+    platform_name,
+    pconfig,
+    chat_id,
+    thread_id,
+    cleaned_message,
+    media_files,
+    force_document,
+    used_home_channel,
+    args,
+    source_session_id: str = "",
+    source_session_key: str = "",
+    source_profile: str = "",
+    source_owner_id: str = "",
+    source_label: str = "",
+) -> dict | None:
+    """Persist an external send and notify the user without blocking the turn."""
+    if (
+        not source_session_id
+        and not source_session_key
+        and _is_originating_chat(platform_name, str(chat_id), thread_id)
+    ):
+        return None
+
+    from gateway.session_context import get_session_env
+    from tools.approval import get_current_session_key, notify_gateway_request
+    from tools.effect_decisions import approval_payload, create_pending
+
+    session_key = source_session_key.strip() or get_current_session_key(default="")
+    session_id = (
+        source_session_id.strip()
+        or get_session_env("KORRA_SESSION_ID", "").strip()
+        or session_key
+    )
+    profile = source_profile.strip() or get_session_env("KORRA_SESSION_PROFILE", "").strip()
+    if not profile:
+        try:
+            from korra_cli.profiles import get_active_profile_name
+
+            profile = get_active_profile_name() or "default"
+        except Exception:
+            profile = "default"
+    owner_id = (
+        source_owner_id.strip()
+        or get_session_env("KORRA_SESSION_USER_ID", "").strip()
+        or f"profile:{profile}"
+    )
+    if not session_key:
+        session_key = f"session:{session_id or 'local'}"
+    if not session_id:
+        session_id = session_key
+
+    attachments = _attachment_snapshot(media_files, durable=True)
+    execution_args = dict(args)
+    if attachments:
+        exact_message = cleaned_message
+        if force_document:
+            exact_message = (exact_message + "\n[[as_document]]").strip()
+        for item in attachments:
+            exact_message = (exact_message + f"\nMEDIA:{item['path']}").strip()
+        execution_args["message"] = exact_message
+    target_label = f"{platform_name}:{chat_id}"
+    if thread_id:
+        target_label += f":{thread_id}"
+    payload = {
+        "platform": platform_name,
+        "account": _configured_account_identity(platform_name, pconfig),
+        "chat_id": str(chat_id),
+        "thread_id": str(thread_id) if thread_id is not None else None,
+        "target_label": target_label,
+        "message": cleaned_message,
+        "attachments": attachments,
+        "force_document": bool(force_document),
+        "used_home_channel": bool(used_home_channel),
+        "tool_args": execution_args,
+        "source_label": source_label.strip()
+        or get_session_env("KORRA_SESSION_PLATFORM", "cli")
+        or "cli",
+        "source_user_id": get_session_env("KORRA_SESSION_USER_ID", "") or None,
+    }
+    decision, created = create_pending(
+        kind="outbound_message",
+        owner_id=owner_id,
+        profile=profile,
+        source_session_id=session_id,
+        source_session_key=session_key,
+        payload=payload,
+    )
+    if created:
+        notify_gateway_request(session_key, approval_payload(decision))
+    return decision
+
+
+def _dispatch_resolved_send(
+    *,
+    platform,
+    platform_name,
+    pconfig,
+    chat_id,
+    thread_id,
+    cleaned_message,
+    media_files,
+    force_document,
+    used_home_channel,
+    entry,
+    args,
+    source_label=None,
+    source_user_id=None,
+) -> dict:
+    from model_tools import _run_async
+
+    send_kwargs = {
+        "thread_id": thread_id,
+        "media_files": media_files,
+        "force_document": force_document,
+    }
+    if entry is not None and entry.send_message_handler is not None:
+        send_kwargs["args"] = args
+    result = _run_async(
+        _send_to_platform(
+            platform,
+            pconfig,
+            chat_id,
+            cleaned_message,
+            **send_kwargs,
+        )
+    )
+    if not isinstance(result, dict):
+        result = {"success": bool(result)}
+    if used_home_channel and result.get("success"):
+        result["note"] = f"Sent to {platform_name} home channel (chat_id: {chat_id})"
+
+    mirror_text = cleaned_message.strip() or _describe_media_for_mirror(media_files)
+    if result.get("success") and mirror_text:
+        try:
+            from gateway.mirror import mirror_to_session
+            from gateway.session_context import get_session_env
+
+            actual_source = source_label or get_session_env("KORRA_SESSION_PLATFORM", "cli")
+            actual_user = source_user_id
+            if actual_user is None:
+                actual_user = get_session_env("KORRA_SESSION_USER_ID", "") or None
+            if mirror_to_session(
+                platform_name,
+                chat_id,
+                mirror_text,
+                source_label=actual_source,
+                thread_id=thread_id,
+                user_id=actual_user,
+            ):
+                result["mirrored"] = True
+        except Exception:
+            pass
+    if "error" in result:
+        result["error"] = _sanitize_error_text(result["error"])
+    return result
+
+
+def resolve_outbound_message_decision(
+    decision_id: str,
+    choice: str,
+    *,
+    source_session_id: str = "",
+    source_session_key: str = "",
+    profile: str = "",
+) -> dict:
+    """Resolve and, once approved, execute one immutable outbound message.
+
+    A duplicate click observes the recorded state.  It never re-enters the
+    transport after ``executing``/``succeeded``/``unknown``.
+    """
+    from tools import effect_decisions as decisions
+
+    decision = decisions.get_decision(decision_id)
+    if decision is None or decision.get("kind") != "outbound_message":
+        raise decisions.DecisionConflict("outbound decision was not found")
+    if source_session_id and decision["source_session_id"] != source_session_id:
+        raise decisions.DecisionConflict("effect decision does not belong to this session")
+    if source_session_key and decision["source_session_key"] != source_session_key:
+        raise decisions.DecisionConflict("effect decision does not belong to this session")
+    if profile and decision["profile"] != profile:
+        raise decisions.DecisionConflict("effect decision does not belong to this profile")
+
+    status = decision["status"]
+    if status in {
+        decisions.EXECUTING,
+        decisions.SUCCEEDED,
+        decisions.FAILED,
+        decisions.UNKNOWN,
+    }:
+        return decision
+    if status == decisions.DENIED:
+        if choice != "deny":
+            raise decisions.DecisionConflict("effect decision is already denied")
+        return decision
+
+    decision = decisions.decide(
+        decision_id,
+        source_session_id=source_session_id,
+        source_session_key=source_session_key,
+        profile=profile,
+        choice=choice,
+    )
+    if choice == "deny":
+        return decision
+
+    payload = decision["payload"]
+    digest = decisions.payload_digest(payload)
+    if digest != decision["payload_sha256"]:
+        raise decisions.DecisionConflict("stored effect payload changed after approval")
+
+    # Claim before any validation result is recorded.  From this point a
+    # second resolver cannot race into the transport.
+    decisions.claim_execution(
+        decision_id, expected_payload_sha256=decision["payload_sha256"]
+    )
+
+    try:
+        prepare_send_message_platforms()
+        from gateway.config import Platform, PlatformConfig, load_gateway_config
+        from gateway.platform_registry import platform_registry
+
+        platform_name = str(payload["platform"])
+        platform = Platform(platform_name)
+        entry = platform_registry.get(platform_name)
+        config = load_gateway_config()
+        pconfig = config.platforms.get(platform)
+        if (not pconfig or not pconfig.enabled) and platform_name == "weixin":
+            wx_token = get_secret("WEIXIN_TOKEN", "").strip()
+            wx_account = get_secret("WEIXIN_ACCOUNT_ID", "").strip()
+            if wx_token and wx_account:
+                pconfig = PlatformConfig(
+                    enabled=True,
+                    token=wx_token,
+                    extra={
+                        "account_id": wx_account,
+                        "base_url": get_secret("WEIXIN_BASE_URL", "").strip(),
+                        "cdn_base_url": get_secret("WEIXIN_CDN_BASE_URL", "").strip(),
+                    },
+                )
+        if not pconfig or not pconfig.enabled:
+            return decisions.finish_execution(
+                decision_id,
+                status=decisions.FAILED,
+                outcome={"reason": "sending_account_unavailable", "retry": False},
+            )
+        if _configured_account_identity(platform_name, pconfig) != payload["account"]:
+            return decisions.finish_execution(
+                decision_id,
+                status=decisions.FAILED,
+                outcome={"reason": "sending_account_changed", "retry": False},
+            )
+        attachments = list(payload.get("attachments") or [])
+        if not _attachment_snapshots_match(attachments):
+            return decisions.finish_execution(
+                decision_id,
+                status=decisions.FAILED,
+                outcome={"reason": "attachment_changed", "retry": False},
+            )
+        media_files = [
+            (item["path"], bool(item.get("is_voice"))) for item in attachments
+        ]
+    except Exception as exc:
+        return decisions.finish_execution(
+            decision_id,
+            status=decisions.FAILED,
+            outcome={
+                "reason": "pre_dispatch_validation_failed",
+                "detail": _sanitize_error_text(str(exc)),
+                "retry": False,
+            },
+        )
+
+    try:
+        result = _dispatch_resolved_send(
+            platform=platform,
+            platform_name=platform_name,
+            pconfig=pconfig,
+            chat_id=str(payload["chat_id"]),
+            thread_id=payload.get("thread_id"),
+            cleaned_message=str(payload.get("message") or ""),
+            media_files=media_files,
+            force_document=bool(payload.get("force_document")),
+            used_home_channel=bool(payload.get("used_home_channel")),
+            entry=entry,
+            args=dict(payload.get("tool_args") or {}),
+            source_label=payload.get("source_label"),
+            source_user_id=payload.get("source_user_id"),
+        )
+    except BaseException as exc:
+        # The transport may have accepted the effect before the local process
+        # observed its response.  Never turn this into an automatic retry.
+        return decisions.finish_execution(
+            decision_id,
+            status=decisions.UNKNOWN,
+            outcome={
+                "reason": "transport_outcome_unknown",
+                "detail": _sanitize_error_text(str(exc)),
+                "retry": False,
+            },
+        )
+
+    if result.get("success"):
+        return decisions.finish_execution(
+            decision_id,
+            status=decisions.SUCCEEDED,
+            outcome={"transport": result},
+        )
+    # Several platform senders can fail after an earlier text chunk or media
+    # item was accepted.  Without a transport reconciliation API this outcome
+    # is unknown, not a safe retryable failure.
+    return decisions.finish_execution(
+        decision_id,
+        status=decisions.UNKNOWN,
+        outcome={"reason": "transport_reported_failure", "transport": result, "retry": False},
+    )
+
+
+def _handle_send(args, *, owner_initiated: bool = False):
     """Send a message to a platform target."""
     target = args.get("target", "")
     message = args.get("message", "")
@@ -444,7 +873,6 @@ def _handle_send(args):
 
     media_files, cleaned_message = BasePlatformAdapter.extract_media(message)
     media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
-    mirror_text = cleaned_message.strip() or _describe_media_for_mirror(media_files)
 
     used_home_channel = False
     if not chat_id:
@@ -489,49 +917,42 @@ def _handle_send(args):
             chat_id = _resolved
 
     try:
-        from model_tools import _run_async
-        send_kwargs = {
-            "thread_id": thread_id,
-            "media_files": media_files,
-            "force_document": force_document_attachments,
-        }
-        # Preserve the exact built-in call contract; only custom handlers need
-        # the complete typed request.
-        if entry is not None and entry.send_message_handler is not None:
-            send_kwargs["args"] = args
-        result = _run_async(
-            _send_to_platform(
-                platform,
-                pconfig,
-                chat_id,
-                cleaned_message,
-                **send_kwargs,
+        decision = None
+        if not owner_initiated:
+            decision = _queue_outbound_decision(
+                platform_name=platform_name,
+                pconfig=pconfig,
+                chat_id=chat_id,
+                thread_id=thread_id,
+                cleaned_message=cleaned_message,
+                media_files=media_files,
+                force_document=force_document_attachments,
+                used_home_channel=used_home_channel,
+                args=args,
             )
+        if decision is not None:
+            return json.dumps({
+                "success": False,
+                "status": "pending_decision",
+                "decision_id": decision["id"],
+                "message": (
+                    "Внешняя отправка не выполнена. Черновик сохранён и ждёт "
+                    "точного решения владельца; не повторяйте вызов."
+                ),
+            }, ensure_ascii=False)
+        result = _dispatch_resolved_send(
+            platform=platform,
+            platform_name=platform_name,
+            pconfig=pconfig,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            cleaned_message=cleaned_message,
+            media_files=media_files,
+            force_document=force_document_attachments,
+            used_home_channel=used_home_channel,
+            entry=entry,
+            args=args,
         )
-        if used_home_channel and isinstance(result, dict) and result.get("success"):
-            result["note"] = f"Sent to {platform_name} home channel (chat_id: {chat_id})"
-
-        # Mirror the sent message into the target's gateway session
-        if isinstance(result, dict) and result.get("success") and mirror_text:
-            try:
-                from gateway.mirror import mirror_to_session
-                from gateway.session_context import get_session_env
-                source_label = get_session_env("KORRA_SESSION_PLATFORM", "cli")
-                user_id = get_session_env("KORRA_SESSION_USER_ID", "") or None
-                if mirror_to_session(
-                    platform_name,
-                    chat_id,
-                    mirror_text,
-                    source_label=source_label,
-                    thread_id=thread_id,
-                    user_id=user_id,
-                ):
-                    result["mirrored"] = True
-            except Exception:
-                pass
-
-        if isinstance(result, dict) and "error" in result:
-            result["error"] = _sanitize_error_text(result["error"])
         return json.dumps(result)
     except Exception as e:
         return json.dumps(_error(f"Send failed: {e}"))

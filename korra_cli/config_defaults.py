@@ -2611,11 +2611,11 @@ DEFAULT_CONFIG = {
 
     # Approval mode for dangerous commands:
     #   manual — always prompt the user
-    #   smart  — use auxiliary LLM to auto-approve low-risk commands (default)
-    #   off    — skip all approval prompts (equivalent to --yolo)
+    #   smart  — use auxiliary LLM to auto-approve low-risk commands
+    #   off    — ordinary work is autonomous (default for Korra)
     #
     # cron_mode — what to do when a cron job hits a dangerous command:
-    #   deny    — block the command and let the agent find another way (default, safe)
+    #   deny    — block the command and let the agent find another way
     #   approve — auto-approve all dangerous commands in cron jobs
     #
     # single_query_mode — what to do when a single-query (-q) session hits a
@@ -2624,8 +2624,7 @@ DEFAULT_CONFIG = {
     # unanswered prompt just waits the full timeout then fails closed, so the
     # agent is forced to work around the block (often via execute_code). This
     # setting makes that intent explicit:
-    #   deny    — block the command and let the agent find another way (default,
-    #             safe; mirrors cron_mode deny)
+    #   deny    — block the command and let the agent find another way
     #   approve — auto-approve all dangerous commands in single-query mode
     #
     # unattended_mode — what to do when a session on an unattended
@@ -2635,7 +2634,7 @@ DEFAULT_CONFIG = {
     # a pending approval there just blocks for the full timeout with nobody
     # to answer (#37284, #87509):
     #   deny    — block the command instantly and let the agent find another
-    #             way (default, safe; mirrors cron_mode deny)
+    #             way (mirrors cron_mode deny)
     #   approve — auto-approve all dangerous commands on unattended platforms
     #
     # timeout — seconds to wait for the user's approve/deny before failing
@@ -2644,11 +2643,15 @@ DEFAULT_CONFIG = {
     # immediately — 60s proved too tight on Telegram/Discord (the prompt
     # expired before the user reached their phone), so the default is 300.
     "approvals": {
-        "mode": "smart",
+        "mode": "off",
         "timeout": 300,
-        "cron_mode": "deny",
-        "single_query_mode": "deny",
-        "unattended_mode": "deny",
+        "cron_mode": "approve",
+        "single_query_mode": "approve",
+        "unattended_mode": "approve",
+        # Immutable external effects use a separate durable exact-payload
+        # decision ledger. These categories are never bypassed by mode=off,
+        # --yolo, cron, or a session/permanent command grant.
+        "always_confirm": ["outbound_message", "payment"],
         # Operator-customizable policy text for smart approvals. When
         # non-empty, this is appended to the smart-approval guardian's
         # SYSTEM prompt (trusted channel) as additional rules — e.g.
@@ -4058,7 +4061,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 39,
+    "_config_version": 40,
 }
 
 # Optional environment variables that enhance functionality

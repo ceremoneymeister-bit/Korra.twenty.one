@@ -3060,7 +3060,17 @@ def _is_channel_dm_topic(
     return is_channel
 
 
-def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Optional[str]:
+_WAITING_DECISION_PREFIX = "waiting_decision:"
+
+
+def _deliver_result(
+    job: dict,
+    content: str,
+    adapters=None,
+    loop=None,
+    *,
+    decision_session_id: str = "",
+) -> Optional[str]:
     """
     Deliver job output to the configured target(s) (origin chat, specific platform, etc.).
 
@@ -3176,6 +3186,7 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
         return msg
 
     delivery_errors = []
+    pending_decision_ids: list[str] = []
 
     for target in targets:
         platform_name = target["platform"]
@@ -3303,6 +3314,55 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
             msg = f"platform '{platform_name}' not configured/enabled"
             logger.warning("Job '%s': %s", job["id"], msg)
             delivery_errors.append(msg)
+            continue
+
+        # Scheduled delivery is an external message whose exact text only
+        # exists after the cron turn. Queue that immutable payload instead of
+        # sending under cron/yolo/off. The decision survives this worker and is
+        # visible from every chat in the profile decision center.
+        if decision_session_id:
+            try:
+                from korra_cli.profiles import get_active_profile_name
+                from tools.send_message_tool import _queue_outbound_decision
+
+                decision = _queue_outbound_decision(
+                    platform_name=platform_name,
+                    pconfig=pconfig,
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                    cleaned_message=cleaned_delivery_content,
+                    media_files=media_files,
+                    force_document=False,
+                    used_home_channel=False,
+                    args={
+                        "action": "cron_delivery",
+                        "job_id": str(job.get("id") or ""),
+                        "job_name": str(job.get("name") or ""),
+                        "target": f"{platform_name}:{chat_id}",
+                        "message": cleaned_delivery_content,
+                    },
+                    source_session_id=decision_session_id,
+                    source_session_key=decision_session_id,
+                    source_profile=get_active_profile_name() or "default",
+                    source_label="cron",
+                )
+                if decision is None:
+                    raise RuntimeError("cron delivery was not classified as external")
+                pending_decision_ids.append(str(decision["id"]))
+                logger.info(
+                    "Job '%s': external delivery to %s:%s waits for exact decision %s",
+                    job["id"],
+                    platform_name,
+                    chat_id,
+                    decision["id"],
+                )
+            except Exception as exc:
+                msg = (
+                    f"could not persist external delivery decision for "
+                    f"{platform_name}:{chat_id}: {exc}"
+                )
+                logger.error("Job '%s': %s", job["id"], msg, exc_info=True)
+                delivery_errors.append(msg)
             continue
 
         # Prefer the resolved live transport when the gateway is running. This
@@ -3916,6 +3976,8 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
         delivery_errors.extend(policy_drop_errors)
     if delivery_errors:
         return "; ".join(delivery_errors)
+    if pending_decision_ids:
+        return _WAITING_DECISION_PREFIX + ",".join(pending_decision_ids)
     return None
 
 
@@ -7179,6 +7241,7 @@ def _run_one_job_body(
         execution_id = create_execution(job["id"], source="direct")["id"]
     delivery_attempted = False
     delivery_error = None
+    delivery_waiting_decision = False
     # Durable failure-incident bookkeeping for this run (see cron.incidents):
     # set on the failure paths below; consumed by the delivery_outcome
     # computation and the post-delivery "alerted" transition.
@@ -7435,7 +7498,15 @@ def _run_one_job_body(
                             deliver_content,
                             adapters=adapters,
                             loop=loop,
+                            decision_session_id=(
+                                f"cron:{job['id']}:{execution_id}"
+                            ),
                         )
+                        if delivery_error and delivery_error.startswith(
+                            _WAITING_DECISION_PREFIX
+                        ):
+                            delivery_waiting_decision = True
+                            delivery_error = None
                 except Exception as de:
                     if isinstance(de, _FireClaimLostDuringSideEffect):
                         raise
@@ -7523,7 +7594,9 @@ def _run_one_job_body(
             )
             return True
         normalized_deliver = _normalize_deliver_value(job.get("deliver", "local"))
-        if delivery_error:
+        if delivery_waiting_decision:
+            delivery_outcome = "waiting_decision"
+        elif delivery_error:
             delivery_outcome = "failed"
         elif should_deliver and unresolved_origin:
             delivery_outcome = "not_configured"
@@ -7605,7 +7678,15 @@ def _run_one_job_body(
                         + _failure_streak_nudge(job),
                         adapters=adapters,
                         loop=loop,
+                        decision_session_id=(
+                            f"cron:{job['id']}:{execution_id}"
+                        ),
                     )
+                    if delivery_error and delivery_error.startswith(
+                        _WAITING_DECISION_PREFIX
+                    ):
+                        delivery_waiting_decision = True
+                        delivery_error = None
                 except Exception as delivery_exc:
                     delivery_error = str(delivery_exc)
                     logger.error(
@@ -7613,7 +7694,9 @@ def _run_one_job_body(
                     )
                 if not delivery_error and normalized_deliver == "origin":
                     unresolved_origin = not _resolve_delivery_targets(job)
-                if delivery_error:
+                if delivery_waiting_decision:
+                    delivery_outcome = "waiting_decision"
+                elif delivery_error:
                     delivery_outcome = "failed"
                 elif unresolved_origin:
                     delivery_outcome = "not_configured"

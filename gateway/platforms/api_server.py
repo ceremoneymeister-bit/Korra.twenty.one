@@ -189,13 +189,13 @@ def _chat_approval_event(
     event.update({
         "event": "approval.request",
         "session_id": session_id,
-        "timestamp": time.time(),
         "choices": _approval_event_choices(
             smart_denied=bool(event.get("smart_denied")),
             allow_session=event.get("allow_session") is not False,
             allow_permanent=allow_permanent,
         ),
     })
+    event.setdefault("timestamp", time.time())
     return event
 
 
@@ -2398,6 +2398,7 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/api/sessions/{session_id}/messages", self._handle_session_messages),
             ("GET", "/api/sessions/{session_id}/approvals", self._handle_session_approvals),
             ("POST", "/api/sessions/{session_id}/approval", self._handle_session_approval),
+            ("GET", "/api/effect-decisions", self._handle_effect_decisions),
             ("POST", "/api/sessions/{session_id}/fork", self._handle_fork_session),
             ("POST", "/api/sessions/{session_id}/chat", self._handle_session_chat),
             ("POST", "/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream),
@@ -4623,11 +4624,87 @@ class APIServerAdapter(BasePlatformAdapter):
                 _chat_approval_event(item, session_id=session_id)
                 for item in list_gateway_approvals(approval_session_key)
             ]
+        # External-effect decisions outlive the agent turn and its in-memory
+        # listener.  They remain answerable after F5 or a process restart.
+        try:
+            from tools.effect_decisions import (
+                APPROVED,
+                DENIED,
+                EXECUTING,
+                FAILED,
+                PENDING,
+                SUCCEEDED,
+                UNKNOWN,
+                approval_payload,
+                list_session_decisions,
+            )
+            from korra_cli.profiles import get_active_profile_name
+
+            seen = {str(item.get("request_id") or "") for item in data}
+            data.extend(
+                _chat_approval_event(approval_payload(item), session_id=session_id)
+                for item in list_session_decisions(
+                    session_id,
+                    profile=get_active_profile_name() or "default",
+                    statuses=(
+                        PENDING,
+                        APPROVED,
+                        DENIED,
+                        EXECUTING,
+                        SUCCEEDED,
+                        FAILED,
+                        UNKNOWN,
+                    ),
+                )
+                if str(item.get("id") or "") not in seen
+            )
+        except Exception:
+            logger.exception(
+                "[api_server] durable decisions could not be listed for session %s",
+                session_id,
+            )
         return web.json_response({
             "object": "list",
             "session_id": session_id,
             "data": data,
         })
+
+    async def _handle_effect_decisions(self, request: "web.Request") -> "web.Response":
+        """GET /api/effect-decisions — profile-wide exact-effect history.
+
+        This is deliberately separate from live dangerous-command prompts:
+        durable external effects remain available from every chat and survive
+        the turn, browser reload, and gateway restart.
+        """
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+        try:
+            raw_limit = int(request.query.get("limit", "100"))
+        except (TypeError, ValueError):
+            raw_limit = 100
+        try:
+            from tools.effect_decisions import approval_payload, list_profile_decisions
+            from korra_cli.profiles import get_active_profile_name
+
+            decisions = await asyncio.to_thread(
+                list_profile_decisions,
+                profile=get_active_profile_name() or "default",
+                limit=max(1, min(raw_limit, 500)),
+            )
+            data = [
+                _chat_approval_event(
+                    approval_payload(item),
+                    session_id=str(item["source_session_id"]),
+                )
+                for item in decisions
+            ]
+        except Exception:
+            logger.exception("[api_server] durable decisions could not be listed")
+            return web.json_response(
+                _openai_error("Durable decisions are unavailable."), status=500
+            )
+        return web.json_response({"object": "list", "data": data})
 
     def _targets_execute_code(
         self, approval_session_key: str, request_id: str
@@ -4704,6 +4781,58 @@ class APIServerAdapter(BasePlatformAdapter):
                 ),
                 status=400,
             )
+
+        if request_id.startswith("effect_"):
+            if choice not in {"once", "deny"}:
+                return web.json_response(
+                    _openai_error(
+                        "Внешнее действие можно подтвердить только один раз или отклонить",
+                        code="invalid_effect_decision_scope",
+                    ),
+                    status=400,
+                )
+            try:
+                from korra_cli.profiles import get_active_profile_name
+                from tools.effect_decisions import resolve_effect_decision
+
+                effect = await asyncio.to_thread(
+                    resolve_effect_decision,
+                    request_id,
+                    choice,
+                    source_session_id=session_id,
+                    profile=get_active_profile_name() or "default",
+                )
+            except Exception as exc:
+                from tools.effect_decisions import (
+                    DecisionConflict,
+                    EffectExecutorUnavailable,
+                )
+
+                if isinstance(exc, EffectExecutorUnavailable):
+                    return web.json_response(
+                        _openai_error(
+                            str(exc), code="effect_executor_unavailable"
+                        ),
+                        status=503,
+                    )
+                if isinstance(exc, DecisionConflict):
+                    return web.json_response(
+                        _openai_error(str(exc), code="effect_decision_conflict"),
+                        status=409,
+                    )
+                logger.exception(
+                    "[api_server] durable effect resolution failed for session %s",
+                    session_id,
+                )
+                return web.json_response(_openai_error(str(exc)), status=500)
+            return web.json_response({
+                "object": "hermes.session.approval_response",
+                "session_id": session_id,
+                "choice": choice,
+                "request_id": request_id,
+                "resolved": 1,
+                "effect_status": effect.get("status"),
+            })
 
         approval_session_key = self._chat_approval_sessions.get(session_id)
         if not approval_session_key:

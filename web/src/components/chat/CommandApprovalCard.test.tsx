@@ -42,6 +42,27 @@ afterEach(async () => {
 });
 
 describe("CommandApprovalCard — что видно человеку", () => {
+  it("для внешней отправки показывает точный черновик без широких разрешений", async () => {
+    await render(
+      <CommandApprovalCard
+        decisionKind="outbound_message"
+        command={"Кому: telegram:2002\n\nТочный текст\n\nВложение: offer.pdf"}
+        description="Проверьте адресата, текст и вложения перед внешней отправкой."
+        choices={["once", "deny"]}
+        onDecide={vi.fn()}
+      />,
+    );
+
+    expect(container.textContent).toContain("Проверьте внешнюю отправку");
+    expect(container.textContent).toContain("telegram:2002");
+    expect(container.textContent).toContain("Точный текст");
+    expect(container.textContent).toContain("offer.pdf");
+    expect(container.textContent).toContain("Отправить");
+    expect(container.textContent).toContain("Не отправлять");
+    expect(container.textContent).not.toContain("до конца чата");
+    expect(container.textContent).not.toContain("Разрешить всегда");
+  });
+
   it("показывает команду и причину, а варианты берёт от сервера", async () => {
     await render(
       <CommandApprovalCard
@@ -173,6 +194,7 @@ describe("CommandApprovalCard — исход", () => {
 
     expect(container.textContent).toContain("Разрешено всегда");
     expect(container.textContent).toContain("Ход продолжится на сервере.");
+    expect(container.textContent).not.toContain("rm -rf /opt/data/tmp");
     expect(container.querySelectorAll("button")).toHaveLength(0);
   });
 

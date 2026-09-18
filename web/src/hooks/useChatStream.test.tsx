@@ -467,6 +467,61 @@ describe("useChatStream — одобрение опасных команд", () 
     // Живого потока нет — про исход надо сказать честно.
     expect(current.approvals[0].request.choices).toEqual(["once", "deny"]);
   });
+
+  it("после F5 восстанавливает ожидающую отправку и два компактных исхода", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL) => {
+        if (String(url).includes("/api/chat/approvals")) {
+          return Response.json({
+            data: [
+              {
+                request_id: "effect_pending",
+                decision_kind: "outbound_message",
+                effect_status: "pending",
+                source_session_id: "s-effects",
+                command: "Кому: telegram:3\n\nТретий черновик",
+                choices: ["once", "deny"],
+              },
+              {
+                request_id: "effect_sent",
+                decision_kind: "outbound_message",
+                effect_status: "succeeded",
+                source_session_id: "s-effects",
+                command: "Кому: email:1\n\nПервый черновик",
+                choices: ["once", "deny"],
+              },
+              {
+                request_id: "effect_denied",
+                decision_kind: "outbound_message",
+                effect_status: "denied",
+                source_session_id: "s-effects",
+                command: "Кому: slack:2\n\nВторой черновик",
+                choices: ["once", "deny"],
+              },
+            ],
+          });
+        }
+        return Response.json({});
+      }),
+    );
+    vi.spyOn(api, "getSessionMessages").mockResolvedValue({
+      session_id: "s-effects",
+      messages: [{ role: "user", content: "Подготовь отправки" }] as unknown as SessionMessage[],
+    });
+
+    await act(async () => current.loadSession("s-effects"));
+    await settle();
+
+    expect(current.approvals).toHaveLength(3);
+    expect(current.approvals.map((entry) => [entry.request.request_id, entry.status, entry.decision])).toEqual([
+      ["effect_pending", "pending", undefined],
+      ["effect_sent", "settled", "once"],
+      ["effect_denied", "settled", "deny"],
+    ]);
+    expect(current.approvals[1].note).toBe("Сообщение отправлено один раз.");
+    expect(current.approvals[2].note).toBe("Сообщение не отправлено.");
+  });
 });
 
 describe("useChatStream — хозяин очереди вопросов остаётся на сервере", () => {

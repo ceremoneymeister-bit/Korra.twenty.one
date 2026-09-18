@@ -144,7 +144,7 @@ def test_host_send_honors_sync_and_async_plugin_handlers(plugin_platform, async_
             "target": f"{name}:@Alice@Example.COM",
             "message": "hello",
             "subject": "greeting",
-        }))
+        }, owner_initiated=True))
 
     assert result["success"] is True
     assert result["platform"] == name
@@ -246,7 +246,8 @@ with patch("gateway.config.load_gateway_config", return_value=config), \
      patch("tools.interrupt.is_interrupted", return_value=False), \
      patch("gateway.mirror.mirror_to_session", return_value=True):
     host_send = json.loads(send_message_tool({"target": "fmsg:@Alice@Example.COM",
-                                              "message": "hello", "subject": "hi"}))
+                                              "message": "hello", "subject": "hi"},
+                                             owner_initiated=True))
 from cron.scheduler import _resolve_single_delivery_target
 cron = _resolve_single_delivery_target({}, "fmsg:@Alice@Example.COM")
 print(json.dumps({"host_send": host_send, "cron": cron,

@@ -272,7 +272,7 @@ def _is_cron_approval_context() -> bool:
 #: other end to answer an approval prompt, and the adapter has no
 #: ``send_exec_approval`` / ``/approve`` surface. Approval decisions for
 #: these sessions are governed by ``approvals.unattended_mode`` config
-#: (default deny), mirroring ``approvals.cron_mode`` — never by an
+#: (Korra default: approve), mirroring ``approvals.cron_mode`` — never by an
 #: interactive round-trip that would block for the full approval timeout
 #: with nobody to answer (#37284, #87509).
 #:
@@ -372,7 +372,7 @@ def _is_gateway_approval_context() -> bool:
     Submitting a pending approval there blocks the session for the full
     approval timeout (60-300 s) with no human who can resolve it (#37284,
     #87509). Their dangerous-command handling is governed by
-    ``approvals.unattended_mode`` config (default deny), mirroring cron.
+    ``approvals.unattended_mode`` config (Korra default: approve), mirroring cron.
     """
     if _is_cron_approval_context():
         return False
@@ -2989,6 +2989,25 @@ def resolve_gateway_approval(session_key: str, choice: str,
 
     Returns the number of approvals resolved (0 means nothing was pending).
     """
+    if request_id and request_id.startswith("effect_"):
+        # Durable external effects do not live in the blocking Python queue.
+        # Resolve their exact immutable record and execute at most once.
+        try:
+            from tools.effect_decisions import resolve_effect_decision
+
+            resolve_effect_decision(
+                request_id,
+                choice,
+                source_session_key=session_key,
+            )
+            return 1
+        except Exception:
+            logger.warning(
+                "Durable effect decision %s could not be resolved",
+                request_id,
+                exc_info=True,
+            )
+            return 0
     with _lock:
         queue = _gateway_queues.get(session_key)
         if not queue:
@@ -3031,6 +3050,27 @@ def list_gateway_approvals(session_key: str) -> list[dict]:
     """Return replay-safe snapshots of unresolved approvals for one session."""
     with _lock:
         return [approval_data_for_display(entry.data) for entry in _gateway_queues.get(session_key, [])]
+
+
+def notify_gateway_request(session_key: str, request: dict) -> bool:
+    """Project a non-blocking durable decision onto the live approval surface.
+
+    Unlike :func:`_await_gateway_decision`, this deliberately does not add an
+    in-memory queue entry and does not wait.  The durable effect ledger remains
+    authoritative after the model turn, browser refresh, or process restart.
+    """
+    if not session_key:
+        return False
+    with _lock:
+        notify_cb = _gateway_notify_cbs.get(session_key)
+    if notify_cb is None:
+        return False
+    try:
+        notify_cb(approval_data_for_display(dict(request)))
+    except Exception as exc:
+        logger.warning("Durable decision notify failed: %s", exc)
+        return False
+    return True
 
 
 def ack_gateway_approval(session_key: str, request_id: str) -> bool:
@@ -3077,14 +3117,8 @@ def approve_session(session_key: str, pattern_key: str):
         _session_approved.setdefault(session_key, set()).add(pattern_key)
 
 
-def _release_permission_mode_dependents(session_key: str) -> None:
-    """Drop resources whose immutable mode is derived from Hermes YOLO.
-
-    The import stays lazy so approval-only sessions do not load computer-use.
-    Releasing on both edges makes enabling YOLO replace an existing standard
-    backend and makes disabling YOLO revoke a private unrestricted daemon
-    immediately, even when no later computer-use call occurs.
-    """
+def _release_session_resources(session_key: str) -> None:
+    """Drop session-owned computer-use resources at the session boundary."""
     try:
         from tools.computer_use import release_computer_use_session
 
@@ -3103,7 +3137,6 @@ def enable_session_yolo(session_key: str) -> None:
         return
     with _lock:
         _session_yolo.add(session_key)
-    _release_permission_mode_dependents(session_key)
 
 
 def disable_session_yolo(session_key: str) -> None:
@@ -3112,7 +3145,6 @@ def disable_session_yolo(session_key: str) -> None:
         return
     with _lock:
         _session_yolo.discard(session_key)
-    _release_permission_mode_dependents(session_key)
 
 
 def clear_session(session_key: str) -> None:
@@ -3129,7 +3161,7 @@ def clear_session(session_key: str) -> None:
         # immediately so the old run can unwind instead of idling until timeout.
         entry.result = "deny"
         entry.event.set()
-    _release_permission_mode_dependents(session_key)
+    _release_session_resources(session_key)
     # Session-persistent code kernels are owned by this same key: they die
     # at the same boundary that clears the session's approval and yolo
     # state, so a finished conversation cannot leak a live interpreter.
@@ -3684,9 +3716,9 @@ def _get_unattended_approval_mode() -> str:
     """Read the unattended-platform approval mode from config.
 
     Governs webhook / msgraph_webhook / api_server sessions (the
-    ``_UNATTENDED_APPROVAL_PLATFORMS`` set). Returns 'deny' or 'approve';
-    default deny — an unattended programmatic session should never silently
-    run a flagged action unless the operator explicitly trusts it.
+    ``_UNATTENDED_APPROVAL_PLATFORMS`` set). Returns 'deny' or 'approve'. The
+    Korra config default is ``approve`` for ordinary autonomous work; a load
+    failure still falls closed to ``deny`` and explicit legacy deny is honored.
     """
     try:
         from korra_cli.config import load_config_readonly

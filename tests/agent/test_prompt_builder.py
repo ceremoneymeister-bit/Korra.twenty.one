@@ -999,6 +999,16 @@ class TestOpenAIModelExecutionGuidance:
         text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
         assert "plausible subset" in text
 
+    def test_guidance_limits_confirmation_to_exact_external_effects(self):
+        text = OPENAI_MODEL_EXECUTION_GUIDANCE.lower()
+        assert "ordinary work is autonomous" in text
+        assert "sending a message" in text
+        assert "paying money" in text
+        assert "recipient/account/text/attachments" in text
+        assert "recipient/amount/currency" in text
+        assert "current chat is not a third-party send" in text
+        assert "never blindly replay" in text
+
 
 class TestExecutionGuidanceModels:
     """Behavior contracts for the default auto-match model list."""
@@ -1045,5 +1055,4 @@ class TestParallelToolCallGuidance:
 # =========================================================================
 # Budget warning history stripping
 # =========================================================================
-
 

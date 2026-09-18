@@ -286,7 +286,8 @@ def test_send_message_routes_buzz_uuid_without_home_fallback() -> None:
                     "action": "send",
                     "target": f"buzz:{channel_id}",
                     "message": "hello group",
-                }
+                },
+                owner_initiated=True,
             )
         )
 
@@ -334,7 +335,8 @@ def test_send_message_routes_whatsapp_group_jid_without_home_fallback() -> None:
                     "action": "send",
                     "target": "whatsapp:120363408391911677@g.us",
                     "message": "hello group",
-                }
+                },
+                owner_initiated=True,
             )
         )
 
@@ -387,7 +389,8 @@ def test_resolved_opaque_plugin_target_uses_directory_id() -> None:
                         "action": "send",
                         "target": f"{platform_name}:Friendly name",
                         "message": "hello",
-                    }
+                    },
+                    owner_initiated=True,
                 )
             )
     finally:

@@ -22,37 +22,38 @@ def test_normal_hermes_session_maps_to_standard_mode():
     from tools.computer_use import tool as computer_use
 
     with patch(
-        "tools.approval.is_approval_bypass_active_for_session",
-        return_value=False,
+        "tools.computer_use.cua_backend._cua_configured_permission_mode",
+        return_value="standard",
     ):
         assert computer_use._cua_permission_mode("session-a") == "standard"
 
 
-def test_any_explicit_hermes_bypass_maps_to_unrestricted_mode():
+def test_approval_bypass_keeps_cua_driver_safety_ceiling():
     from tools.computer_use import tool as computer_use
 
-    with patch(
-        "tools.approval.is_approval_bypass_active_for_session",
-        return_value=True,
+    # The general approval bypass is deliberately irrelevant to the driver
+    # mode. It suppresses ordinary Korra cards, not password/payment ceilings.
+    with patch("tools.approval.is_approval_bypass_active_for_session", return_value=True), patch(
+        "tools.computer_use.cua_backend._cua_configured_permission_mode",
+        return_value="standard",
     ):
-        assert computer_use._cua_permission_mode("session-a") == "unrestricted"
+        assert computer_use._cua_permission_mode("session-a") == "standard"
 
 
-def test_gateway_session_key_yolo_maps_to_unrestricted_mode():
-    """Gateway /yolo keys bypass off the gateway session_key contextvar,
-    not the DB session_id the tool path passes. Mode resolution must consult
-    both namespaces or /yolo is silently dead on messaging platforms."""
+def test_gateway_session_key_yolo_does_not_remove_driver_ceiling():
     from tools import approval
     from tools.computer_use import tool as computer_use
 
     gateway_key = "agent:main:telegram:private:12345"
     token = approval.set_current_session_key(gateway_key)
     try:
-        approval.enable_session_yolo(gateway_key)
-        # Tool dispatch passes the (different) DB session id.
-        assert computer_use._cua_permission_mode("db-sid-xyz") == "unrestricted"
-        approval.disable_session_yolo(gateway_key)
-        assert computer_use._cua_permission_mode("db-sid-xyz") == "standard"
+        # Pin manual policy so the test isolates the session toggle from
+        # Korra's new autonomous default.
+        with patch("tools.approval._get_approval_mode", return_value="manual"):
+            approval.enable_session_yolo(gateway_key)
+            assert computer_use._cua_permission_mode("db-sid-xyz") == "standard"
+            approval.disable_session_yolo(gateway_key)
+            assert computer_use._cua_permission_mode("db-sid-xyz") == "standard"
     finally:
         approval.disable_session_yolo(gateway_key)
         try:
@@ -78,22 +79,22 @@ def test_mode_change_replaces_only_that_sessions_backend():
         def stop(self):
             self.stopped = True
 
-    yolo = False
+    configured_mode = "standard"
     with patch(
-        "tools.approval.is_approval_bypass_active_for_session",
-        side_effect=lambda sid: yolo,
+        "tools.computer_use.cua_backend._cua_configured_permission_mode",
+        side_effect=lambda: configured_mode,
     ), patch(
         "tools.computer_use.cua_backend.CuaDriverBackend", _Backend
     ):
         standard = computer_use._get_backend("session-a")
         other = computer_use._get_backend("session-b")
-        yolo = True
-        unrestricted = computer_use._get_backend("session-a")
+        configured_mode = "bounded"
+        bounded = computer_use._get_backend("session-a")
 
     assert getattr(standard, "permission_mode") == "standard"
     assert getattr(standard, "stopped") is True
-    assert getattr(unrestricted, "permission_mode") == "unrestricted"
-    assert unrestricted is not standard
+    assert getattr(bounded, "permission_mode") == "bounded"
+    assert bounded is not standard
     assert getattr(other, "permission_mode") == "standard"
     assert getattr(other, "stopped") is False
 
@@ -101,7 +102,7 @@ def test_mode_change_replaces_only_that_sessions_backend():
 def test_mode_change_is_rechecked_after_stale_backend_stops():
     from tools.computer_use import tool as computer_use
 
-    yolo = False
+    configured_mode = "standard"
     created = []
 
     class _Backend:
@@ -113,15 +114,15 @@ def test_mode_change_is_rechecked_after_stale_backend_stops():
             pass
 
         def stop(self):
-            nonlocal yolo
-            yolo = False
+            nonlocal configured_mode
+            configured_mode = "standard"
 
     with patch(
-        "tools.approval.is_approval_bypass_active_for_session",
-        side_effect=lambda sid: yolo,
+        "tools.computer_use.cua_backend._cua_configured_permission_mode",
+        side_effect=lambda: configured_mode,
     ), patch("tools.computer_use.cua_backend.CuaDriverBackend", _Backend):
         original = computer_use._get_backend("session-a")
-        yolo = True
+        configured_mode = "bounded"
         replacement = computer_use._get_backend("session-a")
 
     assert getattr(original, "permission_mode") == "standard"
@@ -139,7 +140,7 @@ def test_release_seam_stops_backend_and_clears_session_state():
     backend = Mock()
     computer_use._backends["session-a"] = backend
     computer_use._backend_call_locks["session-a"] = computer_use.threading.RLock()
-    computer_use._backend_permission_modes["session-a"] = "unrestricted"
+    computer_use._backend_permission_modes["session-a"] = "bounded"
     computer_use._session_auto_approve["session-a"] = True
     computer_use._always_allow["session-a"] = {("click", "background")}
 
@@ -151,17 +152,23 @@ def test_release_seam_stops_backend_and_clears_session_state():
     assert "session-a" not in computer_use._always_allow
 
 
-def test_yolo_toggle_immediately_releases_mode_dependent_backend():
+def test_yolo_toggle_does_not_restart_computer_use_backend():
     from tools import approval
 
     with patch("tools.computer_use.release_computer_use_session") as release:
         approval.enable_session_yolo("session-a")
         approval.disable_session_yolo("session-a")
 
-    assert release.call_args_list == [
-        (('session-a',), {}),
-        (('session-a',), {}),
-    ]
+    release.assert_not_called()
+
+
+def test_session_clear_releases_computer_use_backend():
+    from tools import approval
+
+    with patch("tools.computer_use.release_computer_use_session") as release:
+        approval.clear_session("session-a")
+
+    release.assert_called_once_with("session-a")
 
 
 def test_unrestricted_embedded_daemon_uses_private_socket_and_two_part_ack():
@@ -285,73 +292,3 @@ def test_transport_reset_invalidates_native_capabilities():
     assert backend._active_pid is None
     assert backend._active_window_id is None
     assert backend._snapshot_tokens == {}
-
-
-# ── the escalation is at least audible ──────────────────────────────────
-
-
-def test_bypass_escalation_is_warned_once_per_session(caplog):
-    """`-z` reads as "don't prompt me" but also drops the driver's ceiling.
-
-    That widening is deliberate and unrestricted is reachable no other way,
-    but it is easy to trigger by accident: a script takes -z for quiet output
-    and loses its limits as a side effect. It must not be silent.
-    """
-    import logging
-
-    from tools.computer_use import tool as computer_use
-
-    computer_use._escalation_warned.clear()
-    with patch(
-        "tools.approval.is_approval_bypass_active_for_session",
-        return_value=True,
-    ):
-        with caplog.at_level(logging.WARNING, logger=computer_use.logger.name):
-            assert computer_use._cua_permission_mode("session-warn") == "unrestricted"
-            assert computer_use._cua_permission_mode("session-warn") == "unrestricted"
-
-    escalation = [
-        r for r in caplog.records if "escalated the cua-driver" in r.getMessage()
-    ]
-    assert len(escalation) == 1, "warning must fire once, not on every dispatch"
-    message = escalation[0].getMessage()
-    assert "standard" in message
-    assert "unrestricted" in message
-
-
-def test_no_escalation_warning_without_a_bypass(caplog):
-    import logging
-
-    from tools.computer_use import tool as computer_use
-
-    computer_use._escalation_warned.clear()
-    with patch(
-        "tools.approval.is_approval_bypass_active_for_session",
-        return_value=False,
-    ):
-        with caplog.at_level(logging.WARNING, logger=computer_use.logger.name):
-            assert computer_use._cua_permission_mode("session-quiet") == "standard"
-
-    assert not [
-        r for r in caplog.records if "escalated the cua-driver" in r.getMessage()
-    ]
-
-
-def test_each_session_is_warned_separately(caplog):
-    import logging
-
-    from tools.computer_use import tool as computer_use
-
-    computer_use._escalation_warned.clear()
-    with patch(
-        "tools.approval.is_approval_bypass_active_for_session",
-        return_value=True,
-    ):
-        with caplog.at_level(logging.WARNING, logger=computer_use.logger.name):
-            computer_use._cua_permission_mode("session-one")
-            computer_use._cua_permission_mode("session-two")
-
-    escalation = [
-        r for r in caplog.records if "escalated the cua-driver" in r.getMessage()
-    ]
-    assert len(escalation) == 2

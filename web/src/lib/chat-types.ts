@@ -92,19 +92,35 @@ export interface SSEToolProgressData {
  *  браузер не придумывает. */
 export type ApprovalChoiceValue = "once" | "session" | "always" | "deny";
 
-/** Запрос одобрения опасной команды.
+export type EffectDecisionStatus =
+  | "pending"
+  | "approved"
+  | "denied"
+  | "executing"
+  | "succeeded"
+  | "failed"
+  | "unknown";
+
+/** Запрос одобрения команды или долговечное решение по внешнему эффекту.
  *
- *  Один и тот же формат приходит двумя путями:
+ *  Один и тот же формат приходит тремя путями:
  *    • живым событием `hermes.approval.request` в потоке
  *      `POST /api/chat/completions` — пока идёт ход агента;
- *    • ответом `GET /api/chat/approvals?session_id=…` — когда страницу
- *      перезагрузили, а ход на сервере всё ещё стоит на вопросе.
+ *    • ответом `GET /api/chat/approvals?session_id=…` после перезагрузки;
+ *    • ответом `GET /api/chat/decisions` для всех чатов профиля.
  *  Собирает его `_chat_approval_event` в gateway/platforms/api_server.py:
  *  команда там уже отредактирована от секретов. */
 export interface SSEApprovalRequestData {
   /** Адрес конкретного запроса в очереди одобрений. */
   request_id: string;
   session_id?: string;
+  /** Durable exact-payload decision. Missing means a legacy command prompt. */
+  decision_kind?: "outbound_message" | "payment";
+  /** Durable state; command approvals do not have this field. */
+  effect_status?: EffectDecisionStatus;
+  /** Origin chat stays authoritative even when shown in the profile center. */
+  source_session_id?: string;
+  updated_at?: number;
   /** Команда как её покажут человеку (секреты вырезаны на сервере). */
   command?: string;
   /** Чем именно опасна команда — человеческим текстом. */

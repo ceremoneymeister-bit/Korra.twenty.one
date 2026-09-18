@@ -36,10 +36,10 @@ import {
 /**
  * Запрос одобрения вместе с тем, что с ним уже сделали в этой вкладке.
  *
- * `pending`  — агент стоит и ждёт ответа;
+ * `pending`  — команда ждёт в живом ходе или внешний эффект ждёт решения;
  * `sending`  — ответ отправляется;
  * `settled`  — ответ принят движком, исход в `decision`;
- * `expired`  — отвечать некому: ход кончился или истёк таймаут ожидания.
+ * `expired`  — отвечать некому: ход команды кончился или истёк таймаут.
  *
  * Отвеченные карточки не удаляются: решение по опасной команде остаётся
  * видимым в переписке, как и всё остальное в ней.
@@ -89,7 +89,7 @@ type StreamAction =
   | { type: "APPROVAL_REQUESTED"; request: SSEApprovalRequestData }
   | { type: "APPROVAL_RESTORED"; requests: SSEApprovalRequestData[] }
   | { type: "APPROVAL_SENDING"; requestId: string }
-  | { type: "APPROVAL_SETTLED"; requestId: string; decision: ApprovalChoiceValue }
+  | { type: "APPROVAL_SETTLED"; requestId: string; decision: ApprovalChoiceValue; note?: string }
   | { type: "APPROVAL_FAILED"; requestId: string; error: string; expired: boolean }
   | { type: "RESET" }
   | { type: "RESET_STREAMING" };
@@ -102,8 +102,8 @@ const initialState: StreamState = {
   approvals: [],
 };
 
-/** Ход кончился — незакрытые вопросы уже некому исполнять. Держать их
- *  «ждущими» значило бы предлагать кнопку, которая ничего не сделает. */
+/** Ход кончился — обычные command approvals уже некому исполнять. Durable
+ * external effects не привязаны к модельному потоку и остаются pending. */
 function expirePendingApprovals(
   approvals: ChatApprovalEntry[],
 ): ChatApprovalEntry[] {
@@ -111,10 +111,45 @@ function expirePendingApprovals(
     return approvals;
   }
   return approvals.map((entry) =>
-    entry.status === "pending" || entry.status === "sending"
+    (entry.status === "pending" || entry.status === "sending") &&
+    !entry.request.decision_kind
       ? { ...entry, status: "expired" as const }
       : entry,
   );
+}
+
+function effectOutcomeNote(request: SSEApprovalRequestData): string | undefined {
+  switch (request.effect_status) {
+    case "denied":
+      return request.decision_kind === "payment"
+        ? "Оплата отклонена."
+        : "Сообщение не отправлено.";
+    case "succeeded":
+      return request.decision_kind === "payment"
+        ? "Оплата выполнена один раз."
+        : "Сообщение отправлено один раз.";
+    case "failed":
+      return "Действие не выполнено: точный payload или аккаунт изменился.";
+    case "unknown":
+      return "Исход не подтверждён. Korra не повторяет действие вслепую.";
+    case "approved":
+    case "executing":
+      return "Точное действие разрешено и выполняется.";
+    default:
+      return undefined;
+  }
+}
+
+function restoredApprovalEntry(request: SSEApprovalRequestData): ChatApprovalEntry {
+  if (request.decision_kind && request.effect_status && request.effect_status !== "pending") {
+    return {
+      request,
+      status: "settled",
+      decision: request.effect_status === "denied" ? "deny" : "once",
+      note: effectOutcomeNote(request),
+    };
+  }
+  return { request, status: "pending" };
 }
 
 /** Текст, который человек видит в пузыре. Блок `[вложения]` адресован модели:
@@ -422,15 +457,20 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       // который мы поспешили похоронить (например, по кнопке «Стоп»: она
       // рвёт только показ, а ход на сервере продолжает ждать ответа),
       // возвращаем в работу. Принятое решение не трогаем никогда.
-      const alive = new Set(action.requests.map((item) => item.request_id));
+      const restored = new Map(
+        action.requests.map((item) => [item.request_id, restoredApprovalEntry(item)]),
+      );
+      const alive = new Set(restored.keys());
       const known = new Set(
         state.approvals.map((entry) => entry.request.request_id),
       );
       const kept = state.approvals.map((entry) => {
+        const serverEntry = restored.get(entry.request.request_id);
+        if (serverEntry?.status === "settled") return serverEntry;
         if (entry.status === "settled") return entry;
         const stillWaiting = alive.has(entry.request.request_id);
         if (stillWaiting && entry.status === "expired") {
-          return { ...entry, status: "pending" as const, error: undefined };
+          return serverEntry ?? { ...entry, status: "pending" as const, error: undefined };
         }
         if (!stillWaiting && entry.status !== "expired") {
           return { ...entry, status: "expired" as const };
@@ -439,7 +479,7 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       });
       const added = action.requests
         .filter((item) => !known.has(item.request_id))
-        .map((item) => ({ request: item, status: "pending" as const }));
+        .map((item) => restored.get(item.request_id)!);
       if (added.length === 0 && kept.every((entry, i) => entry === state.approvals[i])) {
         return state;
       }
@@ -461,9 +501,9 @@ function reducer(state: StreamState, action: StreamAction): StreamState {
       // Решение, отправленное вне живого потока (после перезагрузки страницы),
       // разблокирует ход на сервере, но ответ агента дописывается уже мимо этой
       // вкладки — честнее сказать это сразу, чем оставить человека ждать.
-      const note = state.isStreaming
+      const note = action.note ?? (state.isStreaming
         ? undefined
-        : "Ход продолжится на сервере — ответ появится в истории чата.";
+        : "Ход продолжится на сервере — ответ появится в истории чата.");
       return {
         ...state,
         approvals: state.approvals.map((entry) =>
@@ -1456,7 +1496,24 @@ export function useChatStream(
       });
       if (!mountedRef.current) return result.ok;
       if (result.ok) {
-        dispatch({ type: "APPROVAL_SETTLED", requestId, decision: choice });
+        const request = state.approvals.find(
+          (entry) => entry.request.request_id === requestId,
+        )?.request;
+        let note: string | undefined;
+        if (request?.decision_kind === "outbound_message") {
+          if (choice === "deny" || result.effectStatus === "denied") {
+            note = "Сообщение не отправлено.";
+          } else if (result.effectStatus === "succeeded") {
+            note = "Сообщение отправлено один раз.";
+          } else if (result.effectStatus === "unknown") {
+            note = "Исход отправки не подтверждён. Korra не повторяет её вслепую.";
+          } else if (result.effectStatus === "failed") {
+            note = "Отправка не выполнена: точный черновик или аккаунт изменился.";
+          } else {
+            note = "Решение принято; состояние отправки сохранено на сервере.";
+          }
+        }
+        dispatch({ type: "APPROVAL_SETTLED", requestId, decision: choice, ...(note ? { note } : {}) });
         return true;
       }
       dispatch({
@@ -1467,7 +1524,7 @@ export function useChatStream(
       });
       return false;
     },
-    [state.sessionId, profile],
+    [state.sessionId, state.approvals, profile],
   );
 
   // Восстановление вопроса после перезагрузки страницы. Живой поток SSE живёт

@@ -49,6 +49,7 @@ import { WorkspaceFilePicker } from "@/components/chat/WorkspaceFilePicker";
 import { TranscriptViewport } from "@/components/chat/TranscriptViewport";
 import { AgentTrace } from "@/components/chat/AgentTrace";
 import { CommandApprovalCard } from "@/components/chat/CommandApprovalCard";
+import { EffectDecisionCenter } from "@/components/chat/EffectDecisionCenter";
 import { ChatWorking, type BusyKind } from "@/components/ChatWorking";
 import { loadChatOutbox, loadChatOutboxRecords, type ChatOutboxRecord } from "@/lib/chat-outbox";
 import { useProfileScope } from "@/contexts/useProfileScope";
@@ -623,6 +624,7 @@ export function BubbleChatTranscript({
           {(approvals ?? []).map((entry) => (
             <div key={entry.request.request_id} className="flex justify-start pl-2">
               <CommandApprovalCard
+                decisionKind={entry.request.decision_kind}
                 command={entry.request.command}
                 description={entry.request.description}
                 choices={entry.request.choices ?? ["once", "deny"]}
@@ -1537,6 +1539,12 @@ export default function BubbleChatPage({
         description={t.sessions.confirmDeleteMessage}
       />
       <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label="Разговор с Коррой">
+        <EffectDecisionCenter
+          profile={agentProfile}
+          active={active !== false}
+          currentSessionId={sessionId}
+          onCurrentDecision={resolveApproval}
+        />
         <BubbleChatTranscript
           scrollKey={`${chatViewKey(agentProfile, sessionId)}:scroll`}
           messages={messages}

@@ -288,10 +288,11 @@ def _cua_configured_permission_mode() -> str:
     """The user-configured cua-driver permission mode.
 
     Reads ``computer_use.permission_mode`` (default ``standard``).  Only
-    ``standard`` and ``bounded`` are honored here — ``unrestricted`` is
-    deliberately NOT a config value: it stays tied to the explicit
-    per-session Hermes YOLO toggle so a stale config line can never
-    silently bypass approvals. Unknown values fall closed to ``standard``.
+    ``standard`` and ``bounded`` are honored here. ``unrestricted`` is
+    deliberately NOT a config value and is never selected by Korra approval
+    bypasses: skipping command cards must not remove the driver's password,
+    permission, or payment ceilings. Unknown values fall closed to
+    ``standard``.
     """
     raw = str(_computer_use_cfg().get("permission_mode", "standard") or "").strip().lower()
     return raw if raw in {"standard", "bounded"} else "standard"

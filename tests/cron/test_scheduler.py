@@ -381,6 +381,41 @@ class TestDeliverResultWrapping:
         assert "Here is today's summary." in sent_content
         assert "To stop or manage this job" in sent_content
 
+    def test_cron_external_delivery_waits_for_exact_durable_decision(self):
+        """off/yolo/cron never bypasses the immutable external-effect gate."""
+        from gateway.config import Platform
+
+        pconfig = MagicMock(enabled=True)
+        mock_cfg = MagicMock()
+        mock_cfg.platforms = {Platform.TELEGRAM: pconfig}
+        queue = MagicMock(return_value={"id": "effect_cron_exact"})
+        send = AsyncMock(return_value={"success": True})
+        job = {
+            "id": "daily-1",
+            "name": "daily-report",
+            "deliver": "origin",
+            "origin": {"platform": "telegram", "chat_id": "123"},
+        }
+
+        with (
+            patch("gateway.config.load_gateway_config", return_value=mock_cfg),
+            patch("tools.send_message_tool._queue_outbound_decision", queue),
+            patch("tools.send_message_tool._send_to_platform", new=send),
+            patch("korra_cli.profiles.get_active_profile_name", return_value="sales"),
+        ):
+            result = _deliver_result(
+                job,
+                "Here is today's summary.",
+                decision_session_id="cron:daily-1:run-7",
+            )
+
+        assert result == "waiting_decision:effect_cron_exact"
+        send.assert_not_awaited()
+        assert queue.call_args.kwargs["source_session_id"] == "cron:daily-1:run-7"
+        assert queue.call_args.kwargs["source_session_key"] == "cron:daily-1:run-7"
+        assert queue.call_args.kwargs["source_label"] == "cron"
+        assert "Cronjob Response: daily-report" in queue.call_args.kwargs["cleaned_message"]
+
 
     def test_relay_fronted_home_uses_relay_config_and_live_adapter(self, monkeypatch, tmp_path):
         """Persisted Slack home survives restart without native Slack config."""

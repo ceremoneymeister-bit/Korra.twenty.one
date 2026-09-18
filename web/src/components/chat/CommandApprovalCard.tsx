@@ -1,13 +1,10 @@
 /**
  * Одобрение опасной команды — карточка прямо в переписке.
  *
- * Пока карточка не отвечена, ход агента физически стоит: его поток
- * заблокирован в ожидании решения (`tools/approval.py`), и сам он не
- * продолжится и не «догадается». Поэтому карточка обязана сказать три вещи и
- * ничего сверх: что за команда, чем она опасна и какие ответы принимает
- * движок. Варианты не выдуманы здесь — их присылает сервер в поле `choices`
- * (`_approval_event_choices`), и если разрешать навсегда нельзя, такого
- * варианта в карточке не будет.
+ * У карточки два протокола. Опасная команда блокирует текущий ход в
+ * `tools/approval.py`; точная внешняя отправка/оплата живёт в durable ledger
+ * и не занимает модельный ход. В обоих случаях варианты присылает сервер, а
+ * для внешнего эффекта это всегда только одно точное действие или отказ.
  *
  * Почему «Разрешить всегда» переспрашивает, а остальные ответы уходят по
  * первому клику: разовое разрешение и отказ живут один вызов, а «всегда»
@@ -77,6 +74,8 @@ const SETTLED_LABEL: Record<ApprovalChoiceValue, string> = {
 };
 
 export interface CommandApprovalCardProps {
+  /** Exact external effect; missing means a dangerous-command approval. */
+  decisionKind?: "outbound_message" | "payment";
   /** Команда как её показывает движок: секреты уже вырезаны на сервере. */
   command?: string;
   /** Чем именно опасна команда. */
@@ -97,6 +96,7 @@ export interface CommandApprovalCardProps {
 }
 
 export function CommandApprovalCard({
+  decisionKind,
   command,
   description,
   choices,
@@ -116,6 +116,39 @@ export function CommandApprovalCard({
   // строках упоминает и прежнее имя форка. В интерфейсе ни того, ни другого
   // быть не должно.
   const trimmedDescription = translateApprovalDescription(description);
+  const outbound = decisionKind === "outbound_message";
+  const payment = decisionKind === "payment";
+  const exactEffect = outbound || payment;
+
+  const choiceMeta = (choice: ApprovalChoiceValue): ChoiceMeta => {
+    if (!exactEffect) return CHOICE_META[choice];
+    if (choice === "once") {
+      return {
+        label: payment ? "Оплатить" : "Отправить",
+        hint: payment
+          ? "Только этому получателю, в этой сумме и валюте"
+          : "Только этот точный текст, адресат и вложения",
+        icon: Check,
+      };
+    }
+    if (choice === "deny") {
+      return {
+        label: payment ? "Не оплачивать" : "Не отправлять",
+        hint: "Точное действие останется в истории решений",
+        icon: Ban,
+        danger: true,
+      };
+    }
+    return CHOICE_META[choice];
+  };
+
+  const settledLabel = exactEffect
+    ? decision === "deny"
+      ? payment ? "Не оплачено" : "Не отправлено"
+      : payment ? "Разрешена одна точная оплата" : "Разрешена одна точная отправка"
+    : decision
+      ? SETTLED_LABEL[decision]
+      : "";
 
   return (
     <div
@@ -125,7 +158,7 @@ export function CommandApprovalCard({
         "font-sans normal-case tracking-normal",
       )}
       role="group"
-      aria-label="Решение по команде агента"
+      aria-label={payment ? "Решение по оплате" : outbound ? "Решение по внешней отправке" : "Решение по команде агента"}
     >
       <div className="mb-2 flex items-start gap-2">
         <ShieldCheck
@@ -135,7 +168,7 @@ export function CommandApprovalCard({
         />
         <div className="min-w-0">
           <p className="text-xs leading-snug font-medium text-[var(--neo-text-primary)]">
-            Агент просит разрешение на команду
+            {payment ? "Проверьте оплату" : outbound ? "Проверьте внешнюю отправку" : "Агент просит разрешение на команду"}
           </p>
           {trimmedDescription && (
             <p className="mt-0.5 text-[11px] leading-snug text-[var(--neo-text-secondary)]">
@@ -145,7 +178,7 @@ export function CommandApprovalCard({
         </div>
       </div>
 
-      {trimmedCommand && (
+      {trimmedCommand && !settled && !expired && (
         <pre
           className={cn(
             "mb-2 max-h-32 overflow-auto rounded-[var(--neo-radius-control)] px-2.5 py-2",
@@ -166,7 +199,7 @@ export function CommandApprovalCard({
             ) : (
               <Check size={12} aria-hidden />
             )}
-            {SETTLED_LABEL[decision]}
+            {settledLabel}
           </p>
           {note && (
             <p className="mt-1 text-[10.5px] leading-snug text-[var(--neo-text-secondary)]">
@@ -181,7 +214,7 @@ export function CommandApprovalCard({
       ) : (
         <div className="flex flex-col gap-1">
           {choices.map((choice) => {
-            const meta = CHOICE_META[choice];
+            const meta = choiceMeta(choice);
             if (!meta) return null;
             const Icon = meta.icon;
             const awaiting = confirming === choice;

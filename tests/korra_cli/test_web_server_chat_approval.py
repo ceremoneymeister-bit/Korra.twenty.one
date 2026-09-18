@@ -79,7 +79,9 @@ class _Recorder:
 
 async def _call(monkeypatch, method: str, path: str, body=None):
     real_client = httpx.AsyncClient
-    app = _route_app("/api/chat/approval", "/api/chat/approvals")
+    app = _route_app(
+        "/api/chat/approval", "/api/chat/approvals", "/api/chat/decisions"
+    )
     transport = httpx.ASGITransport(app=app)
     async with real_client(transport=transport, base_url="http://testserver") as cli:
         monkeypatch.setattr(httpx, "AsyncClient", _Recorder)
@@ -193,6 +195,20 @@ def test_pending_list_is_proxied_for_the_reload_case(monkeypatch):
     assert response.json()["data"][0]["request_id"] == "req-1"
     assert _Recorder.calls[0]["method"] == "GET"
     assert _Recorder.calls[0]["url"].endswith("/api/sessions/s-1/approvals")
+
+
+def test_profile_decision_center_is_not_bound_to_the_open_chat(monkeypatch):
+    _Recorder.response_body = b'{"object":"list","data":[]}'
+
+    response = asyncio.run(
+        _call(monkeypatch, "GET", "/api/chat/decisions?profile=sales")
+    )
+
+    assert response.status_code == 200
+    assert _Recorder.calls[0]["method"] == "GET"
+    assert _Recorder.calls[0]["url"].endswith(
+        "/p/sales/api/effect-decisions"
+    )
 
 
 def test_missing_server_key_is_a_server_error_not_a_silent_success(monkeypatch):

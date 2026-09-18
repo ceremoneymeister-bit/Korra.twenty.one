@@ -193,80 +193,18 @@ _session_auto_approve: Dict[str, bool] = {}
 _always_allow: Dict[str, set] = {}
 
 
-# Sessions already told that their approval bypass widened the driver mode.
-# The resolver runs per dispatch, so without this the warning would repeat on
-# every single tool call.
-_escalation_warned: set = set()
-
-
-def _warn_bypass_escalation(session_id: str) -> None:
-    """Say out loud that an approval bypass just widened the driver's mode.
-
-    ``-z`` / ``--yolo`` read as "don't prompt me", but they also swap the
-    driver onto a private ``unrestricted`` daemon, dropping the ceiling the
-    configured mode would have applied. That is deliberate (see
-    ``_cua_permission_mode``) and ``unrestricted`` is reachable no other way
-    — it is intentionally not a config value, so a stale config line cannot
-    silently bypass approvals. But it is easy to trigger without meaning to:
-    a script gets ``-z`` for quiet output and loses its limits as a side
-    effect. So the widening is at least stated, once per session.
-    """
-    key = str(session_id or "")
-    with _approval_lock:
-        if key in _escalation_warned:
-            return
-        _escalation_warned.add(key)
-    try:
-        from tools.computer_use.cua_backend import _cua_configured_permission_mode
-
-        configured = _cua_configured_permission_mode()
-    except Exception:
-        configured = "standard"
-    logger.warning(
-        "computer_use: approval bypass (--yolo / -z) escalated the cua-driver "
-        "permission mode from the configured '%s' to 'unrestricted' for this "
-        "session. Runtime approval prompts are disabled and the driver's "
-        "residual ceilings no longer apply. Drop the bypass flag to keep '%s', "
-        "or declare a version-3 computer_use.capability_manifest to keep a "
-        "ceiling on bypassed runs.",
-        configured,
-        configured,
-    )
-
-
 def _cua_permission_mode(session_id: str) -> str:
-    """Map Hermes's explicit approval bypass onto Cua's immutable mode.
+    """Return Cua's immutable safety mode, independently of prompt policy.
 
-    Hermes has TWO session-identity namespaces: the tool-dispatch path passes
-    the DB ``session_id`` (``agent.session_id``), while gateway ``/yolo``
-    keys approval state off the gateway ``session_key`` (set per turn via the
-    ``set_current_session_key`` contextvar in tools/approval.py). CLI and TUI
-    use the DB id for both. Checking ONLY ``session_id`` here would make a
-    gateway ``/yolo`` toggle silently invisible to computer_use (works in
-    CLI, dead on messaging platforms), so we consult both namespaces —
-    bypass in either means the user explicitly opted out of approvals for
-    this run. Fails closed on any resolution error.
+    Korra's ``approvals.mode=off`` and ``/yolo`` mean that ordinary work does
+    not stop for a command card. They must not select cua-driver's
+    ``unrestricted`` mode: that would also remove the driver's residual
+    password, permission, and payment ceilings. A reviewed ``bounded``
+    manifest remains available through config; every other case fails closed
+    to ``standard``.
     """
+    del session_id  # Mode is profile policy, never a per-chat bypass toggle.
     try:
-        from tools.approval import (
-            get_current_session_key,
-            is_approval_bypass_active_for_session,
-        )
-
-        if is_approval_bypass_active_for_session(session_id):
-            _warn_bypass_escalation(session_id)
-            return "unrestricted"
-        current_key = get_current_session_key(default="")
-        if current_key and is_approval_bypass_active_for_session(current_key):
-            _warn_bypass_escalation(session_id)
-            return "unrestricted"
-    except Exception:
-        # Approval state must fail closed if it cannot be resolved.
-        pass
-    try:
-        # Without YOLO, honor the configured mode (standard | bounded).
-        # bounded requires computer_use.capability_manifest; the backend
-        # fails loudly at session start when the manifest is missing.
         from tools.computer_use.cua_backend import _cua_configured_permission_mode
 
         return _cua_configured_permission_mode()
@@ -296,8 +234,8 @@ def _get_backend(session_id: str = "") -> ComputerUseBackend:
             if cached is not None:
                 if _backend_permission_modes.get(sid, "standard") == permission_mode:
                     return cached
-                # Cua's permission mode cannot change after daemon startup. A
-                # /yolo toggle replaces only this session's backend.
+                # Cua's permission mode cannot change after daemon startup.
+                # A profile policy change replaces only this session's backend.
                 stale_backend = _backends.pop(sid)
                 stale_lock = _backend_call_locks.pop(sid, None)
                 _backend_permission_modes.pop(sid, None)
@@ -347,9 +285,8 @@ def release_computer_use_session(session_id: str) -> bool:
     This is the production lifecycle seam for hosts and policy plugins. It
     removes the exact session backend, its call lock, and its recorded
     permission mode before stopping the backend, so new lookups cannot retain
-    the stale target/ref namespace — and stops a private embedded daemon when
-    Hermes YOLO selected unrestricted mode. Approval state is cleared even
-    when no backend was started.
+    the stale target/ref namespace. Approval state is cleared even when no
+    backend was started.
 
     Returns ``True`` when a backend was found and released, ``False`` when the
     session was already absent. Safe to call repeatedly.
@@ -426,7 +363,6 @@ def _shutdown_backend_atexit() -> None:
     with _approval_lock:
         _session_auto_approve.clear()
         _always_allow.clear()
-        _escalation_warned.clear()
 
     for backend, call_lock in unique.values():
         try:

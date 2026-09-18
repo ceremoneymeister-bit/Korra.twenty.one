@@ -373,7 +373,10 @@ def cmd_send(args: argparse.Namespace) -> None:
         "message": message,
     }
 
-    result = send_message_tool(tool_args)
+    # This process is executing the owner's explicit ``korra send`` command,
+    # not an agent-originated tool call.  The command itself is the exact
+    # authorization for this payload, so do not ask the owner a second time.
+    result = send_message_tool(tool_args, owner_initiated=True)
     exit_code = _emit_result(
         result,
         json_mode=getattr(args, "json", False),

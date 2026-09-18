@@ -3435,24 +3435,51 @@ def _chat_approval_upstream(
     session_id: str, profile: Optional[str], suffix: str
 ) -> tuple[str, dict[str, str]]:
     """Собрать адрес и заголовки запроса к api_server для одного решения."""
+    url, headers = _chat_profile_upstream(profile, "")
+    if not _CHAT_SESSION_ID_RE.fullmatch(session_id or ""):
+        raise HTTPException(status_code=400, detail="Некорректный идентификатор чата")
+    quoted = urllib.parse.quote(session_id, safe="")
+    return f"{url}/api/sessions/{quoted}{suffix}", headers
+
+
+def _chat_profile_upstream(
+    profile: Optional[str], suffix: str
+) -> tuple[str, dict[str, str]]:
+    """Собрать профильный адрес и внутреннюю авторизацию api_server."""
     api_key = os.environ.get("API_SERVER_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="Не настроен ключ внутреннего API. Перезапустите контейнер или обратитесь к администратору.")
     profile_name = (profile or "").strip()
     if profile_name and not _CHAT_PROFILE_RE.fullmatch(profile_name):
         raise HTTPException(status_code=400, detail="Некорректное имя профиля")
-    if not _CHAT_SESSION_ID_RE.fullmatch(session_id or ""):
-        raise HTTPException(status_code=400, detail="Некорректный идентификатор чата")
-    quoted = urllib.parse.quote(session_id, safe="")
     prefix = (
         f"/p/{urllib.parse.quote(profile_name, safe='')}" if profile_name else ""
     )
-    url = f"{_API_SERVER_PROXY_TARGET}{prefix}/api/sessions/{quoted}{suffix}"
+    url = f"{_API_SERVER_PROXY_TARGET}{prefix}{suffix}"
     return url, {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
         _CHAT_ATTENDED_HEADER: "1",
     }
+
+
+@app.get("/api/chat/decisions")
+async def chat_decisions_proxy(profile: Optional[str] = None) -> Response:
+    """Профильный центр долговечных решений по внешним эффектам."""
+    import httpx as _httpx
+
+    url, headers = _chat_profile_upstream(profile, "/api/effect-decisions")
+    try:
+        async with _httpx.AsyncClient(timeout=_httpx.Timeout(15.0)) as client:
+            response = await client.get(url, headers=headers)
+    except Exception as exc:
+        _log.error("chat_decisions_proxy upstream error: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}")
+    return Response(
+        content=response.content,
+        status_code=response.status_code,
+        media_type=response.headers.get("content-type", "application/json"),
+    )
 
 
 @app.get("/api/chat/approvals")

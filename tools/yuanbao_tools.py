@@ -228,11 +228,22 @@ async def send_sticker(
         get_random_sticker,
     )
 
-    target = (chat_id or "").strip() or get_session_env("KORRA_SESSION_CHAT_ID", "")
+    source_platform = get_session_env("KORRA_SESSION_PLATFORM", "").strip().lower()
+    source_chat = get_session_env("KORRA_SESSION_CHAT_ID", "").strip()
+    target = (chat_id or "").strip() or source_chat
     if not target:
         return {
             "success": False,
             "error": "chat_id is required (no active yuanbao session detected)",
+        }
+    if source_platform != "yuanbao" or not source_chat or target != source_chat:
+        return {
+            "success": False,
+            "error": (
+                "Cross-chat sticker sending is disabled because it has no exact "
+                "durable external-effect executor. Send stickers only as a reply "
+                "in the current chat."
+            ),
         }
 
     adapter = _get_active_adapter()
@@ -371,6 +382,44 @@ async def send_dm(
 
     # Step 2: Send text DM + media
     chat_id = f"direct:{resolved_user_id}"
+    try:
+        from gateway.config import Platform, load_gateway_config
+        from tools.send_message_tool import _queue_outbound_decision
+
+        config = load_gateway_config()
+        pconfig = config.platforms.get(Platform.YUANBAO)
+        if not pconfig or not pconfig.enabled:
+            return {"success": False, "error": "Yuanbao platform is not configured"}
+        decision = _queue_outbound_decision(
+            platform_name="yuanbao",
+            pconfig=pconfig,
+            chat_id=chat_id,
+            thread_id=None,
+            cleaned_message=message,
+            media_files=media_files or [],
+            force_document=False,
+            used_home_channel=False,
+            args={
+                "action": "send",
+                "target": f"yuanbao:{chat_id}",
+                "message": message,
+                "group_code": group_code,
+                "resolved_nickname": resolved_nickname,
+            },
+        )
+        if decision is not None:
+            return {
+                "success": False,
+                "status": "pending_decision",
+                "decision_id": decision["id"],
+                "user_id": resolved_user_id,
+                "nickname": resolved_nickname,
+                "message": "DM draft is waiting for the owner's exact decision.",
+            }
+    except Exception as exc:
+        logger.exception("[yuanbao_tools] could not persist DM decision")
+        return {"success": False, "error": str(exc)}
+
     last_result = None
     errors: list[str] = []
     try:

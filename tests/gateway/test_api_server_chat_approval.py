@@ -31,6 +31,7 @@ from gateway.platforms.api_server import (
     security_headers_middleware,
 )
 from tools import approval as approval_mod
+from tools import effect_decisions
 
 
 def _make_adapter(api_key: str = "") -> APIServerAdapter:
@@ -49,6 +50,7 @@ def _create_app(adapter: APIServerAdapter) -> web.Application:
     app.router.add_post(
         "/api/sessions/{session_id}/approval", adapter._handle_session_approval
     )
+    app.router.add_get("/api/effect-decisions", adapter._handle_effect_decisions)
     return app
 
 
@@ -229,6 +231,153 @@ class TestChatStreamApproval:
 
 class TestSessionApprovalEndpoints:
     @pytest.mark.asyncio
+    async def test_durable_external_decision_survives_without_live_listener(
+        self, adapter, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        pending, _ = effect_decisions.create_pending(
+            kind="outbound_message",
+            owner_id="owner-1",
+            profile="default",
+            source_session_id="s-durable",
+            source_session_key="api:s-durable",
+            payload={
+                "target_label": "telegram:2002",
+                "message": "Полный черновик",
+                "attachments": [],
+            },
+        )
+        app = _create_app(adapter)
+
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.get("/api/sessions/s-durable/approvals")
+            assert resp.status == 200
+            body = await resp.json()
+
+        assert adapter._chat_approval_sessions.get("s-durable") is None
+        assert len(body["data"]) == 1
+        assert body["data"][0]["request_id"] == pending["id"]
+        assert body["data"][0]["decision_kind"] == "outbound_message"
+        assert body["data"][0]["choices"] == ["once", "deny"]
+        assert "Полный черновик" in body["data"][0]["command"]
+
+    @pytest.mark.asyncio
+    async def test_durable_history_and_profile_center_survive_reload(
+        self, adapter, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        pending, _ = effect_decisions.create_pending(
+            kind="outbound_message",
+            owner_id="owner-1",
+            profile="default",
+            source_session_id="s-history",
+            source_session_key="api:s-history",
+            payload={
+                "target_label": "email:client@example.test",
+                "message": "Точный черновик",
+                "attachments": [],
+            },
+        )
+        effect_decisions.decide(
+            pending["id"], source_session_id="s-history", choice="deny"
+        )
+        effect_decisions.create_pending(
+            kind="outbound_message",
+            owner_id="other-owner",
+            profile="other-profile",
+            source_session_id="s-foreign",
+            source_session_key="api:s-foreign",
+            payload={
+                "target_label": "email:foreign@example.test",
+                "message": "Чужой черновик",
+                "attachments": [],
+            },
+        )
+        app = _create_app(adapter)
+
+        async with TestClient(TestServer(app)) as cli:
+            session_resp = await cli.get("/api/sessions/s-history/approvals")
+            center_resp = await cli.get("/api/effect-decisions")
+            session_body = await session_resp.json()
+            center_body = await center_resp.json()
+
+        assert session_resp.status == center_resp.status == 200
+        session_item = session_body["data"][0]
+        center_item = center_body["data"][0]
+        assert len(center_body["data"]) == 1
+        for item in (session_item, center_item):
+            assert item["request_id"] == pending["id"]
+            assert item["source_session_id"] == "s-history"
+            assert item["effect_status"] == "denied"
+            assert item["choices"] == ["once", "deny"]
+
+    @pytest.mark.asyncio
+    async def test_durable_decision_is_answerable_after_turn_finished(
+        self, adapter, monkeypatch
+    ):
+        seen = {}
+
+        def _resolve(decision_id, choice, *, source_session_id="", **_kwargs):
+            seen.update(
+                decision_id=decision_id,
+                choice=choice,
+                source_session_id=source_session_id,
+            )
+            return {"status": "succeeded"}
+
+        monkeypatch.setattr(
+            "tools.effect_decisions.resolve_effect_decision", _resolve
+        )
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                "/api/sessions/s-finished/approval",
+                json={"choice": "once", "request_id": "effect_exact"},
+            )
+            assert resp.status == 200
+            body = await resp.json()
+
+        assert adapter._chat_approval_sessions.get("s-finished") is None
+        assert seen == {
+            "decision_id": "effect_exact",
+            "choice": "once",
+            "source_session_id": "s-finished",
+        }
+        assert body["effect_status"] == "succeeded"
+
+    @pytest.mark.asyncio
+    async def test_payment_without_executor_fails_closed_but_can_be_denied(
+        self, adapter, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        pending, _ = effect_decisions.create_pending(
+            kind="payment",
+            owner_id="owner-1",
+            profile="default",
+            source_session_id="s-payment",
+            source_session_key="api:s-payment",
+            payload={"recipient": "ООО Тест", "amount": "100", "currency": "RUB"},
+        )
+        app = _create_app(adapter)
+
+        async with TestClient(TestServer(app)) as cli:
+            approve = await cli.post(
+                "/api/sessions/s-payment/approval",
+                json={"choice": "once", "request_id": pending["id"]},
+            )
+            approve_body = await approve.json()
+            deny = await cli.post(
+                "/api/sessions/s-payment/approval",
+                json={"choice": "deny", "request_id": pending["id"]},
+            )
+            deny_body = await deny.json()
+
+        assert approve.status == 503
+        assert approve_body["error"]["code"] == "effect_executor_unavailable"
+        assert deny.status == 200
+        assert deny_body["effect_status"] == "denied"
+
+    @pytest.mark.asyncio
     async def test_decision_resolves_the_queued_request(self, adapter):
         app = _create_app(adapter)
         entry = approval_mod._ApprovalEntry({
@@ -389,6 +538,17 @@ class TestPanelIsAttendedForExecuteCode:
         # Ручной режим: вердикт вспомогательной модели здесь не проверяется и
         # сделал бы тест зависимым от сети.
         monkeypatch.setattr(approval_mod, "_get_approval_mode", lambda: "manual")
+        # Этот класс проверяет различие attended/unattended, а не новые
+        # автономные defaults K21-114. Явный пользовательский deny должен
+        # по-прежнему работать и не зависеть от DEFAULT_CONFIG.
+        monkeypatch.setattr(
+            approval_mod,
+            "_get_approval_config",
+            lambda: {"mode": "manual", "unattended_mode": "deny"},
+        )
+        monkeypatch.setattr(
+            approval_mod, "_get_unattended_approval_mode", lambda: "deny"
+        )
         token = approval_mod.set_current_session_key(self.SESSION)
         interactive = approval_mod.set_hermes_interactive_context(False)
         try:

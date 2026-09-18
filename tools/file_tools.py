@@ -844,11 +844,11 @@ def _request_protected_instruction_approval(
         reasons: list[str], task_id: str = "default") -> str | None:
     """Ask the human to approve a write to protected instruction file(s).
 
-    Returns ``None`` when approved, or a BLOCKED error string. This gate
-    intentionally does NOT route through ``_run_approval_gate``: that gate
-    honors --yolo and session/permanent allowlists, and the entire point
-    here is one-operation approval EVERY time, with no persistent scope
-    and no yolo bypass. Fail-closed when no human channel exists.
+    Returns ``None`` when autonomous command execution is active or the write
+    is approved, otherwise a BLOCKED error string.  In manual/smart modes this
+    remains a one-operation gate with no persistent scope.  Korra's autonomous
+    mode deliberately bypasses ordinary local writes; durable exact-payload
+    decisions are reserved for external messages and payments.
     """
     targets = ", ".join(dict.fromkeys(reasons))
     description = (
@@ -870,10 +870,13 @@ def _request_protected_instruction_approval(
         return blocked.format(why="requires approval but the approval "
                                   "subsystem is unavailable.")
 
+    session_key = _approval.get_current_session_key()
+    if _approval.is_approval_bypass_active_for_session(session_key):
+        return None
+
     # Gateway surface: block on the button round-trip when a notify callback
     # is registered for this session (Telegram/Discord/Slack). One-operation
     # only — no session/permanent buttons are offered.
-    session_key = _approval.get_current_session_key()
     notify_cb = None
     try:
         with _approval._lock:

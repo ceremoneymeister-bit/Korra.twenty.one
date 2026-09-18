@@ -1,6 +1,8 @@
 """Tests for korra_cli configuration management."""
 
+import json
 import os
+import stat
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -1387,6 +1389,78 @@ class TestWriteApprovalMigration:
             assert "write_mode" not in raw.get("skills", {})
             assert loaded["memory"]["write_approval"] is False
             assert loaded["skills"]["write_approval"] is False
+
+
+class TestAutonomyApprovalMigration:
+    def test_explicit_legacy_policy_gets_backup_diff_receipt_and_preserves_deny(
+        self, tmp_path
+    ):
+        config_path = tmp_path / "config.yaml"
+        original = yaml.safe_dump(
+            {
+                "_config_version": 39,
+                "approvals": {
+                    "mode": "smart",
+                    "cron_mode": "deny",
+                    "single_query_mode": "deny",
+                    "unattended_mode": "deny",
+                    "deny": ["prod-db *", "rm * customer-ledger"],
+                    "smart_policy": "private operator rule",
+                },
+                "display": {"tool_progress": "off"},
+            },
+            sort_keys=False,
+        )
+        config_path.write_text(original, encoding="utf-8")
+
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            migrate_config(interactive=False, quiet=True)
+            first = config_path.read_text(encoding="utf-8")
+            migrate_config(interactive=False, quiet=True)
+
+        raw = yaml.safe_load(first)
+        assert raw["_config_version"] == 40
+        assert raw["approvals"]["mode"] == "off"
+        assert raw["approvals"]["cron_mode"] == "approve"
+        assert raw["approvals"]["single_query_mode"] == "approve"
+        assert raw["approvals"]["unattended_mode"] == "approve"
+        assert raw["approvals"]["deny"] == ["prod-db *", "rm * customer-ledger"]
+        assert raw["approvals"]["smart_policy"] == "private operator rule"
+        assert raw["display"] == {"tool_progress": "off"}
+
+        receipt_dir = tmp_path / "logs" / "migration_receipts"
+        backups = list(receipt_dir.glob("config.pre-autonomy-v40.*.yaml"))
+        assert len(backups) == 1
+        assert backups[0].read_text(encoding="utf-8") == original
+        assert stat.S_IMODE(backups[0].stat().st_mode) == 0o600
+        receipt_path = receipt_dir / "approvals-autonomy-v40.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        assert receipt["changes"]["mode"] == {"before": "smart", "after": "off"}
+        assert receipt["preserved_deny_rules"] == 2
+        assert "private operator rule" not in receipt_path.read_text(encoding="utf-8")
+        assert stat.S_IMODE(receipt_path.stat().st_mode) == 0o600
+        # Second run at v40 is a no-op: no backup chain and no config churn.
+        assert config_path.read_text(encoding="utf-8") == first
+        assert len(list(receipt_dir.glob("config.pre-autonomy-v40.*.yaml"))) == 1
+
+    def test_profile_without_explicit_approvals_inherits_autonomy_without_receipt(
+        self, tmp_path
+    ):
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("_config_version: 39\n", encoding="utf-8")
+        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
+            migrate_config(interactive=False, quiet=True)
+            loaded = load_config()
+
+        assert loaded["approvals"]["mode"] == "off"
+        assert loaded["approvals"]["cron_mode"] == "approve"
+        assert loaded["approvals"]["single_query_mode"] == "approve"
+        assert loaded["approvals"]["unattended_mode"] == "approve"
+        assert loaded["approvals"]["always_confirm"] == [
+            "outbound_message",
+            "payment",
+        ]
+        assert not (tmp_path / "logs" / "migration_receipts").exists()
 
 
 class TestMigrationWriteInvariant:

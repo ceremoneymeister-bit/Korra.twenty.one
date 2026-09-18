@@ -29,7 +29,7 @@ def _patch_pipeline(monkeypatch, *, success=True, output="out", final="final res
         calls.append(("save", jid))
         return f"/tmp/{jid}.txt"
 
-    def fake_deliver(job, content, adapters=None, loop=None):
+    def fake_deliver(job, content, adapters=None, loop=None, **_kw):
         calls.append(("deliver", job["id"]))
         return None
 
@@ -76,6 +76,48 @@ def test_run_one_job_success_sequence(monkeypatch):
     assert ok is True
     assert [c[0] for c in calls] == ["run_job", "save", "deliver", "mark"]
     assert calls[-1] == ("mark", "j2", True)
+
+
+def test_run_one_job_records_waiting_decision_without_delivery_failure(monkeypatch):
+    marked = []
+    finished = []
+    monkeypatch.setattr(
+        s, "create_execution", lambda *_a, **_kw: {"id": "exec-wait"}
+    )
+    monkeypatch.setattr(s, "claim_dispatch", lambda _job_id: True)
+    monkeypatch.setattr(s, "mark_execution_running", lambda _execution_id: None)
+    monkeypatch.setattr(
+        s,
+        "run_job",
+        lambda *_a, **_kw: (True, "saved output", "exact cron draft", None),
+    )
+    monkeypatch.setattr(s, "save_job_output", lambda *_a, **_kw: "/tmp/out")
+    monkeypatch.setattr(
+        s,
+        "_deliver_result",
+        lambda *_a, **_kw: "waiting_decision:effect_exact",
+    )
+    monkeypatch.setattr(
+        s, "mark_job_run", lambda *args, **kwargs: marked.append((args, kwargs))
+    )
+    monkeypatch.setattr(
+        s,
+        "finish_execution",
+        lambda *args, **kwargs: finished.append((args, kwargs)),
+    )
+
+    assert s.run_one_job({"id": "j-wait", "deliver": "telegram"}) is True
+    assert marked == [(('j-wait', True, None), {"delivery_error": None})]
+    assert finished == [
+        (
+            ("exec-wait",),
+            {
+                "success": True,
+                "error": None,
+                "delivery_outcome": "waiting_decision",
+            },
+        )
+    ]
 
 
 def test_run_one_job_exception_delivers_failure_alert(monkeypatch):
@@ -376,5 +418,3 @@ def test_run_one_job_installs_secret_scope_under_multiplex(monkeypatch, tmp_path
     assert scope_during_delivery["base_url"] == "https://openrouter.ai/api/v1"
     # And it was torn down after the full lifecycle returned (no leak).
     assert ss.current_secret_scope() is None
-
-

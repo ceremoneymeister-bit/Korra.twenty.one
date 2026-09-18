@@ -302,7 +302,8 @@ class TestSendMessageTool:
                         "action": "send",
                         "target": "ntfy:alerts-channel",
                         "message": "done",
-                    }
+                    },
+                    owner_initiated=True,
                 )
             )
 
@@ -341,7 +342,8 @@ class TestSendMessageTool:
                         "action": "send",
                         "target": "telegram:12345",
                         "message": f"hello\nMEDIA:{secret}",
-                    }
+                    },
+                    owner_initiated=True,
                 )
             )
 
@@ -375,7 +377,8 @@ class TestSendMessageTool:
                         "action": "send",
                         "target": "telegram:-1001",
                         "message": "hello",
-                    }
+                    },
+                    owner_initiated=True,
                 )
             )
 
