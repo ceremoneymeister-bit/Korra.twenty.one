@@ -2648,9 +2648,12 @@ DEFAULT_CONFIG = {
         "cron_mode": "approve",
         "single_query_mode": "approve",
         "unattended_mode": "approve",
-        # Immutable external effects use a separate durable exact-payload
+        # Managed external effects use a separate durable exact-payload
         # decision ledger. These categories are never bypassed by mode=off,
-        # --yolo, cron, or a session/permanent command grant.
+        # --yolo, cron, or a session/permanent command grant. The managed
+        # contract currently covers send_message (built-in and plugin), cron
+        # delivery and Yuanbao DM. It does not claim mediation of arbitrary
+        # terminal/browser/MCP/integration-CLI actions that hold credentials.
         "always_confirm": ["outbound_message", "payment"],
         # Operator-customizable policy text for smart approvals. When
         # non-empty, this is appended to the smart-approval guardian's

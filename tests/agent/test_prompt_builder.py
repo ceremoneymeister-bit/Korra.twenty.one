@@ -1008,6 +1008,11 @@ class TestOpenAIModelExecutionGuidance:
         assert "recipient/amount/currency" in text
         assert "current chat is not a third-party send" in text
         assert "never blindly replay" in text
+        assert "managed routes" in text
+        assert "send_message" in text
+        assert "payment execution is unavailable" in text
+        assert "terminal, browser, mcp, and integration-cli" in text
+        assert "never claim that they are covered" in text
 
 
 class TestExecutionGuidanceModels:
@@ -1055,4 +1060,3 @@ class TestParallelToolCallGuidance:
 # =========================================================================
 # Budget warning history stripping
 # =========================================================================
-
