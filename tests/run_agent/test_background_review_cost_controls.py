@@ -35,7 +35,7 @@ class _FakeAgent:
 
     def _current_main_runtime(self):
         return {
-            "api_key": "parent-key",
+            "api_key": "subscription-access-token",
             "base_url": "https://chatgpt.com/backend-api/codex",
             "api_mode": "codex_app_server",
         }
@@ -44,11 +44,16 @@ class _FakeAgent:
 def test_routing_auto_inherits_parent_and_downgrades_codex_app_server():
     agent = _FakeAgent()
     cfg = {"auxiliary": {"background_review": {"provider": "auto", "model": ""}}}
-    with patch("korra_cli.config.load_config", return_value=cfg), patch("korra_cli.config.load_config_readonly", return_value=cfg):
+    with patch("korra_cli.config.load_config", return_value=cfg), patch(
+        "korra_cli.config.load_config_readonly", return_value=cfg
+    ), patch("korra_cli.runtime_provider.resolve_runtime_provider") as resolve:
         rt = br._resolve_review_runtime(agent)
+    resolve.assert_not_called()
     assert rt["routed"] is False
     assert rt["provider"] == "openai-codex"
     assert rt["model"] == "gpt-5.5"
+    assert rt["api_key"] == "subscription-access-token"
+    assert rt["base_url"] == "https://chatgpt.com/backend-api/codex"
     assert rt["api_mode"] == "codex_responses"  # downgraded so agent-loop tools dispatch
 
 
