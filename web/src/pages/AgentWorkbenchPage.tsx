@@ -224,14 +224,16 @@ export default function AgentWorkbenchPage() {
       moved: false,
       lastTarget: profile,
     };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
   }, []);
 
   const moveTabDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = tabDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     if (!drag.moved && Math.abs(event.clientX - drag.startX) < 8) return;
-    drag.moved = true;
+    if (!drag.moved) {
+      drag.moved = true;
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    }
     event.preventDefault();
     const target = document.elementFromPoint(event.clientX, event.clientY)
       ?.closest<HTMLElement>("[data-agent-tab-profile]")

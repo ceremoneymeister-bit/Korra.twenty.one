@@ -208,6 +208,36 @@ describe("AgentWorkbenchPage", () => {
     expect($activeAgentProfile.get()).toBe("calculator");
   });
 
+  it("обычным pointer-кликом выбирает вкладку, не включая drag capture", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const wrapper = container.querySelector<HTMLElement>('[data-agent-tab-profile="calculator"]')!;
+    const tab = wrapper.querySelector<HTMLButtonElement>('[role="tab"]')!;
+    const capture = vi.fn();
+    wrapper.setPointerCapture = capture;
+    const fire = (type: string) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        button: { value: 0 },
+        pointerId: { value: 17 },
+        clientX: { value: 100 },
+        clientY: { value: 10 },
+      });
+      tab.dispatchEvent(event);
+    };
+    await act(async () => {
+      fire("pointerdown");
+      fire("pointerup");
+      tab.click();
+    });
+    expect(capture).not.toHaveBeenCalled();
+    expect(tab.getAttribute("aria-selected")).toBe("true");
+    expect($activeAgentProfile.get()).toBe("calculator");
+  });
+
   it.each(["mouse", "touch"])("перетаскивает вкладку pointer-событиями (%s)", async (pointerType) => {
     await render(
       <MemoryRouter initialEntries={["/agents"]}>
