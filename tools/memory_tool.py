@@ -1051,6 +1051,41 @@ def _apply_batch_write_gate(target: str, operations: List[Dict[str, Any]]) -> Op
     )
 
 
+_BACKGROUND_DELETE_ACTIONS = {"replace", "remove"}
+
+
+def _background_delete_gate(
+    action: Optional[str],
+    operations: Optional[List[Dict[str, Any]]],
+) -> Optional[str]:
+    """Prevent an unattended review fork from deciding what to forget.
+
+    Background review may append a new fact, but destructive replacement or
+    removal is denied for both single operations and atomic batches. This gate
+    runs before approval/staging so no later policy can accidentally authorize
+    an unattended deletion.
+    """
+    from tools.skill_provenance import is_background_review
+
+    if not is_background_review():
+        return None
+
+    destructive = action in _BACKGROUND_DELETE_ACTIONS or any(
+        isinstance(operation, dict)
+        and operation.get("action") in _BACKGROUND_DELETE_ACTIONS
+        for operation in (operations or [])
+    )
+    if not destructive:
+        return None
+
+    return tool_error(
+        "Background review may not delete memory entries "
+        "('replace'/'remove', including in a batch); 'add' is still "
+        "available. Propose consolidation in the review summary instead.",
+        success=False,
+    )
+
+
 def _missing_old_text_error(store: "MemoryStore", target: str, action: str) -> str:
     """Build a recoverable error for a replace/remove call that arrived without
     ``old_text``.
@@ -1125,6 +1160,10 @@ def memory_tool(
     target_error = _memory_target_error(store, target)
     if target_error is not None:
         return json.dumps(target_error)
+
+    delete_gate_result = _background_delete_gate(action, operations)
+    if delete_gate_result is not None:
+        return delete_gate_result
 
     # --- Batch path -------------------------------------------------------
     if operations:
@@ -1388,7 +1427,6 @@ registry.register(
     emoji="🧠",
     dynamic_schema_overrides=_build_memory_schema_overrides,
 )
-
 
 
 

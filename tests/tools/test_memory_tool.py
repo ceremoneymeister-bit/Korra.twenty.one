@@ -9,6 +9,10 @@ from tools.memory_tool import (
     memory_tool,
     _scan_memory_content,
 )
+from tools.skill_provenance import (
+    reset_current_write_origin,
+    set_current_write_origin,
+)
 
 
 def _blocked(content, pattern_id=None):
@@ -396,6 +400,100 @@ class TestMemoryBatch:
         ))
         assert result["success"] is False
         assert "legit fact" not in store.memory_entries
+
+
+class TestBackgroundReviewDeleteGate:
+    """Unattended review may append memory, never replace or remove it."""
+
+    def test_remove_denied_and_store_untouched(self, store):
+        standing_rule = "never create records without permission"
+        store.add("memory", standing_rule)
+        token = set_current_write_origin("background_review")
+        try:
+            result = json.loads(
+                memory_tool(
+                    action="remove",
+                    old_text="without permission",
+                    store=store,
+                )
+            )
+        finally:
+            reset_current_write_origin(token)
+
+        assert result["success"] is False
+        assert "Background review may not delete" in result["error"]
+        assert standing_rule in store._entries_for("memory")
+
+    def test_replace_denied_and_store_untouched(self, store):
+        original = "entry the fork must not rewrite"
+        store.add("memory", original)
+        token = set_current_write_origin("background_review")
+        try:
+            result = json.loads(
+                memory_tool(
+                    action="replace",
+                    old_text="entry the fork",
+                    content="rewritten by fork",
+                    store=store,
+                )
+            )
+        finally:
+            reset_current_write_origin(token)
+
+        assert result["success"] is False
+        assert original in store._entries_for("memory")
+
+    def test_batch_containing_remove_is_denied_atomically(self, store):
+        original = "rule one"
+        store.add("memory", original)
+        token = set_current_write_origin("background_review")
+        try:
+            result = json.loads(
+                memory_tool(
+                    operations=[
+                        {"action": "remove", "old_text": original},
+                        {"action": "add", "content": "fork consolidation"},
+                    ],
+                    store=store,
+                )
+            )
+        finally:
+            reset_current_write_origin(token)
+
+        assert result["success"] is False
+        assert original in store._entries_for("memory")
+        assert "fork consolidation" not in store._entries_for("memory")
+
+    def test_add_stays_available_to_background_review(self, store):
+        token = set_current_write_origin("background_review")
+        try:
+            result = json.loads(
+                memory_tool(
+                    action="add",
+                    content="a fact worth keeping",
+                    store=store,
+                )
+            )
+        finally:
+            reset_current_write_origin(token)
+
+        assert result["success"] is True
+        assert "a fact worth keeping" in store._entries_for("memory")
+
+    def test_foreground_remove_is_unaffected(self, store):
+        entry = "entry a supervised turn may remove"
+        store.add("memory", entry)
+
+        result = json.loads(
+            memory_tool(
+                action="remove",
+                old_text="supervised turn",
+                store=store,
+            )
+        )
+
+        assert result["success"] is True
+        assert entry not in store._entries_for("memory")
 
 
 # =========================================================================

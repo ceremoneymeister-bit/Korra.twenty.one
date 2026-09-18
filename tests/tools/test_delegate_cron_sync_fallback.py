@@ -98,7 +98,7 @@ def test_cron_sync_fallback_returns_and_spawns_no_review_fork(monkeypatch):
     fork_spawned = threading.Event()
     release_fork = threading.Event()
 
-    def _recording_review(agent_obj, messages_snapshot, prompt):
+    def _recording_review(agent_obj, messages_snapshot, prompt, **_kwargs):
         # Stands in for the review fork's replay; wedges like the field report.
         fork_spawned.set()
         release_fork.wait(timeout=60)
