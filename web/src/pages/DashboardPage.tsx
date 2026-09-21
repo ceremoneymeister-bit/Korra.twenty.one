@@ -215,6 +215,7 @@ export default function DashboardPage() {
                 onClick={reset}
                 disabled={isDefault}
                 prefix={<RotateCcw className="size-4 shrink-0" aria-hidden />}
+                className="max-w-full whitespace-normal"
               >
                 Вернуть стандартный набор
               </ProductButton>
@@ -242,7 +243,7 @@ export default function DashboardPage() {
                       </p>
                     </div>
 
-                    <div className="flex shrink-0 flex-wrap items-center gap-3">
+                    <div className="flex w-full min-w-0 max-w-full shrink-0 flex-wrap items-center gap-3 sm:w-auto">
                       {widget.pinned ? (
                         <span className="text-sm text-[var(--neo-text-secondary)]">
                           Полоса над сеткой
