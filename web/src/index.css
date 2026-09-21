@@ -165,11 +165,17 @@ html {
   height: 100dvh;
   max-height: 100dvh;
   overflow: hidden;
+  /* Холст документа и холст приложения — одно значение. Safari показывает
+     фон `html` в безопасных областях и при «резиновой» прокрутке, а
+     `meta[name="theme-color"]` красит системный хром тем же цветом (см.
+     themes/theme-color.ts). Расхождение этих зон и давало полосу прежней
+     темы вокруг уже переключённого интерфейса. */
+  background: var(--neo-background, var(--background-base, #e8e8e8));
 }
 
 body {
   font-family: var(--theme-font-sans);
-  background: var(--neo-background);
+  background: var(--neo-background, var(--background-base, #e8e8e8));
   color: var(--neo-text-primary);
   min-height: 0;
   height: 100%;
@@ -363,6 +369,13 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
     min-height: 44px;
   }
 
+  /* Кнопки каркаса — квадрат под палец: «Сменить тему» в выдвижном меню
+     была 25 px шириной при честной высоте 44 (аудит 390/430, 21.09). */
+  [data-client-ui="true"] aside button,
+  [data-client-ui="true"] header button {
+    min-width: 44px;
+  }
+
   [data-client-ui="true"] aside a,
   [data-client-ui="true"] aside button,
   [data-client-ui="true"] header button,
@@ -380,10 +393,44 @@ code, kbd, pre, samp, .font-mono, .font-mono-ui {
   }
 
   /* Строка списка — тоже кнопка: по ней открывают папку и файл. Правило выше
-     касалось только каркаса, а рабочие списки живут в основной области. */
-  [data-client-ui="true"] main button,
-  [data-client-ui="true"] main a[href] {
+     касалось только каркаса, а рабочие списки живут в основной области.
+     Селектор был написан по тегу `main`, которого в оболочке нет, — правило
+     не срабатывало ни разу; основная область это `#main-content`. */
+  [data-client-ui="true"] #main-content button,
+  [data-client-ui="true"] #main-content a[href],
+  [data-client-ui="true"] #main-content summary {
     min-height: 44px;
+  }
+
+  /* Полоса вкладок агентов: сама вкладка и её «⋮» — цели пальца, а не
+     только курсора. Ширину «⋮» тоже задаём: квадрат 32 px мимо пальца. */
+  .korra-agent-tabs [role='tab'],
+  .korra-agent-tabs [data-agent-tab-menu-trigger] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Телефон и планшет: поле ввода набирается не мельче 16 CSS px.
+   iOS Safari масштабирует страницу под фокус, когда шрифт поля меньше —
+   владелец ловил это и в композере, и в поиске, и в формах («при вводе
+   текста происходит автоматический зум и это всё портит», 21.09). Гасить
+   зум через `user-scalable=no` нельзя: это забирает у человека увеличение
+   всей страницы. Поэтому поднимаем сам шрифт.
+
+   `!important` здесь намеренно: это контракт устройства, и он должен
+   выигрывать у утилит оформления (`text-sm`, `text-xs`) и точечных правил
+   вроде `.korra-chat-history__search input`.
+
+   Границы две, и обе нужны: по ширине — та же, на которой продуктовая
+   оболочка переключается на десктоп (`lg`, 1024), по указателю — любой
+   палец. Иначе iPad в альбомной ориентации ровно 1024 CSS px шириной
+   остался бы без контракта. */
+@media (max-width: 1023.98px), (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+  textarea:not(.xterm-helper-textarea),
+  select {
+    font-size: max(16px, 1rem) !important;
   }
 }
 

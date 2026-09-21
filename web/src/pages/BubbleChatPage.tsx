@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router";
 import {
   Plus,
@@ -386,8 +387,11 @@ export function BubbleChatSidebar({
       className={cn(
         "korra-chat-history shrink-0 flex-col bg-[var(--neo-surface)] shadow-[var(--neo-inset-compact)]",
         layout === "mobile"
-          ? "m-0 flex h-full rounded-none"
-          : "mb-3 ml-3 mt-3 hidden rounded-[var(--neo-radius-card)] md:flex",
+          ? "m-0 flex h-full min-h-0 rounded-none"
+          // Планшет в портрете (768–1023) остаётся на мобильной подаче: до
+          // `lg` продуктовая оболочка сама показывает выдвижное меню, и
+          // второй постоянный список чатов съедал бы ширину переписки.
+          : "mb-3 ml-3 mt-3 hidden rounded-[var(--neo-radius-card)] lg:flex",
       )}
       style={layout === "mobile" ? { width: "100%" } : undefined}
     >
@@ -434,7 +438,7 @@ export function BubbleChatSidebar({
         // четырёх сторон: `--neo-depth-1` смещает блик на -1px вверх и влево,
         // и у крайней карточки внешний `mt` места не даёт — scrollport срезал
         // её верх ровной линией (скриншоты владельца 15.09).
-        className="mt-1 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1"
+        className="mt-1 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain p-1"
         aria-busy={visibleLoading}
       >
         {!searching && visibleLoading && visibleSessions.length === 0 && (
@@ -1503,8 +1507,25 @@ export default function BubbleChatPage({
       if (event.key === "Escape") setMobileHistoryOpen(false);
     };
     window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    // На телефоне документ прокручивается (см. index.css), и без замка
+    // страница уезжала под открытой панелью вместе с её списком.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      document.body.style.overflow = previousOverflow;
+    };
   }, [mobileHistoryOpen]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const closeOnDesktop = (event: MediaQueryListEvent) => {
+      if (event.matches) setMobileHistoryOpen(false);
+    };
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => desktop.removeEventListener("change", closeOnDesktop);
+  }, []);
 
   // Решение по опасной команде уходит отдельным маршрутом, а не сообщением в
   // чат: ход агента заблокирован внутри вызова инструмента и новую реплику
@@ -1551,17 +1572,43 @@ export default function BubbleChatPage({
         onRenamed={() => void sessionList.refresh()}
         historyRevision={historyRevision}
       />
-      {mobileHistoryOpen && (
-        <div className="fixed inset-0 z-[60] flex md:hidden" role="dialog" aria-modal="true" aria-labelledby={mobileHistoryTitleId}>
+      {/* История чатов на телефоне и планшете.
+       *
+       *  Портал в `document.body` здесь обязателен, а не для удобства:
+       *  панель живёт внутри `#main-content`, у которого `relative z-2` —
+       *  это собственный контекст наложения. Любой `z-[60]` внутри него
+       *  сравнивался не с шапкой приложения (`fixed z-40`), а с двойкой
+       *  снаружи, и шапка рисовалась ПОВЕРХ панели: логотип наезжал на
+       *  заголовок, а крестик оказывался под шапкой и не нажимался
+       *  (скриншоты владельца, 21.09). */}
+      {mobileHistoryOpen && createPortal(
+        <div className="fixed inset-0 z-[70] flex lg:hidden" role="dialog" aria-modal="true" aria-labelledby={mobileHistoryTitleId}>
           <button type="button" className="absolute inset-0 bg-black/35" aria-label="Закрыть историю чатов" onClick={() => setMobileHistoryOpen(false)} />
-          <div className="relative flex h-full w-[min(88vw,360px)] flex-col bg-[var(--neo-surface)] shadow-[var(--neo-depth-3)]">
-            <div className="flex min-h-12 items-center justify-between gap-2 border-b border-border px-3">
+          <div
+            data-chat-history-panel
+            // Безопасные области iPhone: под «чёлкой» сверху, над полосой
+            // жестов снизу, за вырезом слева в альбомной ориентации.
+            className={cn(
+              "relative flex h-full w-[min(88vw,360px)] flex-col bg-[var(--neo-surface)] shadow-[var(--neo-depth-3)]",
+              "pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)]",
+            )}
+          >
+            <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
               <h2 id={mobileHistoryTitleId} className="text-sm font-semibold">История чатов</h2>
-              <Button type="button" ghost size="icon" autoFocus aria-label="Закрыть историю чатов" title="Закрыть историю чатов" onClick={() => setMobileHistoryOpen(false)}>
+              {/* Крестик — цель пальца 44 px и всегда над затемнением. */}
+              <button
+                type="button"
+                autoFocus
+                data-chat-history-close
+                aria-label="Закрыть историю чатов"
+                title="Закрыть историю чатов"
+                onClick={() => setMobileHistoryOpen(false)}
+                className="relative z-10 -mr-1 flex size-[44px] shrink-0 items-center justify-center rounded-[var(--neo-radius-round)] text-[var(--neo-text-secondary)]"
+              >
                 <X aria-hidden />
-              </Button>
+              </button>
             </div>
-            <div className="min-h-0 flex-1">
+            <div className="flex min-h-0 flex-1 flex-col">
               <BubbleChatSidebar
                 sessions={sessionList.sessions}
                 profile={agentProfile || "default"}
@@ -1577,7 +1624,8 @@ export default function BubbleChatPage({
               />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       <DeleteConfirmDialog
         open={sessionDelete.isOpen}
@@ -1588,7 +1636,7 @@ export default function BubbleChatPage({
         description={t.sessions.confirmDeleteMessage}
       />
       <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label="Разговор с Коррой">
-        <div className="flex min-h-12 items-center border-b border-border/60 px-3 md:hidden">
+        <div className="flex min-h-12 items-center border-b border-border/60 px-3 lg:hidden">
           <Button type="button" ghost size="sm" onClick={() => setMobileHistoryOpen(true)} prefix={<MessageSquare aria-hidden />} aria-label="Открыть историю чатов">
             Чаты
           </Button>

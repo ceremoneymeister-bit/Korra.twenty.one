@@ -56,6 +56,7 @@ import { soulNamedAs } from "@/lib/agent-wizard";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { cn } from "@/lib/utils";
 import { agentSettingsHref, MAIN_AGENT_TAB } from "@/lib/agent-tabs";
+import { hasCrossedDragThreshold, shouldStartTabDrag } from "@/lib/tab-drag-gesture";
 import { useAgentTabs } from "@/hooks/useAgentTabs";
 import { $activeAgentProfile } from "@/lib/active-agent";
 
@@ -216,7 +217,11 @@ export default function AgentWorkbenchPage() {
   }, []);
 
   const startTabDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>, profile: string) => {
-    if (event.button !== 0 || (event.target as Element).closest("[data-agent-tab-menu-trigger]")) return;
+    // Палец прокручивает полосу, мышь переставляет вкладки: пока решение
+    // принималось без учёта устройства, провести по полосе на телефоне было
+    // нельзя — жест уходил в перетаскивание (см. lib/tab-drag-gesture.ts).
+    const onMenuTrigger = Boolean((event.target as Element).closest("[data-agent-tab-menu-trigger]"));
+    if (!shouldStartTabDrag(event, onMenuTrigger)) return;
     tabDragRef.current = {
       profile,
       pointerId: event.pointerId,
@@ -229,7 +234,7 @@ export default function AgentWorkbenchPage() {
   const moveTabDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = tabDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    if (!drag.moved && Math.abs(event.clientX - drag.startX) < 8) return;
+    if (!drag.moved && !hasCrossedDragThreshold(drag.startX, event.clientX)) return;
     if (!drag.moved) {
       drag.moved = true;
       event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -499,7 +504,9 @@ export default function AgentWorkbenchPage() {
             ref={tabsScrollerRef}
             role="presentation"
             onScroll={rememberTabScroll}
-            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1.5 py-1.5"
+            // `overscroll-x-contain` — чтобы прокрутка полосы до края не
+            // превращалась в жест «назад» Safari и не уводила со страницы.
+            className="korra-agent-tabs__scroller flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-x-contain px-1.5 py-1.5"
           >
             {tabs.map((tab) => {
               const active = tab.profile === activeId;
@@ -512,7 +519,10 @@ export default function AgentWorkbenchPage() {
                   onPointerMove={moveTabDrag}
                   onPointerUp={finishTabDrag}
                   onPointerCancel={finishTabDrag}
-                  className="relative flex shrink-0 touch-pan-y items-center"
+                  // Без `touch-action`: `touch-pan-y` запрещал браузеру
+                  // горизонтальную прокрутку полосы пальцем — ровно тот жест,
+                  // которым на телефоне добираются до дальней вкладки.
+                  className="relative flex shrink-0 items-center"
                 >
                   <button
                     id={`agent-tab-${tab.profile}`}

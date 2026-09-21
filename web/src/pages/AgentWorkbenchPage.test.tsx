@@ -238,19 +238,18 @@ describe("AgentWorkbenchPage", () => {
     expect($activeAgentProfile.get()).toBe("calculator");
   });
 
-  it.each(["mouse", "touch"])("перетаскивает вкладку pointer-событиями (%s)", async (pointerType) => {
-    await render(
-      <MemoryRouter initialEntries={["/agents"]}>
-        <AgentWorkbenchPage />
-      </MemoryRouter>,
-    );
+  /** Провести указателем от «Сметчика» к главной вкладке. */
+  async function dragTab(pointerType: string) {
     const source = container.querySelector<HTMLElement>('[data-agent-tab-profile="calculator"]')!;
     const target = container.querySelector<HTMLElement>('[data-agent-tab-profile=""]')!;
     const tabButton = source.querySelector<HTMLElement>('[role="tab"]')!;
+    const capture = vi.fn();
+    source.setPointerCapture = capture;
     Object.defineProperty(document, "elementFromPoint", {
       configurable: true,
       value: vi.fn(() => target),
     });
+    const events: Event[] = [];
     const fire = (type: string, clientX: number) => {
       const event = new Event(type, { bubbles: true, cancelable: true });
       Object.defineProperties(event, {
@@ -260,6 +259,7 @@ describe("AgentWorkbenchPage", () => {
         clientX: { value: clientX },
         clientY: { value: 10 },
       });
+      events.push(event);
       tabButton.dispatchEvent(event);
     };
     await act(async () => {
@@ -267,11 +267,74 @@ describe("AgentWorkbenchPage", () => {
       fire("pointermove", 60);
       fire("pointerup", 60);
     });
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: undefined });
+    return { capture, moved: events[1] };
+  }
+
+  it("мышью вкладку перетаскивают: порядок меняется", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const { capture, moved } = await dragTab("mouse");
     expect(workbenchMocks.reorderTab).toHaveBeenCalledWith("calculator", "");
-    Object.defineProperty(document, "elementFromPoint", {
-      configurable: true,
-      value: undefined,
+    expect(capture).toHaveBeenCalled();
+    // Перетаскивание забирает жест у прокрутки — для мыши это и нужно.
+    expect(moved.defaultPrevented).toBe(true);
+  });
+
+  it("пальцем полосу прокручивают: порядок не меняется и жест остаётся у браузера", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const { capture, moved } = await dragTab("touch");
+    expect(workbenchMocks.reorderTab).not.toHaveBeenCalled();
+    expect(capture).not.toHaveBeenCalled();
+    // Ни захвата указателя, ни preventDefault — иначе Safari отменит
+    // горизонтальную прокрутку полосы вкладок.
+    expect(moved.defaultPrevented).toBe(false);
+    // Порядок вкладок на телефоне меняют через меню — оно на месте.
+    expect(container.querySelector('button[aria-label="Меню агента «Сметчик»"]')).not.toBeNull();
+  });
+
+  it("палец не отменяет выбор вкладки нажатием", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const wrapper = container.querySelector<HTMLElement>('[data-agent-tab-profile="calculator"]')!;
+    const tab = wrapper.querySelector<HTMLButtonElement>('[role="tab"]')!;
+    const fire = (type: string, clientX: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        button: { value: 0 }, pointerId: { value: 3 }, pointerType: { value: "touch" },
+        clientX: { value: clientX }, clientY: { value: 10 },
+      });
+      tab.dispatchEvent(event);
+    };
+    await act(async () => {
+      fire("pointerdown", 100);
+      fire("pointerup", 100);
+      tab.click();
     });
+    expect(tab.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("полоса вкладок прокручивается по горизонтали и не запрещает жест", async () => {
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const scroller = container.querySelector<HTMLElement>(".korra-agent-tabs__scroller")!;
+    expect(scroller.className).toContain("overflow-x-auto");
+    const wrapper = container.querySelector<HTMLElement>('[data-agent-tab-profile="calculator"]')!;
+    // `touch-pan-y` запрещал браузеру горизонтальный жест внутри полосы.
+    expect(wrapper.className).not.toContain("touch-pan-y");
   });
 
   it("показывает display_name как подпись вкладки", async () => {

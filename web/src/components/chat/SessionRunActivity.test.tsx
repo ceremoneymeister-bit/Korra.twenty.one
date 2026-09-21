@@ -120,10 +120,27 @@ it("отметка стоит у конкретного чата; «Скрыть
   expect(container.textContent).toContain("Ответ готов");
   expect(container.querySelectorAll("[data-unread-response]")).toHaveLength(2);
   const toast = document.querySelector("[data-run-toast]")!;
-  expect(toast.className).toMatch(/top-16/);
+  // Уведомление живёт в верхней безопасной области у правого края: оно не
+  // висит над composer/Send/Stop снизу и не закрывает полосу вкладок,
+  // которая начинается сразу под шапкой (прежнее `top-16`).
+  expect(toast.className).toMatch(/top-\[max\(0\.5rem,env\(safe-area-inset-top/);
+  expect(toast.className).toMatch(/right-\[max\(0\.75rem,env\(safe-area-inset-right/);
   expect(toast.className).not.toMatch(/bottom-/);
+  expect(toast.className).not.toMatch(/(?:^|\s)(?:left-\d|top-16)/);
   expect(toast.querySelectorAll("a")).toHaveLength(2);
-  await act(async () => (toast.querySelector("button") as HTMLButtonElement).click());
+  // Телефон показывает одну строку и счётчик остальных, широкий экран — все.
+  const [first, second] = [...toast.querySelectorAll("li")];
+  expect(first.className).not.toMatch(/hidden/);
+  expect(second.className).toMatch(/hidden lg:block/);
+  expect(toast.querySelector("[data-run-toast-rest='compact']")?.textContent).toContain("+1");
+  expect(toast.querySelector("[data-run-toast-rest='wide']")).toBeNull();
+  // Скрыть — цель пальца 44 px, подпись доступна скринридеру.
+  const dismiss = toast.querySelector("button") as HTMLButtonElement;
+  expect(dismiss.getAttribute("aria-label")).toBe("Скрыть уведомление");
+  // Шкала Tailwind здесь умножена на плотность темы, поэтому цель
+  // пальца задаётся в пикселях, а не в единицах шкалы.
+  expect(dismiss.className).toMatch(/size-\[44px\]/);
+  await act(async () => dismiss.click());
   expect(document.querySelector("[data-run-toast]")).toBeNull();
   expect($unreadChatRuns.get()).toHaveLength(2);
   expect(container.querySelectorAll("[data-unread-response]")).toHaveLength(2);

@@ -112,6 +112,7 @@ import type { Translations } from "@/i18n/types";
 import { PluginPage, PluginSlot, usePlugins } from "@/plugins";
 import type { PluginManifest } from "@/plugins";
 import { useTheme } from "@/themes";
+import { componentSurfaceBackground } from "@/themes/component-surface";
 import { EveningThemePrompt } from "@/components/EveningThemePrompt";
 import {
   isDashboardBubbleChatEnabled,
@@ -701,7 +702,7 @@ export default function App() {
           "bg-background-base",
         )}
         style={{
-          background: "var(--component-header-background)",
+          background: componentSurfaceBackground("header"),
           borderImage: "var(--component-header-border-image)",
           clipPath: "var(--component-header-clip-path)",
         }}
@@ -757,7 +758,7 @@ export default function App() {
               collapsed && "lg:w-14",
             )}
             style={{
-              background: "var(--component-sidebar-background)",
+              background: componentSurfaceBackground("sidebar"),
               clipPath: "var(--component-sidebar-clip-path)",
               borderImage: "var(--component-sidebar-border-image)",
             }}

@@ -34,6 +34,7 @@ import {
   colorOverrideVars,
 } from "./semantic-colors";
 import { NEUMORPHISM_CSS_VARS, neumorphismVars } from "./neumorphism";
+import { applyThemeColorMeta, resolveThemeColor } from "./theme-color";
 import { api } from "@/lib/api";
 import { cachePreference, readBootstrap, safeRead, safeWrite, validPreference, type ThemePreference } from "./preference";
 
@@ -367,6 +368,11 @@ function applyTheme(theme: DashboardTheme) {
   injectFontStylesheet(theme.typography.fontUrl);
   applyCustomCSS(theme.customCSS);
   applyLayoutVariant(theme.layoutVariant);
+
+  // Системный хром Safari (строка состояния, панель адреса, безопасные
+  // области) красится не фоном страницы, а `meta[name="theme-color"]`.
+  // Без этой строки он сохранял цвет предыдущей темы до перезагрузки.
+  applyThemeColorMeta(resolveThemeColor(theme));
 
   // Terminal colors — read by ChatPage via useTheme(); also available as CSS vars.
   root.style.setProperty(

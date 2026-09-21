@@ -80,6 +80,7 @@ import {
 import { maybeReloadForLoopbackWsAuthFailure } from "@/lib/dashboard-auth-reload";
 import { PluginSlot } from "@/plugins";
 import { useTheme } from "@/themes";
+import { componentSurfaceBackground } from "@/themes/component-surface";
 import { useProfileScope } from "@/contexts/useProfileScope";
 
 // Stable per-browser token identifying THIS chat tab's keep-alive PTY session.
@@ -1753,13 +1754,13 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             "border-l border-current/20 text-midground",
             "bg-background-base/95",
             "transition-transform duration-200 ease-out",
-            "[background:var(--component-sidebar-background)]",
             "[clip-path:var(--component-sidebar-clip-path)]",
             "[border-image:var(--component-sidebar-border-image)]",
             mobilePanelOpen
               ? "translate-x-0"
               : "pointer-events-none translate-x-full",
           )}
+          style={{ background: componentSurfaceBackground("sidebar") }}
         >
           <div
             className={cn(
