@@ -29,21 +29,25 @@ import {
   AGENTS,
   ARTIFACTS,
   DEFAULT_LAYOUT,
+  RESIZABLE_WIDGET_IDS,
   SCENARIOS,
   WIDGETS,
   moveWidget,
+  resizeWidget,
   saveLayout,
   selectScenario
 } from './model'
-import type { Artifact, WidgetId } from './model'
+import type { Artifact, WidgetId, WidgetSize } from './model'
 import { AgentMark, ArtifactCover, FirstVisitVisual, MetricChart } from './visuals'
 import { Modal } from './Modal'
+import { SizePicker } from './SizePicker'
 
 type Overlay =
   | { kind: 'catalog' }
   | { kind: 'artifact'; artifact: Artifact }
   | { kind: 'gallery' }
   | { kind: 'approval' }
+  | { kind: 'team' }
   | { kind: 'agent'; id: string }
   | { kind: 'event'; index: number }
 const EVENTS = [
@@ -72,19 +76,21 @@ const EVENTS = [
 
 function Panel({
   id,
+  size,
   title,
   meta,
   action,
   children
 }: {
   id: WidgetId
+  size: WidgetSize
   title: string
   meta?: string
   action?: ReactNode
   children: ReactNode
 }) {
   return (
-    <section className={`dv-panel dv-panel--${id}`} data-widget={id} aria-labelledby={`dv-${id}`}>
+    <section className={`dv-panel dv-panel--${id}`} data-widget={id} data-size={size} aria-labelledby={`dv-${id}`}>
       <header className="dv-panel-heading">
         <div>
           <h3 id={`dv-${id}`}>{title}</h3>
@@ -99,7 +105,15 @@ function Panel({
   )
 }
 
-function ArtifactButton({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) {
+function ArtifactButton({
+  artifact,
+  onOpen,
+  detailed = false
+}: {
+  artifact: Artifact
+  onOpen: () => void
+  detailed?: boolean
+}) {
   return (
     <button className="dv-artifact" onClick={onOpen} aria-label={`Открыть артефакт «${artifact.title}»`}>
       <div className="dv-artifact-stage">
@@ -114,6 +128,14 @@ function ArtifactButton({ artifact, onOpen }: { artifact: Artifact; onOpen: () =
         <span>·</span>
         {artifact.time}
       </span>
+      {detailed && (
+        <span className="dv-artifact-author">
+          {artifact.author}
+          <span>
+            Готово к просмотру <Check size={12} />
+          </span>
+        </span>
+      )}
     </button>
   )
 }
@@ -197,6 +219,7 @@ export default function DashboardVisual() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
   const renderWidget = (id: WidgetId) => {
+    const size = layout.sizes[id]
     switch (id) {
       case 'attention':
         return (
@@ -219,6 +242,7 @@ export default function DashboardVisual() {
           <Panel
             key={id}
             id={id}
+            size={size}
             title="Артефакты"
             meta="3 новых сегодня"
             action={
@@ -228,15 +252,20 @@ export default function DashboardVisual() {
             }
           >
             <div className="dv-artifacts">
-              {ARTIFACTS.map(artifact => (
-                <ArtifactButton key={artifact.id} artifact={artifact} onOpen={() => openArtifact(artifact)} />
+              {(size === 's' ? ARTIFACTS.slice(0, 1) : ARTIFACTS).map(artifact => (
+                <ArtifactButton
+                  key={artifact.id}
+                  artifact={artifact}
+                  detailed={size === 'l'}
+                  onOpen={() => openArtifact(artifact)}
+                />
               ))}
             </div>
             <footer className="dv-artifact-footer">
               <span className="dv-mini-check">
                 <Check size={12} />
               </span>
-              Идеи становятся осязаемыми
+              {size === 's' ? 'Последний артефакт' : 'Идеи становятся осязаемыми'}
               <span className="dv-stack-count">
                 <Layers3 size={14} /> 3
               </span>
@@ -248,6 +277,7 @@ export default function DashboardVisual() {
           <Panel
             key={id}
             id={id}
+            size={size}
             title="Оборот"
             action={
               <button
@@ -261,8 +291,8 @@ export default function DashboardVisual() {
             }
           >
             <div className="dv-metric-value" key={monthly ? 'month' : 'week'}>
-              {monthly ? '1 142 800' : '284 500'}
-              <span>₽</span>
+              {size === 's' ? (monthly ? '1,14' : '284,5') : monthly ? '1 142 800' : '284 500'}
+              <span>{size === 's' ? (monthly ? 'млн ₽' : 'тыс. ₽') : '₽'}</span>
             </div>
             <div className="dv-metric-comparison">
               <span>
@@ -271,11 +301,25 @@ export default function DashboardVisual() {
               </span>
               <small>{monthly ? 'к прошлому периоду' : 'к прошлой неделе'}</small>
             </div>
-            <MetricChart monthly={monthly} />
-            <div className="dv-chart-labels">
-              <span>{monthly ? '1 сен' : '14 сен'}</span>
-              <span>{monthly ? '21 сен' : '20 сен'}</span>
-            </div>
+            {size !== 's' && <MetricChart monthly={monthly} />}
+            {size !== 's' && (
+              <div className="dv-chart-labels">
+                <span>{monthly ? '1 сен' : '14 сен'}</span>
+                <span>{monthly ? '21 сен' : '20 сен'}</span>
+              </div>
+            )}
+            {size === 'l' && (
+              <div className="dv-metric-detail">
+                <span>
+                  {monthly ? '1–21 августа' : 'Прошлая неделя'}
+                  <strong>{monthly ? '1 016 726' : '241 100'} ₽</strong>
+                </span>
+                <span>
+                  {monthly ? '1–21 сентября' : 'Эта неделя'}
+                  <strong>{monthly ? '1 142 800' : '284 500'} ₽</strong>
+                </span>
+              </div>
+            )}
             <footer className="dv-metric-source">
               <span />
               Демо-показатель
@@ -287,39 +331,74 @@ export default function DashboardVisual() {
           <Panel
             key={id}
             id={id}
+            size={size}
             title="Твоя команда"
             meta="2 агента в работе"
             action={<span className="dv-team-count">3</span>}
           >
-            <div className="dv-agent-list">
-              {AGENTS.map(item => (
-                <button
-                  key={item.id}
-                  className="dv-agent-row"
-                  onClick={() => setOverlay({ kind: 'agent', id: item.id })}
-                  aria-label={`Открыть агента ${item.name}`}
-                >
-                  <AgentMark kind={item.mark} />
-                  <span className="dv-agent-copy">
-                    <strong>{item.name}</strong>
-                    <span>{item.role}</span>
-                  </span>
-                  <span className={`dv-agent-status ${item.state === 'Работает' ? 'dv-agent-status--working' : ''}`}>
-                    {item.state === 'Работает' ? (
-                      <span className="dv-activity">
-                        <i />
-                        <i />
-                        <i />
-                      </span>
-                    ) : (
-                      <span className="dv-idle-dot" />
-                    )}
-                    <span>{item.state}</span>
-                  </span>
-                  <ChevronRight className="dv-row-arrow" size={17} />
-                </button>
-              ))}
-            </div>
+            {size === 's' && (
+              <div className="dv-team-summary">
+                <strong>
+                  2<span>/ 3</span>
+                </strong>
+                <span>агента в работе</span>
+              </div>
+            )}
+            {size === 's' ? (
+              <button
+                className="dv-team-short"
+                onClick={() => setOverlay({ kind: 'team' })}
+                aria-label="Открыть команду"
+              >
+                <span className="dv-team-avatars">
+                  {AGENTS.map(item => (
+                    <AgentMark key={item.id} kind={item.mark} />
+                  ))}
+                </span>
+                <span>
+                  Вся команда <ArrowUpRight size={14} />
+                </span>
+              </button>
+            ) : (
+              <div className="dv-agent-list">
+                {AGENTS.map(item => (
+                  <button
+                    key={item.id}
+                    className="dv-agent-row"
+                    onClick={() => setOverlay({ kind: 'agent', id: item.id })}
+                    aria-label={`Открыть агента ${item.name}`}
+                  >
+                    <AgentMark kind={item.mark} />
+                    <span className="dv-agent-copy">
+                      <strong>{item.name}</strong>
+                      <span>{item.role}</span>
+                      {size === 'l' && (
+                        <small>
+                          {item.id === 'designer'
+                            ? 'Собирает слайды'
+                            : item.id === 'analytics'
+                              ? 'Проверяет источники'
+                              : 'Можно дать новое поручение'}
+                        </small>
+                      )}
+                    </span>
+                    <span className={`dv-agent-status ${item.state === 'Работает' ? 'dv-agent-status--working' : ''}`}>
+                      {item.state === 'Работает' ? (
+                        <span className="dv-activity">
+                          <i />
+                          <i />
+                          <i />
+                        </span>
+                      ) : (
+                        <span className="dv-idle-dot" />
+                      )}
+                      <span>{item.state}</span>
+                    </span>
+                    <ChevronRight className="dv-row-arrow" size={17} />
+                  </button>
+                ))}
+              </div>
+            )}
           </Panel>
         )
       case 'upcoming-tasks':
@@ -327,6 +406,7 @@ export default function DashboardVisual() {
           <Panel
             key={id}
             id={id}
+            size={size}
             title="Лента дня"
             action={
               <span className="dv-today-label">
@@ -335,6 +415,19 @@ export default function DashboardVisual() {
               </span>
             }
           >
+            {size === 'l' && (
+              <div className="dv-week-strip" aria-label="Неделя с 21 сентября">
+                <span className="dv-week-today">
+                  Пн<strong>21</strong>
+                </span>
+                {['Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day, index) => (
+                  <span key={day}>
+                    {day}
+                    <strong>{22 + index}</strong>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="dv-timeline">
               {EVENTS.map((event, index) => (
                 <button
@@ -522,12 +615,22 @@ export default function DashboardVisual() {
                       <ArrowDown size={15} />
                     </button>
                   </div>
+                  {RESIZABLE_WIDGET_IDS.includes(id) && (
+                    <SizePicker
+                      id={id}
+                      title={widget.title}
+                      value={layout.sizes[id]}
+                      onChange={size => saveLayout(resizeWidget(layout, id, size))}
+                    />
+                  )}
                 </div>
               )
             })}
           </div>
           <div className="dv-catalog-note">
-            <span>{storageNotice || 'Настройки макета хранятся только в этом браузере'}</span>
+            <span role="status" aria-live="polite">
+              {storageNotice || 'Настройки макета хранятся только в этом браузере'}
+            </span>
             <small>«Внимание» появляется, когда есть вопрос. Синхронизация между устройствами — следующий этап.</small>
           </div>
           <div className="dv-modal-actions">
@@ -611,6 +714,28 @@ export default function DashboardVisual() {
             >
               Подтвердить в макете <Check size={17} />
             </button>
+          </div>
+        </Modal>
+      )}
+      {overlay?.kind === 'team' && (
+        <Modal title="Твоя команда" onClose={close}>
+          <div className="dv-agent-list">
+            {AGENTS.map(item => (
+              <button
+                key={item.id}
+                className="dv-agent-row"
+                onClick={() => setOverlay({ kind: 'agent', id: item.id })}
+                aria-label={`Открыть агента ${item.name}`}
+              >
+                <AgentMark kind={item.mark} />
+                <span className="dv-agent-copy">
+                  <strong>{item.name}</strong>
+                  <span>{item.role}</span>
+                </span>
+                <span className="dv-agent-status">{item.state}</span>
+                <ChevronRight size={16} />
+              </button>
+            ))}
           </div>
         </Modal>
       )}

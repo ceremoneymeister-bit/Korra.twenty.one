@@ -6,6 +6,7 @@ import { ThemeProvider } from '@/themes'
 import { SystemActionsProvider } from '@/contexts/SystemActions'
 import '@/index.css'
 import './dashboard.css'
+import './widget-sizes.css'
 
 createRoot(document.getElementById('root')!).render(
   <MemoryRouter initialEntries={['/dashboard']}>

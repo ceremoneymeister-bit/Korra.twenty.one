@@ -8,6 +8,7 @@ import {
   catalogCompatible,
   moveWidget,
   normalizeLayout,
+  resizeWidget,
   saveLayout
 } from '../../prototypes/dashboard/model'
 
@@ -47,5 +48,37 @@ describe('dashboard visual prototype layout', () => {
     expect(JSON.parse(localStorage.getItem('korra.dashboard.visual-v1.layout')!).hidden).toEqual(['metrics'])
     expect($storageNotice.get()).toContain('этом браузере')
     expect(localStorage.length).toBe(1)
+  })
+  it('migrates v1 settings without resetting order or hidden widgets', () => {
+    const order = [...DEFAULT_LAYOUT.order].reverse()
+    const result = normalizeLayout({ order, hidden: ['agents'] })
+    expect(result.order).toEqual(order)
+    expect(result.hidden).toEqual(['agents'])
+    expect(result.sizes).toEqual(DEFAULT_LAYOUT.sizes)
+  })
+  it('validates each stored size and keeps the attention strip fixed', () => {
+    const result = normalizeLayout({
+      sizes: { agents: 's', metrics: 'l', attention: 's', 'recent-results': 'huge', injected: 'l' }
+    })
+    expect(result.sizes.agents).toBe('s')
+    expect(result.sizes.metrics).toBe('l')
+    expect(result.sizes.attention).toBe('m')
+    expect(result.sizes['recent-results']).toBe('m')
+    expect(Object.keys(result.sizes)).toEqual(Object.keys(DEFAULT_LAYOUT.sizes))
+  })
+  it('changes only the selected widget size, without mutating accepted defaults', () => {
+    const result = resizeWidget(DEFAULT_LAYOUT, 'metrics', 'l')
+    expect(result.sizes.metrics).toBe('l')
+    expect(DEFAULT_LAYOUT.sizes.metrics).toBe('m')
+    expect(result.order).toBe(DEFAULT_LAYOUT.order)
+    expect(result.hidden).toBe(DEFAULT_LAYOUT.hidden)
+    expect(resizeWidget(DEFAULT_LAYOUT, 'attention', 's')).toBe(DEFAULT_LAYOUT)
+  })
+  it('persists and restores different sizes independently', () => {
+    const result = resizeWidget(resizeWidget(DEFAULT_LAYOUT, 'metrics', 's'), 'agents', 'l')
+    saveLayout(result)
+    expect(normalizeLayout(JSON.parse(localStorage.getItem('korra.dashboard.visual-v1.layout')!))).toEqual(result)
+    saveLayout(DEFAULT_LAYOUT)
+    expect($layout.get().sizes).toEqual(DEFAULT_LAYOUT.sizes)
   })
 })

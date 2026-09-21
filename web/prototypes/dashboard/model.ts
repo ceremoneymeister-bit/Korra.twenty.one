@@ -15,11 +15,34 @@ export const WIDGETS = [
   { id: 'upcoming-tasks', title: 'Лента дня', detail: 'Ближайшие запуски и встречи', kind: 'timeline' }
 ] as const
 export type WidgetId = (typeof WIDGETS)[number]['id']
+export type WidgetSize = 's' | 'm' | 'l'
+export const WIDGET_SIZES: { id: WidgetSize; label: string }[] = [
+  { id: 's', label: 'Компактный' },
+  { id: 'm', label: 'Стандартный' },
+  { id: 'l', label: 'Подробный' }
+]
+export const RESIZABLE_WIDGET_IDS: WidgetId[] = WIDGETS.filter(widget => widget.id !== 'attention').map(
+  widget => widget.id
+)
+// M preserves the composition accepted by Dmitry. Width is content-specific;
+// these are Korra's information sizes, not a copy of iOS pixel dimensions.
+export const DEFAULT_SIZES: Record<WidgetId, WidgetSize> = {
+  attention: 'm',
+  'recent-results': 'm',
+  metrics: 'm',
+  agents: 'm',
+  'upcoming-tasks': 'm'
+}
 export interface PreviewLayout {
   order: WidgetId[]
   hidden: WidgetId[]
+  sizes: Record<WidgetId, WidgetSize>
 }
-export const DEFAULT_LAYOUT: PreviewLayout = { order: WIDGETS.map(widget => widget.id), hidden: [] }
+export const DEFAULT_LAYOUT: PreviewLayout = {
+  order: WIDGETS.map(widget => widget.id),
+  hidden: [],
+  sizes: DEFAULT_SIZES
+}
 const STORAGE_KEY = 'korra.dashboard.visual-v1.layout'
 
 export function normalizeLayout(value: unknown): PreviewLayout {
@@ -33,7 +56,21 @@ export function normalizeLayout(value: unknown): PreviewLayout {
         ]
       : []
   const order = valid(source.order)
-  return { order: [...order, ...DEFAULT_LAYOUT.order.filter(id => !order.includes(id))], hidden: valid(source.hidden) }
+  const storedSizes = source.sizes && typeof source.sizes === 'object' ? source.sizes : {}
+  const sizes = { ...DEFAULT_SIZES }
+  for (const id of RESIZABLE_WIDGET_IDS) {
+    const value = (storedSizes as Record<string, unknown>)[id]
+    if (WIDGET_SIZES.some(size => size.id === value)) sizes[id] = value as WidgetSize
+  }
+  return {
+    order: [...order, ...DEFAULT_LAYOUT.order.filter(id => !order.includes(id))],
+    hidden: valid(source.hidden),
+    sizes
+  }
+}
+export function resizeWidget(layout: PreviewLayout, id: WidgetId, size: WidgetSize): PreviewLayout {
+  if (!RESIZABLE_WIDGET_IDS.includes(id) || !WIDGET_SIZES.some(item => item.id === size)) return layout
+  return { ...layout, sizes: { ...layout.sizes, [id]: size } }
 }
 export function moveWidget(layout: PreviewLayout, id: WidgetId, direction: -1 | 1): PreviewLayout {
   const order = [...layout.order],
