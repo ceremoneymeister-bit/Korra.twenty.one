@@ -76,3 +76,15 @@ it("shows a portaled save error without changing sidebar geometry", async () => 
   await act(async () => alert?.querySelector<HTMLButtonElement>("button")?.click());
   expect(state.retryTheme).toHaveBeenCalledOnce();
 });
+
+it("keeps the retry target at 44 px regardless of theme density", async () => {
+  state.saveState = "error";
+  await act(async () => root.render(<ThemeSwitcher />));
+
+  const retry = document.body.querySelector<HTMLButtonElement>('[role="alert"] button');
+
+  // Утилиты Tailwind отмеряны от `--spacing`, а его у нас умножает плотность
+  // темы, поэтому цель пальца задаётся абсолютной величиной.
+  expect(retry?.className).toContain("min-h-[44px]");
+  expect(retry?.className).not.toMatch(/\bmin-h-\d+\b/);
+});

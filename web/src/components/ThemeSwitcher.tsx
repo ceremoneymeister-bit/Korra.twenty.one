@@ -71,7 +71,11 @@ export function ThemeSwitcher({ collapsed = false }: ThemeSwitcherProps) {
         >
           <p>{saveError || "Тема не сохранена. Проверьте соединение и повторите."}</p>
           <button
-            className="mt-2 min-h-11 rounded-lg px-3 font-medium text-[var(--neo-text-primary)] underline underline-offset-4 hover:shadow-[var(--neo-inset-compact)]"
+            // 44 px в абсолютной единице: шкала Tailwind у нас умножена на
+            // плотность темы (`--spacing: var(--korra-space)` в index.css), и
+            // `min-h-11` давал бы ~35 px — палец мимо единственной кнопки,
+            // которой можно вернуть несохранённую тему.
+            className="mt-2 min-h-[44px] rounded-lg px-3 font-medium text-[var(--neo-text-primary)] underline underline-offset-4 hover:shadow-[var(--neo-inset-compact)]"
             onClick={() => void retryTheme()}
             type="button"
           >
