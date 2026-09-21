@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, fetchJSON, setManagementProfile, transcribeAudio } from "./api";
+import { ApiError, api, fetchJSON, setManagementProfile, transcribeAudio } from "./api";
 
 const reloadMocks = vi.hoisted(() => ({
   attemptDashboardTokenReloadOnce: vi.fn(() => false),
@@ -118,6 +118,43 @@ describe("fetchJSON", () => {
     await expect(fetchJSON("/api/status")).rejects.toThrow(
       "409: Сессия уже завершена",
     );
+  });
+
+  it("keeps the status and the response body on the thrown error", async () => {
+    // Проигранный CAS (409 с победившей записью) и сбой связи требуют разных
+    // действий от экрана, поэтому отказ несёт код и тело, а не только текст.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response('{"detail":"Дашборд уже изменился","preference":{"revision":7}}', {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const error = await fetchJSON("/api/dashboard/layout").catch((e) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(409);
+    expect(error.payload).toEqual({
+      detail: "Дашборд уже изменился",
+      preference: { revision: 7 },
+    });
+    expect(error.message).toBe("409: Дашборд уже изменился");
+  });
+
+  it("survives a non-JSON failure without a body to parse", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<html>502</html>", { status: 502 })),
+    );
+
+    const error = await fetchJSON("/api/status").catch((e) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(502);
+    expect(error.payload).toBeUndefined();
   });
 });
 

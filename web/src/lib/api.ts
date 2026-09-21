@@ -114,6 +114,27 @@ function withManagementProfile(url: string): string {
   return `${url}${sep}profile=${encodeURIComponent(_managementProfile)}`;
 }
 
+/**
+ * Отказ сервера с сохранённым кодом и разобранным телом ответа.
+ *
+ * Текст сообщения тот же, что и раньше (`"409: …"`), поэтому места, которые
+ * показывают `error.message`, не меняются. Код нужен там, где разные отказы
+ * требуют разных действий: проигранный CAS (409) — это чужая запись, а 500
+ * или обрыв связи — неизвестный исход, и путать их нельзя. `payload` несёт
+ * то, что сервер приложил к отказу (например победившую запись в 409).
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly payload: unknown;
+
+  constructor(status: number, message: string, payload?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 export async function fetchJSON<T>(
   url: string,
   init?: RequestInit,
@@ -192,7 +213,17 @@ export async function fetchJSON<T>(
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${safeApiErrorMessage(res.status, text)}`);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      // Ответ не JSON — тела для разбора нет, остаётся статус и текст.
+    }
+    throw new ApiError(
+      res.status,
+      `${res.status}: ${safeApiErrorMessage(res.status, text)}`,
+      payload,
+    );
   }
   return res.json();
 }
