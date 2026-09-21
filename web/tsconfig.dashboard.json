@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": { "tsBuildInfoFile": "./node_modules/.tmp/dashboard-preview.tsbuildinfo" },
+  "include": ["prototypes/dashboard", "prototypes/interface/demo-api.ts", "src", "../apps/shared/src"],
+  "exclude": ["src/vendor/nous-ui"]
+}

@@ -3,7 +3,7 @@ import { WidgetEmptyState } from "@/components/dashboard/WidgetEmptyState";
 import type { DashboardWidget } from "@/components/dashboard/widget-types";
 
 /**
- * «Последние результаты» — что уже готово и можно забрать.
+ * «Артефакты» — что уже готово и можно забрать.
  *
  * Источник — материалы контура и завершённые разговоры. Пока его нет,
  * карточка уводит на экран файлов: там результаты видно целиком.
@@ -19,7 +19,7 @@ function RecentResultsBody() {
 
 export const RECENT_RESULTS_WIDGET: DashboardWidget = {
   id: "recent-results",
-  title: "Последние результаты",
+  title: "Артефакты",
   purpose: "Готовые ответы, файлы и отчёты за последние дни.",
   Body: RecentResultsBody,
 };
