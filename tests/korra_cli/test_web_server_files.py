@@ -89,6 +89,38 @@ def _seed_file(client, root, name="out/hello.txt"):
     return file_path
 
 
+def test_managed_file_creation_time_uses_birthtime_not_unix_ctime(monkeypatch, tmp_path):
+    target = tmp_path / "document.txt"
+    target.write_text("data", encoding="utf-8")
+
+    fake_stat = SimpleNamespace(st_birthtime=123.25, st_ctime=999.0)
+    assert web_server._managed_file_created_at(target, fake_stat) == 123.25
+
+    # On Unix ctime is a metadata-change time, not a creation time. A platform
+    # without birthtime must report the value as unavailable instead of
+    # silently mislabelling ctime in the owner UI.
+    monkeypatch.setattr(web_server.sys, "platform", "darwin")
+    assert web_server._managed_file_created_at(
+        target, SimpleNamespace(st_ctime=999.0)
+    ) is None
+
+
+def test_managed_listing_exposes_nullable_creation_time(forced_files_client):
+    client, root = forced_files_client
+    target = _seed_file(client, root)
+
+    entry = next(
+        item
+        for item in client.get(
+            "/api/files", params={"path": str(target.parent)}
+        ).json()["entries"]
+        if item["name"] == target.name
+    )
+
+    assert "created_at" in entry
+    assert entry["created_at"] is None or entry["created_at"] > 0
+
+
 
 
 def test_download_authenticates_via_query_token(forced_files_client):

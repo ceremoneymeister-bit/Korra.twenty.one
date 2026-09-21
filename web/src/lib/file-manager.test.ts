@@ -12,16 +12,25 @@ import {
 } from "@/lib/file-manager";
 
 const entries: ManagedFileEntry[] = [
-  { name: "Фото 10.png", path: "/data/Фото 10.png", is_directory: false, size: 10, mtime: 30, mime_type: "image/png" },
-  { name: "Проекты", path: "/data/Проекты", is_directory: true, size: null, mtime: 10, mime_type: null },
-  { name: "фото 2.png", path: "/data/фото 2.png", is_directory: false, size: 20, mtime: 20, mime_type: "image/png" },
+  { name: "Фото 10.png", path: "/data/Фото 10.png", is_directory: false, size: 10, created_at: 20, mtime: 30, mime_type: "image/png" },
+  { name: "Проекты", path: "/data/Проекты", is_directory: true, size: null, created_at: 10, mtime: 40, mime_type: null },
+  { name: "фото 2.png", path: "/data/фото 2.png", is_directory: false, size: 20, created_at: 30, mtime: 20, mime_type: "image/png" },
+  { name: "Архив", path: "/data/Архив", is_directory: true, size: null, created_at: null, mtime: 10, mime_type: null },
 ];
 
 describe("file manager helpers", () => {
-  it("filters without case sensitivity and always keeps folders first", () => {
+  it("filters without case sensitivity and keeps folders first for name", () => {
     expect(filterAndSortFileEntries(entries, "ФОТО", "name").map((entry) => entry.name))
       .toEqual(["фото 2.png", "Фото 10.png"]);
-    expect(filterAndSortFileEntries(entries, "", "modified")[0].name).toBe("Проекты");
+    expect(filterAndSortFileEntries(entries, "", "name").slice(0, 2).map((entry) => entry.name))
+      .toEqual(["Архив", "Проекты"]);
+  });
+
+  it("mixes files and folders for honest date order and leaves unknown creation last", () => {
+    expect(filterAndSortFileEntries(entries, "", "modified").map((entry) => entry.name))
+      .toEqual(["Проекты", "Фото 10.png", "фото 2.png", "Архив"]);
+    expect(filterAndSortFileEntries(entries, "", "created").map((entry) => entry.name))
+      .toEqual(["фото 2.png", "Фото 10.png", "Проекты", "Архив"]);
   });
 
   it("chooses a non-conflicting Russian copy name", () => {

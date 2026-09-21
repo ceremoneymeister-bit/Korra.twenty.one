@@ -2779,6 +2779,60 @@ def _managed_file_revision_from_stat(st: os.stat_result) -> str:
     return hashlib.sha256(material.encode("ascii")).hexdigest()
 
 
+def _managed_file_created_at(target: Path, st: os.stat_result) -> Optional[float]:
+    """Return the filesystem birth time without calling ctime "creation".
+
+    macOS and modern Windows expose ``st_birthtime`` directly.  CPython does
+    not expose Linux ``statx(2)`` yet, even when the filesystem records a real
+    birth time, so use that one read-only syscall there.  An unsupported
+    kernel/filesystem returns ``None``; ``st_ctime`` is deliberately not used
+    because on Unix it changes with permissions, ownership and other metadata.
+    """
+    birthtime = getattr(st, "st_birthtime", None)
+    if isinstance(birthtime, (int, float)) and birthtime > 0:
+        return float(birthtime)
+    if sys.platform != "linux":
+        return None
+    try:
+        import ctypes
+        import struct
+
+        # Linux ``struct statx`` is a 256-byte ABI structure.  stx_mask is at
+        # offset 0 and stx_btime (seconds, nanoseconds) starts at offset 80.
+        # Passing an opaque buffer avoids mirroring fields added by newer
+        # kernels while keeping the stable ABI offsets explicit.
+        buffer = ctypes.create_string_buffer(256)
+        statx = ctypes.CDLL(None, use_errno=True).statx
+        statx.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_uint,
+            ctypes.c_void_p,
+        )
+        statx.restype = ctypes.c_int
+        statx_btime = 0x00000800
+        at_fdcwd = -100
+        at_symlink_nofollow = 0x100
+        if statx(
+            at_fdcwd,
+            os.fsencode(target),
+            at_symlink_nofollow,
+            statx_btime,
+            buffer,
+        ) != 0:
+            return None
+        mask = struct.unpack_from("@I", buffer.raw, 0)[0]
+        if not mask & statx_btime:
+            return None
+        seconds, nanoseconds = struct.unpack_from("@qI", buffer.raw, 80)
+        if seconds <= 0:
+            return None
+        return float(seconds) + float(nanoseconds) / 1_000_000_000
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        return None
+
+
 def _managed_file_entry(policy: ManagedFilesPolicy, target: Path) -> Dict[str, Any]:
     try:
         parent = target.parent.resolve(strict=True)
@@ -2802,6 +2856,7 @@ def _managed_file_entry(policy: ManagedFilesPolicy, target: Path) -> Dict[str, A
         "path": str(literal),
         "is_directory": is_dir,
         "size": None if is_dir else st.st_size,
+        "created_at": _managed_file_created_at(literal, st),
         "mtime": st.st_mtime,
         "mime_type": mime_type,
     }

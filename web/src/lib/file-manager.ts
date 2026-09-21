@@ -1,6 +1,6 @@
 import type { ManagedFileEntry } from "@/lib/api";
 
-export type FileSortMode = "name" | "modified" | "size";
+export type FileSortMode = "name" | "created" | "modified" | "size";
 
 export function filterAndSortFileEntries(
   entries: ManagedFileEntry[],
@@ -12,7 +12,22 @@ export function filterAndSortFileEntries(
     ? entries.filter((entry) => entry.name.toLocaleLowerCase("ru-RU").includes(needle))
     : entries;
   return [...filtered].sort((left, right) => {
-    if (left.is_directory !== right.is_directory) return left.is_directory ? -1 : 1;
+    // По имени и размеру каталоги остаются привычным отдельным блоком. Для
+    // дат тип объекта не важен: недавно изменённая папка должна подняться
+    // вместе с недавно изменёнными файлами, иначе сортировка вводит в
+    // заблуждение. mtime каталога обновляется при изменении его прямого
+    // содержимого, поэтому новый файл внутри старой папки поднимает папку.
+    if ((sort === "name" || sort === "size") && left.is_directory !== right.is_directory) {
+      return left.is_directory ? -1 : 1;
+    }
+    if (sort === "created") {
+      const leftCreated = left.created_at;
+      const rightCreated = right.created_at;
+      const leftKnown = typeof leftCreated === "number" && Number.isFinite(leftCreated);
+      const rightKnown = typeof rightCreated === "number" && Number.isFinite(rightCreated);
+      if (leftKnown !== rightKnown) return leftKnown ? -1 : 1;
+      if (leftKnown && rightKnown && leftCreated !== rightCreated) return rightCreated - leftCreated;
+    }
     if (sort === "modified" && left.mtime !== right.mtime) return right.mtime - left.mtime;
     if (sort === "size") {
       const sizeDifference = (right.size ?? -1) - (left.size ?? -1);

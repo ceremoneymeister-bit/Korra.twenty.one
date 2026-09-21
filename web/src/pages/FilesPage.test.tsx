@@ -20,10 +20,11 @@ vi.mock("@/plugins", () => ({ PluginSlot: () => null }));
 vi.mock("@/components/FilePreviewDialog", () => ({ FilePreviewDialog: () => null }));
 vi.mock("@/hooks/useCabinetSession", () => ({ useCabinetSession: () => ({ logout: "", canManageSkills: true, canBrowseSkillsHub: true, canConfigureToolsets: true, ...mocks.cabinet }) }));
 import FilesPage from "./FilesPage";
+import type { ManagedFileEntry } from "@/lib/api";
 
 let host: HTMLDivElement;
 let root: Root;
-const entry = (name: string, directory = false) => ({ name, path: `/w/${name}`, is_directory: directory, size: directory ? null : 5, mtime: 1 });
+const entry = (name: string, directory = false): ManagedFileEntry => ({ name, path: `/w/${name}`, is_directory: directory, size: directory ? null : 5, mtime: 1, mime_type: directory ? null : "text/plain" });
 function Location() { const location = useLocation(); return <output>{location.pathname}{location.search}</output>; }
 async function render(entries = [entry("a.txt"), entry("Папка", true)], initial = "/files") {
   mocks.listFiles.mockResolvedValue({ path: "/w", root: "/w", locked_root: "/w", parent: null, entries });
@@ -125,4 +126,35 @@ it("highlights the file named by «Показать в папке» and drops th
   expect(rows[0].textContent).toContain("отчёт.xlsx");
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Открыть Папка"]')!.click());
   expect(host.querySelector("output")!.textContent).not.toContain("highlight=");
+});
+
+it("sorts files and folders together by both dates and explains icon buttons on hover", async () => {
+  await render([
+    { ...entry("Старая папка", true), created_at: 10, mtime: 40 },
+    { ...entry("Новый файл.txt"), created_at: 30, mtime: 30, revision: "r1", capabilities: { rename: true, trash: true } },
+    { ...entry("Без даты.txt"), created_at: null, mtime: 20 },
+  ]);
+
+  const sort = host.querySelector<HTMLSelectElement>('label select')!;
+  await act(async () => {
+    sort.value = "created";
+    sort.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect([...host.querySelectorAll("span.font-medium")].map(item => item.textContent))
+    .toEqual(["Новый файл.txt", "Старая папка", "Без даты.txt"]);
+  expect(host.textContent).toContain("Создано");
+  expect(host.textContent).toContain("Дата создания недоступна");
+
+  const expectedTitles = [
+    "Просмотреть файл Новый файл.txt",
+    "Отправить в чат Новый файл.txt",
+    "Копировать путь Новый файл.txt",
+    "Скачать Новый файл.txt",
+    "Переименовать Новый файл.txt",
+    "Переместить Новый файл.txt в корзину",
+    "Открыть папку Старая папка",
+  ];
+  for (const title of expectedTitles) {
+    expect(host.querySelector(`[title="${title}"]`), title).not.toBeNull();
+  }
 });

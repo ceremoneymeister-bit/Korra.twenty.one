@@ -2706,6 +2706,8 @@ export interface ManagedFileEntry {
   path: string;
   is_directory: boolean;
   size: number | null;
+  /** Настоящее время создания ФС (birth time); null/undefined, если ФС его не хранит. */
+  created_at?: number | null;
   mtime: number;
   mime_type: string | null;
   revision?: string | null;

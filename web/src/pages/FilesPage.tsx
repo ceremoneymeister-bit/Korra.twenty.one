@@ -350,6 +350,13 @@ export default function FilesPage() {
     timeStyle: "short",
     timeZone: getOwnerTimeZone(),
   }), []);
+  const visibleDateLabel = sortMode === "created" ? "Создано" : "Изменено";
+  const formatEntryDate = useCallback((entry: ManagedFileEntry) => {
+    const timestamp = sortMode === "created" ? entry.created_at : entry.mtime;
+    return typeof timestamp === "number" && Number.isFinite(timestamp)
+      ? dateFormat.format(timestamp * 1000)
+      : sortMode === "created" ? "Дата создания недоступна" : "Дата неизвестна";
+  }, [dateFormat, sortMode]);
 
   const activePath = listing?.path ?? requestedPath ?? "";
   const canChangePath = listing?.can_change_path ?? false;
@@ -857,7 +864,8 @@ export default function FilesPage() {
             className="min-h-8 rounded bg-transparent font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <option value="name">По имени</option>
-            <option value="modified">Сначала новые</option>
+            <option value="modified">По дате изменения</option>
+            <option value="created">По дате создания</option>
             <option value="size">По размеру</option>
           </select>
         </label>
@@ -878,7 +886,7 @@ export default function FilesPage() {
           <div className="hidden grid-cols-[minmax(8rem,1fr)_6rem_var(--file-actions-width)] xl:grid-cols-[minmax(12rem,1fr)_7rem_10rem_var(--file-actions-width)] items-center gap-3 border-b border-border px-4 py-3 text-xs font-semibold text-text-tertiary md:grid">
             <span>Название</span>
             <span>Размер</span>
-            <span className="hidden xl:block">Изменено</span>
+            <span className="hidden xl:block">{visibleDateLabel}</span>
             <span className="text-right">Действия</span>
           </div>
 
@@ -932,6 +940,8 @@ export default function FilesPage() {
                 <button
                   type="button"
                   onClick={() => (entry.is_directory ? openDirectory(entry) : previewEntry(entry))}
+                  title={entry.is_directory ? `Открыть папку ${entryLabel(entry)}` : `Просмотреть файл ${entryLabel(entry)}`}
+                  aria-label={entry.is_directory ? `Открыть папку ${entryLabel(entry)}` : `Просмотреть файл ${entryLabel(entry)}`}
                   className="flex min-w-0 cursor-pointer items-center gap-3 pl-6 text-left text-foreground after:absolute after:inset-0 after:content-['']"
                 >
                   {entry.is_directory ? (
@@ -942,17 +952,17 @@ export default function FilesPage() {
                   <span className="min-w-0">
                     <span className="block truncate font-medium">{entryLabel(entry)}</span>
                     <span className="mt-0.5 block truncate text-xs text-muted-foreground md:hidden">
-                      {formatBytes(entry.size)} · {Number.isFinite(entry.mtime) ? dateFormat.format(entry.mtime * 1000) : "Дата неизвестна"}
+                      {formatBytes(entry.size)} · {formatEntryDate(entry)}
                     </span>
                   </span>
                 </button>
                 <span className="hidden text-xs tabular-nums text-text-secondary md:block">{formatBytes(entry.size)}</span>
                 <span className="hidden truncate text-xs text-text-secondary xl:block">
-                  {Number.isFinite(entry.mtime) ? dateFormat.format(entry.mtime * 1000) : "-"}
+                  {formatEntryDate(entry)}
                 </span>
                 <span className="relative z-10 flex max-w-[140px] flex-wrap md:max-w-none md:flex-nowrap justify-end gap-1 justify-self-end">
-                  <Button ghost size="icon" type="button" onClick={() => sendToAgent([entry.path])} aria-label={`Отправить в чат ${entryLabel(entry)}`}><MessageSquare /></Button>
-                  <Button ghost size="icon" type="button" onClick={() => copyPaths([entry.path])} aria-label={`Копировать путь ${entryLabel(entry)}`}><Copy /></Button>
+                  <Button ghost size="icon" type="button" onClick={() => sendToAgent([entry.path])} aria-label={`Отправить в чат ${entryLabel(entry)}`} title={`Отправить в чат ${entryLabel(entry)}`}><MessageSquare /></Button>
+                  <Button ghost size="icon" type="button" onClick={() => copyPaths([entry.path])} aria-label={`Копировать путь ${entryLabel(entry)}`} title={`Копировать путь ${entryLabel(entry)}`}><Copy /></Button>
                   {entry.is_directory ? (
                     <Button
                       ghost
@@ -960,6 +970,7 @@ export default function FilesPage() {
                       type="button"
                       onClick={() => openDirectory(entry)}
                       aria-label={`Открыть ${entryLabel(entry)}`}
+                      title={`Открыть папку ${entryLabel(entry)}`}
                     >
                       <FolderOpen />
                     </Button>
@@ -971,6 +982,7 @@ export default function FilesPage() {
                         type="button"
                         onClick={() => previewEntry(entry)}
                         aria-label={`Просмотреть ${entryLabel(entry)}`}
+                        title={`Просмотреть файл ${entryLabel(entry)}`}
                       >
                         <Eye />
                       </Button>
@@ -980,6 +992,7 @@ export default function FilesPage() {
                         type="button"
                         onClick={() => downloadFile(entry)}
                         aria-label={`Скачать ${entryLabel(entry)}`}
+                        title={`Скачать ${entryLabel(entry)}`}
                       >
                         <Download />
                       </Button>
@@ -995,6 +1008,7 @@ export default function FilesPage() {
                         setRenameName(entry.name);
                       }}
                       aria-label={`Переименовать ${entry.name}`}
+                      title={`Переименовать ${entry.name}`}
                     >
                       <Pencil />
                     </Button>
@@ -1006,6 +1020,9 @@ export default function FilesPage() {
                       type="button"
                       onClick={() => setPendingDelete(entry)}
                       aria-label={entry.capabilities?.trash
+                        ? `Переместить ${entry.name} в корзину`
+                        : `Удалить ${entry.name}`}
+                      title={entry.capabilities?.trash
                         ? `Переместить ${entry.name} в корзину`
                         : `Удалить ${entry.name}`}
                       className="text-destructive hover:text-destructive"
