@@ -20632,20 +20632,33 @@ def _dashboard_layout_key(request: Request = None) -> str:
 
     The request body is never consulted. If it were, any authenticated browser
     could read and overwrite another person's board by naming them (K21-133).
+
+    A verified caller whose identity is unusable (a provider that returned a
+    blank ``sub``) fails closed: the single-owner record belongs to whoever sits
+    at the machine, and handing it to an unnamed browser would show one person
+    another's board. Every shipped provider guarantees a non-empty identity, so
+    this is a broken-deployment signal, not a normal path.
     """
-    from korra_cli.dashboard_layout import storage_key
+    from korra_cli.dashboard_layout import LOCAL_USER_KEY, storage_key
 
     state = getattr(request, "state", None) if request is not None else None
     session = getattr(state, "session", None)
-    if session is not None:
-        return storage_key(
-            getattr(session, "user_id", None), getattr(session, "provider", None)
+    principal = getattr(state, "token_principal", None) if session is None else None
+    if session is not None or principal is not None:
+        verified = session if session is not None else principal
+        key = storage_key(
+            getattr(verified, "user_id", None) or getattr(verified, "principal", None),
+            getattr(verified, "provider", None),
         )
-    principal = getattr(state, "token_principal", None)
-    if principal is not None:
-        return storage_key(
-            getattr(principal, "principal", None), getattr(principal, "provider", None)
-        )
+        if key == LOCAL_USER_KEY:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Вход выполнен, но провайдер не сообщил, кто вы, "
+                    "поэтому личный дашборд недоступен."
+                ),
+            )
+        return key
     return storage_key()
 
 
