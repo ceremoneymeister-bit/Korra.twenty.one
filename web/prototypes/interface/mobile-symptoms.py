@@ -198,11 +198,10 @@ def run() -> int:
         light_meta, light_zones = page.evaluate(meta), page.evaluate(zones)
         print("   светлая:", light_meta, light_zones)
         # Переключатель темы живёт в выдвижном меню — открываем его.
+        # С 0.21.12 это капсула из двух icon-only зон, а не выпадающий список.
         page.get_by_role("button", name="Открыть навигацию").first.click()
         page.wait_for_timeout(500)
-        page.get_by_role("button", name="Сменить тему").first.click()
-        page.wait_for_timeout(400)
-        page.get_by_role("radio").filter(has_text="Т").last.click()
+        page.get_by_role("button", name="Тёмная тема", exact=True).first.click()
         page.wait_for_timeout(900)
         dark_meta, dark_zones = page.evaluate(meta), page.evaluate(zones)
         print("   тёмная: ", dark_meta, dark_zones)
