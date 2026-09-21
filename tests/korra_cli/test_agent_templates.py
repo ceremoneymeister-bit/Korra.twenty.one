@@ -207,7 +207,15 @@ def test_ready_generator_status_is_local_check_without_live_generation(client, m
     assert saved["generation_checked"] is False
     assert saved["generation"]["status"] == "ready"
     assert saved["generation"]["live_tested"] is False
-    assert not list((root / "profiles/designer").rglob("*.png"))
+    # Bundled skills may contain static PNG assets (the PDF kit ships Korra
+    # marks). They are copied package inputs, not generated output. A profile
+    # creation request must not produce an image anywhere outside that package.
+    generated = [
+        path
+        for path in (root / "profiles/designer").rglob("*.png")
+        if "skills" not in path.relative_to(root / "profiles/designer").parts
+    ]
+    assert not generated
 
 
 def test_generator_status_cannot_be_satisfied_by_an_unrelated_fal_route(monkeypatch):
