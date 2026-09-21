@@ -1340,6 +1340,7 @@ export default function BubbleChatPage({
   const [prefill, setPrefill] = useState<string | null>(null);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
+  const mobileHistoryTitleId = useId();
   const recoveryKey = chatViewKey(agentProfile, sessionId);
   const [recovery, setRecovery] = useState<{ key: string; text: string } | null>(null);
   const recoveryNotice = recovery?.key === recoveryKey ? recovery.text : "";
@@ -1551,11 +1552,11 @@ export default function BubbleChatPage({
         historyRevision={historyRevision}
       />
       {mobileHistoryOpen && (
-        <div className="fixed inset-0 z-[60] flex md:hidden" role="dialog" aria-modal="true" aria-labelledby="mobile-chat-history-title">
+        <div className="fixed inset-0 z-[60] flex md:hidden" role="dialog" aria-modal="true" aria-labelledby={mobileHistoryTitleId}>
           <button type="button" className="absolute inset-0 bg-black/35" aria-label="Закрыть историю чатов" onClick={() => setMobileHistoryOpen(false)} />
           <div className="relative flex h-full w-[min(88vw,360px)] flex-col bg-[var(--neo-surface)] shadow-[var(--neo-depth-3)]">
             <div className="flex min-h-12 items-center justify-between gap-2 border-b border-border px-3">
-              <h2 id="mobile-chat-history-title" className="text-sm font-semibold">История чатов</h2>
+              <h2 id={mobileHistoryTitleId} className="text-sm font-semibold">История чатов</h2>
               <Button type="button" ghost size="icon" autoFocus aria-label="Закрыть историю чатов" title="Закрыть историю чатов" onClick={() => setMobileHistoryOpen(false)}>
                 <X aria-hidden />
               </Button>
