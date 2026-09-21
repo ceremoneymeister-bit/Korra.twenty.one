@@ -42,6 +42,10 @@ export function DashboardWidgetCard({
   widgetId,
 }: DashboardWidgetCardProps) {
   const compact = size === "s";
+  // Назначение карточки — текст каталога. В плитке он полезен там, где есть
+  // место: на S и M он вытесняет то, ради чего карточку открыли, а прочитать
+  // его можно в «Добавить виджет». На полосе и на L он остаётся.
+  const showPurpose = size === undefined || size === "l";
   return (
     <Card
       className={cn("flex h-full min-h-0 flex-col", className)}
@@ -56,16 +60,16 @@ export function DashboardWidgetCard({
         <div className="min-w-0">
           <h3
             className="truncate text-base font-semibold text-[var(--neo-text-primary)]"
-            title={compact ? purpose : undefined}
+            title={showPurpose ? undefined : purpose}
           >
             {title}
           </h3>
 
-          {compact ? null : (
+          {showPurpose ? (
             <p className="mt-1 text-sm leading-relaxed text-[var(--neo-text-secondary)]">
               {purpose}
             </p>
-          )}
+          ) : null}
         </div>
 
         {onRemove ? (

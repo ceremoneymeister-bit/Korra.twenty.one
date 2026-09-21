@@ -1,5 +1,12 @@
 /* eslint-disable react-refresh/only-export-components -- виджет и его каталожное описание намеренно живут вместе */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { useStore } from "@nanostores/react";
 import { ArrowRight, RefreshCw } from "lucide-react";
 import { Link } from "react-router";
@@ -182,12 +189,17 @@ function AgentsBody({ size }: DashboardWidgetBodyProps) {
           </p>
         </div>
       ) : (
-        <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
+        /* Строки делят высоту плитки поровну: у карточки нет своей прокрутки,
+           и обрезанная пополам строка читалась бы как поломка. */
+        <ul
+          className="korra-agent-rows min-h-0 flex-1 overflow-hidden"
+          style={{ "--kd-rows": visible.length } as CSSProperties}
+        >
           {visible.map((row) => (
-            <li key={row.profile || "__main__"} className="min-w-0">
+            <li key={row.profile || "__main__"} className="min-h-0 min-w-0">
               <Link
                 to={agentHref(row)}
-                className="flex min-h-11 w-full items-center gap-3 rounded-[var(--neo-radius-control)] px-2 transition-shadow hover:shadow-[var(--neo-inset-compact)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--neo-accent-line)]"
+                className="flex h-full min-h-[44px] w-full items-center gap-3 rounded-[var(--neo-radius-control)] px-2 transition-shadow hover:shadow-[var(--neo-inset-compact)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--neo-accent-line)]"
               >
                 <span
                   aria-hidden
@@ -270,7 +282,7 @@ function WidgetLink({ children, to }: { children: ReactNode; to: string }) {
   return (
     <Link
       to={to}
-      className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-[var(--neo-text-primary)] transition-shadow hover:shadow-[var(--neo-inset-compact)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--neo-accent-line)]"
+      className="inline-flex min-h-[44px] items-center gap-2 rounded-lg px-3 text-sm font-semibold text-[var(--neo-text-primary)] transition-shadow hover:shadow-[var(--neo-inset-compact)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--neo-accent-line)]"
     >
       {children}
       <ArrowRight className="size-4 shrink-0" aria-hidden />

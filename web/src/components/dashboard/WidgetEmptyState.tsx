@@ -2,6 +2,7 @@ import { ArrowRight, Unplug } from "lucide-react";
 import { Link } from "react-router";
 
 import type { WidgetSize } from "@/lib/dashboard-layout";
+import { cn } from "@/lib/utils";
 
 /**
  * Честное состояние карточки, пока её источник не подключён.
@@ -32,7 +33,16 @@ export function WidgetEmptyState({ action, note, size = "m" }: WidgetEmptyStateP
       </p>
 
       {size === "s" ? null : (
-        <p className="min-h-0 overflow-hidden text-sm leading-relaxed text-[var(--neo-text-secondary)]">
+        // Плитка не растягивается под текст, поэтому объяснение обрывается по
+        // целым строкам с многоточием: обрезанная посередине фраза читается
+        // как поломка вёрстки, а не как «дальше есть ещё».
+        <p
+          data-widget-note
+          className={cn(
+            "min-h-0 text-sm leading-relaxed text-[var(--neo-text-secondary)]",
+            size === "l" ? "line-clamp-6" : "line-clamp-2",
+          )}
+        >
           {note}
         </p>
       )}
@@ -40,7 +50,7 @@ export function WidgetEmptyState({ action, note, size = "m" }: WidgetEmptyStateP
       {action ? (
         <Link
           to={action.to}
-          className="mt-auto inline-flex min-h-11 w-fit items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-[var(--neo-text-primary)] transition-shadow hover:shadow-[var(--neo-inset-compact)]"
+          className="mt-auto inline-flex min-h-[44px] w-fit items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-[var(--neo-text-primary)] transition-shadow hover:shadow-[var(--neo-inset-compact)]"
         >
           {action.label}
           <ArrowRight className="size-4 shrink-0" aria-hidden />

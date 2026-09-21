@@ -69,6 +69,31 @@
 }
 
 /*
+ * Содержимое плитки. Геометрию задаёт буква, поэтому на узком полотне
+ * убавляется не размер плитки, а количество второстепенного в ней:
+ * объяснение неподключённого источника и третья строка списка агентов
+ * иначе обрезались бы посередине.
+ */
+.korra-agent-rows {
+  display: grid;
+  grid-template-rows: repeat(var(--kd-rows, 1), minmax(0, 1fr));
+}
+
+@container korra-dashboard (max-width: 880px) {
+  .korra-dashboard__tile[data-size="m"] [data-widget-note] {
+    display: none;
+  }
+
+  .korra-dashboard__tile[data-size="m"] .korra-agent-rows {
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+
+  .korra-dashboard__tile[data-size="m"] .korra-agent-rows > li:nth-child(n + 3) {
+    display: none;
+  }
+}
+
+/*
  * Полоса «Требует внимания» живёт над сеткой и не переставляется среди
  * плиток: это не виджет одного размера, а то, с чего начинается день.
  */
