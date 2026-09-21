@@ -10,12 +10,6 @@ import {
   type ReactNode,
 } from "react";
 import { BUILTIN_THEMES, defaultTheme, migrateThemeName } from "./presets";
-import {
-  FONT_CHOICES,
-  THEME_DEFAULT_FONT_ID,
-  getFontChoice,
-  type FontChoice,
-} from "./fonts";
 import type {
   DashboardTheme,
   ThemeAssets,
@@ -24,7 +18,6 @@ import type {
   ThemeLayer,
   ThemeLayout,
   ThemeLayoutVariant,
-  ThemeListEntry,
   ThemePalette,
   ThemeSeriesColors,
   ThemeTypography,
@@ -36,21 +29,10 @@ import {
 import { NEUMORPHISM_CSS_VARS, neumorphismVars } from "./neumorphism";
 import { applyThemeColorMeta, resolveThemeColor } from "./theme-color";
 import { api } from "@/lib/api";
-import { cachePreference, readBootstrap, safeRead, safeWrite, validPreference, type ThemePreference } from "./preference";
+import { cachePreference, readBootstrap, validPreference, type ThemePreference } from "./preference";
 
-/** LocalStorage key for the font override (independent of theme). Holds a
- *  font id from the catalog in `fonts.ts`, or the `THEME_DEFAULT_FONT_ID`
- *  sentinel / absent = "use the active theme's font". Pre-applied before
- *  the React tree mounts (see `main.tsx`) to avoid a font flash. */
-const FONT_STORAGE_KEY = "hermes-dashboard-font";
-
-const BUILTIN_THEME_ENTRIES: ThemeListEntry[] = Object.values(BUILTIN_THEMES).map(
-  (theme) => ({
-    name: theme.name,
-    label: theme.label,
-    description: theme.description,
-  }),
-);
+/** Removed in 0.21.12. Kept only to clear preferences created by older UI. */
+const LEGACY_FONT_STORAGE_KEY = "hermes-dashboard-font";
 
 /** Tracks fontUrls we've already injected so multiple theme switches don't
  *  pile up <link> tags. Keyed by URL. */
@@ -267,40 +249,6 @@ function injectFontStylesheet(url: string | undefined) {
 }
 
 // ---------------------------------------------------------------------------
-// Font override (independent of theme)
-// ---------------------------------------------------------------------------
-
-/** The active font-override id, mirrored at module scope so `applyTheme`
- *  can re-assert it after every theme switch (theme application rewrites
- *  `--theme-font-sans`, so the override has to win again afterwards). */
-let _ACTIVE_FONT_OVERRIDE: string = THEME_DEFAULT_FONT_ID;
-
-/** Apply (or clear) the font override on `:root`. When a catalog font is
- *  active we override `--theme-font-sans` and `--theme-font-display` and
- *  inject its webfont; the theme keeps ownership of `--theme-font-mono`
- *  (code/terminal) so picking a body font doesn't mangle code blocks.
- *  Passing the theme-default sentinel removes the override so the theme's
- *  own font shows through. */
-function applyFontOverride(fontId: string | undefined) {
-  if (typeof document === "undefined") return;
-  const root = document.documentElement;
-  const choice: FontChoice | undefined = getFontChoice(fontId);
-  if (!choice) {
-    // Clear → fall back to whatever the active theme set (applyTheme already
-    // wrote the theme's --theme-font-sans/-display before this runs).
-    root.style.removeProperty("--theme-font-override-sans");
-    return;
-  }
-  injectFontStylesheet(choice.fontUrl);
-  // Set both the override marker var (used by the picker for diagnostics)
-  // and the live consumed vars. We re-set the consumed vars directly so the
-  // change is immediate and survives the next applyTheme via _ACTIVE_FONT_OVERRIDE.
-  root.style.setProperty("--theme-font-override-sans", choice.stack);
-  root.style.setProperty("--theme-font-sans", choice.stack);
-  root.style.setProperty("--theme-font-display", choice.stack);
-}
-
-// ---------------------------------------------------------------------------
 // Apply a full theme to :root
 // ---------------------------------------------------------------------------
 
@@ -384,9 +332,9 @@ function applyTheme(theme: DashboardTheme) {
     theme.terminalForeground ?? "#f0e6d2",
   );
 
-  // Re-assert the font override last: theme application just rewrote
-  // --theme-font-sans/-display, so an active override has to win again.
-  applyFontOverride(_ACTIVE_FONT_OVERRIDE);
+  // Old builds could leave this marker on a long-lived page. Typography is
+  // now owned exclusively by the selected theme.
+  root.style.removeProperty("--theme-font-override-sans");
 }
 
 // ---------------------------------------------------------------------------
@@ -398,25 +346,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const preferenceRef = useRef(preference);
   const generation = useRef(0);
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
-  const desiredTheme = useRef(preference?.theme ?? "light");
-  const lastChoice = useRef<{name?: string; action?: "later" | "disable" | "enable"}>({name: preference?.theme ?? "light"});
+  const lastChoice = useRef(preference?.theme ?? "light");
   const mounted = useRef(true);
   const [themeName, setThemeName] = useState<string>(() => preference?.theme ?? "light");
   const [saveState, setSaveState] = useState<"idle" | "pending" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState("");
-  const [fontId, setFontId] = useState(() => {
-    const stored = safeRead(FONT_STORAGE_KEY);
-    const valid = stored && getFontChoice(stored) ? stored : THEME_DEFAULT_FONT_ID;
-    _ACTIVE_FONT_OVERRIDE = valid;
-    return valid;
-  });
   const resolveTheme = useCallback((name: string): DashboardTheme =>
     BUILTIN_THEMES[migrateThemeName(name)] ?? defaultTheme, []);
 
   useLayoutEffect(() => {
-    _ACTIVE_FONT_OVERRIDE = fontId;
     applyTheme(resolveTheme(themeName));
-  }, [themeName, resolveTheme, fontId]);
+  }, [themeName, resolveTheme]);
 
   const acceptPreference = useCallback((next: ThemePreference) => {
     preferenceRef.current = next;
@@ -436,7 +376,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const next = validPreference(resp.preference);
       if (!next) return;
       acceptPreference(next);
-      desiredTheme.current = next.theme;
       setThemeName(next.theme);
     }).catch(() => { /* Bootstrap remains authoritative; no healing write. */ });
     return () => { cancelled = true; mounted.current = false; };
@@ -444,23 +383,24 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    try {
+      localStorage.removeItem(LEGACY_FONT_STORAGE_KEY);
+    } catch { /* Optional browser storage may be unavailable. */ }
+    document.documentElement.style.removeProperty("--theme-font-override-sans");
     api.getFontPref().then((resp) => {
-      if (cancelled) return;
-      const next = resp?.font && getFontChoice(resp.font) ? resp.font : THEME_DEFAULT_FONT_ID;
-      setFontId(next);
-      safeWrite(FONT_STORAGE_KEY, next);
+      if (cancelled || !resp?.font || resp.font === "theme") return;
+      // Keep the old endpoint for one compatibility release so an already
+      // open 0.21.11 tab still works, while new clients migrate the setting.
+      void api.setFontPref("theme").catch(() => {});
     }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
-  const saveTheme = useCallback((name: string | undefined, refresh = false, action?: "later" | "disable" | "enable"): Promise<boolean> => {
-    const next = name === undefined ? undefined : migrateThemeName(name);
-    lastChoice.current = { name, action };
+  const saveTheme = useCallback((name: string, refresh = false): Promise<boolean> => {
+    const next = migrateThemeName(name);
+    lastChoice.current = next;
     const thisGeneration = ++generation.current;
-    if (next !== undefined) {
-      desiredTheme.current = next;
-      setThemeName(next);
-    }
+    setThemeName(next);
     setSaveState("pending");
     setSaveError("");
     // Serialize writes: each explicit choice uses the previous durable ACK's
@@ -472,24 +412,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           if (!latest) throw new Error("unknown preference");
           acceptPreference(latest);
         }
-        const response = action ? await api.setTheme(next, preferenceRef.current!.revision, action) : await api.setTheme(next, preferenceRef.current!.revision);
+        const response = await api.setTheme(next, preferenceRef.current!.revision);
         const ack = validPreference(response.preference);
-        if (!response.ok || !ack || (next !== undefined && ack.theme !== next)) throw new Error("missing durable ACK");
+        if (!response.ok || !ack || ack.theme !== next) throw new Error("missing durable ACK");
         acceptPreference(ack);
         if (mounted.current && generation.current === thisGeneration) {
-          if (next === undefined) {
-            // An explicit prompt choice supersedes a failed local preview;
-            // show the palette that its durable ACK actually confirms.
-            desiredTheme.current = ack.theme;
-            setThemeName(ack.theme);
-          }
           setSaveState("saved");
         }
         return true;
       } catch {
         if (mounted.current && generation.current === thisGeneration) {
           setSaveState("error");
-          setSaveError(action ? "Выбор не сохранён. Проверьте соединение и повторите." : "Тема показана на этом экране, но не сохранена. Проверьте соединение и повторите.");
+          setSaveError("Тема показана на этом экране, но не сохранена. Проверьте соединение и повторите.");
         }
         return false;
       }
@@ -498,40 +432,25 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return saving;
   }, [acceptPreference]);
   const setTheme = useCallback((name: string) => saveTheme(name), [saveTheme]);
-  const retryTheme = useCallback(() => saveTheme(lastChoice.current.name, true, lastChoice.current.action), [saveTheme]);
-  const setEvening = useCallback((action: "later" | "disable" | "enable") => saveTheme(undefined, true, action), [saveTheme]);
-  const setFont = useCallback((id: string) => {
-    const next = getFontChoice(id) ? id : THEME_DEFAULT_FONT_ID;
-    setFontId(next);
-    safeWrite(FONT_STORAGE_KEY, next);
-    api.setFontPref(next).catch(() => {});
-  }, []);
+  const retryTheme = useCallback(() => saveTheme(lastChoice.current, true), [saveTheme]);
 
   const value = useMemo<ThemeContextValue>(() => ({
-    theme: resolveTheme(themeName), themeName, availableThemes: BUILTIN_THEME_ENTRIES,
-    setTheme, preference, saveState, saveError, retryTheme, setEvening,
-    fontId, fontChoices: FONT_CHOICES, setFont,
-  }), [themeName, setTheme, resolveTheme, preference, saveState, saveError, retryTheme, setEvening, fontId, setFont]);
+    theme: resolveTheme(themeName), themeName,
+    setTheme, saveState, saveError, retryTheme,
+  }), [themeName, setTheme, resolveTheme, saveState, saveError, retryTheme]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 export function useTheme(): ThemeContextValue { return useContext(ThemeContext); }
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: defaultTheme, themeName: "light", availableThemes: BUILTIN_THEME_ENTRIES,
-  setTheme: async () => false, preference: null, saveState: "idle", saveError: "",
-  retryTheme: async () => false, setEvening: async () => false,
-  fontId: THEME_DEFAULT_FONT_ID, fontChoices: FONT_CHOICES, setFont: () => {},
+  theme: defaultTheme, themeName: "light",
+  setTheme: async () => false, saveState: "idle", saveError: "",
+  retryTheme: async () => false,
 });
 interface ThemeContextValue {
-  availableThemes: ThemeListEntry[];
   setTheme: (name: string) => Promise<boolean>;
-  preference: ThemePreference | null;
   saveState: "idle" | "pending" | "saved" | "error";
   saveError: string;
   retryTheme: () => Promise<boolean>;
-  setEvening: (action: "later" | "disable" | "enable") => Promise<boolean>;
   theme: DashboardTheme;
   themeName: string;
-  fontId: string;
-  fontChoices: FontChoice[];
-  setFont: (id: string) => void;
 }

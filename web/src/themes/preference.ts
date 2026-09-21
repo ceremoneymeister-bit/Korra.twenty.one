@@ -40,9 +40,3 @@ export function cachePreference(p: ThemePreference): void {
     if (cached?.revision !== p.revision || cached.theme !== p.theme) localStorage.setItem(key, JSON.stringify(p));
   } catch { /* Private browsing/quota must not prevent a server-backed render. */ }
 }
-export function safeRead(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-export function safeWrite(key: string, value: string): void {
-  try { localStorage.setItem(key, value); } catch { /* optional cache */ }
-}

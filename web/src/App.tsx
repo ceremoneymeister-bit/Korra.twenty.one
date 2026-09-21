@@ -113,7 +113,6 @@ import { PluginPage, PluginSlot, usePlugins } from "@/plugins";
 import type { PluginManifest } from "@/plugins";
 import { useTheme } from "@/themes";
 import { componentSurfaceBackground } from "@/themes/component-surface";
-import { EveningThemePrompt } from "@/components/EveningThemePrompt";
 import {
   isDashboardBubbleChatEnabled,
   isDashboardEmbeddedChatEnabled,
@@ -457,7 +456,6 @@ export default function App() {
   const { pathname } = useLocation();
   const { manifests, loading: pluginsLoading } = usePlugins();
   const { theme } = useTheme();
-  const { isBusy: systemBusy } = useSystemActions();
   const [mobileOpen, setMobileOpen] = useState(false);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
@@ -959,13 +957,15 @@ export default function App() {
 
                 isDesktopCollapsed
                   ? "lg:flex-col lg:items-start lg:gap-3 lg:py-3"
-                  : "justify-between",
+                  : "w-full justify-between",
               )}
             >
               <div
                 className={cn(
                   "flex min-w-0 items-center gap-2",
-                  isDesktopCollapsed && "lg:flex-col lg:items-start",
+                  isDesktopCollapsed
+                    ? "lg:flex-col lg:items-start"
+                    : "w-full flex-1",
                 )}
               >
                 <PluginSlot name="header-right" />
@@ -975,7 +975,7 @@ export default function App() {
                   label={t.theme?.switchTheme ?? "Сменить тему"}
                   tooltipWarmRef={tooltipWarmRef}
                 >
-                  <ThemeSwitcher collapsed={isDesktopCollapsed} dropUp />
+                  <ThemeSwitcher collapsed={isDesktopCollapsed} />
                 </SidebarIconWithTooltip>
 
               </div>
@@ -1089,7 +1089,6 @@ export default function App() {
       </div>
 
       <PluginSlot name="overlay" />
-      <EveningThemePrompt blocked={systemBusy || sidebarReachable !== true || mobileOpen} />
     </div>
     </ProfileProvider>
   );
@@ -1473,8 +1472,8 @@ function SidebarIconWithTooltip({
   return (
     <div
       className={cn(
-        "relative w-fit",
-        collapsed && "group/icon",
+        "relative",
+        collapsed ? "group/icon w-fit" : "w-full",
       )}
       onMouseEnter={collapsed ? showTooltip : undefined}
       onMouseLeave={collapsed ? hideTooltip : undefined}
