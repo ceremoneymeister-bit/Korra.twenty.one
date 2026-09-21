@@ -1,33 +1,41 @@
 import { ArrowRight, Unplug } from "lucide-react";
 import { Link } from "react-router";
 
+import type { WidgetSize } from "@/lib/dashboard-layout";
+
 /**
  * Честное состояние карточки, пока её источник не подключён.
  *
- * Первый срез дашборда не берёт данные ни из какого API: ноль вместо
- * неизвестного значения читается как «всё спокойно», а придуманное число —
- * как факт. Поэтому карточка прямо говорит, чего ей не хватает, и уводит на
- * экран, где эти сведения уже есть сегодня.
+ * Ноль вместо неизвестного значения читается как «всё спокойно», а
+ * придуманное число — как факт. Поэтому карточка прямо говорит, чего ей не
+ * хватает, и уводит на экран, где эти сведения уже есть сегодня.
+ *
+ * Плитка 1×1 не растягивается под текст — геометрию задаёт буква, а не
+ * содержимое. Поэтому на компактном размере остаётся только заголовок
+ * состояния и переход, а объяснение живёт там, где для него есть место.
  */
 export interface WidgetEmptyStateProps {
   /** Что появится в карточке, когда источник подключат. Одно предложение. */
   note: string;
   /** Куда пойти за теми же сведениями сейчас. Только существующие экраны. */
   action?: { label: string; to: string };
+  size?: WidgetSize;
 }
 
-export function WidgetEmptyState({ action, note }: WidgetEmptyStateProps) {
+export function WidgetEmptyState({ action, note, size = "m" }: WidgetEmptyStateProps) {
   return (
-    <div className="flex flex-1 flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
       {/* Значок только дополняет надпись: состояние читается текстом. */}
       <p className="flex items-center gap-2 text-sm font-semibold text-[var(--neo-text-primary)]">
         <Unplug className="size-4 shrink-0" aria-hidden />
         Источник ещё не подключён
       </p>
 
-      <p className="text-sm leading-relaxed text-[var(--neo-text-secondary)]">
-        {note}
-      </p>
+      {size === "s" ? null : (
+        <p className="min-h-0 overflow-hidden text-sm leading-relaxed text-[var(--neo-text-secondary)]">
+          {note}
+        </p>
+      )}
 
       {action ? (
         <Link

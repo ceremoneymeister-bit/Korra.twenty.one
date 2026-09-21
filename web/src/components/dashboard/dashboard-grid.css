@@ -1,0 +1,148 @@
+/*
+ * Единая модульная сетка дашборда: S 1×1, M 2×1, L 2×2.
+ *
+ * Размер плитки задаёт только буква, а не её содержимое — принятое решение
+ * владельца после того, как две карточки «S» оказались разной высоты.
+ * Поэтому высота строки вычисляется из ширины общего модуля, а у виджетов нет
+ * собственной высоты.
+ *
+ * Единица измерения — ширина ПОЛОТНА (container query), а не окна: слева
+ * стоит навигация панели, и одно и то же окно даёт разную ширину доски в
+ * раскрытом и свёрнутом sidebar.
+ */
+
+.korra-dashboard {
+  container-type: inline-size;
+  container-name: korra-dashboard;
+}
+
+.korra-dashboard__grid {
+  --kd-gap: 24px;
+  --kd-unit: calc((100cqw - 3 * var(--kd-gap)) / 4);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: var(--kd-unit);
+  grid-auto-flow: row;
+  gap: var(--kd-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@container korra-dashboard (max-width: 880px) {
+  .korra-dashboard__grid {
+    --kd-gap: 20px;
+    --kd-unit: calc((100cqw - var(--kd-gap)) / 2);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container korra-dashboard (max-width: 440px) {
+  .korra-dashboard__grid {
+    --kd-gap: 16px;
+    --kd-unit: calc((100cqw - var(--kd-gap)) / 2);
+  }
+}
+
+/* Плитка. Содержимое подстраивается внутри, без собственной прокрутки. */
+.korra-dashboard__tile {
+  min-width: 0;
+  min-height: 0;
+  grid-column: span 2;
+  grid-row: span 1;
+}
+
+.korra-dashboard__tile[data-size="s"] {
+  grid-column: span 1;
+}
+
+.korra-dashboard__tile[data-size="l"] {
+  grid-row: span 2;
+}
+
+/* Карточка обязана уместиться в отведённую плитку: иначе «одна буква — одна
+   геометрия» перестаёт быть правдой на первом же длинном тексте. */
+.korra-dashboard__tile > * {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/*
+ * Полоса «Требует внимания» живёт над сеткой и не переставляется среди
+ * плиток: это не виджет одного размера, а то, с чего начинается день.
+ */
+.korra-dashboard__pinned {
+  margin: 0 0 var(--kd-strip-gap, 24px);
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Выбор размера — обычная radio-group: стрелки работают как в форме. */
+.korra-size-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.korra-size-option {
+  position: relative;
+  display: inline-flex;
+}
+
+.korra-size-option input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.korra-size-face {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: var(--neo-radius-control);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--neo-text-secondary);
+  pointer-events: none;
+  transition:
+    box-shadow 0.18s,
+    color 0.18s;
+}
+
+.korra-size-option input:checked + .korra-size-face {
+  color: var(--neo-text-primary);
+  box-shadow: var(--neo-inset-compact);
+}
+
+.korra-size-option input:focus-visible + .korra-size-face {
+  outline: 2px solid var(--neo-accent-line);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .korra-size-face {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .korra-size-option input:checked + .korra-size-face {
+    outline: 2px solid Highlight;
+  }
+
+  .korra-size-option input:focus-visible + .korra-size-face {
+    outline: 2px dashed CanvasText;
+  }
+}

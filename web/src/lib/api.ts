@@ -1545,6 +1545,16 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(layout),
     }),
+  getDashboardLayout: () =>
+    fetchJSON<DashboardLayoutPreference>("/api/dashboard/layout"),
+  setDashboardLayout: (
+    layout: Pick<DashboardLayoutPreference, "revision" | "order" | "hidden" | "sizes">,
+  ) =>
+    fetchJSON<DashboardLayoutPreference>("/api/dashboard/layout", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(layout),
+    }),
   getFontPref: () =>
     fetchJSON<DashboardFontResponse>("/api/dashboard/font"),
   setFontPref: (font: string) =>
@@ -3372,6 +3382,25 @@ export interface AgentTabsPreference {
   initialized: boolean;
   order: string[];
   hidden: string[];
+}
+
+/**
+ * Одна личная раскладка дашборда (K21-133).
+ *
+ * Отдельный контракт от `AgentTabsPreference`: полоса вкладок — общий для
+ * установки список профилей, а это доска конкретного человека. Чей именно
+ * — решает сервер по проверенной сессии; в теле запроса владельца нет.
+ */
+export interface DashboardLayoutPreference {
+  version: 1;
+  /** Монотонная серверная ревизия: с ней уходит следующая запись (CAS). */
+  revision: number;
+  /** Человек уже раскладывал доску — иначе это набор по умолчанию. */
+  initialized: boolean;
+  order: string[];
+  hidden: string[];
+  /** S 1×1, M 2×1, L 2×2 — только у плиток; закреплённой полосы здесь нет. */
+  sizes: Record<string, string>;
 }
 
 // ── Dashboard plugin types ─────────────────────────────────────────────

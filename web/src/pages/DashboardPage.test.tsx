@@ -2,14 +2,22 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DashboardLayoutPreference } from "@/lib/api";
 import DashboardPage from "./DashboardPage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-let root: Root;
-let container: HTMLDivElement;
+const api = vi.hoisted(() => ({
+  getDashboardLayout: vi.fn(),
+  setDashboardLayout: vi.fn(),
+  getProfiles: vi.fn(),
+}));
+vi.mock(import("@/lib/api"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  api: api as unknown as typeof import("@/lib/api").api,
+}));
 
 const CATALOG_TITLES = [
   "Требует внимания",
@@ -18,18 +26,42 @@ const CATALOG_TITLES = [
   "Ближайшие задачи",
   "Артефакты",
 ];
+const CATALOG_IDS = ["attention", "agents", "metrics", "upcoming-tasks", "recent-results"];
+const TILE_IDS = CATALOG_IDS.filter((id) => id !== "attention");
+
+let root: Root;
+let container: HTMLDivElement;
+
+function pref(over: Partial<DashboardLayoutPreference> = {}): DashboardLayoutPreference {
+  return {
+    version: 1,
+    revision: 1,
+    initialized: true,
+    order: [...CATALOG_IDS],
+    hidden: [],
+    sizes: Object.fromEntries(TILE_IDS.map((id) => [id, "m"])),
+    ...over,
+  };
+}
 
 function cardTitles(): string[] {
-  return Array.from(
-    container.querySelectorAll<HTMLElement>("[data-widget] h3"),
-  ).map((node) => node.textContent ?? "");
+  return Array.from(container.querySelectorAll<HTMLElement>("[data-widget] h3")).map(
+    (node) => node.textContent ?? "",
+  );
+}
+
+function tiles(): { id: string; size: string | null }[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(".korra-dashboard__tile")).map(
+    (node) => ({
+      id: node.querySelector("[data-widget]")?.getAttribute("data-widget") ?? "",
+      size: node.getAttribute("data-size"),
+    }),
+  );
 }
 
 function catalogRow(id: string): HTMLElement {
-  const row = container.querySelector<HTMLElement>(
-    `[data-catalog-widget="${id}"]`,
-  );
-  expect(row).not.toBeNull();
+  const row = container.querySelector<HTMLElement>(`[data-catalog-widget="${id}"]`);
+  expect(row, `строка каталога «${id}»`).not.toBeNull();
   return row!;
 }
 
@@ -38,18 +70,27 @@ function button(text: string, scope: ParentNode = container): HTMLButtonElement 
     (node) => node.textContent?.trim() === text,
   );
   expect(found, `кнопка «${text}»`).toBeTruthy();
+  return found as HTMLButtonElement;
+}
+
+function byLabel(label: string): HTMLElement {
+  const found = container.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+  expect(found, label).not.toBeNull();
   return found!;
 }
 
 async function click(element: Element) {
   await act(async () =>
-    element.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, cancelable: true }),
-    ),
+    element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })),
   );
 }
 
-beforeEach(async () => {
+/** Настоящий щелчок по radio: браузер сам переключает его и шлёт change. */
+async function choose(input: HTMLInputElement) {
+  await act(async () => input.click());
+}
+
+async function mount() {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -60,11 +101,26 @@ beforeEach(async () => {
       </MemoryRouter>,
     ),
   );
+}
+
+beforeEach(async () => {
+  vi.clearAllMocks();
+  api.getDashboardLayout.mockResolvedValue(pref());
+  api.setDashboardLayout.mockImplementation(
+    async (layout: Pick<DashboardLayoutPreference, "revision" | "order" | "hidden" | "sizes">) =>
+      pref({ ...layout, revision: layout.revision + 1 }),
+  );
+  // Дашборд должен собираться и без реальных агентов: эту границу проверяет
+  // отдельный тест самой карточки.
+  api.getProfiles.mockRejectedValue(new Error("offline"));
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+  await mount();
 });
 
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 describe("Личный дашборд", () => {
@@ -78,18 +134,34 @@ describe("Личный дашборд", () => {
     expect(cardTitles()).toEqual(CATALOG_TITLES);
   });
 
-  it("вместо выдуманных данных честно называет неподключённый источник", () => {
-    const cards = container.querySelectorAll<HTMLElement>("[data-widget]");
-    expect(cards).toHaveLength(CATALOG_TITLES.length);
-    for (const card of cards) {
-      expect(card.textContent).toContain("Источник ещё не подключён");
+  it("«Требует внимания» — полоса над сеткой, остальные — плитки единой сетки", () => {
+    expect(
+      container.querySelector('.korra-dashboard__pinned [data-widget="attention"]'),
+    ).not.toBeNull();
+    expect(tiles()).toEqual(TILE_IDS.map((id) => ({ id, size: "m" })));
+  });
+
+  it("карточки без источника честно называют его отсутствие", () => {
+    for (const id of ["attention", "metrics", "upcoming-tasks", "recent-results"]) {
+      expect(
+        container.querySelector<HTMLElement>(`[data-widget="${id}"]`)?.textContent,
+      ).toContain("Источник ещё не подключён");
     }
   });
 
+  it("уводит за теми же сведениями на существующие экраны", () => {
+    const targets = Array.from(
+      container.querySelectorAll<HTMLAnchorElement>("[data-widget] a"),
+    )
+      .map((node) => node.getAttribute("href"))
+      .filter((href) => href !== null);
+    expect(targets).toContain("/agents");
+    expect(targets).toContain("/cron");
+    expect(targets).toContain("/files");
+  });
+
   it("не даёт убирать карточки, пока настройка не открыта", () => {
-    expect(
-      container.querySelector('[aria-label="Убрать карточку «Агенты»"]'),
-    ).toBeNull();
+    expect(container.querySelector('[aria-label="Убрать карточку «Агенты»"]')).toBeNull();
     expect(container.querySelector("#dashboard-widget-catalog")).toBeNull();
   });
 
@@ -102,99 +174,157 @@ describe("Личный дашборд", () => {
     expect(catalog).not.toBeNull();
     expect(button("Добавить виджет").getAttribute("aria-expanded")).toBe("true");
     expect(
-      Array.from(
-        catalog!.querySelectorAll<HTMLElement>("[data-catalog-widget] p"),
-      )
+      Array.from(catalog!.querySelectorAll<HTMLElement>("[data-catalog-widget] p"))
         .map((node) => node.textContent)
         .filter((text) => CATALOG_TITLES.includes(text ?? "")),
     ).toEqual(CATALOG_TITLES);
-    // В режиме настройки карточка получает своё действие «Убрать».
-    expect(
-      container.querySelector('[aria-label="Убрать карточку «Агенты»"]'),
-    ).not.toBeNull();
+    expect(container.querySelector('[aria-label="Убрать карточку «Агенты»"]')).not.toBeNull();
 
     await click(button("Готово"));
     expect(container.querySelector("#dashboard-widget-catalog")).toBeNull();
-    expect(
-      container.querySelector('[aria-label="Убрать карточку «Агенты»"]'),
-    ).toBeNull();
+  });
+});
+
+describe("Раскладка дашборда хранится на сервере", () => {
+  it("применяет ту раскладку, которую вернул сервер", async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    api.getDashboardLayout.mockResolvedValue(
+      pref({
+        revision: 4,
+        order: ["attention", "recent-results", "agents", "metrics", "upcoming-tasks"],
+        hidden: ["metrics"],
+        sizes: { agents: "l", metrics: "m", "upcoming-tasks": "s", "recent-results": "s" },
+      }),
+    );
+    await mount();
+
+    expect(tiles()).toEqual([
+      { id: "recent-results", size: "s" },
+      { id: "agents", size: "l" },
+      { id: "upcoming-tasks", size: "s" },
+    ]);
+    expect(cardTitles()).not.toContain("Мои показатели");
   });
 
-  it("убирает карточку и возвращает её на прежнее место", async () => {
+  it("убранная карточка уходит на сервер с текущей ревизией и возвращается на место", async () => {
     await click(button("Добавить виджет"));
     await click(button("Убрать", catalogRow("agents")));
 
-    expect(cardTitles()).toEqual(CATALOG_TITLES.filter((t) => t !== "Агенты"));
+    expect(api.setDashboardLayout).toHaveBeenCalledTimes(1);
+    expect(api.setDashboardLayout.mock.calls[0][0]).toMatchObject({
+      revision: 1,
+      hidden: ["agents"],
+    });
+    expect(cardTitles()).toEqual(CATALOG_TITLES.filter((title) => title !== "Агенты"));
     expect(catalogRow("agents").textContent).toContain("Убрана");
     expect(container.querySelector('[role="status"]')?.textContent).toContain(
       "«Агенты» убрана",
     );
 
     await click(button("Вернуть", catalogRow("agents")));
+    // Вторая запись обязана уйти с ревизией, подтверждённой первой.
+    expect(api.setDashboardLayout.mock.calls[1][0]).toMatchObject({
+      revision: 2,
+      hidden: [],
+    });
     expect(cardTitles()).toEqual(CATALOG_TITLES);
-    expect(catalogRow("agents").textContent).toContain("На дашборде");
   });
 
-  it("убирает карточку прямо на ней и не теряет её из каталога", async () => {
+  it("выбор размера — обычная radio-group, и он сохраняется", async () => {
     await click(button("Добавить виджет"));
-    await click(
-      container.querySelector('[aria-label="Убрать карточку «Мои показатели»"]')!,
+    const picker = container.querySelector<HTMLElement>('[data-size-picker="agents"]')!;
+    const options = Array.from(picker.querySelectorAll<HTMLInputElement>("input"));
+    expect(options.map((input) => input.value)).toEqual(["s", "m", "l"]);
+    expect(options.map((input) => input.type)).toEqual(["radio", "radio", "radio"]);
+    expect(options.find((input) => input.checked)?.value).toBe("m");
+    expect(options[2].getAttribute("aria-label")).toBe(
+      "Подробный размер карточки «Агенты»",
     );
 
-    expect(cardTitles()).not.toContain("Мои показатели");
-    expect(catalogRow("metrics").textContent).toContain("Убрана");
+    await choose(options[2]);
+    expect(api.setDashboardLayout.mock.calls[0][0].sizes).toMatchObject({ agents: "l" });
+    expect(tiles().find((tile) => tile.id === "agents")?.size).toBe("l");
   });
 
-  it("восстанавливает стандартный набор после того, как убрали всё", async () => {
+  it("порядок плиток меняется стрелками и тоже сохраняется", async () => {
     await click(button("Добавить виджет"));
-    const reset = button("Вернуть стандартный набор");
-    expect(reset.disabled).toBe(true);
+    await click(byLabel("Переместить карточку «Агенты» правее"));
 
-    for (const id of [
+    expect(api.setDashboardLayout.mock.calls[0][0].order).toEqual([
       "attention",
-      "agents",
       "metrics",
+      "agents",
       "upcoming-tasks",
       "recent-results",
-    ]) {
-      await click(button("Убрать", catalogRow(id)));
-    }
+    ]);
+    expect(tiles().map((tile) => tile.id)).toEqual([
+      "metrics",
+      "agents",
+      "upcoming-tasks",
+      "recent-results",
+    ]);
+    // Первую плитку левее не двигают, закреплённая полоса стрелок не имеет.
+    expect((byLabel("Переместить карточку «Мои показатели» левее") as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect(container.querySelector('[data-size-picker="attention"]')).toBeNull();
+  });
+
+  it("стандартный набор восстанавливается и сразу уходит на сервер", async () => {
+    await click(button("Добавить виджет"));
+    expect(button("Вернуть стандартный набор").disabled).toBe(true);
+
+    for (const id of CATALOG_IDS) await click(button("Убрать", catalogRow(id)));
     expect(cardTitles()).toEqual([]);
     expect(container.textContent).toContain("Все карточки убраны");
 
     await click(button("Вернуть стандартный набор"));
     expect(cardTitles()).toEqual(CATALOG_TITLES);
     expect(button("Вернуть стандартный набор").disabled).toBe(true);
-    expect(container.querySelector('[role="status"]')?.textContent).toContain(
-      "стандартный набор",
+    expect(api.setDashboardLayout.mock.lastCall?.[0]).toMatchObject({ hidden: [] });
+  });
+
+  it("проигранный конфликт показывает победителя и даёт повторить свой выбор", async () => {
+    const winner = pref({ revision: 9, hidden: ["recent-results"] });
+    api.setDashboardLayout.mockRejectedValueOnce(new Error("409: конфликт"));
+    api.getDashboardLayout.mockResolvedValue(winner);
+
+    await click(button("Добавить виджет"));
+    await click(button("Убрать", catalogRow("agents")));
+
+    expect(container.querySelector("[data-layout-status]")?.getAttribute("data-layout-status"))
+      .toBe("conflict");
+    expect(container.textContent).toContain("изменился в другом окне");
+    // На экране — сохранённое другим окном состояние, а не наше.
+    expect(cardTitles()).toEqual(CATALOG_TITLES.filter((title) => title !== "Артефакты"));
+
+    // Повтор идёт уже от ревизии победителя.
+    await click(button("Убрать", catalogRow("agents")));
+    expect(api.setDashboardLayout.mock.lastCall?.[0]).toMatchObject({ revision: 9 });
+    expect(cardTitles()).toEqual(
+      CATALOG_TITLES.filter((title) => title !== "Артефакты" && title !== "Агенты"),
     );
   });
 
-  it("из пустого дашборда открывает каталог обратно", async () => {
+  it("без ответа сервера доска работает и честно говорит, что не сохраняется", async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    api.getDashboardLayout.mockRejectedValue(new Error("offline"));
+    await mount();
+
+    expect(container.querySelector("[data-layout-status]")?.getAttribute("data-layout-status"))
+      .toBe("error");
+    expect(container.textContent).toContain("не сохраняется");
+    expect(cardTitles()).toEqual(CATALOG_TITLES);
+
     await click(button("Добавить виджет"));
-    for (const id of [
-      "attention",
-      "agents",
-      "metrics",
-      "upcoming-tasks",
-      "recent-results",
-    ]) {
-      await click(button("Убрать", catalogRow(id)));
-    }
-    await click(button("Готово"));
+    await click(button("Убрать", catalogRow("agents")));
+    expect(api.setDashboardLayout).not.toHaveBeenCalled();
+    expect(cardTitles()).not.toContain("Агенты");
 
-    expect(container.textContent).toContain("Все карточки убраны");
-    await click(button("Открыть каталог карточек"));
-    expect(container.querySelector("#dashboard-widget-catalog")).not.toBeNull();
-
-    await click(button("Вернуть", catalogRow("agents")));
-    expect(cardTitles()).toEqual(["Агенты"]);
-  });
-
-  it("уводит за теми же сведениями на существующие экраны", () => {
-    const targets = Array.from(
-      container.querySelectorAll<HTMLAnchorElement>("[data-widget] a"),
-    ).map((node) => node.getAttribute("href"));
-    expect(targets).toEqual(["/agents", "/agents", "/cron", "/files"]);
+    // Связь вернулась — «Повторить» приводит экран к серверному состоянию.
+    api.getDashboardLayout.mockResolvedValue(pref({ revision: 3, hidden: ["metrics"] }));
+    await click(button("Повторить"));
+    expect(cardTitles()).toEqual(CATALOG_TITLES.filter((title) => title !== "Мои показатели"));
   });
 });

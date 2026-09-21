@@ -30,6 +30,11 @@ export interface ChatRun {
 
 export const $chatRuns = atom<ChatRun[]>([]);
 export const $chatRunsReachable = atom<boolean | null>(null);
+/** Когда список работ последний раз действительно пришёл (Date.now(), мс).
+ *  Экран, который показывает активность агентов, обязан уметь сказать, что
+ *  видимое — последнее известное, а не текущее: «не отвечает» без возраста
+ *  данных читается как «сейчас никто не работает». */
+export const $chatRunsUpdatedAt = atom<number | null>(null);
 export const $viewedChat = atom<{ profile: string; sessionId: string | null } | null>(null);
 export const $unreadChatRuns = atom<ChatRun[]>([]);
 /** Ответы, чьё всплывающее уведомление человек закрыл. Закрыть карточку —
@@ -102,6 +107,7 @@ export function refreshChatRuns(): Promise<void> {
       }
     }
     $chatRuns.set(runs);
+    $chatRunsUpdatedAt.set(Date.now());
     $chatRunsReachable.set(true);
   }).catch(() => { $chatRunsReachable.set(false); }).finally(() => { refreshing = null; });
   return refreshing;

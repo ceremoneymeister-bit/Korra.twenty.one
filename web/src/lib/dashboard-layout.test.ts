@@ -1,66 +1,144 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  DEFAULT_HIDDEN_WIDGETS,
-  hiddenWidgetIds,
+  defaultLayout,
+  defaultSizes,
   hideWidget,
-  isDefaultWidgetLayout,
-  resetWidgets,
+  isDefaultLayout,
+  moveWidget,
+  normalizeLayout,
+  resetLayout,
+  resizeWidget,
   restoreWidget,
+  sameLayout,
+  visibleTileIds,
   visibleWidgetIds,
+  widgetSize,
+  type DashboardLayout,
+  type WidgetCatalogShape,
 } from "./dashboard-layout";
 
-const CATALOG = ["attention", "agents", "metrics", "upcoming", "results"];
+const CATALOG: WidgetCatalogShape = {
+  ids: ["attention", "agents", "metrics", "upcoming", "results"],
+  pinned: ["attention"],
+};
 
-describe("состав дашборда", () => {
-  it("по умолчанию показывает весь каталог в его порядке", () => {
-    expect(visibleWidgetIds(CATALOG, DEFAULT_HIDDEN_WIDGETS)).toEqual(CATALOG);
-    expect(isDefaultWidgetLayout(DEFAULT_HIDDEN_WIDGETS)).toBe(true);
+const base = () => defaultLayout(CATALOG);
+
+describe("раскладка дашборда", () => {
+  it("по умолчанию показывает весь каталог стандартным размером", () => {
+    const layout = base();
+    expect(visibleWidgetIds(layout)).toEqual(CATALOG.ids);
+    expect(isDefaultLayout(CATALOG, layout)).toBe(true);
+    expect(layout.sizes).toEqual({
+      agents: "m",
+      metrics: "m",
+      upcoming: "m",
+      results: "m",
+    });
   });
 
-  it("убирает карточку, не трогая порядок остальных", () => {
-    const hidden = hideWidget(CATALOG, [], "agents");
-    expect(visibleWidgetIds(CATALOG, hidden)).toEqual([
+  it("закреплённая полоса не получает размера и не участвует в плитках", () => {
+    expect(defaultSizes(CATALOG).attention).toBeUndefined();
+    expect(visibleTileIds(CATALOG, base())).toEqual([
+      "agents",
+      "metrics",
+      "upcoming",
+      "results",
+    ]);
+    // Спросить размер у полосы всё равно можно — ответ не ломает вёрстку.
+    expect(widgetSize(CATALOG, base(), "attention")).toBe("m");
+  });
+
+  it("убирает карточку и возвращает её на прежнее место, а не в конец", () => {
+    const hidden = hideWidget(CATALOG, base(), "agents");
+    expect(visibleWidgetIds(hidden)).toEqual([
       "attention",
       "metrics",
       "upcoming",
       "results",
     ]);
-    expect(hiddenWidgetIds(CATALOG, hidden)).toEqual(["agents"]);
-    expect(isDefaultWidgetLayout(hidden)).toBe(false);
-  });
-
-  it("возвращает карточку на её место в каталоге, а не в конец", () => {
-    const hidden = hideWidget(CATALOG, [], "agents");
-    expect(visibleWidgetIds(CATALOG, restoreWidget(hidden, "agents"))).toEqual(
-      CATALOG,
-    );
-  });
-
-  it("не меняет набор при повторном убирании и возврате лишнего", () => {
-    const once = hideWidget(CATALOG, [], "metrics");
-    expect(hideWidget(CATALOG, once, "metrics")).toEqual(once);
-    expect(restoreWidget(once, "attention")).toEqual(once);
+    expect(isDefaultLayout(CATALOG, hidden)).toBe(false);
+    expect(visibleWidgetIds(restoreWidget(hidden, "agents"))).toEqual(CATALOG.ids);
   });
 
   it("не принимает карточку, которой нет в каталоге", () => {
     // Иначе в наборе копятся призраки удалённых виджетов, и «стандартный
     // набор» перестаёт быть отличим от изменённого.
-    expect(hideWidget(CATALOG, [], "notes")).toEqual([]);
-    expect(isDefaultWidgetLayout(hideWidget(CATALOG, [], "notes"))).toBe(true);
+    const layout = hideWidget(CATALOG, base(), "notes");
+    expect(isDefaultLayout(CATALOG, layout)).toBe(true);
+    expect(resizeWidget(CATALOG, base(), "notes", "l")).toEqual(base());
+  });
+
+  it("меняет размер только у плиток", () => {
+    expect(widgetSize(CATALOG, resizeWidget(CATALOG, base(), "agents", "l"), "agents")).toBe("l");
+    // Полоса размера не имеет: попытка ничего не меняет.
+    expect(resizeWidget(CATALOG, base(), "attention", "s")).toEqual(base());
+  });
+
+  it("переставляет плитку через скрытую соседку на видимое место", () => {
+    // Скрытая карточка между двумя видимыми не должна поглощать нажатие,
+    // не меняя того, что человек видит.
+    const hidden = hideWidget(CATALOG, base(), "metrics");
+    const moved = moveWidget(CATALOG, hidden, "upcoming", -1);
+    expect(visibleTileIds(CATALOG, moved)).toEqual(["upcoming", "agents", "results"]);
+    expect(moved.order).toContain("metrics");
+    expect(moved.hidden).toEqual(["metrics"]);
+  });
+
+  it("не двигает карточку за край и не трогает закреплённую полосу", () => {
+    const layout = base();
+    expect(moveWidget(CATALOG, layout, "agents", -1)).toBe(layout);
+    expect(moveWidget(CATALOG, layout, "results", 1)).toBe(layout);
+    expect(moveWidget(CATALOG, layout, "attention", 1)).toBe(layout);
+  });
+
+  it("чинит битую, устаревшую и чужую запись", () => {
+    const repaired = normalizeLayout(CATALOG, {
+      order: ["metrics", "notes", "metrics"],
+      hidden: ["agents", "notes"],
+      sizes: { agents: "xxl", notes: "l", results: "s" },
+    } as unknown as DashboardLayout);
+    expect(repaired.order[0]).toBe("metrics");
+    expect(new Set(repaired.order)).toEqual(new Set(CATALOG.ids));
+    expect(repaired.order).toHaveLength(CATALOG.ids.length);
+    expect(repaired.hidden).toEqual(["agents"]);
+    expect(repaired.sizes.agents).toBe("m");
+    expect(repaired.sizes.results).toBe("s");
+    expect(normalizeLayout(CATALOG, null)).toEqual(base());
+    expect(normalizeLayout(CATALOG, { order: {}, hidden: "agents" } as unknown as DashboardLayout)).toEqual(base());
+  });
+
+  it("карточка, добавленная в каталог позже, появляется у того, кто уже настроил доску", () => {
+    const older = normalizeLayout(CATALOG, {
+      order: ["results", "agents"],
+      hidden: [],
+      sizes: {},
+    } as unknown as DashboardLayout);
+    expect(older.order.slice(0, 2)).toEqual(["results", "agents"]);
+    expect(new Set(older.order)).toEqual(new Set(CATALOG.ids));
   });
 
   it("сброс возвращает весь каталог, сколько бы карточек ни убрали", () => {
-    let hidden: string[] = [];
-    for (const id of CATALOG) hidden = hideWidget(CATALOG, hidden, id);
-    expect(visibleWidgetIds(CATALOG, hidden)).toEqual([]);
-    expect(visibleWidgetIds(CATALOG, resetWidgets())).toEqual(CATALOG);
-    expect(isDefaultWidgetLayout(resetWidgets())).toBe(true);
+    let layout = base();
+    for (const id of CATALOG.ids) layout = hideWidget(CATALOG, layout, id);
+    expect(visibleWidgetIds(layout)).toEqual([]);
+    expect(isDefaultLayout(CATALOG, resetLayout(CATALOG))).toBe(true);
   });
 
-  it("не меняет переданный набор на месте", () => {
-    const hidden: string[] = [];
-    hideWidget(CATALOG, hidden, "agents");
-    expect(hidden).toEqual([]);
+  it("не меняет переданную раскладку на месте", () => {
+    const layout = base();
+    const snapshot = JSON.stringify(layout);
+    hideWidget(CATALOG, layout, "agents");
+    resizeWidget(CATALOG, layout, "agents", "l");
+    moveWidget(CATALOG, layout, "agents", 1);
+    expect(JSON.stringify(layout)).toBe(snapshot);
+  });
+
+  it("сравнение раскладок видит разницу в порядке, составе и размере", () => {
+    expect(sameLayout(base(), base())).toBe(true);
+    expect(sameLayout(base(), moveWidget(CATALOG, base(), "agents", 1))).toBe(false);
+    expect(sameLayout(base(), hideWidget(CATALOG, base(), "agents"))).toBe(false);
+    expect(sameLayout(base(), resizeWidget(CATALOG, base(), "agents", "s"))).toBe(false);
   });
 });

@@ -1,6 +1,9 @@
 /* eslint-disable react-refresh/only-export-components -- виджет и его каталожное описание намеренно живут вместе */
 import { WidgetEmptyState } from "@/components/dashboard/WidgetEmptyState";
-import type { DashboardWidget } from "@/components/dashboard/widget-types";
+import type {
+  DashboardWidget,
+  DashboardWidgetBodyProps,
+} from "@/components/dashboard/widget-types";
 
 /**
  * «Мои показатели» — несколько чисел, которые владелец выбирает сам.
@@ -8,9 +11,9 @@ import type { DashboardWidget } from "@/components/dashboard/widget-types";
  * Карточка намеренно остаётся без действия: подходящего экрана «мои
  * показатели» в панели ещё нет, а ссылка «в никуда» хуже её отсутствия.
  */
-function MetricsBody() {
+function MetricsBody({ size }: DashboardWidgetBodyProps) {
   return (
-    <WidgetEmptyState note="Состав показателей задаёте вы сами — считать нечего, пока не выбрано, что именно считать. Ноль здесь читался бы как «всё спокойно», поэтому его не рисуем." />
+    <WidgetEmptyState size={size} note="Состав показателей задаёте вы сами — считать нечего, пока не выбрано, что именно считать. Ноль здесь читался бы как «всё спокойно», поэтому его не рисуем." />
   );
 }
 

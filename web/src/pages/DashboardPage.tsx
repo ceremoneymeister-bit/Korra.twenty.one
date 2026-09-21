@@ -1,81 +1,110 @@
 /**
  * DashboardPage — личный дашборд владельца контура.
  *
- * Первый срез: рабочая оболочка будущего экрана — шапка с назначением,
- * адаптивная сетка карточек и ограниченный режим настройки набора. Данных
- * здесь пока нет ни у одной карточки, и это намеренно: ноль вместо
- * неизвестного значения читается как «всё спокойно», а правдоподобная
- * цифра — как факт, и оба варианта дороже честного «источник ещё не
- * подключён». Каждая карточка говорит, что она покажет и откуда это
- * возьмётся, и уводит на экран, где сведения есть сегодня.
+ * Экран состоит из полосы «Требует внимания» над сеткой и модульной сетки
+ * плиток под ней. Размер плитки задаёт только буква — S 1×1, M 2×1, L 2×2, —
+ * поэтому две карточки одного размера выглядят одинаково независимо от того,
+ * что внутри.
  *
  * Разделение ответственности:
  *   - `components/dashboard/widget-catalog` — какие карточки бывают;
  *   - `components/dashboard/widgets/*` — что показывает каждая из них;
- *   - `lib/dashboard-layout` — состав просмотра (чистые функции);
+ *   - `lib/dashboard-layout` — правила состава (чистые функции);
+ *   - `hooks/useDashboardLayout` — серверное хранение и конфликты;
  *   - этот файл — шапка, сетка и режим настройки.
  *
- * Набор карточек живёт в памяти вкладки и сбрасывается при перезагрузке.
- * Страница говорит об этом прямо и не обещает синхронизацию между
- * устройствами: постоянное хранение — отдельный шаг с серверным контрактом,
- * а localStorage не должен стать источником правды явочным порядком.
+ * Раскладка живёт на сервере и принадлежит человеку, а не вкладке: собранная
+ * на ноутбуке доска открывается такой же на телефоне. localStorage здесь нет
+ * намеренно — он пережил бы смену человека за тем же браузером.
+ *
+ * Данные каждой карточки — забота самой карточки. «Агенты» читают настоящий
+ * контур; остальные честно говорят, что источник ещё не подключён, и уводят
+ * туда, где эти сведения есть сегодня.
  */
 
-import { useState } from "react";
-import { Check, Plus, RotateCcw } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Check, ChevronLeft, ChevronRight, Plus, RefreshCw, RotateCcw } from "lucide-react";
 import { Card } from "@nous-research/ui/ui/components/card";
 import { DashboardWidgetCard } from "@/components/dashboard/DashboardWidgetCard";
 import { DashboardWidgetBoundary } from "@/components/dashboard/DashboardWidgetBoundary";
-import {
-  DASHBOARD_WIDGETS,
-  DASHBOARD_WIDGET_IDS,
-} from "@/components/dashboard/widget-catalog";
+import { WidgetSizePicker } from "@/components/dashboard/WidgetSizePicker";
+import { DASHBOARD_CATALOG, findWidget } from "@/components/dashboard/widget-catalog";
 import { ProductButton } from "@/components/ProductButton";
+import { useDashboardLayout } from "@/hooks/useDashboardLayout";
 import {
-  DEFAULT_HIDDEN_WIDGETS,
   hideWidget,
-  isDefaultWidgetLayout,
-  resetWidgets,
+  isDefaultLayout,
+  moveWidget,
+  resetLayout,
+  resizeWidget,
   restoreWidget,
+  visibleTileIds,
   visibleWidgetIds,
+  widgetSize,
+  type DashboardLayout,
+  type WidgetSize,
 } from "@/lib/dashboard-layout";
 import { cn } from "@/lib/utils";
+
+import "@/components/dashboard/dashboard-grid.css";
 
 const CATALOG_ID = "dashboard-widget-catalog";
 
 export default function DashboardPage() {
-  const [hidden, setHidden] = useState<string[]>(() => [
-    ...DEFAULT_HIDDEN_WIDGETS,
-  ]);
+  const { apply, layout, message, reload, saving, status } =
+    useDashboardLayout(DASHBOARD_CATALOG);
   const [setupOpen, setSetupOpen] = useState(false);
   // Состав меняется без перезагрузки экрана, поэтому о результате действия
   // сообщаем голосом: иначе пользователь скринридера видит только то, что
   // фокус остался на кнопке.
   const [announcement, setAnnouncement] = useState("");
 
-  const visibleIds = visibleWidgetIds(DASHBOARD_WIDGET_IDS, hidden);
-  const visible = DASHBOARD_WIDGETS.filter((widget) =>
-    visibleIds.includes(widget.id),
+  const visibleIds = useMemo(() => visibleWidgetIds(layout), [layout]);
+  const pinnedIds = useMemo(
+    () => visibleIds.filter((id) => DASHBOARD_CATALOG.pinned.includes(id)),
+    [visibleIds],
   );
-  const isDefault = isDefaultWidgetLayout(hidden);
+  const tileIds = useMemo(
+    () => visibleTileIds(DASHBOARD_CATALOG, layout),
+    [layout],
+  );
+  const isDefault = isDefaultLayout(DASHBOARD_CATALOG, layout);
 
-  const remove = (id: string, title: string) => {
-    setHidden((prev) => hideWidget(DASHBOARD_WIDGET_IDS, prev, id));
-    setAnnouncement(`Карточка «${title}» убрана. Вернуть её можно в каталоге.`);
-  };
+  const change = useCallback(
+    (next: DashboardLayout, said: string) => {
+      if (next === layout) return;
+      apply(next);
+      setAnnouncement(said);
+    },
+    [apply, layout],
+  );
 
-  const restore = (id: string, title: string) => {
-    setHidden((prev) => restoreWidget(prev, id));
-    setAnnouncement(`Карточка «${title}» вернулась на своё место.`);
-  };
+  const remove = (id: string, title: string) =>
+    change(
+      hideWidget(DASHBOARD_CATALOG, layout, id),
+      `Карточка «${title}» убрана. Вернуть её можно в каталоге.`,
+    );
 
-  const reset = () => {
-    setHidden(resetWidgets());
-    setAnnouncement("Восстановлен стандартный набор карточек.");
-  };
+  const restore = (id: string, title: string) =>
+    change(restoreWidget(layout, id), `Карточка «${title}» вернулась на своё место.`);
+
+  const resize = (id: string, title: string, size: WidgetSize) =>
+    change(
+      resizeWidget(DASHBOARD_CATALOG, layout, id, size),
+      `Размер карточки «${title}» изменён.`,
+    );
+
+  const move = (id: string, title: string, direction: -1 | 1) =>
+    change(
+      moveWidget(DASHBOARD_CATALOG, layout, id, direction),
+      `Карточка «${title}» перемещена ${direction === -1 ? "левее" : "правее"}.`,
+    );
+
+  const reset = () =>
+    change(resetLayout(DASHBOARD_CATALOG), "Восстановлен стандартный набор карточек.");
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pt-2">
+    <div className="korra-dashboard mx-auto flex w-full max-w-6xl flex-col gap-6 pt-2">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 max-w-[70ch]">
           <h2 className="text-xl font-semibold text-[var(--neo-text-primary)]">
@@ -84,9 +113,8 @@ export default function DashboardPage() {
 
           <p className="mt-2 text-sm leading-relaxed text-[var(--neo-text-secondary)]">
             Один экран о вашей работе: что требует решения, чем заняты агенты,
-            что запланировано и что уже готово. Пока это каркас — карточки
-            показывают, что появится и откуда будет взято, вместо придуманных
-            цифр.
+            что запланировано и что уже готово. Карточка без подключённого
+            источника честно говорит об этом вместо придуманных цифр.
           </p>
         </div>
 
@@ -116,6 +144,24 @@ export default function DashboardPage() {
         {announcement}
       </p>
 
+      {message ? (
+        <div
+          className="flex flex-wrap items-center gap-3 rounded-[var(--neo-radius-control)] px-4 py-3 text-sm shadow-[var(--neo-inset-compact)]"
+          data-layout-status={status}
+          role={status === "ready" ? "status" : "alert"}
+        >
+          <span className="min-w-0 flex-1 text-[var(--neo-text-primary)]">{message}</span>
+          <ProductButton
+            outlined
+            size="sm"
+            onClick={() => void reload()}
+            prefix={<RefreshCw className="size-4 shrink-0" aria-hidden />}
+          >
+            Повторить
+          </ProductButton>
+        </div>
+      ) : null}
+
       {setupOpen ? (
         <section id={CATALOG_ID} aria-labelledby="dashboard-catalog-title">
           <Card className="flex flex-col gap-4 p-5">
@@ -129,9 +175,10 @@ export default function DashboardPage() {
                 </h3>
 
                 <p className="mt-1 text-sm leading-relaxed text-[var(--neo-text-secondary)]">
-                  Выберите, что показывать на дашборде. Набор действует в этом
-                  окне: после перезагрузки страницы вернётся стандартный —
-                  сохранение появится вместе с хранением набора на сервере.
+                  Выберите, что показывать, каким размером и в каком порядке.
+                  Набор хранится за вами и открывается таким же в другом
+                  браузере.
+                  {saving ? " Сохраняем…" : ""}
                 </p>
               </div>
 
@@ -146,12 +193,15 @@ export default function DashboardPage() {
             </div>
 
             <ul className="flex flex-col gap-2">
-              {DASHBOARD_WIDGETS.map((widget) => {
-                const shown = !hidden.includes(widget.id);
+              {layout.order.map((id) => {
+                const widget = findWidget(id);
+                if (!widget) return null;
+                const shown = !layout.hidden.includes(id);
+                const tilePosition = tileIds.indexOf(id);
                 return (
                   <li
-                    key={widget.id}
-                    data-catalog-widget={widget.id}
+                    key={id}
+                    data-catalog-widget={id}
                     className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--neo-radius-control)] px-3 py-2 shadow-[var(--neo-inset-compact)]"
                   >
                     <div className="min-w-0 max-w-[60ch]">
@@ -164,7 +214,47 @@ export default function DashboardPage() {
                       </p>
                     </div>
 
-                    <div className="flex shrink-0 items-center gap-3">
+                    <div className="flex shrink-0 flex-wrap items-center gap-3">
+                      {widget.pinned ? (
+                        <span className="text-sm text-[var(--neo-text-secondary)]">
+                          Полоса над сеткой
+                        </span>
+                      ) : (
+                        <>
+                          <WidgetSizePicker
+                            widgetId={id}
+                            title={widget.title}
+                            value={widgetSize(DASHBOARD_CATALOG, layout, id)}
+                            onChange={(size) => resize(id, widget.title, size)}
+                          />
+
+                          <div className="flex items-center gap-1">
+                            <ProductButton
+                              ghost
+                              size="icon"
+                              disabled={!shown || tilePosition <= 0}
+                              onClick={() => move(id, widget.title, -1)}
+                              aria-label={`Переместить карточку «${widget.title}» левее`}
+                            >
+                              <ChevronLeft aria-hidden />
+                            </ProductButton>
+                            <ProductButton
+                              ghost
+                              size="icon"
+                              disabled={
+                                !shown ||
+                                tilePosition < 0 ||
+                                tilePosition >= tileIds.length - 1
+                              }
+                              onClick={() => move(id, widget.title, 1)}
+                              aria-label={`Переместить карточку «${widget.title}» правее`}
+                            >
+                              <ChevronRight aria-hidden />
+                            </ProductButton>
+                          </div>
+                        </>
+                      )}
+
                       {/* Состояние словом, а не только цветом кнопки. */}
                       <span className="text-sm text-[var(--neo-text-secondary)]">
                         {shown ? "На дашборде" : "Убрана"}
@@ -175,8 +265,8 @@ export default function DashboardPage() {
                         size="sm"
                         onClick={() =>
                           shown
-                            ? remove(widget.id, widget.title)
-                            : restore(widget.id, widget.title)
+                            ? remove(id, widget.title)
+                            : restore(id, widget.title)
                         }
                         aria-label={`${shown ? "Убрать" : "Вернуть"} карточку «${widget.title}»`}
                       >
@@ -191,36 +281,35 @@ export default function DashboardPage() {
         </section>
       ) : null}
 
-      {visible.length > 0 ? (
-        <ul
-          aria-label="Карточки дашборда"
-          className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
-        >
-          {visible.map((widget) => (
-            <li
-              key={widget.id}
-              className={cn("min-w-0", widget.wide && "sm:col-span-2")}
-            >
-              <DashboardWidgetCard
-                widgetId={widget.id}
-                title={widget.title}
-                purpose={widget.purpose}
-                onRemove={
-                  setupOpen
-                    ? () => remove(widget.id, widget.title)
-                    : undefined
-                }
-              >
-                <DashboardWidgetBoundary
-                  title={widget.title}
-                  widgetId={widget.id}
-                >
-                  <widget.Body />
-                </DashboardWidgetBoundary>
-              </DashboardWidgetCard>
-            </li>
-          ))}
-        </ul>
+      {visibleIds.length > 0 ? (
+        <div className="korra-dashboard__board">
+          {pinnedIds.length > 0 ? (
+            <ul aria-label="Полоса дашборда" className="korra-dashboard__pinned">
+              {pinnedIds.map((id) => (
+                <WidgetTile
+                  key={id}
+                  id={id}
+                  layout={layout}
+                  onRemove={setupOpen ? remove : undefined}
+                  pinned
+                />
+              ))}
+            </ul>
+          ) : null}
+
+          {tileIds.length > 0 ? (
+            <ul aria-label="Карточки дашборда" className="korra-dashboard__grid">
+              {tileIds.map((id) => (
+                <WidgetTile
+                  key={id}
+                  id={id}
+                  layout={layout}
+                  onRemove={setupOpen ? remove : undefined}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : (
         <Card className="flex flex-col items-start gap-3 p-5">
           <p className="text-base font-semibold text-[var(--neo-text-primary)]">
@@ -245,5 +334,36 @@ export default function DashboardPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+interface WidgetTileProps {
+  id: string;
+  layout: DashboardLayout;
+  onRemove?: (id: string, title: string) => void;
+  pinned?: boolean;
+}
+
+function WidgetTile({ id, layout, onRemove, pinned }: WidgetTileProps) {
+  const widget = findWidget(id);
+  if (!widget) return null;
+  const size = widgetSize(DASHBOARD_CATALOG, layout, id);
+  return (
+    <li
+      className={cn(!pinned && "korra-dashboard__tile")}
+      data-size={pinned ? undefined : size}
+    >
+      <DashboardWidgetCard
+        widgetId={id}
+        title={widget.title}
+        purpose={widget.purpose}
+        size={pinned ? undefined : size}
+        onRemove={onRemove ? () => onRemove(id, widget.title) : undefined}
+      >
+        <DashboardWidgetBoundary title={widget.title} widgetId={id}>
+          <widget.Body size={size} />
+        </DashboardWidgetBoundary>
+      </DashboardWidgetCard>
+    </li>
   );
 }

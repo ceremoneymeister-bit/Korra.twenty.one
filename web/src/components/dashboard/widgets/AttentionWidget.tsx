@@ -1,6 +1,9 @@
 /* eslint-disable react-refresh/only-export-components -- виджет и его каталожное описание намеренно живут вместе */
 import { WidgetEmptyState } from "@/components/dashboard/WidgetEmptyState";
-import type { DashboardWidget } from "@/components/dashboard/widget-types";
+import type {
+  DashboardWidget,
+  DashboardWidgetBodyProps,
+} from "@/components/dashboard/widget-types";
 
 /**
  * «Требует внимания» — главная карточка дашборда: с неё начинается день.
@@ -9,9 +12,10 @@ import type { DashboardWidget } from "@/components/dashboard/widget-types";
  * карточка не показывает ни нулей, ни примеров: пустая строка «всё спокойно»
  * в этом месте опаснее честного «источник не подключён».
  */
-function AttentionBody() {
+function AttentionBody({ size }: DashboardWidgetBodyProps) {
   return (
     <WidgetEmptyState
+      size={size}
       note="Здесь соберутся запросы на подтверждение, ошибки и остановленные поручения. Пока дашборд не читает очередь агентов — эти события приходят прямо в разговоре."
       action={{ label: "Открыть агентов", to: "/agents" }}
     />
@@ -22,6 +26,6 @@ export const ATTENTION_WIDGET: DashboardWidget = {
   id: "attention",
   title: "Требует внимания",
   purpose: "Подтверждения, ошибки и остановленные поручения, которые ждут вашего решения.",
-  wide: true,
+  pinned: true,
   Body: AttentionBody,
 };

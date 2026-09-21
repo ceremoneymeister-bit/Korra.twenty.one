@@ -1,6 +1,9 @@
 /* eslint-disable react-refresh/only-export-components -- виджет и его каталожное описание намеренно живут вместе */
 import { WidgetEmptyState } from "@/components/dashboard/WidgetEmptyState";
-import type { DashboardWidget } from "@/components/dashboard/widget-types";
+import type {
+  DashboardWidget,
+  DashboardWidgetBodyProps,
+} from "@/components/dashboard/widget-types";
 
 /**
  * «Артефакты» — что уже готово и можно забрать.
@@ -8,9 +11,10 @@ import type { DashboardWidget } from "@/components/dashboard/widget-types";
  * Источник — материалы контура и завершённые разговоры. Пока его нет,
  * карточка уводит на экран файлов: там результаты видно целиком.
  */
-function RecentResultsBody() {
+function RecentResultsBody({ size }: DashboardWidgetBodyProps) {
   return (
     <WidgetEmptyState
+      size={size}
       note="Здесь появятся свежие ответы, файлы и отчёты — с датой и автором. Пока дашборд не читает материалы и историю разговоров."
       action={{ label: "Открыть файлы", to: "/files" }}
     />

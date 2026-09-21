@@ -1,5 +1,12 @@
 import type { ComponentType } from "react";
 
+import type { WidgetSize } from "@/lib/dashboard-layout";
+
+export interface DashboardWidgetBodyProps {
+  /** Размер плитки: S 1×1, M 2×1, L 2×2. Содержимое решает, что показать. */
+  size: WidgetSize;
+}
+
 /**
  * Встроенный виджет дашборда.
  *
@@ -9,14 +16,15 @@ import type { ComponentType } from "react";
  * работы: сторонний JavaScript дашборд не исполняет.
  */
 export interface DashboardWidget {
-  /** Устойчивый идентификатор: по нему хранится состав текущего просмотра. */
+  /** Устойчивый идентификатор: по нему хранится раскладка. Он переживает
+   *  переименование карточки — `recent-results` называется «Артефакты». */
   id: string;
   /** Название карточки — одно и то же в сетке и в каталоге настройки. */
   title: string;
   /** Одно предложение о том, что карточка показывает человеку. */
   purpose: string;
-  /** Карточка занимает две колонки там, где сетка их даёт. */
-  wide?: boolean;
+  /** Карточка живёт полосой над сеткой: без размера и без перестановки. */
+  pinned?: boolean;
   /** Содержимое карточки: у каждого виджета своё и живёт в его файле. */
-  Body: ComponentType;
+  Body: ComponentType<DashboardWidgetBodyProps>;
 }
