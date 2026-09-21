@@ -1,4 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- виджет и его каталожное описание намеренно живут вместе */
+import { TriangleAlert } from "lucide-react";
+
 import { WidgetEmptyState } from "@/components/dashboard/WidgetEmptyState";
 import type {
   DashboardWidget,
@@ -16,8 +18,8 @@ function AttentionBody({ size }: DashboardWidgetBodyProps) {
   return (
     <WidgetEmptyState
       size={size}
-      note="Здесь соберутся запросы на подтверждение, ошибки и остановленные поручения. Пока дашборд не читает очередь агентов — эти события приходят прямо в разговоре."
-      action={{ label: "Открыть агентов", to: "/agents" }}
+      icon={TriangleAlert}
+      note="Подтверждения, ошибки и остановленные поручения пока приходят прямо в разговоре."
     />
   );
 }
@@ -27,5 +29,6 @@ export const ATTENTION_WIDGET: DashboardWidget = {
   title: "Требует внимания",
   purpose: "Подтверждения, ошибки и остановленные поручения, которые ждут вашего решения.",
   pinned: true,
+  action: { label: "Открыть агентов", short: "Агенты", to: "/agents" },
   Body: AttentionBody,
 };

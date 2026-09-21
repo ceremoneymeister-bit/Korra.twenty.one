@@ -1,4 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- виджет и его каталожное описание намеренно живут вместе */
+import { FileText } from "lucide-react";
+
 import { WidgetEmptyState } from "@/components/dashboard/WidgetEmptyState";
 import type {
   DashboardWidget,
@@ -15,8 +17,8 @@ function RecentResultsBody({ size }: DashboardWidgetBodyProps) {
   return (
     <WidgetEmptyState
       size={size}
-      note="Здесь появятся свежие ответы, файлы и отчёты — с датой и автором. Пока дашборд не читает материалы и историю разговоров."
-      action={{ label: "Открыть файлы", to: "/files" }}
+      icon={FileText}
+      note="Свежие ответы, файлы и отчёты появятся здесь с датой и автором. Пока они лежат в файлах."
     />
   );
 }
@@ -25,5 +27,6 @@ export const RECENT_RESULTS_WIDGET: DashboardWidget = {
   id: "recent-results",
   title: "Артефакты",
   purpose: "Готовые ответы, файлы и отчёты за последние дни.",
+  action: { label: "Открыть файлы", short: "Файлы", to: "/files" },
   Body: RecentResultsBody,
 };

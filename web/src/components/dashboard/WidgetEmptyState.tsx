@@ -1,6 +1,6 @@
-import { ArrowRight, Unplug } from "lucide-react";
-import { Link } from "react-router";
+import type { LucideIcon } from "lucide-react";
 
+import { FittedText } from "@/components/dashboard/FittedText";
 import type { WidgetSize } from "@/lib/dashboard-layout";
 import { cn } from "@/lib/utils";
 
@@ -8,54 +8,47 @@ import { cn } from "@/lib/utils";
  * Честное состояние карточки, пока её источник не подключён.
  *
  * Ноль вместо неизвестного значения читается как «всё спокойно», а
- * придуманное число — как факт. Поэтому карточка прямо говорит, чего ей не
- * хватает, и уводит на экран, где эти сведения уже есть сегодня.
- *
- * Плитка 1×1 не растягивается под текст — геометрию задаёт буква, а не
- * содержимое. Поэтому на компактном размере остаётся только заголовок
- * состояния и переход, а объяснение живёт там, где для него есть место.
+ * придуманное число — как факт. Поэтому карточка показывает знак своей темы и
+ * одну строку о том, чего ей не хватает, а переход к тем же сведениям живёт в
+ * шапке карточки — там он не соревнуется за высоту с текстом.
  */
 export interface WidgetEmptyStateProps {
+  /** Знак темы карточки: он дополняет надпись, а не заменяет её. */
+  icon: LucideIcon;
   /** Что появится в карточке, когда источник подключат. Одно предложение. */
   note: string;
-  /** Куда пойти за теми же сведениями сейчас. Только существующие экраны. */
-  action?: { label: string; to: string };
   size?: WidgetSize;
 }
 
-export function WidgetEmptyState({ action, note, size = "m" }: WidgetEmptyStateProps) {
+export function WidgetEmptyState({ icon: Icon, note, size }: WidgetEmptyStateProps) {
+  // Полоса над сеткой растёт под содержимое: укорачивать там нечего, а
+  // измерять — значит замкнуть наблюдателя сам на себя.
+  const pinned = size === undefined;
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-      {/* Значок только дополняет надпись: состояние читается текстом. */}
-      <p className="flex items-center gap-2 text-sm font-semibold text-[var(--neo-text-primary)]">
-        <Unplug className="size-4 shrink-0" aria-hidden />
-        Источник ещё не подключён
+    <div
+      className={cn(
+        "flex flex-col gap-2",
+        !pinned && "min-h-0 flex-1 overflow-hidden",
+      )}
+    >
+      {/* На плитке 1×1 эта строка не умещается ни при каком сокращении, а
+          «Источник ещё не подкл…» — не то, ради чего карточку открыли. Поэтому
+          она переносится, а знак темы держится первой строки. */}
+      <p className="korra-widget-line flex shrink-0 items-start gap-2 text-sm font-semibold text-[var(--neo-text-primary)]">
+        <Icon className="mt-[3px] size-4 shrink-0" aria-hidden />
+        <span className="min-w-0 line-clamp-2">Источник ещё не подключён</span>
       </p>
 
-      {size === "s" ? null : (
-        // Плитка не растягивается под текст, поэтому объяснение обрывается по
-        // целым строкам с многоточием: обрезанная посередине фраза читается
-        // как поломка вёрстки, а не как «дальше есть ещё».
+      {pinned ? (
         <p
           data-widget-note
-          className={cn(
-            "min-h-0 text-sm leading-relaxed text-[var(--neo-text-secondary)]",
-            size === "l" ? "line-clamp-6" : "line-clamp-2",
-          )}
+          className="korra-widget-line text-sm text-[var(--neo-text-secondary)]"
         >
           {note}
         </p>
+      ) : (
+        <FittedText text={note} className="text-[var(--neo-text-secondary)]" />
       )}
-
-      {action ? (
-        <Link
-          to={action.to}
-          className="mt-auto inline-flex min-h-[44px] w-fit items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-[var(--neo-text-primary)] transition-shadow hover:shadow-[var(--neo-inset-compact)]"
-        >
-          {action.label}
-          <ArrowRight className="size-4 shrink-0" aria-hidden />
-        </Link>
-      ) : null}
     </div>
   );
 }

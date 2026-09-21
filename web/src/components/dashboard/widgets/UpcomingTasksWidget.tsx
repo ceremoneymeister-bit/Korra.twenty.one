@@ -1,4 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- виджет и его каталожное описание намеренно живут вместе */
+import { CalendarClock } from "lucide-react";
+
 import { WidgetEmptyState } from "@/components/dashboard/WidgetEmptyState";
 import type {
   DashboardWidget,
@@ -15,8 +17,8 @@ function UpcomingTasksBody({ size }: DashboardWidgetBodyProps) {
   return (
     <WidgetEmptyState
       size={size}
-      note="Здесь будут ближайшие запуски по расписанию и их результат прошлого раза. Пока дашборд не читает расписание контура."
-      action={{ label: "Открыть задачи", to: "/cron" }}
+      icon={CalendarClock}
+      note="Ближайшие запуски по расписанию и их прошлый результат целиком видно на экране «Задачи»."
     />
   );
 }
@@ -25,5 +27,6 @@ export const UPCOMING_TASKS_WIDGET: DashboardWidget = {
   id: "upcoming-tasks",
   title: "Ближайшие задачи",
   purpose: "Что запланировано по расписанию на ближайшие дни.",
+  action: { label: "Открыть задачи", short: "Задачи", to: "/cron" },
   Body: UpcomingTasksBody,
 };

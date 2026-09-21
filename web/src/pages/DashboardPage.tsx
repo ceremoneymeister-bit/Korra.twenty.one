@@ -23,7 +23,16 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Plus, RefreshCw, RotateCcw } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  SlidersHorizontal,
+  Sun,
+} from "lucide-react";
 import { Card } from "@nous-research/ui/ui/components/card";
 import { DashboardWidgetCard } from "@/components/dashboard/DashboardWidgetCard";
 import { DashboardWidgetBoundary } from "@/components/dashboard/DashboardWidgetBoundary";
@@ -49,6 +58,22 @@ import { cn } from "@/lib/utils";
 import "@/components/dashboard/dashboard-grid.css";
 
 const CATALOG_ID = "dashboard-widget-catalog";
+
+/**
+ * Дата сегодняшнего дня — единственное, что шапка знает о человеке.
+ *
+ * Имени здесь нет намеренно: панель открывают и владелец, и тот, кому он дал
+ * доступ, а придуманное обращение читается как подделка. Дата настоящая и
+ * остаётся верной, пока вкладка открыта, — в отличие от времени.
+ */
+function today(): string {
+  const text = new Date().toLocaleDateString("ru-RU", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 export default function DashboardPage() {
   const { apply, layout, message, reload, saving, status } =
@@ -106,15 +131,18 @@ export default function DashboardPage() {
   return (
     <div className="korra-dashboard mx-auto flex w-full max-w-6xl flex-col gap-6 pt-2">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 max-w-[70ch]">
-          <h2 className="text-xl font-semibold text-[var(--neo-text-primary)]">
-            Личный дашборд
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-sm text-[var(--neo-text-secondary)]">
+            <Sun className="size-4 shrink-0" aria-hidden />
+            <span className="min-w-0 truncate">{today()}</span>
+          </p>
+
+          <h2 className="mt-1 text-2xl font-semibold text-[var(--neo-text-primary)]">
+            Хороший день.
           </h2>
 
-          <p className="mt-2 text-sm leading-relaxed text-[var(--neo-text-secondary)]">
-            Один экран о вашей работе: что требует решения, чем заняты агенты,
-            что запланировано и что уже готово. Карточка без подключённого
-            источника честно говорит об этом вместо придуманных цифр.
+          <p className="mt-1 max-w-[60ch] text-sm text-[var(--neo-text-secondary)]">
+            Что требует решения, чем заняты агенты и что уже готово.
           </p>
         </div>
 
@@ -123,9 +151,9 @@ export default function DashboardPage() {
             onClick={() => setSetupOpen(true)}
             aria-expanded={setupOpen}
             aria-controls={CATALOG_ID}
-            prefix={<Plus className="size-4 shrink-0" aria-hidden />}
+            prefix={<SlidersHorizontal className="size-4 shrink-0" aria-hidden />}
           >
-            Добавить виджет
+            Настроить
           </ProductButton>
 
           {setupOpen ? (
@@ -358,10 +386,11 @@ function WidgetTile({ id, layout, onRemove, pinned }: WidgetTileProps) {
         title={widget.title}
         purpose={widget.purpose}
         size={pinned ? undefined : size}
+        action={widget.action}
         onRemove={onRemove ? () => onRemove(id, widget.title) : undefined}
       >
         <DashboardWidgetBoundary title={widget.title} widgetId={id}>
-          <widget.Body size={size} />
+          <widget.Body size={pinned ? undefined : size} />
         </DashboardWidgetBoundary>
       </DashboardWidgetCard>
     </li>

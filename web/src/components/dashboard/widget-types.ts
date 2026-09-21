@@ -3,8 +3,26 @@ import type { ComponentType } from "react";
 import type { WidgetSize } from "@/lib/dashboard-layout";
 
 export interface DashboardWidgetBodyProps {
-  /** Размер плитки: S 1×1, M 2×1, L 2×2. Содержимое решает, что показать. */
-  size: WidgetSize;
+  /**
+   * Размер плитки: S 1×1, M 2×1, L 2×2.
+   *
+   * `undefined` — закреплённая полоса над сеткой: она растёт под содержимое,
+   * и сокращать там нечего.
+   */
+  size?: WidgetSize;
+}
+
+/**
+ * Переход карточки — один и тот же на любом размере.
+ *
+ * Живёт в шапке карточки, а не в её содержимом: так он не соревнуется за
+ * высоту со строками и не пропадает первым на тесной плитке. `short` — то,
+ * что видно рядом с заголовком, `label` — то, что произносит скринридер.
+ */
+export interface DashboardWidgetAction {
+  label: string;
+  short: string;
+  to: string;
 }
 
 /**
@@ -25,6 +43,8 @@ export interface DashboardWidget {
   purpose: string;
   /** Карточка живёт полосой над сеткой: без размера и без перестановки. */
   pinned?: boolean;
+  /** Куда уйти за полной картиной. Только существующие экраны. */
+  action?: DashboardWidgetAction;
   /** Содержимое карточки: у каждого виджета своё и живёт в его файле. */
   Body: ComponentType<DashboardWidgetBodyProps>;
 }

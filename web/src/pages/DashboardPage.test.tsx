@@ -124,10 +124,15 @@ afterEach(async () => {
 });
 
 describe("Личный дашборд", () => {
-  it("объясняет назначение экрана и предлагает добавить виджет", () => {
-    expect(container.textContent).toContain("Личный дашборд");
-    expect(container.textContent).toContain("Один экран о вашей работе");
-    expect(button("Добавить виджет")).toBeTruthy();
+  it("здоровается настоящей датой, без придуманного имени, и даёт настройку", () => {
+    const today = new Date().toLocaleDateString("ru-RU", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+    expect(container.textContent?.toLowerCase()).toContain(today.toLowerCase());
+    expect(container.textContent).toContain("Хороший день.");
+    expect(button("Настроить")).toBeTruthy();
   });
 
   it("показывает пять карточек-кандидатов в порядке каталога", () => {
@@ -166,13 +171,13 @@ describe("Личный дашборд", () => {
   });
 
   it("открывает каталог со всеми карточками и закрывается по «Готово»", async () => {
-    const add = button("Добавить виджет");
+    const add = button("Настроить");
     expect(add.getAttribute("aria-expanded")).toBe("false");
 
     await click(add);
     const catalog = container.querySelector("#dashboard-widget-catalog");
     expect(catalog).not.toBeNull();
-    expect(button("Добавить виджет").getAttribute("aria-expanded")).toBe("true");
+    expect(button("Настроить").getAttribute("aria-expanded")).toBe("true");
     expect(
       Array.from(catalog!.querySelectorAll<HTMLElement>("[data-catalog-widget] p"))
         .map((node) => node.textContent)
@@ -208,7 +213,7 @@ describe("Раскладка дашборда хранится на сервер
   });
 
   it("убранная карточка уходит на сервер с текущей ревизией и возвращается на место", async () => {
-    await click(button("Добавить виджет"));
+    await click(button("Настроить"));
     await click(button("Убрать", catalogRow("agents")));
 
     expect(api.setDashboardLayout).toHaveBeenCalledTimes(1);
@@ -232,7 +237,7 @@ describe("Раскладка дашборда хранится на сервер
   });
 
   it("выбор размера — обычная radio-group, и он сохраняется", async () => {
-    await click(button("Добавить виджет"));
+    await click(button("Настроить"));
     const picker = container.querySelector<HTMLElement>('[data-size-picker="agents"]')!;
     const options = Array.from(picker.querySelectorAll<HTMLInputElement>("input"));
     expect(options.map((input) => input.value)).toEqual(["s", "m", "l"]);
@@ -248,7 +253,7 @@ describe("Раскладка дашборда хранится на сервер
   });
 
   it("порядок плиток меняется стрелками и тоже сохраняется", async () => {
-    await click(button("Добавить виджет"));
+    await click(button("Настроить"));
     await click(byLabel("Переместить карточку «Агенты» правее"));
 
     expect(api.setDashboardLayout.mock.calls[0][0].order).toEqual([
@@ -271,7 +276,7 @@ describe("Раскладка дашборда хранится на сервер
   });
 
   it("стандартный набор восстанавливается и сразу уходит на сервер", async () => {
-    await click(button("Добавить виджет"));
+    await click(button("Настроить"));
     expect(button("Вернуть стандартный набор").disabled).toBe(true);
 
     for (const id of CATALOG_IDS) await click(button("Убрать", catalogRow(id)));
@@ -292,7 +297,7 @@ describe("Раскладка дашборда хранится на сервер
     );
     api.getDashboardLayout.mockResolvedValue(winner);
 
-    await click(button("Добавить виджет"));
+    await click(button("Настроить"));
     await click(button("Убрать", catalogRow("agents")));
 
     expect(container.querySelector("[data-layout-status]")?.getAttribute("data-layout-status"))
@@ -320,7 +325,7 @@ describe("Раскладка дашборда хранится на сервер
     expect(container.textContent).toContain("не сохраняется");
     expect(cardTitles()).toEqual(CATALOG_TITLES);
 
-    await click(button("Добавить виджет"));
+    await click(button("Настроить"));
     await click(button("Убрать", catalogRow("agents")));
     expect(api.setDashboardLayout).not.toHaveBeenCalled();
     expect(cardTitles()).not.toContain("Агенты");

@@ -1,4 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- виджет и его каталожное описание намеренно живут вместе */
+import { ChartLine } from "lucide-react";
+
 import { WidgetEmptyState } from "@/components/dashboard/WidgetEmptyState";
 import type {
   DashboardWidget,
@@ -13,7 +15,11 @@ import type {
  */
 function MetricsBody({ size }: DashboardWidgetBodyProps) {
   return (
-    <WidgetEmptyState size={size} note="Состав показателей задаёте вы сами — считать нечего, пока не выбрано, что именно считать. Ноль здесь читался бы как «всё спокойно», поэтому его не рисуем." />
+    <WidgetEmptyState
+      size={size}
+      icon={ChartLine}
+      note="Считать нечего, пока не выбрано, что именно считать. Ноль здесь читался бы как факт."
+    />
   );
 }
 

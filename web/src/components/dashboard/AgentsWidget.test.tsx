@@ -152,7 +152,7 @@ describe("Карточка «Агенты» на реальном источни
     expect(container.querySelector("[data-agents-live]")).not.toBeNull();
   });
 
-  it("на компактном размере даёт число занятых и один переход", async () => {
+  it("на компактном размере даёт число занятых, а переход живёт в шапке карточки", async () => {
     serveRuns([
       {
         message_id: "m1",
@@ -168,7 +168,14 @@ describe("Карточка «Агенты» на реальном источни
 
     expect(container.textContent).toContain("сейчас в работе");
     expect(container.textContent).toContain("из 2");
-    expect(links()).toEqual(["/agents"]);
+    // Переход карточки держит шапка: в содержимом плитки 1×1 он соревновался
+    // бы за высоту с самим числом и обрезался первым.
+    expect(links()).toEqual([]);
+    expect(AGENTS_WIDGET.action).toEqual({
+      label: "Все агенты",
+      short: "Все",
+      to: "/agents",
+    });
   });
 
   it("сбой состава — честная ошибка с работающим повтором", async () => {
@@ -202,5 +209,46 @@ describe("Карточка «Агенты» на реальном источни
     expect(container.textContent).toContain("Агентов пока нет");
     expect(container.textContent).not.toContain("Корра");
     expect(links()).toEqual(["/profiles"]);
+  });
+
+  describe("показывает столько строк, сколько помещается целиком", () => {
+    // jsdom не раскладывает страницу, поэтому высоту окна списка задаём сами:
+    // проверяем не вёрстку браузера, а само правило «строка либо целиком, либо
+    // её нет» — из-за его отсутствия карточка и резала имя пополам.
+    const setViewportHeight = (height: number) =>
+      Object.defineProperty(HTMLDivElement.prototype, "clientHeight", {
+        configurable: true,
+        get: () => height,
+      });
+
+    afterEach(() => {
+      Reflect.deleteProperty(HTMLDivElement.prototype, "clientHeight");
+    });
+
+    it("на двух целых строках показывает обоих агентов", async () => {
+      setViewportHeight(100);
+      await mount("m");
+
+      expect(container.textContent).toContain("Корра");
+      expect(container.textContent).toContain("Дизайнер");
+      expect(container.textContent).not.toContain("ещё");
+    });
+
+    it("на одной строке показывает одного и честно считает остальных", async () => {
+      setViewportHeight(50);
+      await mount("m");
+
+      expect(container.textContent).toContain("Корра");
+      expect(container.textContent).not.toContain("Дизайнер");
+      expect(container.textContent).toContain("ещё 1");
+    });
+
+    it("когда не помещается ни одна строка, остаётся счёт, а не половина имени", async () => {
+      setViewportHeight(20);
+      await mount("m");
+
+      expect(container.textContent).not.toContain("Корра");
+      expect(container.textContent).toContain("из 2 в работе");
+    });
   });
 });
