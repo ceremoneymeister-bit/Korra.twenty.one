@@ -54,8 +54,6 @@ DEFAULT_SIZE = "m"
 #: installation has no verified human identity there: one machine, one owner.
 LOCAL_USER_KEY = "local"
 
-_MAX_USERS = 64
-
 
 def storage_key(user_id: Any = None, provider: Any = None) -> str:
     """Return the config key for a verified identity, or the single-owner key.
@@ -176,6 +174,12 @@ def updated(
 def store(config: dict[str, Any], key: str, record: Mapping[str, Any]) -> dict[str, Any]:
     """Write one person's record into *config*, leaving every other one intact.
 
+    There is deliberately no eviction of older records. Growth is bounded by
+    the people the installation's own auth lets in, each record is a handful of
+    short lists, and the alternative — quietly deleting somebody's saved board
+    to make room — costs a person their personalization with no warning and no
+    way to notice. Arranging your dashboard must never rearrange another's.
+
     Returns the mutated config so the caller can hand it straight to
     ``save_config``.
     """
@@ -189,18 +193,6 @@ def store(config: dict[str, Any], key: str, record: Mapping[str, Any]) -> dict[s
     users = layout.get("users")
     if not isinstance(users, dict):
         users = layout["users"] = {}
-    if key not in users and len(users) >= _MAX_USERS:
-        # A shared contour should not be able to grow config.yaml without
-        # bound. Drop the least recently written stranger, never the caller.
-        oldest = min(
-            (name for name in users if name != key),
-            key=lambda name: _revision(
-                users[name].get("revision") if isinstance(users[name], dict) else 0
-            ),
-            default=None,
-        )
-        if oldest is not None:
-            users.pop(oldest, None)
     users[key] = dict(record)
     return config
 

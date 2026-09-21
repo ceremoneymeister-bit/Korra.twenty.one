@@ -329,12 +329,20 @@ def test_one_persons_board_never_moves_another_persons(board_state):
     assert _get(bob) == bob_board
 
 
-def test_storing_a_record_keeps_existing_users(board_state):
-    state, _ = board_state
-    config = {"dashboard": {"layout": {"users": {"u:old": {"revision": 4}}}}}
-    store(config, "u:new", {"revision": 1})
-    assert set(config["dashboard"]["layout"]["users"]) == {"u:old", "u:new"}
-    assert config["dashboard"]["layout"]["users"]["u:old"] == {"revision": 4}
+def test_a_new_board_never_evicts_somebody_elses():
+    # Making room by deleting a stranger's saved board would cost a person
+    # their personalization silently; growth is bounded by who auth lets in.
+    config: dict = {}
+    for index in range(200):
+        store(config, f"u:{index:03d}", {"revision": 1, "order": list(WIDGET_IDS)})
+    users = config["dashboard"]["layout"]["users"]
+    assert len(users) == 200
+    assert users["u:000"] == {"revision": 1, "order": list(WIDGET_IDS)}
+
+    # And an existing record is replaced in place, not duplicated.
+    store(config, "u:000", {"revision": 2, "order": list(WIDGET_IDS)})
+    assert len(users) == 200
+    assert users["u:000"]["revision"] == 2
 
 
 def test_dashboard_layout_is_not_a_public_endpoint():
