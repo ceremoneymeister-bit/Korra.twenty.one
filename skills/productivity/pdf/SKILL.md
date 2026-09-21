@@ -1,37 +1,53 @@
 ---
 name: pdf
-description: "PDF files: create, read, merge, fill, OCR, edit text."
-version: 1.1.0
+description: "PDF: Korra design, create, read, merge, forms, OCR."
+version: 1.2.0
 author: Nous Research
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
   hermes:
-    tags: [pdf, documents, forms, ocr, text-extraction, reportlab, pypdf, pdfplumber, pymupdf, marker]
+    tags: [pdf, documents, korra, html, design, forms, ocr, text-extraction, reportlab, pypdf, pdfplumber, pymupdf, marker]
     category: productivity
     related_skills: [docx, xlsx, powerpoint]
 ---
 
 # PDF Skill
 
-Create PDFs from structured specs, build and fill AcroForm forms (with layout linting and visual overlays), extract text/tables/metadata, merge/split/rotate/watermark/stamp pages, export page images, manage metadata and attachments, and encrypt/decrypt — using pypdf, reportlab, and pdfplumber. Two absorbed capabilities live in references/ (read the matching file before those tasks):
+Create new documents from editable **Korra HTML/CSS templates by default**. Read
+[Korra document design](references/korra-documents.md), choose a starter, adapt it to
+the task, print with the installed Chromium, and review the actual PDF. A requested
+client brand, supplied design, or official form takes precedence. When the user's
+company name is already known from the task, profile or provided materials, pass
+`--company "Company name"` to `init`: it replaces the Korra logo with the company
+name and updates the title and running footer. Do not ask for known information
+again or infer a company from unrelated people; if unknown, keep Korra unless
+the task requires clarification. A supplied company logo can replace the text
+in the editable HTML. Preserve editable
+sources alongside the PDF; do not use the plain JSON/ReportLab route as the default
+for a designed proposal, report, or presentation.
 
-- **Scanned/image-only PDFs and OCR** (pymupdf fast path, marker-pdf quality path, scripts/extract_pymupdf.py + scripts/extract_marker.py): `references/ocr-extraction.md`
-- **Editing text inside an existing PDF via natural-language prompts** (nano-pdf CLI): `references/nano-pdf-editing.md`
+Also create PDFs from structured specs, build and fill AcroForm forms, extract
+text/tables/metadata, merge/split/rotate/watermark/stamp pages, export page images,
+manage metadata and attachments, and encrypt/decrypt. Read the matching reference:
+
+- **Scanned/image-only PDFs and OCR** (pymupdf fast path, marker-pdf quality path, scripts/extract_pymupdf.py + scripts/extract_marker.py): [OCR extraction](references/ocr-extraction.md).
+- **Editing text inside an existing PDF via natural-language prompts**: [nano-pdf editing](references/nano-pdf-editing.md).
 
 ## When to Use
 
-- Generate a report, invoice, or multi-page document as PDF.
+- Generate a proposal, report, brief, guide, invoice, presentation, or multi-page document as PDF, including requests in Russian.
 - Build a fillable AcroForm (text/checkbox/radio/dropdown) from a JSON spec, linting the layout first.
 - Pull text, tables (JSON/CSV), metadata, or form-field values out of a PDF.
 - Merge, split, rotate, extract page subsets, watermark, stamp text/images at coordinates, bookmark, or compress PDFs.
 - Export pages as PNGs for visual review or for OCR hand-off; set/clear document metadata; add/extract file attachments.
 - Fill or flatten AcroForm forms; encrypt or decrypt with passwords.
-- NOT for scanned/image-only PDFs (use `references/ocr-extraction.md`) and NOT for pixel-perfect HTML-to-PDF rendering (use a headless browser).
+- For scanned/image-only PDFs, follow the OCR reference. For editable PPTX output, also use `powerpoint`.
 
 ## Prerequisites
 
-- Python 3.10+ with `pypdf`, `reportlab`, `pdfplumber`:
+- Korra templates: Python 3.10+ (standard library only) and installed Chrome/Chromium 131+; the bundled browser cache is discovered automatically. Local Onest font and OFL license ship with the templates. No automatic downloads.
+- Existing PDF operations and JSON creation: `pypdf`, `reportlab`, `pdfplumber`:
   `python -m pip install pypdf reportlab pdfplumber`
 - Optional, for page rasterization (`pdf_page_image.py`, overlay rendering): `python -m pip install pypdfium2`, or poppler's `pdftoppm` on PATH. Scripts fall back pypdfium2 → pdftoppm and report `{"rendered": false, "missing": [...]}` (exit 0) when neither exists.
 - Each helper script checks imports lazily and prints an install hint if a dependency is missing.
@@ -41,7 +57,12 @@ Create PDFs from structured specs, build and fill AcroForm forms (with layout li
 All helpers live in `scripts/` and are argparse CLIs — run them with the `terminal` tool; every one supports `--help`. They read/write JSON strictly as UTF-8, print JSON results to stdout, and exit non-zero on failure.
 
 ```bash
-python scripts/pdf_create.py spec.json -o out.pdf         # build PDF from JSON spec
+python scripts/pdf_style.py init proposal --output-dir /absolute/task/document
+# When the company is known, use --company during init:
+python scripts/pdf_style.py init report --company 'Моя компания' --output-dir /absolute/task/company-report
+# Edit document.html and theme.css in that new directory, then:
+python scripts/pdf_style.py render /absolute/task/document/document.html -o /absolute/task/document.pdf
+python scripts/pdf_create.py spec.json -o out.pdf         # plain structured PDF, not the design default
 python scripts/pdf_make_form.py formspec.json -o form.pdf # build fillable AcroForm from JSON spec
 python scripts/pdf_form_layout.py formspec.json           # lint form layout BEFORE building
 python scripts/pdf_form_layout.py formspec.json --render-overlay boxes.png [--pdf form.pdf]
@@ -68,7 +89,8 @@ python scripts/pdf_meta.py doc.pdf --list-attachments | --extract-attachments di
 
 | Task | Tool | Command / API |
 |---|---|---|
-| Create doc (headings, tables, images) | reportlab platypus | `pdf_create.py spec.json -o out.pdf` |
+| Designed PDF; editable HTML | [Korra kit](references/korra-documents.md) + Chromium | `pdf_style.py init brief/proposal/report/guide/presentation --output-dir DIR`, then `render HTML -o PDF` |
+| Plain structured PDF / compatibility | reportlab platypus | `pdf_create.py spec.json -o out.pdf` |
 | Build fillable form | reportlab acroForm | `pdf_make_form.py formspec.json -o form.pdf` |
 | Lint form layout / overlay image | pure python + PIL | `pdf_form_layout.py formspec.json [--render-overlay o.png]` |
 | Per-page text | pdfplumber | `pdf_read.py f.pdf --text` |
@@ -86,18 +108,20 @@ python scripts/pdf_meta.py doc.pdf --list-attachments | --extract-attachments di
 
 ## Procedure
 
-1. **Inspect first.** Run `pdf_read.py file.pdf --meta`. Check `encrypted` (if true, decrypt first with `pdf_secure.py --decrypt`) and `likely_scanned_pages`. If pages are image-only, export them with `pdf_page_image.py --pages <scanned> --dpi 300 --out-dir imgs/` and hand the PNGs to the `references/ocr-extraction.md` skill — do not report empty text as "no content".
-2. **Create.** Write a JSON spec with `write_file` (elements: `heading`, `paragraph`, `table`, `image`, `pagebreak`; optional `title`/`author` metadata; page numbers are added automatically), then run `pdf_create.py`. Verify visually with `vision_analyze` on a rendered page image if layout matters.
+1. **Inspect existing input.** For an existing PDF, run `pdf_read.py file.pdf --meta`. Check `encrypted` (if true, decrypt first with `pdf_secure.py --decrypt`) and `likely_scanned_pages`. If pages are image-only, export them with `pdf_page_image.py --pages <scanned> --dpi 300 --out-dir imgs/` and follow [OCR extraction](references/ocr-extraction.md) — do not report empty text as "no content".
+2. **Create.** For a new document, read [Korra document design](references/korra-documents.md), copy a starter with [pdf_style.py](scripts/pdf_style.py), edit local HTML/CSS, and render. Replace demonstration content with verified facts; the report starter contains clearly marked fictitious data. Use `terminal` or `patch` for source edits. Extract the final PDF text and inspect every rendered page with `vision_analyze` before delivery. For an explicitly plain structured PDF or an existing JSON workflow, use `pdf_create.py` (elements: `heading`, `paragraph`, `table`, `image`, `pagebreak`; optional title/author metadata).
 3. **Extract.** `--text` gives a JSON list of per-page strings; `--tables` gives row arrays per page and can also emit CSV files. Read results with `read_file`; never eyeball a binary PDF directly.
 4. **Manipulate.** `pdf_merge.py` concatenates and can add one bookmark per source file; `pdf_split.py` handles page ranges (1-based, e.g. `1-3,5,9-`), rotation in 90° steps, and `--compress`. Watermark by preparing a single-page stamp PDF (e.g. via `pdf_create.py`) and overlaying it with `pdf_watermark.py`; for one-liner stamps ("sign here", diagonal DRAFT, corner labels) use `pdf_stamp.py` with text or an image at explicit coordinates.
-5. **Build forms.** Write one form-spec JSON (fields with `label_box`/`entry_box` in PDF points — see `references/forms.md`), lint it with `pdf_form_layout.py` and fix every reported problem, optionally review the `--render-overlay` PNG with `vision_analyze`, then build with `pdf_make_form.py` and confirm with `pdf_read.py --fields`.
-6. **Fill forms.** List fields (`--fields`) to learn exact names and types, write a UTF-8 JSON of `{"FieldName": "value"}` with `write_file` (checkboxes accept `true`/`false`; radio/choice values must match the field's export options), then `pdf_fill_form.py`. Re-read with `--fields` to confirm values landed.
+5. **Build forms.** Write one form-spec JSON (fields with `label_box`/`entry_box` in PDF points — see [forms](references/forms.md)), lint it with `pdf_form_layout.py` and fix every reported problem, optionally review the `--render-overlay` PNG with `vision_analyze`, then build with `pdf_make_form.py` and confirm with `pdf_read.py --fields`.
+6. **Fill forms.** List fields (`--fields`) to learn exact names and types, write a UTF-8 JSON of `{"FieldName": "value"}` using `terminal` or `patch` (checkboxes accept `true`/`false`; radio/choice values must match the field's export options), then `pdf_fill_form.py`. Re-read with `--fields` to confirm values landed.
 7. **Metadata & attachments.** `pdf_meta.py --set-meta` writes Title/Author/Subject/Keywords (DocInfo); `--clear-meta` drops them; `--attach`/`--list-attachments`/`--extract-attachments` round-trip embedded files.
 8. **Secure.** Encrypt with distinct user/owner passwords and AES-256. To remove a password you know, `--decrypt` writes an unencrypted copy.
 9. **Verify** (see below) before reporting success.
 
 ## Pitfalls
 
+- **Design is not guaranteed by printing**: inspect the PDF, not just the HTML. Check Cyrillic, the last paragraph, table continuation, empty pages, and slide overflow. Never hide overflow or turn all text into a screenshot to make a page fit.
+- **Templates are editable references**: remove irrelevant blocks, adapt the brand when requested, and never present the starter's demonstration text or invented metrics as real findings. Keep customizations in the task copy so bundled-skill updates preserve them.
 - **Scanned PDFs**: empty `extract_text()` plus page images means there is no text layer. Route to `references/ocr-extraction.md`; do not fabricate text.
 - **Flattening limits**: `pdf_fill_form.py --flatten` uses pypdf's flatten support, which converts widget appearances into page content. It is reliable for plain text fields and checkboxes but can drop or misrender exotic widgets (rich text, custom appearance streams, some radio groups). Verify the flattened output visually with `vision_analyze`; for bulletproof flattening use an external renderer (e.g. Ghostscript or `pdftoppm`+reassembly) as a fallback.
 - **NeedAppearances**: after filling, viewers only render values if appearance streams exist. The fill script sets the AcroForm `NeedAppearances` flag so conforming viewers regenerate them; some minimal viewers ignore it — flatten if display fidelity matters.
@@ -114,6 +138,7 @@ python scripts/pdf_meta.py doc.pdf --list-attachments | --extract-attachments di
 
 ## Verification
 
+- For a new designed PDF: follow [the kit's acceptance steps](references/korra-documents.md). Review text and all pages, then deliver the PDF with editable HTML/CSS/assets. Successful printing alone is not visual acceptance.
 - After create/merge/split: `pdf_read.py out.pdf --meta` — confirm `page_count`, and per-page `rotation` when you rotated.
 - After extraction: check the JSON is non-empty and spot-check a known string or cell.
 - Form design loop: `pdf_form_layout.py spec.json` must exit 0; then `--render-overlay boxes.png --pdf form.pdf` and review the PNG with `vision_analyze` (red = entry boxes with field names, blue = label boxes) asking about overlaps, misalignment, and labels detached from their fields. Iterate spec → lint → overlay until clean.

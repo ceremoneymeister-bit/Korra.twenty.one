@@ -1,0 +1,16 @@
+/* Task-local overrides. Change these, content, and components freely.
+   Base colors follow Korra. A client's brand takes precedence when requested.
+   Keep dark text on the lime accent; white text has insufficient contrast. */
+:root {
+  --ink: #1f1f1f;
+  --muted: #61635c;
+  --accent: #9ede01;
+  --paper: #ffffff;
+  --soft: #f3f4ef;
+  --line: #dce0d5;
+  --radius: 4mm;
+}
+
+/* Change the running label for a client document or remove it with content: none. */
+@page { @bottom-left { content: "KORRA"; } }
+@page slides { @bottom-left { content: none; } }

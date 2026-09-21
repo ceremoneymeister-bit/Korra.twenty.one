@@ -1,0 +1,119 @@
+/* Korra document foundations. Edit a task-local copy; keep assets portable. */
+@font-face {
+  font-family: Onest;
+  src: url("fonts/Onest-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+:root {
+  --ink: #1f1f1f;
+  --muted: #61635c;
+  --accent: #9ede01;
+  --paper: #fff;
+  --soft: #f3f4ef;
+  --line: #dce0d5;
+  --radius: 4mm;
+}
+
+@page {
+  size: A4;
+  margin: 17mm 17mm 20mm;
+  @bottom-left {
+    content: "KORRA";
+    font: 500 8pt Onest, sans-serif;
+    color: #61635c;
+  }
+  @bottom-right {
+    content: counter(page, decimal-leading-zero) " / " counter(pages, decimal-leading-zero);
+    font: 400 8pt Onest, sans-serif;
+    color: #61635c;
+  }
+}
+
+* { box-sizing: border-box; }
+html { color: var(--ink); background: var(--paper); }
+body {
+  margin: 0;
+  font: 400 10.5pt/1.55 Onest, Arial, sans-serif;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3, p, ul, ol, figure, blockquote { margin: 0; }
+h1, h2, h3 { font-weight: 600; line-height: 1.12; break-after: avoid; }
+h1 { font-size: 34pt; letter-spacing: -1.5pt; }
+h2 { font-size: 19pt; letter-spacing: -.55pt; margin: 9mm 0 4mm; }
+h3 { font-size: 12pt; margin: 0 0 2mm; }
+p + p { margin-top: 3mm; }
+p, li { orphans: 3; widows: 3; }
+ul, ol { padding-left: 5mm; }
+li + li { margin-top: 2mm; }
+strong { font-weight: 650; }
+a { color: inherit; text-underline-offset: 2pt; }
+img, svg { max-width: 100%; height: auto; }
+figure { margin: 5mm 0; }
+figcaption, .small { font-size: 8.5pt; color: var(--muted); }
+code { font-size: .9em; overflow-wrap: anywhere; }
+.brand { display: block; width: 34mm; height: auto; flex-shrink: 0; }
+.brand-name { max-width: 90mm; font-size: 16pt; font-weight: 650; line-height: 1.2; letter-spacing: -.4pt; }
+.masthead { display: flex; align-items: center; justify-content: space-between; gap: 8mm; padding-bottom: 6mm; border-bottom: .3mm solid var(--line); margin-bottom: 8mm; }
+.eyebrow { font-size: 8pt; font-weight: 600; letter-spacing: 1.1pt; text-transform: uppercase; }
+.muted { color: var(--muted); }
+.lead { font-size: 13pt; line-height: 1.5; max-width: 150mm; margin-top: 5mm; }
+.hero { padding: 10mm; border-radius: var(--radius); background: var(--ink); color: var(--paper); break-inside: avoid; }
+.hero .eyebrow { color: var(--accent); margin-bottom: 7mm; }
+.hero .lead { color: #e2e4dc; }
+.hero .small { color: #e2e4dc; }
+.highlight { background: var(--accent); color: var(--ink); border-radius: 1.2mm; padding: .2mm 1.5mm; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.rule { width: 14mm; height: 1.5mm; background: var(--accent); margin: 6mm 0; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4mm; margin: 5mm 0; }
+.grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.card { background: var(--soft); border: .25mm solid var(--line); border-radius: var(--radius); padding: 5mm; }
+.card p { font-size: 9.5pt; }
+.number { display: block; font-size: 27pt; font-weight: 550; line-height: 1.1; letter-spacing: -1pt; margin-bottom: 3mm; }
+.tag { display: inline-block; font-size: 8pt; font-weight: 550; padding: 1mm 3mm; border-radius: 8mm; background: var(--soft); border: .25mm solid var(--line); }
+.note { padding: 4mm 5mm; border-left: 1.2mm solid var(--accent); background: var(--soft); margin: 5mm 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 3mm 10mm; font-size: 8.5pt; margin: 5mm 0; color: var(--muted); }
+.section-label { color: var(--muted); font-size: 8pt; font-weight: 600; letter-spacing: .5pt; text-transform: uppercase; margin-bottom: 3mm; }
+.keep { break-inside: avoid; }
+.new-page { break-before: page; }
+.spaced { margin-top: 7mm; }
+.decision { border-top: .35mm solid var(--ink); padding-top: 4mm; margin-top: 7mm; break-inside: avoid; }
+table { border-collapse: collapse; width: 100%; margin: 5mm 0; font-size: 9pt; table-layout: fixed; }
+thead { display: table-header-group; }
+th { background: var(--ink); color: var(--paper); text-align: left; font-weight: 550; }
+td, th { padding: 3mm; vertical-align: top; overflow-wrap: anywhere; }
+td { border-bottom: .25mm solid var(--line); }
+tbody tr:nth-child(even) { background: var(--soft); }
+/* Ordinary rows stay together; oversize rows may still fragment in Chromium. */
+tr { break-inside: avoid; }
+.steps { list-style: none; padding: 0; counter-reset: steps; }
+.steps > li { counter-increment: steps; display: grid; grid-template-columns: 10mm 1fr; gap: 3mm; padding: 3.5mm 0; border-bottom: .25mm solid var(--line); break-inside: avoid; }
+.steps > li::before { content: counter(steps, decimal-leading-zero); font-size: 12pt; font-weight: 650; color: var(--muted); }
+.steps p { margin-top: 1.5mm; }
+
+/* A slide is one deliberate page. Overflow stays visible so it cannot be hidden. */
+@page slides { size: 320mm 180mm; margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+.deck { page: slides; }
+.slide { width: 320mm; min-height: 180mm; padding: 15mm 19mm; break-after: page; position: relative; }
+.slide:last-child { break-after: auto; }
+.slide h1 { font-size: 44pt; max-width: 245mm; letter-spacing: -1.9pt; }
+.slide h2 { font-size: 30pt; margin-top: 10mm; }
+.slide .lead { font-size: 17pt; max-width: 225mm; }
+.slide .masthead { margin-bottom: 15mm; }
+.slide .card { padding: 7mm; }
+.slide .card p { font-size: 12pt; }
+.slide.dark { background: var(--ink); color: var(--paper); }
+.slide.dark .masthead { border-color: #52554b; }
+.slide.dark .muted, .slide.dark .small { color: #e2e4dc; }
+.slide.dark .eyebrow { color: var(--accent); }
+.slide-footer { margin-top: 12mm; font-size: 8pt; color: var(--muted); }
+
+@media screen {
+  html { background: #e8e8e8; }
+  body:not(.deck) { max-width: 210mm; margin: 10mm auto; padding: 17mm; background: var(--paper); box-shadow: 0 2mm 10mm #0001; }
+  .slide { margin: 8mm auto; background: var(--paper); box-shadow: 0 2mm 10mm #0001; }
+  .new-page { margin-top: 20mm; border-top: 1px dashed var(--line); padding-top: 10mm; }
+}
