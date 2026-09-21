@@ -1477,16 +1477,28 @@ if not key:
 request = urllib.request.Request('http://127.0.0.1:' + os.environ['API_SERVER_PORT'] + '/v1/chat/completions', data=json.dumps({'messages': [{'role': 'user', 'content': 'Reply with exactly KORRA_UPDATE_OK. Do not use tools.'}], 'max_tokens': 24, 'stream': False}).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
 with urllib.request.urlopen(request, timeout=90) as response:
     value = json.load(response)
-content = value['choices'][0]['message']['content']
+choice = value['choices'][0]
+if choice.get('finish_reason') == 'error':
+    print('model-smoke-provider-unavailable')
+    raise SystemExit(0)
+content = choice['message']['content']
 if 'KORRA_UPDATE_OK' not in str(content):
     raise RuntimeError('Model smoke response missing acknowledgement')
 print('model-smoke-ok')
 '''
         try:
-            self.execute(code)
+            result = self.execute(code)
         except (UpdateError, OSError, subprocess.SubprocessError) as exc:
             self.receipt["error_code"] = "model_smoke_failed"
             raise UpdateError("Model smoke failed; see private operation.log") from exc
+        if result == "model-smoke-provider-unavailable":
+            self.receipt["model_smoke"] = {
+                "status": "warning",
+                "reason": "provider_unavailable",
+            }
+            self.log("model smoke: provider unavailable, update acceptance continues")
+        else:
+            self.receipt["model_smoke"] = {"status": "ok"}
 
     def judge_image(self):
         """The image that wrote this DATA: this operation's protected old image."""

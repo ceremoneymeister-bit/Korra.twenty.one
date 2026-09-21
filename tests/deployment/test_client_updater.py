@@ -1515,7 +1515,10 @@ def real_smoke_context(updater, monkeypatch):
             return io.BytesIO(json.dumps(settings["status"]).encode())
         return io.BytesIO(b'{"profiles":[{"name":"default"},{"name":"secretary"}]}')
     monkeypatch.setattr(u.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(updater, "execute", lambda code, *args, **kwargs: models.append(code))
+    def execute(code, *args, **kwargs):
+        models.append(code)
+        return "model-smoke-ok"
+    monkeypatch.setattr(updater, "execute", execute)
     return updater, clock, models, settings
 
 
@@ -1727,6 +1730,28 @@ def test_real_smoke_model_failure_has_safe_specific_reason(real_smoke_context, m
         u.Updater.smoke(updater, OLD)
     assert "private-upstream-response" not in str(caught.value)
     assert updater.receipt["error_code"] == "model_smoke_failed"
+
+
+def test_real_smoke_provider_unavailable_warns_without_rollback(real_smoke_context, monkeypatch):
+    updater, _, models, _ = real_smoke_context
+    monkeypatch.setattr(updater, "native_states", lambda **kwargs: [{"home": "/opt/data", "state": {
+        "gateway_state": "running", "served_profiles": ["default", "secretary"]}}])
+    monkeypatch.setattr(
+        updater,
+        "execute",
+        lambda code, *args, **kwargs: models.append(code) or "model-smoke-provider-unavailable",
+    )
+
+    u.Updater.smoke(updater, OLD)
+
+    assert updater.receipt["model_smoke"] == {
+        "status": "warning",
+        "reason": "provider_unavailable",
+    }
+    assert "error_code" not in updater.receipt
+    assert models[0].index("choice.get('finish_reason')") < models[0].index(
+        "choice['message']['content']"
+    )
 
 
 @pytest.mark.parametrize("damage", ["degraded", "missing", "schema", "malformed", "false_version"])
