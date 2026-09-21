@@ -84,13 +84,18 @@ def test_codex_keepalives_cannot_extend_the_host_deadline():
     assert yielded[0] < 100
 
 
-def test_codex_full_silence_wakes_at_the_host_deadline():
-    release = threading.Event()
+def test_codex_full_silence_uses_request_timeout_without_closing_shared_client():
+    create_finished = threading.Event()
     closed = threading.Event()
+    observed_timeout = []
 
-    def _blocked_create(**_kwargs):
-        release.wait(timeout=10.0)
-        return iter([])
+    def _blocked_create(**kwargs):
+        observed_timeout.append(kwargs["timeout"])
+        # Model an SDK request-local timeout while waiting for response
+        # headers. It ends the attempt without touching the shared client.
+        time.sleep(float(kwargs["timeout"]) + 0.05)
+        create_finished.set()
+        raise TimeoutError("request-local header timeout")
 
     real_client = SimpleNamespace(
         base_url="https://chatgpt.com/backend-api/codex",
@@ -112,16 +117,19 @@ def test_codex_full_silence_wakes_at_the_host_deadline():
             outcome["exception"] = exc
 
     worker = threading.Thread(target=_run, daemon=True)
-    try:
-        with patch("agent.auxiliary_client._evict_cached_client_instance"):
-            worker.start()
-            assert closed.wait(timeout=5.0), "host deadline never closed the client"
-            release.set()
-            worker.join(timeout=5.0)
+    retired = threading.Event()
+    with patch(
+        "agent.auxiliary_client._evict_cached_client_instance",
+        side_effect=lambda _client: retired.set(),
+    ):
+        worker.start()
+        assert retired.wait(timeout=5.0), "host deadline never retired the client"
+        assert create_finished.wait(timeout=5.0)
+        worker.join(timeout=5.0)
         assert isinstance(outcome.get("exception"), TimeoutError)
         assert "hard ceiling" in str(outcome["exception"])
-    finally:
-        release.set()
+    assert observed_timeout and observed_timeout[0] <= 0.3
+    assert not closed.is_set()
 
 
 def test_codex_without_host_deadline_completes_normally():

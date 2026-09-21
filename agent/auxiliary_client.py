@@ -1891,6 +1891,22 @@ class _CodexCompletionsAdapter:
         attempt_stream_lock = threading.Lock()
         attempt_stream: List[Any] = []
 
+        def _close_attempt_stream(reason: str) -> None:
+            """Stop only this Responses attempt; never close the shared client."""
+            with attempt_stream_lock:
+                stream = attempt_stream[0] if attempt_stream else None
+            close_stream = getattr(stream, "close", None)
+            if not callable(close_stream):
+                return
+            try:
+                close_stream()
+            except Exception:
+                logger.debug(
+                    "Codex auxiliary: %s attempt stream close failed",
+                    reason,
+                    exc_info=True,
+                )
+
         def _effective_deadline() -> float:
             with deadline_lock:
                 return min(hard_deadline, progress_deadline[0])
@@ -1934,41 +1950,30 @@ class _CodexCompletionsAdapter:
             # Publish transport timeout only after the attempt-local decision is
             # fixed, so owner polling cannot observe completion in between.
             timed_out.set()
+            # #70773 / TLS-FD -> SQLite: ``self._client`` is shared by every
+            # cached auxiliary/vision wrapper. Closing it from this watchdog
+            # timer releases pool FDs while sibling TLS workers may still own
+            # SSL BIO state. The kernel can then reuse one of those integers
+            # for an unrelated SQLite file and a late TLS flush writes into
+            # that file. Only the attempt-local stream has an unambiguous
+            # owner, so it is the only object the watchdog may close.
+            _close_attempt_stream("timed out" if timeout_won else "cancelled")
             if not timeout_won:
                 # The request owner already hard-cancelled this attempt. The
-                # OpenAI client is process-shared, so closing/evicting it here
-                # would disrupt unrelated sessions. Wake only this attempt's
-                # event stream when responses.create() returned one in time;
-                # otherwise rely on the bounded SDK/provider timeout.
-                with attempt_stream_lock:
-                    stream = attempt_stream[0] if attempt_stream else None
-                close_stream = getattr(stream, "close", None)
-                if callable(close_stream):
-                    try:
-                        close_stream()
-                    except Exception:
-                        logger.debug(
-                            "Codex auxiliary: cancelled attempt stream close "
-                            "during timeout failed",
-                            exc_info=True,
-                        )
+                # shared client and cache remain valid for sibling requests.
                 return
-            close = getattr(self._client, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    logger.debug("Codex auxiliary: client close during timeout failed", exc_info=True)
-            # The cached auxiliary client wraps this same ``self._client``
-            # (or *is* a ``CodexAuxiliaryClient`` whose ``_real_client`` is
-            # this instance).  After we close the httpx transport above, the
-            # cache must drop that entry — otherwise the next auxiliary call
-            # (compression retry, memory flush, etc.) reuses the dead client
-            # and fails fast with a connection error.  See issue #23432.
+            # Retire the shared instance from the cache without calling
+            # ``close()``. Existing borrowers keep their references and can
+            # finish; the next auxiliary call builds a fresh client. FD release
+            # is thereby deferred until all borrowers have unwound, matching
+            # the primary client's ownership discipline in #70773.
             try:
                 _evict_cached_client_instance(self._client)
             except Exception:
-                logger.debug("Codex auxiliary: cache eviction on timeout failed", exc_info=True)
+                logger.debug(
+                    "Codex auxiliary: cache retirement on timeout failed",
+                    exc_info=True,
+                )
 
         def _check_cancelled() -> None:
             if total_timeout is not None and time.monotonic() >= _effective_deadline():
@@ -2036,6 +2041,16 @@ class _CodexCompletionsAdapter:
 
             stream_kwargs = dict(resp_kwargs)
             stream_kwargs["stream"] = True
+            # The watchdog cannot safely close a process-shared client when
+            # responses.create() is still waiting for headers and has not yet
+            # returned an attempt-local stream. Bound that request itself by
+            # the same effective deadline instead. Once a stream exists, the
+            # watchdog can close only that stream.
+            request_timeout = max(_effective_deadline() - time.monotonic(), 0.001)
+            configured_timeout = stream_kwargs.get("timeout")
+            if isinstance(configured_timeout, (int, float)) and configured_timeout > 0:
+                request_timeout = min(request_timeout, float(configured_timeout))
+            stream_kwargs["timeout"] = request_timeout
             # #93650: keep bulk wire-format payload out of the SDK's
             # GIL-holding request transform on auxiliary calls too.
             stream_kwargs = _bypass_sdk_request_transform(stream_kwargs)
@@ -2063,23 +2078,13 @@ class _CodexCompletionsAdapter:
             event_stream = self._client.responses.create(**stream_kwargs)
             with attempt_stream_lock:
                 attempt_stream.append(event_stream)
-            # The timer can fire while responses.create() is blocked. If the
-            # cancelled attempt had no stream to close at that instant, close it
-            # now that it is safely attempt-owned; never touch the shared client.
-            if (
-                timed_out.is_set()
-                and callable(protected_cancel_check)
-                and _captured_aux_cancel_requested(protected_cancel_check)
-            ):
-                close_fn = getattr(event_stream, "close", None)
-                if callable(close_fn):
-                    try:
-                        close_fn()
-                    except Exception:
-                        logger.debug(
-                            "Codex auxiliary: late cancelled attempt stream close failed",
-                            exc_info=True,
-                        )
+            # The timer can fire while responses.create() is blocked, before
+            # any attempt-local stream exists. Close that stream as soon as it
+            # arrives and surface the recorded timeout; never touch the shared
+            # client to wake a blocked create().
+            if timed_out.is_set():
+                _close_attempt_stream("late timed-out")
+                _check_cancelled()
             try:
                 # Some Codex-compatible hosts accept ``stream=True`` but return
                 # a completed Responses object instead of an SSE iterator. Do
@@ -2094,6 +2099,10 @@ class _CodexCompletionsAdapter:
                         model=str(resp_kwargs.get("model") or model),
                         on_event=_on_each_event,
                     )
+                # A stream.close() implementation is allowed to end iteration
+                # cleanly. Do not accidentally turn a watchdog timeout into a
+                # successful empty/completed response in that case.
+                _check_cancelled()
             finally:
                 close_fn = getattr(event_stream, "close", None)
                 if callable(close_fn):
@@ -4656,7 +4665,7 @@ def _is_connection_error(exc: Exception) -> bool:
 
 
 def _auxiliary_transport_is_closed(client: Any) -> bool:
-    """A watchdog may close the SDK transport behind a cached Codex wrapper."""
+    """Return whether a provider closed its transport behind a cached wrapper."""
     transport = getattr(client, "_real_client", client)
     closed = getattr(transport, "is_closed", False)
     return (closed() if callable(closed) else closed) is True
@@ -4966,13 +4975,15 @@ def _evict_cached_clients(provider: str) -> None:
 def _evict_cached_client_instance(target: Any) -> bool:
     """Drop the cache entry whose stored client is *target*.
 
-    Used when a specific cached client has been poisoned (closed httpx
-    transport after a timeout, broken streaming session, etc.) so the next
-    auxiliary call rebuilds rather than reusing the dead instance.
+    This is ownership-safe retirement, not transport shutdown: it deliberately
+    does not call ``close()``. Existing borrowers keep their references and the
+    next auxiliary call rebuilds instead of reusing the retired instance. This
+    matters for shared Codex clients because releasing pool FDs from a watchdog
+    thread can race late TLS writes into an unrelated reused file descriptor.
 
     Walks both sync and async wrappers (``CodexAuxiliaryClient``,
     ``AnthropicAuxiliaryClient``, ``AsyncCodexAuxiliaryClient``, etc.) via
-    their ``_real_client`` attribute so a timeout that closes the underlying
+    their ``_real_client`` attribute so retirement of the underlying
     ``OpenAI`` (or native provider) client evicts every cached shim that
     exposed it. Async wrappers must mirror their sync sibling's
     ``_real_client`` for this to work — otherwise the sync entry is evicted

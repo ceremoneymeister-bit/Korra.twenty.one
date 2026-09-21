@@ -18,9 +18,10 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 from korra_constants import get_hermes_home
 
@@ -49,6 +50,17 @@ class EffectExecutorUnavailable(DecisionError):
     """The exact effect is understood but has no safe executor."""
 
 
+class EffectDecisionStoreUnavailable(DecisionError):
+    """The durable ledger cannot be trusted, so no decision may proceed."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(
+            message
+            or "Durable effect decisions are unavailable; the database was "
+            "left unchanged and requires recovery."
+        )
+
+
 def _executor_instance() -> str:
     """Distinguish an inherited post-fork child from the claiming process."""
     return f"{os.getpid()}:{_PROCESS_INSTANCE}"
@@ -75,56 +87,108 @@ def payload_digest(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_payload(payload).encode("utf-8")).hexdigest()
 
 
-def _connect(path: str | os.PathLike[str] | None = None) -> sqlite3.Connection:
+@contextmanager
+def _connect(
+    path: str | os.PathLike[str] | None = None,
+) -> Iterator[sqlite3.Connection]:
+    """Open the decision ledger without ever repairing or replacing damage.
+
+    An existing file must already be recognisably SQLite before the sqlite
+    library sees it. This is intentionally stricter than sqlite's convenient
+    empty-file initialisation: a zeroed/truncated durable ledger is evidence to
+    preserve, not permission to silently create a new database. A brand-new
+    file is created atomically and initialised once.
+    """
     db_path = _db_path(path)
-    db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    # sqlite's creation mode follows umask.  Pre-create explicitly so message
-    # drafts and recipient identifiers never inherit a permissive process umask.
-    fd = os.open(db_path, os.O_CREAT | os.O_RDWR, 0o600)
-    os.close(fd)
-    os.chmod(db_path, 0o600)
-    conn = sqlite3.connect(db_path, timeout=15.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout = 15000")
-    conn.execute("PRAGMA foreign_keys = ON")
-    with _SCHEMA_LOCK:
-        # CREATE IF NOT EXISTS is cheap and also handles a profile database
-        # being restored/replaced while a long-lived gateway process remains
-        # alive. A process-local "initialized" cache would return a connection
-        # to the replacement file without its schema.
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS effect_decisions (
-                id TEXT PRIMARY KEY,
-                kind TEXT NOT NULL,
-                owner_id TEXT NOT NULL,
-                profile TEXT NOT NULL,
-                source_session_id TEXT NOT NULL,
-                source_session_key TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                payload_sha256 TEXT NOT NULL,
-                dedupe_key TEXT NOT NULL,
-                status TEXT NOT NULL CHECK (status IN (
-                    'pending', 'approved', 'denied', 'executing',
-                    'succeeded', 'failed', 'unknown'
-                )),
-                idempotency_key TEXT NOT NULL UNIQUE,
-                executor_instance TEXT,
-                outcome_json TEXT,
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL,
-                decided_at REAL,
-                execution_started_at REAL,
-                finished_at REAL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS effect_decisions_one_pending
-                ON effect_decisions(dedupe_key) WHERE status = 'pending';
-            CREATE INDEX IF NOT EXISTS effect_decisions_session_status
-                ON effect_decisions(source_session_id, status, created_at);
-            """
-        )
-        conn.commit()
-    return conn
+    conn: sqlite3.Connection | None = None
+    try:
+        db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # sqlite's creation mode follows umask. Pre-create explicitly so
+        # message drafts and recipient identifiers never inherit a permissive
+        # process umask. O_EXCL distinguishes a legitimate first creation from
+        # a pre-existing zero-byte/truncated store, which must fail closed.
+        created = False
+        try:
+            fd = os.open(db_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            created = True
+        except FileExistsError:
+            fd = os.open(db_path, os.O_RDWR)
+        try:
+            if not created:
+                size = os.fstat(fd).st_size
+                os.lseek(fd, 0, os.SEEK_SET)
+                header = os.read(fd, 16) if size >= 16 else b""
+                if header != b"SQLite format 3\x00":
+                    raise sqlite3.DatabaseError(
+                        "effect decision database header is invalid"
+                    )
+        finally:
+            os.close(fd)
+        os.chmod(db_path, 0o600)
+
+        conn = sqlite3.connect(db_path, timeout=15.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 15000")
+        conn.execute("PRAGMA foreign_keys = ON")
+        with _SCHEMA_LOCK:
+            if not created:
+                check = conn.execute("PRAGMA quick_check(1)").fetchone()
+                if check is None or check[0] != "ok":
+                    detail = check[0] if check is not None else "no result"
+                    raise sqlite3.DatabaseError(
+                        f"effect decision database quick_check failed: {detail}"
+                    )
+                table = conn.execute(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'effect_decisions'"
+                ).fetchone()
+                if table is None:
+                    raise sqlite3.DatabaseError(
+                        "effect decision database schema is missing"
+                    )
+            # CREATE IF NOT EXISTS also handles a healthy profile database
+            # being atomically restored while a long-lived gateway remains
+            # alive. A process-local "initialized" cache would miss that swap.
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS effect_decisions (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    profile TEXT NOT NULL,
+                    source_session_id TEXT NOT NULL,
+                    source_session_key TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    payload_sha256 TEXT NOT NULL,
+                    dedupe_key TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN (
+                        'pending', 'approved', 'denied', 'executing',
+                        'succeeded', 'failed', 'unknown'
+                    )),
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    executor_instance TEXT,
+                    outcome_json TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    decided_at REAL,
+                    execution_started_at REAL,
+                    finished_at REAL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS effect_decisions_one_pending
+                    ON effect_decisions(dedupe_key) WHERE status = 'pending';
+                CREATE INDEX IF NOT EXISTS effect_decisions_session_status
+                    ON effect_decisions(source_session_id, status, created_at);
+                """
+            )
+            conn.commit()
+        yield conn
+    except EffectDecisionStoreUnavailable:
+        raise
+    except (OSError, sqlite3.Error) as exc:
+        raise EffectDecisionStoreUnavailable() from exc
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -134,9 +198,18 @@ def _row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     try:
         data["payload"] = json.loads(data.pop("payload_json"))
     except Exception as exc:  # fail closed on a corrupted durable payload
-        raise DecisionError("stored effect payload is not valid JSON") from exc
+        raise EffectDecisionStoreUnavailable(
+            "Stored effect decision payload is corrupt; the database was left "
+            "unchanged and requires recovery."
+        ) from exc
     raw_outcome = data.pop("outcome_json", None)
-    data["outcome"] = json.loads(raw_outcome) if raw_outcome else None
+    try:
+        data["outcome"] = json.loads(raw_outcome) if raw_outcome else None
+    except Exception as exc:
+        raise EffectDecisionStoreUnavailable(
+            "Stored effect decision outcome is corrupt; the database was left "
+            "unchanged and requires recovery."
+        ) from exc
     return data
 
 

@@ -20,6 +20,7 @@ New contract for ``_CodexCompletionsAdapter.create``:
    full-budget stall skips straight to fallback (#54465 semantics).
 """
 
+import sqlite3
 import threading
 import time
 from types import SimpleNamespace
@@ -150,31 +151,36 @@ class TestNoProgressFailFast:
                 timeout=300,
             )
 
-    def test_watchdog_timer_fires_while_blocked_before_first_event(self):
+    def test_watchdog_retires_but_does_not_close_client_while_create_is_blocked(self):
         """responses.create() itself can block with zero bytes; the re-armable
-        watchdog must close the client and surface the no-progress timeout
-        without any event ever reaching _check_cancelled."""
+        watchdog records the timeout without releasing the shared client's FDs.
+        Once create() returns, its attempt-local stream is closed and the
+        no-progress timeout is surfaced."""
         release = threading.Event()
 
         def _blocked_create(**_kwargs):
             release.wait(timeout=30.0)
             return iter([])
 
-        closed = threading.Event()
+        close_client = MagicMock()
         real_client = SimpleNamespace(
             base_url="https://chatgpt.com/backend-api/codex",
             responses=SimpleNamespace(create=_blocked_create),
-            close=closed.set,
+            close=close_client,
         )
         adapter = _CodexCompletionsAdapter(real_client, "gpt-5.6-sol")
         try:
+            retired = threading.Event()
             with (
                 patch("agent.auxiliary_client._AUX_STREAM_NO_PROGRESS_TIMEOUT_SECONDS", 0.3),
-                patch("agent.auxiliary_client._evict_cached_client_instance"),
+                patch(
+                    "agent.auxiliary_client._evict_cached_client_instance",
+                    side_effect=lambda _client: retired.set(),
+                ),
             ):
-                # The watchdog closes the shared client at the window; the
-                # blocked create keeps waiting (SimpleNamespace has no real
-                # transport), so unblock it and verify the timeout surfaced.
+                # There is no attempt-local stream until create() returns, so
+                # the watchdog cannot safely wake this fake provider. Release
+                # it after observing ownership-safe cache retirement.
                 waiter: dict = {}
 
                 def _run():
@@ -188,13 +194,117 @@ class TestNoProgressFailFast:
 
                 t = threading.Thread(target=_run, daemon=True)
                 t.start()
-                assert closed.wait(timeout=5.0), "watchdog never closed client"
+                assert retired.wait(timeout=5.0), "watchdog never retired client"
+                close_client.assert_not_called()
                 release.set()
                 t.join(timeout=5.0)
             assert isinstance(waiter.get("exc"), TimeoutError)
             assert "no-progress timeout" in str(waiter["exc"])
+            close_client.assert_not_called()
         finally:
             release.set()
+
+    def test_parallel_auxiliary_timeout_never_closes_shared_client_or_damages_sqlite(
+        self, tmp_path
+    ):
+        """A timed-out auxiliary/vision sibling owns only its stream (#70773)."""
+        db_path = tmp_path / "unrelated.sqlite3"
+        with sqlite3.connect(db_path) as database:
+            database.execute("CREATE TABLE sentinel (value TEXT NOT NULL)")
+            database.execute("INSERT INTO sentinel VALUES ('before')")
+
+        timed_stream_started = threading.Event()
+        timed_stream_closed = threading.Event()
+        shared_client_closed = threading.Event()
+        close_client = MagicMock(side_effect=shared_client_closed.set)
+
+        class TimedStream:
+            def __iter__(self):
+                timed_stream_started.set()
+                while not timed_stream_closed.wait(0.01):
+                    yield _keepalive_event()
+
+            def close(self):
+                timed_stream_closed.set()
+
+        class HealthyStream:
+            def __iter__(self):
+                assert timed_stream_started.wait(timeout=5.0)
+                # Establish progress before the sibling's no-progress window,
+                # then remain live across that sibling watchdog firing.
+                yield _content_event("before-timeout")
+                assert timed_stream_closed.wait(timeout=5.0)
+                if shared_client_closed.is_set():
+                    raise RuntimeError("shared client was closed by sibling watchdog")
+                yield _content_event("after-timeout")
+
+            def close(self):
+                pass
+
+        create_count = 0
+        create_lock = threading.Lock()
+
+        def _create(**_kwargs):
+            nonlocal create_count
+            with create_lock:
+                create_count += 1
+                call_number = create_count
+            return TimedStream() if call_number == 1 else HealthyStream()
+
+        shared_client = SimpleNamespace(
+            base_url="https://chatgpt.com/backend-api/codex",
+            responses=SimpleNamespace(create=_create),
+            close=close_client,
+        )
+        adapters = [
+            _CodexCompletionsAdapter(shared_client, "gpt-5.6-sol")
+            for _ in range(3)
+        ]
+        results: dict[int, object] = {}
+
+        def _run(index: int) -> None:
+            try:
+                results[index] = adapters[index].create(
+                    messages=[{"role": "user", "content": f"request-{index}"}],
+                    timeout=5.0,
+                )
+            except Exception as exc:  # noqa: BLE001 - captured for assertions
+                results[index] = exc
+
+        threads = [
+            threading.Thread(target=_run, args=(index,), daemon=True)
+            for index in range(3)
+        ]
+        with (
+            patch("agent.auxiliary_client._AUX_STREAM_NO_PROGRESS_TIMEOUT_SECONDS", 0.3),
+            patch("agent.codex_runtime._consume_codex_event_stream", _consume),
+        ):
+            # Start the timed request first so its stream selection is
+            # deterministic, then overlap two healthy auxiliary/vision calls.
+            threads[0].start()
+            assert timed_stream_started.wait(timeout=5.0)
+            threads[1].start()
+            threads[2].start()
+
+            # Exercise an unrelated SQLite FD while the watchdog fires.
+            with sqlite3.connect(db_path) as database:
+                database.execute("INSERT INTO sentinel VALUES ('during-timeout')")
+            for thread in threads:
+                thread.join(timeout=5.0)
+                assert not thread.is_alive()
+
+        assert isinstance(results[0], TimeoutError)
+        for index in (1, 2):
+            response = results[index]
+            assert not isinstance(response, Exception)
+            assert response.choices[0].message.content == "summary"
+        close_client.assert_not_called()
+
+        with sqlite3.connect(db_path) as database:
+            assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+            assert database.execute(
+                "SELECT value FROM sentinel ORDER BY rowid"
+            ).fetchall() == [("before",), ("during-timeout",)]
 
 
 class TestCompressionRetryGate:

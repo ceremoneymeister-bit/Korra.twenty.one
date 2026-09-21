@@ -3196,7 +3196,7 @@ class TestVisionAutoSkipsKimiCoding:
 
 
 class TestCodexAuxiliaryAdapterTimeout:
-    def test_forwards_timeout_to_responses_create(self):
+    def test_bounds_responses_create_by_caller_timeout(self):
         message_item = SimpleNamespace(
             type="message",
             content=[SimpleNamespace(type="output_text", text="summary")],
@@ -3228,7 +3228,8 @@ class TestCodexAuxiliaryAdapterTimeout:
             timeout=12.5,
         )
 
-        assert fake_client.responses.kwargs["timeout"] == 12.5
+        request_timeout = fake_client.responses.kwargs["timeout"]
+        assert 12.0 < request_timeout <= 12.5
         assert fake_client.responses.kwargs["stream"] is True
         assert response.choices[0].message.content == "summary"
 

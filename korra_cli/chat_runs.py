@@ -111,12 +111,25 @@ async def chat_runs(profile: str | None = None, session_id: str | None = None):
         result.append(summary)
     from korra_cli.chat_activity import project_chat_activity
 
-    projected = await server.run_in_threadpool(
-        project_chat_activity,
-        result,
-        profile=profile,
-        session_id=session_id,
-    )
+    try:
+        projected = await server.run_in_threadpool(
+            project_chat_activity,
+            result,
+            profile=profile,
+            session_id=session_id,
+        )
+    except Exception as exc:
+        from tools.effect_decisions import EffectDecisionStoreUnavailable
+
+        if not isinstance(exc, EffectDecisionStoreUnavailable):
+            raise
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Хранилище подтверждений временно недоступно. Данные не "
+                "изменялись; требуется восстановление базы."
+            ),
+        ) from None
     return {"runs": projected}
 
 

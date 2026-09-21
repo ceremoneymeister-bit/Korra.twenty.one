@@ -14,6 +14,7 @@
 """
 
 import json
+import logging
 import threading
 
 import pytest
@@ -230,6 +231,56 @@ class TestChatStreamApproval:
 
 
 class TestSessionApprovalEndpoints:
+    @pytest.mark.asyncio
+    async def test_corrupt_durable_store_returns_quiet_actionable_503(
+        self, adapter, tmp_path, monkeypatch, caplog
+    ):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        db_path = tmp_path / "effect_decisions.sqlite3"
+        pending, _ = effect_decisions.create_pending(
+            kind="outbound_message",
+            owner_id="owner-1",
+            profile="default",
+            source_session_id="s-corrupt",
+            source_session_key="api:s-corrupt",
+            payload={"target_label": "test", "message": "draft"},
+        )
+        damaged = bytearray(db_path.read_bytes())
+        damaged[5:29] = b"\x17\x03\x03\x00\x13" + (b"T" * 19)
+        db_path.write_bytes(damaged)
+        damaged_bytes = bytes(damaged)
+
+        monkeypatch.setattr(
+            "gateway.platforms.api_server._effect_store_last_warning", 0.0
+        )
+        caplog.set_level(logging.ERROR, logger="gateway.platforms.api_server")
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            center = await cli.get("/api/effect-decisions")
+            session = await cli.get("/api/sessions/s-corrupt/approvals")
+            resolve = await cli.post(
+                "/api/sessions/s-corrupt/approval",
+                json={"choice": "once", "request_id": pending["id"]},
+            )
+            responses = [
+                (response.status, await response.json())
+                for response in (center, session, resolve)
+            ]
+
+        for status, body in responses:
+            assert status == 503
+            assert body["error"]["code"] == "effect_decision_store_unavailable"
+            assert "Данные не изменялись" in body["error"]["message"]
+
+        warnings = [
+            record
+            for record in caplog.records
+            if "durable effect store unavailable" in record.getMessage()
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].exc_info is None
+        assert db_path.read_bytes() == damaged_bytes
+
     @pytest.mark.asyncio
     async def test_durable_external_decision_survives_without_live_listener(
         self, adapter, tmp_path, monkeypatch

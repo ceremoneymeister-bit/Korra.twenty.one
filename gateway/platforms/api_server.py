@@ -1313,6 +1313,38 @@ def _openai_error(message: str, err_type: str = "invalid_request_error", param: 
     }
 
 
+_EFFECT_STORE_WARNING_INTERVAL_SECONDS = 300.0
+_effect_store_warning_lock = threading.Lock()
+_effect_store_last_warning = 0.0
+
+
+def _effect_store_unavailable_response(context: str, exc: Exception) -> "web.Response":
+    """Return a stable 503 and rate-limit corruption noise without tracebacks."""
+    global _effect_store_last_warning
+
+    now = time.monotonic()
+    should_log = False
+    with _effect_store_warning_lock:
+        if now - _effect_store_last_warning >= _EFFECT_STORE_WARNING_INTERVAL_SECONDS:
+            _effect_store_last_warning = now
+            should_log = True
+    if should_log:
+        logger.error(
+            "[api_server] durable effect store unavailable (%s): %s",
+            context,
+            exc,
+        )
+    return web.json_response(
+        _openai_error(
+            "Хранилище подтверждений временно недоступно. Данные не изменялись; "
+            "требуется восстановление базы.",
+            err_type="server_error",
+            code="effect_decision_store_unavailable",
+        ),
+        status=503,
+    )
+
+
 _api_agent_request_reservation: ContextVar[Optional[dict[str, bool]]] = ContextVar(
     "api_agent_request_reservation", default=None
 )
@@ -4658,7 +4690,13 @@ class APIServerAdapter(BasePlatformAdapter):
                 )
                 if str(item.get("id") or "") not in seen
             )
-        except Exception:
+        except Exception as exc:
+            from tools.effect_decisions import EffectDecisionStoreUnavailable
+
+            if isinstance(exc, EffectDecisionStoreUnavailable):
+                return _effect_store_unavailable_response(
+                    "session approvals", exc
+                )
             logger.exception(
                 "[api_server] durable decisions could not be listed for session %s",
                 session_id,
@@ -4699,7 +4737,13 @@ class APIServerAdapter(BasePlatformAdapter):
                 )
                 for item in decisions
             ]
-        except Exception:
+        except Exception as exc:
+            from tools.effect_decisions import EffectDecisionStoreUnavailable
+
+            if isinstance(exc, EffectDecisionStoreUnavailable):
+                return _effect_store_unavailable_response(
+                    "profile decision center", exc
+                )
             logger.exception("[api_server] durable decisions could not be listed")
             return web.json_response(
                 _openai_error("Durable decisions are unavailable."), status=500
@@ -4805,9 +4849,14 @@ class APIServerAdapter(BasePlatformAdapter):
             except Exception as exc:
                 from tools.effect_decisions import (
                     DecisionConflict,
+                    EffectDecisionStoreUnavailable,
                     EffectExecutorUnavailable,
                 )
 
+                if isinstance(exc, EffectDecisionStoreUnavailable):
+                    return _effect_store_unavailable_response(
+                        "decision resolution", exc
+                    )
                 if isinstance(exc, EffectExecutorUnavailable):
                     return web.json_response(
                         _openai_error(

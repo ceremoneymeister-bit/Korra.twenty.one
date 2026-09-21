@@ -7,7 +7,7 @@ import pytest
 
 from korra_state import SessionDB
 from korra_cli import chat_activity
-from tools.effect_decisions import create_pending
+from tools.effect_decisions import EffectDecisionStoreUnavailable, create_pending
 
 
 def _session(home, session_id, *, source, title, holder=None):
@@ -156,6 +156,33 @@ def test_pending_decision_replaces_same_turn_lease_instead_of_counting_twice(
     assert len(active) == 1
     assert active[0]["message_id"] == "browser-message"
     assert active[0]["status"] == "waiting_decision"
+
+
+def test_corrupt_effect_store_is_not_hidden_as_an_empty_activity_list(
+    monkeypatch, tmp_path
+):
+    home = tmp_path / "lawyer"
+    home.mkdir()
+    _session(home, "decision-chat", source="browser", title="Решение")
+    db_path = home / "effect_decisions.sqlite3"
+    create_pending(
+        kind="outbound_message",
+        owner_id="owner",
+        profile="lawyer",
+        source_session_id="decision-chat",
+        source_session_key="browser:decision-chat",
+        payload={"target": "owner", "message": "Черновик"},
+        path=db_path,
+    )
+    damaged = bytearray(db_path.read_bytes())
+    damaged[5:29] = b"\x17\x03\x03\x00\x13" + (b"T" * 19)
+    db_path.write_bytes(damaged)
+    monkeypatch.setattr(
+        chat_activity, "_profile_targets", lambda _profile: [("lawyer", home)]
+    )
+
+    with pytest.raises(EffectDecisionStoreUnavailable):
+        chat_activity.project_chat_activity([], profile="lawyer", session_id=None)
 
 
 def test_expired_lease_is_stale_not_running(monkeypatch, tmp_path):

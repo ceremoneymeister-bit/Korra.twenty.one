@@ -385,9 +385,10 @@ def test_codex_timeout_and_explicit_cancel_have_one_linearized_outcome(
 
     assert not owner.is_alive()
     if winner == "timeout":
-        assert real_client.closed.is_set()
         assert isinstance(owner_outcome["exc"], TimeoutError)
         assert not isinstance(owner_outcome["exc"], aux.AuxiliaryExplicitCancellation)
+        assert stream.closed.wait(timeout=1), "timeout did not wake its attempt stream"
+        assert not real_client.closed.is_set()
     else:
         assert isinstance(owner_outcome["exc"], aux.AuxiliaryExplicitCancellation)
         assert stream.closed.wait(timeout=1), "cancelled timer did not wake its stream"

@@ -77,6 +77,8 @@ def _gateway_heartbeat_live(home: Path, now: float) -> bool:
 
 
 def _pending_decisions(home: Path) -> list[dict[str, Any]]:
+    from tools.effect_decisions import EffectDecisionStoreUnavailable
+
     path = home / "effect_decisions.sqlite3"
     if not path.is_file():
         return []
@@ -90,8 +92,8 @@ def _pending_decisions(home: Path) -> list[dict[str, Any]]:
             "ORDER BY created_at DESC LIMIT 100"
         ).fetchall()
         return [dict(row) for row in rows]
-    except (OSError, sqlite3.Error):
-        return []
+    except (OSError, sqlite3.Error) as exc:
+        raise EffectDecisionStoreUnavailable() from exc
     finally:
         if connection is not None:
             connection.close()
@@ -289,7 +291,14 @@ def project_chat_activity(
     for wire_profile, home in _profile_targets(profile):
         try:
             snapshots[wire_profile] = _load_profile_snapshot(wire_profile, home, current)
-        except Exception:
+        except Exception as exc:
+            from tools.effect_decisions import EffectDecisionStoreUnavailable
+
+            if isinstance(exc, EffectDecisionStoreUnavailable):
+                # A missing pending decision is not optional enrichment: it can
+                # invite the user to repeat an external effect. Surface the
+                # degraded store instead of presenting a false empty state.
+                raise
             # Status polling must survive one damaged/locked profile.  The
             # browser ledger remains visible and the caller can mark the poll
             # reachable; it just lacks optional cross-channel enrichment.

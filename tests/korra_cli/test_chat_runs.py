@@ -121,6 +121,26 @@ def test_failed_stream_is_not_a_ready_answer(isolated):
     assert asyncio.run(chat_runs("lawyer", "session-a"))["runs"][0]["status"] == "failed"
 
 
+def test_corrupt_effect_store_surfaces_as_degraded_503(isolated, monkeypatch):
+    from korra_cli import chat_activity
+    from tools.effect_decisions import EffectDecisionStoreUnavailable
+
+    def _raise_store_unavailable(*_args, **_kwargs):
+        raise EffectDecisionStoreUnavailable()
+
+    monkeypatch.setattr(
+        chat_activity,
+        "project_chat_activity",
+        _raise_store_unavailable,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(chat_runs("lawyer"))
+
+    assert exc.value.status_code == 503
+    assert "требуется восстановление" in str(exc.value.detail)
+
+
 def test_explicit_cancel_stops_queued_task_and_retains_terminal_replay(isolated):
     from korra_cli.chat_runs import cancel_chat_run
     async def scenario():

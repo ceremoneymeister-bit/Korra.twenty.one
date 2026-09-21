@@ -44,6 +44,39 @@ def test_pending_decision_survives_reopen_and_database_is_private(tmp_path):
     assert stat.S_IMODE(db_path.stat().st_mode) == 0o600
 
 
+def test_corrupt_database_fails_closed_without_recreate_or_byte_changes(tmp_path):
+    db_path = tmp_path / "effect-decisions.sqlite3"
+    _create(db_path)
+
+    damaged = bytearray(db_path.read_bytes())
+    # Reproduce the live incident shape: a late TLS record overwrote bytes
+    # 5..28 while leaving the rest of the SQLite file recoverable.
+    damaged[5:29] = b"\x17\x03\x03\x00\x13" + (b"T" * 19)
+    db_path.write_bytes(damaged)
+    damaged_bytes = bytes(damaged)
+
+    with pytest.raises(
+        decisions.EffectDecisionStoreUnavailable,
+        match="left unchanged and requires recovery",
+    ):
+        decisions.list_profile_decisions(profile="sales", path=db_path)
+
+    assert db_path.read_bytes() == damaged_bytes
+    assert not db_path.with_name(db_path.name + "-journal").exists()
+    assert not db_path.with_name(db_path.name + "-wal").exists()
+
+
+def test_preexisting_empty_database_is_not_silently_reinitialized(tmp_path):
+    db_path = tmp_path / "effect-decisions.sqlite3"
+    db_path.touch()
+
+    with pytest.raises(decisions.EffectDecisionStoreUnavailable):
+        _create(db_path)
+
+    assert db_path.exists()
+    assert db_path.stat().st_size == 0
+
+
 def test_same_pending_payload_is_deduplicated_but_changed_attachment_is_new(tmp_path):
     db_path = tmp_path / "effect-decisions.sqlite3"
     first, first_is_new = _create(db_path)
