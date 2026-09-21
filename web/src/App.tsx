@@ -36,6 +36,7 @@ import {
   Globe,
   Heart,
   KeyRound,
+  LayoutDashboard,
   Menu,
   MessageSquare,
   Package,
@@ -80,6 +81,7 @@ import type { SystemAction } from "@/contexts/system-actions-context";
 // Route pages are lazy-loaded so the initial dashboard shell does not pay for
 // every admin surface (and heavy deps like xterm) up front.
 const ConfigPage = lazy(() => import("@/pages/ConfigPage"));
+const DashboardPage = lazy(() => import("@/pages/DashboardPage"));
 const DocsPage = lazy(() => import("@/pages/DocsPage"));
 const ClientHelpPage = lazy(() => import("@/pages/ClientHelpPage"));
 const EnvPage = lazy(() => import("@/pages/EnvPage"));
@@ -123,6 +125,7 @@ import {
   resolveOpenGroup,
   selectProductNav,
   selectProductSidebar,
+  stripProductOnlyNav,
   type ProductSidebarGroups,
   type SidebarGroupChoice,
   type SidebarGroupKey,
@@ -187,8 +190,8 @@ function UnknownRouteFallback({ pluginsLoading }: { pluginsLoading: boolean }) {
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-4 py-16">
       <h2 className="text-xl font-semibold">Такого раздела нет</h2>
-      <p className="text-muted-foreground">Возможно, ссылка устарела. Откройте нужный раздел в меню или вернитесь к агентам.</p>
-      <NavLink to={productHomePath(productUiMode())} className="neo-button w-fit px-5 py-3">К агентам</NavLink>
+      <p className="text-muted-foreground">Возможно, ссылка устарела. Откройте нужный раздел в меню или вернитесь на главный экран.</p>
+      <NavLink to={productHomePath(productUiMode())} className="neo-button w-fit px-5 py-3">На главный экран</NavLink>
     </div>
   );
 }
@@ -213,6 +216,10 @@ const CHAT_NAV_ITEM: NavItem = {
  */
 const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
+  // Маршрут общий для всех режимов: прямая ссылка на дашборд не должна
+  // упираться в «Такого раздела нет». В меню он есть только у продукта —
+  // см. stripProductOnlyNav.
+  "/dashboard": DashboardPage,
   "/agents": AgentsRouteSink,
   "/sessions": SessionsPage,
   "/files": FilesPage,
@@ -253,6 +260,7 @@ function AgentsRouteSink() {
 }
 
 const BUILTIN_NAV_REST: NavItem[] = [
+  { path: "/dashboard", label: "Дашборд", icon: LayoutDashboard },
   { path: "/agents", label: "Агенты", icon: Users },
   {
     path: "/sessions",
@@ -556,7 +564,9 @@ export default function App() {
     const withAnalytics = showTokenAnalytics
       ? base
       : base.filter((n) => n.path !== "/analytics");
-    return uiMode ? selectProductNav(withAnalytics, uiMode) : withAnalytics;
+    // Дашборд — экран продукта: меню административной панели он не меняет.
+    const available = stripProductOnlyNav(withAnalytics, uiMode);
+    return uiMode ? selectProductNav(available, uiMode) : available;
   }, [embeddedChat, showTokenAnalytics, uiMode]);
 
   const sidebarNav = useMemo(

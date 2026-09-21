@@ -7,11 +7,16 @@ import {
   selectProductSettingsNav,
   selectProductSidebar,
   selectServiceNav,
+  stripProductOnlyNav,
   type NavEntry,
 } from "./product-nav";
 
+// Список встроенных пунктов так, как его собирает App: «Дашборд» лежит в нём
+// вместе с админскими экранами, а из меню панели его убирает
+// stripProductOnlyNav.
 const ADMIN_NAV: NavEntry[] = [
   { path: "/chat", labelKey: "chat", label: "Chat" },
+  { path: "/dashboard", label: "Дашборд" },
   { path: "/agents", label: "Agents" },
   { path: "/sessions", labelKey: "sessions", label: "Sessions" },
   { path: "/files", label: "Files" },
@@ -41,12 +46,37 @@ const PLUGIN_NAV: NavEntry[] = [
 ];
 
 describe("selectProductNav", () => {
-  it("убирает отдельный чат и оставляет три рабочих экрана", () => {
+  it("убирает отдельный чат и оставляет четыре рабочих экрана", () => {
     expect(selectProductNav(ADMIN_NAV, "fleet")).toEqual([
+      { path: "/dashboard", label: "Дашборд", labelKey: undefined },
       { path: "/agents", label: "Агенты", labelKey: undefined },
       { path: "/files", label: "Файлы", labelKey: undefined },
       { path: "/cron", label: "Задачи", labelKey: undefined },
     ]);
+  });
+
+  it("ставит дашборд первым пунктом, прямо над агентами", () => {
+    const paths = selectProductNav(ADMIN_NAV, "fleet").map((item) => item.path);
+    expect(paths[0]).toBe("/dashboard");
+    expect(paths[1]).toBe("/agents");
+  });
+});
+
+describe("stripProductOnlyNav", () => {
+  it("прячет дашборд от административной панели, не трогая остальное меню", () => {
+    const admin = stripProductOnlyNav(ADMIN_NAV, null);
+    expect(admin.map((item) => item.path)).not.toContain("/dashboard");
+    expect(admin.map((item) => item.path)).toEqual(
+      ADMIN_NAV.filter((item) => item.path !== "/dashboard").map(
+        (item) => item.path,
+      ),
+    );
+  });
+
+  it("оставляет продуктовые экраны продукту", () => {
+    expect(
+      stripProductOnlyNav(ADMIN_NAV, "fleet").map((item) => item.path),
+    ).toContain("/dashboard");
   });
 });
 
@@ -101,6 +131,7 @@ describe("selectProductSidebar", () => {
 
   it("убирает историю и достижения из главного меню, оставляя канбан под задачами", () => {
     expect(groups.main.map((item) => item.path)).toEqual([
+      "/dashboard",
       "/agents",
       "/files",
       "/cron",
@@ -154,6 +185,7 @@ describe("resolveOpenGroup", () => {
   });
 
   it("держит группы закрытыми на экранах главного списка", () => {
+    expect(resolveOpenGroup("/dashboard", groups, null)).toBeNull();
     expect(resolveOpenGroup("/agents", groups, null)).toBeNull();
     expect(resolveOpenGroup("/kanban", groups, null)).toBeNull();
     // До загрузки манифестов групп ещё нет — и открывать нечего.
@@ -181,8 +213,8 @@ describe("resolveOpenGroup", () => {
 });
 
 describe("productHomePath", () => {
-  it("делает вкладку агентов домашним экраном fleet", () => {
-    expect(productHomePath("fleet")).toBe("/agents");
+  it("делает дашборд стартовым экраном продукта, не трогая админскую панель", () => {
+    expect(productHomePath("fleet")).toBe("/dashboard");
     expect(productHomePath(null)).toBe("/sessions");
   });
 });

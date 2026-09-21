@@ -45,6 +45,14 @@ describe("resolvePageTitle", () => {
     expect(resolvePageTitle("/files", t, [])).toBe("Файлы");
   });
 
+  it("называет дашборд одинаково в продукте и по прямой ссылке в панели", () => {
+    // В панели пункта меню нет, но заголовок у открытого экрана быть обязан.
+    expect(resolvePageTitle("/dashboard", t, [])).toBe("Дашборд");
+    (globalThis as { window?: unknown }).window = { __KORRA_UI_MODE__: "fleet" };
+    expect(resolvePageTitle("/dashboard", t, [])).toBe("Дашборд");
+    delete (globalThis as { window?: unknown }).window;
+  });
+
   it("uses the configured fleet label before the admin fallback", () => {
     (globalThis as { window?: unknown }).window = { __KORRA_UI_MODE__: "fleet" };
     expect(resolvePageTitle("/agents", t, [])).toBe("Агенты");
