@@ -21,9 +21,12 @@
 """
 
 import asyncio
+import contextlib
 import importlib.util
+import io
 import json
-import re
+import os
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -36,11 +39,14 @@ from gateway.platforms.api_server import (
     SESSION_SOURCE_HEADER,
     APIServerAdapter,
     _derive_chat_session_id,
+    _describe_provider_auth_failure,
+    _ProviderAuthResolutionError,
     cors_middleware,
     security_headers_middleware,
 )
 from gateway.config import PlatformConfig
 from gateway.session_context import clear_session_vars
+from korra_cli.auth import AuthError
 from korra_state import MAINTENANCE_SESSION_SOURCE, SessionDB
 from korra_cli.web_routers.sessions import list_router, manage_router, search_router
 import run_agent
@@ -52,11 +58,82 @@ u = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(u)
 
 
-def _smoke_prompt(code: str) -> str:
-    """Текст, который обновление реально отправляет модели."""
-    match = re.search(r"'content': '([^']+)'", code)
-    assert match, "в smoke-коде больше нет узнаваемого пользовательского сообщения"
-    return match.group(1)
+# ---------------------------------------------------------------------------
+# Реальное исполнение smoke-кода обновления (вместо чтения его исходного
+# текста). ``docs/client-deploy/updater.py`` запускает ``MODEL_SMOKE_CODE`` /
+# ``FOUNDATION_SMOKE_CODE`` внутри контейнера через ``docker exec``; здесь тот
+# же код исполняется настоящим ``exec`` в процессе теста, с подменённым
+# ``urllib.request.urlopen`` — единственной точкой, которую скрипт использует
+# для выхода в сеть — и заведомо синтетическим локальным ключом.
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def _patched_transport(urlopen, *, key: str, port: str):
+    original_urlopen = urllib.request.urlopen
+    _unset = object()
+    original_key = os.environ.get("API_SERVER_KEY", _unset)
+    original_port = os.environ.get("API_SERVER_PORT", _unset)
+    os.environ["API_SERVER_KEY"] = key
+    os.environ["API_SERVER_PORT"] = port
+    urllib.request.urlopen = urlopen
+    try:
+        yield
+    finally:
+        urllib.request.urlopen = original_urlopen
+        for name, original in (("API_SERVER_KEY", original_key), ("API_SERVER_PORT", original_port)):
+            if original is _unset:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = original
+
+
+def _run_smoke_code(code: str, urlopen, *, key: str = "synthetic-maintenance-smoke-key", port: str = "0"):
+    """Исполняет настоящий smoke-код обновления с подменённым транспортом."""
+    with _patched_transport(urlopen, key=key, port=port):
+        exec(code, {})
+
+
+class _Captured(Exception):
+    """Сигнал: реальный запрос собран, дальше транспорт не нужен."""
+
+    def __init__(self, request):
+        self.request = request
+
+
+def _capture_request(code: str) -> "urllib.request.Request":
+    """Настоящий ``Request``, который smoke-код обновления реально строит."""
+    def urlopen(request, **_kwargs):
+        raise _Captured(request)
+
+    try:
+        _run_smoke_code(code, urlopen)
+    except _Captured as captured:
+        return captured.request
+    raise AssertionError("smoke-код не попытался отправить запрос")
+
+
+def _header(request, name: str):
+    """Значение настоящего заголовка запроса, без учёта регистра urllib."""
+    lowered = {key.lower(): value for key, value in request.header_items()}
+    return lowered.get(name.lower())
+
+
+_MODEL_SMOKE_REQUEST = _capture_request(u.MODEL_SMOKE_CODE)
+_MODEL_SMOKE_PROMPT = json.loads(_MODEL_SMOKE_REQUEST.data)["messages"][0]["content"]
+_FOUNDATION_SMOKE_REQUEST = _capture_request(u.FOUNDATION_SMOKE_CODE)
+
+
+def _raise_no_provider_configured(**_kwargs):
+    """Тот же настоящий отказ резолвера, что ловит боевой ``_run_agent``."""
+    raise _ProviderAuthResolutionError(
+        _describe_provider_auth_failure(
+            AuthError(
+                "Провайдер ответа не настроен: добавьте ключ в разделе «Ключи».",
+                code="no_provider_configured",
+            )
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -66,24 +143,14 @@ def _smoke_prompt(code: str) -> str:
 
 class TestUpdaterDeclaresTheMaintenanceClass:
     def test_model_smoke_sends_the_header_the_engine_understands(self):
-        assert (
-            f"'{SESSION_SOURCE_HEADER}': '{MAINTENANCE_SESSION_SOURCE}'"
-            in u.MODEL_SMOKE_CODE
-        )
+        assert _header(_MODEL_SMOKE_REQUEST, SESSION_SOURCE_HEADER) == MAINTENANCE_SESSION_SOURCE
 
     def test_foundation_smoke_sends_it_too(self):
         """У обеих приёмок один транспорт и один класс разговора."""
-        assert (
-            f"'{SESSION_SOURCE_HEADER}': '{MAINTENANCE_SESSION_SOURCE}'"
-            in u.FOUNDATION_SMOKE_CODE
-        )
+        assert _header(_FOUNDATION_SMOKE_REQUEST, SESSION_SOURCE_HEADER) == MAINTENANCE_SESSION_SOURCE
 
-    def test_model_smoke_still_requires_the_acknowledgement(self):
-        """Маркировка не ослабляет проверку: без ACK smoke по-прежнему красный."""
-        assert "Reply with exactly KORRA_UPDATE_OK" in u.MODEL_SMOKE_CODE
-        assert "if 'KORRA_UPDATE_OK' not in str(content):" in u.MODEL_SMOKE_CODE
-        assert "Model smoke response missing acknowledgement" in u.MODEL_SMOKE_CODE
-        assert "print('model-smoke-ok')" in u.MODEL_SMOKE_CODE
+    def test_model_smoke_prompt_reaching_the_engine_is_unchanged(self):
+        assert _MODEL_SMOKE_PROMPT == "Reply with exactly KORRA_UPDATE_OK. Do not use tools."
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +193,7 @@ class TestEngineAcceptsTheClass:
         собственное пространство идентификаторов: прежняя строка больше не
         обновляется, а сторонний клиент с тем же текстом остаётся при своей.
         """
-        prompt = _smoke_prompt(u.MODEL_SMOKE_CODE)
+        prompt = _MODEL_SMOKE_PROMPT
         service = _derive_chat_session_id(None, prompt, source=MAINTENANCE_SESSION_SOURCE)
         user = _derive_chat_session_id(None, prompt)
 
@@ -147,7 +214,7 @@ class TestEngineAcceptsTheClass:
 class _StubAgent:
     """Агент без модели, сохраняющий сессию штатным кодом ``run_agent``."""
 
-    def __init__(self, db, session_id):
+    def __init__(self, db, session_id, reply="KORRA_UPDATE_OK"):
         self._session_db = db
         self._persist_disabled = False
         self._session_db_created = False
@@ -160,25 +227,19 @@ class _StubAgent:
         self.session_prompt_tokens = 0
         self.session_completion_tokens = 0
         self.session_total_tokens = 0
+        self._reply = reply
 
     def run_conversation(self, user_message=None, conversation_history=None, task_id=None):
         # Именно этот метод движка решает, с каким источником родится строка.
         run_agent.AIAgent._ensure_db_session(self)
         self._session_db.append_message(self.session_id, "user", str(user_message))
-        self._session_db.append_message(self.session_id, "assistant", "KORRA_UPDATE_OK")
-        return {"final_response": "KORRA_UPDATE_OK", "messages": [], "api_calls": 1, "tools": []}
+        self._session_db.append_message(self.session_id, "assistant", self._reply)
+        return {"final_response": self._reply, "messages": [], "api_calls": 1, "tools": []}
 
 
-async def _post_smoke(db, headers):
+def _adapter_app(create_agent):
     adapter = APIServerAdapter(PlatformConfig(enabled=True, extra={}))
-    created = {}
-
-    def _create_agent(**kwargs):
-        agent = _StubAgent(db, kwargs.get("session_id"))
-        created["agent"] = agent
-        return agent
-
-    adapter._create_agent = _create_agent
+    adapter._create_agent = create_agent
     mws = [
         mw
         for mw in (
@@ -191,19 +252,67 @@ async def _post_smoke(db, headers):
     app = web.Application(middlewares=mws)
     app["api_server_adapter"] = adapter
     app.router.add_post("/v1/chat/completions", adapter._handle_chat_completions)
+    return app
+
+
+async def _post_smoke(db, headers, *, body=None, create_agent=None):
+    created = {}
+
+    def _create_agent(**kwargs):
+        factory = create_agent or (lambda **kw: _StubAgent(db, kw.get("session_id")))
+        agent = factory(**kwargs)
+        created["agent"] = agent
+        return agent
+
+    app = _adapter_app(_create_agent)
+    post_headers = dict(headers)
+    post_headers.setdefault("Content-Type", "application/json")
+    if body is None:
+        body = json.dumps({
+            "messages": [{"role": "user", "content": _MODEL_SMOKE_PROMPT}],
+            "max_tokens": 24,
+            "stream": False,
+        }).encode()
 
     async with TestClient(TestServer(app)) as client:
-        response = await client.post(
-            "/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": _smoke_prompt(u.MODEL_SMOKE_CODE)}],
-                "max_tokens": 24,
-                "stream": False,
-            },
-            headers=headers,
-        )
+        response = await client.post("/v1/chat/completions", data=body, headers=post_headers)
         assert response.status == 200
-        return await response.json(), created["agent"].session_id
+        payload = await response.json()
+        agent = created.get("agent")
+        return payload, (agent.session_id if agent else None)
+
+
+async def _post_smoke_stream(db, headers, body, create_agent):
+    app = _adapter_app(create_agent)
+    post_headers = dict(headers)
+    post_headers.setdefault("Content-Type", "application/json")
+
+    async with TestClient(TestServer(app)) as client:
+        response = await client.post("/v1/chat/completions", data=body, headers=post_headers)
+        assert response.status == 200
+        return await response.read()
+
+
+def _run_through_engine(code, db, *, create_agent=None):
+    """Исполняет реальный ``MODEL_SMOKE_CODE``, отправляя его настоящий запрос движку."""
+    def urlopen(request, **_kwargs):
+        payload, _sid = asyncio.run(
+            _post_smoke(db, dict(request.header_items()), body=request.data, create_agent=create_agent)
+        )
+        return io.BytesIO(json.dumps(payload).encode())
+
+    _run_smoke_code(code, urlopen)
+
+
+def _run_foundation_through_engine(db, *, create_agent):
+    """Исполняет реальный ``FOUNDATION_SMOKE_CODE`` поверх настоящего SSE движка."""
+    def urlopen(request, **_kwargs):
+        raw = asyncio.run(
+            _post_smoke_stream(db, dict(request.header_items()), request.data, create_agent)
+        )
+        return io.BytesIO(raw)
+
+    _run_smoke_code(u.FOUNDATION_SMOKE_CODE, urlopen)
 
 
 @pytest.fixture
@@ -239,6 +348,39 @@ def test_undeclared_third_party_turn_is_unchanged(db):
 
 
 # ---------------------------------------------------------------------------
+# Проверка ACK — поведением настоящего исполнения, а не текстом источника
+# ---------------------------------------------------------------------------
+
+
+class TestModelSmokeStillRequiresTheAcknowledgement:
+    """Маркировка не ослабляет проверку: каждый исход — настоящее исполнение
+    ``MODEL_SMOKE_CODE`` / ``FOUNDATION_SMOKE_CODE`` против настоящего движка."""
+
+    def test_ack_success_is_a_real_engine_round_trip(self, db, capsys):
+        _run_through_engine(u.MODEL_SMOKE_CODE, db)
+        assert capsys.readouterr().out.strip() == "model-smoke-ok"
+
+    def test_missing_ack_really_raises(self, db):
+        def create_agent(**kwargs):
+            return _StubAgent(db, kwargs.get("session_id"), reply="Здравствуйте!")
+
+        with pytest.raises(RuntimeError, match="Model smoke response missing acknowledgement"):
+            _run_through_engine(u.MODEL_SMOKE_CODE, db, create_agent=create_agent)
+
+    def test_provider_unavailable_is_a_warning_not_a_failure(self, db, capsys):
+        """Тот же настоящий отказ резолвера, что ловит боевой ``_run_agent``."""
+        with pytest.raises(SystemExit) as excinfo:
+            _run_through_engine(u.MODEL_SMOKE_CODE, db, create_agent=_raise_no_provider_configured)
+
+        assert excinfo.value.code == 0
+        assert capsys.readouterr().out.strip() == "model-smoke-provider-unavailable"
+
+    def test_foundation_really_parses_the_missing_provider_sse(self, db, capsys):
+        _run_foundation_through_engine(db, create_agent=_raise_no_provider_configured)
+        assert capsys.readouterr().out.strip() == "foundation-smoke-ok"
+
+
+# ---------------------------------------------------------------------------
 # Поверхности истории
 # ---------------------------------------------------------------------------
 
@@ -256,7 +398,7 @@ def history_api(db):
 #: Идентификатор служебной строки: тот же вывод, что даёт движок на реальном
 #: запросе обновления (см. test_service_turn_gets_its_own_session_namespace).
 SMOKE_SESSION_ID = _derive_chat_session_id(
-    None, _smoke_prompt(u.MODEL_SMOKE_CODE), MAINTENANCE_SESSION_SOURCE
+    None, _MODEL_SMOKE_PROMPT, MAINTENANCE_SESSION_SOURCE
 )
 
 
