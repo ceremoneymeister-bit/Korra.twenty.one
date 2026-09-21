@@ -1862,6 +1862,7 @@ from korra_cli.web_models import (  # noqa: F401
     RawConfigUpdate,
     ThemeSetBody,
     AgentTabsSetBody,
+    DashboardLayoutSetBody,
     FontSetBody,
     _AgentPluginInstallBody,
     _PluginProvidersPutBody,
@@ -20615,6 +20616,85 @@ async def set_dashboard_agent_tabs(body: AgentTabsSetBody):
                 raise HTTPException(
                     status_code=409,
                     detail="Расположение вкладок не сохранилось; обновите экран.",
+                )
+            return saved
+
+    return await asyncio.to_thread(_run)
+
+
+def _dashboard_layout_key(request: Request = None) -> str:
+    """Resolve whose dashboard board this request is allowed to touch.
+
+    The only trusted source is what auth already verified for this request:
+    ``request.state.session`` behind the OAuth gate, ``token_principal`` for a
+    service caller. A loopback/session-token bind has no human identity at all
+    — one machine, one owner — and maps to the single-owner record.
+
+    The request body is never consulted. If it were, any authenticated browser
+    could read and overwrite another person's board by naming them (K21-133).
+    """
+    from korra_cli.dashboard_layout import storage_key
+
+    state = getattr(request, "state", None) if request is not None else None
+    session = getattr(state, "session", None)
+    if session is not None:
+        return storage_key(
+            getattr(session, "user_id", None), getattr(session, "provider", None)
+        )
+    principal = getattr(state, "token_principal", None)
+    if principal is not None:
+        return storage_key(
+            getattr(principal, "principal", None), getattr(principal, "provider", None)
+        )
+    return storage_key()
+
+
+@app.get("/api/dashboard/layout")
+async def get_dashboard_layout(request: Request = None):
+    """Return this person's durable board: order, hidden cards and tile sizes."""
+    from korra_cli.dashboard_layout import preference
+
+    key = _dashboard_layout_key(request)
+    return await asyncio.to_thread(lambda: preference(load_config(), key))
+
+
+@app.put("/api/dashboard/layout")
+async def set_dashboard_layout(body: DashboardLayoutSetBody, request: Request = None):
+    """CAS-update one person's board using a server-owned monotonic revision.
+
+    A losing browser gets 409 **with the winning record**, so a second device
+    can show what actually happened and re-apply the choice without guessing.
+    """
+    from korra_cli.dashboard_layout import preference, preserve_keys, store, updated
+
+    key = _dashboard_layout_key(request)
+
+    def _run():
+        with _CONFIG_MUTATION_LOCK:
+            config = load_config()
+            before = preference(config, key)
+            if body.revision != before["revision"]:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "Дашборд уже изменился в другом окне.",
+                        "preference": before,
+                    },
+                )
+            next_value = updated(
+                before, order=body.order, hidden=body.hidden, sizes=body.sizes
+            )
+            save_config(store(config, key, next_value), preserve_keys=preserve_keys(key))
+            saved = preference(load_config(), key)
+            if saved != next_value:
+                # A managed policy can drop the write without raising; ACK only
+                # what a fresh read proves is durable.
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "Дашборд не сохранился; обновите экран.",
+                        "preference": saved,
+                    },
                 )
             return saved
 

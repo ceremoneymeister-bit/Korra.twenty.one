@@ -840,6 +840,20 @@ class AgentTabsSetBody(BaseModel):
     hidden: List[str] = []
 
 
+class DashboardLayoutSetBody(BaseModel):
+    """One person's dashboard board (K21-133).
+
+    Deliberately carries no user field: the owner of the record is resolved
+    from the verified session on the server, so a browser cannot address
+    somebody else's board by editing the payload.
+    """
+
+    revision: int = Field(ge=0)
+    order: List[str] = []
+    hidden: List[str] = []
+    sizes: Dict[str, str] = {}
+
+
 # --- from web_server.py (originally lines 19449-19450) ---
 
 class FontSetBody(BaseModel):
