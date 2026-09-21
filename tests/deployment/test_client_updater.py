@@ -899,6 +899,42 @@ def test_insufficient_disk_never_drains(updater, monkeypatch):
     assert not any(call[0] in {"native", "stop", "pull"} for call in updater.calls)
 
 
+def test_free_space_ignores_file_vanishing_after_walk_listing(updater, monkeypatch):
+    from collections import namedtuple
+    Disk = namedtuple("Disk", "total used free")
+    vanished = updater.data / ".runtime-download.tmp"
+    vanished.write_bytes(b"in progress")
+    walk = u.os.walk
+
+    def remove_after_listing(root):
+        for current, dirs, files in walk(root):
+            if Path(current) == updater.data:
+                assert vanished.name in files
+                vanished.unlink()
+            yield current, dirs, files
+
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    monkeypatch.setattr(u.os, "walk", remove_after_listing)
+    monkeypatch.setattr(u.shutil, "disk_usage", lambda path: Disk(10**13, 0, 10**13))
+    updater.free_space()
+
+
+def test_free_space_propagates_file_permission_error(updater, monkeypatch):
+    denied = updater.data / "unreadable.bin"
+    denied.write_bytes(b"private")
+    lstat = Path.lstat
+
+    def deny_file(path):
+        if path == denied:
+            raise PermissionError("fixture denied stat")
+        return lstat(path)
+
+    updater.free_space = u.Updater.free_space.__get__(updater)
+    monkeypatch.setattr(Path, "lstat", deny_file)
+    with pytest.raises(PermissionError, match="fixture denied stat"):
+        updater.free_space()
+
+
 @pytest.mark.parametrize("before,now,expected", [
     ({"telegram": {"bot_token": "revoked", "enabled": True}}, {}, {"telegram": {"enabled": True}}),
     ({"custom_providers": [{"name": "demo", "api_key": "revoked", "model": "old"}]},

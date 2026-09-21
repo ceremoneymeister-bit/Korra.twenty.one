@@ -1001,8 +1001,17 @@ class Updater:
         self.phase("pending")
 
     def free_space(self, image_bytes=0):
-        size = sum(p.lstat().st_size for root, _dirs, files in os.walk(self.data)
-                   for p in (Path(root) / n for n in files) if not p.is_symlink())
+        size = 0
+        for root, _dirs, files in os.walk(self.data):
+            for name in files:
+                try:
+                    info = (Path(root) / name).lstat()
+                except FileNotFoundError:
+                    # A running service may remove a temporary file after
+                    # os.walk listed it. It no longer needs backup space.
+                    continue
+                if not stat.S_ISLNK(info.st_mode):
+                    size += info.st_size
         # Before + after + restoration staging, plus dependency/image headroom.
         required = 3 * size + image_bytes + 2 * 1024**3
         for location in {self.home, self.data.parent, Path("/var/lib/docker")}:
