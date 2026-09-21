@@ -1,4 +1,3 @@
-import { Link } from "react-router";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { KorraLoader } from "@/components/KorraLoader";
 import { createPortal } from "react-dom";
@@ -24,16 +23,13 @@ import type {
   ModelsAnalyticsModelEntry,
   ModelsAnalyticsResponse,
 } from "@/lib/api";
-import { timeAgo, cn, themedBody } from "@/lib/utils";
+import { timeAgo, cn } from "@/lib/utils";
 import {
-  DASHBOARD_MODAL_BACKDROP,
-  DASHBOARD_MODAL_PANEL,
   shouldCloseOuterModalOnEscape,
 } from "@/lib/dashboard-modal-shell";
 import { formatTokenCount } from "@/lib/format";
-import { Button } from "@nous-research/ui/ui/components/button";
+import { Button } from "@/components/ProductButton";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
-import { Stats } from "@nous-research/ui/ui/components/stats";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Switch } from "@nous-research/ui/ui/components/switch";
@@ -47,6 +43,7 @@ import { ModelPickerDialog } from "@/components/ModelPickerDialog";
 import { ModelReloadConfirm } from "@/components/ModelReloadConfirm";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { russianInterfaceText } from "@/lib/russian-interface-text";
+import { providerDisplayName } from "@/lib/model-choices";
 
 // `label` — ключ перевода в `ru.dashboard`, а не готовая подпись: сам период
 // («7 дней») собирается из него через `tr` уже в разметке.
@@ -133,7 +130,7 @@ function TokenBar({
   return (
     <div className="space-y-1.5">
       {/* Stacked bar — segments fill proportionally to their share of total */}
-      <div className="relative flex min-h-[1.5rem] w-full items-stretch overflow-hidden">
+      <div className="relative flex min-h-[0.75rem] w-full items-stretch overflow-hidden rounded-full">
         {segments.map((s, i) => (
           <div
             key={i}
@@ -186,22 +183,22 @@ function CapabilityBadges({
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {capabilities.supports_tools && (
-        <span className="inline-flex items-center gap-1 bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success">
+        <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-1 text-xs font-medium text-success">
           <Wrench className="h-2.5 w-2.5" /> Инструменты
         </span>
       )}
       {capabilities.supports_vision && (
-        <span className="inline-flex items-center gap-1 bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+        <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400">
           <Eye className="h-2.5 w-2.5" /> Зрение
         </span>
       )}
       {capabilities.supports_reasoning && (
-        <span className="inline-flex items-center gap-1 bg-purple-500/10 px-1.5 py-0.5 text-xs font-medium text-purple-600 dark:text-purple-400">
+        <span className="inline-flex items-center gap-1 rounded-full bg-purple-500/10 px-2 py-1 text-xs font-medium text-purple-600 dark:text-purple-400">
           <Brain className="h-2.5 w-2.5" /> Рассуждение
         </span>
       )}
       {capabilities.model_family && (
-        <span className="inline-flex items-center bg-muted px-1.5 py-0.5 text-xs font-medium text-text-secondary">
+        <span className="inline-flex items-center rounded-full bg-muted px-2 py-1 text-xs font-medium text-text-secondary">
           {capabilities.model_family}
         </span>
       )}
@@ -294,31 +291,31 @@ function UseAsMenu({
         outlined
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
-        className="h-6 px-2 text-xs uppercase"
+        className="min-h-9 px-3 text-xs"
         prefix={busy ? <Spinner /> : null}
       >
-        Использовать <ChevronDown className="h-3 w-3" />
+        Назначить <ChevronDown className="h-3 w-3" />
       </Button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] border border-border bg-card shadow-lg">
+        <div className="neo-select-menu absolute right-0 top-full z-50 mt-2 min-w-[270px] overflow-hidden p-1.5 font-sans">
           <button
             type="button"
             onClick={() => assign("main", "")}
             disabled={busy}
-            className="flex w-full items-center justify-between px-3 py-2 text-xs uppercase hover:bg-muted/50 disabled:opacity-40"
+            className="neo-select-option flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm disabled:opacity-40"
           >
             <span className="flex items-center gap-2">
               <Star className="h-3 w-3" />
               Основная модель
             </span>
             {isMain && (
-              <span className="text-display text-xs tracking-wider text-primary">
+              <span className="text-xs font-medium text-primary">
                 выбрана
               </span>
             )}
           </button>
 
-          <div className="border-t border-border/50 px-3 py-1.5 text-display text-xs tracking-wider text-text-tertiary">
+          <div className="px-3 pb-1 pt-3 text-xs font-semibold text-text-tertiary">
             Вспомогательные задачи
           </div>
 
@@ -326,7 +323,7 @@ function UseAsMenu({
             type="button"
             onClick={() => assign("auxiliary", "")}
             disabled={busy}
-            className="flex w-full items-center justify-between px-3 py-1.5 text-xs uppercase hover:bg-muted/50 disabled:opacity-40"
+            className="neo-select-option flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-sm disabled:opacity-40"
           >
             <span>Все вспомогательные задачи</span>
           </button>
@@ -337,11 +334,11 @@ function UseAsMenu({
               type="button"
               onClick={() => assign("auxiliary", t.key)}
               disabled={busy}
-              className="flex w-full items-center justify-between px-3 py-1.5 text-xs uppercase hover:bg-muted/50 disabled:opacity-40"
+              className="neo-select-option flex min-h-10 w-full items-center justify-between px-3 py-2 text-left text-sm disabled:opacity-40"
             >
               <span>{t.label}</span>
               {mainAuxTask === t.key && (
-                <span className="text-display text-xs tracking-wider text-primary">
+                <span className="text-xs font-medium text-primary">
                   выбрана
                 </span>
               )}
@@ -349,7 +346,7 @@ function UseAsMenu({
           ))}
 
           {error && (
-            <div className="px-3 py-2 text-xs text-destructive border-t border-border/50">
+            <div className="px-3 py-2 text-sm text-destructive">
               {error}
             </div>
           )}
@@ -412,80 +409,57 @@ function ModelCard({
 
   return (
     <Card
-      className={cn("min-w-0 max-w-full", isMain && "ring-1 ring-primary/40")}
+      className={cn(
+        "min-w-0 max-w-full overflow-hidden rounded-xl border border-border/60 font-sans",
+        isMain && "border-primary/50",
+      )}
     >
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-2">
+      <CardHeader className="gap-3 pb-3 font-sans">
+        <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-text-tertiary text-xs font-mono">
-                #{rank}
-              </span>
-              <CardTitle className="text-sm font-mono-ui truncate">
+            <span className="text-xs text-text-tertiary">Модель {rank}</span>
+            <CardTitle className="mt-1 truncate font-mono text-base normal-case tracking-normal" title={entry.model}>
                 {shortModelName(entry.model)}
-              </CardTitle>
-              {isMain && (
-                <span className="inline-flex items-center gap-0.5 bg-primary/15 px-1.5 py-0.5 text-display text-xs font-medium tracking-wider text-primary">
-                  <Star className="h-2.5 w-2.5" /> основная
-                </span>
-              )}
-              {mainAuxTask && (
-                <span className="inline-flex items-center bg-purple-500/10 px-1.5 py-0.5 text-display text-xs font-medium tracking-wider text-purple-600 dark:text-purple-400">
-                  вспомогательная · {auxTaskLabel(mainAuxTask)}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 mt-1">
-              {provider && (
-                <Badge tone="secondary" className="text-xs">
-                  {provider}
-                </Badge>
-              )}
-              {caps.context_window && caps.context_window > 0 && (
-                <span className="text-xs text-text-secondary">
-                  {formatTokenCount(caps.context_window)} контекст
-                </span>
-              )}
-              {caps.max_output_tokens && caps.max_output_tokens > 0 && (
-                <span className="text-xs text-text-secondary">
-                  {formatTokenCount(caps.max_output_tokens)} вывод
-                </span>
-              )}
-            </div>
+            </CardTitle>
           </div>
-          <div className="flex flex-col items-end gap-1 shrink-0">
-            {showTokens ? (
-              <div className="text-right">
-                <div className="text-xs font-mono font-semibold">
-                  {formatTokens(totalTokens)}
-                </div>
-                <div className="text-xs text-text-tertiary">
-                  {t.models.tokens}
-                </div>
-              </div>
-            ) : (
-              entry.sessions > 0 && (
-                <div className="text-right">
-                  <div className="text-xs font-mono font-semibold">
-                    {entry.sessions}
-                  </div>
-                  <div className="text-xs text-text-tertiary">
-                    {t.models.sessions}
-                  </div>
-                </div>
-              )
-            )}
-            <UseAsMenu
-              provider={provider}
-              model={entry.model}
-              isMain={isMain}
-              mainAuxTask={mainAuxTask}
-              onAssigned={onAssigned}
-            />
+          <div className="shrink-0 text-right">
+            <div className="font-mono text-base font-semibold">
+              {showTokens ? formatTokens(totalTokens) : entry.sessions}
+            </div>
+            <div className="text-xs text-text-tertiary">
+              {showTokens ? t.models.tokens : t.models.sessions}
+            </div>
           </div>
         </div>
+
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {provider && (
+            <Badge tone="secondary" className="max-w-full rounded-full text-xs normal-case tracking-normal">
+              <span className="truncate">{providerDisplayName(provider)}</span>
+            </Badge>
+          )}
+          {isMain && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-1 text-xs font-medium text-primary">
+              <Star className="h-3 w-3" /> основная
+            </span>
+          )}
+          {mainAuxTask && (
+            <span className="inline-flex items-center rounded-full bg-purple-500/10 px-2 py-1 text-xs font-medium text-purple-600 dark:text-purple-400">
+              задача · {auxTaskLabel(mainAuxTask)}
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
+          {caps.context_window && caps.context_window > 0 && (
+            <span>{formatTokenCount(caps.context_window)} контекст</span>
+          )}
+          {caps.max_output_tokens && caps.max_output_tokens > 0 && (
+            <span>{formatTokenCount(caps.max_output_tokens)} вывод</span>
+          )}
+        </div>
       </CardHeader>
-      <CardContent className="space-y-3 pt-3">
+      <CardContent className="space-y-4 pt-2">
         {showTokens && (
           <>
             <TokenBar
@@ -522,7 +496,9 @@ function ModelCard({
           </>
         )}
 
-        <div className="flex items-center justify-between text-xs text-text-secondary border-t border-border/30 pt-2">
+        <CapabilityBadges capabilities={entry.capabilities} />
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1 text-xs text-text-secondary">
           <div className="flex items-center gap-3">
             {showTokens && entry.estimated_cost > 0 && (
               <span className="flex items-center gap-0.5">
@@ -542,7 +518,15 @@ function ModelCard({
           )}
         </div>
 
-        <CapabilityBadges capabilities={entry.capabilities} />
+        <div className="flex justify-end border-t border-border/40 pt-3">
+          <UseAsMenu
+            provider={provider}
+            model={entry.model}
+            isMain={isMain}
+            mainAuxTask={mainAuxTask}
+            onAssigned={onAssigned}
+          />
+        </div>
       </CardContent>
     </Card>
   );
@@ -595,50 +579,47 @@ function AuxiliaryTasksModal({
   return (
     <div
       ref={modalRef}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-background/85 p-4"
+      className="neo-overlay fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6"
       onClick={(e) => e.target === e.currentTarget && onClose()}
       role="dialog"
       aria-modal="true"
       aria-labelledby="aux-modal-title"
     >
-      <div className={cn(themedBody, "relative w-full max-w-2xl max-h-[80vh] border border-border bg-card shadow-2xl flex flex-col")}>
+      <div className="neo-dialog relative flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden font-sans">
         <Button
           ghost
           size="icon"
           onClick={onClose}
-          className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+          className="absolute right-3 top-3 text-muted-foreground hover:text-foreground"
           aria-label="Закрыть"
         >
           <X />
         </Button>
 
-        <header className="p-5 pb-3 border-b border-border">
-          <div className="flex items-center justify-between gap-3 pr-8">
+        <header className="px-5 pb-4 pt-5 pr-16 sm:px-6 sm:pt-6">
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2
               id="aux-modal-title"
-              className="font-mondwest text-display text-base tracking-wider"
+              className="text-2xl font-semibold leading-tight"
             >
-              Вспомогательные задачи
+              Служебные задачи
             </h2>
             <Button
               size="sm"
               outlined
               onClick={() => setConfirmReset(true)}
               disabled={resetBusy}
-              className="h-6 text-xs uppercase"
               prefix={resetBusy ? <Spinner /> : null}
             >
-              Вернуть автоматический выбор
+              Выбирать автоматически
             </Button>
           </div>
-          <p className="text-xs text-text-secondary mt-2">
-            Вспомогательные модели выполняют анализ изображений, поиск по сессиям
-            и сжатие контекста. Режим <span className="font-mono">auto</span>
-            использует основную модель.
+          <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-text-secondary">
+            Обычно Korra сама выбирает модель для зрения, сжатия контекста и других внутренних действий. Здесь можно задать исключения.
           </p>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-1">
+        <div className="flex-1 space-y-2 overflow-y-auto px-5 pb-5 sm:px-6 sm:pb-6">
           {AUX_TASKS.map((t) => {
             const cur = aux?.tasks.find((a) => a.task === t.key);
             const isAuto =
@@ -646,28 +627,28 @@ function AuxiliaryTasksModal({
             return (
               <div
                 key={t.key}
-                className="flex items-center justify-between gap-3 px-3 py-2 border border-border/30 bg-card/50 hover:bg-muted/20 transition-colors"
+                className="flex flex-col gap-3 rounded-xl bg-[var(--neo-surface)] p-4 shadow-[var(--neo-inset-compact)] sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-xs font-medium">{t.label}</span>
-                    <span className="text-xs text-text-tertiary">
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span className="text-sm font-semibold">{t.label}</span>
+                    <span className="text-sm text-text-tertiary">
                       {t.hint}
                     </span>
                   </div>
-                  <div className="text-xs font-mono text-text-secondary truncate">
+                  <div className="mt-1 truncate font-mono text-xs text-text-secondary">
                     {isAuto
-                      ? "авто (основная модель)"
-                      : `${cur?.provider} · ${cur?.model || "(модель провайдера)"}`}
+                      ? "Автоматически — используется основная модель"
+                      : `${providerDisplayName(cur?.provider ?? "")} · ${cur?.model || "модель поставщика"}`}
                   </div>
                 </div>
                 <Button
                   size="sm"
                   outlined
                   onClick={() => setPicker({ kind: "aux", task: t.key })}
-                  className="h-6 text-xs uppercase"
+                  className="w-full sm:w-auto"
                 >
-                  Изменить
+                  Выбрать модель
                 </Button>
               </div>
             );
@@ -698,10 +679,9 @@ function AuxiliaryTasksModal({
           open={confirmReset}
           onCancel={() => setConfirmReset(false)}
           onConfirm={() => void resetAllAux()}
-          title="Сбросить вспомогательные модели?"
-          description="Для всех вспомогательных задач будет восстановлен автоматический выбор основной модели."
-          destructive
-          confirmLabel="Сбросить все"
+          title="Включить автоматический выбор?"
+          description="Korra снова будет использовать основную модель для всех служебных задач. Ручные назначения удалятся."
+          confirmLabel="Включить"
           cancelLabel="Отмена"
           loading={resetBusy}
         />
@@ -814,7 +794,7 @@ function MoaModelsModal({
   return createPortal(
     <div
       ref={modalRef}
-      className={DASHBOARD_MODAL_BACKDROP}
+      className="neo-overlay fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) closeMoaUnlessPickerOpen();
       }}
@@ -822,31 +802,26 @@ function MoaModelsModal({
       aria-modal="true"
       aria-labelledby="moa-modal-title"
     >
-      {/* Opaque panel — do not use <Card> here; Card defaults to bg-background-base/80. */}
       <div
-        className={cn(
-          themedBody,
-          DASHBOARD_MODAL_PANEL,
-          "max-h-[85vh] max-w-2xl overflow-auto flex flex-col",
-        )}
+        className="neo-dialog relative flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-auto font-sans"
       >
-        <header className="p-5 pb-3 border-b border-border">
+        <header className="px-5 pb-3 pt-5 sm:px-6 sm:pt-6">
           <h2
             id="moa-modal-title"
-            className="font-mondwest text-display text-base tracking-wider"
+            className="text-2xl font-semibold leading-tight"
           >
-            Настройка пресетов «Команды моделей»
+            Команда моделей
           </h2>
         </header>
-        <div className="space-y-4 p-5">
-          <p className="text-xs text-text-secondary">
+        <div className="space-y-5 px-5 pb-5 sm:px-6 sm:pb-6">
+          <p className="text-[15px] leading-relaxed text-text-secondary">
             Референсные модели предлагают варианты, а итоговая модель формирует
             ответ и вызывает инструменты.
           </p>
 
           <div className="flex flex-wrap items-center gap-2">
             <select
-              className="border border-border bg-background px-2 py-1 text-xs"
+              className="min-h-11 rounded-xl bg-[var(--neo-surface)] px-3 py-2 text-sm shadow-[var(--neo-inset)] outline-none"
               value={selected}
               onChange={(event) => setSelected(event.target.value)}
             >
@@ -855,7 +830,7 @@ function MoaModelsModal({
             <Button size="sm" outlined onClick={() => setDraft((prev) => ({ ...prev, default_preset: selected }))}>По умолчанию</Button>
             <Button size="sm" ghost disabled={presetNames.length <= 1} onClick={deletePreset}>Удалить</Button>
             <input
-              className="border border-border bg-background px-2 py-1 text-xs"
+              className="min-h-11 min-w-0 flex-1 rounded-xl bg-[var(--neo-surface)] px-3 py-2 text-sm shadow-[var(--neo-inset)] outline-none"
               placeholder="Название нового пресета"
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
@@ -863,17 +838,17 @@ function MoaModelsModal({
             <Button size="sm" outlined disabled={!newName.trim() || !!draft.presets[newName.trim()]} onClick={addPreset}>Добавить пресет</Button>
           </div>
 
-          <div className="text-xs text-text-secondary">
+          <div className="text-sm text-text-secondary">
             По умолчанию: <span className="font-mono">{draft.default_preset}</span>
           </div>
 
           <div className="space-y-2">
-            <div className="text-display text-xs font-medium tracking-wider">Референсные модели</div>
+            <h3 className="text-base font-semibold">Референсные модели</h3>
             {preset.reference_models.map((slot, index) => (
               <div
                 key={`${selected}-${slot.provider}-${slot.model}-${index}`}
                 className={cn(
-                  "flex items-center gap-2 border border-border/50 bg-muted/20 px-3 py-2",
+                  "flex flex-wrap items-center gap-2 rounded-xl bg-[var(--neo-surface)] px-3 py-3 shadow-[var(--neo-inset-compact)]",
                   slot.enabled === false && "opacity-60"
                 )}
               >
@@ -897,16 +872,16 @@ function MoaModelsModal({
           </div>
 
           <div className="space-y-2">
-            <div className="text-display text-xs font-medium tracking-wider">Итоговая модель</div>
-            <div className="flex items-center gap-2 border border-border/50 bg-muted/20 px-3 py-2">
+            <h3 className="text-base font-semibold">Итоговая модель</h3>
+            <div className="flex flex-wrap items-center gap-2 rounded-xl bg-[var(--neo-surface)] px-3 py-3 shadow-[var(--neo-inset-compact)]">
               <div className="min-w-0 flex-1 truncate font-mono text-xs text-text-secondary">{slotLabel(preset.aggregator)}</div>
               <Button size="sm" outlined onClick={() => setPicker({ kind: "aggregator" })}>Изменить</Button>
             </div>
           </div>
 
           {error && <div className="text-xs text-destructive">{error}</div>}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button ghost onClick={onClose} disabled={busy}>Отмена</Button>
+          <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+            <Button outlined onClick={onClose} disabled={busy}>Отмена</Button>
             <Button onClick={() => void save()} disabled={busy}>{busy ? "Сохранение…" : "Сохранить"}</Button>
           </div>
         </div>
@@ -993,90 +968,88 @@ function ModelSettingsPanel({
   ).length ?? 0;
 
   return (
-    <Card className="min-w-0 max-w-full overflow-hidden">
-      <CardHeader className="min-w-0 pb-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <Settings2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <CardTitle className="text-sm">Настройки моделей</CardTitle>
-          <span className="max-w-full min-w-0 text-xs text-text-secondary [overflow-wrap:anywhere]">
-            применяются к новым сессиям
+    <Card className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/60 font-sans">
+      <CardHeader className="min-w-0 gap-2 px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
+        <div className="flex items-center gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-[var(--neo-inset-compact)]">
+            <Settings2 className="h-5 w-5" />
           </span>
+          <div>
+            <CardTitle className="text-xl font-semibold normal-case tracking-normal">
+              Модели для работы
+            </CardTitle>
+            <p className="mt-1 max-w-3xl text-[15px] leading-relaxed text-text-secondary">
+              Основная модель отвечает в новых чатах. Для служебных задач Korra может выбирать модель автоматически.
+            </p>
+          </div>
         </div>
       </CardHeader>
 
-      <CardContent className="min-w-0 space-y-3 pt-3">
-        {/* Main row */}
-        <div className="flex min-w-0 flex-col gap-2 bg-muted/20 border border-border/50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-0.5">
-              <Star className="h-3 w-3 text-primary" />
-              <span className="text-display text-xs font-medium tracking-wider">
-                Основная модель
-              </span>
+      <CardContent className="min-w-0 px-5 pb-5 pt-0 sm:px-6 sm:pb-6">
+        <div className="grid gap-3 lg:grid-cols-3">
+          <div className="flex min-w-0 flex-col gap-4 rounded-xl bg-[var(--neo-surface)] p-4 shadow-[var(--neo-depth-1)] lg:col-span-1">
+            <div className="flex min-w-0 items-start gap-3">
+              <Star className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base font-semibold">Основная модель</h3>
+                <p className="mt-1 text-sm leading-relaxed text-text-secondary">
+                  Отвечает в новых разговорах.
+                </p>
+                <p className="mt-3 truncate font-mono text-sm text-foreground" title={[mainProv, mainModel].filter(Boolean).join(" · ")}>
+                  {mainProv ? providerDisplayName(mainProv) : "Не выбрана"}
+                  {mainProv && mainModel && " · "}
+                  {mainModel}
+                </p>
+              </div>
             </div>
-            <div className="text-xs font-mono text-text-secondary truncate">
-              {mainProv || "(не выбрано)"}
-              {mainProv && mainModel && " · "}
-              {mainModel || "(не выбрано)"}
-            </div>
+            <Button size="sm" onClick={() => setPicker({ kind: "main" })} className="mt-auto w-full sm:w-fit">
+              Выбрать модель
+            </Button>
           </div>
-          <Button
-            size="sm"
-            onClick={() => setPicker({ kind: "main" })}
-            className="shrink-0 self-start text-xs uppercase sm:self-center"
-          >
-            Изменить
-          </Button>
-        </div>
 
-        {/* Auxiliary tasks summary + open modal */}
-        <div className="flex min-w-0 flex-col gap-2 bg-muted/20 border border-border/50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-0.5">
-              <Cpu className="h-3 w-3 text-text-tertiary" />
-              <span className="text-display text-xs font-medium tracking-wider">
-                Вспомогательные задачи
-              </span>
+          <div className="flex min-w-0 flex-col gap-4 rounded-xl bg-[var(--neo-surface)] p-4 shadow-[var(--neo-inset-compact)]">
+            <div className="flex min-w-0 items-start gap-3">
+              <Cpu className="mt-0.5 h-5 w-5 shrink-0 text-text-secondary" />
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base font-semibold">Служебные задачи</h3>
+                <p className="mt-1 text-sm leading-relaxed text-text-secondary">
+                  Зрение, сжатие контекста и другие внутренние действия.
+                </p>
+                <p className="mt-3 text-sm text-foreground">
+                  {auxOverrideCount > 0
+                    ? `Назначено вручную: ${auxOverrideCount}`
+                    : "Автоматический выбор"}
+                </p>
+              </div>
             </div>
-            <div className="text-xs font-mono text-text-secondary truncate">
-              {auxOverrideCount > 0
-                ? `Настроено: ${auxOverrideCount} · авто: ${AUX_TASKS.length - auxOverrideCount}`
-                : `${AUX_TASKS.length} задач · автоматический выбор`}
-            </div>
+            <Button size="sm" outlined onClick={() => setAuxModalOpen(true)} className="mt-auto w-full sm:w-fit">
+              Настроить задачи
+            </Button>
           </div>
-          <Button
-            size="sm"
-            outlined
-            onClick={() => setAuxModalOpen(true)}
-            className="shrink-0 self-start text-xs uppercase sm:self-center"
-          >
-            Настроить
-          </Button>
-        </div>
 
-        <div className="flex min-w-0 flex-col gap-2 bg-muted/20 border border-border/50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 mb-0.5">
-              <Brain className="h-3 w-3 text-text-tertiary" />
-              <span className="text-display text-xs font-medium tracking-wider">
-                Команда моделей
-              </span>
+          <div className="flex min-w-0 flex-col gap-4 rounded-xl bg-[var(--neo-surface)] p-4 shadow-[var(--neo-inset-compact)]">
+            <div className="flex min-w-0 items-start gap-3">
+              <Brain className="mt-0.5 h-5 w-5 shrink-0 text-text-secondary" />
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base font-semibold">Команда моделей</h3>
+                <p className="mt-1 text-sm leading-relaxed text-text-secondary">
+                  Несколько моделей готовят один итоговый ответ.
+                </p>
+                <p className="mt-3 truncate text-sm text-foreground">
+                  {moa ? `${moa.reference_models.length} референсных · ${shortModelName(moa.aggregator.model)}` : "Не настроена"}
+                </p>
+              </div>
             </div>
-            <div className="text-xs font-mono text-text-secondary truncate">
-              {moa
-                ? `Референсов: ${moa.reference_models.length} · ${moa.aggregator.provider}/${shortModelName(moa.aggregator.model)}`
-                : "не загружено"}
-            </div>
+            <Button
+              size="sm"
+              outlined
+              onClick={() => setMoaModalOpen(true)}
+              disabled={!moa}
+              className="mt-auto w-full sm:w-fit"
+            >
+              Настроить команду
+            </Button>
           </div>
-          <Button
-            size="sm"
-            outlined
-            onClick={() => setMoaModalOpen(true)}
-            disabled={!moa}
-            className="shrink-0 self-start text-xs uppercase sm:self-center"
-          >
-            Настроить
-          </Button>
         </div>
 
         {picker && (
@@ -1190,6 +1163,22 @@ export default function ModelsPage() {
     setSaveKey((k) => k + 1);
   }, [refreshAux]);
 
+  const usageStats = data
+    ? showTokens
+      ? [
+          { label: t.models.modelsUsed, value: String(data.totals.distinct_models) },
+          { label: t.analytics.totalSessions, value: String(data.totals.total_sessions) },
+          { label: t.analytics.totalTokens, value: formatTokens(data.totals.total_input + data.totals.total_output) },
+          { label: t.analytics.input, value: formatTokens(data.totals.total_input) },
+          { label: t.analytics.output, value: formatTokens(data.totals.total_output) },
+          { label: t.models.estimatedCost, value: formatCost(data.totals.total_estimated_cost) },
+        ]
+      : [
+          { label: "Моделей использовано", value: String(data.totals.distinct_models) },
+          { label: "Чатов", value: String(data.totals.total_sessions) },
+        ]
+    : [];
+
   useLayoutEffect(() => {
     // Period selector + refresh both live in afterTitle so the controls
     // sit immediately next to the page title instead of being pinned to
@@ -1252,78 +1241,40 @@ export default function ModelsPage() {
   }, [refreshAux]);
 
   return (
-    <div className="flex min-w-0 max-w-full flex-col gap-6">
+    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-8 font-sans">
       <PluginSlot name="models:top" />
 
-      <div className="grid min-w-0 gap-6 lg:grid-cols-2">
-        <ModelSettingsPanel
-          aux={aux}
-          refreshKey={saveKey}
-          onSaved={onAssigned}
-        />
+      <ModelSettingsPanel
+        aux={aux}
+        refreshKey={saveKey}
+        onSaved={onAssigned}
+      />
 
-        {data && (
-          <Card className="min-w-0 max-w-full overflow-hidden">
-            <CardContent className="min-w-0 py-6">
-              <div className="min-w-0 max-w-full [&_div.grid]:grid-cols-[auto_minmax(0,1fr)_auto]">
-                <Stats
-                  className="min-w-0"
-                  items={
-                  showTokens
-                    ? [
-                        {
-                          label: t.models.modelsUsed,
-                          value: String(data.totals.distinct_models),
-                        },
-                        {
-                          label: t.analytics.totalTokens,
-                          value: formatTokens(
-                            data.totals.total_input + data.totals.total_output,
-                          ),
-                        },
-                        {
-                          label: t.analytics.input,
-                          value: formatTokens(data.totals.total_input),
-                        },
-                        {
-                          label: t.analytics.output,
-                          value: formatTokens(data.totals.total_output),
-                        },
-                        {
-                          label: t.models.estimatedCost,
-                          value: formatCost(data.totals.total_estimated_cost),
-                        },
-                        {
-                          label: t.analytics.totalSessions,
-                          value: String(data.totals.total_sessions),
-                        },
-                      ]
-                    : [
-                        {
-                          label: t.models.modelsUsed,
-                          value: String(data.totals.distinct_models),
-                        },
-                        {
-                          label: t.analytics.totalSessions,
-                          value: String(data.totals.total_sessions),
-                        },
-                      ]
-                }
-              />
+      {data && (
+        <section aria-labelledby="model-usage-title" className="space-y-4">
+          <div>
+            <h2 id="model-usage-title" className="text-xl font-semibold text-foreground">
+              Использование за {days} дней
+            </h2>
+            <p className="mt-1 text-[15px] leading-relaxed text-text-secondary">
+              Здесь видно, какие модели действительно участвовали в разговорах.
+            </p>
+          </div>
+
+          <Card className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/60 font-sans">
+            <CardContent className="min-w-0 p-5 sm:p-6">
+              <div className="grid min-w-0 grid-cols-2 gap-3 lg:grid-cols-3">
+                {usageStats.map((item) => (
+                  <div key={item.label} className="rounded-xl bg-[var(--neo-surface)] p-4 shadow-[var(--neo-inset-compact)]">
+                    <div className="font-mono text-2xl font-semibold text-foreground">{item.value}</div>
+                    <div className="mt-1 text-sm text-text-secondary">{item.label}</div>
+                  </div>
+                ))}
               </div>
-              {!showTokens && (
-                <p className="mt-4 text-xs text-text-tertiary leading-relaxed">
-                  Токены и стоимость скрыты: локальный счётчик не включает
-                  вспомогательные вызовы и повторные запросы провайдера, поэтому
-                  может отличаться от счёта. Для отладочной оценки включите{" "}
-                  <span className="font-mono">dashboard.show_token_analytics</span>{" "}
-                  в <Link to="/config" className="underline">конфигурации</Link>.
-                </p>
-              )}
             </CardContent>
           </Card>
-        )}
-      </div>
+        </section>
+      )}
 
       {loading && !data && (
         <KorraLoader className="py-24" />
@@ -1340,27 +1291,37 @@ export default function ModelsPage() {
       {data && (
         <>
           {data.models.length > 0 ? (
-            <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {data.models.map((m, i) => (
-                <ModelCard
-                  key={`${m.model}:${m.provider}`}
-                  entry={m}
-                  rank={i + 1}
-                  main={aux?.main ?? null}
-                  aux={aux?.tasks ?? []}
-                  onAssigned={onAssigned}
-                  showTokens={showTokens}
-                />
-              ))}
-            </div>
+            <section aria-labelledby="models-in-work-title" className="space-y-4">
+              <div>
+                <h2 id="models-in-work-title" className="text-xl font-semibold text-foreground">
+                  Модели в работе
+                </h2>
+                <p className="mt-1 text-[15px] leading-relaxed text-text-secondary">
+                  Нажмите «Назначить», чтобы сделать модель основной или отдать ей отдельную задачу.
+                </p>
+              </div>
+              <div className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {data.models.map((m, i) => (
+                  <ModelCard
+                    key={`${m.model}:${m.provider}`}
+                    entry={m}
+                    rank={i + 1}
+                    main={aux?.main ?? null}
+                    aux={aux?.tasks ?? []}
+                    onAssigned={onAssigned}
+                    showTokens={showTokens}
+                  />
+                ))}
+              </div>
+            </section>
           ) : (
-            <Card>
+            <Card className="rounded-xl border border-border/60 font-sans">
               <CardContent className="py-12">
                 <div className="flex flex-col items-center text-muted-foreground">
-                  <Cpu className="h-8 w-8 mb-3 opacity-40" />
-                  <p className="text-sm font-medium">{t.models.noModelsData}</p>
-                  <p className="text-xs mt-1 text-text-tertiary">
-                    {t.models.startSession}
+                  <Cpu className="mb-3 h-8 w-8" />
+                  <p className="text-base font-semibold">Модели ещё не использовались</p>
+                  <p className="mt-1 text-center text-sm text-text-secondary">
+                    Начните новый чат — выбранная модель появится здесь после первого ответа.
                   </p>
                 </div>
               </CardContent>

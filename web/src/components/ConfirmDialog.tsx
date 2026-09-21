@@ -1,9 +1,8 @@
-import { Button } from "@nous-research/ui/ui/components/button";
+import { Button } from "@/components/ProductButton";
 import { AlertTriangle } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/i18n";
-import { cn, themedBody } from "@/lib/utils";
 
 interface ConfirmDialogProps {
   cancelLabel?: string;
@@ -38,7 +37,7 @@ export function ConfirmDialog({
 
     const prevActive = document.activeElement as HTMLElement | null;
     dialogRef.current
-      ?.querySelector<HTMLButtonElement>("[data-confirm]")
+      ?.querySelector<HTMLButtonElement>("[data-cancel]")
       ?.focus();
 
     const onKey = (e: KeyboardEvent) => {
@@ -70,26 +69,26 @@ export function ConfirmDialog({
       onClick={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-background/85 p-4"
+      className="neo-overlay fixed inset-0 z-[200] flex items-center justify-center p-4"
     >
       <div
         ref={dialogRef}
-        className={cn(
-          themedBody,
-          "relative w-full max-w-md border border-border bg-card shadow-2xl",
-        )}
+        className="neo-dialog relative w-full max-w-md overflow-hidden font-sans"
       >
-        <div className="flex items-start gap-3 p-4 border-b border-border">
+        <div className="flex items-start gap-4 px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
           {destructive && (
-            <div aria-hidden className="mt-0.5 shrink-0 text-destructive">
-              <AlertTriangle className="h-4 w-4" />
+            <div
+              aria-hidden
+              className="flex size-11 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive shadow-[var(--neo-inset-compact)]"
+            >
+              <AlertTriangle className="h-5 w-5" />
             </div>
           )}
 
-          <div className="flex-1 min-w-0 flex flex-col gap-1">
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
             <h2
               id="confirm-dialog-title"
-              className="font-mondwest text-display text-base tracking-wider"
+              className="text-xl font-semibold leading-tight text-foreground"
             >
               {title}
             </h2>
@@ -97,7 +96,7 @@ export function ConfirmDialog({
             {description && (
               <p
                 id="confirm-dialog-desc"
-                className="text-xs text-muted-foreground leading-relaxed whitespace-pre-line"
+                className="whitespace-pre-line text-[15px] leading-relaxed text-text-secondary"
               >
                 {description}
               </p>
@@ -105,8 +104,15 @@ export function ConfirmDialog({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 p-3">
-          <Button type="button" outlined onClick={onCancel} disabled={loading}>
+        <div className="flex flex-col-reverse gap-2 px-5 pb-5 sm:flex-row sm:justify-end sm:px-6 sm:pb-6">
+          <Button
+            data-cancel
+            type="button"
+            outlined
+            onClick={onCancel}
+            disabled={loading}
+            className="w-full sm:w-auto"
+          >
             {resolvedCancelLabel}
           </Button>
           <Button
@@ -115,6 +121,7 @@ export function ConfirmDialog({
             destructive={destructive}
             onClick={onConfirm}
             disabled={loading}
+            className="w-full sm:w-auto"
           >
             {loading ? "…" : resolvedConfirmLabel}
           </Button>

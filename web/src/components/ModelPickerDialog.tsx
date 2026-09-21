@@ -1,18 +1,16 @@
-import { Button } from "@nous-research/ui/ui/components/button";
 import { Checkbox } from "@nous-research/ui/ui/components/checkbox";
-import { ListItem } from "@nous-research/ui/ui/components/list-item";
 import { Spinner } from "@nous-research/ui/ui/components/spinner";
 import { Input } from "@nous-research/ui/ui/components/input";
-import { Label } from "@nous-research/ui/ui/components/label";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Button } from "@/components/ProductButton";
 import type { GatewayClient } from "@/lib/gatewayClient";
 import { Check, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { cn, themedBody } from "@/lib/utils";
 import { fuzzyRank } from "@/lib/fuzzy";
 import { queryMatchesProviderOnly } from "@/lib/model-picker-filter";
 import { modelSearchText } from "@/lib/model-search-text";
+import { providerDisplayName } from "@/lib/model-choices";
 import { useI18n } from "@/i18n";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 import { russianInterfaceText } from "@/lib/russian-interface-text";
@@ -356,50 +354,54 @@ export function ModelPickerDialog(props: Props) {
   // Toast.tsx for the same pattern.
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-background/85 p-4"
+      className="neo-overlay fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6"
       onClick={(e) => e.target === e.currentTarget && onClose()}
       role="dialog"
       aria-modal="true"
       aria-labelledby="model-picker-title"
     >
-      <div className={cn(themedBody, "relative w-full max-w-3xl max-h-[80vh] border border-border bg-card shadow-2xl flex flex-col")}>
+      <div className="neo-dialog relative flex max-h-[min(90dvh,52rem)] w-full max-w-4xl flex-col overflow-hidden font-sans">
         <Button
           ghost
           size="icon"
           onClick={onClose}
-          className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+          className="absolute right-3 top-3 z-10 text-muted-foreground hover:text-foreground"
           aria-label={t.common.close}
         >
           <X />
         </Button>
 
-        <header className="p-5 pb-3 border-b border-border">
+        <header className="px-5 pb-4 pt-5 pr-16 sm:px-7 sm:pt-7">
           <h2
             id="model-picker-title"
-            className="font-mondwest text-display text-base tracking-wider"
+            className="text-2xl font-semibold leading-tight text-foreground"
           >
             {dialogTitle}
           </h2>
-          <p className="text-xs text-muted-foreground mt-1 font-mono">
-            {tr("current:")} {currentModel || tr("(unknown)")}
-            {currentProviderSlug && ` · ${currentProviderSlug}`}
-          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-text-secondary">
+            <span>Сейчас выбрана</span>
+            <span className="max-w-full truncate rounded-full bg-[var(--neo-surface)] px-3 py-1 font-mono text-xs text-foreground shadow-[var(--neo-inset-compact)]">
+              {currentProviderSlug && `${providerDisplayName(currentProviderSlug)} · `}
+              {currentModel || "модель не выбрана"}
+            </span>
+          </div>
         </header>
 
-        <div className="px-5 pt-3 pb-2 border-b border-border">
+        <div className="px-5 pb-4 sm:px-7">
           <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               autoFocus
-              placeholder={tr("Filter providers and models…")}
+              aria-label="Найти поставщика или модель"
+              placeholder="Найти поставщика или модель"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="pl-7 h-8 text-sm"
+              className="h-11 rounded-xl pl-11 pr-4 font-sans text-sm"
             />
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 grid grid-cols-[200px_1fr] overflow-hidden">
+        <div className="mx-3 mb-3 grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-2xl bg-[var(--neo-surface)] shadow-[var(--neo-inset-compact)] sm:mx-5 sm:mb-4 md:grid-cols-[minmax(15rem,0.8fr)_minmax(0,1.4fr)]">
           <ProviderColumn
             loading={loading}
             error={error}
@@ -433,13 +435,16 @@ export function ModelPickerDialog(props: Props) {
           />
         </div>
 
-        <footer className="border-t border-border p-3 flex items-center justify-between gap-3 flex-wrap">
+        <footer className="flex flex-col gap-3 px-5 pb-5 pt-1 sm:px-7 sm:pb-6 lg:flex-row lg:items-center lg:justify-between">
           {alwaysGlobal ? (
-            <span className="text-xs text-muted-foreground">
-              {tr("Saves to config.yaml — applies to new sessions.")}
+            <span className="max-w-xl text-sm leading-relaxed text-text-secondary">
+              Выбор будет действовать в новых чатах. Уже открытый разговор продолжит работать с прежней моделью.
             </span>
           ) : (
-            <div className="flex items-center gap-2">
+            <label
+              className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-text-secondary"
+              htmlFor="model-picker-persist-global"
+            >
               <Checkbox
                 checked={persistGlobal}
                 id="model-picker-persist-global"
@@ -447,30 +452,26 @@ export function ModelPickerDialog(props: Props) {
                   setPersistGlobal(checked === true)
                 }
               />
-
-              <Label
-                className="font-mondwest normal-case tracking-normal text-xs text-muted-foreground cursor-pointer"
-                htmlFor="model-picker-persist-global"
-              >
-                {tr("Persist globally (otherwise this session only)")}
-              </Label>
-            </div>
+              Использовать в новых чатах, а не только в этом
+            </label>
           )}
 
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex w-full flex-col-reverse gap-2 sm:flex-row lg:ml-auto lg:w-auto">
             <Button
+              ghost
               outlined
               onClick={refreshOptions}
               disabled={applying || loading || refreshing}
+              className="w-full sm:w-auto"
             >
               {refreshing ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" />}
-              {tr("Refresh Models")}
+              Обновить список
             </Button>
-            <Button outlined onClick={onClose} disabled={applying}>
+            <Button outlined onClick={onClose} disabled={applying} className="w-full sm:w-auto">
               {t.common.cancel}
             </Button>
-            <Button onClick={confirm} disabled={!canConfirm}>
-              {applying ? <Spinner /> : tr("Switch")}
+            <Button onClick={confirm} disabled={!canConfirm} className="w-full sm:w-auto">
+              {applying ? <Spinner /> : "Выбрать модель"}
             </Button>
           </div>
         </footer>
@@ -519,49 +520,75 @@ function ProviderColumn({
 }) {
   const { tr } = useI18n();
   return (
-    <div className="border-r border-border overflow-y-auto">
+    <section
+      aria-label="Поставщики моделей"
+      className="flex min-h-0 flex-col border-b border-border/50 md:border-b-0 md:border-r"
+    >
+      <div className="flex items-center justify-between px-4 pb-2 pt-4">
+        <h3 className="text-sm font-semibold text-foreground">Поставщик</h3>
+        {!loading && (
+          <span className="text-xs text-text-tertiary">{providers.length} из {total}</span>
+        )}
+      </div>
+      <div className="max-h-[28dvh] min-h-0 overflow-y-auto px-2 pb-2 md:max-h-none md:flex-1">
       {loading && (
-        <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
-          <Spinner className="text-xs" /> {tr("loading…")}
+        <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+          <Spinner /> Загружаем поставщиков…
         </div>
       )}
 
-      {error && <div className="p-4 text-xs text-destructive">{error}</div>}
+      {error && <div className="m-2 rounded-xl bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
 
       {!loading && !error && providers.length === 0 && (
-        <div className="p-4 text-xs text-muted-foreground italic">
+        <div className="p-4 text-sm leading-relaxed text-muted-foreground">
           {query
-            ? tr("no matches")
+            ? "Ничего не найдено. Попробуйте изменить запрос."
             : total === 0
-              ? tr("no authenticated providers")
-              : tr("no matches")}
+              ? "Поставщики моделей пока не подключены."
+              : "Ничего не найдено."}
         </div>
       )}
 
       {providers.map((p) => {
         const active = p.slug === selectedSlug;
+        const modelCount = p.total_models ?? p.models?.length ?? 0;
         return (
-          <ListItem
+          <button
+            type="button"
+            role="option"
+            aria-selected={active}
             key={p.slug}
-            active={active}
             onClick={() => onSelect(p.slug)}
-            className={`items-start text-xs border-l-2 ${
-              active ? "border-l-primary" : "border-l-transparent"
+            className={`mb-1 flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left outline-none transition-colors ${
+              active
+                ? "bg-[var(--neo-surface)] text-foreground shadow-[var(--neo-depth-1)]"
+                : "text-text-secondary hover:bg-background/35 hover:text-foreground"
             }`}
           >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="font-medium truncate">{p.name}</span>
+            <span
+              aria-hidden
+              className={`flex size-7 shrink-0 items-center justify-center rounded-full ${
+                active ? "bg-primary text-primary-foreground" : "bg-background/60 text-transparent"
+              }`}
+            >
+              <Check className="size-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2">
+                <span className="truncate text-sm font-semibold">
+                  {providerDisplayName(p.slug, p.name)}
+                </span>
                 {p.is_current && <CurrentTag />}
-              </div>
-              <div className="text-xs text-text-secondary font-mono truncate">
-                {p.slug} · {tr("{count} models", { count: p.total_models ?? p.models?.length ?? 0 })}
-              </div>
-            </div>
-          </ListItem>
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-text-tertiary">
+                {modelCount > 0 ? tr("{count} models", { count: modelCount }) : "нужно подключить"}
+              </span>
+            </span>
+          </button>
         );
       })}
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -588,21 +615,30 @@ function ModelColumn({
   onSelect(model: string): void;
   onConfirm(model: string): void;
 }) {
-  const { tr } = useI18n();
   if (!provider) {
     return (
-      <div className="overflow-y-auto">
-        <div className="p-4 text-xs text-muted-foreground italic">
-          {tr("pick a provider →")}
+      <section className="min-h-40 overflow-y-auto" aria-label="Модели">
+        <div className="p-5 text-sm text-muted-foreground">
+          Сначала выберите поставщика.
         </div>
-      </div>
+      </section>
     );
   }
 
   return (
-    <div className="overflow-y-auto">
+    <section className="flex min-h-0 flex-col" aria-label="Модели">
+      <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-4">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold text-foreground">Модель</h3>
+          <p className="truncate text-xs text-text-tertiary">
+            {providerDisplayName(provider.slug, provider.name)}
+          </p>
+        </div>
+        <span className="shrink-0 text-xs text-text-tertiary">{models.length} из {allModels.length}</span>
+      </div>
+
       {provider.warning && (
-        <div className="p-3 text-xs text-destructive border-b border-border">
+        <div className="mx-3 mb-2 rounded-xl bg-warning/10 p-3 text-sm leading-relaxed text-text-secondary">
           {russianInterfaceText(
             provider.warning,
             "Провайдер требует настройки перед использованием.",
@@ -611,45 +647,53 @@ function ModelColumn({
       )}
 
       {models.length === 0 ? (
-        <div className="p-4 text-xs text-muted-foreground italic">
+        <div className="p-5 text-sm leading-relaxed text-muted-foreground">
           {allModels.length
-            ? tr("no models match your filter")
-            : tr("no models listed for this provider")}
+            ? "Среди моделей этого поставщика ничего не найдено."
+            : "У этого поставщика пока нет доступных моделей."}
         </div>
       ) : (
-        models.map(({ model: m, positions }) => {
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+          {models.map(({ model: m, positions }) => {
           const active = m === selectedModel;
           const isCurrent =
             m === currentModel && provider.slug === currentProviderSlug;
 
           return (
-            <ListItem
+            <button
+              type="button"
+              role="option"
+              aria-selected={active}
               key={m}
-              active={active}
               onClick={() => onSelect(m)}
               onDoubleClick={() => onConfirm(m)}
-              className="px-3 py-1.5 text-xs font-mono"
+              className={`mb-1 flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2 text-left outline-none transition-colors ${
+                active
+                  ? "bg-[var(--neo-surface)] text-foreground shadow-[var(--neo-depth-1)]"
+                  : "text-text-secondary hover:bg-background/35 hover:text-foreground"
+              }`}
             >
               <Check
-                className={`h-3 w-3 shrink-0 ${active ? "text-primary" : "text-transparent"}`}
+                className={`h-4 w-4 shrink-0 ${active ? "text-primary" : "text-transparent"}`}
               />
-              <span className="flex-1 truncate">
+              <span className="flex-1 truncate font-mono text-sm">
                 <HighlightedText text={m} positions={positions} />
               </span>
               {isCurrent && <CurrentTag />}
-            </ListItem>
+            </button>
           );
-        })
+          })}
+        </div>
       )}
-    </div>
+    </section>
   );
 }
 
 function CurrentTag() {
   const { tr } = useI18n();
   return (
-    <span className="text-display text-xs tracking-wider text-primary shrink-0">
-      {tr("current")}
+    <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+      {tr("current") === "current" ? "выбрана" : tr("current")}
     </span>
   );
 }
