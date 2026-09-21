@@ -1754,6 +1754,26 @@ def test_real_smoke_provider_unavailable_warns_without_rollback(real_smoke_conte
     )
 
 
+def test_real_smoke_runs_as_maintenance_and_keeps_its_verdict(real_smoke_context, monkeypatch):
+    """Ход приёмки объявлен служебным, но остаётся полноценной приёмкой.
+
+    Заголовок класса разговора убирает smoke из пользовательской истории
+    (см. tests/deployment/test_update_smoke_not_a_user_chat.py); проверка ACK
+    и запись результата в квитанцию от этого не меняются.
+    """
+    updater, _, models, _ = real_smoke_context
+    monkeypatch.setattr(updater, "native_states", lambda **kwargs: [{"home": "/opt/data", "state": {
+        "gateway_state": "running", "served_profiles": ["default", "secretary"]}}])
+
+    u.Updater.smoke(updater, OLD)
+
+    assert len(models) == 1
+    assert "'X-Korra-Session-Source': 'maintenance'" in models[0]
+    assert "Reply with exactly KORRA_UPDATE_OK" in models[0]
+    assert updater.receipt["model_smoke"] == {"status": "ok"}
+    assert "error_code" not in updater.receipt
+
+
 @pytest.mark.parametrize("damage", ["degraded", "missing", "schema", "malformed", "false_version"])
 def test_degraded_health_never_reaches_model(real_smoke_context, monkeypatch, damage):
     updater, clock, models, settings = real_smoke_context

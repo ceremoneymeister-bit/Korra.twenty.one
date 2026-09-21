@@ -53,8 +53,18 @@ describe("таксономия источников истории", () => {
     expect(isAutomationSource("cli")).toBe(false);
   });
 
+  it("служебный ход обслуживания не попадает в «Чаты»", () => {
+    // Сервер и так не отдаёт этот класс в списках разговоров; вкладка «Чаты»
+    // держит ту же таксономию, чтобы строка не всплыла и при явном выборе.
+    expect(isAutomationSource("maintenance")).toBe(true);
+  });
+
   it("источник панели подписан по-русски, а не слагом движка", () => {
     expect(sourceLabel("dashboard")).toBe("Панель");
     expect(sourceLabel("hermes_browser")).toBe("Панель");
+  });
+
+  it("служебный класс подписан по-русски", () => {
+    expect(sourceLabel("maintenance")).toBe("Обслуживание");
   });
 });
