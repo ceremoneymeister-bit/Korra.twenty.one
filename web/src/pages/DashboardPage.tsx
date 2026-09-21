@@ -25,6 +25,7 @@ import { useState } from "react";
 import { Check, Plus, RotateCcw } from "lucide-react";
 import { Card } from "@nous-research/ui/ui/components/card";
 import { DashboardWidgetCard } from "@/components/dashboard/DashboardWidgetCard";
+import { DashboardWidgetBoundary } from "@/components/dashboard/DashboardWidgetBoundary";
 import {
   DASHBOARD_WIDGETS,
   DASHBOARD_WIDGET_IDS,
@@ -210,7 +211,12 @@ export default function DashboardPage() {
                     : undefined
                 }
               >
-                <widget.Body />
+                <DashboardWidgetBoundary
+                  title={widget.title}
+                  widgetId={widget.id}
+                >
+                  <widget.Body />
+                </DashboardWidgetBoundary>
               </DashboardWidgetCard>
             </li>
           ))}

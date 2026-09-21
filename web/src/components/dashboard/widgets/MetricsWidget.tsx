@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- виджет и его каталожное описание намеренно живут вместе */
 import { WidgetEmptyState } from "@/components/dashboard/WidgetEmptyState";
 import type { DashboardWidget } from "@/components/dashboard/widget-types";
 
