@@ -136,6 +136,12 @@ fs.mkdirSync(evidence, { recursive: true })
     await page.setViewportSize({ width: 390, height: 844 })
     await inspect('mixed-dark')
     await open()
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('dialog[open]')).opacity === '1')
+    assert.notEqual(
+      await page.getByRole('dialog').evaluate(el => getComputedStyle(el).backgroundColor),
+      'rgba(0, 0, 0, 0)',
+      'dark catalog keeps an opaque readable surface'
+    )
     await page.screenshot({ path: path.join(evidence, 'mobile-size-picker.png') })
     await done()
     await page.emulateMedia({ reducedMotion: 'reduce' })
