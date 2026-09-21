@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DashboardLayoutPreference } from "@/lib/api";
+import { ApiError, type DashboardLayoutPreference } from "@/lib/api";
 import DashboardPage from "./DashboardPage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -286,7 +286,10 @@ describe("Раскладка дашборда хранится на сервер
 
   it("проигранный конфликт показывает победителя и даёт повторить свой выбор", async () => {
     const winner = pref({ revision: 9, hidden: ["recent-results"] });
-    api.setDashboardLayout.mockRejectedValueOnce(new Error("409: конфликт"));
+    // Так отвечает сервер на проигранный CAS: 409 и победившая запись в теле.
+    api.setDashboardLayout.mockRejectedValueOnce(
+      new ApiError(409, "409: Дашборд уже изменился в другом окне.", { preference: winner }),
+    );
     api.getDashboardLayout.mockResolvedValue(winner);
 
     await click(button("Добавить виджет"));

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, useEffect } from "react";
+import { StrictMode, act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,13 +13,14 @@ import {
 /** Тот же класс, что бросает `fetchJSON`: хуку важен именно код ответа. */
 const { ApiError } = vi.hoisted(() => ({
   ApiError: class ApiError extends Error {
-    constructor(
-      readonly status: number,
-      message: string,
-      readonly payload?: unknown,
-    ) {
+    status: number;
+    payload: unknown;
+
+    constructor(status: number, message: string, payload?: unknown) {
       super(message);
       this.name = "ApiError";
+      this.status = status;
+      this.payload = payload;
     }
   },
 }));
@@ -79,12 +80,12 @@ function Probe() {
   return null;
 }
 
-async function mount() {
+async function mount({ strict = false } = {}) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(<Probe />);
+    root.render(strict ? <StrictMode><Probe /></StrictMode> : <Probe />);
   });
   await act(async () => {});
 }
@@ -291,6 +292,43 @@ describe("useDashboardLayout", () => {
     expect(current.message).toBe("");
   });
 
+  it("выбор, сделанный вслепую, не выдаётся за сохранённый исходом разбора", async () => {
+    await mount();
+    // Запись дошла до сервера, а подтверждение — нет.
+    setDashboardLayout.mockImplementationOnce(async (body: Body) => {
+      server = { ...server, revision: server.revision + 1, hidden: [...body.hidden] };
+      throw new ApiError(500, "500: Сервис временно недоступен.");
+    });
+    const recovery = deferred<DashboardLayoutPreference>();
+    getDashboardLayout.mockImplementationOnce(() => recovery.promise);
+
+    await act(async () => current.apply(hide("agents")));
+    await flush(3);
+    expect(getDashboardLayout).toHaveBeenCalledTimes(2);
+
+    // Пока идёт разбор, человек выбирает ещё раз — вслепую.
+    await act(async () => current.apply(hide("metrics")));
+    await act(async () => recovery.settle({ ...server }));
+    await flush();
+
+    expect(setDashboardLayout).toHaveBeenCalledTimes(1);
+    expect(current.layout.hidden).toEqual(["agents"]);
+    expect(current.status).toBe("conflict");
+    expect(current.message).toContain("не подтвердился");
+    // Ревизия сдвинулась нашей же записью: чужого окна здесь не было.
+    expect(current.message).not.toContain("другом окне");
+
+    // Повтор по известному состоянию применяет выбор человека.
+    await act(async () => current.apply(hide("metrics")));
+    await flush();
+
+    expect(setDashboardLayout).toHaveBeenCalledTimes(2);
+    expect(setDashboardLayout).toHaveBeenLastCalledWith(
+      expect.objectContaining({ revision: 5, hidden: ["agents", "metrics"] }),
+    );
+    expect(current.status).toBe("ready");
+  });
+
   it("сбой записи и недоступное перечитывание оставляют явную ошибку", async () => {
     await mount();
     setDashboardLayout.mockRejectedValueOnce(new ApiError(503, "503: Панель недоступна."));
@@ -353,6 +391,72 @@ describe("useDashboardLayout", () => {
     expect(current.layout.hidden).toEqual(["agents"]);
   });
 
+  it("чтение, начатое при незавершённой записи, не подтверждает промежуточную раскладку", async () => {
+    await mount();
+    const pending = deferred<DashboardLayoutPreference>();
+    setDashboardLayout.mockImplementationOnce(() => pending.promise);
+
+    await act(async () => current.apply(hide("agents")));
+    // «Повторить» нажато, пока запись ещё в пути: сервер сейчас ответит тем,
+    // что было до неё, и это не то состояние, которое стоит показывать.
+    let reloading: Promise<void> = Promise.resolve();
+    await act(async () => {
+      reloading = current.reload();
+    });
+    await flush(2);
+
+    expect(current.layout.hidden).toEqual(["agents"]);
+    expect(getDashboardLayout).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.settle(record(["agents"], 5));
+      await reloading;
+    });
+    await flush();
+
+    expect(current.layout.hidden).toEqual(["agents"]);
+    expect(current.status).toBe("ready");
+
+    // Новое нажатие «Повторить» по затихшей очереди читает сервер как обычно.
+    server = record(["metrics"], 7);
+    await act(async () => current.reload());
+    await flush();
+
+    expect(getDashboardLayout).toHaveBeenCalledTimes(2);
+    expect(current.layout.hidden).toEqual(["metrics"]);
+    expect(current.status).toBe("ready");
+  });
+
+  it("оборванное чтение, начатое при незавершённой записи, не отменяет подтверждённую запись", async () => {
+    await mount();
+    const pending = deferred<DashboardLayoutPreference>();
+    setDashboardLayout.mockImplementationOnce(() => pending.promise);
+    const stale = deferred<DashboardLayoutPreference>();
+    // Отменённое чтение никто не ждёт — отказ по нему тоже никому не адресован.
+    void stale.promise.catch(() => {});
+    getDashboardLayout.mockImplementationOnce(() => stale.promise);
+
+    await act(async () => current.apply(hide("agents")));
+    let reloading: Promise<void> = Promise.resolve();
+    await act(async () => {
+      reloading = current.reload();
+    });
+
+    await act(async () => pending.settle(record(["agents"], 5)));
+    await flush();
+    expect(current.status).toBe("ready");
+
+    // Чтение обрывается уже после того, как запись подтвердилась.
+    await act(async () => {
+      stale.fail(new Error("offline"));
+      await reloading;
+    });
+
+    expect(current.status).toBe("ready");
+    expect(current.message).toBe("");
+    expect(current.layout.hidden).toEqual(["agents"]);
+  });
+
   it("опоздавшее чтение не стирает объяснение свежего конфликта", async () => {
     await mount();
     const stale = deferred<DashboardLayoutPreference>();
@@ -400,6 +504,45 @@ describe("useDashboardLayout", () => {
     await mount();
     expect(current.layout.hidden).toEqual(["metrics"]);
     expect(current.status).toBe("ready");
+  });
+
+  it("размонтирование отменяет запись, которая ещё не ушла", async () => {
+    await mount();
+    const pending = deferred<DashboardLayoutPreference>();
+    setDashboardLayout.mockImplementationOnce(() => pending.promise);
+
+    await act(async () => {
+      current.apply(hide("agents"));
+      current.apply({ ...hide("agents"), hidden: ["agents", "metrics"] });
+    });
+    expect(setDashboardLayout).toHaveBeenCalledTimes(1);
+
+    await act(async () => root.unmount());
+    container.remove();
+    // Первая запись уже у сервера — её исход отменить нельзя.
+    server = record(["agents"], 5);
+    await act(async () => pending.settle({ ...server }));
+    await flush();
+
+    // А вторая ушла бы уже за закрытым экраном — возможно, от другого человека.
+    expect(setDashboardLayout).toHaveBeenCalledTimes(1);
+    expect(server.hidden).toEqual(["agents"]);
+
+    await mount();
+    expect(current.layout.hidden).toEqual(["agents"]);
+    expect(current.status).toBe("ready");
+  });
+
+  it("повторный монтаж StrictMode не оставляет запись висеть", async () => {
+    await mount({ strict: true });
+
+    await act(async () => current.apply(hide("agents")));
+    await flush();
+
+    expect(setDashboardLayout).toHaveBeenCalledTimes(1);
+    expect(server.hidden).toEqual(["agents"]);
+    expect(current.status).toBe("ready");
+    expect(current.saving).toBe(false);
   });
 
   it("без ответа сервера выбор остаётся в окне и не уходит записью", async () => {

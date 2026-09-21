@@ -133,7 +133,7 @@ describe("fetchJSON", () => {
       ),
     );
 
-    const error = await fetchJSON("/api/dashboard/layout").catch((e) => e);
+    const error = (await fetchJSON("/api/dashboard/layout").catch((e) => e)) as ApiError;
 
     expect(error).toBeInstanceOf(ApiError);
     expect(error.status).toBe(409);
@@ -150,7 +150,7 @@ describe("fetchJSON", () => {
       vi.fn(async () => new Response("<html>502</html>", { status: 502 })),
     );
 
-    const error = await fetchJSON("/api/status").catch((e) => e);
+    const error = (await fetchJSON("/api/status").catch((e) => e)) as ApiError;
 
     expect(error).toBeInstanceOf(ApiError);
     expect(error.status).toBe(502);
