@@ -22,6 +22,9 @@ while IFS= read -r -d '' asset; do
   install -d -m 755 "$TARGET/$(dirname "$relative")"
   install -m 644 "$asset" "$TARGET/$relative"
 done < <(find "$BUILD_DIR" -type f \( -name '*.js' -o -name '*.css' -o -name '*.woff2' -o -name '*.woff' -o -name '*.png' -o -name '*.webp' -o -name '*.svg' -o -name '*.ico' \) -print0)
+# Keep the bundled font's license with its redistributed files. This exact
+# allowlisted path must not turn into a general text/source publication rule.
+install -m 644 "$BUILD_DIR/fonts/Onest-OFL.txt" "$TARGET/fonts/Onest-OFL.txt"
 touch "$TARGET/.korra-dashboard-preview"
 install -m 644 "$BUILD_DIR/index.html" "$TARGET/index.html"
 curl -fsS http://127.0.0.1/s/korra21-dashboard-v1/ -o /dev/null
