@@ -49,6 +49,14 @@ describe('dashboard visual prototype layout', () => {
     expect($storageNotice.get()).toContain('этом браузере')
     expect(localStorage.length).toBe(1)
   })
+  it('reorders tiles across the fixed attention strip without moving the strip', () => {
+    const layout = normalizeLayout({ order: ['metrics', 'attention', 'agents', 'recent-results', 'upcoming-tasks'] })
+    const result = moveWidget(layout, 'agents', -1)
+    expect(result.order.slice(0, 3)).toEqual(['agents', 'attention', 'metrics'])
+    expect(moveWidget(layout, 'attention', 1)).toBe(layout)
+    expect(moveWidget(DEFAULT_LAYOUT, 'recent-results', -1)).toBe(DEFAULT_LAYOUT)
+    expect(result.sizes).toBe(layout.sizes)
+  })
   it('migrates v1 settings without resetting order or hidden widgets', () => {
     const order = [...DEFAULT_LAYOUT.order].reverse()
     const result = normalizeLayout({ order, hidden: ['agents'] })

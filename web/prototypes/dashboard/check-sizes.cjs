@@ -50,6 +50,12 @@ fs.mkdirSync(evidence, { recursive: true })
     const inspect = async label => {
       const result = await page.evaluate(() => ({
         width: innerWidth,
+        grid: (() => {
+          const el = document.querySelector('.dv-grid'),
+            style = getComputedStyle(el)
+          const columns = style.gridTemplateColumns.split(' ').map(Number.parseFloat)
+          return { columns: columns.length, unit: columns[0], gap: Number.parseFloat(style.gap) }
+        })(),
         overflow:
           document.documentElement.scrollWidth > innerWidth ||
           document.querySelector('.dv-root').scrollWidth > document.querySelector('.dv-root').clientWidth + 1,
@@ -58,9 +64,9 @@ fs.mkdirSync(evidence, { recursive: true })
           return {
             id: el.dataset.widget,
             size: el.dataset.size,
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
-            contentOverflow: el.scrollWidth > el.clientWidth + 1
+            width: rect.width,
+            height: rect.height,
+            contentOverflow: el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
           }
         })
       }))
@@ -71,9 +77,22 @@ fs.mkdirSync(evidence, { recursive: true })
         `${label}: card overflow`
       )
       report.layouts.push({ label, ...result })
+      assert.ok([2, 4].includes(result.grid.columns), 'grid uses two or four base columns')
+      for (const card of result.cards) {
+        const spanX = card.size === 's' ? 1 : 2,
+          spanY = card.size === 'l' ? 2 : 1
+        assert.ok(
+          Math.abs(card.width - (spanX * result.grid.unit + (spanX - 1) * result.grid.gap)) < 1,
+          `${label}/${card.id}: standard width`
+        )
+        assert.ok(
+          Math.abs(card.height - (spanY * result.grid.unit + (spanY - 1) * result.grid.gap)) < 1,
+          `${label}/${card.id}: standard height`
+        )
+      }
       await page.screenshot({ path: path.join(evidence, `${result.width}-${label}.png`) })
     }
-    for (const width of [320, 390, 768, 1024, 1440, 1920]) {
+    for (const width of [320, 360, 390, 600, 768, 1024, 1100, 1160, 1180, 1280, 1440, 1920]) {
       await page.setViewportSize({ width, height: width < 761 ? 844 : 900 })
       for (const size of ['s', 'm', 'l']) {
         await open()
@@ -98,10 +117,21 @@ fs.mkdirSync(evidence, { recursive: true })
           await page.getByRole('dialog', { name: 'Дизайнер', exact: true }).waitFor()
           await page.keyboard.press('Escape')
           report.checks.push('compact team opens every agent without tiny touch targets')
+          await page.getByRole('button', { name: 'Все события дня', exact: true }).click()
+          assert.equal(await page.getByRole('dialog').locator('.dv-event').count(), 3)
+          await page
+            .getByRole('dialog')
+            .getByRole('button', { name: /17:00.*Итоги дня/ })
+            .click()
+          await page.getByRole('dialog', { name: 'Итоги дня', exact: true }).waitFor()
+          await page.keyboard.press('Escape')
+          report.checks.push('compact timeline keeps all events reachable through its gallery')
         }
       }
     }
-    report.checks.push('18 size/viewport combinations have no page or card overflow; content adapts to S/M/L')
+    report.checks.push(
+      '36 size/viewport combinations obey S 1x1, M 2x1, L 2x2; no horizontal or vertical card overflow'
+    )
 
     await page.setViewportSize({ width: 1440, height: 900 })
     await open()
@@ -161,7 +191,13 @@ fs.mkdirSync(evidence, { recursive: true })
       'm',
       'm'
     ])
-    report.checks.push('dark and reduced-motion sizes work; reset restores the accepted v1 composition')
+    report.checks.push('dark and reduced-motion sizes work; reset restores all M sizes')
+
+    await page.getByRole('button', { name: 'Нужно решение', exact: true }).click()
+    assert.equal(await page.locator('.dv-grid [data-widget="attention"]').count(), 0)
+    assert.equal(await page.locator('.dv-board > [data-widget="attention"]').count(), 1)
+    await inspect('attention-strip-outside-grid')
+    await page.getByRole('button', { name: 'Рабочий день', exact: true }).click()
 
     // Load a real legacy-shaped browser record, not a mock of the migration.
     await page.evaluate(() =>

@@ -48,6 +48,7 @@ type Overlay =
   | { kind: 'gallery' }
   | { kind: 'approval' }
   | { kind: 'team' }
+  | { kind: 'events' }
   | { kind: 'agent'; id: string }
   | { kind: 'event'; index: number }
 const EVENTS = [
@@ -98,9 +99,11 @@ function Panel({
         </div>
         {action}
       </header>
-      <DashboardWidgetBoundary title={title} widgetId={id}>
-        {children}
-      </DashboardWidgetBoundary>
+      <div className="dv-panel-body">
+        <DashboardWidgetBoundary title={title} widgetId={id}>
+          {children}
+        </DashboardWidgetBoundary>
+      </div>
     </section>
   )
 }
@@ -108,16 +111,18 @@ function Panel({
 function ArtifactButton({
   artifact,
   onOpen,
-  detailed = false
+  detailed = false,
+  compact = false
 }: {
   artifact: Artifact
   onOpen: () => void
   detailed?: boolean
+  compact?: boolean
 }) {
   return (
     <button className="dv-artifact" onClick={onOpen} aria-label={`Открыть артефакт «${artifact.title}»`}>
       <div className="dv-artifact-stage">
-        <ArtifactCover kind={artifact.kind} />
+        <ArtifactCover kind={artifact.kind} compact={compact} />
         <span className="dv-artifact-open">
           <ArrowUpRight size={18} />
         </span>
@@ -257,6 +262,7 @@ export default function DashboardVisual() {
                   key={artifact.id}
                   artifact={artifact}
                   detailed={size === 'l'}
+                  compact={size === 'm'}
                   onOpen={() => openArtifact(artifact)}
                 />
               ))}
@@ -292,7 +298,7 @@ export default function DashboardVisual() {
           >
             <div className="dv-metric-value" key={monthly ? 'month' : 'week'}>
               {size === 's' ? (monthly ? '1,14' : '284,5') : monthly ? '1 142 800' : '284 500'}
-              <span>{size === 's' ? (monthly ? 'млн ₽' : 'тыс. ₽') : '₽'}</span>
+              <span>{size === 's' ? (monthly ? 'млн ₽ · месяц' : 'тыс. ₽ · неделя') : '₽'}</span>
             </div>
             <div className="dv-metric-comparison">
               <span>
@@ -332,7 +338,7 @@ export default function DashboardVisual() {
             key={id}
             id={id}
             size={size}
-            title="Твоя команда"
+            title={size === 's' ? 'Команда' : 'Твоя команда'}
             meta="2 агента в работе"
             action={<span className="dv-team-count">3</span>}
           >
@@ -407,12 +413,15 @@ export default function DashboardVisual() {
             key={id}
             id={id}
             size={size}
-            title="Лента дня"
+            title={size === 's' ? 'День' : 'Лента дня'}
             action={
-              <span className="dv-today-label">
-                <Sun size={15} />
-                Сегодня
-              </span>
+              <button
+                className="dv-text-button"
+                aria-label="Все события дня"
+                onClick={() => setOverlay({ kind: 'events' })}
+              >
+                Все <ArrowUpRight size={15} />
+              </button>
             }
           >
             {size === 'l' && (
@@ -532,18 +541,21 @@ export default function DashboardVisual() {
           </div>
         </div>
       ) : (
-        <div className="dv-grid" key={scenario}>
-          {visible.map(renderWidget)}
-          {visible.length === 0 && (
-            <section className="dv-empty">
-              <Layers3 size={36} strokeWidth={1.2} />
-              <h3>Место для твоих виджетов</h3>
-              <button className="dv-button dv-button--accent" onClick={() => setOverlay({ kind: 'catalog' })}>
-                <Plus size={18} />
-                Выбрать виджеты
-              </button>
-            </section>
-          )}
+        <div className="dv-board" key={scenario}>
+          {visible.includes('attention') && renderWidget('attention')}
+          <div className="dv-grid">
+            {visible.filter(id => id !== 'attention').map(renderWidget)}
+            {visible.filter(id => id !== 'attention').length === 0 && (
+              <section className="dv-empty">
+                <Layers3 size={36} strokeWidth={1.2} />
+                <h3>Место для твоих виджетов</h3>
+                <button className="dv-button dv-button--accent" onClick={() => setOverlay({ kind: 'catalog' })}>
+                  <Plus size={18} />
+                  Выбрать виджеты
+                </button>
+              </section>
+            )}
+          </div>
         </div>
       )}
 
@@ -573,7 +585,7 @@ export default function DashboardVisual() {
         <Modal title="Твой дашборд" onClose={close} drawer>
           <p className="dv-modal-description">Оставь то, что важно тебе.</p>
           <div className="dv-catalog-list">
-            {layout.order.map((id, index) => {
+            {layout.order.map(id => {
               const widget = WIDGETS.find(item => item.id === id)!
               const shown = !layout.hidden.includes(id)
               return (
@@ -601,7 +613,9 @@ export default function DashboardVisual() {
                     <button
                       className="dv-icon-button"
                       aria-label={`Выше: ${widget.title}`}
-                      disabled={index === 0}
+                      disabled={
+                        id === 'attention' || layout.order.filter(item => item !== 'attention').indexOf(id) === 0
+                      }
                       onClick={() => saveLayout(moveWidget(layout, id, -1))}
                     >
                       <ArrowUp size={15} />
@@ -609,7 +623,7 @@ export default function DashboardVisual() {
                     <button
                       className="dv-icon-button"
                       aria-label={`Ниже: ${widget.title}`}
-                      disabled={index === layout.order.length - 1}
+                      disabled={id === 'attention' || layout.order.filter(item => item !== 'attention').at(-1) === id}
                       onClick={() => saveLayout(moveWidget(layout, id, 1))}
                     >
                       <ArrowDown size={15} />
@@ -631,7 +645,7 @@ export default function DashboardVisual() {
             <span role="status" aria-live="polite">
               {storageNotice || 'Настройки макета хранятся только в этом браузере'}
             </span>
-            <small>«Внимание» появляется, когда есть вопрос. Синхронизация между устройствами — следующий этап.</small>
+            <small>S · 1×1, M · 2×1, L · 2×2. «Внимание» — отдельная полоса над плитками.</small>
           </div>
           <div className="dv-modal-actions">
             <button className="dv-text-button" onClick={() => saveLayout(DEFAULT_LAYOUT)}>
@@ -778,6 +792,22 @@ export default function DashboardVisual() {
             >
               Открыть диалог <ArrowUpRight size={17} />
             </button>
+          </div>
+        </Modal>
+      )}
+      {overlay?.kind === 'events' && (
+        <Modal title="Все события дня" onClose={close}>
+          <div className="dv-timeline">
+            {EVENTS.map((event, index) => (
+              <button className="dv-event" key={event.time} onClick={() => setOverlay({ kind: 'event', index })}>
+                <span className="dv-event-time">{event.time}</span>
+                <span className="dv-event-copy">
+                  <strong>{event.title}</strong>
+                  <span>{event.agent}</span>
+                </span>
+                <ArrowUpRight size={15} />
+              </button>
+            ))}
           </div>
         </Modal>
       )}

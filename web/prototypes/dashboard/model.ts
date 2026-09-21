@@ -24,8 +24,8 @@ export const WIDGET_SIZES: { id: WidgetSize; label: string }[] = [
 export const RESIZABLE_WIDGET_IDS: WidgetId[] = WIDGETS.filter(widget => widget.id !== 'attention').map(
   widget => widget.id
 )
-// M preserves the composition accepted by Dmitry. Width is content-specific;
-// these are Korra's information sizes, not a copy of iOS pixel dimensions.
+// One geometry for every widget: S 1×1, M 2×1, L 2×2.
+// Existing size choices do not reset personalization.
 export const DEFAULT_SIZES: Record<WidgetId, WidgetSize> = {
   attention: 'm',
   'recent-results': 'm',
@@ -73,9 +73,13 @@ export function resizeWidget(layout: PreviewLayout, id: WidgetId, size: WidgetSi
   return { ...layout, sizes: { ...layout.sizes, [id]: size } }
 }
 export function moveWidget(layout: PreviewLayout, id: WidgetId, direction: -1 | 1): PreviewLayout {
+  if (id === 'attention') return layout
+  const tiles = layout.order.filter(item => item !== 'attention')
+  const neighbor = tiles[tiles.indexOf(id) + direction]
+  if (!neighbor) return layout
   const order = [...layout.order],
     index = order.indexOf(id),
-    next = index + direction
+    next = order.indexOf(neighbor)
   if (index < 0 || next < 0 || next >= order.length) return layout
   ;[order[index], order[next]] = [order[next], order[index]]
   return { ...layout, order }

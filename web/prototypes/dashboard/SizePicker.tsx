@@ -28,6 +28,7 @@ export function SizePicker({
           <span className="dv-size-face">
             <i className={`dv-size-shape dv-size-shape--${size.id}`} aria-hidden="true" />
             <span>{size.id.toUpperCase()}</span>
+            <small>{size.id === 's' ? '1×1' : size.id === 'm' ? '2×1' : '2×2'}</small>
           </span>
         </label>
       ))}

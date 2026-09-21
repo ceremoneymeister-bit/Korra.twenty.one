@@ -20,7 +20,7 @@ export function AgentMark({ kind }: { kind: string }) {
   )
 }
 
-export function ArtifactCover({ kind }: { kind: Artifact['kind'] }) {
+export function ArtifactCover({ kind, compact = false }: { kind: Artifact['kind']; compact?: boolean }) {
   if (kind === 'deck')
     return (
       <div className="dv-cover dv-cover--deck" aria-hidden="true">
@@ -46,8 +46,18 @@ export function ArtifactCover({ kind }: { kind: Artifact['kind'] }) {
         <span className="dv-paper-tab" />
         <span className="dv-cover-brand">Проект / запуск</span>
         <strong>
-          Всё начинается
-          <br />с плана.
+          {compact ? (
+            <>
+              План
+              <br />
+              запуска.
+            </>
+          ) : (
+            <>
+              Всё начинается
+              <br />с плана.
+            </>
+          )}
         </strong>
         <span className="dv-paper-rule" />
         <span className="dv-paper-row">
