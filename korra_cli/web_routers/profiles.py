@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile  # noqa: F401
 
+from korra_cli.session_listing import hide_service_sources
 from korra_cli.web_deps import late
 from korra_cli.web_models import (
     ProfileCreate,
@@ -285,7 +286,11 @@ def get_profiles_sessions(
     # newest cron sessions can't starve the recents page.
     source_filter = source or None
     source_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
-    exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
+    exclude_list = hide_service_sources(
+        [s.strip() for s in (exclude_sources or "").split(",") if s.strip()],
+        source=source_filter,
+        sources=source_list or None,
+    )
     # Over-fetch per profile so the merged+sorted window is correct for the
     # requested page. Capped so a huge profile can't blow up the response.
     per_profile = min(max(limit + offset, limit), 500)
@@ -420,8 +425,14 @@ def get_profiles_sessions_sidebar(
         targets.append(("default", profiles_mod.get_profile_dir("default")))
 
     recents_scope = (recents_profile or "all").strip() or "all"
-    recents_exclude_list = [s for s in (recents_exclude or "").split(",") if s.strip()]
-    messaging_exclude_list = [s for s in (messaging_exclude or "").split(",") if s.strip()]
+    # Служебные классы не попадают в боковую панель разговоров (см.
+    # hide_service_sources); срез cron адресован по явному source и не меняется.
+    recents_exclude_list = hide_service_sources(
+        [s for s in (recents_exclude or "").split(",") if s.strip()]
+    ) or []
+    messaging_exclude_list = hide_service_sources(
+        [s for s in (messaging_exclude or "").split(",") if s.strip()]
+    ) or []
 
     recents_cap = min(max(recents_limit, 1), 500)
     cron_cap = min(max(cron_limit, 1), 500)

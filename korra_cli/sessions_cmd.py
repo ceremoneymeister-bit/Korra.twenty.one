@@ -315,9 +315,13 @@ def cmd_sessions(args, sessions_parser=None):
         print(f'Ошибка открытия базы бесед: {e}')
         return 1
 
-    # Hide third-party tool sessions by default, but honour explicit --source
+    # Hide third-party tool sessions and maintenance turns by default, but
+    # honour explicit --source (hide_service_sources holds the same contract
+    # for the dashboard/API listings).
+    from korra_state import MAINTENANCE_SESSION_SOURCE
+
     _source = getattr(args, "source", None)
-    _exclude = None if _source else ["tool"]
+    _exclude = None if _source else ["tool", MAINTENANCE_SESSION_SOURCE]
 
     if action == "list":
         from korra_state import workspace_key as _ws_key
@@ -1174,7 +1178,7 @@ def cmd_sessions(args, sessions_parser=None):
     elif action == "browse":
         limit = getattr(args, "limit", 500) or 500
         source = getattr(args, "source", None)
-        _browse_exclude = None if source else ["tool"]
+        _browse_exclude = None if source else ["tool", MAINTENANCE_SESSION_SOURCE]
         sessions = db.list_sessions_rich(
             source=source, exclude_sources=_browse_exclude, limit=limit
         )

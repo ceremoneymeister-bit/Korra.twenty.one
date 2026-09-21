@@ -61,6 +61,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from korra_constants import korra_env
+from korra_state_common import MAINTENANCE_SESSION_SOURCE
 
 # Sentinel returned by _resolve_request_profile when a /p/<profile>/ prefix
 # names a profile this gateway does not serve (→ 404). Distinct from None
@@ -1514,6 +1515,7 @@ def _make_request_fingerprint(body: Dict[str, Any], keys: List[str]) -> str:
 def _derive_chat_session_id(
     system_prompt: Optional[str],
     first_user_message: str,
+    source: str = "",
 ) -> str:
     """Derive a stable session ID from the conversation's first user message.
 
@@ -1523,9 +1525,19 @@ def _derive_chat_session_id(
     them produces a deterministic session ID that lets the API server reuse
     the same Hermes session (and therefore the same Docker container sandbox
     directory) across turns.
+
+    ``source`` — объявленный клиентом класс разговора. Служебный ход
+    обслуживания получает собственное пространство идентификаторов: иначе он
+    садится в ту же строку, что и разговор человека с тем же первым
+    сообщением. Текст update smoke фиксирован, поэтому одна строка ``api-…``
+    переживала все обновления установки и всплывала в списке чатов после
+    каждого из них. Остальные классы сохраняют прежний префикс ``api-``: их
+    строки уже существуют на установках и должны продолжать резолвиться.
     """
     seed = f"{system_prompt or ''}\n{first_user_message}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+    if source == MAINTENANCE_SESSION_SOURCE:
+        return f"{MAINTENANCE_SESSION_SOURCE}-{digest}"
     return f"api-{digest}"
 
 
@@ -2923,7 +2935,13 @@ class APIServerAdapter(BasePlatformAdapter):
     @staticmethod
     def _normalize_session_source(value: Any) -> str:
         text = str(value or "").strip().lower()
-        allowed = {"api_server", "hermes_browser", "browser", "cli", "telegram", "discord", "slack", "desktop", "dashboard"}
+        allowed = {
+            "api_server", "hermes_browser", "browser", "cli", "telegram",
+            "discord", "slack", "desktop", "dashboard",
+            # Служебный ход обслуживания установки (model smoke обновления,
+            # приёмка контейнера): транспорт тот же, разговором не является.
+            MAINTENANCE_SESSION_SOURCE,
+        }
         if text in allowed:
             return "hermes_browser" if text == "browser" else text
         return "api_server"
@@ -4447,8 +4465,14 @@ class APIServerAdapter(BasePlatformAdapter):
         include_hidden = bool(title_filter) and _coerce_request_bool(
             request.query.get("include_hidden"), default=False
         )
+        # Служебные ходы обслуживания установки — не разговоры клиента: внешний
+        # список их не показывает, пока класс не запрошен явным ``?source=``.
+        from korra_cli.session_listing import hide_service_sources
+
+        exclude_sources = hide_service_sources(None, source=source)
         sessions = await asyncio.to_thread(db.list_sessions_rich,
             source=source,
+            exclude_sources=exclude_sources,
             limit=limit,
             offset=offset,
             include_children=include_children,
@@ -4478,6 +4502,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     if stale and stale.get("archived") and db.unarchive_recoverable_session(stale["id"]):
                         sessions = await asyncio.to_thread(db.list_sessions_rich,
                             source=source,
+                            exclude_sources=exclude_sources,
                             limit=limit,
                             offset=offset,
                             include_children=include_children,
@@ -5675,7 +5700,9 @@ class APIServerAdapter(BasePlatformAdapter):
                 if cm.get("role") == "user":
                     first_user = cm.get("content", "")
                     break
-            session_id = _derive_chat_session_id(system_prompt, first_user)
+            session_id = _derive_chat_session_id(
+                system_prompt, first_user, _api_request_session_source.get()
+            )
             # history already set from request body above
 
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"

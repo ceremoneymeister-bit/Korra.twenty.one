@@ -34,6 +34,7 @@ import {
   Pencil,
   Check,
   Archive,
+  Wrench,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { SearchHighlight } from "@/components/chat/SearchHighlight";
@@ -99,6 +100,9 @@ const SOURCE_CONFIG: Record<string, { icon: typeof Terminal; color: string }> =
     sms: { icon: MessageCircle, color: "text-success" },
     cron: { icon: Clock, color: "text-warning" },
     tool: { icon: Play, color: "text-warning" },
+    // Служебный ход обслуживания установки: в списках разговоров его нет,
+    // но при явном выборе источника он должен честно называться.
+    maintenance: { icon: Wrench, color: "text-muted-foreground" },
     api_server: { icon: Globe, color: "text-muted-foreground" },
     // Разговор из этой же панели: движок метит его `dashboard`, и он остаётся
     // в «Чатах», а не уезжает к вызовам сторонних клиентов.
@@ -119,6 +123,7 @@ const AUTOMATION_SESSION_SOURCES = [
   "hermes_flow",
   "vulcan_delegate",
   "webhook",
+  "maintenance",
 ];
 const AUTOMATION_SESSION_SOURCE_SET = new Set(AUTOMATION_SESSION_SOURCES);
 const NO_MATCHING_SESSION_SOURCE = "__hermes_dashboard_no_matching_source__";
@@ -170,6 +175,8 @@ export function sourceLabel(source: string): string {
       return "Расписание";
     case "tool":
       return "Инструмент";
+    case "maintenance":
+      return "Обслуживание";
     case "hermes_flow":
       return "Korra Flow";
     case "vulcan_delegate":

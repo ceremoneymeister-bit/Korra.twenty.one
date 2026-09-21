@@ -1347,12 +1347,12 @@ def _sessions_list(_engine: HermesConsoleEngine, args: list[str]) -> str:
     if ns.limit < 1 or ns.limit > 200:
         raise ConsoleCommandError("Значение sessions list --limit должно быть от 1 до 200")
 
-    from korra_state import SessionDB
+    from korra_state import MAINTENANCE_SESSION_SOURCE, SessionDB
 
     db = SessionDB()
     try:
         sessions = db.list_sessions_rich(
-            exclude_sources=["kanban", "tool"],
+            exclude_sources=["kanban", "tool", MAINTENANCE_SESSION_SOURCE],
             limit=ns.limit,
             order_by_last_active=True,
         )
@@ -1363,12 +1363,15 @@ def _sessions_list(_engine: HermesConsoleEngine, args: list[str]) -> str:
 
 def _sessions_stats(_engine: HermesConsoleEngine, args: list[str]) -> str:
     _expect_no_args(args, "sessions stats")
-    from korra_state import SessionDB
+    from korra_state import MAINTENANCE_SESSION_SOURCE, SessionDB
 
     db = SessionDB()
     try:
         total = db.session_count()
-        listable = db.session_count(exclude_children=True, exclude_sources=["kanban", "tool"])
+        listable = db.session_count(
+            exclude_children=True,
+            exclude_sources=["kanban", "tool", MAINTENANCE_SESSION_SOURCE],
+        )
         messages = db.message_count()
         lines = [
             f"Всего сессий: {total}",

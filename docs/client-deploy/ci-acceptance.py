@@ -256,7 +256,8 @@ elif mode == 'chat':
     key = re.search(r'^API_SERVER_KEY=(.+)$', env, re.M).group(1)
     payload = json.dumps({'model': 'test', 'messages': [{'role': 'user', 'content': 'Привет!'}], 'stream': True}).encode()
     print(get('http://127.0.0.1:8642/v1/chat/completions', data=payload,
-              headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}))
+              headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json',
+                       'X-Korra-Session-Source': 'maintenance'}))
 elif mode == 'download':
     query = urllib.parse.urlencode({'path': 'release-office-preflight/' + sys.argv[2]})
     request = urllib.request.Request(

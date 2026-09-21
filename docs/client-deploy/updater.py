@@ -282,6 +282,12 @@ else:
 print(json.dumps(result))
 '''
 
+# Приёмка называет себя классом разговора `maintenance` (заголовок
+# `X-Korra-Session-Source`, тот же механизм, которым панель называет себя
+# `dashboard`). Транспорт и проверка прежние; меняется только то, чем этот ход
+# является в истории: обслуживанием установки, а не разговором человека.
+# Движок до 0.21.12 заголовок не знает и приводит его к прежнему `api_server`,
+# поэтому обновление старого контура ведёт себя как раньше.
 FOUNDATION_SMOKE_CODE = r'''
 import json, os, urllib.request
 from dotenv import dotenv_values
@@ -290,7 +296,7 @@ if not key:
     raise RuntimeError('API authentication unavailable')
 payload = {'messages': [{'role': 'user', 'content': 'Привет!'}], 'max_tokens': 24, 'stream': True}
 request = urllib.request.Request('http://127.0.0.1:' + os.environ['API_SERVER_PORT'] + '/v1/chat/completions',
-    data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
+    data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Korra-Session-Source': 'maintenance'})
 with urllib.request.urlopen(request, timeout=90) as response:
     body = response.read(2 * 1024 * 1024 + 1)
 if len(body) > 2 * 1024 * 1024:
@@ -312,6 +318,27 @@ message = str((finals[0].get('error') or {}).get('message', ''))
 if 'Провайдер ответа не настроен' not in message or 'Ключи' not in message:
     raise RuntimeError('Unexpected provider failure')
 print('foundation-smoke-ok')
+'''
+
+# A stateless API turn exercises model resolution and generation without
+# sending to a person/channel. Test fixtures provide a local fake model.
+MODEL_SMOKE_CODE = r'''
+import json, os, urllib.request
+from dotenv import dotenv_values
+key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env').get('API_SERVER_KEY')
+if not key:
+    raise RuntimeError('API_SERVER_KEY missing; model smoke unavailable')
+request = urllib.request.Request('http://127.0.0.1:' + os.environ['API_SERVER_PORT'] + '/v1/chat/completions', data=json.dumps({'messages': [{'role': 'user', 'content': 'Reply with exactly KORRA_UPDATE_OK. Do not use tools.'}], 'max_tokens': 24, 'stream': False}).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'X-Korra-Session-Source': 'maintenance'})
+with urllib.request.urlopen(request, timeout=90) as response:
+    value = json.load(response)
+choice = value['choices'][0]
+if choice.get('finish_reason') == 'error':
+    print('model-smoke-provider-unavailable')
+    raise SystemExit(0)
+content = choice['message']['content']
+if 'KORRA_UPDATE_OK' not in str(content):
+    raise RuntimeError('Model smoke response missing acknowledgement')
+print('model-smoke-ok')
 '''
 
 # Judges every copied database with the engine that wrote it. Read-only and
@@ -1466,28 +1493,8 @@ class Updater:
                 self.receipt["error_code"] = "foundation_smoke_failed"
                 raise UpdateError("Foundation API readiness failed; see private operation.log") from None
             return
-        # A stateless API turn exercises model resolution and generation without
-        # sending to a person/channel. Test fixtures provide a local fake model.
-        code = r'''
-import json, os, urllib.request
-from dotenv import dotenv_values
-key = os.environ.get('API_SERVER_KEY') or dotenv_values('/opt/data/.env').get('API_SERVER_KEY')
-if not key:
-    raise RuntimeError('API_SERVER_KEY missing; model smoke unavailable')
-request = urllib.request.Request('http://127.0.0.1:' + os.environ['API_SERVER_PORT'] + '/v1/chat/completions', data=json.dumps({'messages': [{'role': 'user', 'content': 'Reply with exactly KORRA_UPDATE_OK. Do not use tools.'}], 'max_tokens': 24, 'stream': False}).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
-with urllib.request.urlopen(request, timeout=90) as response:
-    value = json.load(response)
-choice = value['choices'][0]
-if choice.get('finish_reason') == 'error':
-    print('model-smoke-provider-unavailable')
-    raise SystemExit(0)
-content = choice['message']['content']
-if 'KORRA_UPDATE_OK' not in str(content):
-    raise RuntimeError('Model smoke response missing acknowledgement')
-print('model-smoke-ok')
-'''
         try:
-            result = self.execute(code)
+            result = self.execute(MODEL_SMOKE_CODE)
         except (UpdateError, OSError, subprocess.SubprocessError) as exc:
             self.receipt["error_code"] = "model_smoke_failed"
             raise UpdateError("Model smoke failed; see private operation.log") from exc

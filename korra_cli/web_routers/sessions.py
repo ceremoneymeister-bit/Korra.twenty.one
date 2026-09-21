@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Query, Request  # noqa: F401
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
+from korra_cli.session_listing import hide_service_sources
 from korra_cli.web_deps import late
 from korra_cli.web_models import (
     BulkDeleteSessions,
@@ -148,6 +149,11 @@ def get_sessions(
             # section (source=cron) into two independent lists.
             source_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
             exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
+            # Служебные классы (обслуживание установки) в списке разговоров не
+            # показываются, пока их не запросили явно — см. hide_service_sources.
+            exclude_list = hide_service_sources(
+                exclude_list, source=source or None, sources=source_list or None
+            )
             sessions = db.list_sessions_rich(
                 source=source or None,
                 sources=source_list or None,
@@ -231,6 +237,11 @@ async def search_sessions(
             source_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
             include_sources = [source_filter] if source_filter else (source_list or None)
             exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
+            # Поиск по истории — та же поверхность разговоров: служебный класс
+            # не всплывает по совпадению слова, но находится по явному source.
+            exclude_list = hide_service_sources(
+                exclude_list, source=source_filter, sources=source_list or None
+            )
             now = time.time()
 
             # Walk parent_session_id to the compression root, memoized so a

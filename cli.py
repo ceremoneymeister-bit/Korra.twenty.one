@@ -10119,6 +10119,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             return []
         try:
             from korra_cli.session_listing import query_session_listing
+            from korra_state import MAINTENANCE_SESSION_SOURCE
 
             return query_session_listing(
                 self._session_db,
@@ -10127,7 +10128,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 include_all_sources=False,
                 include_unnamed=True,
                 limit=limit,
-                exclude_sources=["kanban", "tool"],
+                exclude_sources=["kanban", "tool", MAINTENANCE_SESSION_SOURCE],
             )
         except Exception:
             return []

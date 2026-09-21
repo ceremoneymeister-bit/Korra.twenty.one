@@ -2,7 +2,44 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable, Sequence
+
+from korra_state_common import MAINTENANCE_SESSION_SOURCE
+
+#: Классы разговора, которых нет в пользовательских списках истории: их
+#: создаёт не человек, а обслуживание установки. Список намеренно узкий —
+#: прятать можно только то, что вызывающая сторона сама объявила служебным
+#: (см. ``MAINTENANCE_SESSION_SOURCE``), а не то, что похоже на служебное по
+#: тексту или названию.
+SERVICE_SESSION_SOURCES: tuple[str, ...] = (MAINTENANCE_SESSION_SOURCE,)
+
+
+def hide_service_sources(
+    exclude_sources: Sequence[str] | None,
+    *,
+    source: str | None = None,
+    sources: Iterable[str] | None = None,
+) -> list[str] | None:
+    """Дополнить исключения списка истории служебными классами.
+
+    Тот же договор, по которому CLI давно прячет сессии сторонних инструментов
+    («hide third-party tool sessions by default, but honour explicit
+    --source»): служебный класс не показывается сам по себе, но остаётся
+    доступен, когда его запросили явно — ``?source=maintenance``,
+    ``sources=…,maintenance`` или ``--source maintenance``. Данные не
+    удаляются и не становятся нечитаемыми, меняется только состав списка
+    разговоров по умолчанию.
+
+    Возвращает ``None``, когда исключать нечего, чтобы вызывающий код мог
+    передать значение в ``list_sessions_rich``/``session_count`` как есть.
+    """
+    requested = {s for s in ([source] if source else []) if s}
+    requested.update(s for s in (sources or []) if s)
+    if requested & set(SERVICE_SESSION_SOURCES):
+        return list(exclude_sources) if exclude_sources else None
+    merged = list(exclude_sources or [])
+    merged.extend(s for s in SERVICE_SESSION_SOURCES if s not in merged)
+    return merged or None
 
 
 def parse_session_listing_args(raw_args: str) -> tuple[bool, bool, str, str | None]:

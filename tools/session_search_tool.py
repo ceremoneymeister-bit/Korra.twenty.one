@@ -37,13 +37,14 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Union
 
-from korra_state_common import _RESET_END_REASONS
+from korra_state_common import _RESET_END_REASONS, MAINTENANCE_SESSION_SOURCE
 
 # Sources that are excluded from session browsing/searching by default.
 # Third-party integrations tag their sessions with HERMES_SESSION_SOURCE=tool;
 # delegate subagent runs are tagged "subagent"; kanban dispatcher workers are
-# tagged "kanban" — none belongs in the user's session history.
-_HIDDEN_SESSION_SOURCES = ("kanban", "subagent", "tool")
+# tagged "kanban"; update/acceptance smokes are tagged "maintenance" — none
+# belongs in the user's session history.
+_HIDDEN_SESSION_SOURCES = ("kanban", "subagent", "tool", MAINTENANCE_SESSION_SOURCE)
 
 # Automation sources that are kept searchable but DEMOTED below interactive
 # sessions in discover ranking. Cron jobs run on a schedule and accumulate

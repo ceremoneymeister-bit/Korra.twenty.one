@@ -189,6 +189,17 @@ _COMPRESSION_CHILD_SQL = (
 )
 
 
+# Класс разговора (``sessions.source``) для служебных ходов обслуживания
+# установки: model smoke обновления и приёмка контейнера. Такой ход идёт по
+# тому же API, что и разговор человека, но разговором не является — он не
+# показывается в пользовательских списках истории (как давно не показываются
+# ``tool``/``kanban``/``subagent``) и остаётся доступен по явному запросу
+# источника. Значение объявляет сам вызывающий: заголовок
+# ``X-Korra-Session-Source`` у API-сервера, ``KORRA_SESSION_SOURCE`` у
+# запускаемых движком процессов.
+MAINTENANCE_SESSION_SOURCE = "maintenance"
+
+
 _RESET_END_REASONS = (
     "session_reset",
     # switch_session() never creates a child row, but pre-marker DBs can hold

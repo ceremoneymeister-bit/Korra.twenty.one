@@ -104,7 +104,7 @@ def _(rid, params: dict) -> dict:
         if db is None:
             return None
         try:
-            deny = frozenset({"kanban", "tool"})
+            deny = frozenset({"kanban", "tool", MAINTENANCE_SESSION_SOURCE})
             row = db.get_session_by_title("Bot Chat")
             if not row:
                 return None
@@ -208,7 +208,7 @@ def _(rid, params: dict) -> dict:
         if db is None:
             return None, None
         try:
-            deny = frozenset({"kanban", "tool"})
+            deny = frozenset({"kanban", "tool", MAINTENANCE_SESSION_SOURCE})
             human = None
             worker = None
             for s in db.list_sessions_rich(

@@ -5286,6 +5286,7 @@ class GatewaySlashCommandsMixin:
             parse_session_listing_args,
             query_session_listing,
         )
+        from korra_state import MAINTENANCE_SESSION_SOURCE
 
         raw_args = event.get_command_args().strip()
         try:
@@ -5326,7 +5327,7 @@ class GatewaySlashCommandsMixin:
             # Search filters at SQL level, so over-fetch before the visibility
             # cut: origin-invisible matches would otherwise consume the page.
             limit=50 if search_query else 10,
-            exclude_sources=["tool"],
+            exclude_sources=["tool", MAINTENANCE_SESSION_SOURCE],
         )
         if not cross_origin:
             # Scope the listing to the caller's own origin on every adapter so

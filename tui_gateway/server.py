@@ -36,6 +36,7 @@ from korra_constants import (
     set_hermes_home_override,
 )
 from korra_cli.env_loader import load_hermes_dotenv
+from korra_state_common import MAINTENANCE_SESSION_SOURCE
 from utils import is_truthy_value
 from tools.environments.local import hermes_subprocess_env
 from agent.replay_cleanup import sanitize_replay_history
@@ -15301,11 +15302,13 @@ def _discover_repos_payload(
     return out
 
 
-# Sources excluded from the project tree: cron runs, and kanban dispatcher
-# workers, are not user conversations. Subagent/compression children are
-# already dropped by list_sessions_rich(include_children=False); cron has its
-# own section, and kanban runs are read on the board.
-_PROJECT_TREE_EXCLUDED_SOURCES = ["cron", "kanban"]
+# Sources excluded from the project tree: cron runs, kanban dispatcher
+# workers and installation-maintenance turns are not user conversations.
+# Subagent/compression children are already dropped by
+# list_sessions_rich(include_children=False); cron has its own section, kanban
+# runs are read on the board, and the maintenance class is reachable by an
+# explicit source filter.
+_PROJECT_TREE_EXCLUDED_SOURCES = ["cron", "kanban", MAINTENANCE_SESSION_SOURCE]
 
 
 def _project_tree_row(r: dict) -> dict:
