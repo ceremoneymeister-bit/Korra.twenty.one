@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import DashboardPage from "./DashboardPage";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 let root: Root;
 let container: HTMLDivElement;
 
@@ -14,7 +16,7 @@ const CATALOG_TITLES = [
   "Агенты",
   "Мои показатели",
   "Ближайшие задачи",
-  "Последние результаты",
+  "Артефакты",
 ];
 
 function cardTitles(): string[] {
