@@ -1758,7 +1758,7 @@ def test_real_smoke_runs_as_maintenance_and_keeps_its_verdict(real_smoke_context
     """Ход приёмки объявлен служебным, но остаётся полноценной приёмкой.
 
     Заголовок класса разговора убирает smoke из пользовательской истории
-    (см. tests/deployment/test_update_smoke_not_a_user_chat.py); проверка ACK
+    (см. tests/gateway/test_update_smoke_not_a_user_chat.py); проверка ACK
     и запись результата в квитанцию от этого не меняются.
     """
     updater, _, models, _ = real_smoke_context
