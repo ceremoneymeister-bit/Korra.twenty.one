@@ -658,7 +658,7 @@ describe("BubbleChatSidebar", () => {
     session("c", "Третий чат"),
   ];
 
-  async function renderSidebar(activeId: string) {
+  async function renderSidebar(activeId: string, layout: "desktop" | "mobile" = "desktop") {
     await render(
       <BubbleChatSidebar
         sessions={sessions}
@@ -668,6 +668,7 @@ describe("BubbleChatSidebar", () => {
         onSelect={vi.fn()}
         onNewChat={vi.fn()}
         onRequestDelete={vi.fn()}
+        layout={layout}
       />,
     );
     return container.querySelector<HTMLElement>('nav[aria-label="Список чатов"]')!;
@@ -699,6 +700,16 @@ describe("BubbleChatSidebar", () => {
         button.textContent?.includes("Новый чат"),
       ),
     ).toBe(true);
+  });
+
+  it("показывает тот же серверный список в мобильной панели", async () => {
+    await renderSidebar("b", "mobile");
+    const aside = container.querySelector<HTMLElement>("aside")!;
+    expect(aside.className).toContain("flex");
+    expect(aside.className).not.toContain("hidden");
+    expect(aside.style.width).toBe("100%");
+    expect(aside.querySelectorAll(".korra-chat-history__item")).toHaveLength(3);
+    expect(aside.querySelector('[aria-current="page"]')?.textContent).toContain("Второй чат");
   });
 });
 

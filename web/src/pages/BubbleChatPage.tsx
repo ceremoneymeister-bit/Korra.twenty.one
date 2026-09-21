@@ -346,6 +346,7 @@ interface BubbleChatSidebarProps {
   onRequestDelete: (id: string) => void;
   onRenamed?: () => void;
   historyRevision?: number;
+  layout?: "desktop" | "mobile";
 }
 
 export function BubbleChatSidebar({
@@ -359,6 +360,7 @@ export function BubbleChatSidebar({
   onRequestDelete,
   onRenamed,
   historyRevision = 0,
+  layout = "desktop",
 }: BubbleChatSidebarProps) {
   const [searchInput, setSearchInput] = useState({ profile, value: "" });
   const query = searchInput.profile === profile ? searchInput.value : "";
@@ -381,7 +383,13 @@ export function BubbleChatSidebar({
     <aside
       // Список чатов — вдавленная панель на холсте: отделяет его от переписки
       // без линии-разделителя (владелец 03.09: «слились»).
-      className="korra-chat-history mb-3 ml-3 mt-3 hidden shrink-0 flex-col rounded-[var(--neo-radius-card)] bg-[var(--neo-surface)] shadow-[var(--neo-inset-compact)] md:flex"
+      className={cn(
+        "korra-chat-history shrink-0 flex-col bg-[var(--neo-surface)] shadow-[var(--neo-inset-compact)]",
+        layout === "mobile"
+          ? "m-0 flex h-full rounded-none"
+          : "mb-3 ml-3 mt-3 hidden rounded-[var(--neo-radius-card)] md:flex",
+      )}
+      style={layout === "mobile" ? { width: "100%" } : undefined}
     >
       <div className="p-3 pb-0">
         <Button
@@ -1331,6 +1339,7 @@ export default function BubbleChatPage({
   // остальным, переживая перезагрузку.
   const [prefill, setPrefill] = useState<string | null>(null);
   const [historyRevision, setHistoryRevision] = useState(0);
+  const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
   const recoveryKey = chatViewKey(agentProfile, sessionId);
   const [recovery, setRecovery] = useState<{ key: string; text: string } | null>(null);
   const recoveryNotice = recovery?.key === recoveryKey ? recovery.text : "";
@@ -1477,13 +1486,24 @@ export default function BubbleChatPage({
   const handleSelect = useCallback(
     (id: string) => {
       void loadSession(id);
+      setMobileHistoryOpen(false);
     },
     [loadSession],
   );
 
   const handleNewChat = useCallback(() => {
     reset();
+    setMobileHistoryOpen(false);
   }, [reset]);
+
+  useEffect(() => {
+    if (!mobileHistoryOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileHistoryOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileHistoryOpen]);
 
   // Решение по опасной команде уходит отдельным маршрутом, а не сообщением в
   // чат: ход агента заблокирован внутри вызова инструмента и новую реплику
@@ -1530,6 +1550,34 @@ export default function BubbleChatPage({
         onRenamed={() => void sessionList.refresh()}
         historyRevision={historyRevision}
       />
+      {mobileHistoryOpen && (
+        <div className="fixed inset-0 z-[60] flex md:hidden" role="dialog" aria-modal="true" aria-labelledby="mobile-chat-history-title">
+          <button type="button" className="absolute inset-0 bg-black/35" aria-label="Закрыть историю чатов" onClick={() => setMobileHistoryOpen(false)} />
+          <div className="relative flex h-full w-[min(88vw,360px)] flex-col bg-[var(--neo-surface)] shadow-[var(--neo-depth-3)]">
+            <div className="flex min-h-12 items-center justify-between gap-2 border-b border-border px-3">
+              <h2 id="mobile-chat-history-title" className="text-sm font-semibold">История чатов</h2>
+              <Button type="button" ghost size="icon" autoFocus aria-label="Закрыть историю чатов" title="Закрыть историю чатов" onClick={() => setMobileHistoryOpen(false)}>
+                <X aria-hidden />
+              </Button>
+            </div>
+            <div className="min-h-0 flex-1">
+              <BubbleChatSidebar
+                sessions={sessionList.sessions}
+                profile={agentProfile || "default"}
+                activeId={sessionId}
+                loading={sessionList.loading}
+                error={sessionList.error}
+                onSelect={handleSelect}
+                onNewChat={handleNewChat}
+                onRequestDelete={(id) => { setMobileHistoryOpen(false); sessionDelete.requestDelete(id); }}
+                onRenamed={() => void sessionList.refresh()}
+                historyRevision={historyRevision}
+                layout="mobile"
+              />
+            </div>
+          </div>
+        </div>
+      )}
       <DeleteConfirmDialog
         open={sessionDelete.isOpen}
         onCancel={sessionDelete.cancel}
@@ -1539,6 +1587,11 @@ export default function BubbleChatPage({
         description={t.sessions.confirmDeleteMessage}
       />
       <section className="flex-1 flex flex-col min-w-0 min-h-0" aria-label="Разговор с Коррой">
+        <div className="flex min-h-12 items-center border-b border-border/60 px-3 md:hidden">
+          <Button type="button" ghost size="sm" onClick={() => setMobileHistoryOpen(true)} prefix={<MessageSquare aria-hidden />} aria-label="Открыть историю чатов">
+            Чаты
+          </Button>
+        </div>
         <EffectDecisionCenter
           profile={agentProfile}
           active={active !== false}

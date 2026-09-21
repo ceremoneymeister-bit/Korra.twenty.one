@@ -89,6 +89,20 @@ it("показывает ожидание решения и подтверждё
 });
 
 
+it("называет счётчик текущей работой, а не количеством пользовательских задач", async () => {
+  $chatRuns.set([run]);
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(<MemoryRouter>
+    <SessionRunActivity tabs={[{ profile: "lawyer", label: "Юрист" }]} />
+  </MemoryRouter>));
+  expect(container.querySelector("summary")?.textContent).toContain("В работе: 1");
+  expect(container.querySelector("summary")?.getAttribute("aria-label")).toBe("Работа агентов: 1");
+  expect(container.textContent).not.toContain("Задачи: 1");
+  await act(async () => root.unmount()); container.remove();
+});
+
+
 it("отметка стоит у конкретного чата; «Скрыть уведомление» не читает ответ, а открытие чата снимает только его отметку", async () => {
   const a = { ...run, message_id: "m-a", session_id: "session-a", status: "completed" } as ChatRun;
   const c = { ...run, message_id: "m-c", session_id: "session-c", status: "completed" } as ChatRun;

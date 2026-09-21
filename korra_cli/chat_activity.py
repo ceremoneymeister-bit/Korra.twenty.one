@@ -234,6 +234,17 @@ def _load_profile_snapshot(profile: str, home: Path, now: float) -> dict[str, An
             continue
         sid = sid or session_key
         meta = metadata.get(sid, _session_meta(None))
+        # A pending exact-effect decision is the current state of this turn,
+        # not a second task next to its lease/gateway marker. Keep one row per
+        # conversation and let the more useful waiting state win.
+        activity = [
+            item
+            for item in activity
+            if not (
+                item["session_id"] == sid
+                and item["status"] in {"running", "stale", "waiting_decision"}
+            )
+        ]
         activity.append({
             **meta,
             "message_id": _stable_id("decision", profile, decision.get("id")),
@@ -296,6 +307,7 @@ def project_chat_activity(
 
     result: list[dict[str, Any]] = []
     browser_sessions: set[tuple[str, str]] = set()
+    browser_active_sessions: set[tuple[str, str]] = set()
     for raw in browser_runs:
         item = dict(raw)
         key = (str(item.get("profile") or ""), str(item.get("session_id") or ""))
@@ -306,10 +318,15 @@ def project_chat_activity(
         else:
             item.setdefault("unread", False)
         durable_status = by_session_status.get(key)
-        if item.get("status") == "interrupted" and durable_status in {
-            "running", "waiting_decision"
+        browser_status = str(item.get("status") or "")
+        if durable_status == "waiting_decision" and browser_status in {
+            "interrupted", "queued", "running", "waiting_decision"
         }:
             item["status"] = durable_status
+        elif browser_status == "interrupted" and durable_status == "running":
+            item["status"] = durable_status
+        if item.get("status") in {"queued", "running", "waiting_decision"}:
+            browser_active_sessions.add(key)
         item["delivery"] = {
             "completed": "delivered",
             "failed": "failed",
@@ -330,11 +347,16 @@ def project_chat_activity(
         for item in snapshot["activity"]:
             if item["message_id"] in seen_ids:
                 continue
-            # Do not duplicate the same completed notification already owned
-            # by a browser delivery row.  Concurrent/running cross-channel
-            # work remains separate and is intentionally retained.
+            # One browser delivery row and its durable lease/decision describe
+            # one turn. Keep genuinely different sessions separate, but never
+            # count the same profile+session as two or three tasks.
             key = (wire_profile, item["session_id"])
             if item["status"] == "completed" and key in browser_sessions:
+                continue
+            if (
+                item["status"] in {"running", "stale", "waiting_decision"}
+                and key in browser_active_sessions
+            ):
                 continue
             result.append(item)
             seen_ids.add(item["message_id"])

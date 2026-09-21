@@ -50,11 +50,11 @@ export function SessionRunActivity({ tabs }: { tabs: AgentTabConfig[] }) {
     {visible.length > 0 && <details className="relative shrink-0" onKeyDown={event => {
       if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
     }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}>
-      <summary className="neo-tab cursor-pointer list-none rounded-full px-3 py-2 text-sm" aria-label={`Задачи агентов: ${visible.length}`}>
-        Задачи: {visible.length}
+      <summary className="neo-tab cursor-pointer list-none rounded-full px-3 py-2 text-sm" aria-label={`Работа агентов: ${visible.length}`}>
+        В работе: {visible.length}
       </summary>
       <div className="absolute right-0 top-full z-40 mt-2 max-h-[50dvh] w-[min(340px,calc(100vw-32px))] overflow-y-auto rounded-2xl bg-[var(--neo-surface)] p-3 shadow-[var(--neo-depth-3)]" aria-label="Работающие чаты">
-        <p className="mb-2 text-sm">{reachable === false ? "Не удалось обновить статус. Ниже — последнее известное состояние." : "Задачи агентов"}</p>
+        <p className="mb-2 text-sm">{reachable === false ? "Не удалось обновить статус. Ниже — последнее известное состояние." : "Работа агентов"}</p>
         {visible.map(run => <Link key={run.message_id} to={agentChatHref(run.profile, run.session_id)} className="mb-2 block rounded-xl p-2 text-sm focus-visible:outline" onClick={event => { const panel = event.currentTarget.closest("details"); if (panel) panel.open = false; }}>
           <span className="block font-medium">{name(run.profile)}{run.title ? ` · ${run.title}` : ""}</span>
           <span className="block break-words text-xs text-muted-foreground">Запрос: {run.user_message.content}</span>

@@ -110,6 +110,54 @@ def test_global_projection_keeps_parallel_channels_and_server_unread(
     assert [item["session_id"] for item in waiting] == ["decision-chat"]
 
 
+def test_pending_decision_replaces_same_turn_lease_instead_of_counting_twice(
+    monkeypatch, tmp_path
+):
+    home = tmp_path / "lawyer"
+    home.mkdir()
+    _session(
+        home,
+        "decision-chat",
+        source="browser",
+        title="Один запрос",
+        holder=f"pid={os.getpid()}:turn=browser",
+    )
+    create_pending(
+        kind="outbound_message",
+        owner_id="owner",
+        profile="lawyer",
+        source_session_id="decision-chat",
+        source_session_key="browser:decision-chat",
+        payload={"channel": "telegram", "recipient": "owner", "text": "Черновик"},
+        path=home / "effect_decisions.sqlite3",
+    )
+    monkeypatch.setattr(
+        chat_activity, "_profile_targets", lambda _profile: [("lawyer", home)]
+    )
+
+    browser = [{
+        "message_id": "browser-message",
+        "session_id": "decision-chat",
+        "profile": "lawyer",
+        "status": "running",
+        "updated_at": 1,
+        "history_count": 0,
+        "user_message": {"role": "user", "content": "Один запрос"},
+    }]
+    runs = chat_activity.project_chat_activity(
+        browser, profile=None, session_id=None
+    )
+    active = [
+        item for item in runs
+        if item["session_id"] == "decision-chat"
+        and item["status"] in {"running", "waiting_decision", "stale"}
+    ]
+
+    assert len(active) == 1
+    assert active[0]["message_id"] == "browser-message"
+    assert active[0]["status"] == "waiting_decision"
+
+
 def test_expired_lease_is_stale_not_running(monkeypatch, tmp_path):
     home = tmp_path / "default"
     home.mkdir()
