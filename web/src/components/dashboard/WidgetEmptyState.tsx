@@ -5,7 +5,7 @@ import type { WidgetSize } from "@/lib/dashboard-layout";
 import { cn } from "@/lib/utils";
 
 /**
- * Честное состояние карточки, пока её источник не подключён.
+ * Честное состояние карточки, пока её сводка недоступна.
  *
  * Ноль вместо неизвестного значения читается как «всё спокойно», а
  * придуманное число — как факт. Поэтому карточка показывает знак своей темы и
@@ -32,11 +32,11 @@ export function WidgetEmptyState({ icon: Icon, note, size }: WidgetEmptyStatePro
       )}
     >
       {/* На плитке 1×1 эта строка не умещается ни при каком сокращении, а
-          «Источник ещё не подкл…» — не то, ради чего карточку открыли. Поэтому
+          «Сводка недоступна» — не то, ради чего карточку открыли. Поэтому
           она переносится, а знак темы держится первой строки. */}
       <p className="korra-widget-line flex shrink-0 items-start gap-2 text-sm font-semibold text-[var(--neo-text-primary)]">
         <Icon className="mt-[3px] size-4 shrink-0" aria-hidden />
-        <span className="min-w-0 line-clamp-2">Источник ещё не подключён</span>
+        <span className="min-w-0 line-clamp-2">Сводка недоступна</span>
       </p>
 
       {pinned ? (

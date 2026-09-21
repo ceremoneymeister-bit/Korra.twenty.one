@@ -39,6 +39,20 @@ describe("карточка «Агенты»", () => {
     expect(busyAgentCount(rows)).toBe(0);
   });
 
+  it("до первого снимка сохраняет состав, но не придумывает состояние или переход к работе", () => {
+    const rows = agentRows({
+      profiles: PROFILES,
+      runs: [run({ profile: "designer", status: "running", session_id: "s-running" })],
+      activityKnown: false,
+    });
+
+    expect(rows.map((row) => row.label)).toEqual(["Корра", "Дизайнер", "Юрист"]);
+    expect(rows.every((row) => row.activity === "unknown")).toBe(true);
+    expect(rows.every((row) => row.note === "Состояние уточняется")).toBe(true);
+    expect(rows.every((row) => row.sessionId === null && row.step === "")).toBe(true);
+    expect(busyAgentCount(rows)).toBe(0);
+  });
+
   it("сначала показывает тех, кому человек нужен прямо сейчас", () => {
     const rows = agentRows({
       profiles: PROFILES,

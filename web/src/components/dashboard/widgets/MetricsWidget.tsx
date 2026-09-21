@@ -18,7 +18,7 @@ function MetricsBody({ size }: DashboardWidgetBodyProps) {
     <WidgetEmptyState
       size={size}
       icon={ChartLine}
-      note="Считать нечего, пока не выбрано, что именно считать. Ноль здесь читался бы как факт."
+      note="Здесь появится сводка показателей вашей работы."
     />
   );
 }

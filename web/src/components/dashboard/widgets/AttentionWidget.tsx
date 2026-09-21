@@ -19,7 +19,7 @@ function AttentionBody({ size }: DashboardWidgetBodyProps) {
     <WidgetEmptyState
       size={size}
       icon={TriangleAlert}
-      note="Подтверждения, ошибки и остановленные поручения пока приходят прямо в разговоре."
+      note="Подтверждения и уведомления — в чатах агентов."
     />
   );
 }

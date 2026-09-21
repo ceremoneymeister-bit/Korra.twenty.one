@@ -18,7 +18,7 @@ function RecentResultsBody({ size }: DashboardWidgetBodyProps) {
     <WidgetEmptyState
       size={size}
       icon={FileText}
-      note="Свежие ответы, файлы и отчёты появятся здесь с датой и автором. Пока они лежат в файлах."
+      note="Документы и другие материалы доступны в разделе «Файлы»."
     />
   );
 }

@@ -18,7 +18,7 @@ function UpcomingTasksBody({ size }: DashboardWidgetBodyProps) {
     <WidgetEmptyState
       size={size}
       icon={CalendarClock}
-      note="Ближайшие запуски по расписанию и их прошлый результат целиком видно на экране «Задачи»."
+      note="Расписание и результаты запусков — в разделе «Задачи»."
     />
   );
 }

@@ -7,9 +7,10 @@
  *
  * Два обещания, ради которых этот файл существует отдельно:
  *
- * - **Никаких выдуманных чисел.** Если состав агентов не пришёл — строк нет.
- *   Если не пришла активность — строки есть, но они честно помечены как
- *   последнее известное состояние, а не выдаются за текущее.
+ * - **Никаких выдуманных состояний.** Если состав агентов не пришёл — строк
+ *   нет. До первого снимка активности состав виден, но занятость остаётся
+ *   неизвестной. Только после снимка при обрыве можно показать последнее
+ *   известное состояние.
  * - **Переход ведёт туда, где человек продолжит.** Не «на экран агентов», а
  *   к нужному агенту и в тот самый чат, в котором идёт работа.
  */
@@ -17,7 +18,7 @@
 import { buildAgentTabs, MAIN_AGENT_TAB, type AgentTabConfig } from "@/lib/agent-tabs";
 import { isRunBusy, type ChatRun } from "@/lib/chat-runs";
 
-export type AgentActivity = "waiting" | "working" | "ready" | "failed" | "idle";
+export type AgentActivity = "waiting" | "working" | "ready" | "failed" | "idle" | "unknown";
 
 export interface DashboardAgentRow {
   /** Имя профиля; "" — главный агент панели. */
@@ -42,6 +43,7 @@ const ACTIVITY_RANK: Record<AgentActivity, number> = {
   ready: 2,
   failed: 3,
   idle: 4,
+  unknown: 5,
 };
 
 const ACTIVITY_NOTE: Record<AgentActivity, string> = {
@@ -50,6 +52,7 @@ const ACTIVITY_NOTE: Record<AgentActivity, string> = {
   ready: "Ответ готов",
   failed: "Последняя работа не завершилась",
   idle: "Готов к поручению",
+  unknown: "Состояние уточняется",
 };
 
 function runActivity(run: ChatRun): AgentActivity {
@@ -85,6 +88,8 @@ export interface AgentRosterInput {
   profiles: unknown;
   /** Последний известный список работ. */
   runs: readonly ChatRun[];
+  /** Хотя бы один ответ о работах уже был получен. */
+  activityKnown?: boolean;
 }
 
 /**
@@ -93,7 +98,11 @@ export interface AgentRosterInput {
  * Свободные агенты не исчезают: человеку важно видеть и того, кто ждёт
  * поручения. Но решения и работа идут первыми — с них начинается день.
  */
-export function agentRows({ profiles, runs }: AgentRosterInput): DashboardAgentRow[] {
+export function agentRows({
+  profiles,
+  runs,
+  activityKnown = true,
+}: AgentRosterInput): DashboardAgentRow[] {
   // `buildAgentTabs` намеренно всегда отдаёт главную вкладку: полоса агентов
   // не должна быть пустой даже без ответа сервера. Дашборду это не подходит —
   // строка «Корра · готов к поручению» без прочитанного состава была бы
@@ -110,16 +119,19 @@ export function agentRows({ profiles, runs }: AgentRosterInput): DashboardAgentR
   }
   const rows = tabs.map((tab) => {
     const run = leadingRun(byProfile.get(tab.profile) ?? []);
-    const activity = run ? runActivity(run) : "idle";
+    // Пустой массив означает «все свободны» только после настоящего ответа.
+    // До первого снимка даже оставшиеся в модульном store строки не являются
+    // подтверждённой активностью этого показа.
+    const activity = activityKnown ? (run ? runActivity(run) : "idle") : "unknown";
     return {
       profile: tab.profile,
       label: tab.label,
       activity,
       note: ACTIVITY_NOTE[activity],
-      sessionId: run?.session_id ?? null,
-      step: activity === "idle" ? "" : cleanStep(run),
-      unread: run?.unread === true,
-      updatedAt: run ? run.updated_at : null,
+      sessionId: activityKnown ? (run?.session_id ?? null) : null,
+      step: activity === "idle" || activity === "unknown" ? "" : cleanStep(run),
+      unread: activityKnown && run?.unread === true,
+      updatedAt: activityKnown && run ? run.updated_at : null,
     } satisfies DashboardAgentRow;
   });
   return rows.sort((a, b) => {

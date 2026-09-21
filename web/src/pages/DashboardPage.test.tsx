@@ -146,11 +146,17 @@ describe("Личный дашборд", () => {
     expect(tiles()).toEqual(TILE_IDS.map((id) => ({ id, size: "m" })));
   });
 
-  it("карточки без источника честно называют его отсутствие", () => {
-    for (const id of ["attention", "metrics", "upcoming-tasks", "recent-results"]) {
-      expect(
-        container.querySelector<HTMLElement>(`[data-widget="${id}"]`)?.textContent,
-      ).toContain("Источник ещё не подключён");
+  it("пустые карточки коротко объясняют, где искать нужные сведения", () => {
+    const notes = {
+      attention: "Подтверждения и уведомления — в чатах агентов.",
+      metrics: "Здесь появится сводка показателей вашей работы.",
+      "upcoming-tasks": "Расписание и результаты запусков — в разделе «Задачи».",
+      "recent-results": "Документы и другие материалы доступны в разделе «Файлы».",
+    };
+    for (const [id, note] of Object.entries(notes)) {
+      const card = container.querySelector<HTMLElement>(`[data-widget="${id}"]`);
+      expect(card?.textContent).toContain("Сводка недоступна");
+      expect(card?.textContent).toContain(note);
     }
   });
 

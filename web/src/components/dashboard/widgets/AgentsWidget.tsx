@@ -73,6 +73,7 @@ const DOT_BY_ACTIVITY: Record<AgentActivity, string> = {
   ready: "bg-[var(--neo-accent-line)]",
   failed: "bg-[var(--neo-text-secondary)]",
   idle: "bg-[var(--neo-text-secondary)]/40",
+  unknown: "bg-[var(--neo-text-secondary)]/40",
 };
 
 /** Сколько целых строк помещается в измеренную высоту. */
@@ -149,7 +150,11 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
     );
   }
 
-  const rows = agentRows({ profiles, runs });
+  // `runs=[]` — это подтверждённый ноль только после успешного ответа.
+  // Пока `$chatRunsUpdatedAt` пуст, показываем состав, но не приписываем
+  // людям ни свободное, ни рабочее состояние.
+  const activityKnown = runsUpdatedAt !== null;
+  const rows = agentRows({ profiles, runs, activityKnown });
 
   if (rows.length === 0) {
     return (
@@ -172,24 +177,27 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
   // работ — уже нет. Молчать об этом нельзя, иначе «никто не работает»
   // выглядит фактом.
   const stale =
-    runsReachable === false ||
-    runsUpdatedAt === null ||
-    now - runsUpdatedAt > STALE_AFTER_MS;
+    runsUpdatedAt !== null &&
+    (runsReachable === false || now - runsUpdatedAt > STALE_AFTER_MS);
+  const activityState = !activityKnown ? "unknown" : stale ? "stale" : "live";
   const busy = busyAgentCount(rows);
 
   if (size === "s") {
+    const unknown = activityState === "unknown";
     return (
       <div className="flex min-h-0 flex-1 flex-col justify-center gap-1">
         <p className="text-5xl leading-none font-medium text-[var(--neo-text-primary)]">
-          {busy}
+          {unknown ? "—" : busy}
           <span className="ml-2 text-base text-[var(--neo-text-secondary)]">
-            из {rows.length}
+            {unknown ? `всего ${rows.length}` : `из ${rows.length}`}
           </span>
         </p>
-        <p className="truncate text-sm text-[var(--neo-text-secondary)]">
-          {busy === 0 ? "никто не занят" : "сейчас в работе"}
-        </p>
-        <StatusLine size={size} stale={stale} />
+        {unknown ? null : (
+          <p className="truncate text-sm text-[var(--neo-text-secondary)]">
+            {busy === 0 ? "никто не занят" : "сейчас в работе"}
+          </p>
+        )}
+        <StatusLine size={size} state={activityState} />
       </div>
     );
   }
@@ -217,12 +225,14 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
                     <span className="block truncate text-sm font-semibold text-[var(--neo-text-primary)]">
                       {row.label}
                     </span>
-                    {/* Состояние словом остаётся на любом размере: точка у
-                        метки его лишь дублирует. На L к нему добавляется само
-                        поручение — там для этого есть ширина. */}
-                    <span className="block truncate text-xs text-[var(--neo-text-secondary)]">
-                      {size === "l" && row.step ? `${row.note} · ${row.step}` : row.note}
-                    </span>
+                    {/* После snapshot состояние остаётся словом на любом
+                        размере: точка у метки его лишь дублирует. На L к нему
+                        добавляется само поручение — там для этого есть ширина. */}
+                    {row.activity === "unknown" ? null : (
+                      <span className="block truncate text-xs text-[var(--neo-text-secondary)]">
+                        {size === "l" && row.step ? `${row.note} · ${row.step}` : row.note}
+                      </span>
+                    )}
                   </span>
                   <ChevronRight
                     aria-hidden
@@ -236,8 +246,14 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
           /* Ни одной целой строки не помещается — показываем счёт, а за самим
              списком карточка уводит своим переходом в шапке. */
           <p className="truncate text-sm text-[var(--neo-text-secondary)]">
-            <span className="font-semibold text-[var(--neo-text-primary)]">{busy}</span> из{" "}
-            {rows.length} в работе
+            {activityState === "unknown" ? (
+              <>Состав: {rows.length}</>
+            ) : (
+              <>
+                <span className="font-semibold text-[var(--neo-text-primary)]">{busy}</span> из{" "}
+                {rows.length} в работе
+              </>
+            )}
           </p>
         )}
       </div>
@@ -245,7 +261,7 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
       <StatusLine
         hiddenCount={visible.length > 0 ? hiddenCount : 0}
         size={size}
-        stale={stale}
+        state={activityState}
         onRetry={retry}
       />
     </div>
@@ -253,25 +269,34 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
 }
 
 /**
- * Строка под списком: живое состояние или его давность, и сколько агентов
- * осталось за кадром. Сколько бы места она ни заняла, счёт строк списка от
- * этого не сбивается: список меряет то, что ему осталось, а не вычитает её.
+ * Строка под списком: ожидание первого снимка, живое состояние или его
+ * давность, и сколько агентов осталось за кадром. Сколько бы места она ни
+ * заняла, счёт строк списка от этого не сбивается: список меряет то, что ему
+ * осталось, а не вычитает её.
  */
 function StatusLine({
   hiddenCount = 0,
   onRetry,
   size,
-  stale,
+  state,
 }: {
   hiddenCount?: number;
   onRetry?: () => void;
   size: "s" | "m" | "l";
-  stale: boolean;
+  state: "unknown" | "stale" | "live";
 }) {
   const rest = hiddenCount > 0 ? ` · ещё ${hiddenCount}` : "";
   return (
     <div className="flex shrink-0 items-center gap-2">
-      {stale ? (
+      {state === "unknown" ? (
+        <p
+          className="min-w-0 flex-1 truncate text-xs text-[var(--neo-text-secondary)]"
+          data-agents-unknown
+          role="status"
+        >
+          {`Занятость уточняется${rest}`}
+        </p>
+      ) : state === "stale" ? (
         <p
           className="min-w-0 flex-1 truncate text-xs text-[var(--neo-text-secondary)]"
           data-agents-stale
@@ -289,8 +314,8 @@ function StatusLine({
           {size === "s" ? "Состояние живое" : `Состояние обновляется само${rest}`}
         </p>
       )}
-      {/* Повтор нужен только там, где данные устарели и есть место под кнопку. */}
-      {stale && size !== "s" && onRetry ? <RetryButton onClick={onRetry} /> : null}
+      {/* Повтор нужен, когда первого ответа нет либо данные устарели, и есть место под кнопку. */}
+      {state !== "live" && size !== "s" && onRetry ? <RetryButton onClick={onRetry} /> : null}
     </div>
   );
 }
@@ -309,12 +334,14 @@ function AgentMark({ row }: { row: DashboardAgentRow }) {
       className="relative grid size-8 shrink-0 place-items-center rounded-[var(--neo-radius-control)] text-sm font-semibold text-[var(--neo-text-primary)] shadow-[var(--neo-inset-compact)]"
     >
       {row.label.trim().slice(0, 1).toUpperCase()}
-      <span
-        className={cn(
-          "absolute -right-0.5 -top-0.5 size-2 rounded-full",
-          DOT_BY_ACTIVITY[row.activity],
-        )}
-      />
+      {row.activity === "unknown" ? null : (
+        <span
+          className={cn(
+            "absolute -right-0.5 -top-0.5 size-2 rounded-full",
+            DOT_BY_ACTIVITY[row.activity],
+          )}
+        />
+      )}
     </span>
   );
 }

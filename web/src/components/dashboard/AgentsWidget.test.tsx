@@ -48,7 +48,7 @@ const PROFILES = [
 let root: Root;
 let container: HTMLDivElement;
 
-async function mount(size: WidgetSize = "m") {
+async function mount(size: WidgetSize = "m", refreshRuns = true) {
   const { Body } = AGENTS_WIDGET;
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -60,12 +60,14 @@ async function mount(size: WidgetSize = "m") {
       </MemoryRouter>,
     ),
   );
-  // Хранилище работ — модульное и в этом файле переживает размонтирование
-  // (nanostores снимает подписку отложенно), поэтому опрос запускаем явно.
-  // Путь при этом настоящий: fetch → разбор → атомы.
-  await act(async () => {
-    await refreshChatRuns();
-  });
+  if (refreshRuns) {
+    // Хранилище работ — модульное и в этом файле переживает размонтирование
+    // (nanostores снимает подписку отложенно), поэтому опрос запускаем явно.
+    // Путь при этом настоящий: fetch → разбор → атомы.
+    await act(async () => {
+      await refreshChatRuns();
+    });
+  }
   await flush();
 }
 
@@ -192,14 +194,83 @@ describe("Карточка «Агенты» на реальном источни
   });
 
   it("недоступная активность помечается как последнее известное состояние", async () => {
-    serveRuns(new Error("offline"));
+    // «Последнее известное» допустимо только после хотя бы одного ответа.
+    // Иначе это тот же случай «занятость уточняется» ниже.
+    serveRuns([]);
     await mount();
+    serveRuns(new Error("offline"));
+    await act(async () => {
+      await refreshChatRuns();
+    });
 
     expect(container.querySelector("[data-agents-stale]")).not.toBeNull();
     expect(container.textContent).toContain("последнее известное состояние");
     // Состав всё равно виден: он пришёл и не устарел.
     expect(container.textContent).toContain("Корра");
     expect(button("Повторить")).toBeTruthy();
+  });
+
+  it.each([false, null] as const)(
+    "до первого снимка с доступностью %s не выдаёт отсутствие активности за idle",
+    async (reachable) => {
+      $chatRuns.set([]);
+      $chatRunsReachable.set(reachable);
+      $chatRunsUpdatedAt.set(null);
+      await mount("m", false);
+
+      expect(container.textContent).toContain("Занятость уточняется");
+      expect(container.querySelector("[data-agents-unknown]")).not.toBeNull();
+      expect(container.textContent).toContain("Корра");
+      expect(container.textContent).not.toContain("Готов к поручению");
+      expect(container.textContent).not.toContain("Показано последнее известное состояние");
+      expect(button("Повторить")).toBeTruthy();
+    },
+  );
+
+  it("после настоящего пустого снимка показывает ноль и свободных агентов", async () => {
+    serveRuns([]);
+    await mount("s");
+
+    expect(container.textContent).toContain("0");
+    expect(container.textContent).toContain("никто не занят");
+    expect(container.querySelector("[data-agents-live]")).not.toBeNull();
+    expect(container.querySelector("[data-agents-unknown]")).toBeNull();
+  });
+
+  it("повтор после первого сбоя получает пустой снимок и только тогда объявляет idle", async () => {
+    serveRuns([]);
+    await mount("m", false);
+    expect(container.querySelector("[data-agents-unknown]")).not.toBeNull();
+
+    await click(button("Повторить"));
+    await flush();
+
+    expect(container.querySelector("[data-agents-live]")).not.toBeNull();
+    expect(container.querySelector("[data-agents-unknown]")).toBeNull();
+    expect(container.textContent).toContain("Готов к поручению");
+  });
+
+  it("при обрыве после снимка сохраняет последнее настоящее состояние", async () => {
+    serveRuns([
+      {
+        message_id: "m1",
+        session_id: "s-42",
+        profile: "designer",
+        status: "running",
+        updated_at: 10,
+        history_count: 1,
+        user_message: { role: "user", content: "Собери презентацию" },
+      },
+    ]);
+    await mount("m");
+    await act(async () => {
+      $chatRunsReachable.set(false);
+    });
+
+    expect(container.textContent).toContain("Дизайнер");
+    expect(container.textContent).toContain("Работает");
+    expect(container.querySelector("[data-agents-stale]")).not.toBeNull();
+    expect(container.querySelector("[data-agents-unknown]")).toBeNull();
   });
 
   it("пустой ответ о составе не превращается в выдуманного агента", async () => {
