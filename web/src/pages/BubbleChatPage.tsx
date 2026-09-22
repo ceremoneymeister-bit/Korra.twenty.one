@@ -970,6 +970,13 @@ export function BubbleChatComposer({
     !failed &&
     Boolean(value.trim() || ready.length > 0);
   const recording = dictation.state === "recording";
+  const recordingLimitMinutes = Math.round(
+    dictation.recordingLimitSeconds / 60,
+  );
+  const recordingLimitLabel = `${recordingLimitMinutes} минут`;
+  const dictationLabel = recording
+    ? `Остановить запись (до ${recordingLimitLabel})`
+    : DICTATION_LABEL[dictation.state];
   // «Включаю микрофон» и «Распознаю речь» — короткие ожидания, на них кнопка
   // занята: второе нажатие в этот момент означало бы отмену, а отменять
   // владелец собирался запись, которой уже нет.
@@ -986,7 +993,7 @@ export function BubbleChatComposer({
       : uploading
         ? "Файлы загружаются"
         : recording
-          ? "Идёт запись"
+          ? `Идёт запись · до ${recordingLimitLabel}`
           : dictation.state === "transcribing"
             ? "Распознаю речь"
             : "";
@@ -1144,6 +1151,11 @@ export function BubbleChatComposer({
               {composerError}
             </p>
           )}
+          {recording && (
+            <p className="text-xs text-muted-foreground normal-case tracking-normal">
+              Идёт запись · максимум {recordingLimitLabel}
+            </p>
+          )}
 
           <div
             className="korra-chat-composer__controls"
@@ -1176,12 +1188,12 @@ export function BubbleChatComposer({
                 className="korra-chat-composer__control korra-chat-composer__microphone"
                 aria-label={
                   dictation.supported
-                    ? DICTATION_LABEL[dictation.state]
+                    ? dictationLabel
                     : "Диктовка недоступна"
                 }
                 title={
                   dictation.supported
-                    ? DICTATION_LABEL[dictation.state]
+                    ? dictationLabel
                     : (dictation.unavailableReason ?? "Диктовка недоступна")
                 }
               >

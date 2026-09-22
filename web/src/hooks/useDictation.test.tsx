@@ -156,6 +156,35 @@ describe("useDictation", () => {
     expect(track.stop).toHaveBeenCalled();
   });
 
+  it("не обрывает длинную мысль через две минуты и распознаёт на пределе", async () => {
+    vi.useFakeTimers();
+    const onText = vi.fn();
+    apiMocks.transcribeAudio.mockResolvedValue("длинная мысль закончена");
+
+    try {
+      await mount({ onText });
+      await press();
+
+      await act(async () => {
+        vi.advanceTimersByTime(120_000);
+      });
+      expect(current.state).toBe("recording");
+      expect(apiMocks.transcribeAudio).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(8 * 60_000);
+      });
+      await act(async () => {});
+
+      expect(apiMocks.transcribeAudio).toHaveBeenCalledTimes(1);
+      expect(onText).toHaveBeenCalledWith("длинная мысль закончена");
+      expect(current.state).toBe("idle");
+      expect(track.stop).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("в Safari пишет в mp4 — единственный формат, который там есть", async () => {
     FakeMediaRecorder.supportedTypes = ["audio/mp4"];
     await mount();

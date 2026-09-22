@@ -495,8 +495,9 @@ describe("BubbleChatComposer · диктовка", () => {
     expect(microphoneButton().dataset.state).toBe("recording");
     expect(microphoneButton().getAttribute("aria-pressed")).toBe("true");
     expect(microphoneButton().getAttribute("aria-label")).toBe(
-      "Остановить запись",
+      "Остановить запись (до 10 минут)",
     );
+    expect(container.textContent).toContain("Идёт запись · максимум 10 минут");
     expect(microphoneButton().querySelector(".lucide-square")).not.toBeNull();
     expect(textarea.placeholder).toBe("Слушаю…");
 

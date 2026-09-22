@@ -7,7 +7,8 @@
  * Остановка только по второму нажатию — распознавание запускает владелец,
  * а не таймер тишины: порог громкости нечем откалибровать, и «умная» пауза
  * рвала бы фразу на каждом вдохе. Единственный автоматический стоп —
- * предохранитель на две минуты, чтобы забытый микрофон не писал вечно.
+ * десятиминутный предохранитель от забытого микрофона. Предел достаточно
+ * велик для связного монолога и остаётся заметным в интерфейсе владельца.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -35,8 +36,11 @@ const MIME_CANDIDATES = [
   "audio/mpeg",
 ];
 
-/** Предохранитель: дольше двух минут монолог не пишем. */
-const MAX_RECORDING_MS = 120_000;
+/** Сжатая браузерная запись укладывается в серверный предел 25 МБ с запасом. */
+const MAX_RECORDING_SECONDS = 10 * 60;
+const MAX_RECORDING_MS = MAX_RECORDING_SECONDS * 1_000;
+/** Небольшие порции не заставляют браузер держать весь монолог внутри recorder. */
+const RECORDING_CHUNK_MS = 1_000;
 
 export interface UseDictationOptions {
   /** Профиль агента: у каждого свой ключ распознавания. */
@@ -51,6 +55,8 @@ export interface UseDictationOptions {
 
 export interface UseDictationReturn {
   state: DictationState;
+  /** Видимый владельцу предохранитель одной браузерной записи. */
+  recordingLimitSeconds: number;
   /** Микрофон доступен в этом браузере и на этом адресе. */
   supported: boolean;
   /** Почему диктовка недоступна; `null` — доступна. */
@@ -274,7 +280,7 @@ export function useDictation({
 
     recorderRef.current = recorder;
     streamRef.current = stream;
-    recorder.start();
+    recorder.start(RECORDING_CHUNK_MS);
     apply("recording");
     timerRef.current = window.setTimeout(() => stop(), MAX_RECORDING_MS);
   }, [apply, clearTimer, finish, release, stop, support.supported]);
@@ -304,6 +310,7 @@ export function useDictation({
 
   return {
     state,
+    recordingLimitSeconds: MAX_RECORDING_SECONDS,
     supported: support.supported,
     unavailableReason: support.reason,
     toggle,
