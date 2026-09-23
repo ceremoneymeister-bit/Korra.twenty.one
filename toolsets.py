@@ -75,6 +75,10 @@ _HERMES_CORE_TOOLS = [
     # Owner-only Google connection lifecycle. The single tool is profile-bound
     # and never accepts or returns app secrets, auth codes, or tokens.
     "google_workspace_auth",
+    # The owner's Google Calendar through the connection made in Korra. Gated
+    # only on the installation OAuth app (check_fn); each call resolves the
+    # profile's effective grant, so connect/revoke apply on the next call.
+    "google_calendar",
     # Kanban multi-agent coordination — only in schema when the agent is
     # spawned as a kanban worker (HERMES_KANBAN_TASK env set) or the current
     # profile explicitly enables the kanban toolset. Gated via check_fn in
@@ -151,6 +155,16 @@ TOOLSETS = {
     "google_workspace": {
         "description": "Connect the current profile to selected Google Workspace services",
         "tools": ["google_workspace_auth"],
+        "includes": [],
+    },
+
+    # Not a configurable toolset on purpose: a connected service is the
+    # agent's tool without a per-profile switch («подключение = инструмент»).
+    # Curated profiles with an explicit toolset list get it through the
+    # non-configurable recovery in tools_config._get_platform_tools.
+    "google_calendar": {
+        "description": "Read and add events in the Google Calendar the owner connected in Korra",
+        "tools": ["google_calendar"],
         "includes": [],
     },
 
@@ -479,11 +493,13 @@ TOOLSETS = {
             "cronjob",
             # Home Assistant smart home control (gated on HASS_TOKEN via check_fn)
             "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
+            # The owner's Google Calendar (gated on the installation OAuth app)
+            "google_calendar",
 
         ],
         "includes": []
     },
-    
+
     "hermes-cli": {
         "description": "Full interactive CLI toolset - all default tools plus cronjob management",
         "tools": _HERMES_CORE_TOOLS,

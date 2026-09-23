@@ -155,6 +155,8 @@ def test_update_increments_the_server_revision_and_pins_the_attention_strip():
         "agents",
         "recent-results",
         "upcoming-tasks",
+        # Не названная браузером карточка каталога встаёт в конец.
+        "calendar",
     ]
     assert value["hidden"] == ["upcoming-tasks"]
     assert value["sizes"]["metrics"] == "l"

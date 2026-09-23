@@ -35,6 +35,10 @@ WIDGET_IDS: tuple[str, ...] = (
     "metrics",
     "upcoming-tasks",
     "recent-results",
+    # Встречи из подключённого Google-календаря, задачи с датой и запуски
+    # агентов на неделю (0.21.13). Новый в каталоге — у тех, кто уже
+    # настраивал доску, встаёт последним, а не пропадает.
+    "calendar",
 )
 
 #: Cards that live outside the tile grid: no size, no reordering.

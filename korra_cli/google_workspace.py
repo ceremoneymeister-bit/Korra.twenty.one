@@ -739,6 +739,104 @@ def status(*, profile_home: Path | None = None) -> dict[str, Any]:
     }
 
 
+def app_ready() -> bool:
+    """Is the operator-managed OAuth app usable on this installation?
+
+    Cheap and secret-free: agent tools use it as their availability gate, so
+    an installation without the Ceremoneymeister app mount advertises no
+    Google tool at all.
+    """
+    try:
+        _load_app()
+    except GoogleWorkspaceError:
+        return False
+    return True
+
+
+def _pending_active(profile_home: Path) -> bool:
+    """Lock-free, read-only view of an unexpired authorization flow.
+
+    ``_pending_record`` may unlink an expired record and therefore belongs
+    under the profile lock.  The installation overview only needs to know
+    whether a flow is open, so it must not create lock files or directories in
+    every profile it looks at.
+    """
+    path = pending_path(profile_home)
+    _reject_symlink(path)
+    if not path.exists():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return int(payload["expires_at"]) > int(time.time())
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def overview() -> dict[str, Any]:
+    """Installation-wide, secret-free map of Google access per profile.
+
+    One consistent snapshot for the owner's «Сервисы» screen: which profile
+    holds its own grant, which one borrows it through the explicit sharing
+    policy, and which has none.  Nothing here creates state: no lock files,
+    no ``google-workspace`` directories in profiles that never touched Google.
+    """
+    from korra_cli import profiles as profile_store
+
+    try:
+        _load_app()
+        app: dict[str, Any] = {"configured": True}
+    except GoogleWorkspaceError as exc:
+        app = {"configured": False, "reason": exc.code}
+
+    sources = _read_sharing_policy()["profile_sources"]
+    rows: list[dict[str, Any]] = []
+    for name in profile_store.list_profile_names():
+        if not profile_store.profile_exists(name):
+            continue
+        home = _profile_home_for_name(name)
+        own = _local_active_token_path(home).exists()
+        source = None if own else sources.get(name)
+        grant_home = _profile_home_for_name(source) if source else home
+        token = _token_status(grant_home)
+        state = token["state"]
+        if state == "connected":
+            services = [service for service in token.get("services", []) if service != "all"]
+            if token.get("services") == ["all"]:
+                services = list(SERVICE_SCOPES)
+        elif token.get("legacy_compatible"):
+            services = list(token.get("usable_services", []))
+        else:
+            services = []
+        row: dict[str, Any] = {
+            "profile": name,
+            "access": "own" if own else ("shared" if source else "none"),
+            "state": state,
+            "services": services,
+            "pending": _pending_active(home),
+        }
+        if source:
+            row["shared_from"] = source
+        if token.get("reason"):
+            row["reason"] = token["reason"]
+        if token.get("legacy_compatible"):
+            row["legacy_compatible"] = True
+        rows.append(row)
+    # A stale policy entry for a profile that later got its own grant is not
+    # effective (a local grant always wins), so it is not reported as sharing.
+    borrowers: dict[str, list[str]] = {}
+    for row in rows:
+        if row["access"] == "shared":
+            borrowers.setdefault(row["shared_from"], []).append(row["profile"])
+    for row in rows:
+        if row["access"] == "own":
+            row["shared_with"] = sorted(borrowers.get(row["profile"], []))
+    return {
+        "app": app,
+        "profiles": rows,
+        "available_services": list(SERVICE_SCOPES),
+    }
+
+
 def start(
     services: str | tuple[str, ...],
     *,

@@ -17582,6 +17582,11 @@ app.include_router(_tools_routes.router)
 from korra_cli.web_routers import google_workspace as _google_workspace_routes  # noqa: E402
 
 app.include_router(_google_workspace_routes.router)
+# «Сервисы» и лента «Календаря» на дашборде: сводка подключений по агентам
+# и встречи/задачи/запуски на неделю. Изменения идут прежними маршрутами.
+from korra_cli.web_routers import connections as _connections_routes  # noqa: E402
+
+app.include_router(_connections_routes.router)
 # Раздел «Обновления»: что стоит, что доступно и просьба обновиться. Сам
 # ничего не запускает — обновление исполняет хост, см. модуль.
 from korra_cli.web_routers import updates as _updates_routes  # noqa: E402
