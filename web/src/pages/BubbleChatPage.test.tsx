@@ -12,8 +12,13 @@ const attachmentMocks = vi.hoisted(() => ({
 }));
 
 const apiMocks = vi.hoisted(() => ({
-  transcribeAudio: vi.fn(),
+  transcribeRecording: vi.fn(),
 }));
+
+/** Ответ распознавания: текст и сколько звука сервер нашёл в файле. */
+function heard(text: string, audioSeconds: number | null = null) {
+  return { text, audioSeconds };
+}
 
 vi.mock("@/lib/upload-session", async () => ({
   ...await vi.importActual<typeof import("@/lib/upload-session")>("@/lib/upload-session"),
@@ -26,7 +31,7 @@ vi.mock("@/lib/upload-queue", async () => ({
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, transcribeAudio: apiMocks.transcribeAudio };
+  return { ...actual, transcribeRecording: apiMocks.transcribeRecording };
 });
 
 // Орбита рисует себя через requestAnimationFrame и canvas — в jsdom это шум,
@@ -144,8 +149,8 @@ beforeEach(() => {
     return 1;
   });
   vi.stubGlobal("cancelAnimationFrame", () => {});
-  apiMocks.transcribeAudio.mockReset();
-  apiMocks.transcribeAudio.mockResolvedValue("");
+  apiMocks.transcribeRecording.mockReset();
+  apiMocks.transcribeRecording.mockResolvedValue(heard(""));
   attachmentMocks.createUpload.mockReset();
   attachmentMocks.completeUpload.mockReset();
   attachmentMocks.runUploadQueue.mockReset();
@@ -480,10 +485,24 @@ describe("BubbleChatComposer", () => {
 });
 
 describe("BubbleChatComposer · диктовка", () => {
+  function sendButton(): HTMLButtonElement {
+    return container.querySelector<HTMLButtonElement>(".korra-chat-composer__submit")!;
+  }
+
+  function keptCard(): HTMLElement | null {
+    return container.querySelector<HTMLElement>(".korra-chat-composer__kept");
+  }
+
+  function keptAction(label: string): HTMLButtonElement {
+    return Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".korra-chat-composer__kept button"),
+    ).find((button) => button.textContent?.includes(label))!;
+  }
+
   it("дописывает распознанное к набранному и не отправляет за владельца", async () => {
     const onSend = vi.fn();
     const track = enableMicrophone();
-    apiMocks.transcribeAudio.mockResolvedValue("готова?");
+    apiMocks.transcribeRecording.mockResolvedValue(heard("готова?"));
     await render(<BubbleChatComposer onSend={onSend} profile="raschet" />);
 
     const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
@@ -494,33 +513,43 @@ describe("BubbleChatComposer · диктовка", () => {
     await pressMicrophone();
     expect(microphoneButton().dataset.state).toBe("recording");
     expect(microphoneButton().getAttribute("aria-pressed")).toBe("true");
+    // Один понятный путь: кнопка записи подписана «Готово» и несёт таймер.
     expect(microphoneButton().getAttribute("aria-label")).toBe(
-      "Остановить запись (до 10 минут)",
+      "Готово — остановить запись и распознать",
     );
-    expect(container.textContent).toContain("Идёт запись · максимум 10 минут");
+    expect(microphoneButton().textContent).toBe("Готово0:00");
+    expect(container.textContent).toContain(
+      "Идёт запись · до 10 минут. Закончили — нажмите «Готово», текст появится в поле.",
+    );
     expect(microphoneButton().querySelector(".lucide-square")).not.toBeNull();
     expect(textarea.placeholder).toBe("Слушаю…");
+    // Стрелка отправки на время записи выключена и объясняет почему.
+    expect(sendButton().disabled).toBe(true);
+    expect(sendButton().title).toBe("Сначала нажмите «Готово» — текст появится в поле");
 
     await pressMicrophone();
-    expect(apiMocks.transcribeAudio).toHaveBeenCalledTimes(1);
-    expect(apiMocks.transcribeAudio.mock.calls[0][2]).toBe("raschet");
+    expect(apiMocks.transcribeRecording).toHaveBeenCalledTimes(1);
+    expect(apiMocks.transcribeRecording.mock.calls[0][1].profile).toBe("raschet");
     // Пробел между набранным и надиктованным ставит композер.
     expect(textarea.value).toBe("Смета готова?");
     expect(onSend).not.toHaveBeenCalled();
     expect(track.stop).toHaveBeenCalled();
     expect(microphoneButton().dataset.state).toBe("idle");
     expect(textarea.placeholder).toBe("Напишите Корре…");
+    expect(sendButton().disabled).toBe(false);
   });
 
-  it("на время распознавания показывает орбиту вместо иконки", async () => {
+  it("на время распознавания показывает орбиту, подпись и не даёт отправить", async () => {
     enableMicrophone();
-    let finish: (text: string) => void = () => {};
-    apiMocks.transcribeAudio.mockReturnValue(
-      new Promise<string>((resolve) => {
+    let finish: (value: { text: string; audioSeconds: number | null }) => void = () => {};
+    apiMocks.transcribeRecording.mockReturnValue(
+      new Promise((resolve) => {
         finish = resolve;
       }),
     );
     await render(<BubbleChatComposer onSend={vi.fn()} />);
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+    await enterText(textarea, "Начало");
 
     await pressMicrophone();
     await pressMicrophone();
@@ -528,39 +557,131 @@ describe("BubbleChatComposer · диктовка", () => {
     expect(microphoneButton().disabled).toBe(true);
     expect(microphoneButton().querySelector("[data-orb]")).not.toBeNull();
     expect(microphoneButton().querySelector(".lucide-mic")).toBeNull();
+    expect(microphoneButton().textContent).toContain("Распознаю…");
+    expect(container.textContent).toContain(
+      "Распознаю запись 0:00 — текст появится в поле, отправите сами.",
+    );
+    expect(sendButton().disabled).toBe(true);
+    expect(sendButton().title).toBe("Дождитесь распознавания — текст появится в поле");
 
-    await act(async () => finish("сделай смету"));
+    await act(async () => finish(heard("сделай смету")));
     await act(async () => {});
     expect(microphoneButton().dataset.state).toBe("idle");
+    expect(textarea.value).toBe("Начало сделай смету");
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it("фоновое обновление переписки не обрывает запись", async () => {
+    enableMicrophone();
+    apiMocks.transcribeRecording.mockResolvedValue(heard("весь монолог"));
+    const onSend = vi.fn();
+    await render(<BubbleChatComposer onSend={onSend} />);
+
+    await pressMicrophone();
+    expect(microphoneButton().dataset.state).toBe("recording");
+
+    // Возврат во вкладку: чат перечитывает историю и на это время
+    // выключает поле. Раньше это молча стирало идущую запись.
+    await act(async () =>
+      root.render(
+        <MemoryRouter>
+          <BubbleChatComposer onSend={onSend} disabled />
+        </MemoryRouter>,
+      ),
+    );
+    expect(microphoneButton().dataset.state).toBe("recording");
+    // Завершить запись можно и в это время.
+    expect(microphoneButton().disabled).toBe(false);
+
+    await act(async () =>
+      root.render(
+        <MemoryRouter>
+          <BubbleChatComposer onSend={onSend} />
+        </MemoryRouter>,
+      ),
+    );
+    await pressMicrophone();
+    expect(apiMocks.transcribeRecording).toHaveBeenCalledTimes(1);
     expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe(
-      "сделай смету",
+      "весь монолог",
     );
   });
 
-  it("ненастроенное распознавание объясняет владельцу, чего не хватает", async () => {
+  it("Enter во время записи не отправляет набранное и не теряет запись", async () => {
     enableMicrophone();
-    apiMocks.transcribeAudio.mockRejectedValue(
-      new Error(
-        "Не получилось распознать речь. Повторите или напишите текстом; если распознавание не настроено, добавьте ключ Deepgram в разделе «Ключи».",
-      ),
-    );
+    apiMocks.transcribeRecording.mockResolvedValue(heard("и голосом"));
+    const onSend = vi.fn();
+    await render(<BubbleChatComposer onSend={onSend} />);
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea")!;
+    await enterText(textarea, "Текстом");
+
+    await pressMicrophone();
+    await act(async () => {
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(microphoneButton().dataset.state).toBe("recording");
+
+    await pressMicrophone();
+    expect(textarea.value).toBe("Текстом и голосом");
+  });
+
+  it("отказ распознавания сохраняет запись и даёт повторить", async () => {
+    enableMicrophone();
+    apiMocks.transcribeRecording
+      .mockRejectedValueOnce(
+        new Error(
+          "Не получилось распознать речь. Повторите или напишите текстом; если распознавание не настроено, добавьте ключ Deepgram в разделе «Ключи».",
+        ),
+      )
+      .mockResolvedValueOnce(heard("со второй попытки"));
     await render(<BubbleChatComposer onSend={vi.fn()} />);
 
     await pressMicrophone();
     await pressMicrophone();
 
-    // Тем же способом, что и отказы вложений — одной строкой в композере.
-    expect(
-      container.querySelector(".korra-chat-composer__error")?.textContent,
-    ).toBe(
-      "Не получилось распознать речь. Повторите или напишите текстом; если распознавание не настроено, добавьте ключ Deepgram в разделе «Ключи».",
+    const card = keptCard();
+    expect(card?.getAttribute("role")).toBe("alert");
+    expect(card?.textContent).toContain(
+      "Запись 0:00 сохранена в этой вкладке, но не распознана.",
     );
-    expect(microphoneButton().dataset.state).toBe("idle");
+    expect(card?.textContent).toContain(
+      "если распознавание не настроено, добавьте ключ Deepgram в разделе «Ключи».",
+    );
+    // Новую запись не начать, пока не решена судьба сохранённой.
+    expect(microphoneButton().disabled).toBe(true);
+    expect(microphoneButton().title).toBe(
+      "Сначала повторите распознавание или удалите сохранённую запись",
+    );
+
+    await act(async () => keptAction("Повторить распознавание").click());
+    await act(async () => {});
+    expect(keptCard()).toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe(
+      "со второй попытки",
+    );
+    expect(microphoneButton().disabled).toBe(false);
+  });
+
+  it("сохранённую запись можно удалить", async () => {
+    enableMicrophone();
+    apiMocks.transcribeRecording.mockRejectedValue(new TypeError("Load failed"));
+    await render(<BubbleChatComposer onSend={vi.fn()} />);
+
+    await pressMicrophone();
+    await pressMicrophone();
+    expect(keptCard()?.textContent).toContain("Не удалось связаться с сервером.");
+
+    await act(async () => keptAction("Удалить запись").click());
+    expect(keptCard()).toBeNull();
+    expect(microphoneButton().disabled).toBe(false);
   });
 
   it("на тишину не молчит, а просит повторить", async () => {
     enableMicrophone();
-    apiMocks.transcribeAudio.mockResolvedValue("");
+    apiMocks.transcribeRecording.mockResolvedValue(heard(""));
     await render(<BubbleChatComposer onSend={vi.fn()} />);
 
     await pressMicrophone();
@@ -572,6 +693,7 @@ describe("BubbleChatComposer · диктовка", () => {
     expect(container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe(
       "",
     );
+    expect(keptCard()).toBeNull();
   });
 
   it("во время ответа агента диктовка недоступна", async () => {

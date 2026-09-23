@@ -39,6 +39,7 @@ import {
   Paperclip,
   RotateCcw,
   Mic,
+  Download,
   Search,
   X,
 } from "lucide-react";
@@ -87,7 +88,7 @@ import { cn } from "@/lib/utils";
 import type { ApprovalChoiceValue, ChatMessage } from "@/lib/chat-types";
 import { api, type SessionInfo } from "@/lib/api";
 import { useChatStream, type PendingMessageTarget, type ChatApprovalEntry } from "@/hooks/useChatStream";
-import { useDictation, type DictationState } from "@/hooks/useDictation";
+import { formatDictationClock, useDictation, type DictationState } from "@/hooks/useDictation";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useSessionSearch } from "@/hooks/useSessionSearch";
 import { SearchHighlight } from "@/components/chat/SearchHighlight";
@@ -701,7 +702,7 @@ const TEXTAREA_EXPANDED_HEIGHT = 320;
 const DICTATION_LABEL: Record<DictationState, string> = {
   idle: "Надиктовать сообщение",
   starting: "Включаю микрофон",
-  recording: "Остановить запись",
+  recording: "Готово — остановить запись и распознать",
   transcribing: "Распознаю речь",
 };
 
@@ -869,18 +870,18 @@ export function BubbleChatComposer({
 
   const dictation = useDictation({
     profile,
+    keepKey: draftKey,
     onText: appendDictated,
     onError: setComposerError,
     onEmpty: reportSilence,
   });
 
-  // Пока идёт ответ агента или уходит сообщение, поле принадлежит не
-  // владельцу: недописанную запись бросаем, чтобы текст не прилетел в уже
-  // очищенное поле.
-  const cancelDictation = dictation.cancel;
-  useEffect(() => {
-    if (disabled || submitting) cancelDictation();
-  }, [cancelDictation, disabled, submitting]);
+  // Запись не бросаем ни на фоновом обновлении переписки, ни на ответе
+  // агента: при возврате во вкладку чат перечитывает историю, и прежняя
+  // отмена по `disabled` молча стирала многоминутный монолог (Виктория,
+  // 22.09). Отправка на время записи и распознавания закрыта ниже, так что
+  // текст не прилетит в уже очищенное поле.
+  const dictationActive = dictation.state !== "idle";
 
   const uploading = attachments.some((item) => !["ready", "error"].includes(item.status));
   const failed = attachments.some((item) => item.status === "error");
@@ -910,6 +911,9 @@ export function BubbleChatComposer({
     // whose attachments do not exist yet — the exact failure this feature is
     // meant to prevent. The button is disabled too; this is the second gate.
     if (disabled || streaming || submitting || uploading || failed) return;
+    // Пока идёт запись или распознавание, текста в поле ещё нет целиком:
+    // Enter не должен ни отправить половину, ни потерять надиктованное.
+    if (dictationActive) return;
     if (!text && ready.length === 0) return;
     setSubmitting(true);
     acceptedRef.current = false;
@@ -944,6 +948,7 @@ export function BubbleChatComposer({
     failed,
     ready,
     clearComposer,
+    dictationActive,
   ]);
 
   useEffect(() => {
@@ -968,22 +973,31 @@ export function BubbleChatComposer({
     !submitting &&
     !uploading &&
     !failed &&
+    !dictationActive &&
     Boolean(value.trim() || ready.length > 0);
   const recording = dictation.state === "recording";
+  const transcribing = dictation.state === "transcribing";
   const recordingLimitMinutes = Math.round(
     dictation.recordingLimitSeconds / 60,
   );
   const recordingLimitLabel = `${recordingLimitMinutes} минут`;
-  const dictationLabel = recording
-    ? `Остановить запись (до ${recordingLimitLabel})`
+  const recordingClock = formatDictationClock(dictation.elapsedSeconds);
+  const keptRecording = dictation.kept;
+  const keptFailed = keptRecording?.kind === "failed";
+  const dictationLabel = keptFailed && !recording
+    ? "Сначала повторите распознавание или удалите сохранённую запись"
     : DICTATION_LABEL[dictation.state];
   // «Включаю микрофон» и «Распознаю речь» — короткие ожидания, на них кнопка
   // занята: второе нажатие в этот момент означало бы отмену, а отменять
   // владелец собирался запись, которой уже нет.
   const dictationBusy =
     dictation.state === "starting" || dictation.state === "transcribing";
+  // Идущую запись можно завершить всегда — даже пока чат перечитывает
+  // историю. Новую не начинаем, пока не разобрана нераспознанная.
   const micDisabled =
-    !dictation.supported || Boolean(disabled) || submitting || dictationBusy;
+    !dictation.supported ||
+    (!recording && (Boolean(disabled) || submitting || dictationBusy || keptFailed));
+  const secondsLeft = dictation.recordingLimitSeconds - dictation.elapsedSeconds;
   const activity = streaming
     ? responding
       ? "Корра отвечает"
@@ -1112,7 +1126,7 @@ export function BubbleChatComposer({
               }
             }}
             placeholder={
-              recording ? "Слушаю…" : streaming ? "Можно написать следующее сообщение — отправите после ответа…" : agentLabel ? `Напишите агенту «${agentLabel}»…` : "Напишите Корре…"
+              recording ? "Слушаю…" : transcribing ? "Распознаю запись…" : streaming ? "Можно написать следующее сообщение — отправите после ответа…" : agentLabel ? `Напишите агенту «${agentLabel}»…` : "Напишите Корре…"
             }
             disabled={disabled || submitting}
             className="korra-chat-composer__textarea min-w-0 w-full resize-none bg-transparent text-sm leading-6 normal-case tracking-normal"
@@ -1151,10 +1165,55 @@ export function BubbleChatComposer({
               {composerError}
             </p>
           )}
-          {recording && (
-            <p className="text-xs text-muted-foreground normal-case tracking-normal">
-              Идёт запись · максимум {recordingLimitLabel}
+          {(recording || transcribing) && (
+            <p
+              className="korra-chat-composer__dictation-status text-xs text-muted-foreground normal-case tracking-normal"
+              data-state={dictation.state}
+            >
+              {recording
+                ? secondsLeft <= 60
+                  ? `Осталась минута: в ${formatDictationClock(dictation.recordingLimitSeconds)} запись завершится сама и уйдёт на распознавание.`
+                  : `Идёт запись · до ${recordingLimitLabel}. Закончили — нажмите «Готово», текст появится в поле.`
+                : `Распознаю запись ${recordingClock} — текст появится в поле, отправите сами.`}
             </p>
+          )}
+          {keptRecording && (
+            <div
+              role="alert"
+              className="korra-chat-composer__kept text-xs normal-case tracking-normal"
+              data-kind={keptRecording.kind}
+            >
+              <p>
+                <strong>
+                  {keptRecording.kind === "failed"
+                    ? `Запись ${formatDictationClock(keptRecording.recordedSeconds)} сохранена в этой вкладке, но не распознана.`
+                    : "Запись дошла не целиком."}
+                </strong>{" "}
+                {keptRecording.message}
+              </p>
+              <div className="korra-chat-composer__kept-actions">
+                {keptRecording.kind === "failed" && (
+                  <button
+                    type="button"
+                    onClick={dictation.retry}
+                    disabled={dictationActive}
+                  >
+                    <RotateCcw size={13} aria-hidden />
+                    Повторить распознавание
+                  </button>
+                )}
+                {keptRecording.url && (
+                  <a href={keptRecording.url} download={keptRecording.fileName}>
+                    <Download size={13} aria-hidden />
+                    Скачать запись
+                  </a>
+                )}
+                <button type="button" onClick={dictation.discard}>
+                  <X size={13} aria-hidden />
+                  {keptRecording.kind === "failed" ? "Удалить запись" : "Скрыть"}
+                </button>
+              </div>
+            </div>
           )}
 
           <div
@@ -1198,15 +1257,26 @@ export function BubbleChatComposer({
                 }
               >
                 {recording ? (
-                  <Square size={15} fill="currentColor" aria-hidden />
+                  <>
+                    <Square size={13} fill="currentColor" aria-hidden />
+                    <span className="korra-chat-composer__microphone-text">Готово</span>
+                    <span className="korra-chat-composer__microphone-clock" aria-hidden>
+                      {recordingClock}
+                    </span>
+                  </>
                 ) : dictationBusy ? (
-                  <ThinkingOrb
-                    state="working"
-                    size={20}
-                    speed={1.3}
-                    theme={themeName === "dark" ? "dark" : "light"}
-                    aria-label={DICTATION_LABEL[dictation.state]}
-                  />
+                  <>
+                    <ThinkingOrb
+                      state="working"
+                      size={20}
+                      speed={1.3}
+                      theme={themeName === "dark" ? "dark" : "light"}
+                      aria-label={DICTATION_LABEL[dictation.state]}
+                    />
+                    {transcribing && (
+                      <span className="korra-chat-composer__microphone-text">Распознаю…</span>
+                    )}
+                  </>
                 ) : (
                   <Mic size={18} strokeWidth={1.5} aria-hidden />
                 )}
@@ -1230,13 +1300,17 @@ export function BubbleChatComposer({
                 onClick={submit}
                 disabled={!canSend}
                 title={
-                  uploading
-                    ? "Дождитесь загрузки файлов"
-                    : failed
-                      ? "Повторите загрузку или уберите файл"
-                      : submitting
-                        ? "Отправляется"
-                        : "Отправить"
+                  recording
+                    ? "Сначала нажмите «Готово» — текст появится в поле"
+                    : transcribing
+                      ? "Дождитесь распознавания — текст появится в поле"
+                      : uploading
+                        ? "Дождитесь загрузки файлов"
+                        : failed
+                          ? "Повторите загрузку или уберите файл"
+                          : submitting
+                            ? "Отправляется"
+                            : "Отправить"
                 }
                 className="korra-chat-composer__control korra-chat-composer__submit"
                 aria-label={submitting ? "Отправляется" : "Отправить"}

@@ -383,6 +383,8 @@ export interface AudioTranscriptionResponse {
   ok: boolean;
   transcript: string;
   provider?: string | null;
+  /** Длительность принятого файла, секунды; нет — сервер её не измерил. */
+  audio_seconds?: number | null;
 }
 
 /** Отказы вида «распознавание речи на контуре не работает».
@@ -436,6 +438,30 @@ export async function transcribeAudio(
   mimeType?: string,
   profile?: string,
 ): Promise<string> {
+  return (await transcribeRecording(blob, { mimeType, profile })).text;
+}
+
+/** Итог распознавания браузерной записи. */
+export interface RecordingTranscription {
+  text: string;
+  /** Сколько секунд звука сервер нашёл в принятом файле; `null` — не измерил
+   *  (нет ffprobe, старый движок). Сверяется с длиной записи по часам
+   *  браузера: так видно, что до распознавания дошла только часть. */
+  audioSeconds: number | null;
+}
+
+/**
+ * Распознать запись с микрофона и узнать, сколько звука дошло до сервера.
+ *
+ * `recordedMs` — длина записи по часам браузера. Сервер пишет её в журнал
+ * рядом с размером и длительностью принятого файла: расхождение «записали
+ * пять минут, дошло полминуты» иначе ничем не отличается от короткой речи.
+ */
+export async function transcribeRecording(
+  blob: Blob,
+  options: { mimeType?: string; profile?: string; recordedMs?: number } = {},
+): Promise<RecordingTranscription> {
+  const { mimeType, profile, recordedMs } = options;
   if (blob.size === 0) {
     throw new Error("Запись пустая — микрофон ничего не услышал.");
   }
@@ -452,6 +478,7 @@ export async function transcribeAudio(
       body: JSON.stringify({
         data_url: dataUrl,
         mime_type: mimeType || blob.type || undefined,
+        ...(recordedMs !== undefined ? { duration_ms: Math.round(recordedMs) } : {}),
       }),
     },
   );
@@ -476,7 +503,13 @@ export async function transcribeAudio(
   }
 
   const payload = (await res.json()) as AudioTranscriptionResponse;
-  return typeof payload?.transcript === "string" ? payload.transcript : "";
+  return {
+    text: typeof payload?.transcript === "string" ? payload.transcript : "",
+    audioSeconds:
+      typeof payload?.audio_seconds === "number" && Number.isFinite(payload.audio_seconds)
+        ? payload.audio_seconds
+        : null,
+  };
 }
 
 /** Итог контрольного сообщения новому агенту (см. `probeProfileChat`). */

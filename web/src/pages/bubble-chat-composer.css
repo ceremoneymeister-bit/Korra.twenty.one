@@ -186,6 +186,75 @@
   color: var(--neo-accent-foreground);
 }
 
+/* На время записи и распознавания кнопка подписана словами: «Готово» с
+   таймером, затем «Распознаю…». Иконка «стоп» рядом со стрелкой отправки
+   читалась как второй способ закончить — подпись снимает этот выбор. */
+.korra-chat-composer__microphone[data-state='recording'],
+.korra-chat-composer__microphone[data-state='transcribing'] {
+  width: auto;
+  min-width: 40px;
+  gap: 6px;
+  padding-inline: 12px 14px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.korra-chat-composer__microphone-clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+/* Сохранённая запись: не распознана или дошла не целиком. Висит, пока
+   владелец не решит её судьбу, — в отличие от строки ошибки, которая гаснет. */
+.korra-chat-composer__kept {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--neo-radius-control);
+  color: var(--neo-text-primary);
+  background: var(--neo-surface);
+  box-shadow: var(--neo-inset-compact);
+}
+
+.korra-chat-composer__kept p {
+  margin: 0;
+}
+
+.korra-chat-composer__kept[data-kind='failed'] strong {
+  color: var(--destructive);
+}
+
+.korra-chat-composer__kept-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.korra-chat-composer__kept-actions > button,
+.korra-chat-composer__kept-actions > a {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  color: var(--neo-text-primary);
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.korra-chat-composer__kept-actions > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
 /* Ожидание микрофона и распознавание: кнопка занята, но орбиту внутри
    гасить нельзя — она и есть ответ на вопрос «что сейчас происходит». */
 .korra-chat-composer__microphone:disabled[data-state='starting'],
