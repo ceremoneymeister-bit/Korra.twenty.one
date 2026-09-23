@@ -47,6 +47,39 @@ class TestGetExternalSkillsDirs:
         assert len(result) == 1
         assert result[0] == external_skills_dir.resolve()
 
+    def test_installation_shared_skill_reaches_existing_and_new_profiles(self, hermes_home):
+        from agent.skill_utils import get_external_skills_dirs
+        from tools.skills_tool import _find_all_skills
+
+        shared = hermes_home / "shared-skills"
+        named = hermes_home / "profiles" / "new-agent"
+        named.mkdir(parents=True)
+        (named / "skills").mkdir()
+        with patch.dict(os.environ, {"HERMES_HOME": str(named)}):
+            assert shared not in get_external_skills_dirs()
+            skill = shared / "productivity" / "client-documents"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                "---\nname: client-documents\ndescription: Shared reports\n---\n\n# Reports\n\nUse this kit.\n",
+                encoding="utf-8",
+            )
+            # Directory creation must invalidate an earlier empty result.
+            assert shared.resolve() in get_external_skills_dirs()
+            with patch("tools.skills_tool.SKILLS_DIR", named / "skills"):
+                assert "client-documents" in {s["name"] for s in _find_all_skills()}
+
+    def test_no_skills_profile_opts_out_of_installation_shared_skill(self, hermes_home):
+        from agent.skill_utils import get_external_skills_dirs
+
+        shared = hermes_home / "shared-skills"
+        shared.mkdir()
+        named = hermes_home / "profiles" / "minimal"
+        named.mkdir(parents=True)
+        with patch.dict(os.environ, {"HERMES_HOME": str(named)}):
+            assert shared.resolve() in get_external_skills_dirs()
+            (named / ".no-bundled-skills").write_text("opted out\n")
+            assert shared.resolve() not in get_external_skills_dirs()
+
 
 
 
