@@ -12,6 +12,8 @@ import base64
 import json
 import re
 import threading
+import time as clock
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -30,7 +32,28 @@ MAX_RESPONSE_BYTES = 2_000_000
 MAX_CALENDARS = 30
 MAX_EVENTS = 300
 MAX_DAYS = 31
+# The dashboard is visited far more often than calendars change. Reuse a
+# recent response and refresh older results without blocking a page visit.
+DASHBOARD_FRESH_SECONDS = 2 * 60
+DASHBOARD_STALE_SECONDS = 30 * 60
+DASHBOARD_RETRY_SECONDS = 30
+DASHBOARD_MANUAL_SECONDS = 15
 _lock = threading.RLock()
+
+
+@dataclass
+class _DashboardCache:
+    key: tuple[tuple[int, int, int], str, str]
+    payload: dict
+    fetched_mono: float
+    attempted_mono: float
+    refreshing: bool = False
+    error_code: str | None = None
+
+
+_dashboard_cache: dict[Path, _DashboardCache] = {}
+_dashboard_fetch_locks: dict[Path, threading.Lock] = {}
+_dashboard_auth_errors: dict[Path, tuple[tuple[int, int, int], str]] = {}
 
 
 class ICloudCalendarError(RuntimeError):
@@ -262,12 +285,17 @@ def connect(username: str, password: str, *, root: Path | None = None) -> dict:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         path.parent.chmod(0o700)
         atomic_json_write(path, {"username": username, "password": password}, mode=0o600)
+        _dashboard_cache.pop(path.parent.parent, None)
+        _dashboard_auth_errors.pop(path.parent.parent, None)
     return {"state": "connected", "account": username, "calendars": len(calendars)}
 
 
 def disconnect(*, root: Path | None = None) -> dict:
     with _lock:
-        _path(root).unlink(missing_ok=True)
+        path = _path(root)
+        path.unlink(missing_ok=True)
+        _dashboard_cache.pop(path.parent.parent, None)
+        _dashboard_auth_errors.pop(path.parent.parent, None)
     return {"state": "not_connected", "account": None}
 
 
@@ -282,14 +310,143 @@ def list_events(start: datetime, end: datetime, *, root: Path | None = None) -> 
     return {"account": creds["username"], "fetched_at": datetime.now(timezone.utc).isoformat(), "events": items}
 
 
-def dashboard_feed(*, root: Path | None = None) -> dict:
-    state = status(root)
-    if state["state"] != "connected":
-        return {**state, "fetched_at": None, "events": []}
+def _credential_stamp(root: Path) -> tuple[int, int, int]:
+    try:
+        stat = _path(root).stat()
+    except OSError as exc:
+        raise ICloudCalendarError("storage_error", "Не удалось проверить подключение iCloud.") from exc
+    return (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+
+
+def reset_dashboard_cache() -> None:
+    """Drop in-memory calendar data; useful for isolated tests and recovery."""
+    with _lock:
+        _dashboard_cache.clear()
+        _dashboard_fetch_locks.clear()
+        _dashboard_auth_errors.clear()
+
+
+def _refresh_dashboard(root: Path, key: tuple[tuple[int, int, int], str, str],
+                       creds: dict[str, str], start: datetime, end: datetime) -> _DashboardCache | None:
+    with _lock:
+        fetch_lock = _dashboard_fetch_locks.setdefault(root, threading.Lock())
+    with fetch_lock:
+        with _lock:
+            latest = _dashboard_cache.get(root)
+            if latest is not None and latest.key == key and clock.monotonic() - latest.fetched_mono < DASHBOARD_MANUAL_SECONDS:
+                latest.refreshing = False
+                return latest
+        try:
+            with _client(creds["username"], creds["password"]) as client:
+                events = _read(client, start, end)
+        except ICloudCalendarError as exc:
+            with _lock:
+                if _credential_stamp(root) == key[0]:
+                    if exc.code == "auth_error":
+                        _dashboard_cache.pop(root, None)
+                        _dashboard_auth_errors[root] = (key[0], exc.code)
+                    else:
+                        latest = _dashboard_cache.get(root)
+                        if latest is not None and latest.key == key:
+                            latest.refreshing = False
+                            latest.error_code = exc.code
+            raise
+        except Exception as exc:
+            with _lock:
+                latest = _dashboard_cache.get(root)
+                if latest is not None and latest.key == key:
+                    latest.refreshing = False
+                    latest.error_code = "network_error"
+            raise ICloudCalendarError("network_error", "iCloud Calendar не ответил.") from exc
+        entry = _DashboardCache(
+            key=key,
+            payload={"account": creds["username"], "fetched_at": datetime.now(timezone.utc).isoformat(),
+                     "events": events},
+            fetched_mono=clock.monotonic(),
+            attempted_mono=clock.monotonic(),
+        )
+        with _lock:
+            # A disconnected or replaced grant must never repopulate the card.
+            try:
+                current_stamp = _credential_stamp(root)
+            except ICloudCalendarError:
+                return None
+            if current_stamp != key[0]:
+                return None
+            _dashboard_cache[root] = entry
+            _dashboard_auth_errors.pop(root, None)
+        return entry
+
+
+def _refresh_dashboard_background(root: Path, key: tuple[tuple[int, int, int], str, str],
+                                  creds: dict[str, str], start: datetime, end: datetime) -> None:
+    try:
+        _refresh_dashboard(root, key, creds, start, end)
+    except ICloudCalendarError:
+        # The next dashboard poll reads the classified error without exposing
+        # the app password or a private calendar URL in process logs.
+        pass
+
+
+def _dashboard_response(entry: _DashboardCache, zone: str, now: datetime, *, stale: bool) -> dict:
+    return {
+        "state": "connected", "account": entry.payload["account"], "timezone": zone,
+        "now": now.isoformat(), "fetched_at": entry.payload["fetched_at"],
+        "events": [dict(event) for event in entry.payload["events"]],
+        "stale": stale, "refreshing": entry.refreshing, "error_code": entry.error_code,
+    }
+
+
+def dashboard_feed(*, root: Path | None = None, refresh: bool = False) -> dict:
     from korra_cli.google_calendar import owner_timezone
-    zone = owner_timezone()
-    today = datetime.now(zone).date()
+
+    root_path = Path(root or get_default_hermes_root())
+    with _lock:
+        creds = _credentials(root_path)
+        if creds is None:
+            _dashboard_cache.pop(root_path, None)
+            _dashboard_auth_errors.pop(root_path, None)
+            return {"state": "not_connected", "account": None, "fetched_at": None,
+                    "events": [], "stale": False, "refreshing": False, "error_code": None}
+        stamp = _credential_stamp(root_path)
+        auth_error = _dashboard_auth_errors.get(root_path)
+        if auth_error is not None and auth_error[0] == stamp and not refresh:
+            raise ICloudCalendarError("auth_error", "Пароль приложения iCloud не принят.", 424)
+        zone = owner_timezone()
+        now = datetime.now(zone)
+        today = now.date()
+        key = (stamp, today.isoformat(), str(zone))
+        cached = _dashboard_cache.get(root_path)
+        if cached is not None and cached.key != key:
+            _dashboard_cache.pop(root_path, None)
+            cached = None
+        age = clock.monotonic() - cached.fetched_mono if cached else None
+        if cached is not None and age is not None:
+            if age < (DASHBOARD_MANUAL_SECONDS if refresh else DASHBOARD_FRESH_SECONDS):
+                return _dashboard_response(cached, str(zone), now, stale=False)
+            if not refresh and age < DASHBOARD_STALE_SECONDS:
+                if not cached.refreshing and clock.monotonic() - cached.attempted_mono >= DASHBOARD_RETRY_SECONDS:
+                    cached.refreshing = True
+                    cached.error_code = None
+                    cached.attempted_mono = clock.monotonic()
+                    start = datetime.combine(today, time.min, zone)
+                    end = datetime.combine(today + timedelta(days=7), time.min, zone)
+                    threading.Thread(target=_refresh_dashboard_background,
+                        args=(root_path, key, creds, start, end), daemon=True,
+                        name="icloud-dashboard-refresh").start()
+                return _dashboard_response(cached, str(zone), now, stale=True)
     start = datetime.combine(today, time.min, zone)
     end = datetime.combine(today + timedelta(days=7), time.min, zone)
-    result = list_events(start, end, root=root)
-    return {"state": "connected", "timezone": str(zone), "now": datetime.now(zone).isoformat(), **result}
+    try:
+        entry = _refresh_dashboard(root_path, key, creds, start, end)
+    except ICloudCalendarError as exc:
+        with _lock:
+            cached = _dashboard_cache.get(root_path)
+            if exc.code != "auth_error" and cached is not None and cached.key == key:
+                age = clock.monotonic() - cached.fetched_mono
+                if age < DASHBOARD_STALE_SECONDS:
+                    return _dashboard_response(cached, str(zone), datetime.now(zone), stale=True)
+        raise
+    if entry is None:
+        return dashboard_feed(root=root_path, refresh=refresh)
+    return _dashboard_response(entry, str(zone), datetime.now(zone), stale=False)

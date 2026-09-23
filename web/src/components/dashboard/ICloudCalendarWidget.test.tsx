@@ -64,6 +64,36 @@ it("показывает настоящую встречу и честно по�
   expect(host.textContent).toContain("Разговор с клиентом");
   expect(host.textContent).toContain("09:00");
   await act(async () => { host.querySelector<HTMLButtonElement>("button[aria-label='Обновить iCloud Calendar']")!.click(); await Promise.resolve(); });
-  expect(host.textContent).toContain("показаны последние данные");
+  expect(host.textContent).toContain("Не удалось обновить · данные 08:00");
   expect(host.textContent).toContain("Разговор с клиентом");
+  expect(api.getICloudCalendarFeed).toHaveBeenLastCalledWith(true);
+});
+
+it("выделяет ближайшую встречу и показывает следующие на большой карточке", async () => {
+  api.getICloudCalendarFeed.mockResolvedValue({
+    state: "connected", account: "person@icloud.com", timezone: "UTC",
+    now: "2026-09-23T08:00:00Z", fetched_at: "2026-09-23T08:00:00Z",
+    events: [
+      { id: "one", title: "Первая встреча", start: "2026-09-23T09:00:00Z", end: "2026-09-23T10:00:00Z", all_day: false, calendar: "Работа", location: "" },
+      { id: "two", title: "Вторая встреча", start: "2026-09-24T11:00:00Z", end: "2026-09-24T12:00:00Z", all_day: false, calendar: "Личное", location: "" },
+    ],
+  });
+  await mount("l");
+  expect(host.querySelector(".kdw-icloud-featured")?.textContent).toContain("Первая встреча");
+  expect(host.querySelector(".kdw-icloud-followups")?.textContent).toContain("Вторая встреча");
+  expect(host.textContent).toContain("Завтра");
+});
+
+it("показывает старую ленту сразу, пока сервер обновляет iCloud", async () => {
+  api.getICloudCalendarFeed.mockResolvedValue({
+    state: "connected", account: "person@icloud.com", timezone: "UTC",
+    now: "2026-09-23T08:05:00Z", fetched_at: "2026-09-23T08:00:00Z",
+    stale: true, refreshing: true, events: [
+      { id: "one", title: "Встреча", start: "2026-09-23T09:00:00Z", end: null, all_day: false, calendar: "Работа", location: "" },
+    ],
+  });
+  await mount("m");
+  expect(host.textContent).toContain("Встреча");
+  expect(host.textContent).toContain("Обновляем · данные 08:00");
+  expect(host.querySelector<HTMLButtonElement>("button[aria-label='Обновить iCloud Calendar']")?.disabled).toBe(true);
 });

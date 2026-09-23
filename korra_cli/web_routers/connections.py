@@ -115,9 +115,9 @@ class ICloudConnectBody(BaseModel):
     app_password: str
 
 
-def _icloud_call(callback, *args):
+def _icloud_call(callback, *args, **kwargs):
     try:
-        return callback(*args)
+        return callback(*args, **kwargs)
     except icloud_calendar.ICloudCalendarError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}) from exc
 
@@ -138,5 +138,5 @@ async def icloud_calendar_disconnect():
 
 
 @router.get("/api/dashboard/icloud-calendar")
-async def icloud_dashboard_feed():
-    return await asyncio.to_thread(_icloud_call, icloud_calendar.dashboard_feed)
+async def icloud_dashboard_feed(refresh: bool = False):
+    return await asyncio.to_thread(_icloud_call, icloud_calendar.dashboard_feed, refresh=refresh)

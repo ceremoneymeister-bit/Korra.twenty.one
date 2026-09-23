@@ -1106,8 +1106,8 @@ export const api = {
     }),
   disconnectICloudCalendar: () =>
     fetchJSON<ICloudCalendarStatus>("/api/connections/icloud-calendar", { method: "DELETE" }),
-  getICloudCalendarFeed: () =>
-    fetchJSON<ICloudCalendarFeed>("/api/dashboard/icloud-calendar"),
+  getICloudCalendarFeed: (refresh = false) =>
+    fetchJSON<ICloudCalendarFeed>(refresh ? "/api/dashboard/icloud-calendar?refresh=1" : "/api/dashboard/icloud-calendar"),
 
   // Cron jobs
   getCronJobs: (profile = "all") =>
@@ -2831,6 +2831,10 @@ export interface ICloudCalendarFeed extends ICloudCalendarStatus {
   now?: string;
   fetched_at: string | null;
   events: ICloudCalendarEvent[];
+  /** The last successful response is displayed while a new CalDAV read runs. */
+  stale?: boolean;
+  refreshing?: boolean;
+  error_code?: string | null;
 }
 
 export interface TelegramOnboardingStartResponse {

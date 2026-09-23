@@ -1281,3 +1281,282 @@
     background: CanvasText;
   }
 }
+
+/* ── iCloud Calendar: one next meeting, then the rest of the week ──────── */
+
+.kdw-icloud {
+  gap: 8px;
+}
+
+.kdw-icloud-featured {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: none;
+  gap: 11px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--kdw-accent) 36%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--kdw-accent) 12%, var(--neo-surface));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--neo-highlight) 65%, transparent);
+  color: var(--kdw-ink);
+  text-decoration: none;
+  transition: background var(--neo-duration-quick) var(--neo-ease-out);
+}
+
+.kdw-icloud-featured:hover {
+  background: color-mix(in srgb, var(--kdw-accent) 22%, var(--neo-surface));
+}
+
+.kdw-icloud-featured:focus-visible,
+.kdw-icloud-followups a:focus-visible {
+  outline: 2px solid var(--neo-accent-line);
+  outline-offset: 2px;
+}
+
+.kdw-icloud-featured--l {
+  min-height: 96px;
+}
+
+.kdw-icloud-featured--m,
+.kdw-icloud-featured--s {
+  min-height: 0;
+  flex: 1;
+  padding: 6px 8px;
+}
+
+.kdw-icloud-date {
+  display: flex;
+  width: 52px;
+  height: 60px;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: var(--kdw-accent);
+  color: #202020;
+  line-height: 1;
+  box-shadow: 0 2px 5px color-mix(in srgb, var(--neo-shadow) 25%, transparent);
+}
+
+.kdw-icloud-date strong {
+  font-size: 24px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.kdw-icloud-date span {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.kdw-icloud-featured--m .kdw-icloud-date {
+  width: 42px;
+  height: 46px;
+}
+
+.kdw-icloud-featured--m .kdw-icloud-date strong {
+  font-size: 19px;
+}
+
+.kdw-icloud-featured--m .kdw-icloud-date span {
+  font-size: 9px;
+}
+
+.kdw-icloud-featured-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kdw-icloud-eyebrow {
+  overflow: hidden;
+  color: var(--kdw-muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.kdw-icloud-featured-copy > strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--kdw-ink);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 19px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.kdw-icloud-featured-meta {
+  overflow: hidden;
+  color: var(--kdw-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kdw-icloud-featured-arrow {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  align-self: flex-start;
+  color: var(--kdw-muted);
+}
+
+.kdw-icloud-featured--m .kdw-icloud-featured-copy > strong {
+  -webkit-line-clamp: 1;
+}
+
+.kdw-icloud-featured--m .kdw-icloud-featured-arrow {
+  display: none;
+}
+
+.kdw-icloud-featured--s {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+}
+
+.kdw-icloud-compact-time {
+  color: var(--kdw-ink);
+  font-size: 22px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.kdw-icloud-featured--s .kdw-icloud-eyebrow,
+.kdw-icloud-featured--s .kdw-icloud-featured-meta {
+  display: none;
+}
+
+.kdw-icloud-featured--s .kdw-icloud-featured-copy > strong {
+  -webkit-line-clamp: 1;
+}
+
+.kdw-icloud-followups {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kdw-icloud-followups li + li {
+  border-top: 1px solid var(--kdw-hairline);
+}
+
+.kdw-icloud-followups a {
+  display: grid;
+  min-width: 0;
+  height: 52px;
+  grid-template-columns: 70px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--neo-radius-control);
+  color: var(--kdw-ink);
+  text-decoration: none;
+}
+
+.kdw-icloud-followups a:hover {
+  box-shadow: var(--neo-inset-compact);
+}
+
+.kdw-icloud-followup-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kdw-icloud-followup-time::before {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--kdw-accent);
+  content: "";
+}
+
+.kdw-icloud-followup-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.kdw-icloud-followup-copy strong,
+.kdw-icloud-followup-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kdw-icloud-followup-copy strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.kdw-icloud-followup-copy small {
+  color: var(--kdw-muted);
+  font-size: 11px;
+}
+
+.kdw-icloud-freshness {
+  display: flex;
+  min-height: 36px;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--kdw-muted);
+  font-size: 12px;
+}
+
+.kdw-icloud-empty {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+}
+
+.kdw-icloud-empty-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  place-items: center;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--kdw-accent) 18%, var(--neo-surface));
+  color: var(--kdw-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kdw-icloud-featured {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .kdw-icloud-featured,
+  .kdw-icloud-date,
+  .kdw-icloud-empty-mark {
+    border: 1px solid CanvasText;
+  }
+}

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
+import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -132,6 +134,7 @@ def test_browser_routes_share_one_installation_and_never_return_password(tmp_pat
     assert "secret" not in response.text
     assert client.get("/api/connections/icloud-calendar").json()["state"] == "connected"
     assert client.get("/api/dashboard/icloud-calendar").status_code == 200
+    assert client.get("/api/dashboard/icloud-calendar?refresh=1").status_code == 200
     assert client.delete("/api/connections/icloud-calendar").json()["state"] == "not_connected"
     assert not (tmp_path / "icloud-calendar" / "credentials.json").exists()
 
@@ -149,6 +152,92 @@ def test_agent_tool_reads_same_connection_and_disconnect_revokes_it(tmp_path, mo
     ic.disconnect(root=tmp_path)
     denied = json.loads(icloud_calendar_tool._handle({"date": "2026-09-23"}))
     assert denied["error"] == "not_connected"
+
+
+def test_dashboard_reuses_feed_and_refreshes_expired_data_without_blocking(tmp_path, monkeypatch):
+    ic.reset_dashboard_cache()
+    fake_client(monkeypatch)
+    ic.connect("person@icloud.com", "secret", root=tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    reads = []
+
+    def read(_client, _start, _end):
+        reads.append(len(reads) + 1)
+        if len(reads) == 2:
+            started.set()
+            assert release.wait(3)
+        return [{"id": str(reads[-1]), "title": "Встреча", "start": "2026-09-23T09:00:00Z",
+                 "end": None, "all_day": False, "calendar": "Работа", "location": ""}]
+
+    monkeypatch.setattr(ic, "_read", read)
+    first = ic.dashboard_feed(root=tmp_path)
+    assert first["stale"] is False
+    assert ic.dashboard_feed(root=tmp_path)["events"] == first["events"]
+    assert reads == [1]
+
+    cache = ic._dashboard_cache[tmp_path]
+    cache.fetched_mono -= ic.DASHBOARD_FRESH_SECONDS + 1
+    cache.attempted_mono -= ic.DASHBOARD_FRESH_SECONDS + 1
+    began = time.perf_counter()
+    stale = ic.dashboard_feed(root=tmp_path)
+    assert time.perf_counter() - began < 0.5
+    assert stale["stale"] is True and stale["refreshing"] is True
+    assert stale["events"] == first["events"]
+    assert started.wait(2)
+    release.set()
+    for _ in range(100):
+        if ic._dashboard_cache[tmp_path].payload["events"][0]["id"] == "2":
+            break
+        time.sleep(0.01)
+    fresh = ic.dashboard_feed(root=tmp_path)
+    assert fresh["stale"] is False
+    assert fresh["events"][0]["id"] == "2"
+    assert reads == [1, 2]
+
+
+def test_dashboard_drops_cached_events_when_credential_is_replaced(tmp_path, monkeypatch):
+    ic.reset_dashboard_cache()
+    fake_client(monkeypatch)
+    ic.connect("person@icloud.com", "old-secret", root=tmp_path)
+    reads = []
+    monkeypatch.setattr(ic, "_read", lambda *_: reads.append(1) or [])
+    ic.dashboard_feed(root=tmp_path)
+    assert len(reads) == 1
+    ic.connect("person@icloud.com", "new-secret", root=tmp_path)
+    ic.dashboard_feed(root=tmp_path)
+    assert len(reads) == 2
+    ic.disconnect(root=tmp_path)
+    assert ic.dashboard_feed(root=tmp_path)["state"] == "not_connected"
+    assert tmp_path not in ic._dashboard_cache
+
+
+def test_dashboard_revoked_password_clears_stale_events(tmp_path, monkeypatch):
+    ic.reset_dashboard_cache()
+    fake_client(monkeypatch)
+    ic.connect("person@icloud.com", "secret", root=tmp_path)
+    reads = []
+
+    def read(*_args):
+        reads.append(1)
+        if len(reads) > 1:
+            raise ic.ICloudCalendarError("auth_error", "Пароль приложения iCloud не принят.", 424)
+        return [{"id": "private-event"}]
+
+    monkeypatch.setattr(ic, "_read", read)
+    ic.dashboard_feed(root=tmp_path)
+    cache = ic._dashboard_cache[tmp_path]
+    cache.fetched_mono -= ic.DASHBOARD_FRESH_SECONDS + 1
+    cache.attempted_mono -= ic.DASHBOARD_FRESH_SECONDS + 1
+    assert ic.dashboard_feed(root=tmp_path)["stale"] is True
+    for _ in range(100):
+        if tmp_path in ic._dashboard_auth_errors:
+            break
+        time.sleep(0.01)
+    with pytest.raises(ic.ICloudCalendarError) as error:
+        ic.dashboard_feed(root=tmp_path)
+    assert error.value.code == "auth_error"
+    assert tmp_path not in ic._dashboard_cache
 
 
 def test_caldav_redirects_stay_on_icloud(monkeypatch):

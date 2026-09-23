@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- карточка и запись каталога живут вместе */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CalendarDays, RefreshCw } from "lucide-react";
+import { ArrowUpRight, CalendarDays, RefreshCw } from "lucide-react";
 
 import { ProductButton } from "@/components/ProductButton";
 import { ErrorNote, LoadingNote, NoteTitle, WidgetLink, WidgetStack } from "@/components/dashboard/widget-states";
@@ -11,6 +11,8 @@ import { ApiError, api, type ICloudCalendarEvent, type ICloudCalendarFeed } from
 import { dayKey } from "@/lib/dashboard-calendar";
 
 const REFRESH_MS = 5 * 60 * 1000;
+const POLL_REFRESH_MS = 2 * 1000;
+const FOLLOWUP_HEIGHT = 52;
 const ICLOUD_CALENDAR_URL = "https://www.icloud.com/calendar/";
 
 function eventDay(event: ICloudCalendarEvent, zone: string): string {
@@ -25,8 +27,16 @@ function eventClock(event: ICloudCalendarEvent, zone: string): string {
 function when(event: ICloudCalendarEvent, zone: string, today: string): string {
   const date = eventDay(event, zone);
   if (date === today) return "Сегодня";
+  const tomorrow = new Date(`${today}T12:00:00Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  if (date === tomorrow.toISOString().slice(0, 10)) return "Завтра";
   const target = new Date(`${date}T12:00:00Z`);
   return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", timeZone: "UTC" }).format(target);
+}
+
+function datePart(date: string, part: "day" | "month"): string {
+  return new Intl.DateTimeFormat("ru-RU", { [part]: part === "day" ? "numeric" : "short", timeZone: "UTC" })
+    .format(new Date(`${date}T12:00:00Z`));
 }
 
 function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
@@ -34,20 +44,22 @@ function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [stale, setStale] = useState(false);
   const [authFailed, setAuthFailed] = useState(false);
+  const [manualBusy, setManualBusy] = useState(false);
   const ticket = useRef(0);
+  const mounted = useRef(true);
   const [listRef, listHeight] = useAvailableHeight<HTMLUListElement>();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refresh = false) => {
     const current = ++ticket.current;
     try {
-      const next = await api.getICloudCalendarFeed();
-      if (current !== ticket.current) return;
+      const next = await api.getICloudCalendarFeed(refresh);
+      if (current !== ticket.current || !mounted.current) return;
       setFeed(next);
       setPhase("ready");
       setStale(false);
       setAuthFailed(false);
     } catch (cause) {
-      if (current !== ticket.current) return;
+      if (current !== ticket.current || !mounted.current) return;
       const detail = cause instanceof ApiError && cause.payload && typeof cause.payload === "object"
         ? (cause.payload as { detail?: { code?: string } }).detail : null;
       if (detail?.code === "auth_error") {
@@ -62,9 +74,22 @@ function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     void load();
     const timer = window.setInterval(() => void load(), REFRESH_MS);
-    return () => { ticket.current += 1; window.clearInterval(timer); };
+    return () => { mounted.current = false; ticket.current += 1; window.clearInterval(timer); };
+  }, [load]);
+
+  useEffect(() => {
+    if (!feed?.refreshing) return;
+    const timer = window.setInterval(() => void load(), POLL_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [feed?.refreshing, load]);
+
+  const refresh = useCallback(async () => {
+    setManualBusy(true);
+    await load(true);
+    if (mounted.current) setManualBusy(false);
   }, [load]);
 
   if (!feed && phase === "loading") return <LoadingNote text="Читаем iCloud Calendar…" />;
@@ -84,37 +109,61 @@ function ICloudCalendarBody({ size = "m" }: DashboardWidgetBodyProps) {
   const events = feed.events.filter((event) => event.all_day
     ? (event.end ? event.end.slice(0, 10) > today : event.start.slice(0, 10) >= today)
     : event.end ? new Date(event.end).getTime() > now : new Date(event.start).getTime() >= now);
-  const todayEvents = events.filter((event) => eventDay(event, zone) === today);
-  const candidates = size === "m" && todayEvents.length ? todayEvents : events;
-  const defaultRows = size === "s" ? 1 : size === "m" ? 2 : 7;
-  const capacity = listHeight === null ? defaultRows : Math.max(1, Math.min(defaultRows, Math.floor(listHeight / 44)));
-  const shown = candidates.slice(0, capacity);
-  const hidden = candidates.length - shown.length;
+  const isStale = Boolean(stale || feed.stale || feed.error_code);
+  const busy = Boolean(manualBusy || feed.refreshing);
 
   if (events.length === 0) {
-    return <WidgetStack>
-      <p className="text-sm font-semibold text-[var(--neo-text-primary)]">На ближайшую неделю встреч нет</p>
-      {size !== "s" ? <p className="text-xs text-[var(--neo-text-secondary)]">Проверены календари учётной записи {feed.account}.</p> : null}
-      <Freshness feed={feed} stale={stale} onRetry={load} />
+    return <WidgetStack className="kdw-icloud">
+      <div className="kdw-icloud-empty">
+        <span className="kdw-icloud-empty-mark" aria-hidden><CalendarDays className="size-5" /></span>
+        <div>
+          <p className="font-semibold text-[var(--neo-text-primary)]">Неделя свободна</p>
+          {size !== "s" ? <p className="text-xs text-[var(--neo-text-secondary)]">
+            {isStale ? "В последнем чтении встреч не было" : "На ближайшие семь дней встреч нет"}
+          </p> : null}
+        </div>
+      </div>
+      <Freshness feed={feed} stale={isStale} busy={busy} onRetry={refresh} />
     </WidgetStack>;
   }
 
-  return <WidgetStack>
-    {size === "m" && todayEvents.length === 0 ? <p className="truncate text-xs text-[var(--neo-text-secondary)]">Сегодня встреч нет · дальше</p> : null}
-    <ul ref={listRef} className="min-h-0 flex-1 overflow-hidden" aria-label="События iCloud Calendar">
-      {shown.map((event) => <li key={event.id} className="min-w-0">
+  const next = events[0];
+  const followups = events.slice(1);
+  const capacity = listHeight === null ? 3 : Math.max(0, Math.min(6, Math.floor(listHeight / FOLLOWUP_HEIGHT)));
+  const shown = size === "l" ? followups.slice(0, capacity) : [];
+  const hidden = followups.length - shown.length;
+
+  return <WidgetStack className="kdw-icloud">
+    <a href={ICLOUD_CALENDAR_URL} target="_blank" rel="noopener noreferrer"
+      className={`kdw-icloud-featured kdw-icloud-featured--${size}`}
+      aria-label={`${next.title}, ${when(next, zone, today)}, ${eventClock(next, zone)}. Открыть iCloud Calendar`}>
+      {size === "s" ? <span className="kdw-icloud-compact-time">{eventClock(next, zone)}</span> :
+        <span className="kdw-icloud-date" aria-hidden>
+          <strong>{datePart(eventDay(next, zone), "day")}</strong>
+          <span>{datePart(eventDay(next, zone), "month")}</span>
+        </span>}
+      <span className="kdw-icloud-featured-copy">
+        <span className="kdw-icloud-eyebrow">Следующая · {when(next, zone, today).toLowerCase()}</span>
+        <strong title={next.title}>{next.title}</strong>
+        <span className="kdw-icloud-featured-meta">
+          {size === "s" ? when(next, zone, today) : eventClock(next, zone)} · {next.calendar}
+        </span>
+      </span>
+      {size === "s" ? null : <ArrowUpRight className="kdw-icloud-featured-arrow" aria-hidden />}
+    </a>
+    {size === "l" ? <ul ref={listRef} className="kdw-icloud-followups" aria-label="Следующие события iCloud Calendar">
+      {shown.map((event) => <li key={event.id}>
         <a href={ICLOUD_CALENDAR_URL} target="_blank" rel="noopener noreferrer"
-          className="flex min-h-[44px] min-w-0 items-center gap-2 rounded-[var(--neo-radius-control)] px-1 hover:shadow-[var(--neo-inset-compact)] focus-visible:outline-2 focus-visible:outline-[var(--neo-accent-line)]"
           aria-label={`${event.title}, ${when(event, zone, today)}, ${eventClock(event, zone)}. Открыть iCloud Calendar`}>
-          <CalendarDays aria-hidden className="size-4 shrink-0 text-[var(--neo-text-secondary)]" />
-          <span className="min-w-0 flex-1">
-            <strong className="block truncate text-sm text-[var(--neo-text-primary)]">{event.title}</strong>
-            <span className="block truncate text-xs text-[var(--neo-text-secondary)]">{when(event, zone, today)} · {eventClock(event, zone)}{size === "l" ? ` · ${event.calendar}` : ""}</span>
+          <span className="kdw-icloud-followup-time">{event.all_day ? "весь день" : eventClock(event, zone)}</span>
+          <span className="kdw-icloud-followup-copy">
+            <strong title={event.title}>{event.title}</strong>
+            <small>{when(event, zone, today)} · {event.calendar}</small>
           </span>
         </a>
       </li>)}
-    </ul>
-    <Freshness feed={feed} stale={stale} onRetry={load} hidden={hidden} />
+    </ul> : null}
+    <Freshness feed={feed} stale={isStale} busy={busy} onRetry={refresh} hidden={hidden} />
   </WidgetStack>;
 }
 
@@ -126,12 +175,17 @@ function ConnectionStep({ size, title, text, action }: { size: "s" | "m" | "l"; 
   </WidgetStack>;
 }
 
-function Freshness({ feed, stale, onRetry, hidden = 0 }: { feed: ICloudCalendarFeed; stale: boolean; onRetry: () => void; hidden?: number }) {
-  return <div className="flex shrink-0 items-center gap-2 text-xs text-[var(--neo-text-secondary)]">
-    <span className="min-w-0 flex-1 truncate" role={stale ? "alert" : "status"}>
-      {stale ? "iCloud не ответил · показаны последние данные" : feed.fetched_at ? `iCloud · обновлено ${new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: feed.timezone || "UTC" }).format(new Date(feed.fetched_at))}` : "iCloud Calendar"}{hidden > 0 ? ` · ещё ${hidden}` : ""}
+function Freshness({ feed, stale, busy, onRetry, hidden = 0 }: {
+  feed: ICloudCalendarFeed; stale: boolean; busy: boolean; onRetry: () => void; hidden?: number;
+}) {
+  const time = feed.fetched_at ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: feed.timezone || "UTC" }).format(new Date(feed.fetched_at)) : "—";
+  const status = busy ? `Обновляем · данные ${time}` : stale ? `Не удалось обновить · данные ${time}` : `iCloud · обновлено ${time}`;
+  return <div className="kdw-icloud-freshness">
+    <span className="min-w-0 flex-1 truncate" role="status" title={status}>
+      {status}{hidden > 0 ? ` · ещё ${hidden}` : ""}
     </span>
-    <ProductButton ghost size="sm" onClick={() => void onRetry()} aria-label="Обновить iCloud Calendar" prefix={<RefreshCw className="size-4" aria-hidden />} />
+    <ProductButton ghost size="sm" onClick={() => void onRetry()} disabled={busy}
+      aria-label="Обновить iCloud Calendar" prefix={<RefreshCw className={`size-4 ${busy ? "animate-spin" : ""}`} aria-hidden />} />
   </div>;
 }
 
