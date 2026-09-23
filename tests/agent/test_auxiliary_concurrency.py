@@ -35,10 +35,20 @@ class TestGetTaskMaxConcurrency:
         ):
             assert _get_task_max_concurrency("title_generation") is None
 
-    def test_does_not_reuse_vision_cpu_limit_for_llm_calls(self):
+    def test_configured_vision_limit_also_bounds_llm_calls(self):
+        # Concurrent Codex vision streams closed each other's HTTP descriptors
+        # after an idle watchdog fired (field fix, 22.09.2026): an explicit
+        # auxiliary.vision.max_concurrency now bounds the provider calls too.
         with patch(
             "agent.auxiliary_client._get_auxiliary_task_config",
             return_value={"max_concurrency": 1},
+        ):
+            assert _get_task_max_concurrency("vision") == 1
+
+    def test_vision_llm_calls_stay_unbounded_by_default(self):
+        with patch(
+            "agent.auxiliary_client._get_auxiliary_task_config",
+            return_value={},
         ):
             assert _get_task_max_concurrency("vision") is None
 

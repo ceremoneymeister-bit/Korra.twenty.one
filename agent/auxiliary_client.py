@@ -9055,10 +9055,14 @@ _aux_sem_lock = threading.Lock()
 
 def _get_task_max_concurrency(task: Optional[str]) -> Optional[int]:
     """Return ``auxiliary.<task>.max_concurrency`` as a positive int, or None."""
-    if not task or task == "vision":
-        # Vision already uses this key for its encode/resize CPU worker pool;
-        # its LLM calls deliberately remain concurrent.
+    if not task:
         return None
+    # Vision uses the same setting for both its bounded CPU preparation pool
+    # and its provider calls. Keeping those two limits aligned prevents
+    # concurrent Codex vision streams from closing/reusing each other's HTTP
+    # descriptors after an idle watchdog fires. A value of 1 favours stable
+    # visualisation over parallel fan-out; profiles that have a transport
+    # proven safe for concurrency can opt into a larger value.
     raw = _get_auxiliary_task_config(task).get("max_concurrency")
     if raw is None:
         return None

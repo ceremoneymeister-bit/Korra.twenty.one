@@ -736,3 +736,27 @@ def test_fingerprint_depends_on_last_user_turn_only():
     c = request_fingerprint({"messages": [{"role": "user", "content": "другой"}]}, "s-1")
     assert a == b and a != c
 
+
+
+def test_durable_stream_keeps_a_silent_run_alive_for_proxies(monkeypatch):
+    # A long vision/video tool can stay silent for minutes; browsers and
+    # reverse proxies then declared the run disconnected (field fix, 22.09.2026).
+    monkeypatch.setattr(web_server, "_CHAT_STREAM_HEARTBEAT_SECONDS", 0.05)
+
+    async def _exercise():
+        run = web_server._DurableBrowserChatStream()
+        subscriber = run.subscribe()
+        # Silence yields an SSE comment, which the chat parser ignores.
+        assert await asyncio.wait_for(anext(subscriber), timeout=1) == b": agent is working\n\n"
+        await run.publish(b"data: {}\n\n")
+        chunk = await asyncio.wait_for(anext(subscriber), timeout=1)
+        while chunk.startswith(b":"):
+            chunk = await asyncio.wait_for(anext(subscriber), timeout=1)
+        assert chunk == b"data: {}\n\n"
+        await run.finish((200, b"data: {}\n\n", "text/event-stream"))
+        rest = [c async for c in subscriber]
+        # The stored result never contains heartbeats.
+        assert all(c.startswith(b":") for c in rest)
+        assert run.chunks == [b"data: {}\n\n"]
+
+    asyncio.run(_exercise())

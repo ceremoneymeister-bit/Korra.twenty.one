@@ -340,13 +340,34 @@ def _get_capability_backend(capability: str) -> str:
     returned unconditionally (strict selection — no availability probe).
     A selected-but-broken backend surfaces the vendor path's honest error
     instead of being silently replaced by whatever the credential ladder
-    finds. Falls through to the shared ``_get_backend()`` only when no
-    per-capability override is stored.
+    finds. With no explicit selection, capability-aware registry resolution
+    runs before the legacy shared autodetect. This matters when the cheapest
+    search backend is search-only (for example DDGS): ``web_extract`` must
+    select an extract-capable keyless provider instead of inheriting DDGS and
+    failing immediately.
     """
     cfg = _load_web_config()
     specific = (cfg.get(f"{capability}_backend") or "").lower().strip()
     if specific:
         return specific
+    if (cfg.get("backend") or "").strip():
+        return _get_backend()
+    try:
+        _ensure_web_plugins_loaded()
+        from agent.web_search_registry import (
+            get_active_extract_provider,
+            get_active_search_provider,
+        )
+
+        provider = (
+            get_active_extract_provider()
+            if capability == "extract"
+            else get_active_search_provider()
+        )
+        if provider is not None:
+            return provider.name
+    except Exception as exc:  # noqa: BLE001 — preserve legacy fallback
+        logger.debug("capability-aware web backend resolution failed: %s", exc)
     return _get_backend()
 
 

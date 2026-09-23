@@ -2947,6 +2947,7 @@ _CHAT_DELIVERY_BOOT_ID = __import__("uuid").uuid4().hex
 _CHAT_DELIVERY_TASKS: dict[str, "asyncio.Task[tuple[int, bytes, str]]"] = {}
 _CHAT_DELIVERY_STREAMS: dict[str, "_DurableBrowserChatStream"] = {}
 _CHAT_DELIVERY_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
+_CHAT_STREAM_HEARTBEAT_SECONDS = 10.0
 
 
 def _chat_upstream_timeout():
@@ -3057,16 +3058,30 @@ class _DurableBrowserChatStream:
             self.condition.notify_all()
 
     async def subscribe(self):
-        """Replay buffered chunks, then follow new ones until the run ends."""
+        """Replay chunks and keep idle proxies alive while tools are working."""
         index = 0
         while True:
+            heartbeat = False
             async with self.condition:
-                await self.condition.wait_for(
-                    lambda: index < len(self.chunks) or self.done
-                )
+                try:
+                    await asyncio.wait_for(
+                        self.condition.wait_for(
+                            lambda: index < len(self.chunks) or self.done
+                        ),
+                        timeout=_CHAT_STREAM_HEARTBEAT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    heartbeat = True
                 batch = self.chunks[index:]
                 index = len(self.chunks)
                 done = self.done
+            if heartbeat and not batch and not done:
+                # SSE comments are invisible to the chat parser but count as
+                # transport activity for browsers and reverse proxies. A
+                # long vision/video tool can therefore stay silent for
+                # minutes without the UI declaring the run disconnected.
+                yield b": agent is working\n\n"
+                continue
             for chunk in batch:
                 yield chunk
             if done and index >= len(self.chunks):
