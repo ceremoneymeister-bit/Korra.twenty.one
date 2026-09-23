@@ -56,3 +56,15 @@ it("opens existing files separately from the device file chooser", async () => {
   expect(onPickWorkspace).toHaveBeenCalledOnce();
   expect(onPickFiles).not.toHaveBeenCalled();
 });
+
+it("does not move focus back to the menu trigger while the device chooser is opening", async () => {
+  const onPickFiles = vi.fn();
+  await act(async () => root.render(<AttachmentMenu disabled={false} onPickFiles={onPickFiles} originals={false} onOriginalsChange={vi.fn()} />));
+  const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Прикрепить файл"]')!;
+  const menu = await open();
+  const item = Array.from(menu!.querySelectorAll('[role="menuitem"]'))
+    .find(node => node.textContent?.includes("Загрузить с устройства"))!;
+  await act(async () => item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  expect(onPickFiles).toHaveBeenCalledOnce();
+  expect(document.activeElement).not.toBe(trigger);
+});

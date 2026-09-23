@@ -41,7 +41,7 @@ export function AttachmentMenu({ disabled, onPickFiles, onPickWorkspace, origina
           aria-label="Вложения"
           className="z-50 w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl bg-[var(--neo-surface)] p-2 text-[var(--neo-text-primary)] shadow-[var(--neo-depth-3)] outline-0"
         >
-          <Menu.Item className={item} onSelect={onPickFiles}>
+          <Menu.Item className={item} onSelect={() => { openingPicker.current = true; onPickFiles(); }}>
             <Paperclip size={16} aria-hidden className="shrink-0 text-[var(--neo-text-secondary)]" />
             <span className="min-w-0 flex-1">
               <span className="block">Загрузить с устройства</span>
