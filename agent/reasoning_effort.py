@@ -61,9 +61,9 @@ OPENAI_COMPAT_WIRE_EFFORTS: tuple[str, ...] = (
     "none", "minimal", "low", "medium", "high", "xhigh", "max",
 )
 
-#: OpenAI/Codex Responses backend — per-model vocabulary, live-verified
-#: (Aug 2026): ``minimal`` is rejected by both generations (clamps to low);
-#: ``max`` is gpt-5.6-only — gpt-5.5 rejects it with "Supported values are:
+#: OpenAI/Codex Responses backend — per-model vocabulary: ``minimal`` is
+#: rejected by GPT-5.6 and GPT-6 Sol/Luna (clamps to low), while ``max`` is
+#: accepted. GPT-5.5 rejects ``max`` with "Supported values are:
 #: 'none', 'low', 'medium', 'high', 'xhigh'" (#68365's premise, confirmed).
 CODEX_GPT56_EFFORTS: tuple[str, ...] = (
     "none", "low", "medium", "high", "xhigh", "max",
@@ -75,7 +75,8 @@ CODEX_LEGACY_EFFORTS: tuple[str, ...] = (
 
 def codex_supported_efforts(model: Optional[str]) -> tuple[str, ...]:
     """Supported effort set for an OpenAI/Codex Responses model."""
-    if "gpt-5.6" in (model or "").lower():
+    bare_model = (model or "").lower().rsplit("/", 1)[-1]
+    if "gpt-5.6" in bare_model or bare_model in {"gpt-6-sol", "gpt-6-luna"}:
         return CODEX_GPT56_EFFORTS
     return CODEX_LEGACY_EFFORTS
 

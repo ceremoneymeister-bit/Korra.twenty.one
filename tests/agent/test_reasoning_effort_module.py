@@ -141,9 +141,7 @@ class TestCodexVocabulary:
         assert clamp_effort("ultra", CODEX_RESPONSES_EFFORTS) == "max"
 
     def test_per_model_max_support(self):
-        """Live-verified (Aug 2026, #68365): 'max' is gpt-5.6-only — gpt-5.5
-        rejects it ("Supported values are: 'none','low','medium','high',
-        'xhigh'"); 'minimal' is rejected by both generations."""
+        """GPT-5.6 and GPT-6 Sol/Luna accept max; GPT-5.5 caps at xhigh."""
         from agent.reasoning_effort import (
             CODEX_GPT56_EFFORTS,
             CODEX_LEGACY_EFFORTS,
@@ -152,6 +150,8 @@ class TestCodexVocabulary:
 
         assert codex_supported_efforts("gpt-5.6") is CODEX_GPT56_EFFORTS
         assert codex_supported_efforts("gpt-5.6-codex") is CODEX_GPT56_EFFORTS
+        assert codex_supported_efforts("gpt-6-sol") is CODEX_GPT56_EFFORTS
+        assert codex_supported_efforts("gpt-6-luna") is CODEX_GPT56_EFFORTS
         assert codex_supported_efforts("gpt-5.5") is CODEX_LEGACY_EFFORTS
         assert codex_supported_efforts("o5-pro") is CODEX_LEGACY_EFFORTS
         # The consequential clamps:

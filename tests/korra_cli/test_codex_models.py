@@ -112,6 +112,34 @@ def test_fetch_from_api_keeps_supported_in_api_false_models(monkeypatch):
     assert "gpt-5-internal" not in models
 
 
+def test_new_gpt6_models_come_from_account_catalog_only(monkeypatch, tmp_path):
+    """One account's Sol entitlement must not invent Luna or Terra for it."""
+    import sys
+    from korra_cli import codex_models
+
+    class _FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"models": [{"slug": "gpt-6-sol", "priority": 0}]}
+
+    class _FakeHttpx:
+        @staticmethod
+        def get(url, headers=None, timeout=None):
+            assert "client_version=1.0.0" in url
+            return _FakeResp()
+
+    monkeypatch.setitem(sys.modules, "httpx", _FakeHttpx)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+
+    models = codex_models.get_codex_model_ids(access_token="fake-token")
+
+    assert "gpt-6-sol" in models
+    assert "gpt-6-luna" not in models
+    assert "gpt-6-terra" not in models
+    assert "gpt-6-sol-900k" not in models
+
+
 
 
 

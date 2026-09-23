@@ -577,6 +577,25 @@ class TestCodexOAuthContextLength:
             )
         assert ctx == 272_000
 
+    @pytest.mark.parametrize("slug", ["gpt-6-sol", "gpt-6-luna"])
+    def test_new_codex_models_use_272k_when_live_catalog_is_unavailable(self, slug):
+        from agent.model_metadata import get_model_context_length
+
+        fake_response = MagicMock()
+        fake_response.status_code = 503
+        import agent.model_metadata as mm
+        mm._codex_oauth_context_cache = {}
+        with patch("agent.model_metadata.requests.get", return_value=fake_response), \
+             patch("agent.model_metadata.get_cached_context_length", return_value=None), \
+             patch("agent.model_metadata.save_context_length"):
+            ctx = get_model_context_length(
+                model=slug,
+                base_url="https://chatgpt.com/backend-api/codex",
+                api_key="fake-token",
+                provider="openai-codex",
+            )
+        assert ctx == 272_000
+
     def test_non_272k_advertisement_is_trusted_verbatim(self):
         """Any advertised value other than the known-stale 272,000 — higher or
         lower — is a real server-side change and must NOT be overridden, even
