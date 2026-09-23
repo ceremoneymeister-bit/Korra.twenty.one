@@ -337,7 +337,10 @@ KANBAN_GUIDANCE = (
     "fields. If the owner must answer before you can continue, put the exact "
     "question AND the material they decide on (the list of changes, the "
     "draft, the options) into `kanban_block(reason=...)`: the owner answers "
-    "from that text alone. If `kanban_show()` lists child IDs, inspect those cards with "
+    "from that text alone. Before ANY change in an external system (CRM, "
+    "documents, messages to people, calendars, spending) block with "
+    "`kind=\"approval\"` and the exact list of changes; do them only after "
+    "the owner's comment says they were granted. If `kanban_show()` lists child IDs, inspect those cards with "
     "`kanban_show(task_id=...)` before choosing the terminal action. When any "
     "pre-created review, QA, or release child depends on your task, call "
     "`kanban_complete`: your implementation phase is done, and completion is "
@@ -444,9 +447,11 @@ KANBAN_CHAT_GUIDANCE = (
     "and that questions and results will come to this chat and to the board "
     "(section «Канбан-доска»).\n"
     "- **When the owner answers a board question here,** pass it on only for "
-    "the exact question they answered: `kanban_comment` with their words, then "
-    "`kanban_unblock`. Results the owner must accept are accepted by the owner "
-    "on the board, not by you."
+    "the exact question they answered: `kanban_show` for its `block_revision`, "
+    "then `kanban_unblock(task_id, answer=<their words>, revision=...)`. "
+    "Permission for external changes (`needs_approval`) and results the owner "
+    "must accept are decided by the owner on the board, not by you — tell "
+    "them where to click."
 )
 
 TOOL_USE_ENFORCEMENT_GUIDANCE = (

@@ -123,7 +123,13 @@ VALID_INITIAL_STATUSES = {"running", "blocked"}
 # ``BLOCK_RECURRENCE_LIMIT``) escalates them to ``triage`` if a cron keeps
 # unblocking them only to have the worker re-block for the same reason.
 # ``None`` = legacy/un-typed block (treated as a generic human blocker).
-VALID_BLOCK_KINDS = {"dependency", "needs_input", "capability", "transient"}
+VALID_BLOCK_KINDS = {"dependency", "needs_input", "capability", "transient", "approval"}
+
+# ``approval``: the agent asks the owner to permit a change in an external
+# system (CRM, documents, messages to people, spending). Limited v1
+# (Dmitry, 23.09.2026): such a step never resumes on a plain answer — only
+# on the owner's explicit decision to grant or to deny it.
+APPROVAL_BLOCK_KIND = "approval"
 
 # Owner pause from the board. Not offered to agents: it is the owner's own
 # stop, never a question, so it stays out of the unblock-loop breaker and
@@ -1282,6 +1288,7 @@ class Run:
     summary: Optional[str]
     metadata: Optional[dict]
     error: Optional[str]
+    result: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Run":
@@ -1306,6 +1313,7 @@ class Run:
             summary=row["summary"],
             metadata=meta,
             error=row["error"],
+            result=row["result"] if "result" in row.keys() else None,
         )
 
 
@@ -1505,7 +1513,10 @@ CREATE TABLE IF NOT EXISTS task_runs (
     --          gave_up | reclaimed | (null while still running)
     summary             TEXT,
     metadata            TEXT,
-    error               TEXT
+    error               TEXT,
+    -- Full result text of the attempt: every submitted/completed version
+    -- stays readable after a rework overwrites ``tasks.result``.
+    result              TEXT
 );
 
 -- Files attached to a task (PDFs, images, source documents). The blob
@@ -2720,6 +2731,10 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
             "block_recurrences",
             "block_recurrences INTEGER NOT NULL DEFAULT 0",
         )
+
+    run_cols = {row["name"] for row in conn.execute("PRAGMA table_info(task_runs)")}
+    if run_cols and "result" not in run_cols:
+        _add_column_if_missing(conn, "task_runs", "result", "result TEXT")
 
     # Owner-facing Kanban (0.21.13): the agent's question, who accepts the
     # result, human steps and plan membership. All nullable, so legacy rows
@@ -4906,6 +4921,7 @@ def claim_review_task(
                AND status = 'review'
                AND claim_lock IS NULL
                AND COALESCE(acceptance, '') != 'owner'
+               AND COALESCE(actor_kind, '') != 'human'
             """,
             (lock, expires, now, task_id),
         )
@@ -5564,13 +5580,22 @@ def complete_task(
         if not _parents_satisfied(conn, task_id):
             return False
         prior = conn.execute(
-            "SELECT status, acceptance FROM tasks WHERE id = ?",
+            "SELECT status, acceptance, actor_kind FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
         prior_status = prior["status"] if prior else None
+        if as_worker and prior is not None and (
+            prior["actor_kind"] == "human"
+            or (prior["acceptance"] == "owner" and prior_status == "review")
+        ):
+            # An agent never finishes the owner's own step, and never accepts
+            # a result already waiting for the owner — only the owner does.
+            _append_event(conn, task_id, "completion_refused", {
+                "reason": "human_step" if prior["actor_kind"] == "human" else "owner_acceptance",
+            })
+            return False
         hold = bool(
             as_worker and prior is not None and prior["acceptance"] == "owner"
-            and prior_status != "review"
         )
         target_status = "review" if hold else "done"
         completed_value = None if hold else now
@@ -5632,6 +5657,8 @@ def complete_task(
             summary=summary if summary is not None else result,
             metadata=metadata,
         )
+        if run_id is not None and result is not None:
+            conn.execute("UPDATE task_runs SET result = ? WHERE id = ?", (result, run_id))
         # If complete_task was called on a never-claimed task (ready or
         # blocked → done with no run in flight), synthesize a
         # zero-duration run so the handoff fields are persisted in
@@ -5653,6 +5680,8 @@ def complete_task(
                 summary=synth_summary,
                 metadata=synth_metadata,
             )
+            if run_id is not None and result is not None:
+                conn.execute("UPDATE task_runs SET result = ? WHERE id = ?", (result, run_id))
         # Carry the handoff summary in the event payload so gateway
         # notifiers and dashboard WS consumers can render it without a
         # second SQL round-trip. First line only, 400 char cap — the
@@ -6681,11 +6710,13 @@ def request_review(
         if not _parents_satisfied(conn, task_id):
             return _ret(False, "parent dependencies are not satisfied")
         trow = conn.execute(
-            "SELECT assignee, status, claim_lock, current_run_id "
+            "SELECT assignee, status, claim_lock, current_run_id, actor_kind "
             "FROM tasks WHERE id = ?", (task_id,),
         ).fetchone()
         if trow is None:
             return _ret(False, "task not found")
+        if trow["actor_kind"] == "human":
+            return _ret(False, "the owner's own step is never reviewed by an agent")
         # Refuse to clear a live worker's claim without proof of ownership
         # (expected_run_id) or an explicit human override (force=True).
         if (
@@ -7107,6 +7138,14 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
     state) holds for the rest of this function's lifetime.
     """
     with write_txn(conn):
+        kind = conn.execute(
+            "SELECT status, block_kind FROM tasks WHERE id = ?", (task_id,),
+        ).fetchone()
+        if kind is not None and kind["block_kind"] == APPROVAL_BLOCK_KIND and kind["status"] == "blocked":
+            # A permission question resumes only on the owner's explicit
+            # grant/deny (respond_to_block), never on a plain unblock from a
+            # CLI, a drag on the board or an agent.
+            return False
         return _unblock_in_txn(conn, task_id, now=int(time.time())) is not None
 
 
@@ -7121,11 +7160,13 @@ def block_revision(conn: sqlite3.Connection, task_id: str) -> Optional[int]:
     """
     row = conn.execute(
         "SELECT id, kind FROM task_events WHERE task_id = ? "
-        "AND kind IN ('blocked', 'unblocked', 'gave_up') "
+        "AND kind IN ('blocked', 'block_loop_detected', 'unblocked', 'gave_up') "
         "ORDER BY id DESC LIMIT 1",
         (task_id,),
     ).fetchone()
-    return int(row["id"]) if row and row["kind"] == "blocked" else None
+    return (
+        int(row["id"]) if row and row["kind"] in ("blocked", "block_loop_detected") else None
+    )
 
 
 def respond_to_block(
@@ -7136,8 +7177,14 @@ def respond_to_block(
     author: str,
     request_id: str,
     revision: Optional[int] = None,
+    decision: Optional[str] = None,
 ) -> dict[str, Any]:
     """Answer a blocked task and resume it in one transaction.
+
+    ``revision`` is required whenever the task waits on a question: an
+    answer written for an earlier screen must not resume work on a question
+    the owner never saw. For an ``approval`` question ``decision`` must be
+    ``grant`` or ``deny``; a plain answer leaves it waiting (limited v1).
 
     Saves the owner's answer as a comment (the worker reads comments in its
     context) and unblocks the task, or does neither. A repeated
@@ -7168,7 +7215,7 @@ def respond_to_block(
                     "duplicate": True, "reason": None,
                 }
         current = conn.execute(
-            "SELECT status, block_kind FROM tasks WHERE id = ?", (task_id,),
+            "SELECT status, block_kind, block_reason FROM tasks WHERE id = ?", (task_id,),
         ).fetchone()
         if current is None:
             return {"ok": False, "status": None, "duplicate": False, "reason": "not_found"}
@@ -7181,11 +7228,32 @@ def respond_to_block(
                 "duplicate": False, "reason": "not_blocked",
             }
         current_revision = block_revision(conn, task_id)
-        if revision is not None and current_revision != int(revision):
+        if current_revision is not None and (
+            revision is None or current_revision != int(revision)
+        ):
             return {
                 "ok": False, "status": current["status"],
                 "duplicate": False, "reason": "stale",
             }
+        approval = current["block_kind"] == APPROVAL_BLOCK_KIND
+        if approval and decision not in ("grant", "deny"):
+            return {
+                "ok": False, "status": current["status"],
+                "duplicate": False, "reason": "decision_required",
+            }
+        if approval:
+            question = (current["block_reason"] or "").strip()
+            verdict = (
+                "Владелец РАЗРЕШИЛ изменения, о которых вы спрашивали."
+                if decision == "grant" else
+                "Владелец НЕ РАЗРЕШИЛ эти изменения. Ничего не меняйте во "
+                "внешних системах; продолжайте только подготовку."
+            )
+            text = "\n\n".join(filter(None, [verdict, f"Вопрос: {question}" if question else "", text]))
+            _append_event(conn, task_id, "owner_granted" if decision == "grant" else "owner_denied", {
+                "revision": current_revision,
+                "request_id": request_id,
+            })
         if text:
             add_comment(conn, task_id, author, text)
         if repeated_question:
@@ -7214,6 +7282,7 @@ def respond_to_block(
                 "request_id": request_id,
                 "revision": current_revision,
                 "answered": bool(text),
+                "decision": decision,
                 "status": new_status,
             },
         )
@@ -7261,7 +7330,9 @@ def _owner_review_gate(conn, task_id: str, version: Optional[int]) -> tuple[Opti
     if row["status"] != "review" or row["acceptance"] != "owner":
         return "not_waiting", None
     current = submitted_version(conn, task_id)
-    if version is not None and current != int(version):
+    if version is None or current != int(version):
+        # The owner decides on the exact version they saw; no version means
+        # the screen did not show one, so it cannot be accepted blindly.
         return "stale", current
     return None, current
 
@@ -9818,18 +9889,50 @@ def _record_spawn_failure(
     )
 
 
-def _set_worker_pid(conn: sqlite3.Connection, task_id: str, pid: int) -> None:
+def _claim_still_held(conn: sqlite3.Connection, task_id: str, run_id: Optional[int]) -> bool:
+    """Whether the dispatcher's claim (``run_id``) still owns ``task_id``.
+
+    The owner may pause or archive a card between ``claim_task`` and the
+    worker spawn; the claim is then gone and the spawn must not proceed.
+    """
+    if run_id is None:
+        return True
+    row = conn.execute(
+        "SELECT 1 FROM tasks WHERE id = ? AND status = 'running' "
+        "AND current_run_id = ? AND claim_lock IS NOT NULL",
+        (task_id, int(run_id)),
+    ).fetchone()
+    return row is not None
+
+
+def _set_worker_pid(
+    conn: sqlite3.Connection, task_id: str, pid: int, *, run_id: Optional[int] = None,
+) -> bool:
     """Record the spawned child's pid + emit a ``spawned`` event.
 
     The event's payload carries the pid so a human reading ``hermes kanban
     tail`` can correlate log lines with OS-level traces without opening
     the drawer.
+
+    With ``run_id`` (the dispatcher path) the write is a compare-and-set on
+    the claim: if the owner paused/archived the card while the worker was
+    starting, nothing is recorded and False is returned so the caller stops
+    the orphaned process.
     """
     with write_txn(conn):
-        conn.execute(
-            "UPDATE tasks SET worker_pid = ? WHERE id = ?",
-            (int(pid), task_id),
-        )
+        if run_id is None:
+            conn.execute(
+                "UPDATE tasks SET worker_pid = ? WHERE id = ?",
+                (int(pid), task_id),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE tasks SET worker_pid = ? WHERE id = ? AND status = 'running' "
+                "AND current_run_id = ? AND claim_lock IS NOT NULL",
+                (int(pid), task_id, int(run_id)),
+            )
+            if cur.rowcount != 1:
+                return False
         run_id = _current_run_id(conn, task_id)
         if run_id is not None:
             conn.execute(
@@ -9837,6 +9940,20 @@ def _set_worker_pid(conn: sqlite3.Connection, task_id: str, pid: int) -> None:
                 (int(pid), run_id),
             )
         _append_event(conn, task_id, "spawned", {"pid": int(pid)}, run_id=run_id)
+    return True
+
+
+def _cancel_lost_spawn(conn: sqlite3.Connection, claimed: "Task", pid: Optional[int]) -> None:
+    """The claim was lost while the worker started: stop it and record why."""
+    info: dict[str, Any] = {}
+    if pid:
+        info = _terminate_reclaimed_worker(int(pid), claimed.claim_lock)
+    with write_txn(conn):
+        _append_event(conn, claimed.id, "spawn_cancelled", {
+            "reason": "claim_lost",
+            "pid": int(pid) if pid else None,
+            "terminated": bool(info.get("terminated")) if pid else None,
+        })
 
 
 def _clear_failure_counter(conn: sqlite3.Connection, task_id: str) -> None:
@@ -10526,6 +10643,7 @@ def _dispatch_once_locked(
             "SELECT id, assignee FROM tasks "
             "WHERE status = 'review' AND claim_lock IS NULL "
             "AND COALESCE(acceptance, '') != 'owner' "
+            "AND COALESCE(actor_kind, '') != 'human' "
             "ORDER BY priority DESC, created_at ASC"
         ).fetchall()
     # Review-lane reservation (OOF-30 review finding): the ready loop runs
@@ -10730,6 +10848,10 @@ def _dispatch_once_locked(
         if claimed.workspace_kind == "worktree":
             set_branch_name(conn, claimed.id, resolved_branch_name or (claimed.branch_name or "").strip() or f"wt/{claimed.id}")
         _maybe_emit_scratch_tip(conn, claimed.id, claimed.workspace_kind)
+        if not _claim_still_held(conn, claimed.id, claimed.current_run_id):
+            # Paused/archived by the owner while the workspace was prepared.
+            _cancel_lost_spawn(conn, claimed, None)
+            continue
         _spawn = spawn_fn if spawn_fn is not None else _default_spawn
         try:
             # Back-compat: older spawn_fn signatures accept only
@@ -10744,8 +10866,11 @@ def _dispatch_once_locked(
                     pid = _spawn(claimed, str(workspace))
             except (TypeError, ValueError):
                 pid = _spawn(claimed, str(workspace))
-            if pid:
-                _set_worker_pid(conn, claimed.id, int(pid))
+            if pid and not _set_worker_pid(
+                conn, claimed.id, int(pid), run_id=claimed.current_run_id,
+            ):
+                _cancel_lost_spawn(conn, claimed, int(pid))
+                continue
             # Worker-lifecycle observer (RFC #58548): fires AFTER spawn_fn
             # returned and the PID (when reported) is durably persisted,
             # per the RFC timing contract. Best-effort — can never break
@@ -10865,6 +10990,9 @@ def _dispatch_once_locked(
         claimed.skills = list(
             dict.fromkeys([*(claimed.skills or []), "sdlc-review"])
         )
+        if not _claim_still_held(conn, claimed.id, claimed.current_run_id):
+            _cancel_lost_spawn(conn, claimed, None)
+            continue
         _spawn = spawn_fn if spawn_fn is not None else _default_spawn
         try:
             import inspect
@@ -10876,8 +11004,11 @@ def _dispatch_once_locked(
                     pid = _spawn(claimed, str(workspace))
             except (TypeError, ValueError):
                 pid = _spawn(claimed, str(workspace))
-            if pid:
-                _set_worker_pid(conn, claimed.id, int(pid))
+            if pid and not _set_worker_pid(
+                conn, claimed.id, int(pid), run_id=claimed.current_run_id,
+            ):
+                _cancel_lost_spawn(conn, claimed, int(pid))
+                continue
             # Worker-lifecycle observer (RFC #58548): same contract as the
             # ready-lane fire above — after spawn + PID persistence.
             _fire_worker_spawned_hook(

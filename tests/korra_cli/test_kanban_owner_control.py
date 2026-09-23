@@ -251,6 +251,7 @@ def test_answer_respects_unfinished_parents(kanban_home: Path) -> None:
         kb.block_task(conn, child, kind=kb.OWNER_PAUSE_KIND, reason="пауза")
         outcome = kb.respond_to_block(
             conn, child, answer=None, author="Владелец", request_id="r4",
+            revision=kb.block_revision(conn, child),
         )
         assert outcome["ok"] and outcome["status"] == "todo"
 
@@ -265,6 +266,7 @@ def test_repeated_question_parked_in_triage_can_still_be_answered(kanban_home: P
         assert kb.get_task(conn, tid).status == "triage"
         out = kb.respond_to_block(
             conn, tid, answer="Доступ выдан, продолжай", author="Владелец", request_id="loop-1",
+            revision=kb.block_revision(conn, tid),
         )
         assert out["ok"] and out["status"] == "ready"
         task = kb.get_task(conn, tid)

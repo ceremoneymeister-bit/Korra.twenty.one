@@ -1693,9 +1693,44 @@ def _handle_unblock(args: dict, **kw) -> str:
     if ownership_err:
         return ownership_err
     board = args.get("board")
+    answer = (args.get("answer") or "").strip()
+    revision = args.get("revision")
     try:
         kb, conn = _connect(board=board)
         try:
+            task = kb.get_task(conn, str(tid))
+            if task is None:
+                return tool_error(f"unknown task {tid}")
+            if task.block_kind == kb.APPROVAL_BLOCK_KIND and task.status in ("blocked", "triage"):
+                return tool_error(
+                    f"{tid} asks the owner's permission for external changes. "
+                    "Only the owner decides it on the card (Разрешить / Не разрешать); "
+                    "tell the owner where to find it instead of unblocking."
+                )
+            question_revision = kb.block_revision(conn, str(tid))
+            # A dependency or transient block is a technical wait, not a
+            # question to the owner: it may be released without an answer.
+            technical = task.block_kind in ("dependency", "transient") and not answer
+            if question_revision is not None and not technical:
+                # The owner's answer and the resume are one atomic, versioned
+                # step — the same command the board uses.
+                if not answer or revision is None:
+                    return tool_error(
+                        f"{tid} waits on a question (revision {question_revision}). "
+                        "Pass answer=<the owner's words> and revision from kanban_show."
+                    )
+                outcome = kb.respond_to_block(
+                    conn, str(tid), answer=answer, author="Владелец (через чат)",
+                    request_id=f"chat-{tid}-{int(revision)}", revision=int(revision),
+                )
+                if not outcome["ok"]:
+                    if outcome["reason"] == "stale":
+                        return tool_error(
+                            f"{tid}: the question changed since revision {revision}; "
+                            "read it again with kanban_show and ask the owner."
+                        )
+                    return tool_error(f"could not resume {tid}: {outcome['reason']}")
+                return _ok(task_id=str(tid), status=outcome["status"], duplicate=outcome["duplicate"])
             ok = kb.unblock_task(conn, str(tid))
             if not ok:
                 return tool_error(f"could not unblock {tid} (not blocked or unknown)")
@@ -1963,11 +1998,14 @@ KANBAN_BLOCK_SCHEMA = {
             },
             "kind": {
                 "type": "string",
-                "enum": ["dependency", "needs_input", "capability", "transient"],
+                "enum": ["dependency", "needs_input", "capability", "transient", "approval"],
                 "description": (
                     "Why you're blocked. 'dependency' waits in todo and "
                     "resumes automatically; the others surface to a human. "
-                    "Omit only if none apply."
+                    "Use 'approval' BEFORE any change in an external system "
+                    "(CRM, documents, messages to people, calendars, spending): "
+                    "put the exact changes in reason; the task resumes only "
+                    "when the owner grants or denies it. Omit only if none apply."
                 ),
             },
             "board": _board_schema_prop(),
@@ -2436,6 +2474,20 @@ KANBAN_UNBLOCK_SCHEMA = {
             "task_id": {
                 "type": "string",
                 "description": "Blocked task id to move to ready or parent-gated todo.",
+            },
+            "answer": {
+                "type": "string",
+                "description": (
+                    "The owner's answer in their words. Required when the task "
+                    "waits on a question; saved and resumed atomically."
+                ),
+            },
+            "revision": {
+                "type": "integer",
+                "description": (
+                    "block_revision of the question the owner answered "
+                    "(from kanban_show). A changed question is refused."
+                ),
             },
             "board": _board_schema_prop(),
         },

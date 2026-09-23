@@ -54,6 +54,8 @@
     not_waiting_acceptance: "Этот результат уже принят или возвращён. Обновите карточку.",
     parents_not_done: "Сначала должны завершиться предыдущие шаги. Их список есть в карточке.",
     task_not_found: "Задача не найдена. Возможно, её удалили.",
+    decision_required: "Здесь нужно явное решение: «Разрешить эти изменения» или «Не разрешать».",
+    use_accept: "Этот результат принимается кнопкой «Принять» в карточке.",
   };
   function errorText(error) {
     const raw = String(error && error.message || error || "");
@@ -266,8 +268,10 @@
           // Комментарий сохраняется до возобновления: агент увидит причину доработки.
           if (text.trim()) await request("/tasks/" + encodeURIComponent(task.id) + "/comments", board, "POST", { body: text.trim(), author: "Пользователь" });
         }
-        await request("/tasks/" + encodeURIComponent(task.id), board, "PATCH", patch);
-        onSaved("Состояние задачи обновлено.");
+        const result = await request("/tasks/" + encodeURIComponent(task.id), board, "PATCH", patch);
+        onSaved(result && result.warning === "worker_stop_unconfirmed"
+          ? "Задача на паузе, но остановку агента подтвердить не удалось. Если он продолжит работу, обратитесь в поддержку."
+          : "Состояние задачи обновлено.");
       } catch (err) { setError(errorText(err)); }
       finally { saving.current = false; setBusy(false); }
     }
@@ -324,13 +328,13 @@
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const requestIdRef = useRef(null);
-    async function send(text) {
+    async function send(text, decision) {
       if (busy) return;
       setBusy(true); setError("");
       if (!requestIdRef.current) requestIdRef.current = newRequestId();
       try {
         const result = await request("/tasks/" + encodeURIComponent(task.id) + "/respond", board, "POST",
-          { answer: text || null, revision: task.block_revision == null ? null : task.block_revision, request_id: requestIdRef.current, author: OWNER });
+          { answer: text || null, revision: task.block_revision == null ? null : task.block_revision, request_id: requestIdRef.current, author: OWNER, decision: decision || null });
         requestIdRef.current = null; setAnswer("");
         onDone(result && result.status === "todo"
           ? "Ответ сохранён. Шаг продолжится, когда завершатся предыдущие шаги."
@@ -354,6 +358,19 @@
         h("p", { className: "k21-muted" }, "Проверьте задание или подключение, затем повторите. Поручение и файлы сохранены."),
         errorBlock,
         h("div", { className: "k21-actions" }, h(Button, { primary: true, disabled: busy, onClick: () => void send(null) }, busy ? "Сохраняем…" : "Повторить")));
+    }
+    if (task.needs_approval) {
+      // Ограниченная v1: внешние изменения продолжаются только по явному
+      // решению владельца, а не по любому ответу.
+      return h("section", { className: "k21-note k21-decision", "data-kind": "approval" },
+        h("h3", null, "Нужно ваше разрешение"),
+        h(RichText, null, task.block_reason || "Агент просит разрешения на изменения во внешних системах."),
+        h(Field, { label: "Комментарий (необязательно)" }, h("textarea", { value: answer, onChange: e => setAnswer(e.target.value), rows: 3, placeholder: "Например: только первые три замены" })),
+        h("p", { className: "k21-muted" }, agentName + " выполнит изменения, только если вы их разрешите. Если не разрешить — продолжит лишь подготовку, ничего не меняя."),
+        errorBlock,
+        h("div", { className: "k21-actions" },
+          h(Button, { primary: true, disabled: busy, onClick: () => void send(answer.trim(), "grant") }, busy ? "Сохраняем…" : "Разрешить эти изменения"),
+          h(Button, { disabled: busy, onClick: () => void send(answer.trim(), "deny") }, "Не разрешать")));
     }
     return h("section", { className: "k21-note k21-decision", "data-kind": "question" },
       h("h3", null, "Вопрос агента"),
@@ -517,6 +534,7 @@
             h("strong", null, RUN_LABEL[run.outcome || run.status] || "Попытка завершена"),
             h("small", null, " · ", dateLabel(run.started_at)),
             run.summary && h(RichText, null, run.summary),
+            run.result && run.result !== run.summary && h("details", null, h("summary", null, "Полный текст этой версии"), h(RichText, null, run.result)),
             run.error && h("p", null, runErrorText(run.error)))))));
   }
 
@@ -628,7 +646,7 @@
           const repeated = item.question && waitingItems.slice(0, index).some(prev => prev.question === item.question && prev.plan_id === item.plan_id && prev.board === item.board);
           return h("li", { key: item.board + ":" + item.task_id, className: "k21-waiting-item", "data-kind": item.kind },
           h("div", { className: "k21-waiting-text" },
-            h("span", { className: "k21-task-badge", "data-kind": item.kind }, (ATTENTION[item.kind] || ["Нужно внимание"])[0]),
+            h("span", { className: "k21-task-badge", "data-kind": item.kind }, item.needs_approval ? "Нужно разрешение" : (ATTENTION[item.kind] || ["Нужно внимание"])[0]),
             h("strong", null, item.title),
             h("small", { className: "k21-muted" }, [item.plan_title && "План «" + item.plan_title + "»", item.board !== board && "доска «" + (item.board === "default" ? "Основная доска" : item.board_name || item.board) + "»", item.assignee && profileLabel(profiles.find(p => p.name === item.assignee) || { name: item.assignee })].filter(Boolean).join(" · ")),
             item.question && (repeated

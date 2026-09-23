@@ -193,12 +193,15 @@ def _block_revisions(conn: sqlite3.Connection, task_ids: list[str]) -> dict[str,
     latest = conn.execute(
         f"SELECT e.task_id, e.id, e.kind FROM task_events e "
         f"JOIN (SELECT task_id, MAX(id) AS mid FROM task_events "
-        f"      WHERE kind IN ('blocked', 'unblocked', 'gave_up') "
+        f"      WHERE kind IN ('blocked', 'block_loop_detected', 'unblocked', 'gave_up') "
         f"        AND task_id IN ({marks}) GROUP BY task_id) m "
         f"  ON m.mid = e.id",
         task_ids,
     ).fetchall()
-    return {r["task_id"]: int(r["id"]) for r in latest if r["kind"] == "blocked"}
+    return {
+        r["task_id"]: int(r["id"]) for r in latest
+        if r["kind"] in ("blocked", "block_loop_detected")
+    }
 
 
 def _task_dict(
@@ -213,7 +216,11 @@ def _task_dict(
     # kept in the DB after an answer so a repeated question is recognisable.
     if task.status != "blocked" and not (task.status == "triage" and task.block_kind):
         d["block_reason"] = None
-    d["block_revision"] = block_revision if task.status == "blocked" else None
+    waiting_question = task.status == "blocked" or (
+        task.status == "triage" and bool(task.block_kind)
+    )
+    d["block_revision"] = block_revision if waiting_question else None
+    d["needs_approval"] = waiting_question and task.block_kind == kanban_db.APPROVAL_BLOCK_KIND
     d["owner_attention"] = _owner_attention(
         task, sticky_block=(block_revision is not None) if task.status == "blocked" else None,
     )
@@ -288,6 +295,7 @@ def _run_dict(r: kanban_db.Run) -> dict[str, Any]:
         "summary": r.summary,
         "metadata": r.metadata,
         "error": r.error,
+        "result": getattr(r, "result", None),
     }
 
 
@@ -518,7 +526,10 @@ def get_board(
         # preview here — the full text is available via /tasks/:id.
         summary_map = kanban_db.latest_summaries(conn, [t.id for t in tasks])
         revisions = _block_revisions(
-            conn, [t.id for t in tasks if t.status == "blocked"],
+            conn, [
+                t.id for t in tasks
+                if t.status == "blocked" or (t.status == "triage" and t.block_kind)
+            ],
         )
 
         for t in tasks:
@@ -976,6 +987,7 @@ def _reopen_if_review(conn, task_id: str, current) -> Optional[bool]:
 def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Query(None)):
     board = _resolve_board(board)
     conn = _conn(board=board)
+    stop_warning: Optional[str] = None
     try:
         task = kanban_db.get_task(conn, task_id)
         if task is None:
@@ -1002,6 +1014,12 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
         if payload.status is not None:
             s = payload.status
             ok = True
+            if s == "done" and task.status == "review" and task.acceptance == "owner":
+                # The owner accepts an exact submitted version via /accept.
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "use_accept"},
+                )
             if s == "done":
                 ok = kanban_db.complete_task(
                     conn, task_id,
@@ -1013,9 +1031,14 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                 # The board's "pause" is the owner's own stop: typed so it
                 # never feeds the unblock-loop breaker / triage, and it stops
                 # the live worker instead of leaving it running unseen.
-                ok = kanban_db.pause_task(
+                paused = kanban_db.pause_task(
                     conn, task_id, reason=payload.block_reason,
-                )["ok"]
+                )
+                ok = paused["ok"]
+                if ok and paused.get("stopped") is False:
+                    # The card is paused but the live process did not
+                    # confirm termination: say so instead of promising it.
+                    stop_warning = "worker_stop_unconfirmed"
             elif s == "scheduled":
                 ok = kanban_db.schedule_task(conn, task_id, reason=payload.block_reason)
             elif s == "review":
@@ -1038,6 +1061,11 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                 # status set. "Changes requested" (review -> ready) goes through
                 # reopen_review_task via _reopen_if_review.
                 current = kanban_db.get_task(conn, task_id)
+                if (
+                    current and current.status == "blocked"
+                    and current.block_kind == kanban_db.APPROVAL_BLOCK_KIND
+                ):
+                    raise HTTPException(status_code=409, detail={"code": "decision_required"})
                 if current and current.status in ("blocked", "scheduled"):
                     ok = kanban_db.unblock_task(conn, task_id)
                 else:
@@ -1161,7 +1189,10 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
             )
 
         updated = kanban_db.get_task(conn, task_id)
-        return {"task": _task_dict(updated) if updated else None}
+        response: dict[str, Any] = {"task": _task_dict(updated) if updated else None}
+        if stop_warning:
+            response["warning"] = stop_warning
+        return response
     finally:
         conn.close()
 
@@ -1388,12 +1419,15 @@ class RespondBody(BaseModel):
     # Client-generated id; a retry with the same id returns the first outcome.
     request_id: str = Field(..., min_length=1, max_length=128)
     author: Optional[str] = None
+    # For a permission question (``needs_approval``): "grant" or "deny".
+    decision: Optional[str] = None
 
 
 _RESPOND_REJECTIONS = {
     "not_found": (404, "task_not_found"),
     "not_blocked": (409, "not_waiting"),
     "stale": (409, "question_changed"),
+    "decision_required": (409, "decision_required"),
 }
 
 
@@ -1415,6 +1449,7 @@ def respond_to_task(task_id: str, payload: RespondBody, board: Optional[str] = Q
                 author=(payload.author or "Владелец").strip() or "Владелец",
                 request_id=payload.request_id,
                 revision=payload.revision,
+                decision=payload.decision,
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -1543,13 +1578,17 @@ def get_attention(limit: int = Query(50, ge=1, le=200)):
                 ).fetchall()
                 tasks = [kanban_db.Task.from_row(r) for r in rows]
                 revisions = _block_revisions(
-                    conn, [t.id for t in tasks if t.status == "blocked"],
+                    conn, [
+                        t.id for t in tasks
+                        if t.status == "blocked" or (t.status == "triage" and t.block_kind)
+                    ],
                 )
                 for t in tasks:
                     rev = revisions.get(t.id)
                     kind = _owner_attention(
                         t, sticky_block=(rev is not None) if t.status == "blocked" else None,
                     )
+                    approval = t.block_kind == kanban_db.APPROVAL_BLOCK_KIND
                     if kind is None:
                         continue
                     items.append({
@@ -1561,6 +1600,7 @@ def get_attention(limit: int = Query(50, ge=1, le=200)):
                         "assignee": t.assignee,
                         "question": t.block_reason if t.status in ("blocked", "triage") else None,
                         "revision": rev,
+                        "needs_approval": approval and kind == "question",
                         "version": (
                             kanban_db.submitted_version(conn, t.id)
                             if kind == "accept" else None
@@ -1665,7 +1705,10 @@ def bulk_update(payload: BulkTaskBody, board: Optional[str] = Query(None)):
                         entry.update(ok=False, error="archive refused")
                 if payload.status is not None and not payload.archive:
                     s = payload.status
-                    if s == "done":
+                    if s == "done" and task.status == "review" and task.acceptance == "owner":
+                        # Owner acceptance is per exact version (/accept).
+                        ok = False
+                    elif s == "done":
                         ok = kanban_db.complete_task(
                             conn, tid,
                             result=payload.result,
@@ -1673,7 +1716,7 @@ def bulk_update(payload: BulkTaskBody, board: Optional[str] = Query(None)):
                             metadata=payload.metadata,
                         )
                     elif s == "blocked":
-                        ok = kanban_db.block_task(conn, tid)
+                        ok = kanban_db.pause_task(conn, tid)["ok"]
                     elif s == "review":
                         # Non-block review handoff (mirror of PATCH /tasks/{id}).
                         ok = kanban_db.request_review(

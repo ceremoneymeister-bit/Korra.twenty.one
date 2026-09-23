@@ -246,5 +246,8 @@ def test_repeated_question_in_triage_is_still_owner_attention(client):
     assert task["block_reason"] == "Нужен доступ к CRM"
     item = next(i for i in client.get(f"{API}/attention").json()["items"] if i["task_id"] == tid)
     assert item["kind"] == "question" and item["question"] == "Нужен доступ к CRM"
-    r = client.post(f"{API}/tasks/{tid}/respond", json={"answer": "Доступ выдан", "request_id": "loop-api"})
+    assert isinstance(task["block_revision"], int)
+    r = client.post(f"{API}/tasks/{tid}/respond", json={
+        "answer": "Доступ выдан", "request_id": "loop-api", "revision": task["block_revision"],
+    })
     assert r.status_code == 200 and r.json()["status"] == "ready"

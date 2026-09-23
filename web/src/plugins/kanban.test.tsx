@@ -241,4 +241,15 @@ describe("Доска поручений", () => {
     await change(field("Кому поручить"), "default"); await click(button("Передать агенту"));
     expect(JSON.parse(writes()[0][1].body).acceptance).toBe("owner");
   });
+
+  it("разрешение на внешние изменения даётся только явным решением владельца", async () => {
+    boardTasks = [{ ...task, status: "blocked", owner_attention: "question", needs_approval: true, block_kind: "approval", block_reason: "Разрешите 4 замены в CRM", block_revision: 12 }];
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Нужно ваше разрешение");
+    expect(Array.from(host.querySelectorAll("button")).some(el => el.textContent === "Ответить и продолжить")).toBe(false);
+    await click(button("Не разрешать"));
+    const [url, options] = writes()[0];
+    expect(url).toContain("/tasks/task-1/respond");
+    expect(JSON.parse(options.body)).toMatchObject({ decision: "deny", revision: 12 });
+  });
 });

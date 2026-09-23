@@ -114,7 +114,7 @@ def test_default_completion_stays_final(kanban_home):
         assert kb.get_task(conn, tid).status == "done"
 
 
-def test_human_step_is_never_dispatched_or_auto_assigned(kanban_home, monkeypatch):
+def test_human_step_is_never_dispatched_or_auto_assigned(kanban_home, monkeypatch, all_assignees_spawnable):
     spawned = []
     with kb.connect_closing() as conn:
         tid = kb.create_task(conn, title="Обучить команду", assignee="rop", actor_kind="human")

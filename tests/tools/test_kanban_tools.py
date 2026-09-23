@@ -439,7 +439,9 @@ def test_unblock_happy_path(monkeypatch, worker_env):
     conn = kb.connect()
     try:
         tid = kb.create_task(conn, title="blocked", assignee="worker")
-        kb.block_task(conn, tid, reason="waiting")
+        # A technical wait resumes without an answer; a question to the
+        # owner needs answer+revision (test_kanban_review_fixes).
+        kb.block_task(conn, tid, reason="waiting", kind="transient")
     finally:
         conn.close()
 
