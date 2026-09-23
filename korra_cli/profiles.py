@@ -2231,6 +2231,16 @@ def delete_profile(name: str, yes: bool = False) -> Path:
     if remove_error is not None:
         raise RuntimeError(f'Не удалось удалить папку профиля {profile_dir}: {remove_error}') from remove_error
 
+    # Shared fleet output lives outside the deleted profile. Retire its key
+    # only after deletion succeeds, so a new profile with this name cannot
+    # silently inherit the old agent's results.
+    try:
+        from korra_cli.file_organization import retire_agent
+
+        retire_agent(_get_default_hermes_home() / "workspace", canon)
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not archive file organization for %s: %s", canon, exc)
+
     print(f"\nПрофиль '{canon}' удалён.")
     return profile_dir
 
@@ -2835,6 +2845,12 @@ def rename_profile(old_name: str, new_name: str) -> Path:
     except Exception:
         new_dir.rename(old_dir)
         raise
+    try:
+        from korra_cli.file_organization import rename_agent
+
+        rename_agent(_get_default_hermes_home() / "workspace", old_canon, new_canon)
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not rename file organization for %s: %s", old_canon, exc)
     print(f'✓ Переименовано: {old_dir.name} → {new_dir.name}')
 
     # 3. Update profile-scoped Honcho host blocks, preserving aiPeer identity

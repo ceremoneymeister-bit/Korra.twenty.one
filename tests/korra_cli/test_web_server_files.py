@@ -548,11 +548,78 @@ def test_fleet_files_are_confined_to_a_dedicated_workspace(monkeypatch, tmp_path
         assert payload["path"] == str(workspace)
         assert payload["locked_root"] == str(workspace)
         assert payload["can_change_path"] is False
-        assert payload["entries"] == []
+        assert {entry["name"] for entry in payload["entries"]} == {"shared", "agents", "client"}
+        assert payload["organization"] == {
+            "shared": str(workspace / "shared"),
+            "agents": str(workspace / "agents"),
+            "uploads": str(workspace / "client" / "inbox"),
+            "profiles": {},
+            "archived": {},
+        }
+        assert all(not entry["capabilities"]["trash"] for entry in payload["entries"])
         assert workspace.is_dir()
 
         escaped = client.get("/api/files", params={"path": str(hermes_home)})
         assert escaped.status_code == 403
+    finally:
+        _close_client(client)
+        _restore_app_state(prev_auth_required, prev_bound_host)
+
+
+def test_fleet_organization_keeps_old_paths_and_protects_section_roots(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    workspace = home / "workspace"
+    old_folder = workspace / "Прежняя папка"
+    old_folder.mkdir(parents=True)
+    old_file = old_folder / "договор.txt"
+    old_file.write_text("unchanged", encoding="utf-8")
+    for index in range(216):
+        (workspace / f"старый-{index:03d}.txt").write_text(str(index), encoding="utf-8")
+    upload = workspace / "client" / "inbox" / "2026-09-23" / "batch" / "photo.jpg"
+    upload.parent.mkdir(parents=True)
+    upload.write_bytes(b"\xff\xd8\xffold")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("KORRA_UI_MODE", "fleet")
+
+    client, prev_auth_required, prev_bound_host = _client_with_app_state()
+    try:
+        root = client.get("/api/files").json()
+        assert "Прежняя папка" in {entry["name"] for entry in root["entries"]}
+        assert len([entry for entry in root["entries"] if entry["name"].startswith("старый-")]) == 216
+        assert client.get("/api/files", params={"path": str(old_folder)}).status_code == 200
+        assert client.get("/api/files", params={"path": str(upload.parent)}).status_code == 200
+        assert old_file.read_text(encoding="utf-8") == "unchanged"
+        assert upload.read_bytes() == b"\xff\xd8\xffold"
+        shared = next(entry for entry in root["entries"] if entry["name"] == "shared")
+        assert client.post("/api/files/rename", json={
+            "path": shared["path"], "new_name": "moved", "expected_revision": shared["revision"],
+        }).status_code == 403
+        assert client.post("/api/files/trash", json={
+            "path": shared["path"], "expected_revision": shared["revision"],
+        }).status_code == 403
+        assert (workspace / "shared").is_dir()
+    finally:
+        _close_client(client)
+        _restore_app_state(prev_auth_required, prev_bound_host)
+
+
+def test_fleet_organization_collision_falls_back_without_touching_owner_data(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    shared = home / "workspace" / "shared"
+    shared.mkdir(parents=True)
+    marker = shared / "owner.txt"
+    marker.write_text("owner", encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("KORRA_UI_MODE", "fleet")
+
+    client, prev_auth_required, prev_bound_host = _client_with_app_state()
+    try:
+        response = client.get("/api/files")
+        assert response.status_code == 200
+        assert response.json()["organization"] is None
+        assert {entry["name"] for entry in response.json()["entries"]} == {"shared"}
+        assert marker.read_text(encoding="utf-8") == "owner"
+        assert not (home / "workspace" / "agents").exists()
     finally:
         _close_client(client)
         _restore_app_state(prev_auth_required, prev_bound_host)
@@ -1015,7 +1082,7 @@ def test_owner_creates_folders_inside_the_fleet_workspace_only(monkeypatch, tmp_
     client, prev_auth_required, prev_bound_host = _client_with_app_state()
     try:
         workspace = hermes_home / "workspace"
-        assert client.get("/api/files").json()["entries"] == []
+        assert {entry["name"] for entry in client.get("/api/files").json()["entries"]} == {"shared", "agents", "client"}
 
         created = client.post("/api/files/mkdir", json={"path": "Отчёты за сентябрь"})
         assert created.status_code == 200, created.text
@@ -1031,7 +1098,7 @@ def test_owner_creates_folders_inside_the_fleet_workspace_only(monkeypatch, tmp_
         assert marker.read_text(encoding="utf-8") == "keep"
 
         names = [entry["name"] for entry in client.get("/api/files").json()["entries"]]
-        assert names == ["Отчёты за сентябрь"]
+        assert set(names) == {"shared", "agents", "client", "Отчёты за сентябрь"}
 
         assert client.post("/api/files/mkdir", json={"path": "../escape"}).status_code == 400
         assert client.post("/api/files/mkdir", json={"path": str(outside / "escape")}).status_code == 403

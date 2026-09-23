@@ -2868,6 +2868,10 @@ def _managed_file_entry(policy: ManagedFilesPolicy, target: Path) -> Dict[str, A
         and literal != mutation_root
         and _path_is_under(mutation_root, literal)
     )
+    if mutable and policy.locked_root is not None and korra_env("KORRA_UI_MODE", "").strip().lower() == "fleet":
+        from korra_cli.file_organization import is_managed_structure
+
+        mutable = not is_managed_structure(policy.locked_root, literal)
     entry["revision"] = _managed_file_revision_from_stat(st)
     entry["capabilities"] = {"rename": mutable, "trash": mutable}
     return entry
@@ -3935,6 +3939,18 @@ async def list_managed_files(request: Request, path: Optional[str] = None):
     if not target.is_dir():
         raise HTTPException(status_code=400, detail="Path is not a directory")
 
+    organization = None
+    if policy.locked_root is not None and korra_env("KORRA_UI_MODE", "").strip().lower() == "fleet":
+        try:
+            from korra_cli.file_organization import section_snapshot
+
+            organization = await run_in_threadpool(section_snapshot, policy.locked_root)
+        except (OSError, ValueError) as exc:
+            # A collision/corrupt registry must leave the existing Files and
+            # upload paths usable. The owner sees the old flat view until an
+            # operator can inspect the installation's workspace.
+            _log.warning("File organization unavailable: %s", exc)
+
     # os.scandir + stat on thousands of entries is blocking filesystem work;
     # keep it off the FastAPI event loop so chat/status requests stay live.
     entries = await run_in_threadpool(_scan_managed_directory, policy, target)
@@ -3954,6 +3970,7 @@ async def list_managed_files(request: Request, path: Optional[str] = None):
         "path": display_path,
         "parent": parent,
         "entries": entries,
+        "organization": organization,
         **_managed_response_meta(policy),
     }
 
@@ -4356,6 +4373,11 @@ def _managed_mutation_target(
         raise HTTPException(status_code=404, detail="Файл не найден.")
     if target.name.startswith(".") or _is_private_managed_path(target):
         raise HTTPException(status_code=403, detail="Служебный файл нельзя изменить.")
+    if policy.locked_root is not None and korra_env("KORRA_UI_MODE", "").strip().lower() == "fleet":
+        from korra_cli.file_organization import is_managed_structure
+
+        if is_managed_structure(policy.locked_root, target):
+            raise HTTPException(status_code=403, detail="Раздел файлов нельзя переименовать или удалить.")
     return policy, base, target
 
 

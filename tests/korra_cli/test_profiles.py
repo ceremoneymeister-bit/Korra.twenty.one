@@ -802,6 +802,24 @@ class TestRenameProfile:
         assert new_dir.is_dir()
         assert new_dir == tmp_path / ".hermes" / "profiles" / "newname"
 
+    def test_result_folder_survives_rename_and_is_archived_on_delete(self, profile_env):
+        from korra_cli.file_organization import ensure_agent_results, section_snapshot
+
+        workspace = profile_env / ".hermes" / "workspace"
+        create_profile("oldname", no_alias=True)
+        results = ensure_agent_results(workspace, "oldname")
+        (results / "report.txt").write_text("done", encoding="utf-8")
+
+        with patch("korra_cli.profiles.check_alias_collision", return_value="skip"):
+            rename_profile("oldname", "newname")
+        assert ensure_agent_results(workspace, "newname") == results
+
+        delete_profile("newname", yes=True)
+        assert section_snapshot(workspace)["archived"][results.parent.name] == "newname"
+        assert (results / "report.txt").read_text(encoding="utf-8") == "done"
+        create_profile("newname", no_alias=True)
+        assert ensure_agent_results(workspace, "newname") != results
+
     def test_renames_root_honcho_host_without_changing_ai_peer(self, profile_env):
         tmp_path = profile_env
         create_profile("ssi_health", no_alias=True)
@@ -1423,4 +1441,3 @@ class TestMultiplexSeedsApiServerOff:
         profile_dir = create_profile("voice", no_alias=True)
         cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
         assert cfg["stt"]["provider"] == "deepgram"
-

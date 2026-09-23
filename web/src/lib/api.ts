@@ -2796,6 +2796,13 @@ export interface ManagedFilesResponse {
   locked_root: string | null;
   can_change_path: boolean;
   entries: ManagedFileEntry[];
+  organization?: {
+    shared: string;
+    agents: string;
+    uploads: string;
+    profiles: Record<string, string>;
+    archived: Record<string, string>;
+  } | null;
 }
 
 export interface ManagedFileReadResponse {

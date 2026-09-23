@@ -129,6 +129,29 @@ def _prompt_parts(agent):
         return build_system_prompt_parts(agent)
 
 
+def test_fleet_prompt_assigns_each_profile_a_stable_results_folder(tmp_path, monkeypatch):
+    from korra_cli.file_organization import section_snapshot
+
+    root = tmp_path / "hermes"
+    named_home = root / "profiles" / "designer"
+    named_home.mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(root))
+    monkeypatch.setenv("KORRA_UI_MODE", "fleet")
+
+    def prompt(home):
+        agent = _make_agent(_session_db=type("DB", (), {"db_path": home / "state.db"})())
+        return _prompt_parts(agent)["stable"]
+
+    default_prompt = prompt(root)
+    named_prompt = prompt(named_home)
+    paths = section_snapshot(root / "workspace")["profiles"]
+    assert paths["default"] != paths["designer"]
+    for text, key in ((default_prompt, paths["default"]), (named_prompt, paths["designer"])):
+        assert str(root / "workspace" / "shared") in text
+        assert str(root / "workspace" / "agents" / key / "results") in text
+        assert "старые файлы ради порядка не переноси" in text
+
+
 def _init_code_repo(path):
     """A git repo that actually holds code — the coding posture requires a source
     file (or manifest), not a bare ``.git`` (a prose/notes repo stays general)."""

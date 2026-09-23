@@ -887,6 +887,23 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     if _effective_hint:
         post_workspace_parts.append(_effective_hint)
 
+    if korra_env("KORRA_UI_MODE", "").strip().lower() == "fleet":
+        try:
+            from korra_cli.file_organization import ensure_agent_results
+
+            shared_root = get_default_hermes_root() / "workspace" / "shared"
+            results_root = ensure_agent_results(get_default_hermes_root() / "workspace", active_profile)
+            post_workspace_parts.append(
+                "Общие материалы этой установки находятся в " + str(shared_root) + ". "
+                "Новые файлы, которые ты создаёшь для человека, сохраняй в " + str(results_root) + ". "
+                "Путь вложений из чата используй как дано; старые файлы ради порядка не переноси. "
+                "Выдавай человеку фактический путь готового файла."
+            )
+        except (OSError, ValueError) as exc:
+            # Organization is additive. A collision or damaged registry must
+            # never make an existing agent conversation unavailable.
+            logger.warning("File organization hint unavailable: %s", exc)
+
     # ── Context tier (cwd-dependent, may change between sessions) ─
     context_parts: List[str] = []
 

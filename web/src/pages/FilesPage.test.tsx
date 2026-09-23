@@ -20,14 +20,14 @@ vi.mock("@/plugins", () => ({ PluginSlot: () => null }));
 vi.mock("@/components/FilePreviewDialog", () => ({ FilePreviewDialog: () => null }));
 vi.mock("@/hooks/useCabinetSession", () => ({ useCabinetSession: () => ({ logout: "", canManageSkills: true, canBrowseSkillsHub: true, canConfigureToolsets: true, ...mocks.cabinet }) }));
 import FilesPage from "./FilesPage";
-import type { ManagedFileEntry } from "@/lib/api";
+import type { ManagedFileEntry, ManagedFilesResponse } from "@/lib/api";
 
 let host: HTMLDivElement;
 let root: Root;
 const entry = (name: string, directory = false): ManagedFileEntry => ({ name, path: `/w/${name}`, is_directory: directory, size: directory ? null : 5, mtime: 1, mime_type: directory ? null : "text/plain" });
 function Location() { const location = useLocation(); return <output>{location.pathname}{location.search}</output>; }
-async function render(entries = [entry("a.txt"), entry("Папка", true)], initial = "/files") {
-  mocks.listFiles.mockResolvedValue({ path: "/w", root: "/w", locked_root: "/w", parent: null, entries });
+async function render(entries = [entry("a.txt"), entry("Папка", true)], initial = "/files", organization?: ManagedFilesResponse["organization"]) {
+  mocks.listFiles.mockResolvedValue({ path: "/w", root: "/w", locked_root: "/w", parent: null, entries, organization });
   await act(async () => root.render(<MemoryRouter initialEntries={[initial]}><FilesPage /><Location /></MemoryRouter>));
 }
 function button(text: string) { return [...host.querySelectorAll("button")].find(item => item.textContent?.trim() === text)!; }
@@ -75,6 +75,38 @@ it("starts the shared session queue with originals and the actual directory", as
   await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
   expect(mocks.prepareUploadBatch).toHaveBeenCalledWith([file], { origin: "files", target: "/w", folder: undefined, conflict: "copy" });
   expect(mocks.startUploadJob).toHaveBeenCalledOnce();
+});
+
+it("shows managed sections without moving old entries and sends root JPG uploads to shared", async () => {
+  const organization = {
+    shared: "/w/shared", agents: "/w/agents", uploads: "/w/client/inbox",
+    profiles: { designer: "abcdef0123456789" }, archived: {},
+  };
+  await render([
+    entry("shared", true), entry("agents", true), entry("client", true), entry("старый.txt"),
+  ], "/files", organization);
+  expect(host.textContent).toContain("Ранее созданное");
+  expect(host.textContent).toContain("Новые файлы отсюда загружаются в «Общие материалы»");
+  expect(host.querySelector('button[aria-label="Просмотреть файл старый.txt"]')).not.toBeNull();
+  expect(host.querySelector('button[aria-label="Открыть папку Общие материалы"]')).toBeNull();
+
+  const photo = new File(["jpg"], "photo.jpg", { type: "image/jpeg" });
+  const input = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(input, "files", { value: [photo], configurable: true });
+  mocks.listFiles.mockResolvedValue({ path: "/w/shared", root: "/w", locked_root: "/w", parent: "/w", entries: [], organization });
+  await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+  expect(mocks.prepareUploadBatch).toHaveBeenCalledWith([photo], {
+    origin: "files", target: "/w/shared", folder: undefined, conflict: "copy",
+  });
+  expect(mocks.listFiles).toHaveBeenLastCalledWith("/w/shared");
+});
+
+it("opens the shared section from the organized landing", async () => {
+  const organization = { shared: "/w/shared", agents: "/w/agents", uploads: "/w/client/inbox", profiles: {}, archived: {} };
+  await render([entry("shared", true)], "/files", organization);
+  mocks.listFiles.mockResolvedValue({ path: "/w/shared", root: "/w", locked_root: "/w", parent: "/w", entries: [], organization });
+  await act(async () => button("Общие материалыПапка для людей и агентов").click());
+  expect(mocks.listFiles).toHaveBeenLastCalledWith("/w/shared");
 });
 
 it("requires a conflict choice before starting replacement", async () => {

@@ -401,6 +401,26 @@ def test_chat_packages_deduplicate_by_content(panel):
     assert len(list((workspace / "client" / "inbox").rglob("IMG_2581.jpg"))) == 1
 
 
+def test_organized_files_jpg_upload_and_chat_jpg_keep_separate_paths(panel):
+    client, _root, workspace = panel
+    payload = b"\xff\xd8\xffjpeg-test"
+    shared = workspace / "shared"
+    files_result = _send(client, _manifest(
+        origin="files", target={"kind": "path", "path": str(shared)},
+        on_conflict="copy", files=[_entry("photo.jpg", payload)],
+    ), [payload])
+    assert files_result.status_code == 200, files_result.text
+    assert Path(files_result.json()["files"][0]["path"]) == shared / "photo.jpg"
+    assert (shared / "photo.jpg").read_bytes() == payload
+
+    chat_result = _send(client, _manifest(files=[_entry("photo.jpg", payload)]), [payload])
+    assert chat_result.status_code == 200, chat_result.text
+    chat_path = Path(chat_result.json()["files"][0]["path"])
+    assert workspace / "client" / "inbox" in chat_path.parents
+    assert chat_path.read_bytes() == payload
+    assert (shared / "photo.jpg").read_bytes() == payload
+
+
 def test_client_side_hash_lets_the_browser_skip_a_known_file(panel):
     client, _root, _workspace = panel
     import hashlib

@@ -6,6 +6,7 @@ import {
   buildFileBreadcrumbs,
   buildWorkspaceBreadcrumbs,
   filterAndSortFileEntries,
+  organizedWorkspaceLabel,
   workspaceEntryLabel,
   workspaceEntryTarget,
   workspaceParentPath,
@@ -51,6 +52,20 @@ describe("file manager helpers", () => {
 
 describe("workspace labels over the physical fleet layout", () => {
   const root = "/opt/data/workspace";
+  it("names stable agent folders without changing their paths", () => {
+    const organization = {
+      profiles: { designer: "abcdef0123456789" },
+      archived: { "1122334455667788": "old-agent" },
+    };
+    const label = (path: string, name: string) => organizedWorkspaceLabel(root, path, name, organization, { designer: "Дизайнер" });
+    expect(label(`${root}/shared`, "shared")).toBe("Общие материалы");
+    expect(label(`${root}/agents`, "agents")).toBe("Результаты агентов");
+    expect(label(`${root}/agents/abcdef0123456789`, "abcdef0123456789")).toBe("Дизайнер");
+    expect(label(`${root}/agents/abcdef0123456789/results`, "results")).toBe("Результаты");
+    expect(label(`${root}/agents/1122334455667788`, "1122334455667788")).toBe("Архив: old-agent");
+    expect(label(`${root}/client/inbox`, "inbox")).toBe("Загрузки из чатов");
+    expect(label(`${root}/Старое/shared`, "shared")).toBe("shared");
+  });
   it("names the chat inbox and its date/package folders without touching paths", () => {
     expect(workspaceEntryLabel(root, `${root}/client`, "client")).toBe("Загрузки из чатов");
     expect(workspaceEntryLabel(root, `${root}/client/inbox`, "inbox")).toBe("Загрузки из чатов");

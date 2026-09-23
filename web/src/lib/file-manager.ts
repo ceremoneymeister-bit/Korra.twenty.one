@@ -138,6 +138,29 @@ export function workspaceEntryLabel(root: string | null | undefined, entryPath: 
   return name;
 }
 
+/** Human names for new managed sections and stable agent result keys. */
+export function organizedWorkspaceLabel(
+  root: string | null | undefined,
+  entryPath: string,
+  name: string,
+  organization: { profiles: Record<string, string>; archived: Record<string, string> } | null | undefined,
+  agentNames: Record<string, string>,
+): string {
+  if (!organization) return workspaceEntryLabel(root, entryPath, name);
+  const parts = workspaceRelativeParts(root, entryPath);
+  if (!parts) return name;
+  if (parts.length === 1 && parts[0] === "shared") return "Общие материалы";
+  if (parts.length === 1 && parts[0] === "agents") return "Результаты агентов";
+  if (parts[0] === "agents" && parts.length === 2) {
+    const profile = Object.keys(organization.profiles).find(id => organization.profiles[id] === parts[1]);
+    if (profile) return agentNames[profile] || profile;
+    const archived = organization.archived[parts[1]];
+    return archived ? `Архив: ${archived}` : `Агент ${parts[1].slice(0, 8)}`;
+  }
+  if (parts[0] === "agents" && parts.length === 3 && parts[2] === "results") return "Результаты";
+  return workspaceEntryLabel(root, entryPath, name);
+}
+
 /**
  * Куда вести клик по элементу: «Загрузки из чатов» в корне сразу открывает
  * `client/inbox`, минуя служебный уровень `client`.

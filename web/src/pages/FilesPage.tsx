@@ -57,7 +57,7 @@ import {
   buildFileBreadcrumbs,
   buildWorkspaceBreadcrumbs,
   filterAndSortFileEntries,
-  workspaceEntryLabel,
+  organizedWorkspaceLabel,
   workspaceEntryTarget,
   workspaceParentPath,
   type FileSortMode,
@@ -361,15 +361,31 @@ export default function FilesPage() {
   const activePath = listing?.path ?? requestedPath ?? "";
   const canChangePath = listing?.can_change_path ?? false;
   const managedRoot = listing?.locked_root ?? listing?.root;
+  const organization = fleetMode ? listing?.organization : null;
+  const atOrganizedRoot = Boolean(organization && activePath === managedRoot);
+  const agentNames = useMemo(() => Object.fromEntries([
+    ["default", tabs[0]?.label || "Корра"],
+    ...[...tabs, ...hiddenTabs].filter(tab => tab.profile).map(tab => [tab.profile, tab.label]),
+  ]), [tabs, hiddenTabs]);
   const breadcrumbs = useMemo(
     () => (fleetMode
-      ? buildWorkspaceBreadcrumbs(managedRoot, activePath)
+      ? buildWorkspaceBreadcrumbs(managedRoot, activePath).map((item, index) => index === 0 ? item : {
+        ...item,
+        label: organization && activePath === `${managedRoot}/client` && item.path === activePath
+          ? "client (прежние файлы)"
+          : organizedWorkspaceLabel(managedRoot, item.path, item.path.split("/").pop() || item.label, organization, agentNames),
+      })
       : buildFileBreadcrumbs(managedRoot, activePath, filesRootLabel())),
-    [activePath, fleetMode, managedRoot],
+    [activePath, fleetMode, managedRoot, organization, agentNames],
   );
   const entryLabel = useCallback(
-    (entry: { path: string; name: string }) => (fleetMode ? workspaceEntryLabel(managedRoot, entry.path, entry.name) : clientEntryLabel(entry.name)),
-    [fleetMode, managedRoot],
+    (entry: { path: string; name: string }) => {
+      if (atOrganizedRoot && entry.path === `${managedRoot}/client`) return "client (прежние файлы)";
+      return fleetMode
+        ? organizedWorkspaceLabel(managedRoot, entry.path, entry.name, organization, agentNames)
+        : clientEntryLabel(entry.name);
+    },
+    [atOrganizedRoot, fleetMode, managedRoot, organization, agentNames],
   );
   // «Показать в папке» из чата: `/files?path=<папка>&highlight=<имя>` подсвечивает
   // и прокручивает к нужной строке, чтобы файл не искали глазами среди сотни.
@@ -390,19 +406,24 @@ export default function FilesPage() {
     clientMode && /(?:^|\/)home\/client\/inbox(?:\/|$)/.test(normalizedActivePath);
   const canUpload =
     Boolean(activePath) && !uploading && !pendingBatch && (!clientMode || isInClientInbox);
+  const uploadTarget = atOrganizedRoot && organization ? organization.shared : activePath;
+  const uploadDisplayPath = atOrganizedRoot ? "Общие материалы" : headerPath;
   const baseEntries = useMemo(() => (listing?.entries ?? []).filter((entry) => {
     if (!clientMode) return true;
     if (entry.name.startsWith(".") || entry.name.endsWith(".meta.json")) return false;
     return !isAtClientRoot || ["artifacts", "inbox"].includes(entry.name);
   }), [clientMode, isAtClientRoot, listing?.entries]);
   const visibleEntries = useMemo(() => {
-    const sorted = filterAndSortFileEntries(baseEntries, searchQuery, sortMode);
+    const entries = atOrganizedRoot
+      ? baseEntries.filter(item => item.path !== organization?.shared && item.path !== organization?.agents)
+      : baseEntries;
+    const sorted = filterAndSortFileEntries(entries, searchQuery, sortMode);
     if (!fleetMode) return sorted;
     // «Загрузки из чатов» — постоянный раздел корня, а не папка среди папок:
     // держим её первой независимо от сортировки по имени/дате/размеру.
     const pinned = sorted.filter((item) => workspaceEntryTarget(managedRoot, item.path) !== item.path);
     return pinned.length ? [...pinned, ...sorted.filter((item) => !pinned.includes(item))] : sorted;
-  }, [baseEntries, fleetMode, managedRoot, searchQuery, sortMode]);
+  }, [atOrganizedRoot, baseEntries, fleetMode, managedRoot, organization, searchQuery, sortMode]);
   useEffect(() => { setSelected([]); }, [activePath]);
 
   /** Переход в папку — новая запись в истории: «Назад» вернёт на уровень выше. */
@@ -525,7 +546,9 @@ export default function FilesPage() {
 
   const openDirectory = (entry: ManagedFileEntry) => {
     if (entry.is_directory) {
-      navigateTo(fleetMode ? workspaceEntryTarget(managedRoot, entry.path) : entry.path);
+      navigateTo(atOrganizedRoot && entry.path === `${managedRoot}/client`
+        ? entry.path
+        : fleetMode ? workspaceEntryTarget(managedRoot, entry.path) : entry.path);
     }
   };
 
@@ -571,6 +594,7 @@ export default function FilesPage() {
     try {
       const input = await prepareUploadBatch(batch.files, { origin: "files", target: batch.target, folder: batch.folder, conflict });
       startUploadJob(input);
+      if (batch.target !== activePath) navigateTo(batch.target);
       setUploadNotice(batch.folder?.directoryCapture === "files-only" ? "Выбор папки в этом браузере не включает пустые каталоги. Чтобы сохранить их, перетащите папку." : "");
     } catch (cause) {
       setError(ownerFacingError(cause, "Не удалось подготовить загрузку."));
@@ -582,10 +606,10 @@ export default function FilesPage() {
   };
 
   const uploadFiles = (files: FileList | File[] | null, folder?: FolderSelection) => {
-    if (!activePath || (!files?.length && !folder)) return;
-    const batch = { files: Array.from(files ?? []), folder, target: activePath };
+    if (!uploadTarget || (!files?.length && !folder)) return;
+    const batch = { files: Array.from(files ?? []), folder, target: uploadTarget };
     const names = folder ? [folder.name] : batch.files.map(file => file.name);
-    if (baseEntries.some(entry => names.includes(entry.name))) setPendingBatch(batch);
+    if (uploadTarget === activePath && baseEntries.some(entry => names.includes(entry.name))) setPendingBatch(batch);
     else void beginUpload(batch, "copy");
   };
 
@@ -785,6 +809,31 @@ export default function FilesPage() {
         </div>
       </div>
 
+      {atOrganizedRoot && organization && (
+        <section aria-label="Разделы файлов" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: "Общие материалы", path: organization.shared, description: "Папка для людей и агентов" },
+            { label: "Результаты агентов", path: organization.agents, description: "Отдельная папка каждому агенту" },
+            { label: "Загрузки из чатов", path: organization.uploads, description: "Файлы, приложенные к сообщениям" },
+          ].map(section => (
+            <button key={section.path} type="button" onClick={() => navigateTo(section.path)}
+              className="min-h-24 rounded-xl border border-border bg-background/35 p-4 text-left transition-colors hover:bg-background/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+              <Folder className="mb-2 size-5 text-warning" aria-hidden />
+              <span className="block font-medium">{section.label}</span>
+              <span className="block text-xs text-muted-foreground">{section.description}</span>
+            </button>
+          ))}
+          <a href="#earlier-files" className="min-h-24 rounded-xl border border-border bg-background/35 p-4 text-left transition-colors hover:bg-background/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+            <FolderOpen className="mb-2 size-5 text-warning" aria-hidden />
+            <span className="block font-medium">Ранее созданное</span>
+            <span className="block text-xs text-muted-foreground">Файлы и папки на прежних местах</span>
+          </a>
+          <p className="text-xs text-muted-foreground sm:col-span-2 xl:col-span-4">
+            Новые файлы отсюда загружаются в «Общие материалы». Старые файлы остаются на прежних местах.
+          </p>
+        </section>
+      )}
+
       {(!clientMode || isInClientInbox) && (
         <button
           type="button"
@@ -809,8 +858,8 @@ export default function FilesPage() {
               <span className="block text-sm font-semibold text-foreground">
                 {uploading ? "Загрузка" : draggingFiles ? "Отпустите файлы" : "Перетащите файлы сюда"}
               </span>
-              <span className="block truncate text-xs text-text-secondary" title={headerPath}>
-                {headerPath} · до 2 ГБ на файл, 20 ГБ на загрузку
+              <span className="block truncate text-xs text-text-secondary" title={uploadDisplayPath}>
+                {uploadDisplayPath} · до 2 ГБ на файл, 20 ГБ на загрузку
               </span>
             </span>
           </span>
@@ -870,6 +919,8 @@ export default function FilesPage() {
           </select>
         </label>
       </div>
+
+      {atOrganizedRoot && <h2 id="earlier-files" className="text-sm font-semibold text-foreground">Ранее созданное</h2>}
 
       <Card className="min-w-0 max-w-full overflow-hidden rounded-xl"
         style={{ "--file-actions-width": restrictedFiles ? "196px" : "292px" } as CSSProperties}>
