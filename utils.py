@@ -554,6 +554,11 @@ def atomic_yaml_write(
         raise
 
 
+# Keep quoted values byte-stable: ruamel 0.18 can turn a fold after a
+# backslash into a literal space when the value is read again.
+ROUNDTRIP_YAML_WIDTH = 2**31 - 1
+
+
 def atomic_roundtrip_yaml_update(
     path: Union[str, Path],
     key_path: str,
@@ -573,6 +578,7 @@ def atomic_roundtrip_yaml_update(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     yaml_rt = YAML(typ="rt")
+    yaml_rt.width = ROUNDTRIP_YAML_WIDTH
     yaml_rt.preserve_quotes = True
     yaml_rt.allow_unicode = True
     yaml_rt.default_flow_style = False
@@ -681,6 +687,7 @@ def atomic_roundtrip_yaml_save(
     require_readable_config_before_write(path)
 
     yaml_rt = YAML(typ="rt")
+    yaml_rt.width = ROUNDTRIP_YAML_WIDTH
     yaml_rt.preserve_quotes = True
     yaml_rt.allow_unicode = True
     yaml_rt.default_flow_style = False
