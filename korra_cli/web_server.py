@@ -1886,6 +1886,48 @@ _AUDIO_MIME_EXTENSIONS: Dict[str, str] = {
     "video/webm": ".webm",
 }
 _MAX_TRANSCRIPTION_UPLOAD_BYTES = 25 * 1024 * 1024
+# A browser recording counts as truncated when the received file holds less
+# audio than the browser clock recorded by more than this many seconds AND
+# this share. The recorder starts a fraction of a second late — that is not a
+# loss. Mirrors PARTIAL_MIN_* in web/src/hooks/useDictation.ts.
+_DICTATION_SHORTFALL_SECONDS = 5.0
+_DICTATION_SHORTFALL_SHARE = 0.1
+
+
+def _probe_browser_recording(
+    path: str, size: int, mime_type: str, duration_ms: Optional[int]
+) -> Optional[float]:
+    """Log what actually arrived from the browser and return its length.
+
+    Before 0.21.13 nothing recorded the size or duration of a dictation
+    upload, so a five-minute monologue that reached the server as half a
+    minute looked exactly like a short answer from the STT provider. The file
+    name matches the ``Transcribing <name>`` line of the provider call.
+    """
+    from tools.transcription_tools import probe_audio_seconds
+
+    audio_seconds = probe_audio_seconds(path)
+    recorded = duration_ms / 1000 if duration_ms and duration_ms > 0 else None
+
+    def _fmt(value: Optional[float]) -> str:
+        return "unknown" if value is None else f"{value:.1f}s"
+
+    _log.info(
+        "Browser dictation %s received: %d bytes %s, audio %s, recorded %s",
+        Path(path).name, size, mime_type, _fmt(audio_seconds), _fmt(recorded),
+    )
+    if recorded is not None and audio_seconds is not None:
+        missing = recorded - audio_seconds
+        if (
+            missing > _DICTATION_SHORTFALL_SECONDS
+            and missing > recorded * _DICTATION_SHORTFALL_SHARE
+        ):
+            _log.warning(
+                "Browser dictation %s arrived shorter than recorded: "
+                "%.1fs of audio for %.1fs recorded (%d bytes %s)",
+                Path(path).name, audio_seconds, recorded, size, mime_type,
+            )
+    return audio_seconds
 
 
 def _audio_extension_for_mime(mime_type: str) -> str:
@@ -7438,16 +7480,21 @@ async def transcribe_audio_upload(
         from tools.voice_mode import transcribe_recording
 
         def _transcribe_scoped():
+            # The probe is a short ffprobe/ffmpeg subprocess — it belongs in
+            # this worker thread, not on the event loop.
+            audio_seconds = _probe_browser_recording(
+                temp_path, len(audio_bytes), mime_type, payload.duration_ms
+            )
             # Home-only scope (contextvar), NOT _profile_scope: transcription
             # blocks for the provider round-trip and _profile_scope holds a
             # process-global skills lock for its entire body (see the MCP
             # probe above). STT only needs config/.env resolution, which the
             # contextvar override provides inside this worker thread.
             with _config_profile_scope(profile):
-                return transcribe_recording(temp_path)
+                return audio_seconds, transcribe_recording(temp_path)
 
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _transcribe_scoped)
+        audio_seconds, result = await loop.run_in_executor(None, _transcribe_scoped)
     except HTTPException:
         raise
     except Exception as exc:
@@ -7460,6 +7507,10 @@ async def transcribe_audio_upload(
             except OSError:
                 pass
 
+    # How much audio the received file holds: the browser compares it with
+    # its own clock and tells the owner when only part of a recording arrived.
+    received_seconds = round(audio_seconds, 1) if audio_seconds is not None else None
+
     if not result.get("success"):
         err = result.get("error") or "Transcription failed"
         # An empty transcript means no speech was detected — a normal outcome
@@ -7468,13 +7519,19 @@ async def transcribe_audio_upload(
         # the client quietly re-listens instead of surfacing a "transcription
         # failed" toast on every silent gap.
         if "empty transcript" in err.lower():
-            return {"ok": True, "transcript": "", "provider": result.get("provider")}
+            return {
+                "ok": True,
+                "transcript": "",
+                "provider": result.get("provider"),
+                "audio_seconds": received_seconds,
+            }
         raise HTTPException(status_code=400, detail=err)
 
     return {
         "ok": True,
         "transcript": str(result.get("transcript") or "").strip(),
         "provider": result.get("provider"),
+        "audio_seconds": received_seconds,
     }
 
 

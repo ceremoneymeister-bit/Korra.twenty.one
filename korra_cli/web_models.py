@@ -126,6 +126,11 @@ class WhatsAppOnboardingApply(BaseModel):
 class AudioTranscriptionRequest(BaseModel):
     data_url: str
     mime_type: Optional[str] = None
+    # Length of the recording by the browser's clock. Logged next to the
+    # size and probed duration of the received file, so "recorded five
+    # minutes, half a minute arrived" is visible instead of looking like a
+    # short answer.
+    duration_ms: Optional[int] = None
 
 
 class ManagedFileUpload(BaseModel):

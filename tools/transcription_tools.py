@@ -3152,6 +3152,46 @@ def _probe_audio_duration(file_path: str) -> Optional[float]:
         return None
 
 
+_FFMPEG_TIME_RE = re.compile(r"time=(\d+):(\d{2}):(\d{2}(?:\.\d+)?)")
+
+
+def probe_audio_seconds(file_path: str) -> Optional[float]:
+    """Return how many seconds of audio *file_path* really holds, or None.
+
+    Browser ``MediaRecorder`` output is a live WebM stream: Chrome and Safari
+    never write the container ``Duration``, so ``format=duration`` reports
+    ``N/A`` exactly for the files whose length matters most. When the header
+    has no answer, remux the audio stream to the null muxer (no decode, a
+    ten-minute recording takes well under a second) and read the last
+    timestamp ffmpeg reached. Best-effort: None when the tools are missing or
+    the file cannot be read.
+    """
+    declared = _probe_audio_duration(file_path)
+    if declared and declared > 0:
+        return declared
+    ffmpeg = _find_ffmpeg_binary()
+    if not ffmpeg:
+        return None
+    command = [
+        ffmpeg, "-hide_banner", "-nostdin", "-i", file_path,
+        "-map", "0:a:0", "-c", "copy", "-f", "null", "-",
+    ]
+    try:
+        result = subprocess.run(
+            command, check=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+            stdin=subprocess.DEVNULL, creationflags=windows_hide_flags(),
+        )
+    except Exception:  # noqa: BLE001 - probe is best-effort
+        return None
+    matches = _FFMPEG_TIME_RE.findall(result.stderr or "")
+    if not matches:
+        return None
+    hours, minutes, seconds = matches[-1]
+    total = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    return total if total > 0 else None
+
+
 def _cloud_trim_settings(stt_config: Dict[str, Any]) -> tuple[bool, int, int]:
     """Resolve (enabled, threshold_db, keep_ms) for the cloud silence trim."""
     cfg = stt_config if isinstance(stt_config, dict) else {}
