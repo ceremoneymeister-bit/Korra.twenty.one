@@ -43,7 +43,9 @@ vi.mock("@/hooks/useSessionSearch", () => ({
   }),
 }));
 vi.mock("@/hooks/useSessionRun", () => ({ useSessionRun: () => null }));
-vi.mock("@/hooks/useDictation", () => ({
+vi.mock("@/hooks/useDictation", async (importOriginal) => ({
+  // Keep the real pure helpers (e.g. formatDictationClock); stub only the hook.
+  ...(await importOriginal<typeof import("@/hooks/useDictation")>()),
   useDictation: () => ({ state: "idle", supported: false, toggle: vi.fn(), cancel: vi.fn() }),
 }));
 vi.mock("@/contexts/useProfileScope", () => ({ useProfileScope: () => ({ profiles: [] }) }));
