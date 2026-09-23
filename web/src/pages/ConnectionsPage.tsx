@@ -88,6 +88,10 @@ export default function ConnectionsPage() {
         <p className="text-xs text-text-tertiary">
           Отключение действует сразу: агент теряет доступ со следующего обращения.
         </p>
+        <p className="text-xs text-text-tertiary" data-owner-only-note>
+          Подключения — ваши: в Telegram и других мессенджерах агент пользуется ими только в вашем личном
+          чате, когда вы указаны владельцем бота. Посетители общих ботов и группы их не получают.
+        </p>
       </div>
 
       {loadState === "loading" && !data ? <KorraLoader className="py-16" /> : null}

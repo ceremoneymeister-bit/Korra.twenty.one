@@ -1,19 +1,24 @@
 """Agent tool: the owner's Google Calendar through the connection made in Korra.
 
-Contract «подключение = инструмент агента»:
+Contract «подключение = инструмент агента», with the owner's consent kept:
 
-* the tool exists in every profile of an installation whose Ceremoneymeister
-  OAuth app is configured — no per-profile config, skill or terminal access
-  is needed, so curated agents get it too;
-* each call resolves the profile's *effective* grant at that moment (its own
-  or one the owner explicitly shared with it).  Connecting in the owner's
-  screen works on the next call, and revoking or detaching a shared grant
-  denies the next call — even inside an already running conversation;
-* the schema never changes with the connection state, so a connect or revoke
-  never rebuilds tool schemas mid-conversation (prompt cache stays valid).
+* the tool is a configurable toolset (``google_calendar``): profiles on the
+  default toolset list get it wherever the installation OAuth app is
+  configured, while a profile with an explicit toolset list gets it only when
+  the list names it — a restricted profile never gains it silently;
+* two independent checks on **every call**: the principal (who this turn
+  acts for, :mod:`gateway.principal`) and the grant (the profile's own or
+  explicitly shared connection, resolved at call time). Revoking or detaching
+  a grant denies the next call, even inside a running conversation;
+* reads: the owner, live or delegated (owner-created scheduled jobs, board
+  workers). Adding an event: only the owner speaking in a live conversation —
+  a background run never makes external changes on its own;
+* creates are idempotent: the event id is derived from the request, so a
+  repeated create — after a lost answer or a second attempt — cannot produce
+  a duplicate, and an unknown outcome is reported as such, never as "retry".
 
-The tool reads events and can add a simple event without guests.  Credential
-management stays with ``google_workspace_auth`` and the owner's screens.
+Credential management stays with ``google_workspace_auth`` and the owner's
+screens.
 """
 
 from __future__ import annotations
@@ -22,10 +27,11 @@ import json
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from gateway.principal import current_principal
 from korra_constants import get_hermes_home
 from korra_cli import google_calendar
 from korra_cli import google_workspace as google
-from tools.registry import registry
+from tools.registry import no_cache_check_fn, registry
 
 
 MAX_DAYS = 31
@@ -42,7 +48,25 @@ _OWNER_ACTIONS = {
     ),
     google_calendar.ACTION_RETRY: "Google did not answer; suggest trying again a bit later.",
     google_calendar.ACTION_SUPPORT: "Google is not set up on this Korra server; suggest contacting Korra support.",
+    google_calendar.ACTION_VERIFY: (
+        "The result is unknown: the event may already be in the calendar. Do not "
+        "create it again. Check with action=list for that time and tell the user "
+        "exactly what you found."
+    ),
 }
+
+_OWNER_ONLY = (
+    "The owner's Google Calendar is available only in the owner's own "
+    "conversation (the Korra cabinet, the owner's computer, or the owner's "
+    "direct chat when the owner is configured for this bot). Do not reveal, "
+    "guess or change the owner's schedule here; say that you cannot access it."
+)
+_LIVE_OWNER_ONLY = (
+    "Adding events is done only when the owner asks for it in a live "
+    "conversation. This is a background run (a scheduled task or a board "
+    "step): do not create it. Describe the event you would add in your "
+    "result or ask the owner, and let the owner confirm it in chat."
+)
 
 
 def _error(code: str, message: str, action: str | None = None) -> str:
@@ -127,19 +151,45 @@ def _create(args: dict[str, Any]) -> str:
         location=str(args.get("location") or ""),
         description=str(args.get("description") or ""),
     )
-    return json.dumps({"ok": True, "created": _format_event(event)}, ensure_ascii=False)
+    payload: dict[str, Any] = {"ok": True, "created": _format_event(event)}
+    if event.get("already_existed"):
+        payload["already_existed"] = True
+        payload["note"] = "This exact event was already in the calendar; nothing new was added."
+    if event.get("reconciled"):
+        payload["note"] = "Google's answer was lost; the event was found in the calendar, so it exists once."
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _handle(args: dict, **_kwargs) -> str:
     action = str((args or {}).get("action") or "list").strip().lower()
+    # Who this turn acts for is decided by the server on every call, before
+    # the grant is touched. Grant/share/revoke stay the second, independent
+    # check inside korra_cli.google_calendar.
+    principal = current_principal()
     try:
         if action == "list":
+            if not principal.owner:
+                return _error("owner_only", _OWNER_ONLY)
             return _list(args or {})
         if action == "create":
+            if not principal.owner:
+                return _error("owner_only", _OWNER_ONLY)
+            if not principal.live:
+                return _error("owner_confirmation_required", _LIVE_OWNER_ONLY)
             return _create(args or {})
         return _error("invalid_request", f"Unsupported action: {action}")
     except google_calendar.CalendarError as exc:
         return _error(exc.code, str(exc), exc.action)
+
+
+@no_cache_check_fn
+def _calendar_available() -> bool:
+    """Offer the schema only where it can be used: app configured, owner turn.
+
+    Uncached on purpose: the answer depends on who is speaking, and the tool
+    definitions cache keys on the principal (see model_tools).
+    """
+    return current_principal().owner and google.app_ready()
 
 
 registry.register(
@@ -155,8 +205,10 @@ registry.register(
             "optional days, or for an explicit ISO 8601 start/end; times are in "
             "the owner's timezone. action=create: add one event (title, start, "
             "end or duration_minutes, optional location/description); no guests "
-            "are invited. If the result says the calendar is not connected, "
-            "explain the owner's next step instead of retrying."
+            "are invited; creating is for the owner in a live conversation only, "
+            "and repeating the same create never duplicates the event. If the "
+            "result says the calendar is not connected or not available here, "
+            "explain the next step instead of retrying."
         ),
         "parameters": {
             "type": "object",
@@ -195,7 +247,7 @@ registry.register(
         },
     },
     handler=_handle,
-    check_fn=google.app_ready,
+    check_fn=_calendar_available,
     description="Owner's Google Calendar through the Korra connection.",
     emoji="📅",
 )

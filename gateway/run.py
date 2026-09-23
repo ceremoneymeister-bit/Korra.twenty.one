@@ -18210,18 +18210,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # ordinary gateway access. Pairing, roles, and allow-all never imply
         # ownership: the active profile must name this exact platform principal
         # under gateway.credential_management.owners.
-        from gateway.credential_management import owner_matches
+        from gateway.credential_management import owner_principal
 
-        source._credential_management_authorized = bool(
-            not is_internal
-            and str(source.user_id or "").strip()
-            and source.chat_type == "dm"
-            and owner_matches(
-                _load_gateway_config(),
-                getattr(source.platform, "value", source.platform),
-                str(source.user_id),
-            )
+        # The same owner mapping decides who may use the owner's connected
+        # services (calendar, board) in chat — see gateway.principal. A system
+        # turn inside the owner's direct chat acts for the owner but is not
+        # the owner speaking: it may read, never commit external changes.
+        source._owner_principal = owner_principal(
+            _load_gateway_config(),
+            platform=getattr(source.platform, "value", source.platform),
+            user_id=str(source.user_id or ""),
+            chat_type=str(source.chat_type or ""),
+            internal=is_internal,
         )
+        source._credential_management_authorized = source._owner_principal == "live"
 
         # Global emergency stop (`hermes pause`): give new turns a brief
         # paused notice instead of starting an agent run. Internal events
@@ -26382,6 +26384,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 )
                 is True
             ),
+            owner_principal=str(getattr(context.source, "_owner_principal", "") or ""),
             async_delivery=_async_delivery,
             cron_session="",
         )

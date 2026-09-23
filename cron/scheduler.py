@@ -5927,6 +5927,7 @@ def run_job(
     _cron_session_var = _VAR_MAP["KORRA_CRON_SESSION"]
     _cron_session_token = None
     _non_dispatcher_token = None
+    _background_owner_token = None
     _session_db = None
     try:
 
@@ -5935,6 +5936,17 @@ def run_job(
         # which would suppress the legacy os.environ fallback used by standalone
         # cron entrypoints and tests.
         _cron_session_token = _cron_session_var.set("1")
+
+        # Whose job is this? A job acts for the owner only when it was created
+        # from an owner surface; the owner's connected services (calendar,
+        # board) check this, never the model's word. See gateway.principal.
+        try:
+            from gateway.principal import cron_job_acts_for_owner
+            from gateway.session_context import set_background_owner
+
+            _background_owner_token = set_background_owner(cron_job_acts_for_owner(job))
+        except Exception:
+            logger.warning("Job '%s': owner verdict unavailable; treating as not the owner's", job_id)
 
         # Mark this job as NOT the dispatcher-owned kanban worker.
         #
@@ -6862,6 +6874,10 @@ def run_job(
         clear_session_vars(_ctx_tokens)
         if _cron_session_token is not None:
             _cron_session_var.reset(_cron_session_token)
+        if _background_owner_token is not None:
+            from gateway.session_context import reset_background_owner
+
+            reset_background_owner(_background_owner_token)
         if _non_dispatcher_token is not None:
             exit_non_dispatcher_owned_context(_non_dispatcher_token)
         for _var_name in _cron_delivery_vars:

@@ -313,6 +313,15 @@ def _scan_cron_skill_assembled(assembled: str) -> tuple[str, str]:
     return cleaned, ""
 
 
+def _creator_is_owner() -> bool:
+    try:
+        from gateway.principal import origin_owner_verdict
+
+        return origin_owner_verdict()
+    except Exception:
+        return False
+
+
 def _origin_from_env() -> Optional[Dict[str, str]]:
     from gateway.session_context import get_session_env
     origin_platform = get_session_env("KORRA_SESSION_PLATFORM")
@@ -346,6 +355,9 @@ def _origin_from_env() -> Optional[Dict[str, str]]:
             "chat_id": origin_chat_id,
             "chat_name": get_session_env("KORRA_SESSION_CHAT_NAME") or None,
             "thread_id": thread_id,
+            # Who created the job: when it later runs unattended it may use
+            # the owner's connected services only if this was the owner.
+            "owner": _creator_is_owner(),
             # Captured so an opt-in delivery mirror (cron.mirror_delivery /
             # attach_to_session) can resolve the exact participant's session in
             # per-user-isolated group chats — parity with interactive

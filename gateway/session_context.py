@@ -37,7 +37,7 @@ needs to replace the import + call site:
 """
 
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from typing import Any, Iterator
 from korra_constants import korra_env, korra_env_set, korra_env_aliases
 
@@ -109,12 +109,26 @@ _SESSION_PROFILE: ContextVar = ContextVar("KORRA_SESSION_PROFILE", default=_UNSE
 _CREDENTIAL_MANAGEMENT_AUTHORIZED: ContextVar = ContextVar(
     "KORRA_CREDENTIAL_MANAGEMENT_AUTHORIZED", default=_UNSET
 )
+# Server-derived verdict about who is speaking in this turn, bound by the
+# gateway from the same owner mapping as credential management
+# (``gateway.credential_management.owners`` + a direct chat):
+# ``"live"`` — the verified owner wrote this message; ``"delegated"`` — a
+# system turn (background completion, board notification) inside the owner's
+# own direct chat; ``""`` — anybody else. Read through
+# :func:`gateway.principal.current_principal`, never from model arguments.
+_SESSION_OWNER: ContextVar = ContextVar("KORRA_SESSION_OWNER", default=_UNSET)
 _BROWSER_CONTROL_PRINCIPAL: ContextVar = ContextVar(
     "KORRA_BROWSER_CONTROL_PRINCIPAL", default=_UNSET
 )
 _BROWSER_CONTROL_TRANSPORT_FAMILY: ContextVar = ContextVar(
     "KORRA_BROWSER_CONTROL_TRANSPORT_FAMILY", default=_UNSET
 )
+
+# Whether the scheduled job running in this context acts for the owner
+# (created from the owner's own surface). Set by the cron scheduler per job;
+# deliberately outside ``_VAR_MAP``: it is never exported to subprocesses and
+# never falls back to ``os.environ``.
+_BACKGROUND_OWNER: ContextVar = ContextVar("korra_background_owner", default=None)
 
 # Per-session cron marker. Unlike the process-global legacy env var, this is
 # scoped to one cron job / inbound session. _UNSET preserves the legacy env
@@ -165,6 +179,7 @@ _VAR_MAP = {
     "KORRA_SESSION_MESSAGE_ID": _SESSION_MESSAGE_ID,
     "KORRA_SESSION_PROFILE": _SESSION_PROFILE,
     "KORRA_CREDENTIAL_MANAGEMENT_AUTHORIZED": _CREDENTIAL_MANAGEMENT_AUTHORIZED,
+    "KORRA_SESSION_OWNER": _SESSION_OWNER,
     "KORRA_BROWSER_CONTROL_PRINCIPAL": _BROWSER_CONTROL_PRINCIPAL,
     "KORRA_BROWSER_CONTROL_TRANSPORT_FAMILY": _BROWSER_CONTROL_TRANSPORT_FAMILY,
     "KORRA_CRON_SESSION": _CRON_SESSION,
@@ -245,6 +260,7 @@ def set_session_vars(
     message_id: str = "",
     profile: str = "",
     credential_management_authorized: bool = False,
+    owner_principal: str = "",
     browser_control_principal: str = "",
     browser_control_transport_family: str = "",
     cwd: str = "",
@@ -295,6 +311,9 @@ def set_session_vars(
         _CREDENTIAL_MANAGEMENT_AUTHORIZED.set(
             "1" if credential_management_authorized else ""
         ),
+        _SESSION_OWNER.set(
+            owner_principal if owner_principal in {"live", "delegated"} else ""
+        ),
         _BROWSER_CONTROL_PRINCIPAL.set(browser_control_principal),
         _BROWSER_CONTROL_TRANSPORT_FAMILY.set(browser_control_transport_family),
         _CRON_SESSION.set(cron_session),
@@ -337,6 +356,7 @@ def clear_session_vars(tokens: list) -> None:
         _SESSION_MESSAGE_ID,
         _SESSION_PROFILE,
         _CREDENTIAL_MANAGEMENT_AUTHORIZED,
+        _SESSION_OWNER,
         _BROWSER_CONTROL_PRINCIPAL,
         _BROWSER_CONTROL_TRANSPORT_FAMILY,
         _CRON_SESSION,
@@ -401,6 +421,35 @@ def reset_session_vars() -> None:
         clear_session_cwd()
     except Exception:
         pass
+
+
+def session_var_is_bound(name: str) -> bool:
+    """Whether a session variable was bound (even to ``""``) in this context.
+
+    ``get_session_env`` falls back to ``os.environ`` for never-bound
+    variables. Authorization decisions need to tell "this context explicitly
+    has no messaging platform" (CLI, TUI, cron) from "this context never
+    learned who is speaking" (a thread that lost the gateway's context).
+    """
+    for alias in korra_env_aliases(name):
+        var = _VAR_MAP.get(alias)
+        if var is not None:
+            return var.get() is not _UNSET
+    return False
+
+
+def set_background_owner(acts_for_owner: bool) -> Token:
+    """Bind whether the current scheduled job acts for the owner."""
+    return _BACKGROUND_OWNER.set(bool(acts_for_owner))
+
+
+def reset_background_owner(token: Token) -> None:
+    _BACKGROUND_OWNER.reset(token)
+
+
+def background_owner() -> bool | None:
+    """The scheduler's verdict for this job, or None when none was bound."""
+    return _BACKGROUND_OWNER.get()
 
 
 def get_session_env(name: str, default: str = "") -> str:

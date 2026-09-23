@@ -136,11 +136,18 @@ export function borrowStatusText(
  * агентов из пакетов может не быть.
  */
 export function capabilityNote(row: ConnectionsGoogleProfile, services: string[]): string | null {
+  const calendarOff = services.includes("calendar") && !row.tools.calendar;
   const other = services.filter((service) => service !== "calendar");
-  if (!other.length || row.tools.workspace_skill) return null;
-  const hasCalendar = services.includes("calendar") && row.tools.calendar;
+  const skillMissing = other.length > 0 && !row.tools.workspace_skill;
   const rest = serviceLabels(other).join(", ").toLowerCase();
-  return hasCalendar
+  if (calendarOff) {
+    // Ограниченный набор инструментов агента не расширяется сам: календарь
+    // включают в его инструментах явно.
+    const calendar = "Календарь у агента выключен в его наборе инструментов";
+    return skillMissing ? `${calendar}; ${rest} — после установки навыка Google Workspace.` : `${calendar}.`;
+  }
+  if (!skillMissing) return null;
+  return services.includes("calendar")
     ? `Календарь доступен сразу; ${rest} — после установки навыка Google Workspace.`
     : `${rest[0]?.toUpperCase() ?? ""}${rest.slice(1)} — после установки навыка Google Workspace.`;
 }

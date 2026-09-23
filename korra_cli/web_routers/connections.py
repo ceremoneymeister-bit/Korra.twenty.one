@@ -44,19 +44,45 @@ def _has_workspace_skill(home: Path) -> bool:
         return False
 
 
+#: Chat surfaces whose toolset lists decide whether an agent has the calendar
+#: tool: the cabinet chat and the messaging bots.
+_CHAT_PLATFORMS = ("api_server", "telegram")
+
+
+def _calendar_tool_enabled(home: Path) -> bool:
+    """Whether the profile's own toolset lists include ``google_calendar``.
+
+    A profile on the default lists has it; a restricted profile with an
+    explicit list has it only when the list names it.
+    """
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+
+    token = set_hermes_home_override(str(home))
+    try:
+        from korra_cli.config import load_config_readonly
+        from korra_cli.tools_config import _get_platform_tools
+
+        config = load_config_readonly()
+        return any("google_calendar" in _get_platform_tools(config, platform) for platform in _CHAT_PLATFORMS)
+    except Exception:
+        return False
+    finally:
+        reset_hermes_home_override(token)
+
+
 def _connections_snapshot() -> dict[str, Any]:
     from korra_cli import profiles as profile_store
 
     snapshot = google.overview()
-    calendar_tool = bool(snapshot["app"].get("configured"))
+    app_ready = bool(snapshot["app"].get("configured"))
     for row in snapshot["profiles"]:
         home = google._profile_home_for_name(row["profile"])
         meta = profile_store.read_profile_meta(home)
         row["label"] = meta.get("display_name") or ""
         row["tools"] = {
-            # Native `google_calendar` tool: every agent has it wherever the
-            # installation app is configured; the grant decides the answer.
-            "calendar": calendar_tool,
+            # The calendar tool needs the installation app and the profile's
+            # toolset lists to include it; who may use it is decided per call.
+            "calendar": app_ready and _calendar_tool_enabled(home),
             "workspace_skill": _has_workspace_skill(home),
         }
     return {"google": snapshot}

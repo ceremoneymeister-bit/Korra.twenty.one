@@ -34,7 +34,7 @@ from typing import Any, Optional
 
 from agent.redact import redact_sensitive_text
 from korra_cli.goals import judge_goal
-from tools.registry import registry, tool_error
+from tools.registry import no_cache_check_fn, registry, tool_error
 from korra_cli.config import cfg_get, load_config
 from korra_constants import korra_env
 
@@ -139,6 +139,49 @@ def _reject_delegated_child_mutation(tool_name: str) -> Optional[str]:
     )
 
 
+def _board_principal_allowed() -> bool:
+    """The owner's board in chat is for turns that act for the owner.
+
+    The board belongs to the installation owner. A chat profile being
+    allowed to plan on it (``kanban.chat_tools`` / ``toolsets: [kanban]``)
+    says nothing about who is talking to that profile's bot: a public bot of
+    the main agent must not hand its visitors the owner's cards. Decided from
+    server-bound session state (:mod:`gateway.principal`), per call.
+    """
+    try:
+        from gateway.principal import current_principal
+
+        return current_principal().owner
+    except Exception:
+        return False
+
+
+def _dispatcher_worker_turn() -> bool:
+    return bool(korra_env("KORRA_KANBAN_TASK")) and _is_dispatcher_owned_worker()
+
+
+_BOARD_OWNER_ONLY = (
+    "The Kanban board belongs to the owner and is available only in the "
+    "owner's own conversation (the Korra cabinet, the owner's computer, or the "
+    "owner's direct chat when the owner is configured for this bot). Do not "
+    "describe or change the owner's board here."
+)
+
+
+def _principal_guard(handler):
+    """Enforce the board principal on every chat-path call, not only in the schema."""
+    import functools
+
+    @functools.wraps(handler)
+    def guarded(args: dict, **kw) -> str:
+        if not _dispatcher_worker_turn() and not _board_principal_allowed():
+            return tool_error(_BOARD_OWNER_ONLY)
+        return handler(args, **kw)
+
+    return guarded
+
+
+@no_cache_check_fn
 def _check_kanban_mode() -> bool:
     """Task-lifecycle tools are available when:
 
@@ -155,9 +198,10 @@ def _check_kanban_mode() -> bool:
         return False
     if korra_env("KORRA_KANBAN_TASK") and _is_dispatcher_owned_worker():
         return True
-    return _profile_has_kanban_toolset()
+    return _profile_has_kanban_toolset() and _board_principal_allowed()
 
 
+@no_cache_check_fn
 def _check_kanban_orchestrator_mode() -> bool:
     """Board-routing tools (kanban_list, kanban_unblock) are intentionally
     hidden from task workers.
@@ -171,7 +215,7 @@ def _check_kanban_orchestrator_mode() -> bool:
         return False
     if korra_env("KORRA_KANBAN_TASK") and _is_dispatcher_owned_worker():
         return False
-    return _profile_has_kanban_toolset()
+    return _profile_has_kanban_toolset() and _board_principal_allowed()
 
 
 # ---------------------------------------------------------------------------
@@ -2512,6 +2556,28 @@ KANBAN_LINK_SCHEMA = {
         "required": ["parent_id", "child_id"],
     },
 }
+
+
+# Every handler re-checks who the turn acts for (schema gating alone is not a
+# server-side boundary). The dispatcher-owned worker path is unchanged.
+for _handler_name in (
+    "_handle_show",
+    "_handle_list",
+    "_handle_complete",
+    "_handle_block",
+    "_handle_request_review",
+    "_handle_request_changes",
+    "_handle_heartbeat",
+    "_handle_comment",
+    "_handle_attach",
+    "_handle_attach_url",
+    "_handle_attachments",
+    "_handle_create",
+    "_handle_unblock",
+    "_handle_link",
+):
+    globals()[_handler_name] = _principal_guard(globals()[_handler_name])
+del _handler_name
 
 
 # ---------------------------------------------------------------------------

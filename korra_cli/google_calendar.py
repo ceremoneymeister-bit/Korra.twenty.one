@@ -16,6 +16,8 @@ calendar list itself.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import urllib.error
 import urllib.parse
@@ -38,6 +40,8 @@ ACTION_CONNECT = "connect"
 ACTION_RECONNECT = "reconnect"
 ACTION_RETRY = "retry"
 ACTION_SUPPORT = "support"
+# A write whose result is unknown: check before doing anything again.
+ACTION_VERIFY = "verify"
 
 
 class CalendarError(RuntimeError):
@@ -143,10 +147,28 @@ def _http_json(request: urllib.request.Request) -> dict[str, Any]:
     return payload
 
 
-def _call(request: urllib.request.Request) -> dict[str, Any]:
+class _WriteOutcomeUnknown(Exception):
+    """A write left without an answer: Google may or may not have stored it."""
+
+
+class _AlreadyExists(Exception):
+    """Google refused a create because an event with this id already exists."""
+
+
+def _call(request: urllib.request.Request, *, write: bool = False) -> dict[str, Any]:
+    """Execute a request; ``write=True`` keeps unknown outcomes apart.
+
+    For a read a lost answer is simply "try again". For a write it is not:
+    Google may have stored the event before the answer was lost, so the
+    caller has to reconcile instead of retrying blindly.
+    """
     try:
         return _http_json(request)
     except urllib.error.HTTPError as exc:
+        if write and exc.code == 409:
+            raise _AlreadyExists() from exc
+        if write and (exc.code >= 500 or exc.code == 408):
+            raise _WriteOutcomeUnknown() from exc
         if exc.code == 401:
             raise CalendarError(
                 "reauthorization_required",
@@ -179,12 +201,22 @@ def _call(request: urllib.request.Request) -> dict[str, Any]:
             transient=True,
         ) from exc
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        if write and not _refused_before_sending(exc):
+            raise _WriteOutcomeUnknown() from exc
         raise CalendarError(
             "google_unavailable",
             "Google Calendar could not be reached.",
             action=ACTION_RETRY,
             transient=True,
         ) from exc
+
+
+def _refused_before_sending(exc: BaseException) -> bool:
+    """Connection errors that prove the request never reached Google."""
+    reason = getattr(exc, "reason", exc)
+    return isinstance(reason, (ConnectionRefusedError,)) or (
+        isinstance(reason, OSError) and getattr(reason, "errno", None) in {-2, -3}  # DNS failure
+    )
 
 
 def _rfc3339(value: datetime) -> str:
@@ -270,6 +302,54 @@ def list_events(profile_home: Path, *, start: datetime, end: datetime) -> dict[s
     }
 
 
+def event_id_for(
+    *,
+    title: str,
+    start: datetime,
+    end: datetime,
+    location: str = "",
+    description: str = "",
+    generation: int = 0,
+) -> str:
+    """Stable Calendar event id for one requested event.
+
+    The same request always maps to the same id, so a repeated create — after
+    a lost answer, or the agent asking twice — cannot produce a second event:
+    Google answers 409 and the existing event is returned instead. Google ids
+    use base32hex (``0-9a-v``), 5–1024 characters.
+    """
+    key = "\x1f".join(
+        [
+            title.strip(),
+            start.astimezone(timezone.utc).isoformat(),
+            end.astimezone(timezone.utc).isoformat(),
+            location.strip(),
+            description.strip(),
+            str(generation),
+        ]
+    )
+    digest = hashlib.sha256(key.encode("utf-8")).digest()
+    return "k21" + base64.b32hexencode(digest).decode("ascii").lower().rstrip("=")[:40]
+
+
+def _event_request(token: str, event_id: str) -> urllib.request.Request:
+    return urllib.request.Request(
+        f"{EVENTS_ENDPOINT}/{urllib.parse.quote(event_id, safe='')}",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        method="GET",
+    )
+
+
+def _stored_event(token: str, event_id: str) -> dict[str, Any] | None:
+    """The event with this id as Google stores it, or None if there is none."""
+    try:
+        return _http_json(_event_request(token, event_id))
+    except urllib.error.HTTPError as exc:
+        if exc.code in (404, 410):
+            return None
+        raise
+
+
 def create_event(
     profile_home: Path,
     *,
@@ -279,7 +359,17 @@ def create_event(
     location: str = "",
     description: str = "",
 ) -> dict[str, Any]:
-    """Add one event to the primary calendar.  No guests, no invitations."""
+    """Add one event to the primary calendar.  No guests, no invitations.
+
+    Idempotent per request: the event id is derived from its content (see
+    :func:`event_id_for`). When the answer to the insert is lost, the event is
+    looked up by that id before anything is reported; if even that is
+    impossible, the outcome is reported as unknown — never as a failure that
+    invites a blind retry.
+
+    Returns the normalized event plus ``already_existed`` (the same event was
+    created earlier) and ``reconciled`` (confirmed after a lost answer).
+    """
     title = (title or "").strip()
     if not title:
         raise CalendarError("invalid_request", "An event needs a title.", action=ACTION_RETRY)
@@ -295,25 +385,81 @@ def create_event(
         body["location"] = location.strip()[:500]
     if description.strip():
         body["description"] = description.strip()[:4000]
-    request = urllib.request.Request(
-        f"{EVENTS_ENDPOINT}?{urllib.parse.urlencode({'sendUpdates': 'none'})}",
-        data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    event = normalize_event(_call(request))
-    if event is None:
-        raise CalendarError(
-            "google_unavailable",
-            "Google accepted the request but returned no event.",
-            action=ACTION_RETRY,
-            transient=True,
+
+    # A deleted event keeps its id reserved; the next generation gets a new one.
+    for generation in range(3):
+        event_id = event_id_for(
+            title=title,
+            start=start,
+            end=end,
+            location=location,
+            description=description,
+            generation=generation,
         )
-    return event
+        request = urllib.request.Request(
+            f"{EVENTS_ENDPOINT}?{urllib.parse.urlencode({'sendUpdates': 'none'})}",
+            data=json.dumps({**body, "id": event_id}).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            event = normalize_event(_call(request, write=True))
+            if event is not None:
+                return {**event, "already_existed": False, "reconciled": False}
+            # Accepted but unreadable: confirm by id below like a lost answer.
+            raise _WriteOutcomeUnknown()
+        except _AlreadyExists:
+            stored = _lookup_after_write(token, event_id)
+            event = normalize_event(stored) if stored else None
+            if event is not None:
+                return {**event, "already_existed": True, "reconciled": False}
+            continue  # deleted earlier: this id is spent, take the next one
+        except _WriteOutcomeUnknown:
+            stored = _lookup_after_write(token, event_id)
+            event = normalize_event(stored) if stored else None
+            if event is not None:
+                return {**event, "already_existed": False, "reconciled": True}
+            # Checked: the event is not there. Repeating the same request is
+            # safe — it carries the same id, so it can never add a second one.
+            raise CalendarError(
+                "create_not_stored",
+                "Google did not store the event: its answer was lost and the event is not in the calendar. "
+                "Repeating exactly the same request is safe (same event id, no duplicate).",
+                action=ACTION_RETRY,
+            ) from None
+    raise CalendarError(
+        "invalid_request",
+        "This exact event was created and deleted several times; change its title or time.",
+        action=ACTION_VERIFY,
+    )
+
+
+def _lookup_after_write(token: str, event_id: str) -> dict[str, Any] | None:
+    """Look an event up after a write; an unanswerable lookup is 'unknown'."""
+    try:
+        return _stored_event(token, event_id)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise CalendarError(
+                "reauthorization_required",
+                "Google rejected the stored access; the owner must reconnect it.",
+                action=ACTION_RECONNECT,
+            ) from exc
+        raise _outcome_unknown() from exc
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise _outcome_unknown() from exc
+
+
+def _outcome_unknown() -> CalendarError:
+    return CalendarError(
+        "create_outcome_unknown",
+        "Google did not confirm whether the event was created, and it could not be checked.",
+        action=ACTION_VERIFY,
+    )
 
 
 # ---------------------------------------------------------------------------

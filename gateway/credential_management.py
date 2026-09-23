@@ -39,3 +39,25 @@ def owner_matches(config: Mapping[str, Any] | None, platform: str, user_id: str)
         and str(item).strip() != "*"
     }
     return clean_user_id in allowed
+
+
+def owner_principal(
+    config: Mapping[str, Any] | None,
+    *,
+    platform: str,
+    user_id: str,
+    chat_type: str,
+    internal: bool,
+) -> str:
+    """Who a messaging turn acts for, from the same owner mapping.
+
+    ``"live"`` — the configured owner wrote this message in a direct chat;
+    ``"delegated"`` — a system turn (background completion, board
+    notification) inside that owner's direct chat; ``""`` — anyone else,
+    including the owner speaking in a group, where others read the answer.
+    """
+    if str(chat_type or "").strip().lower() != "dm":
+        return ""
+    if not owner_matches(config, platform, user_id):
+        return ""
+    return "delegated" if internal else "live"

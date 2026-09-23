@@ -111,6 +111,10 @@ CONFIGURABLE_TOOLSETS = [
     ("x_search", "🐦 Поиск в X (Twitter)", "Поиск через xAI OAuth или XAI_API_KEY"),
     ("google_workspace", "🔑 Подключение Google Workspace",
      "Владелец подключает Gmail, Календарь, Диск и Таблицы прямо из переписки"),
+    # Configurable on purpose: profiles on the default list get it, a profile
+    # with an explicit (restricted) list gets it only when the list names it.
+    ("google_calendar", "📅 Google Календарь",
+     "Встречи владельца из подключённого Google-календаря; только в разговоре владельца"),
     ("tts", "🔊 Синтез речи", "Преобразование текста в речь"),
     ("stt", "🎙️ Распознавание речи", "Расшифровка голосовых сообщений и голосовой режим"),
     ("skills", "📚 Навыки", "Просмотр и управление навыками"),

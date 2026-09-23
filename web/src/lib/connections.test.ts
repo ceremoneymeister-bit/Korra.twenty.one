@@ -81,6 +81,14 @@ describe("общий доступ к подключению Google", () => {
     expect(capabilityNote(designer, ["email"])).toBe("Почта — после установки навыка Google Workspace.");
   });
 
+  it("говорит, когда календарь выключен в ограниченном наборе инструментов агента", () => {
+    const restricted = { ...designer, tools: { calendar: false, workspace_skill: false } };
+    expect(capabilityNote(restricted, ["calendar"])).toBe("Календарь у агента выключен в его наборе инструментов.");
+    expect(capabilityNote(restricted, ["calendar", "drive"])).toBe(
+      "Календарь у агента выключен в его наборе инструментов; диск — после установки навыка Google Workspace.",
+    );
+  });
+
   it("предлагает подключить тому, кого назвали, иначе начатому или главному", () => {
     expect(defaultConnectTarget(rows, "lawyer")).toBe("lawyer");
     expect(defaultConnectTarget(rows, null)).toBe("mentor");

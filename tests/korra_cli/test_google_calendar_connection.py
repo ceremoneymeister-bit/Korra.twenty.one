@@ -112,14 +112,23 @@ def install(tmp_path, monkeypatch):
 
 
 class FakeCalendarApi:
-    """Answers like the Calendar v3 events endpoint, per access token."""
+    """Answers like the Calendar v3 events endpoints, per access token.
+
+    Honors client-supplied event ids like Google: a second insert with the
+    same id is 409, and ``GET events/<id>`` finds a stored event.
+    """
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
         self.calendars: dict[str, list[dict]] = {}
         self.fail_with: Exception | None = None
 
+    def _find(self, token: str, event_id: str) -> dict | None:
+        return next((e for e in self.calendars.get(token, []) if e.get("id") == event_id), None)
+
     def __call__(self, request):
+        import urllib.error
+
         parsed = urllib.parse.urlparse(request.full_url)
         token = request.headers.get("Authorization", "").removeprefix("Bearer ")
         call = {
@@ -133,17 +142,26 @@ class FakeCalendarApi:
         self.calls.append(call)
         if self.fail_with is not None:
             raise self.fail_with
+        base = "/calendar/v3/calendars/primary/events"
         if request.get_method() == "POST":
             body = call["body"]
+            event_id = body.get("id") or f"generated-{len(self.calls)}"
+            if self._find(token, event_id) is not None:
+                raise urllib.error.HTTPError(request.full_url, 409, "duplicate", {}, None)
             created = {
-                "id": "new-1",
+                "id": event_id,
                 "summary": body["summary"],
                 "start": body["start"],
                 "end": body["end"],
-                "htmlLink": "https://calendar.google.com/event?eid=new-1",
+                "htmlLink": f"https://calendar.google.com/event?eid={event_id}",
             }
             self.calendars.setdefault(token, []).append(created)
             return created
+        if parsed.path.startswith(base + "/"):
+            found = self._find(token, urllib.parse.unquote(parsed.path[len(base) + 1:]))
+            if found is None:
+                raise urllib.error.HTTPError(request.full_url, 404, "not found", {}, None)
+            return found
         return {
             "summary": f"owner-of-{token}@example.com",
             "timeZone": "Asia/Novosibirsk",
@@ -162,11 +180,22 @@ def _event(event_id: str, title: str, start: str, end: str, **extra) -> dict:
     return {"id": event_id, "summary": title, "start": {"dateTime": start}, "end": {"dateTime": end}, **extra}
 
 
-def _tool(monkeypatch, home: Path, args: dict) -> dict:
+OWNER_CABINET = {"platform": "api_server"}
+
+
+def _tool(monkeypatch, home: Path, args: dict, session: dict | None = None) -> dict:
+    """Call the tool as a turn of ``session`` (default: the owner's cabinet chat)."""
+    from gateway.session_context import clear_session_vars, set_session_vars
     from tools import google_calendar_tool
 
     monkeypatch.setattr(google_calendar_tool, "get_hermes_home", lambda: home)
-    return json.loads(google_calendar_tool._handle(args))
+    bound = dict(OWNER_CABINET if session is None else session)
+    bound.setdefault("cron_session", "")
+    tokens = set_session_vars(**bound)
+    try:
+        return json.loads(google_calendar_tool._handle(args))
+    finally:
+        clear_session_vars(tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -249,31 +278,47 @@ def test_shared_grant_reaches_curated_agents_and_detach_or_revoke_cuts_it(instal
     assert len(fake_api.calls) == calls_before
 
 
-def test_curated_profiles_get_the_tool_without_any_config(monkeypatch, tmp_path):
-    """A ready-made agent with an explicit toolset list (even without terminal)."""
+def test_restricted_profiles_never_gain_the_tool_silently(monkeypatch, tmp_path):
+    """Default lists get the calendar; an explicit list only when it names it."""
     from korra_cli.tools_config import _get_platform_tools
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "probe"))
     curated = ["clarify", "memory", "session_search", "skills", "todo", "web"]
-    config = {"platform_toolsets": {p: list(curated) for p in ("telegram", "api_server", "cron", "cli")}}
+    restricted = {"platform_toolsets": {p: list(curated) for p in ("telegram", "api_server", "cron", "cli")}}
+    opted_in = {"platform_toolsets": {p: [*curated, "google_calendar"] for p in ("telegram", "api_server")}}
     for platform in ("telegram", "api_server", "cron", "cli"):
-        assert "google_calendar" in _get_platform_tools(config, platform), platform
         assert "google_calendar" in _get_platform_tools({}, platform), platform
+        assert "google_calendar" not in _get_platform_tools(restricted, platform), platform
         # The owner-only credential tool stays opt-in.
-        assert "google_workspace" not in _get_platform_tools(config, platform)
+        assert "google_workspace" not in _get_platform_tools(restricted, platform)
+    for platform in ("telegram", "api_server"):
+        assert "google_calendar" in _get_platform_tools(opted_in, platform), platform
+    assert "google_calendar" not in _get_platform_tools({"platform_toolsets": {"telegram": ["web"]}}, "telegram")
 
 
-def test_tool_schema_depends_only_on_the_installation_app(install, monkeypatch):
+def test_tool_schema_needs_the_installation_app_and_an_owner_turn(install, monkeypatch):
+    from gateway.session_context import clear_session_vars, set_session_vars
     from tools import google_calendar_tool  # noqa: F401 — registers the tool
     from tools.registry import invalidate_check_fn_cache, registry
 
+    def names(**session) -> list[str]:
+        tokens = set_session_vars(cron_session="", **session)
+        try:
+            return [d["function"]["name"] for d in registry.get_definitions({"google_calendar"}, quiet=True)]
+        finally:
+            clear_session_vars(tokens)
+
     invalidate_check_fn_cache()
-    names = [d["function"]["name"] for d in registry.get_definitions({"google_calendar"}, quiet=True)]
-    assert names == ["google_calendar"]  # present with no grant anywhere
+    # Present for the owner with no grant anywhere: the grant decides the answer.
+    assert names(platform="api_server") == ["google_calendar"]
+    assert names(platform="telegram", chat_type="dm", user_id="1", owner_principal="live") == ["google_calendar"]
+    # Never offered to someone else's turn, and not cached across turns.
+    assert names(platform="telegram", chat_type="dm", user_id="2") == []
+    assert names(platform="telegram", chat_type="group", user_id="1", owner_principal="live") == []
+    assert names(platform="api_server") == ["google_calendar"]
 
     monkeypatch.setenv("KORRA_GOOGLE_OAUTH_CLIENT_PATH", str(install / "missing.json"))
-    invalidate_check_fn_cache()
-    assert registry.get_definitions({"google_calendar"}, quiet=True) == []
+    assert names(platform="api_server") == []
     invalidate_check_fn_cache()
 
 
@@ -638,3 +683,296 @@ def test_calendar_route_reads_every_profile_schedule(install, fake_api, monkeypa
     feed = asyncio.run(connections.dashboard_calendar_feed(refresh=False))
     assert seen == ["all"]
     assert feed["google"]["state"] == "not_connected"
+
+
+# ---------------------------------------------------------------------------
+# R2 (review 23.09): the principal, not only the grant
+# ---------------------------------------------------------------------------
+
+OUTSIDER_DM = {"platform": "telegram", "chat_type": "dm", "chat_id": "777", "user_id": "777"}
+OWNER_DM = {"platform": "telegram", "chat_type": "dm", "chat_id": "42", "user_id": "42", "owner_principal": "live"}
+OWNER_SYSTEM_TURN = {**OWNER_DM, "owner_principal": "delegated"}
+OWNER_IN_GROUP = {"platform": "telegram", "chat_type": "group", "chat_id": "-100", "user_id": "42",
+                  "owner_principal": "live"}
+CREATE = {"action": "create", "title": "Встреча", "start": "2026-09-24T11:00:00+07:00"}
+LIST = {"action": "list", "date": "2026-09-24"}
+
+
+@pytest.fixture
+def shared_calendar(install, fake_api):
+    home = install / "profiles" / "assistant"
+    _write_token(home, ("calendar",), access="tok-owner")
+    fake_api.calendars["tok-owner"] = [
+        _event("private", "Private owner meeting", "2026-09-24T09:00:00+07:00", "2026-09-24T10:00:00+07:00"),
+    ]
+    return home
+
+
+def test_public_bot_visitor_gets_neither_schedule_nor_create(shared_calendar, fake_api, monkeypatch):
+    """The review's `public-calendar`, with the safe expected result."""
+    read = _tool(monkeypatch, shared_calendar, LIST, OUTSIDER_DM)
+    created = _tool(monkeypatch, shared_calendar, CREATE, OUTSIDER_DM)
+    assert read["ok"] is False and read["error"] == "owner_only"
+    assert created["ok"] is False and created["error"] == "owner_only"
+    assert "Private owner meeting" not in json.dumps(read, ensure_ascii=False)
+    assert fake_api.calls == []  # the grant was never even used
+
+
+def test_owner_speaking_in_a_group_is_not_the_owners_private_channel(shared_calendar, fake_api, monkeypatch):
+    assert _tool(monkeypatch, shared_calendar, LIST, OWNER_IN_GROUP)["error"] == "owner_only"
+    assert fake_api.calls == []
+
+
+def test_owner_direct_chat_reads_and_creates(shared_calendar, fake_api, monkeypatch):
+    read = _tool(monkeypatch, shared_calendar, LIST, OWNER_DM)
+    assert [e["title"] for e in read["events"]] == ["Private owner meeting"]
+    created = _tool(monkeypatch, shared_calendar, CREATE, OWNER_DM)
+    assert created["ok"] is True and created["created"]["title"] == "Встреча"
+
+
+def test_background_runs_may_read_but_never_create(shared_calendar, fake_api, monkeypatch):
+    """R4 (restricted v1): external changes are never started implicitly."""
+    from gateway.session_context import reset_background_owner, set_background_owner
+
+    assert _tool(monkeypatch, shared_calendar, LIST, OWNER_SYSTEM_TURN)["ok"] is True
+    refused = _tool(monkeypatch, shared_calendar, CREATE, OWNER_SYSTEM_TURN)
+    assert refused["error"] == "owner_confirmation_required"
+
+    token = set_background_owner(True)  # an owner-created scheduled job
+    try:
+        assert _tool(monkeypatch, shared_calendar, LIST, {"cron_session": "1"})["ok"] is True
+        assert _tool(monkeypatch, shared_calendar, CREATE, {"cron_session": "1"})["error"] == (
+            "owner_confirmation_required"
+        )
+    finally:
+        reset_background_owner(token)
+
+    token = set_background_owner(False)  # scheduled by somebody else
+    try:
+        assert _tool(monkeypatch, shared_calendar, LIST, {"cron_session": "1"})["error"] == "owner_only"
+    finally:
+        reset_background_owner(token)
+    # A cron context whose scheduler bound no verdict fails closed.
+    assert _tool(monkeypatch, shared_calendar, LIST, {"cron_session": "1"})["error"] == "owner_only"
+
+    monkeypatch.setenv("KORRA_KANBAN_TASK", "t_1")  # a board worker on the owner's board
+    assert _tool(monkeypatch, shared_calendar, LIST, {})["ok"] is True
+    assert _tool(monkeypatch, shared_calendar, CREATE, {})["error"] == "owner_confirmation_required"
+    assert [c["method"] for c in fake_api.calls].count("POST") == 0
+
+
+def test_a_context_that_never_learned_the_speaker_is_not_the_owner(shared_calendar, fake_api, monkeypatch):
+    import contextvars
+
+    from gateway.session_context import clear_session_vars, set_session_vars
+    from tools import google_calendar_tool
+
+    clear_session_vars(set_session_vars(platform="telegram"))  # this process now serves sessions
+    monkeypatch.setattr(google_calendar_tool, "get_hermes_home", lambda: shared_calendar)
+    answer = json.loads(contextvars.Context().run(google_calendar_tool._handle, LIST))
+    assert answer["error"] == "owner_only"
+
+
+def test_two_multiplex_profiles_decide_by_their_own_owner_mapping(install, fake_api, monkeypatch):
+    """Same person, two profiles in one process: owner of A, a visitor of B."""
+    from korra_constants import reset_hermes_home_override, set_hermes_home_override
+
+    a = install / "profiles" / "assistant"
+    b = install / "profiles" / "designer"
+    _write_token(a, ("calendar",), access="tok-a")
+    google.configure_sharing(source_profile="assistant", profiles=["designer"])
+    fake_api.calendars["tok-a"] = [
+        _event("p", "Owner meeting", "2026-09-24T09:00:00+07:00", "2026-09-24T10:00:00+07:00"),
+    ]
+    person = {"platform": "telegram", "chat_type": "dm", "chat_id": "42", "user_id": "42"}
+    for _ in range(2):  # interleaved turns, nothing cached across them
+        token = set_hermes_home_override(str(a))
+        try:
+            answer_a = _tool(monkeypatch, a, LIST, {**person, "profile": "assistant", "owner_principal": "live"})
+        finally:
+            reset_hermes_home_override(token)
+        token = set_hermes_home_override(str(b))
+        try:
+            answer_b = _tool(monkeypatch, b, LIST, {**person, "profile": "designer"})
+        finally:
+            reset_hermes_home_override(token)
+        assert answer_a["ok"] is True and answer_a["events"][0]["title"] == "Owner meeting"
+        assert answer_b["error"] == "owner_only"
+
+
+def test_owner_mapping_decides_live_delegated_and_nobody():
+    from gateway.credential_management import owner_principal
+
+    config = {"gateway": {"credential_management": {"owners": {"telegram": ["42"]}}}}
+    common = {"platform": "telegram", "chat_type": "dm", "internal": False}
+    assert owner_principal(config, user_id="42", **common) == "live"
+    assert owner_principal(config, user_id="42", **{**common, "internal": True}) == "delegated"
+    assert owner_principal(config, user_id="777", **common) == ""
+    assert owner_principal(config, user_id="42", **{**common, "chat_type": "group"}) == ""
+    assert owner_principal({}, user_id="42", **common) == ""  # no mapping configured: nobody
+
+
+def test_gateway_binds_the_owner_verdict_for_tools(monkeypatch):
+    from types import SimpleNamespace
+
+    from gateway.principal import current_principal
+    from gateway.run import GatewayRunner
+    from gateway.session_context import clear_session_vars
+
+    runner = GatewayRunner.__new__(GatewayRunner)
+    runner.adapters = {}
+    from gateway.config import Platform
+
+    source = SimpleNamespace(
+        platform=Platform.TELEGRAM, chat_id="42", chat_type="dm", chat_name="",
+        thread_id=None, user_id="42", user_id_alt=None, user_name=None, scope_id="", message_id=None,
+        profile="", _credential_management_authorized=True, _owner_principal="live",
+    )
+    tokens = runner._set_session_env(SimpleNamespace(source=source, session_key="k"))
+    try:
+        assert current_principal().owner and current_principal().live
+    finally:
+        clear_session_vars(tokens)
+    source._owner_principal = ""
+    tokens = runner._set_session_env(SimpleNamespace(source=source, session_key="k"))
+    try:
+        assert current_principal().kind == "outsider"
+    finally:
+        clear_session_vars(tokens)
+
+
+def test_revoke_during_a_running_conversation_denies_the_next_call(shared_calendar, fake_api, monkeypatch):
+    assert _tool(monkeypatch, shared_calendar, LIST, OWNER_DM)["ok"] is True
+    google.revoke(profile_home=shared_calendar, remote_revoke=lambda _value: None)
+    after = _tool(monkeypatch, shared_calendar, LIST, OWNER_DM)  # same session, next call
+    assert after["error"] == "not_connected"
+
+
+def test_tool_definitions_are_cached_per_principal(install, monkeypatch):
+    import model_tools
+    from gateway.session_context import clear_session_vars, set_session_vars
+    from tools.registry import invalidate_check_fn_cache
+
+    invalidate_check_fn_cache()
+    model_tools._clear_tool_defs_cache()
+
+    def names(**session) -> set[str]:
+        tokens = set_session_vars(cron_session="", **session)
+        try:
+            return {d["function"]["name"] for d in model_tools.get_tool_definitions(
+                enabled_toolsets=["google_calendar"], quiet_mode=True)}
+        finally:
+            clear_session_vars(tokens)
+
+    for _ in range(2):
+        assert "google_calendar" in names(platform="api_server")
+        assert "google_calendar" not in names(**OUTSIDER_DM)
+    model_tools._clear_tool_defs_cache()
+
+
+# ---------------------------------------------------------------------------
+# Scheduled jobs: whose job is it?
+# ---------------------------------------------------------------------------
+
+
+def test_scheduled_job_acts_for_the_owner_only_when_the_owner_created_it():
+    from gateway.principal import cron_job_acts_for_owner
+
+    owners = {"gateway": {"credential_management": {"owners": {"telegram": ["42"]}}}}
+    assert cron_job_acts_for_owner({"origin": None}, owners) is True  # cabinet / CLI
+    assert cron_job_acts_for_owner({"origin": {"platform": "telegram", "user_id": "777", "owner": True}}, {})
+    assert not cron_job_acts_for_owner({"origin": {"platform": "telegram", "user_id": "42", "owner": False}}, owners)
+    assert cron_job_acts_for_owner({"origin": {"platform": "api_server", "chat_id": "x"}}, {})
+    assert not cron_job_acts_for_owner({"origin": {"platform": "webhook", "chat_id": "x"}}, owners)
+    # Jobs from before 0.21.13 carry no verdict: only a configured owner counts.
+    legacy = {"origin": {"platform": "telegram", "chat_id": "42", "user_id": "42"}}
+    assert cron_job_acts_for_owner(legacy, owners) is True
+    assert cron_job_acts_for_owner(legacy, {}) is False
+
+
+def test_job_created_in_chat_records_whether_the_owner_created_it():
+    from gateway.session_context import clear_session_vars, set_session_vars
+    from tools.cronjob_tools import _origin_from_env
+
+    for session, expected in ((OUTSIDER_DM, False), (OWNER_DM, True)):
+        tokens = set_session_vars(cron_session="", **session)
+        try:
+            assert _origin_from_env()["owner"] is expected
+        finally:
+            clear_session_vars(tokens)
+
+
+# ---------------------------------------------------------------------------
+# R9 (review 23.09): an unknown create outcome never becomes a duplicate
+# ---------------------------------------------------------------------------
+
+
+def _lost_answer_after(fake_api, *, lose: set[int], lookup_fails: bool = False, store: bool = True):
+    """Transport that loses the answers of the given calls (1-based)."""
+    def transport(request):
+        number = len(fake_api.calls) + 1
+        if number in lose:
+            if request.get_method() == "POST" and store:
+                fake_api(request)
+            else:
+                fake_api.calls.append({"method": request.get_method(), "lost": True})
+            raise TimeoutError("synthetic: answer lost")
+        if lookup_fails and request.get_method() == "GET" and "/events/" in request.full_url:
+            fake_api.calls.append({"method": "GET", "lost": True})
+            raise TimeoutError("synthetic: lookup lost too")
+        return fake_api(request)
+    return transport
+
+
+def test_lost_answer_is_reconciled_and_a_repeat_never_duplicates(shared_calendar, fake_api, monkeypatch):
+    """The review's `calendar-unknown-write`, with the safe expected result."""
+    monkeypatch.setattr(google_calendar, "_http_json", _lost_answer_after(fake_api, lose={1}))
+    first = _tool(monkeypatch, shared_calendar, CREATE, OWNER_DM)
+    assert first["ok"] is True and "found in the calendar" in first["note"]
+    again = _tool(monkeypatch, shared_calendar, CREATE, OWNER_DM)
+    assert again["ok"] is True and again["already_existed"] is True
+    stored = [e for e in fake_api.calendars["tok-owner"] if e["summary"] == "Встреча"]
+    assert len(stored) == 1
+
+
+def test_unverifiable_outcome_is_reported_as_unknown_not_as_retry(shared_calendar, fake_api, monkeypatch):
+    monkeypatch.setattr(
+        google_calendar, "_http_json", _lost_answer_after(fake_api, lose={1}, lookup_fails=True)
+    )
+    first = _tool(monkeypatch, shared_calendar, CREATE, OWNER_DM)
+    assert first["error"] == "create_outcome_unknown"
+    assert "Do not create it again" in first["next_step"]
+    assert "trying again" not in first["next_step"]
+    # Even if the agent repeats anyway, the stable id prevents a second event.
+    monkeypatch.setattr(google_calendar, "_http_json", fake_api)
+    again = _tool(monkeypatch, shared_calendar, CREATE, OWNER_DM)
+    assert again["ok"] is True and again["already_existed"] is True
+    assert len([e for e in fake_api.calendars["tok-owner"] if e["summary"] == "Встреча"]) == 1
+
+
+def test_confirmed_not_stored_says_so_and_a_repeat_creates_once(shared_calendar, fake_api, monkeypatch):
+    monkeypatch.setattr(google_calendar, "_http_json", _lost_answer_after(fake_api, lose={1}, store=False))
+    first = _tool(monkeypatch, shared_calendar, CREATE, OWNER_DM)
+    assert first["error"] == "create_not_stored"
+    monkeypatch.setattr(google_calendar, "_http_json", fake_api)
+    again = _tool(monkeypatch, shared_calendar, CREATE, OWNER_DM)
+    assert again["ok"] is True and "already_existed" not in again
+    assert len([e for e in fake_api.calendars["tok-owner"] if e["summary"] == "Встреча"]) == 1
+
+
+def test_event_deleted_earlier_does_not_block_creating_it_again(shared_calendar, fake_api, monkeypatch):
+    first = _tool(monkeypatch, shared_calendar, CREATE, OWNER_DM)
+    stored = fake_api._find("tok-owner", first["created"].get("id") or "") or fake_api.calendars["tok-owner"][-1]
+    stored["status"] = "cancelled"  # the owner deleted it in Google Calendar
+    again = _tool(monkeypatch, shared_calendar, CREATE, OWNER_DM)
+    assert again["ok"] is True and "already_existed" not in again
+    ids = [e["id"] for e in fake_api.calendars["tok-owner"] if e["summary"] == "Встреча"]
+    assert len(ids) == 2 and len(set(ids)) == 2
+
+
+def test_reads_keep_plain_retry_advice(shared_calendar, fake_api, monkeypatch):
+    import urllib.error
+
+    fake_api.fail_with = urllib.error.URLError("offline")
+    answer = _tool(monkeypatch, shared_calendar, LIST, OWNER_DM)
+    assert answer["error"] == "google_unavailable" and "trying again" in answer["next_step"]

@@ -70,6 +70,15 @@ def _is_delegated_child_context() -> bool:
         return False
 
 
+def _principal_cache_key() -> str:
+    try:
+        from gateway.principal import current_principal
+
+        return current_principal().cache_key
+    except Exception:
+        return "unknown"
+
+
 def _is_dispatcher_owned_worker() -> bool:
     """False when HERMES_KANBAN_* is present but this execution does not own it
     (delegate_task child, or a cron job fired in-process from a worker)."""
@@ -374,6 +383,10 @@ def get_tool_definitions(
                 _is_delegated_child_context(),
                 _is_dispatcher_owned_worker(),
                 profile_scope,
+                # The owner's services (calendar, board) are offered only to
+                # turns acting for the owner; their check_fns are uncached,
+                # so this memo must not hand one principal's list to another.
+                _principal_cache_key(),
             )
         with _tool_defs_cache_lock:
             cached = _tool_defs_cache.get(cache_key) if cache_key is not None else None

@@ -75,9 +75,9 @@ _HERMES_CORE_TOOLS = [
     # Owner-only Google connection lifecycle. The single tool is profile-bound
     # and never accepts or returns app secrets, auth codes, or tokens.
     "google_workspace_auth",
-    # The owner's Google Calendar through the connection made in Korra. Gated
-    # only on the installation OAuth app (check_fn); each call resolves the
-    # profile's effective grant, so connect/revoke apply on the next call.
+    # The owner's Google Calendar through the connection made in Korra. Offered
+    # to owner turns where the installation OAuth app is configured; each call
+    # re-checks the principal and resolves the profile's effective grant.
     "google_calendar",
     # Kanban multi-agent coordination — only in schema when the agent is
     # spawned as a kanban worker (HERMES_KANBAN_TASK env set) or the current
@@ -158,10 +158,10 @@ TOOLSETS = {
         "includes": [],
     },
 
-    # Not a configurable toolset on purpose: a connected service is the
-    # agent's tool without a per-profile switch («подключение = инструмент»).
-    # Curated profiles with an explicit toolset list get it through the
-    # non-configurable recovery in tools_config._get_platform_tools.
+    # Configurable (tools_config.CONFIGURABLE_TOOLSETS): on for profiles on
+    # the default list, off for an explicit list that does not name it — a
+    # restricted profile never gains the owner's calendar silently. Who may
+    # use it is checked per call (gateway.principal).
     "google_calendar": {
         "description": "Read and add events in the Google Calendar the owner connected in Korra",
         "tools": ["google_calendar"],
