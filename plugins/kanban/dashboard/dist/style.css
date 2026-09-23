@@ -62,3 +62,37 @@
 .k21-view-tabs [aria-pressed=true] { box-shadow: var(--neo-inset); }
 .k21-note.k21-board-header { font-family: Onest, sans-serif; font-size: 14px; }
 .k21-note.k21-board-header .neo-button { padding: 10px 15px; white-space: nowrap; }
+
+/* Путь владельца: «Ждёт вас», решения, приёмка и планы (0.21.13). */
+.k21-waiting { display: grid; gap: 14px; background: var(--neo-surface); box-shadow: var(--neo-depth-2); padding: 20px; border-radius: var(--neo-radius-card); }
+.k21-waiting ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.k21-waiting-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border-radius: var(--neo-radius-control); box-shadow: var(--neo-inset-compact); }
+.k21-waiting-text { display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.k21-waiting-item .neo-button { flex: none; }
+.k21-task-badge { width: fit-content; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--neo-accent); color: var(--neo-accent-foreground); }
+.k21-task-badge[data-kind=paused], .k21-task-badge[data-kind=human_step] { background: var(--neo-surface); color: var(--neo-text-primary); box-shadow: var(--neo-inset-compact); }
+.k21-task-badge[data-kind=problem] { background: var(--neo-surface); color: var(--neo-text-primary); box-shadow: var(--neo-error); }
+.k21-more { padding: 4px 0; }
+.k21-more > summary { cursor: pointer; padding: 8px 0; color: var(--neo-text-secondary); font-size: 13px; }
+.k21-more[open] { display: grid; gap: 16px; }
+.k21-plans { display: grid; gap: 12px; }
+.k21-plan-row { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(90px, 1fr) minmax(200px, 2fr); align-items: center; gap: 16px; padding: 14px 18px; text-align: left; background: var(--neo-surface); color: var(--neo-text-primary); border: 0; border-radius: var(--neo-radius-control); box-shadow: var(--neo-depth-1); cursor: pointer; font: inherit; }
+.k21-plan-progress { display: block; height: 8px; border-radius: 999px; box-shadow: var(--neo-inset-compact); overflow: hidden; }
+.k21-plan-progress i { display: block; height: 100%; background: var(--neo-accent); border-radius: 999px; }
+.k21-plan-strip { display: grid; gap: 6px; }
+.k21-plan-steps { margin: 8px 0 0; padding-left: 22px; display: grid; gap: 6px; }
+.k21-link { background: none; border: 0; padding: 0; font: inherit; color: var(--neo-text-primary); text-decoration: underline; cursor: pointer; text-align: left; }
+.k21-decision { display: grid; gap: 14px; }
+.k21-decision h3 { font-size: 16px; }
+.k21-result { display: grid; gap: 10px; }
+.k21-result-details h4 { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.k21-accept { display: grid; gap: 16px; }
+@media (max-width: 640px) {
+  .k21-board { gap: 16px; }
+  .k21-board-header p { display: none; }
+  .k21-waiting { padding: 16px; }
+  .k21-waiting-item { flex-direction: column; align-items: stretch; }
+  .k21-plan-row { grid-template-columns: 1fr; gap: 8px; }
+  .k21-view-tabs { gap: 8px; }
+  .k21-board-modal .k21-actions .neo-button { flex: 1 1 auto; }
+}

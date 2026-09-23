@@ -11,7 +11,9 @@ const profiles = vi.fn();
 const authedFetch = vi.fn();
 const columns = ["ready", "running", "blocked", "review", "done"];
 const task = { id: "task-1", title: "Сравнить поставщиков", body: "Собрать таблицу условий", status: "ready", assignee: "default" };
-let boardTasks: Array<typeof task & { latest_summary?: string; result?: string }>;
+let boardTasks: Array<typeof task & Record<string, unknown>>;
+let attentionPayload: { items: Array<Record<string, unknown>>; count: number; errors: unknown[] };
+let taskExtras: Record<string, unknown>;
 function Children({ children }: { children?: React.ReactNode }) { return <>{children}</>; }
 function Content({ children }: { children?: React.ReactNode }) { return <div role="dialog">{children}</div>; }
 async function renderPage(path = "/kanban") {
@@ -45,13 +47,15 @@ const writes = () => fetchJSON.mock.calls.filter(([, options]) => options?.metho
 
 beforeEach(() => {
   vi.resetModules(); localStorage.clear(); boardTasks = [];
+  attentionPayload = { items: [], count: 0, errors: [] }; taskExtras = {};
   authedFetch.mockReset().mockResolvedValue(new Response(""));
   profiles.mockReset().mockResolvedValue({ profiles: [{ name: "default", is_default: true }] });
   fetchJSON.mockReset().mockImplementation(async (url: string, options?: { method: string }) => {
     if (options?.method) return {};
     if (url.endsWith("/boards")) return { boards: [{ slug: "default", name: "Default" }] };
+    if (url.endsWith("/attention")) return attentionPayload;
     if (url.includes("/board?")) return { columns: columns.map(name => ({ name, tasks: boardTasks.filter(t => t.status === name) })) };
-    if (url.includes("/tasks/task-1")) return { task: boardTasks[0] || task, comments: [], attachments: [], links: {}, runs: [] };
+    if (url.includes("/tasks/task-1")) return { task: boardTasks[0] || task, comments: [], attachments: [], links: {}, runs: [], ...taskExtras };
     throw new Error("Неожиданный запрос " + url);
   });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -101,7 +105,8 @@ describe("Доска поручений", () => {
   it("называет причину остановки и не выдаёт её за готовый результат", async () => {
     boardTasks = [{ ...task, status: "blocked", latest_summary: "Нужно согласовать бюджет" }];
     await renderPage(); await click(host.querySelector('[data-task-id]')!);
-    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Что мешает продолжить");
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Вопрос агента");
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Нужно согласовать бюджет");
     await click(button("Завершить поручение"));
     expect(field("Что получилось").value).toBe("");
     expect(button("Завершить поручение").hasAttribute("disabled")).toBe(true);
@@ -159,5 +164,81 @@ describe("Доска поручений", () => {
     expect(uploadCountAtAssign).toEqual([3]);
     expect(writes().filter(([, options]) => options.method === "POST")).toHaveLength(1);
     expect(writes().every(([url]) => url.includes("board=default"))).toBe(true);
+  });
+
+  it("ответ агенту сохраняется одной операцией и повторяется с тем же ключом", async () => {
+    boardTasks = [{ ...task, status: "blocked", owner_attention: "question", block_reason: "Подтвердите 4 замены", block_revision: 41 }];
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Подтвердите 4 замены");
+    expect(button("Ответить и продолжить").hasAttribute("disabled")).toBe(true);
+    await change(field("Ваш ответ"), "Подтверждаю, кроме каталога");
+    fetchJSON.mockRejectedValueOnce(new Error("503: сбой")); await click(button("Ответить и продолжить"));
+    await click(button("Ответить и продолжить"));
+    const posts = writes().filter(([url]) => url.includes("/tasks/task-1/respond"));
+    expect(posts).toHaveLength(2);
+    const [first, second] = posts.map(([, options]) => JSON.parse(options.body));
+    expect(first).toMatchObject({ answer: "Подтверждаю, кроме каталога", revision: 41 });
+    expect(second.request_id).toBe(first.request_id);
+    expect(writes().some(([url]) => url.includes("/comments"))).toBe(false);
+  });
+  it("объясняет, что агент уже задал новый вопрос", async () => {
+    boardTasks = [{ ...task, status: "blocked", owner_attention: "question", block_reason: "Старый вопрос", block_revision: 7 }];
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    fetchJSON.mockRejectedValueOnce(Object.assign(new Error("409: Данные уже изменились."), { status: 409, payload: { detail: { code: "question_changed" } } }));
+    await click(button("Продолжить как предложено"));
+    expect(host.textContent).toContain("Агент уже задал новый вопрос");
+  });
+  it("принимает ровно ту версию результата, которую видит владелец, и возвращает только с замечанием", async () => {
+    boardTasks = [{ ...task, status: "review", acceptance: "owner", owner_attention: "accept", submitted_version: 99, result: "1. Поручения — знакомое слово" }];
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Результат ждёт вашей проверки");
+    await click(button("Вернуть с замечанием"));
+    expect(button("Вернуть агенту").hasAttribute("disabled")).toBe(true);
+    await change(field("Что исправить"), "Добавь четвёртый вариант");
+    await click(button("Вернуть агенту"));
+    const [url, options] = writes()[0];
+    expect(url).toContain("/tasks/task-1/request-changes");
+    expect(JSON.parse(options.body)).toMatchObject({ version: 99, comment: "Добавь четвёртый вариант" });
+  });
+  it("кнопка «Принять» отправляет приёмку с версией", async () => {
+    boardTasks = [{ ...task, status: "review", acceptance: "owner", owner_attention: "accept", submitted_version: 5, result: "Итог" }];
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    await click(button("Принять"));
+    const [url, options] = writes()[0];
+    expect(url).toContain("/tasks/task-1/accept"); expect(JSON.parse(options.body).version).toBe(5);
+  });
+  it("показывает подробности результата, если агент положил их в metadata", async () => {
+    boardTasks = [{ ...task, status: "done", latest_summary: "Три варианта" }];
+    taskExtras = { runs: [{ id: 1, outcome: "completed", summary: "Три варианта", metadata: { options: [{ name: "Поручения", rationale: "Знакомое деловое слово" }], worker_session_id: "s1" } }] };
+    await renderPage(); await click(host.querySelector('[data-task-id]')!);
+    const text = host.querySelector('[role="dialog"]')?.textContent || "";
+    expect(text).toContain("Подробности от агента");
+    expect(text).toContain("Поручения — Знакомое деловое слово");
+    expect(text).not.toContain("worker_session_id");
+  });
+  it("«Ждёт вас» собирает вопросы со всех досок и открывает карточку на её доске", async () => {
+    attentionPayload = { count: 1, errors: [], items: [{ board: "sales", board_name: "Продажи", task_id: "task-1", title: "Заменить ссылки", kind: "question", question: "Подтвердите замены", plan_title: "Новая система ботов", assignee: "default" }] };
+    await renderPage();
+    expect(host.textContent).toContain("Ждёт вас · 1");
+    expect(host.textContent).toContain("План «Новая система ботов»");
+    await click(button("Ответить"));
+    expect(fetchJSON.mock.calls.some(([url]) => url.includes("/tasks/task-1?board=sales"))).toBe(true);
+  });
+  it("шаг владельца не отдаётся агенту и отмечается выполненным самим владельцем", async () => {
+    boardTasks = [{ ...task, assignee: null as unknown as string, actor_kind: "human", owner_attention: "human_step" }];
+    await renderPage();
+    expect(host.querySelector('[data-task-id]')?.textContent).toContain("Ваш шаг");
+    await click(host.querySelector('[data-task-id]')!);
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Это ваш шаг");
+    expect(Array.from(host.querySelectorAll("button")).some(el => el.textContent === "Передать агенту")).toBe(false);
+    await click(button("Отметить выполненным"));
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Что получилось");
+  });
+  it("по умолчанию просит прислать результат владельцу на проверку", async () => {
+    await renderPage(); await click(button("Новое поручение"));
+    await change(field("Что нужно сделать"), "Сводка");
+    await change(field("Задание и ожидаемый результат"), "Таблица");
+    await change(field("Кому поручить"), "default"); await click(button("Передать агенту"));
+    expect(JSON.parse(writes()[0][1].body).acceptance).toBe("owner");
   });
 });
