@@ -33,7 +33,7 @@
 .k21-task-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--neo-text-secondary); font-size: 12px; white-space: pre-wrap; }
 .k21-task-agent { font-size: 12px; font-weight: 550; }
 .k21-task-meta { color: var(--neo-text-secondary); font-size: 11px; }
-.k21-task-tag { width: fit-content; padding: 3px 8px; box-shadow: var(--neo-inset-compact); border-radius: 999px; font-size: 11px; }
+.k21-task-tag { width: fit-content; padding: 3px 8px; box-shadow: var(--neo-inset-compact); border-radius: 12px; font-size: 11px; }
 .k21-note, .k21-empty { background: var(--neo-surface); box-shadow: var(--neo-depth-2); padding: 20px; border-radius: var(--neo-radius-card); }
 .k21-empty { display: grid; justify-items: start; gap: 16px; }
 .k21-empty p { max-width: 700px; color: var(--neo-text-secondary); }

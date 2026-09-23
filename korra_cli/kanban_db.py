@@ -7168,11 +7168,14 @@ def respond_to_block(
                     "duplicate": True, "reason": None,
                 }
         current = conn.execute(
-            "SELECT status FROM tasks WHERE id = ?", (task_id,),
+            "SELECT status, block_kind FROM tasks WHERE id = ?", (task_id,),
         ).fetchone()
         if current is None:
             return {"ok": False, "status": None, "duplicate": False, "reason": "not_found"}
-        if current["status"] != "blocked":
+        # A question the agent repeated after an answer is parked in triage
+        # by the loop breaker; it still waits for the owner, who may answer.
+        repeated_question = current["status"] == "triage" and bool(current["block_kind"])
+        if current["status"] != "blocked" and not repeated_question:
             return {
                 "ok": False, "status": current["status"],
                 "duplicate": False, "reason": "not_blocked",
@@ -7180,12 +7183,26 @@ def respond_to_block(
         current_revision = block_revision(conn, task_id)
         if revision is not None and current_revision != int(revision):
             return {
-                "ok": False, "status": "blocked",
+                "ok": False, "status": current["status"],
                 "duplicate": False, "reason": "stale",
             }
         if text:
             add_comment(conn, task_id, author, text)
-        new_status = _unblock_in_txn(conn, task_id, now=int(time.time()))
+        if repeated_question:
+            # The owner broke the loop by answering: resume with a fresh
+            # counter so a genuinely new question is not treated as a loop.
+            landing = _landing_status_after_parents(conn, task_id)
+            cur = conn.execute(
+                "UPDATE tasks SET status = ?, block_recurrences = 0, "
+                "current_run_id = NULL, consecutive_failures = 0, "
+                "last_failure_error = NULL WHERE id = ? AND status = 'triage'",
+                (landing, task_id),
+            )
+            new_status = landing if cur.rowcount == 1 else None
+            if new_status:
+                _append_event(conn, task_id, "unblocked", {"status": landing, "from": "triage"})
+        else:
+            new_status = _unblock_in_txn(conn, task_id, now=int(time.time()))
         if new_status is None:
             return {
                 "ok": False, "status": current["status"],

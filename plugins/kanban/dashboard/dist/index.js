@@ -32,6 +32,8 @@
     paused: ["На паузе", "Открыть"],
   };
   const OWNER = "Владелец";
+  // Превью карточки — простой текст: разметку показывает только открытая карточка.
+  function plainPreview(text) { return String(text || "").replace(/\*\*|__|`/g, "").replace(/^#+\s*/gm, ""); }
   function newRequestId() { return "ui-" + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()); }
   const RUN_LABEL = { submitted: "Передан на проверку", running: "В работе", completed: "Завершён", done: "Завершён", success: "Успешно", failed: "Ошибка", error: "Ошибка", blocked: "Нужно решение", review: "На проверке", reclaimed: "Остановлен", cancelled: "Отменён", timeout: "Время истекло", gave_up: "Требуется помощь", scheduled: "Отложен", claimed: "Запускается" };
 
@@ -307,6 +309,7 @@
   function attentionOf(task) {
     if (!task) return null;
     if (task.owner_attention !== undefined) return task.owner_attention;
+    if (task.status === "triage" && task.block_kind && task.block_kind !== "paused") return "question";
     if (task.status === "blocked") return task.block_kind === "paused" ? "paused" : "question";
     if (task.status === "review" && task.acceptance === "owner") return "accept";
     if (task.status === "ready" && task.actor_kind === "human") return "human_step";
@@ -619,13 +622,20 @@
         h(Button, { primary: true, onClick: () => setModal({ kind: "create" }), disabled: loading || !data }, "Новое поручение")),
       waitingItems.length > 0 && h("section", { className: "k21-waiting", "aria-label": "Ждёт вас" },
         h("h3", null, "Ждёт вас · ", attention),
-        h("ul", null, waitingItems.map(item => h("li", { key: item.board + ":" + item.task_id, className: "k21-waiting-item", "data-kind": item.kind },
+        h("ul", null, waitingItems.map((item, index) => {
+          // Тот же вопрос в том же плане показываем один раз: отвечать всё
+          // равно нужно по каждой карточке, но длинный текст не повторяется.
+          const repeated = item.question && waitingItems.slice(0, index).some(prev => prev.question === item.question && prev.plan_id === item.plan_id && prev.board === item.board);
+          return h("li", { key: item.board + ":" + item.task_id, className: "k21-waiting-item", "data-kind": item.kind },
           h("div", { className: "k21-waiting-text" },
             h("span", { className: "k21-task-badge", "data-kind": item.kind }, (ATTENTION[item.kind] || ["Нужно внимание"])[0]),
             h("strong", null, item.title),
             h("small", { className: "k21-muted" }, [item.plan_title && "План «" + item.plan_title + "»", item.board !== board && "доска «" + (item.board === "default" ? "Основная доска" : item.board_name || item.board) + "»", item.assignee && profileLabel(profiles.find(p => p.name === item.assignee) || { name: item.assignee })].filter(Boolean).join(" · ")),
-            item.question && h("p", { className: "k21-task-preview" }, item.question)),
-          h(Button, { primary: item.kind === "question" || item.kind === "accept", onClick: () => openWaiting(item) }, (ATTENTION[item.kind] || ["", "Открыть"])[1]))))),
+            item.question && (repeated
+              ? h("small", { className: "k21-muted" }, "Тот же вопрос, что выше")
+              : h("p", { className: "k21-task-preview" }, item.question))),
+          h(Button, { primary: item.kind === "question" || item.kind === "accept", onClick: () => openWaiting(item) }, (ATTENTION[item.kind] || ["", "Открыть"])[1]));
+        }))),
       waiting && waiting.errors && waiting.errors.length > 0 && h("p", { role: "status", className: "k21-muted" }, "Не удалось проверить все доски — список «Ждёт вас» может быть неполным."),
       h("div", { className: "k21-board-controls" },
         h(Field, { label: "Доска" }, h("select", { value: board, onChange: e => { setBoard(e.target.value); setSearch(""); setAssignee(""); }, disabled: !!activeModal },
@@ -687,10 +697,10 @@
                 h("strong", null, task.title),
                 task.plan_title && h("span", { className: "k21-task-tag" }, "План «" + task.plan_title + "»"),
                 task.tenant && h("span", { className: "k21-task-tag" }, task.tenant),
-                preview && h("p", { className: "k21-task-preview" }, preview),
+                preview && h("p", { className: "k21-task-preview" }, plainPreview(preview)),
                 h("span", { className: "k21-task-agent" }, task.actor_kind === "human" ? "Ваш шаг" : profile ? profileLabel(profile) : task.assignee || (task.status === "review" ? "Ждёт вашей проверки" : task.status === "done" ? "Результат сохранён" : "Назначьте исполнителя")),
                 h("span", { className: "k21-task-meta" }, task.priority > 0 ? "Приоритет: " + task.priority + " · " : "", "Создано ", dateLabel(task.created_at)),
-                task.progress && h("span", { className: "k21-task-meta" }, `Подзадачи: ${task.progress.done} из ${task.progress.total}`),
+                task.progress && !task.plan_id && h("span", { className: "k21-task-meta" }, `Подзадачи: ${task.progress.done} из ${task.progress.total}`),
                 task.comment_count > 0 && h("span", { className: "k21-task-meta" }, "Комментариев: ", task.comment_count));
             }));
         }))),

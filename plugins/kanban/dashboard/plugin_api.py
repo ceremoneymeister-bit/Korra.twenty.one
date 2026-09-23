@@ -168,6 +168,10 @@ def _owner_attention(
     review, dependency waits and running work are not owner attention.
     """
     status = task.status
+    if status == "triage" and task.block_kind and task.block_kind != kanban_db.OWNER_PAUSE_KIND:
+        # The agent asked the same question again after an answer; the loop
+        # breaker parked it in triage, but it is still the owner's question.
+        return "question"
     if status == "blocked":
         if task.block_kind == kanban_db.OWNER_PAUSE_KIND:
             return "paused"
@@ -207,7 +211,7 @@ def _task_dict(
     d = asdict(task)
     # The question text is meaningful only while the task waits on it; it is
     # kept in the DB after an answer so a repeated question is recognisable.
-    if task.status != "blocked":
+    if task.status != "blocked" and not (task.status == "triage" and task.block_kind):
         d["block_reason"] = None
     d["block_revision"] = block_revision if task.status == "blocked" else None
     d["owner_attention"] = _owner_attention(
@@ -1533,6 +1537,7 @@ def get_attention(limit: int = Query(50, ge=1, le=200)):
             with kanban_db.connect_closing(board=slug) as conn:
                 rows = conn.execute(
                     "SELECT * FROM tasks WHERE status = 'blocked' "
+                    "OR (status = 'triage' AND block_kind IS NOT NULL) "
                     "OR (status = 'review' AND acceptance = 'owner') "
                     "OR (status = 'ready' AND actor_kind = 'human')"
                 ).fetchall()
@@ -1554,7 +1559,7 @@ def get_attention(limit: int = Query(50, ge=1, le=200)):
                         "title": t.title,
                         "kind": kind,
                         "assignee": t.assignee,
-                        "question": t.block_reason if t.status == "blocked" else None,
+                        "question": t.block_reason if t.status in ("blocked", "triage") else None,
                         "revision": rev,
                         "version": (
                             kanban_db.submitted_version(conn, t.id)

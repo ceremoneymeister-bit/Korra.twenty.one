@@ -253,3 +253,19 @@ def test_answer_respects_unfinished_parents(kanban_home: Path) -> None:
             conn, child, answer=None, author="Владелец", request_id="r4",
         )
         assert outcome["ok"] and outcome["status"] == "todo"
+
+
+def test_repeated_question_parked_in_triage_can_still_be_answered(kanban_home: Path) -> None:
+    with kb.connect_closing() as conn:
+        tid = _running_task(conn)
+        kb.block_task(conn, tid, reason="Нужен доступ к CRM", kind="needs_input")
+        kb.unblock_task(conn, tid)
+        _running(conn, tid)
+        kb.block_task(conn, tid, reason="Нужен доступ к CRM", kind="needs_input")
+        assert kb.get_task(conn, tid).status == "triage"
+        out = kb.respond_to_block(
+            conn, tid, answer="Доступ выдан, продолжай", author="Владелец", request_id="loop-1",
+        )
+        assert out["ok"] and out["status"] == "ready"
+        task = kb.get_task(conn, tid)
+        assert task.status == "ready" and task.block_recurrences == 0

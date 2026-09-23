@@ -753,7 +753,7 @@ def test_dashboard_done_actions_prompt_for_completion_summary():
     # PATCH. Диалог требует текста для «Готово» (итог), «Нужно решение»
     # (причина) и возврата на доработку, и только он шлёт PATCH со статусом.
     assert 'setModal({ kind: "move", task, target })' in js
-    assert 'const needsText = target === "done" || target === "blocked" || (target === "ready" && task.status === "review");' in js
+    assert 'const needsText = target === "done" || (target === "ready" && (task.status === "review" || task.status === "done"));' in js
     assert 'if (target === "done") { patch.summary = text.trim(); patch.result = text.trim(); }' in js
     assert 'if (target === "blocked") patch.block_reason = text.trim();' in js
     # Кнопка отправки заблокирована, пока обязательный текст пуст, и после
@@ -832,7 +832,7 @@ def test_dashboard_surfaces_ready_blocked_error_inline():
     # (`errorText`): причина «сначала завершите связанные задачи», конфликт
     # версий, недоступность — без HTTP-кухни в тексте.
     assert "function errorText(error)" in bundle
-    assert "/parent|dependenc|prerequisite/i.test(raw)" in bundle
+    assert "/parent|dependenc|prerequisite/i.test(text)" in bundle
     # Каждое действие показывает ошибку рядом с собой (`role: "alert"`),
     # а не глотает её: форма, диалог перехода, карточка, доска.
     assert bundle.count('role: "alert"') >= 5

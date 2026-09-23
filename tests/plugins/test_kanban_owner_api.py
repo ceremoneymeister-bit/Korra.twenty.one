@@ -230,3 +230,21 @@ def test_human_step_is_owner_attention_when_ready(client):
     assert task["assignee"] is None and task["owner_attention"] == "human_step"
     item = next(i for i in client.get(f"{API}/attention").json()["items"] if i["task_id"] == task["id"])
     assert item["kind"] == "human_step" and item["plan_title"] == "Новая система ботов"
+
+
+def test_repeated_question_in_triage_is_still_owner_attention(client):
+    with kb.connect_closing() as conn:
+        tid = _running_task(conn)
+        kb.block_task(conn, tid, reason="Нужен доступ к CRM", kind="needs_input")
+        kb.unblock_task(conn, tid)
+        with kb.write_txn(conn):
+            conn.execute("UPDATE tasks SET status='ready' WHERE id=?", (tid,))
+        kb.claim_task(conn, tid, claimer="worker")
+        kb.block_task(conn, tid, reason="Нужен доступ к CRM", kind="needs_input")
+    task = client.get(f"{API}/tasks/{tid}").json()["task"]
+    assert task["status"] == "triage" and task["owner_attention"] == "question"
+    assert task["block_reason"] == "Нужен доступ к CRM"
+    item = next(i for i in client.get(f"{API}/attention").json()["items"] if i["task_id"] == tid)
+    assert item["kind"] == "question" and item["question"] == "Нужен доступ к CRM"
+    r = client.post(f"{API}/tasks/{tid}/respond", json={"answer": "Доступ выдан", "request_id": "loop-api"})
+    assert r.status_code == 200 and r.json()["status"] == "ready"
