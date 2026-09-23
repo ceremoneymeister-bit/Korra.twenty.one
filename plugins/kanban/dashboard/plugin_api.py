@@ -156,12 +156,62 @@ BOARD_COLUMNS: list[str] = [
 _CARD_SUMMARY_PREVIEW_CHARS = 200
 
 
+def _owner_attention(
+    task: kanban_db.Task, *, sticky_block: Optional[bool] = None,
+) -> Optional[str]:
+    """What, if anything, this task is waiting on from its owner.
+
+    ``question`` — the agent asked and waits for an answer; ``paused`` — the
+    owner paused it; ``problem`` — the dispatcher gave up after failures;
+    ``accept`` — a result waits for the owner's acceptance; ``human_step`` —
+    a step the owner does themselves is ready. ``None`` otherwise. Agent
+    review, dependency waits and running work are not owner attention.
+    """
+    status = task.status
+    if status == "blocked":
+        if task.block_kind == kanban_db.OWNER_PAUSE_KIND:
+            return "paused"
+        if sticky_block is False:
+            return "problem"
+        return "question"
+    if status == "review" and task.acceptance == "owner":
+        return "accept"
+    if status == "ready" and task.actor_kind == "human":
+        return "human_step"
+    return None
+
+
+def _block_revisions(conn: sqlite3.Connection, task_ids: list[str]) -> dict[str, int]:
+    """Latest ``blocked`` event id per task (see ``kanban_db.block_revision``)."""
+    if not task_ids:
+        return {}
+    marks = ",".join("?" for _ in task_ids)
+    latest = conn.execute(
+        f"SELECT e.task_id, e.id, e.kind FROM task_events e "
+        f"JOIN (SELECT task_id, MAX(id) AS mid FROM task_events "
+        f"      WHERE kind IN ('blocked', 'unblocked', 'gave_up') "
+        f"        AND task_id IN ({marks}) GROUP BY task_id) m "
+        f"  ON m.mid = e.id",
+        task_ids,
+    ).fetchall()
+    return {r["task_id"]: int(r["id"]) for r in latest if r["kind"] == "blocked"}
+
+
 def _task_dict(
     task: kanban_db.Task,
     *,
     latest_summary: Optional[str] = None,
+    block_revision: Optional[int] = None,
 ) -> dict[str, Any]:
     d = asdict(task)
+    # The question text is meaningful only while the task waits on it; it is
+    # kept in the DB after an answer so a repeated question is recognisable.
+    if task.status != "blocked":
+        d["block_reason"] = None
+    d["block_revision"] = block_revision if task.status == "blocked" else None
+    d["owner_attention"] = _owner_attention(
+        task, sticky_block=(block_revision is not None) if task.status == "blocked" else None,
+    )
     # Add derived age metrics so the UI can colour stale cards without
     # computing deltas client-side.
     try:
@@ -461,13 +511,18 @@ def get_board(
         # for boards with hundreds of tasks). Truncated to a card-size
         # preview here — the full text is available via /tasks/:id.
         summary_map = kanban_db.latest_summaries(conn, [t.id for t in tasks])
+        revisions = _block_revisions(
+            conn, [t.id for t in tasks if t.status == "blocked"],
+        )
 
         for t in tasks:
             full = summary_map.get(t.id)
             preview = (
                 full[:_CARD_SUMMARY_PREVIEW_CHARS] if full else None
             )
-            d = _task_dict(t, latest_summary=preview)
+            d = _task_dict(
+                t, latest_summary=preview, block_revision=revisions.get(t.id),
+            )
             d["link_counts"] = link_counts.get(t.id, {"parents": 0, "children": 0})
             d["comment_count"] = comment_counts.get(t.id, 0)
             d["progress"] = progress.get(t.id)  # None when the task has no children
@@ -548,7 +603,10 @@ def get_task(
         # operators can read the complete worker handoff without making
         # a second round-trip. Cards on /board carry a 200-char preview.
         full_summary = kanban_db.latest_summary(conn, task_id)
-        task_d = _task_dict(task, latest_summary=full_summary)
+        task_d = _task_dict(
+            task, latest_summary=full_summary,
+            block_revision=kanban_db.block_revision(conn, task_id),
+        )
         links = _links_for(conn, task_id)
         child_ids = links["children"]
         child_summaries = kanban_db.latest_summaries(conn, child_ids)
@@ -905,7 +963,12 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                     metadata=payload.metadata,
                 )
             elif s == "blocked":
-                ok = kanban_db.block_task(conn, task_id, reason=payload.block_reason)
+                # The board's "pause" is the owner's own stop: typed so it
+                # never feeds the unblock-loop breaker / triage, and it stops
+                # the live worker instead of leaving it running unseen.
+                ok = kanban_db.pause_task(
+                    conn, task_id, reason=payload.block_reason,
+                )["ok"]
             elif s == "scheduled":
                 ok = kanban_db.schedule_task(conn, task_id, reason=payload.block_reason)
             elif s == "review":
@@ -935,7 +998,7 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                     # Direct status write for drag-drop (todo -> ready etc).
                     ok = reopened if reopened is not None else _set_status_direct(conn, task_id, "ready")
             elif s == "archived":
-                ok = kanban_db.archive_task(conn, task_id)
+                ok = kanban_db.archive_task(conn, task_id, stop_worker=True)
             elif s == "running":
                 raise HTTPException(
                     status_code=400,
@@ -1085,14 +1148,15 @@ def _parents_blocking_ready(
     parents, or all parents already done).
     """
     rows = conn.execute(
-        "SELECT t.id, t.title, t.status FROM tasks t "
+        "SELECT t.id, t.title, t.status, t.completed_at, t.result FROM tasks t "
         "JOIN task_links l ON l.parent_id = t.id "
-        "WHERE l.child_id = ? AND t.status != 'done'",
+        "WHERE l.child_id = ?",
         (task_id,),
     ).fetchall()
     return [
         {"id": r["id"], "title": r["title"], "status": r["status"]}
         for r in rows
+        if not kanban_db.parent_satisfies(r["status"], r["completed_at"], r["result"])
     ]
 
 
@@ -1159,13 +1223,14 @@ def _set_status_direct(
         # hasn't completed (e.g. T4 dispatched while T3 is still blocked).
         if effective_status == "ready":
             parent_statuses = conn.execute(
-                "SELECT t.status FROM tasks t "
+                "SELECT t.status, t.completed_at, t.result FROM tasks t "
                 "JOIN task_links l ON l.parent_id = t.id "
                 "WHERE l.child_id = ?",
                 (task_id,),
             ).fetchall()
             if parent_statuses and not all(
-                p["status"] in {"done", "archived"} for p in parent_statuses
+                kanban_db.parent_satisfies(p["status"], p["completed_at"], p["result"])
+                for p in parent_statuses
             ):
                 return False
 
@@ -1261,6 +1326,137 @@ def add_comment(task_id: str, payload: CommentBody, board: Optional[str] = Query
 class LinkBody(BaseModel):
     parent_id: str
     child_id: str
+
+
+# ---------------------------------------------------------------------------
+# Owner answer: comment + resume in one step (K21-139)
+# ---------------------------------------------------------------------------
+
+class RespondBody(BaseModel):
+    # Answer text; empty means "continue as proposed".
+    answer: Optional[str] = None
+    # ``block_revision`` of the question the owner saw. Omit only for a
+    # task stopped by the failure breaker (no question to match).
+    revision: Optional[int] = None
+    # Client-generated id; a retry with the same id returns the first outcome.
+    request_id: str = Field(..., min_length=1, max_length=128)
+    author: Optional[str] = None
+
+
+_RESPOND_REJECTIONS = {
+    "not_found": (404, "task_not_found"),
+    "not_blocked": (409, "not_waiting"),
+    "stale": (409, "question_changed"),
+}
+
+
+@router.post("/tasks/{task_id}/respond")
+def respond_to_task(task_id: str, payload: RespondBody, board: Optional[str] = Query(None)):
+    """Save the owner's answer and resume the task atomically.
+
+    Errors carry a machine-readable ``code`` so the board can explain them in
+    Russian: ``not_waiting`` (already resumed/finished), ``question_changed``
+    (the agent replaced its question — reload and answer the new one).
+    """
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        try:
+            outcome = kanban_db.respond_to_block(
+                conn, task_id,
+                answer=payload.answer,
+                author=(payload.author or "Владелец").strip() or "Владелец",
+                request_id=payload.request_id,
+                revision=payload.revision,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if not outcome["ok"]:
+            status_code, code = _RESPOND_REJECTIONS.get(
+                outcome["reason"], (409, "not_waiting"),
+            )
+            raise HTTPException(
+                status_code=status_code,
+                detail={"code": code, "status": outcome["status"]},
+            )
+        task = kanban_db.get_task(conn, task_id)
+        return {
+            "ok": True,
+            "duplicate": outcome["duplicate"],
+            "status": outcome["status"],
+            "task": _task_dict(task) if task else None,
+        }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# What waits for the owner, across boards (K21-139/143)
+# ---------------------------------------------------------------------------
+
+_ATTENTION_ORDER = ("question", "accept", "human_step", "problem", "paused")
+
+
+@router.get("/attention")
+def get_attention(limit: int = Query(50, ge=1, le=200)):
+    """Everything that waits for the owner on every live board.
+
+    One source for the board header, the navigation badge and the dashboard
+    "needs attention" card. ``count`` excludes owner pauses: a pause is the
+    owner's own choice, listed for context but not asking for anything.
+    An unreadable board is reported in ``errors`` — never as zero.
+    """
+    items: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for meta in kanban_db.list_boards(include_archived=False):
+        slug = meta.get("slug") or kanban_db.DEFAULT_BOARD
+        try:
+            with kanban_db.connect_closing(board=slug) as conn:
+                rows = conn.execute(
+                    "SELECT * FROM tasks WHERE status = 'blocked' "
+                    "OR (status = 'review' AND acceptance = 'owner') "
+                    "OR (status = 'ready' AND actor_kind = 'human')"
+                ).fetchall()
+                tasks = [kanban_db.Task.from_row(r) for r in rows]
+                revisions = _block_revisions(
+                    conn, [t.id for t in tasks if t.status == "blocked"],
+                )
+                for t in tasks:
+                    rev = revisions.get(t.id)
+                    kind = _owner_attention(
+                        t, sticky_block=(rev is not None) if t.status == "blocked" else None,
+                    )
+                    if kind is None:
+                        continue
+                    items.append({
+                        "board": slug,
+                        "board_name": meta.get("name") or slug,
+                        "task_id": t.id,
+                        "title": t.title,
+                        "kind": kind,
+                        "assignee": t.assignee,
+                        "question": t.block_reason if t.status == "blocked" else None,
+                        "revision": rev,
+                        "plan_id": t.plan_id,
+                        "plan_title": t.plan_title,
+                        "priority": t.priority,
+                        "created_at": t.created_at,
+                    })
+        except Exception as exc:  # pragma: no cover - reported, not hidden
+            log.warning("kanban attention: board %s unreadable: %s", slug, exc)
+            errors.append({"board": slug, "error": "unreadable"})
+    items.sort(key=lambda i: (
+        _ATTENTION_ORDER.index(i["kind"]), -int(i["priority"] or 0), i["created_at"],
+    ))
+    counts = {k: 0 for k in _ATTENTION_ORDER}
+    for i in items:
+        counts[i["kind"]] += 1
+    return {
+        "items": items[:limit],
+        "counts": counts,
+        "count": sum(n for k, n in counts.items() if k != "paused"),
+        "errors": errors,
+    }
 
 
 @router.post("/links")

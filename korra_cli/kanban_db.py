@@ -125,6 +125,11 @@ VALID_INITIAL_STATUSES = {"running", "blocked"}
 # ``None`` = legacy/un-typed block (treated as a generic human blocker).
 VALID_BLOCK_KINDS = {"dependency", "needs_input", "capability", "transient"}
 
+# Owner pause from the board. Not offered to agents: it is the owner's own
+# stop, never a question, so it stays out of the unblock-loop breaker and
+# out of triage/auto-decompose.
+OWNER_PAUSE_KIND = "paused"
+
 # After a task has been blocked, unblocked, and re-blocked this many times for
 # the same (truly-blocked) reason, the unblock-loop breaker stops trusting the
 # unblocker (usually a cron) and routes the task to ``triage`` instead of back
@@ -1142,6 +1147,13 @@ class Task:
     # Unblock-loop counter. See the column comment in SCHEMA_SQL and
     # ``BLOCK_RECURRENCE_LIMIT``. Reset only on successful completion.
     block_recurrences: int = 0
+    # Latest block text; meaningful to readers only while ``status`` is
+    # ``blocked``. See the SCHEMA_SQL comments for the owner-facing columns.
+    block_reason: Optional[str] = None
+    acceptance: Optional[str] = None
+    actor_kind: Optional[str] = None
+    plan_id: Optional[str] = None
+    plan_title: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Task":
@@ -1236,6 +1248,10 @@ class Task:
                 if "block_recurrences" in keys and row["block_recurrences"] is not None
                 else 0
             ),
+            **{
+                name: (row[name] if name in keys and row[name] else None)
+                for name in ("block_reason", "acceptance", "actor_kind", "plan_id", "plan_title")
+            },
         )
 
 
@@ -1423,7 +1439,21 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- ``blocked`` so a cron can't spin it forever. Reset to 0 only on a
     -- successful completion — NOT on unblock (resetting on unblock is exactly
     -- the amnesia that let the loop run unbounded).
-    block_recurrences    INTEGER NOT NULL DEFAULT 0
+    block_recurrences    INTEGER NOT NULL DEFAULT 0,
+    -- Text of the latest block (the agent's question or the owner's pause
+    -- note). Kept after unblock so a re-block can be compared by cause, not
+    -- only by kind; readers show it only while the task is blocked.
+    block_reason         TEXT,
+    -- Who accepts the result: 'owner' parks a worker completion in
+    -- ``review`` until the owner accepts it; NULL keeps completion final.
+    acceptance           TEXT,
+    -- 'human' marks a step the owner does themselves: never claimed,
+    -- auto-assigned, decomposed or review-spawned. NULL = agent step.
+    actor_kind           TEXT,
+    -- Plan membership, separate from dependency links: every step of one
+    -- plan shares ``plan_id`` and its display ``plan_title``.
+    plan_id              TEXT,
+    plan_title           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_links (
@@ -2691,6 +2721,13 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
             "block_recurrences INTEGER NOT NULL DEFAULT 0",
         )
 
+    # Owner-facing Kanban (0.21.13): the agent's question, who accepts the
+    # result, human steps and plan membership. All nullable, so legacy rows
+    # keep their previous behaviour.
+    for name in ("block_reason", "acceptance", "actor_kind", "plan_id", "plan_title"):
+        if name not in cols:
+            _add_column_if_missing(conn, "tasks", name, f"{name} TEXT")
+
     # Indexes over additive ``tasks`` columns must be created after the
     # columns exist. Keeping them in SCHEMA_SQL breaks legacy boards: SQLite
     # parses each statement in ``executescript`` against the live schema, so a
@@ -2705,6 +2742,7 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tasks_session_id ON tasks(session_id)"
     )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_plan ON tasks(plan_id)")
 
     # task_events gained a run_id column; back-fill it as NULL for
     # historical events (they predate runs and can't be attributed).
@@ -4569,12 +4607,15 @@ def recompute_ready(
                 # this predicate back).
                 continue
             parents = conn.execute(
-                "SELECT t.status FROM tasks t "
+                "SELECT t.status, t.completed_at, t.result FROM tasks t "
                 "JOIN task_links l ON l.parent_id = t.id "
                 "WHERE l.child_id = ?",
                 (task_id,),
             ).fetchall()
-            if all(p["status"] in ("done", "archived") for p in parents):
+            if all(
+                parent_satisfies(p["status"], p["completed_at"], p["result"])
+                for p in parents
+            ):
                 resume_status = _resume_status_from_events(conn, task_id)
                 if cur_status == "blocked":
                     # Don't auto-recover tasks that have hit the
@@ -4615,13 +4656,30 @@ def recompute_ready(
 # Claim / complete / block
 # ---------------------------------------------------------------------------
 
+# A parent satisfies a dependency when it finished: ``done``, or archived
+# after it had completed. Archiving an unfinished step only removes it from
+# the board; it must not release the steps that were waiting for its work or
+# for the owner's decision on it.
+_UNSATISFIED_PARENT_SQL = (
+    "(p.status != 'done' AND NOT (p.status = 'archived' "
+    "AND (p.completed_at IS NOT NULL OR p.result IS NOT NULL)))"
+)
+
+
+def parent_satisfies(status: Optional[str], completed_at: Any = None, result: Any = None) -> bool:
+    """Python twin of :data:`_UNSATISFIED_PARENT_SQL` (negated)."""
+    if status == "done":
+        return True
+    return status == "archived" and (completed_at is not None or result is not None)
+
+
 def _parents_satisfied(conn: sqlite3.Connection, task_id: str) -> bool:
     """Return whether every direct parent is terminal for dependency gating."""
     return conn.execute(
         "SELECT 1 FROM task_links l "
         "JOIN tasks p ON p.id = l.parent_id "
         "WHERE l.child_id = ? "
-        "AND p.status NOT IN ('done', 'archived') LIMIT 1",
+        f"AND {_UNSATISFIED_PARENT_SQL} LIMIT 1",
         (task_id,),
     ).fetchone() is None
 
@@ -4653,7 +4711,7 @@ def claim_task(
         undone = conn.execute(
             "SELECT 1 FROM task_links l "
             "JOIN tasks p ON p.id = l.parent_id "
-            "WHERE l.child_id = ? AND p.status NOT IN ('done', 'archived') LIMIT 1",
+            f"WHERE l.child_id = ? AND {_UNSATISFIED_PARENT_SQL} LIMIT 1",
             (task_id,),
         ).fetchone()
         if undone:
@@ -5462,7 +5520,8 @@ def complete_task(
                        claim_expires= NULL,
                        worker_pid   = NULL,
                        block_kind   = NULL,
-                       block_recurrences = 0
+                       block_recurrences = 0,
+                       block_reason = NULL
                  WHERE id = ?
                    AND status IN ('running', 'ready', 'blocked', 'review')
                 """,
@@ -5479,7 +5538,8 @@ def complete_task(
                        claim_expires= NULL,
                        worker_pid   = NULL,
                        block_kind   = NULL,
-                       block_recurrences = 0
+                       block_recurrences = 0,
+                       block_reason = NULL
                  WHERE id = ?
                    AND status IN ('running', 'ready', 'blocked', 'review')
                    AND current_run_id = ?
@@ -6255,6 +6315,13 @@ def edit_completed_task_result(
     return True
 
 
+def _same_block_text(previous: Optional[str], current: Optional[str]) -> bool:
+    """Whether two block texts name the same cause (case/space-insensitive)."""
+    def norm(value: Optional[str]) -> str:
+        return " ".join((value or "").casefold().split())
+    return norm(previous) == norm(current)
+
+
 def block_task(
     conn: sqlite3.Connection,
     task_id: str,
@@ -6290,14 +6357,15 @@ def block_task(
     Returns True on any successful transition (to ``blocked``, ``todo``, or
     ``triage``), False when the task wasn't in a blockable state.
     """
-    if kind is not None and kind not in VALID_BLOCK_KINDS:
+    if kind is not None and kind not in VALID_BLOCK_KINDS and kind != OWNER_PAUSE_KIND:
         raise ValueError(
             f"block kind must be one of {sorted(VALID_BLOCK_KINDS)} or None"
         )
     recurrences = 0
     with write_txn(conn):
         cur_row = conn.execute(
-            "SELECT status, block_kind, block_recurrences FROM tasks WHERE id = ?",
+            "SELECT status, block_kind, block_recurrences, block_reason "
+            "FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
         if cur_row is None:
@@ -6327,12 +6395,13 @@ def block_task(
                        claim_lock    = NULL,
                        claim_expires = NULL,
                        worker_pid    = NULL,
-                       block_kind    = ?
+                       block_kind    = ?,
+                       block_reason  = ?
                  WHERE id = ?
                    AND status IN ('running', 'ready')
                 """ + ("" if expected_run_id is None else " AND current_run_id = ?"),
-                (kind, task_id) if expected_run_id is None
-                else (kind, task_id, int(expected_run_id)),
+                (kind, reason, task_id) if expected_run_id is None
+                else (kind, reason, task_id, int(expected_run_id)),
             )
             if cur.rowcount != 1:
                 return False
@@ -6365,44 +6434,93 @@ def block_task(
             )
             return True
 
-        # Truly-blocked kinds. Increment the unblock-loop counter when this is a
-        # re-block for the SAME reason after a prior unblock. block_task only
-        # fires from running/ready (i.e. AFTER an unblock returned the task to
-        # the work pool), so a stored block_kind that matches the incoming kind
-        # means: blocked → unblocked → about-to-re-block for the same cause.
-        # An un-typed (None) block compares as "same" to a prior un-typed block.
-        same_cause = prev_kind == kind
-        recurrences = prev_recurrences + 1 if same_cause else 1
-
-        if recurrences >= BLOCK_RECURRENCE_LIMIT:
-            # Loop detected — stop letting the unblocker spin this task. Route
-            # to triage for a human-in-the-loop decision instead of blocked.
+        # Owner pause: the owner's own stop from the board. It is neither a
+        # question nor a loop signal, so the loop counter and the previous
+        # kind survive untouched, and a task waiting on its parents
+        # (``todo``) can be paused too. The ``blocked`` event keeps it sticky.
+        if kind == OWNER_PAUSE_KIND:
             cur = conn.execute(
-                """
-                UPDATE tasks
-                   SET status        = 'triage',
-                       claim_lock    = NULL,
-                       claim_expires = NULL,
-                       worker_pid    = NULL,
-                       block_kind    = ?,
-                       block_recurrences = ?
-                 WHERE id = ?
-                   AND status IN ('running', 'ready')
-                """ + ("" if expected_run_id is None else " AND current_run_id = ?"),
-                (kind, recurrences, task_id) if expected_run_id is None
-                else (kind, recurrences, task_id, int(expected_run_id)),
+                "UPDATE tasks SET status = 'blocked', claim_lock = NULL, "
+                "claim_expires = NULL, worker_pid = NULL, block_kind = ?, "
+                "block_reason = ? WHERE id = ? "
+                "AND status IN ('running', 'ready', 'todo')"
+                + ("" if expected_run_id is None else " AND current_run_id = ?"),
+                (kind, reason, task_id) if expected_run_id is None
+                else (kind, reason, task_id, int(expected_run_id)),
             )
             if cur.rowcount != 1:
                 return False
             run_id = _end_run(
-                conn, task_id,
-                outcome="blocked", status="blocked",
-                summary=reason,
+                conn, task_id, outcome="blocked", status="blocked",
+                summary=reason or "paused by owner",
             )
-            if run_id is None and reason:
-                run_id = _synthesize_ended_run(
-                    conn, task_id, outcome="blocked", summary=reason,
-                )
+            _append_event(
+                conn, task_id, "blocked",
+                {
+                    "reason": reason,
+                    "kind": kind,
+                    "recurrences": prev_recurrences,
+                    "source_status": (
+                        "ready" if cur_row["status"] == "todo" else source_status
+                    ),
+                },
+                run_id=run_id,
+            )
+            _blocked_task = get_task(conn, task_id)
+            _fire_kanban_lifecycle_hook(
+                "kanban_task_blocked",
+                task_id,
+                board=get_current_board(),
+                assignee=_blocked_task.assignee if _blocked_task else None,
+                run_id=run_id,
+                reason=reason,
+            )
+            return True
+
+        # Truly-blocked kinds. Increment the unblock-loop counter when this is a
+        # re-block for the SAME cause after a prior unblock: the same kind AND
+        # the same question. block_task only fires from running/ready (i.e.
+        # AFTER an unblock returned the task to the work pool), so a matching
+        # stored kind + text means blocked → unblocked → about-to-re-block for
+        # the same cause. A different question after the owner answered is
+        # progress, not a loop. Un-typed/untexted blocks compare as before.
+        prev_reason = cur_row["block_reason"] if "block_reason" in cur_row.keys() else None
+        same_cause = prev_kind == kind and _same_block_text(prev_reason, reason)
+        recurrences = prev_recurrences + 1 if same_cause else 1
+        target = "triage" if recurrences >= BLOCK_RECURRENCE_LIMIT else "blocked"
+
+        cur = conn.execute(
+            f"""
+            UPDATE tasks
+               SET status        = '{target}',
+                   claim_lock    = NULL,
+                   claim_expires = NULL,
+                   worker_pid    = NULL,
+                   block_kind    = ?,
+                   block_recurrences = ?,
+                   block_reason  = ?
+             WHERE id = ?
+               AND status IN ('running', 'ready')
+            """ + ("" if expected_run_id is None else " AND current_run_id = ?"),
+            (kind, recurrences, reason, task_id) if expected_run_id is None
+            else (kind, recurrences, reason, task_id, int(expected_run_id)),
+        )
+        if cur.rowcount != 1:
+            return False
+        run_id = _end_run(
+            conn, task_id,
+            outcome="blocked", status="blocked",
+            summary=reason,
+        )
+        # Synthesize a run when blocking a never-claimed task so the
+        # reason is preserved in attempt history.
+        if run_id is None and reason:
+            run_id = _synthesize_ended_run(
+                conn, task_id, outcome="blocked", summary=reason,
+            )
+        if target == "triage":
+            # Loop detected — stop letting the unblocker spin this task and
+            # route it to triage for a human-in-the-loop decision.
             _append_event(
                 conn, task_id, "block_loop_detected",
                 {
@@ -6415,52 +6533,6 @@ def block_task(
                 run_id=run_id,
             )
         else:
-            if expected_run_id is None:
-                cur = conn.execute(
-                    """
-                    UPDATE tasks
-                       SET status        = 'blocked',
-                           claim_lock    = NULL,
-                           claim_expires = NULL,
-                           worker_pid    = NULL,
-                           block_kind    = ?,
-                           block_recurrences = ?
-                     WHERE id = ?
-                       AND status IN ('running', 'ready')
-                    """,
-                    (kind, recurrences, task_id),
-                )
-            else:
-                cur = conn.execute(
-                    """
-                    UPDATE tasks
-                       SET status        = 'blocked',
-                           claim_lock    = NULL,
-                           claim_expires = NULL,
-                           worker_pid    = NULL,
-                           block_kind    = ?,
-                           block_recurrences = ?
-                     WHERE id = ?
-                       AND status IN ('running', 'ready')
-                       AND current_run_id = ?
-                    """,
-                    (kind, recurrences, task_id, int(expected_run_id)),
-                )
-            if cur.rowcount != 1:
-                return False
-            run_id = _end_run(
-                conn, task_id,
-                outcome="blocked", status="blocked",
-                summary=reason,
-            )
-            # Synthesize a run when blocking a never-claimed task so the
-            # reason is preserved in attempt history.
-            if run_id is None and reason:
-                run_id = _synthesize_ended_run(
-                    conn, task_id,
-                    outcome="blocked",
-                    summary=reason,
-                )
             _append_event(
                 conn, task_id, "blocked",
                 {
@@ -6814,14 +6886,14 @@ def promote_task(
 
     if not force:
         parents = conn.execute(
-            "SELECT t.id, t.status FROM tasks t "
+            "SELECT t.id, t.status, t.completed_at, t.result FROM tasks t "
             "JOIN task_links l ON l.parent_id = t.id "
             "WHERE l.child_id = ?",
             (task_id,),
         ).fetchall()
         unsatisfied = [
             p["id"] for p in parents
-            if p["status"] not in ("done", "archived")
+            if not parent_satisfies(p["status"], p["completed_at"], p["result"])
         ]
         if unsatisfied:
             return False, (
@@ -6893,10 +6965,65 @@ def _landing_status_after_parents(conn: sqlite3.Connection, task_id: str) -> str
         "SELECT 1 FROM task_links l "
         "JOIN tasks p ON p.id = l.parent_id "
         "WHERE l.child_id = ? "
-        "AND p.status NOT IN ('done', 'archived') LIMIT 1",
+        f"AND {_UNSATISFIED_PARENT_SQL} LIMIT 1",
         (task_id,),
     ).fetchone()
     return "todo" if undone_parents else "ready"
+
+
+def _unblock_in_txn(conn: sqlite3.Connection, task_id: str, *, now: int) -> Optional[str]:
+    """Body of :func:`unblock_task`; the caller owns the write transaction.
+
+    Returns the landing status, or ``None`` when the task was not blocked or
+    scheduled.
+    """
+    current = conn.execute(
+        "SELECT status FROM tasks WHERE id = ?",
+        (task_id,),
+    ).fetchone()
+    resume_status = (
+        _resume_status_from_events(conn, task_id)
+        if current and current["status"] == "blocked"
+        else "ready"
+    )
+    _reclaim_dangling_run(
+        conn, task_id, statuses=("blocked", "scheduled"), now=now,
+        note="invariant recovery on unblock",
+    )
+    # Re-gate on parent completion before restoring the source phase.
+    landing_status = _landing_status_after_parents(conn, task_id)
+    new_status = (
+        "review"
+        if landing_status == "ready" and resume_status == "review"
+        else landing_status
+    )
+    # NOTE: deliberately does NOT touch ``block_recurrences``, ``block_kind``
+    # or ``block_reason``. Resetting the recurrence counter on unblock is
+    # exactly the amnesia that let a cron unblock → worker re-block loop run
+    # unbounded (Dale's report). The counter and the cause survive the
+    # unblock so that a subsequent same-cause ``block_task`` can detect the
+    # loop and route to triage at ``BLOCK_RECURRENCE_LIMIT``. They are reset
+    # only on a successful completion (see ``complete_task``).
+    # ``consecutive_failures`` (the *dispatcher* spawn/crash/timeout counter —
+    # a different signal) is still reset here, which is correct: a
+    # deliberate unblock is a fresh start for the dispatcher's retry budget.
+    cur = conn.execute(
+        "UPDATE tasks SET status = ?, current_run_id = NULL, "
+        "consecutive_failures = 0, last_failure_error = NULL "
+        "WHERE id = ? AND status IN ('blocked', 'scheduled')",
+        (new_status, task_id),
+    )
+    if cur.rowcount != 1:
+        return None
+    _append_event(
+        conn, task_id, "unblocked",
+        (
+            {"status": new_status, "resume_status": resume_status}
+            if new_status != "ready" or resume_status != "ready"
+            else None
+        ),
+    )
+    return new_status
 
 
 def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
@@ -6909,55 +7036,132 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
     runs invariant (``current_run_id IS NULL`` ⇔ run row in terminal
     state) holds for the rest of this function's lifetime.
     """
-    now = int(time.time())
     with write_txn(conn):
-        current = conn.execute(
-            "SELECT status FROM tasks WHERE id = ?",
+        return _unblock_in_txn(conn, task_id, now=int(time.time())) is not None
+
+
+def block_revision(conn: sqlite3.Connection, task_id: str) -> Optional[int]:
+    """Identity of the question a blocked task is currently waiting on.
+
+    The id of the latest ``blocked`` event, or ``None`` when the task is
+    not waiting on a question (never blocked by one, or later unblocked or
+    stopped by the failure breaker). An answer carries the revision it
+    was written for, so a reply to an earlier or replaced question is
+    rejected instead of resuming work on the wrong premise.
+    """
+    row = conn.execute(
+        "SELECT id, kind FROM task_events WHERE task_id = ? "
+        "AND kind IN ('blocked', 'unblocked', 'gave_up') "
+        "ORDER BY id DESC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    return int(row["id"]) if row and row["kind"] == "blocked" else None
+
+
+def respond_to_block(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    answer: Optional[str],
+    author: str,
+    request_id: str,
+    revision: Optional[int] = None,
+) -> dict[str, Any]:
+    """Answer a blocked task and resume it in one transaction.
+
+    Saves the owner's answer as a comment (the worker reads comments in its
+    context) and unblocks the task, or does neither. A repeated
+    ``request_id`` returns the first outcome without writing again, so a
+    retry after a lost HTTP response cannot post the answer twice or resume
+    a task that has since been blocked on a new question.
+
+    Returns ``{"ok", "status", "duplicate", "reason"}``; ``reason`` is
+    ``not_found``, ``not_blocked`` or ``stale`` when ``ok`` is False.
+    """
+    request_id = (request_id or "").strip()
+    if not request_id:
+        raise ValueError("request_id is required")
+    text = (answer or "").strip()
+    with write_txn(conn):
+        for row in conn.execute(
+            "SELECT payload FROM task_events WHERE task_id = ? "
+            "AND kind = 'owner_responded' ORDER BY id DESC",
             (task_id,),
+        ):
+            try:
+                payload = json.loads(row["payload"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            if payload.get("request_id") == request_id:
+                return {
+                    "ok": True, "status": payload.get("status"),
+                    "duplicate": True, "reason": None,
+                }
+        current = conn.execute(
+            "SELECT status FROM tasks WHERE id = ?", (task_id,),
         ).fetchone()
-        resume_status = (
-            _resume_status_from_events(conn, task_id)
-            if current and current["status"] == "blocked"
-            else "ready"
-        )
-        _reclaim_dangling_run(
-            conn, task_id, statuses=("blocked", "scheduled"), now=now,
-            note="invariant recovery on unblock",
-        )
-        # Re-gate on parent completion before restoring the source phase.
-        landing_status = _landing_status_after_parents(conn, task_id)
-        new_status = (
-            "review"
-            if landing_status == "ready" and resume_status == "review"
-            else landing_status
-        )
-        # NOTE: deliberately does NOT touch ``block_recurrences`` or
-        # ``block_kind``. Resetting the recurrence counter on unblock is exactly
-        # the amnesia that let a cron unblock → worker re-block loop run
-        # unbounded (Dale's report). The counter survives the unblock so that a
-        # subsequent same-cause ``block_task`` can detect the loop and route to
-        # triage at ``BLOCK_RECURRENCE_LIMIT``. It is reset to 0 only on a
-        # successful completion (see ``complete_task``). ``consecutive_failures``
-        # (the *dispatcher* spawn/crash/timeout counter — a different signal) is
-        # still reset here, which is correct: a deliberate unblock is a fresh
-        # start for the dispatcher's retry budget.
-        cur = conn.execute(
-            "UPDATE tasks SET status = ?, current_run_id = NULL, "
-            "consecutive_failures = 0, last_failure_error = NULL "
-            "WHERE id = ? AND status IN ('blocked', 'scheduled')",
-            (new_status, task_id),
-        )
-        if cur.rowcount != 1:
-            return False
+        if current is None:
+            return {"ok": False, "status": None, "duplicate": False, "reason": "not_found"}
+        if current["status"] != "blocked":
+            return {
+                "ok": False, "status": current["status"],
+                "duplicate": False, "reason": "not_blocked",
+            }
+        current_revision = block_revision(conn, task_id)
+        if revision is not None and current_revision != int(revision):
+            return {
+                "ok": False, "status": "blocked",
+                "duplicate": False, "reason": "stale",
+            }
+        if text:
+            add_comment(conn, task_id, author, text)
+        new_status = _unblock_in_txn(conn, task_id, now=int(time.time()))
+        if new_status is None:
+            return {
+                "ok": False, "status": current["status"],
+                "duplicate": False, "reason": "not_blocked",
+            }
         _append_event(
-            conn, task_id, "unblocked",
-            (
-                {"status": new_status, "resume_status": resume_status}
-                if new_status != "ready" or resume_status != "ready"
-                else None
-            ),
+            conn, task_id, "owner_responded",
+            {
+                "request_id": request_id,
+                "revision": current_revision,
+                "answered": bool(text),
+                "status": new_status,
+            },
         )
-        return True
+    return {"ok": True, "status": new_status, "duplicate": False, "reason": None}
+
+
+def pause_task(
+    conn: sqlite3.Connection, task_id: str, *, reason: Optional[str] = None,
+) -> dict[str, Any]:
+    """Owner pause: park the task and stop its live worker process.
+
+    ``block_task`` only clears the worker pointer; without the explicit stop
+    the process kept working (and could still write to external systems)
+    after the board showed it as paused.
+    """
+    prev = conn.execute(
+        "SELECT status, worker_pid, claim_lock FROM tasks WHERE id = ?",
+        (task_id,),
+    ).fetchone()
+    if prev is None:
+        return {"ok": False, "stopped": None}
+    ok = block_task(conn, task_id, reason=reason, kind=OWNER_PAUSE_KIND)
+    if not ok:
+        return {"ok": False, "stopped": None}
+    stopped = None
+    if prev["status"] == "running" and prev["worker_pid"]:
+        info = _terminate_reclaimed_worker(prev["worker_pid"], prev["claim_lock"])
+        stopped = bool(info.get("terminated"))
+        with write_txn(conn):
+            _append_event(conn, task_id, "worker_stopped", {
+                "reason": "owner_pause",
+                "terminated": stopped,
+                "host_local": bool(info.get("host_local")),
+            })
+    return {"ok": True, "stopped": stopped}
 
 
 def reopen_review_task(conn: sqlite3.Connection, task_id: str) -> bool:
@@ -7522,7 +7726,18 @@ def decompose_triage_task(
     return child_ids
 
 
-def archive_task(conn: sqlite3.Connection, task_id: str) -> bool:
+def archive_task(
+    conn: sqlite3.Connection, task_id: str, *, stop_worker: bool = False,
+) -> bool:
+    """Archive a task. ``stop_worker`` also stops a live host-local worker.
+
+    Archiving does not complete the task: an unfinished archived step no
+    longer satisfies its children's dependency (see ``parent_satisfies``).
+    """
+    prev = conn.execute(
+        "SELECT status, worker_pid, claim_lock FROM tasks WHERE id = ?",
+        (task_id,),
+    ).fetchone()
     with write_txn(conn):
         cur = conn.execute(
             "UPDATE tasks SET status = 'archived', "
@@ -7541,9 +7756,16 @@ def archive_task(conn: sqlite3.Connection, task_id: str) -> bool:
             summary="task archived with run still active",
         )
         _append_event(conn, task_id, "archived", None, run_id=run_id)
-    # ``archived`` parents no longer block children, same as ``done``.
-    # Promote newly-unblocked dependents immediately instead of waiting
-    # for a later dispatcher tick.
+    if stop_worker and prev is not None and prev["status"] == "running" and prev["worker_pid"]:
+        info = _terminate_reclaimed_worker(prev["worker_pid"], prev["claim_lock"])
+        with write_txn(conn):
+            _append_event(conn, task_id, "worker_stopped", {
+                "reason": "archived",
+                "terminated": bool(info.get("terminated")),
+                "host_local": bool(info.get("host_local")),
+            })
+    # A completed task that is archived still satisfies its children; an
+    # unfinished one does not. Promote newly-unblocked dependents now.
     recompute_ready(conn)
     # Reap the workspace on archive too — tasks archived without ever
     # completing previously kept their scratch dir / worktree forever.

@@ -458,7 +458,12 @@ def decompose_task(
 
 
 def list_triage_ids(*, tenant: Optional[str] = None) -> list[str]:
-    """Return task ids currently in the triage column."""
+    """Return triage task ids that are ideas awaiting decomposition.
+
+    A task the unblock-loop breaker routed here (``block_kind`` set) is a
+    stuck conversation for its owner to resolve, not an idea to split: auto
+    decomposition would reassign its root and start new work on it.
+    """
     with kb.connect_closing() as conn:
         rows = kb.list_tasks(
             conn,
@@ -466,4 +471,4 @@ def list_triage_ids(*, tenant: Optional[str] = None) -> list[str]:
             tenant=tenant,
             limit=1000,
         )
-    return [row.id for row in rows]
+    return [row.id for row in rows if not row.block_kind]
