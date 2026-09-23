@@ -39,6 +39,8 @@ WIDGET_IDS: tuple[str, ...] = (
     # агентов на неделю (0.21.13). Новый в каталоге — у тех, кто уже
     # настраивал доску, встаёт последним, а не пропадает.
     "calendar",
+    # Shown only where a Codex subscription is connected (0.21.13).
+    "codex-quota",
 )
 
 #: Cards that live outside the tile grid: no size, no reordering.

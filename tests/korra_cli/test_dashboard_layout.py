@@ -150,14 +150,11 @@ def test_update_increments_the_server_revision_and_pins_the_attention_strip():
     assert value["revision"] == 13
     assert value["initialized"] is True
     assert value["order"][0] == "attention"
-    assert [w for w in value["order"] if w != "attention"] == [
-        "metrics",
-        "agents",
-        "recent-results",
-        "upcoming-tasks",
-        # Не названная браузером карточка каталога встаёт в конец.
-        "calendar",
-    ]
+    stored = ["metrics", "agents", "recent-results", "upcoming-tasks"]
+    tiles = [w for w in value["order"] if w != "attention"]
+    # The browser's order is kept; catalog cards it never mentioned follow it.
+    assert tiles[: len(stored)] == stored
+    assert tiles[len(stored):] == [w for w in TILE_WIDGET_IDS if w not in stored]
     assert value["hidden"] == ["upcoming-tasks"]
     assert value["sizes"]["metrics"] == "l"
     assert value["sizes"]["agents"] == "s"

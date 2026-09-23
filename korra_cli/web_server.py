@@ -20798,6 +20798,11 @@ async def set_dashboard_layout(body: DashboardLayoutSetBody, request: Request = 
     return await asyncio.to_thread(_run)
 
 
+from korra_cli.web_routers import dashboard_state as _dashboard_state_routes  # noqa: E402
+
+app.include_router(_dashboard_state_routes.router)
+
+
 # Curated font-override ids. Kept in sync with FONT_CHOICES in
 # web/src/themes/fonts.ts — the frontend owns the self-hosted font stacks;
 # the backend only needs the id allow-list so it can reject anything not
