@@ -1,7 +1,7 @@
 """Tests for the image-rejection fallback in run_agent.
 
 When a server rejects image content (e.g. text-only endpoints), the agent
-strips image parts from message history and retries text-only.  These tests
+strips image parts from the request copy and retries text-only.  These tests
 verify that stripping preserves the role-alternation invariants providers
 require, and that the phrase detector fires on the expected error bodies.
 """
@@ -221,14 +221,13 @@ class TestImageRejectionPhraseIsolation:
 
 
 class TestStripImagesDropsStaleApiContent:
-    """The strip runs on the persistent history, not just the per-call copy.
+    """A message the strip rewrites loses its ``api_content`` sidecar.
 
-    ``api_content`` is the byte-stability sidecar: it holds the exact bytes
-    previously sent for a message, and the next turn substitutes it back into
-    ``content``. Leaving it in place on a message this function rewrote would
-    replay the images the strip just removed — and the recovery cannot re-fire,
-    because it sets ``_vision_supported = False`` and gates itself on that. The
-    session would then send rejected images on every subsequent turn.
+    The recovery now strips only per-call request copies (the conversation
+    keeps its images — see test_image_rejection_keeps_history.py), but the
+    contract is unchanged: ``api_content`` is the byte-stability sidecar, it
+    holds the exact bytes previously sent for a message, and substituting it
+    back into ``content`` would replay the images the strip just removed.
 
     Same contract the other content-rewrite paths follow (stale-confirmation
     redaction in ``replay_cleanup``, compression rewrites, merge-into-tail):

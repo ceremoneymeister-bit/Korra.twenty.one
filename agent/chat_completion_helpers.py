@@ -3100,6 +3100,13 @@ def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
             for idx, pfm in enumerate(agent.prefill_messages):
                 api_messages.insert(sys_offset + idx, pfm.copy())
 
+        # Same as the main loop: images this model already rejected are not
+        # re-sent. The strip rebinds ``content`` on these shallow copies, so
+        # the conversation keeps its images.
+        from agent.message_sanitization import strip_images_for_rejecting_model
+
+        strip_images_for_rejecting_model(agent, api_messages)
+
         # Same safety net as the main loop: repair tool-call/result
         # pairing before asking for a final summary.  Compression and
         # session resume can leave a tool result whose parent assistant

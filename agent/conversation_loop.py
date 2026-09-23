@@ -64,7 +64,9 @@ from agent.message_sanitization import (
     _looks_like_image_content_rejection,
     _strip_images_from_messages,
     _strip_non_ascii,
+    remember_rejected_images,
     serialized_messages_bytes,
+    strip_images_for_rejecting_model,
 )
 # Must mirror _STALE_TOOL_CALL_MARKER_RE in korra_state.py — kept local
 # to avoid importing korra_state at module load time (its module-level
@@ -2640,6 +2642,13 @@ def run_conversation(
             logger=request_logger,
         )
 
+        # Images a model already rejected in this session are not re-sent to
+        # it; the conversation keeps them for any model that can see them.
+        # Runs on the per-call copy in Korra's own part format, before the
+        # orphan/alternation repair below and before provider conversion,
+        # cache decoration and the pressure estimate.
+        strip_images_for_rejecting_model(agent, api_messages)
+
         # Safety net: strip orphaned tool results / add stubs for missing
         # results before sending to the API.  Runs unconditionally — not
         # gated on context_compressor — so orphans from session loading or
@@ -4844,9 +4853,18 @@ def run_conversation(
                 # Some providers (mlx-lm, text-only endpoints, text-only
                 # fallbacks on multimodal models) reject any message that
                 # contains image_url content with a 4xx error like
-                # "Only 'text' content type is supported."  On first hit,
-                # strip all images from the message list, mark the session
-                # as vision-unsupported, and retry with text only.
+                # "Only 'text' content type is supported."  On first hit in
+                # a turn, retry this request text-only and remember which
+                # images this (provider, model) refused, so later requests to
+                # it are built without them (new images still get a chance —
+                # some wordings are about one corrupt picture, not the model).
+                #
+                # Request only, never the conversation: the rejection says
+                # what THIS model accepts, not what the conversation holds.
+                # Stripping ``messages`` rewrote the caller's history dicts
+                # and dropped image-only messages from the list the CLI/TUI
+                # carry into the next turn, so a fallback or /model switch to
+                # a vision model found the images gone (Hermes 1ef306f68d).
                 #
                 # Detection is best-effort English phrase matching — a
                 # locale-translated or heavily-reworded upstream error
@@ -4872,11 +4890,11 @@ def run_conversation(
                     and _status_ok
                 ):
                     agent._vision_supported = False
-                    _imgs_removed = _strip_images_from_messages(messages)
+                    remember_rejected_images(agent, api_messages)
                     if isinstance(api_messages, list):
                         _strip_images_from_messages(api_messages)
                     agent._vprint(
-                        f'{agent.log_prefix}⚠️ Провайдер отклонил изображения — для этой беседы включён текстовый режим' + ('. Изображения удалены из истории запроса; повторяю.' if _imgs_removed else '.'),
+                        f'{agent.log_prefix}⚠️ Провайдер отклонил изображения — повторяю запрос без них; в беседе они сохранены.',
                         force=True,
                     )
                     continue

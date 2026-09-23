@@ -972,7 +972,11 @@ def init_agent(
     agent.request_overrides = dict(request_overrides or {})
     agent.prefill_messages = prefill_messages or []  # Prefilled conversation turns
     agent._force_ascii_payload = False
-    
+    # {(provider, model): refs of images that model rejected}. The request
+    # build drops those images for that model only; the conversation keeps
+    # them for any model that can see (see strip_images_for_rejecting_model).
+    agent._image_rejections = {}
+
     # Anthropic prompt caching: auto-enabled for Claude models on native
     # Anthropic, OpenRouter, and third-party gateways that speak the
     # Anthropic protocol (``api_mode == 'anthropic_messages'``). Reduces

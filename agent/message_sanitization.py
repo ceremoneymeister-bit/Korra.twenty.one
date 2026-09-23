@@ -435,7 +435,10 @@ def serialized_messages_bytes(messages: list) -> int:
         return sum(len(str(m)) for m in messages)
 
 
-def _strip_images_from_messages(messages: list) -> bool:
+_IMAGE_PART_TYPES = frozenset({"image_url", "image", "input_image"})
+
+
+def _strip_images_from_messages(messages: list, should_strip: Any = None) -> bool:
     """Remove image_url content parts from all messages in-place.
 
     Called when a server signals it does not support images (e.g.
@@ -453,11 +456,16 @@ def _strip_images_from_messages(messages: list) -> bool:
         this only hits synthetic image-only user messages appended for
         attachment delivery; real user turns always include text.
 
-    This runs on the persistent history as well as the per-call copy, so any
-    message it rewrites must also lose its ``api_content`` sidecar: the sidecar
-    carries the exact bytes previously sent — here, the images this strip
-    exists to remove — and the next turn substitutes it back into ``content``,
-    undoing the strip on the wire.
+    Callers pass the per-call request copy, never the conversation: a
+    rejection describes what the current model accepts, not what the
+    conversation holds (see ``strip_images_for_rejecting_model``). Any message
+    it rewrites still loses its ``api_content`` sidecar: the sidecar carries the
+    exact bytes previously sent — here, the images this strip exists to
+    remove — and substituting it back into ``content`` would undo the strip on
+    the wire.
+
+    ``should_strip`` optionally narrows the strip to the image parts for
+    which it returns True; the default removes every image part.
 
     Returns True if any image parts were removed.
     """
@@ -473,7 +481,11 @@ def _strip_images_from_messages(messages: list) -> bool:
             continue
         new_parts = []
         for part in content:
-            if isinstance(part, dict) and part.get("type") in {"image_url", "image", "input_image"}:
+            if (
+                isinstance(part, dict)
+                and part.get("type") in _IMAGE_PART_TYPES
+                and (should_strip is None or should_strip(part))
+            ):
                 found = True
             else:
                 new_parts.append(part)
@@ -572,6 +584,91 @@ def _looks_like_image_content_rejection(error_body: str) -> bool:
     return any(phrase in body for phrase in _IMAGE_REJECTION_PHRASES)
 
 
+def _image_part_ref(part: dict) -> Any:
+    """In-process identity of an image part's payload, or None if it has none.
+
+    ``hash()`` is cached on the str object and request copies share the
+    conversation's strings, so this stays O(1) for megabyte data URLs. String
+    hashing is salted per process, which is fine: the refs never leave the
+    agent that recorded them.
+    """
+    ref = None
+    kind = part.get("type")
+    if kind in ("image_url", "input_image"):
+        value = part.get("image_url")
+        ref = value.get("url") if isinstance(value, dict) else value
+        if not ref:
+            ref = part.get("file_id")
+    elif kind == "image":
+        source = part.get("source")
+        if isinstance(source, dict):
+            ref = source.get("data") or source.get("url")
+    if isinstance(ref, str) and ref:
+        return (len(ref), hash(ref))
+    return None
+
+
+def _rejection_key(agent: Any) -> tuple:
+    return (getattr(agent, "provider", None), getattr(agent, "model", None))
+
+
+def remember_rejected_images(agent: Any, api_messages: Any) -> None:
+    """Record the images a model has just rejected (image-rejection recovery).
+
+    The recovery strips the rejected request copy and records its images under
+    the current ``(provider, model)`` instead of stripping the conversation: a
+    rejection says what this model accepts, not what the conversation holds.
+    """
+    rejections = getattr(agent, "_image_rejections", None)
+    if not isinstance(rejections, dict):
+        rejections = {}
+        agent._image_rejections = rejections
+    refs = rejections.setdefault(_rejection_key(agent), set())
+    for msg in api_messages if isinstance(api_messages, list) else ():
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and part.get("type") in _IMAGE_PART_TYPES:
+                ref = _image_part_ref(part)
+                if ref is not None:
+                    refs.add(ref)
+
+
+def strip_images_for_rejecting_model(agent: Any, api_messages: Any) -> bool:
+    """Drop, from a request copy, the images this model already rejected.
+
+    Runs on each per-call ``api_messages`` copy in Korra's own message format,
+    before provider conversion (the part types above are that format's).
+    Only images recorded by ``remember_rejected_images`` for the SAME
+    ``(provider, model)`` are removed — plus image parts with no identifiable
+    payload, conservatively — so:
+
+    * the conversation keeps every image, and a model that accepts them
+      (a fallback, a ``/model`` switch) sees them again;
+    * the rejecting model is not re-sent the images it refused, so later
+      requests do not repeat the 4xx;
+    * a NEW image still reaches that model. Several rejection wordings are
+      about one corrupt picture, not the model (ChatGPT-account Codex "image
+      data you provided does not represent a valid image", "failed to decode
+      image"), so a later valid photo must not be silently hidden.
+
+    Returns True if any image parts were removed.
+    """
+    rejections = getattr(agent, "_image_rejections", None)
+    if not isinstance(rejections, dict) or not isinstance(api_messages, list):
+        return False
+    refs = rejections.get(_rejection_key(agent))
+    if refs is None:
+        return False
+
+    def _already_rejected(part: dict) -> bool:
+        ref = _image_part_ref(part)
+        return ref is None or ref in refs
+
+    return _strip_images_from_messages(api_messages, should_strip=_already_rejected)
+
+
 def _sanitize_structure_non_ascii(payload: Any) -> bool:
     """Strip non-ASCII characters from nested dict/list payloads in-place."""
     found = False
@@ -613,6 +710,8 @@ __all__ = [
     "_sanitize_messages_non_ascii",
     "_sanitize_tools_non_ascii",
     "_strip_images_from_messages",
+    "remember_rejected_images",
+    "strip_images_for_rejecting_model",
     "_sanitize_structure_non_ascii",
     # call_id policy owners (F4 consolidation)
     "deterministic_call_id",
