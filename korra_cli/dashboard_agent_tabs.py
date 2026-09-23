@@ -11,7 +11,12 @@ import re
 from typing import Any, Iterable
 
 
-MAX_AGENT_TABS = 10
+# A bound on the stored record, not on the strip: the strip shows every profile
+# of the installation (0.21.13 — Boris has 12 agents, Dmitry 22). The old value
+# 10 silently dropped the 11th+ profile from the saved order and, worse, from
+# ``hidden``: "Скрыть вкладку" on such an agent was accepted and then lost.
+# The bound only keeps a buggy or hostile browser from bloating config.yaml.
+MAX_LAYOUT_PROFILES = 256
 _PROFILE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
@@ -29,7 +34,7 @@ def _profiles(value: Any, *, allow_main: bool) -> list[str]:
         elif not _PROFILE_RE.fullmatch(profile) or profile in result:
             continue
         result.append(profile)
-        if len(result) >= MAX_AGENT_TABS:
+        if len(result) >= MAX_LAYOUT_PROFILES:
             break
     return result
 
@@ -68,7 +73,7 @@ def updated(
     clean_order = _profiles(list(order), allow_main=True)
     if "" not in clean_order:
         clean_order.insert(0, "")
-        clean_order = clean_order[:MAX_AGENT_TABS]
+        clean_order = clean_order[:MAX_LAYOUT_PROFILES]
     clean_hidden = _profiles(list(hidden), allow_main=False)
     hidden_set = set(clean_hidden)
     clean_hidden = [profile for profile in clean_order if profile and profile in hidden_set]

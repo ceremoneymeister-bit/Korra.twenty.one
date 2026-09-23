@@ -266,6 +266,30 @@ describe("useAgentTabs", () => {
     expect(current.hiddenTabs).toEqual([]);
   });
 
+  it("двенадцатый агент — вкладка, и его можно скрыть и вернуть", async () => {
+    // Приёмка 0.21.12 у клиента с 12 агентами: полоса показывала 10.
+    const names = Array.from({ length: 11 }, (_, index) => `agent-${String(index).padStart(2, "0")}`);
+    getProfiles.mockResolvedValue({
+      profiles: [
+        { name: "default", is_default: true },
+        ...names.map((name) => ({ name, is_default: false })),
+      ],
+    });
+    await mount();
+    await act(async () => {});
+    expect(current.tabs).toHaveLength(12);
+    expect(current.tabs.at(-1)?.profile).toBe("agent-10");
+
+    await act(async () => current.hideTab("agent-10"));
+    expect(current.tabs).toHaveLength(11);
+    expect(current.hiddenTabs.map((tab) => tab.profile)).toEqual(["agent-10"]);
+    expect(serverLayout.hidden).toEqual(["agent-10"]);
+    expect(serverLayout.order).toHaveLength(12);
+
+    await act(async () => current.showTab("agent-10"));
+    expect(current.tabs).toHaveLength(12);
+  });
+
   it("вычищает удалённый профиль из порядка и скрытых вкладок", async () => {
     window.localStorage.setItem(
       "korra.agentTabs.order",

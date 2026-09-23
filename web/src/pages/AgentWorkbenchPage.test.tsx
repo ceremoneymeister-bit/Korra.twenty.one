@@ -735,3 +735,281 @@ describe("AgentWorkbenchPage", () => {
     expect(document.body.textContent).not.toContain("по-прежнему зовётся");
   });
 });
+
+/** Двенадцать агентов клиента из приёмки 0.21.12: двое последних
+ *  не попадали на полосу из-за предела в десять вкладок. */
+const TWELVE_TABS = [
+  { profile: "", label: "Корра" },
+  { profile: "finance", label: "Финансы и управление" },
+  { profile: "interior", label: "Интерьер и архитектура" },
+  { profile: "migrationlab", label: "migrationlab" },
+  { profile: "studio_docs_bot", label: "Канцлер" },
+  { profile: "studio_assistant_bot", label: "Ассистент" },
+  { profile: "studio_visual_bot", label: "Визуализатор" },
+  { profile: "studio_light_bot", label: "Светодизайнер" },
+  { profile: "studio_marketing_bot", label: "Маркетинг" },
+  { profile: "studio_project_bot", label: "Архитектурное бюро" },
+  { profile: "studio_sales_bot", label: "Продажи", description: "Ведёт сделки" },
+  { profile: "studio_secretary_bot", label: "Секретарь" },
+];
+
+/**
+ * jsdom не раскладывает страницу: полоса «помещается» при нулевых размерах.
+ * Здесь задаём ей ширину и содержимое шире неё — как у двенадцати вкладок
+ * на экране 1440 px, — а каждой вкладке место по её порядку.
+ */
+function mockStripGeometry({ overflow, width = 600 }: { overflow: boolean; width?: number }) {
+  const isStrip = (element: Element) => element.classList.contains("korra-agent-tabs__scroller");
+  const scrollLeft = new WeakMap<Element, number>();
+  const patched: Array<[string, PropertyDescriptor | undefined]> = [];
+  const define = (name: string, descriptor: PropertyDescriptor) => {
+    patched.push([name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)]);
+    Object.defineProperty(HTMLElement.prototype, name, { configurable: true, ...descriptor });
+  };
+  define("clientWidth", { get(this: HTMLElement) { return isStrip(this) ? width : 0; } });
+  define("scrollWidth", { get(this: HTMLElement) { return isStrip(this) ? (overflow ? 2400 : width) : 0; } });
+  define("scrollLeft", {
+    get(this: HTMLElement) { return scrollLeft.get(this) ?? 0; },
+    set(this: HTMLElement, value: number) { scrollLeft.set(this, value); },
+  });
+  const originalRect = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    if (isStrip(this)) return new DOMRect(0, 0, width, 40);
+    const strip = this.closest(".korra-agent-tabs__scroller");
+    const profile = this.dataset.agentTabProfile;
+    if (strip && profile !== undefined) {
+      const index = Array.from(strip.children).indexOf(this);
+      return new DOMRect(index * 200 - (scrollLeft.get(strip) ?? 0), 0, 190, 40);
+    }
+    return originalRect.call(this);
+  };
+  return () => {
+    for (const [name, descriptor] of patched.reverse()) {
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+    }
+    HTMLElement.prototype.getBoundingClientRect = originalRect;
+  };
+}
+
+describe("много агентов", () => {
+  let restoreGeometry: (() => void) | null = null;
+
+  afterEach(() => {
+    restoreGeometry?.();
+    restoreGeometry = null;
+  });
+
+  const listTrigger = () =>
+    container.querySelector<HTMLButtonElement>("button[data-agent-list-trigger]");
+  const agentList = () => document.body.querySelector<HTMLElement>("[data-agent-list]");
+
+  it("все двенадцать агентов — вкладки полосы, и список «Все агенты» открывает любого", async () => {
+    workbenchMocks.tabs = TWELVE_TABS;
+    restoreGeometry = mockStripGeometry({ overflow: true });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+
+    const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    expect(tabs.map((tab) => tab.id)).toContain("agent-tab-studio_sales_bot");
+    expect(tabs.map((tab) => tab.id)).toContain("agent-tab-studio_secretary_bot");
+
+    const trigger = listTrigger()!;
+    expect(trigger.getAttribute("aria-label")).toBe("Все агенты: 12");
+    await act(async () => trigger.click());
+    const list = agentList()!;
+    expect(list.getAttribute("role")).toBe("dialog");
+    const items = Array.from(list.querySelectorAll<HTMLButtonElement>("[data-agent-list-item]"));
+    expect(items.map((item) => item.textContent)).toEqual(TWELVE_TABS.map((tab) => tab.label));
+    expect(items[0].getAttribute("aria-current")).toBe("true");
+
+    await act(async () => items[11].click());
+    expect(agentList()).toBeNull();
+    expect(container.querySelector("#agent-tab-studio_secretary_bot")?.getAttribute("aria-selected")).toBe("true");
+    expect($activeAgentProfile.get()).toBe("studio_secretary_bot");
+    // Вкладка доведена до видимой части полосы: 12-я стоит на 2200 px.
+    const scroller = container.querySelector<HTMLElement>(".korra-agent-tabs__scroller")!;
+    expect(scroller.scrollLeft).toBeGreaterThanOrEqual(11 * 200 + 190 - 600);
+    expect(workbenchMocks.showTab).not.toHaveBeenCalled();
+  });
+
+  it("на узкой полосе телефона начало подписи выбранной вкладки не уходит за левый край", async () => {
+    workbenchMocks.tabs = TWELVE_TABS;
+    // Полоса 195 px, вкладка с «⋮» — 190: зазор справа в 8 px сдвинул бы
+    // начало подписи за левый край.
+    restoreGeometry = mockStripGeometry({ overflow: true, width: 195 });
+    await render(
+      <MemoryRouter initialEntries={["/agents?agent=studio_secretary_bot"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const wrapper = container.querySelector<HTMLElement>('[data-agent-tab-profile="studio_secretary_bot"]')!;
+    const box = wrapper.getBoundingClientRect();
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(195);
+  });
+
+  it("поиск находит агента по имени, профилю и роли; Enter открывает первого найденного", async () => {
+    workbenchMocks.tabs = TWELVE_TABS;
+    restoreGeometry = mockStripGeometry({ overflow: true });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    await act(async () => listTrigger()!.click());
+    const input = agentList()!.querySelector<HTMLInputElement>('input[type="search"]')!;
+    await enterText(input, "сделки");
+    expect(
+      Array.from(agentList()!.querySelectorAll("[data-agent-list-item]")).map((item) => item.textContent),
+    ).toEqual(["Продажи"]);
+    await enterText(input, "нет такого");
+    expect(agentList()!.textContent).toContain("Нет агента с таким именем");
+    await enterText(input, "secretary");
+    await act(async () => {
+      input.form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector("#agent-tab-studio_secretary_bot")?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("скрытый агент в списке помечен и при выборе возвращается на полосу", async () => {
+    workbenchMocks.tabs = TWELVE_TABS.slice(0, 11);
+    workbenchMocks.hiddenTabs = [TWELVE_TABS[11]];
+    restoreGeometry = mockStripGeometry({ overflow: true });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    await act(async () => listTrigger()!.click());
+    const item = agentList()!.querySelector<HTMLButtonElement>('[data-agent-list-item="studio_secretary_bot"]')!;
+    expect(item.textContent).toContain("вкладка скрыта");
+    await act(async () => item.click());
+    expect(workbenchMocks.showTab).toHaveBeenCalledWith("studio_secretary_bot");
+  });
+
+  it("клавиатура: стрелки по списку, Escape возвращает фокус на кнопку", async () => {
+    workbenchMocks.tabs = TWELVE_TABS;
+    restoreGeometry = mockStripGeometry({ overflow: true });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const trigger = listTrigger()!;
+    // Нажатие с клавиатуры — `detail === 0`: фокус сразу в поиске.
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+    });
+    const list = agentList()!;
+    const input = list.querySelector<HTMLInputElement>('input[type="search"]')!;
+    expect(document.activeElement).toBe(input);
+    const press = async (key: string) => {
+      await act(async () => {
+        (document.activeElement as HTMLElement).dispatchEvent(
+          new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+        );
+      });
+    };
+    await press("ArrowDown");
+    expect((document.activeElement as HTMLElement).dataset.agentListItem).toBe("");
+    await press("End");
+    expect((document.activeElement as HTMLElement).dataset.agentListItem).toBe("studio_secretary_bot");
+    await press("ArrowUp");
+    expect((document.activeElement as HTMLElement).dataset.agentListItem).toBe("studio_sales_bot");
+    await press("Escape");
+    expect(agentList()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    // Tab за пределы списка закрывает его, а не оставляет висеть над страницей.
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+    });
+    expect(agentList()).not.toBeNull();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Добавить вкладку агента"]')!.focus();
+    });
+    expect(agentList()).toBeNull();
+  });
+
+  it("на 3–7 агентах полоса прежняя: списка нет, даже когда полоса прокручивается", async () => {
+    workbenchMocks.tabs = TWELVE_TABS.slice(0, 7);
+    restoreGeometry = mockStripGeometry({ overflow: true });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    expect(listTrigger()).toBeNull();
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(7);
+    expect(container.querySelector('button[aria-label="Добавить вкладку агента"]')).not.toBeNull();
+  });
+
+  it("список не нужен, когда все вкладки помещаются", async () => {
+    workbenchMocks.tabs = TWELVE_TABS;
+    restoreGeometry = mockStripGeometry({ overflow: false });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    expect(listTrigger()).toBeNull();
+  });
+
+  it("Home и End на полосе ведут к первой и последней вкладке", async () => {
+    workbenchMocks.tabs = TWELVE_TABS;
+    restoreGeometry = mockStripGeometry({ overflow: true });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const first = container.querySelector<HTMLButtonElement>("#agent-tab-")!;
+    first.focus();
+    await act(async () => {
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector("#agent-tab-studio_secretary_bot")?.getAttribute("aria-selected")).toBe("true");
+    const last = container.querySelector<HTMLButtonElement>("#agent-tab-studio_secretary_bot")!;
+    await act(async () => {
+      last.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+    });
+    expect(first.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("колесо мыши листает переполненную полосу вбок и отдаёт жест странице у края", async () => {
+    workbenchMocks.tabs = TWELVE_TABS;
+    restoreGeometry = mockStripGeometry({ overflow: true });
+    await render(
+      <MemoryRouter initialEntries={["/agents"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    const scroller = container.querySelector<HTMLElement>(".korra-agent-tabs__scroller")!;
+    const wheel = (deltaY: number, deltaX = 0) => {
+      const event = new WheelEvent("wheel", { deltaY, deltaX, bubbles: true, cancelable: true });
+      scroller.dispatchEvent(event);
+      return event;
+    };
+    expect(wheel(120).defaultPrevented).toBe(true);
+    expect(scroller.scrollLeft).toBe(120);
+    // Жест тачпада вбок браузер обрабатывает сам.
+    expect(wheel(5, 40).defaultPrevented).toBe(false);
+    // В начале полосы колесо вверх ей не нужно — листается страница.
+    scroller.scrollLeft = 0;
+    expect(wheel(-120).defaultPrevented).toBe(false);
+  });
+
+  it("ссылка на двенадцатого агента открывает его, а не оставляет главную вкладку", async () => {
+    workbenchMocks.tabs = TWELVE_TABS;
+    await render(
+      <MemoryRouter initialEntries={["/agents?agent=studio_sales_bot"]}>
+        <AgentWorkbenchPage />
+      </MemoryRouter>,
+    );
+    expect(container.querySelector("#agent-tab-studio_sales_bot")?.getAttribute("aria-selected")).toBe("true");
+  });
+});

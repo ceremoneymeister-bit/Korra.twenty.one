@@ -130,4 +130,24 @@ describe("карточка «Агенты»", () => {
       "/agents?agent=designer&resume=s-7",
     );
   });
+
+  it("карточка знает всех агентов, а не первые десять", () => {
+    // Приёмка 0.21.12: у клиента 12 агентов, у владельца 22 — карточка
+    // брала состав у полосы вкладок и вместе с ней теряла всех после десятого.
+    const profiles = [
+      { name: "default", is_default: true, display_name: "" },
+      ...Array.from({ length: 21 }, (_, index) => ({
+        name: `agent-${String(index).padStart(2, "0")}`,
+        is_default: false,
+        display_name: `Агент ${index + 1}`,
+      })),
+    ];
+    const rows = agentRows({
+      profiles,
+      runs: [run({ profile: "agent-20", status: "running" })],
+    });
+    expect(rows).toHaveLength(22);
+    expect(rows[0]).toMatchObject({ profile: "agent-20", activity: "working" });
+    expect(busyAgentCount(rows)).toBe(1);
+  });
 });

@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from korra_cli import web_server as ws
-from korra_cli.dashboard_agent_tabs import MAX_AGENT_TABS, preference, updated
+from korra_cli.dashboard_agent_tabs import MAX_LAYOUT_PROFILES, preference, updated
 from korra_cli.dashboard_auth.public_paths import PUBLIC_API_PATHS
 from korra_cli.web_models import AgentTabsSetBody
 
@@ -49,17 +49,34 @@ def test_normalization_never_hides_main_or_accepts_invalid_profiles():
     }
 
 
-def test_update_adds_main_caps_layout_and_increments_server_revision():
+def test_update_adds_main_keeps_every_agent_and_increments_server_revision():
+    """0.21.13: an owner with 12–22 agents can order and hide all of them.
+
+    The old bound of ten entries cut the saved order after the tenth profile
+    and filtered ``hidden`` through that cut order, so hiding the 11th agent
+    was accepted by the endpoint and then silently lost.
+    """
     value = updated(
         {"revision": 12},
-        order=[f"agent-{index}" for index in range(20)],
-        hidden=["agent-2", "missing", ""],
+        order=[f"agent-{index}" for index in range(21)],
+        hidden=["agent-2", "agent-20", "missing", ""],
     )
     assert value["revision"] == 13
     assert value["initialized"] is True
     assert value["order"][0] == ""
-    assert len(value["order"]) == MAX_AGENT_TABS
-    assert value["hidden"] == ["agent-2"]
+    assert value["order"][1:] == [f"agent-{index}" for index in range(21)]
+    assert value["hidden"] == ["agent-2", "agent-20"]
+    assert preference({"dashboard": {"agent_tabs": value}}) == value
+
+
+def test_stored_layout_is_still_bounded():
+    value = updated(
+        {"revision": 0},
+        order=[f"agent-{index}" for index in range(MAX_LAYOUT_PROFILES + 40)],
+        hidden=[],
+    )
+    assert value["order"][0] == ""
+    assert len(value["order"]) == MAX_LAYOUT_PROFILES
 
 
 def test_endpoint_round_trip_preserves_unrelated_config_and_rejects_stale_writer(tab_state):

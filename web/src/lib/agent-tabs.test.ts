@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   agentSettingsHref,
   buildAgentTabs,
+  filterAgentTabs,
   MAIN_AGENT_TAB,
-  MAX_AGENT_TABS,
   sameAgentTabs,
 } from "./agent-tabs";
 
@@ -88,14 +88,27 @@ describe("buildAgentTabs", () => {
     expect(tabs.slice(1).map((tab) => tab.profile)).toEqual(names);
   });
 
-  it("не больше десяти вкладок вместе с главной, лишние отбрасываются с конца", () => {
-    const many = Array.from({ length: 14 }, (_, index) =>
+  it("каждый профиль — вкладка: одиннадцатый и дальше не отрезаются", () => {
+    // Приёмка 0.21.12 у клиента с 12 профилями: полоса показывала десять,
+    // двух последних агентов было не открыть из кабинета.
+    const twelve = [
+      "default", "finance", "interior", "migrationlab",
+      "studio_docs_bot", "studio_assistant_bot", "studio_visual_bot",
+      "studio_light_bot", "studio_marketing_bot", "studio_project_bot",
+      "studio_sales_bot", "studio_secretary_bot",
+    ].map((name) => profile(name, { is_default: name === "default" }));
+    const tabs = buildAgentTabs(twelve);
+    expect(tabs).toHaveLength(12);
+    expect(tabs[0]).toEqual(MAIN);
+    expect(tabs.slice(-2).map((tab) => tab.profile)).toEqual([
+      "studio_sales_bot",
+      "studio_secretary_bot",
+    ]);
+
+    const many = Array.from({ length: 30 }, (_, index) =>
       profile(`agent-${String(index).padStart(2, "0")}`),
     );
-    const tabs = buildAgentTabs(many);
-    expect(tabs).toHaveLength(MAX_AGENT_TABS);
-    expect(tabs[0]).toEqual(MAIN);
-    expect(tabs[MAX_AGENT_TABS - 1].profile).toBe("agent-08");
+    expect(buildAgentTabs(many)).toHaveLength(31);
   });
 
   it("дубли схлопываются, первая запись выигрывает", () => {
@@ -182,5 +195,27 @@ describe("agentSettingsHref", () => {
     expect(agentSettingsHref(MAIN_AGENT_TAB.profile, "skills")).toBe(
       "/skills?profile=default",
     );
+  });
+});
+
+describe("filterAgentTabs", () => {
+  const tabs = [
+    { profile: "", label: "Корра" },
+    { profile: "studio_sales_bot", label: "Продажи", description: "Ведёт сделки и счета" },
+    { profile: "studio_secretary_bot", label: "Секретарь Ёлка" },
+    { profile: "finance", label: "Финансы и управление" },
+  ];
+
+  it("пустой запрос — все агенты в порядке полосы", () => {
+    expect(filterAgentTabs(tabs, "  ")).toEqual(tabs);
+  });
+
+  it("ищет по подписи, имени профиля и описанию роли без учёта регистра и «ё»", () => {
+    expect(filterAgentTabs(tabs, "секр").map((tab) => tab.profile)).toEqual(["studio_secretary_bot"]);
+    expect(filterAgentTabs(tabs, "елка").map((tab) => tab.profile)).toEqual(["studio_secretary_bot"]);
+    expect(filterAgentTabs(tabs, "SALES").map((tab) => tab.profile)).toEqual(["studio_sales_bot"]);
+    expect(filterAgentTabs(tabs, "сделки").map((tab) => tab.profile)).toEqual(["studio_sales_bot"]);
+    expect(filterAgentTabs(tabs, "studio бот").map((tab) => tab.profile)).toEqual([]);
+    expect(filterAgentTabs(tabs, "studio секр").map((tab) => tab.profile)).toEqual(["studio_secretary_bot"]);
   });
 });
