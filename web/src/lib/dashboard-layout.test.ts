@@ -10,10 +10,12 @@ import {
   resetLayout,
   resizeWidget,
   restoreWidget,
+  restoreWidgets,
   sameLayout,
   visibleTileIds,
   visibleWidgetIds,
   widgetSize,
+  withoutWidgets,
   type DashboardLayout,
   type WidgetCatalogShape,
 } from "./dashboard-layout";
@@ -140,5 +142,33 @@ describe("раскладка дашборда", () => {
     expect(sameLayout(base(), moveWidget(CATALOG, base(), "agents", 1))).toBe(false);
     expect(sameLayout(base(), hideWidget(CATALOG, base(), "agents"))).toBe(false);
     expect(sameLayout(base(), resizeWidget(CATALOG, base(), "agents", "s"))).toBe(false);
+  });
+});
+
+describe("карточки, которым нет места на установке", () => {
+  const catalog = { ids: ["attention", "agents", "metrics", "codex-quota", "files"], pinned: ["attention"] };
+
+  it("не видны на доске, но сохраняют своё место и скрытость в раскладке", () => {
+    const stored: DashboardLayout = {
+      order: ["attention", "metrics", "codex-quota", "agents", "files"],
+      hidden: ["codex-quota"],
+      sizes: { agents: "m", metrics: "m", "codex-quota": "l", files: "s" },
+    };
+    const board = withoutWidgets(stored, ["codex-quota"]);
+    expect(board.order).toEqual(["attention", "metrics", "agents", "files"]);
+    expect(board.hidden).toEqual([]);
+
+    // Человек переставил видимые плитки — недоступная встаёт за прежним соседом.
+    const moved = moveWidget(catalog, board, "agents", -1);
+    const saved = restoreWidgets(moved, stored, ["codex-quota"]);
+    expect(saved.order).toEqual(["attention", "agents", "metrics", "codex-quota", "files"]);
+    expect(saved.hidden).toEqual(["codex-quota"]);
+    expect(saved.sizes["codex-quota"]).toBe("l");
+  });
+
+  it("без недоступных карточек ничего не меняет", () => {
+    const layout: DashboardLayout = { order: ["attention", "agents"], hidden: [], sizes: {} };
+    expect(withoutWidgets(layout, [])).toBe(layout);
+    expect(restoreWidgets(layout, layout, [])).toBe(layout);
   });
 });

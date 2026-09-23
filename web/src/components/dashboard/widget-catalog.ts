@@ -1,8 +1,10 @@
 import type { WidgetCatalogShape } from "@/lib/dashboard-layout";
+import type { DashboardState } from "@/lib/dashboard-state";
 import type { DashboardWidget } from "./widget-types";
 import { AGENTS_WIDGET } from "./widgets/AgentsWidget";
 import { ATTENTION_WIDGET } from "./widgets/AttentionWidget";
 import { CALENDAR_WIDGET } from "./widgets/CalendarWidget";
+import { CODEX_QUOTA_WIDGET } from "./widgets/CodexQuotaWidget";
 import { METRICS_WIDGET } from "./widgets/MetricsWidget";
 import { RECENT_RESULTS_WIDGET } from "./widgets/RecentResultsWidget";
 import { UPCOMING_TASKS_WIDGET } from "./widgets/UpcomingTasksWidget";
@@ -27,6 +29,7 @@ export const DASHBOARD_WIDGETS: readonly DashboardWidget[] = [
   // 0.21.13: встречи Google, задачи с датой и запуски агентов. Последним —
   // так же, как в серверном каталоге (`korra_cli/dashboard_layout.py`).
   CALENDAR_WIDGET,
+  CODEX_QUOTA_WIDGET,
 ];
 
 /** Порядок каталога в том виде, в каком его читают функции состава. */
@@ -48,4 +51,15 @@ export const DASHBOARD_CATALOG: WidgetCatalogShape = {
 
 export function findWidget(id: string): DashboardWidget | undefined {
   return DASHBOARD_WIDGETS.find((widget) => widget.id === id);
+}
+
+/**
+ * Карточки, которым на этой установке нет места (например, квота Codex без
+ * подписки). Их не видно ни на доске, ни в каталоге, но сохранённая раскладка
+ * их помнит: вернётся источник — вернётся и карточка на прежнее место.
+ */
+export function unavailableWidgetIds(state: DashboardState | null): string[] {
+  return DASHBOARD_WIDGETS.filter((widget) => widget.isAvailable && !widget.isAvailable(state)).map(
+    (widget) => widget.id,
+  );
 }

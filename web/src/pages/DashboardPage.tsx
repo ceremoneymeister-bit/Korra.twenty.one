@@ -17,12 +17,14 @@
  * на ноутбуке доска открывается такой же на телефоне. localStorage здесь нет
  * намеренно — он пережил бы смену человека за тем же браузером.
  *
- * Данные каждой карточки — забота самой карточки. «Агенты» читают настоящий
- * контур; остальные честно говорят, что источник ещё не подключён, и уводят
- * туда, где эти сведения есть сегодня.
+ * Данные карточек приходят одной сводкой `/api/dashboard/state`
+ * (`lib/dashboard-state`); «Агенты» дополнительно живут потоком работ чатов.
+ * Каждая карточка сама показывает ожидание, сбой источника и первый шаг для
+ * пустого источника — ни нулей вместо неизвестного, ни примеров вместо фактов.
  */
 
 import { useCallback, useMemo, useState } from "react";
+import { useStore } from "@nanostores/react";
 import {
   Check,
   ChevronLeft,
@@ -37,7 +39,11 @@ import { Card } from "@nous-research/ui/ui/components/card";
 import { DashboardWidgetCard } from "@/components/dashboard/DashboardWidgetCard";
 import { DashboardWidgetBoundary } from "@/components/dashboard/DashboardWidgetBoundary";
 import { WidgetSizePicker } from "@/components/dashboard/WidgetSizePicker";
-import { DASHBOARD_CATALOG, findWidget } from "@/components/dashboard/widget-catalog";
+import {
+  DASHBOARD_CATALOG,
+  findWidget,
+  unavailableWidgetIds,
+} from "@/components/dashboard/widget-catalog";
 import { ProductButton } from "@/components/ProductButton";
 import { useDashboardLayout } from "@/hooks/useDashboardLayout";
 import {
@@ -47,15 +53,19 @@ import {
   resetLayout,
   resizeWidget,
   restoreWidget,
+  restoreWidgets,
   visibleTileIds,
   visibleWidgetIds,
   widgetSize,
+  withoutWidgets,
   type DashboardLayout,
   type WidgetSize,
 } from "@/lib/dashboard-layout";
+import { $dashboardState } from "@/lib/dashboard-state";
 import { cn } from "@/lib/utils";
 
 import "@/components/dashboard/dashboard-grid.css";
+import "@/components/dashboard/dashboard-widgets.css";
 
 const CATALOG_ID = "dashboard-widget-catalog";
 
@@ -76,8 +86,15 @@ function today(): string {
 }
 
 export default function DashboardPage() {
-  const { apply, layout, message, reload, saving, status } =
+  const { apply, layout: stored, message, reload, saving, status } =
     useDashboardLayout(DASHBOARD_CATALOG);
+  // Общая сводка карточек. Подписка страницы держит её опрос, пока доска
+  // открыта, и говорит, каким карточкам на этой установке есть место.
+  const dashboardState = useStore($dashboardState);
+  const unavailable = useMemo(() => unavailableWidgetIds(dashboardState), [dashboardState]);
+  // Доска и каталог видят только доступные карточки; хранимая раскладка
+  // помнит и остальные, поэтому любое изменение возвращает их на места.
+  const layout = useMemo(() => withoutWidgets(stored, unavailable), [stored, unavailable]);
   const [setupOpen, setSetupOpen] = useState(false);
   // Состав меняется без перезагрузки экрана, поэтому о результате действия
   // сообщаем голосом: иначе пользователь скринридера видит только то, что
@@ -93,15 +110,15 @@ export default function DashboardPage() {
     () => visibleTileIds(DASHBOARD_CATALOG, layout),
     [layout],
   );
-  const isDefault = isDefaultLayout(DASHBOARD_CATALOG, layout);
+  const isDefault = isDefaultLayout(DASHBOARD_CATALOG, stored);
 
   const change = useCallback(
     (next: DashboardLayout, said: string) => {
       if (next === layout) return;
-      apply(next);
+      apply(restoreWidgets(next, stored, unavailable));
       setAnnouncement(said);
     },
-    [apply, layout],
+    [apply, layout, stored, unavailable],
   );
 
   const remove = (id: string, title: string) =>

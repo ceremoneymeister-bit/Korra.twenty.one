@@ -203,3 +203,47 @@ export function sameLayout(a: DashboardLayout, b: DashboardLayout): boolean {
   }
   return true;
 }
+
+/**
+ * Раскладка без карточек, которым на этой установке сейчас нет места.
+ *
+ * Нужна доске и каталогу: недоступная карточка не должна ни рисоваться, ни
+ * занимать позицию при перестановке соседей. Хранимая раскладка при этом не
+ * меняется — см. `restoreWidgets`.
+ */
+export function withoutWidgets(layout: DashboardLayout, ids: readonly string[]): DashboardLayout {
+  if (!ids.length) return layout;
+  const keep = (list: readonly string[]) => list.filter((id) => !ids.includes(id));
+  return { ...layout, order: keep(layout.order), hidden: keep(layout.hidden) };
+}
+
+/**
+ * Вернуть в изменённую раскладку карточки, спрятанные из-за недоступности.
+ *
+ * Каждая встаёт сразу за тем соседом, за которым стояла раньше, и сохраняет
+ * свою скрытость: человек переставлял видимые плитки, а не отказывался от
+ * карточки, которой просто нет на этой установке.
+ */
+export function restoreWidgets(
+  next: DashboardLayout,
+  previous: DashboardLayout,
+  ids: readonly string[],
+): DashboardLayout {
+  if (!ids.length) return next;
+  const order = [...next.order];
+  for (const id of ids) {
+    const at = previous.order.indexOf(id);
+    if (at < 0 || order.includes(id)) continue;
+    let insertAt = 0;
+    for (let i = at - 1; i >= 0; i -= 1) {
+      const anchor = order.indexOf(previous.order[i]);
+      if (anchor >= 0) {
+        insertAt = anchor + 1;
+        break;
+      }
+    }
+    order.splice(insertAt, 0, id);
+  }
+  const hidden = new Set([...next.hidden, ...previous.hidden.filter((id) => ids.includes(id))]);
+  return { ...next, order, hidden: order.filter((id) => hidden.has(id)) };
+}

@@ -4,7 +4,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { dashboardStateFixture } from "@/components/dashboard/dashboard-state.fixture";
 import { ApiError, type DashboardLayoutPreference } from "@/lib/api";
+import {
+  $dashboardState,
+  $dashboardStatus,
+  refreshDashboardState,
+  type DashboardState,
+} from "@/lib/dashboard-state";
 import DashboardPage from "./DashboardPage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -103,6 +110,24 @@ async function mount() {
       </MemoryRouter>,
     ),
   );
+  // Сводка карточек — модульное хранилище, которое между тестами остаётся
+  // подключённым; запрашиваем её явно через настоящий транспорт.
+  await act(async () => {
+    await refreshDashboardState();
+  });
+}
+
+/** Сервер отвечает сводкой карточек; всё прочее по-прежнему недоступно. */
+function serveState(state: DashboardState) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: unknown) => {
+      if (String(url).includes("/api/dashboard/state")) {
+        return new Response(JSON.stringify(state), { headers: { "Content-Type": "application/json" } });
+      }
+      throw new Error("offline");
+    }),
+  );
 }
 
 beforeEach(async () => {
@@ -118,6 +143,8 @@ beforeEach(async () => {
   // Календарь проверяется своим тестом; здесь он только должен не мешать доске.
   api.getDashboardCalendar.mockRejectedValue(new Error("offline"));
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+  $dashboardState.set(null);
+  $dashboardStatus.set("idle");
   await mount();
 });
 
@@ -150,17 +177,20 @@ describe("Личный дашборд", () => {
     expect(tiles()).toEqual(TILE_IDS.map((id) => ({ id, size: "m" })));
   });
 
-  it("пустые карточки коротко объясняют, где искать нужные сведения", () => {
-    const notes = {
-      attention: "Подтверждения и уведомления — в чатах агентов.",
-      metrics: "Здесь появится сводка показателей вашей работы.",
-      "upcoming-tasks": "Расписание и результаты запусков — в разделе «Задачи».",
-      "recent-results": "Документы и другие материалы доступны в разделе «Файлы».",
+  it("без сводки каждая карточка честно говорит о сбое и даёт повторить, а не показывает ноль", () => {
+    const failures = {
+      attention: "Не удалось проверить",
+      metrics: "Не удалось посчитать показатели",
+      "upcoming-tasks": "Не удалось прочитать расписание",
+      "recent-results": "Не удалось прочитать файлы",
     };
-    for (const [id, note] of Object.entries(notes)) {
+    for (const [id, text] of Object.entries(failures)) {
       const card = container.querySelector<HTMLElement>(`[data-widget="${id}"]`);
-      expect(card?.textContent).toContain("Сводка недоступна");
-      expect(card?.textContent).toContain(note);
+      expect(card?.textContent).toContain(text);
+      expect(card?.querySelector('[role="alert"]'), id).not.toBeNull();
+      expect(Array.from(card!.querySelectorAll("button")).some((node) => node.textContent?.includes("Повторить")))
+        .toBe(true);
+      expect(card?.textContent).not.toContain("Сводка недоступна");
     }
   });
 
@@ -268,6 +298,8 @@ describe("Раскладка дашборда хранится на сервер
     await click(button("Настроить"));
     await click(byLabel("Переместить карточку «Агенты» правее"));
 
+    // Квота Codex на этой установке недоступна: на доске её нет, но
+    // сохранённая раскладка её помнит и не теряет место.
     expect(api.setDashboardLayout.mock.calls[0][0].order).toEqual([
       "attention",
       "metrics",
@@ -275,6 +307,7 @@ describe("Раскладка дашборда хранится на сервер
       "upcoming-tasks",
       "recent-results",
       "calendar",
+      "codex-quota",
     ]);
     expect(tiles().map((tile) => tile.id)).toEqual([
       "metrics",
@@ -348,5 +381,38 @@ describe("Раскладка дашборда хранится на сервер
     api.getDashboardLayout.mockResolvedValue(pref({ revision: 3, hidden: ["metrics"] }));
     await click(button("Повторить"));
     expect(cardTitles()).toEqual(CATALOG_TITLES.filter((title) => title !== "Мои показатели"));
+  });
+});
+
+describe("Карточки на живой сводке", () => {
+  async function remount(state: DashboardState) {
+    await act(async () => root.unmount());
+    container.remove();
+    $dashboardState.set(null);
+    serveState(state);
+    await mount();
+  }
+
+  it("квота Codex встаёт на доску и в каталог только там, где есть подписка", async () => {
+    await remount(dashboardStateFixture());
+    expect(tiles().map((tile) => tile.id)).toContain("codex-quota");
+    expect(container.querySelector('[data-widget="codex-quota"]')?.textContent).toContain("62 %");
+    await click(button("Настроить"));
+    expect(container.querySelector('[data-catalog-widget="codex-quota"]')).not.toBeNull();
+
+    await remount(dashboardStateFixture({ quota: { available: false, status: "absent" } }));
+    expect(tiles().map((tile) => tile.id)).not.toContain("codex-quota");
+    await click(button("Настроить"));
+    expect(container.querySelector('[data-catalog-widget="codex-quota"]')).toBeNull();
+  });
+
+  it("каждая карточка показывает настоящие данные сводки", async () => {
+    await remount(dashboardStateFixture());
+    const card = (id: string) => container.querySelector<HTMLElement>(`[data-widget="${id}"]`)!;
+    expect(card("attention").textContent).toContain("Смета для клиента");
+    expect(card("metrics").textContent).toContain("12");
+    expect(card("upcoming-tasks").textContent).toContain("Итоги дня");
+    expect(card("recent-results").textContent).toContain("Отчёт.md");
+    expect(container.textContent).not.toContain("Сводка недоступна");
   });
 });

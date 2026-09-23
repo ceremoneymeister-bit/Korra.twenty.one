@@ -35,6 +35,9 @@ export interface DashboardAgentRow {
   unread: boolean;
   /** Время последнего события работы, unix-секунды. */
   updatedAt: number | null;
+  /** Готовый шаблон, из которого создан агент (`distribution_name`):
+   *  по нему выбирается знак аватара. */
+  template: string | null;
 }
 
 const ACTIVITY_RANK: Record<AgentActivity, number> = {
@@ -111,6 +114,18 @@ export function agentRows({
   // «агентов нет».
   if (!Array.isArray(profiles) || profiles.length === 0) return [];
   const tabs: AgentTabConfig[] = buildAgentTabs(profiles);
+  const templates = new Map<string, string>();
+  for (const item of profiles as unknown[]) {
+    if (!item || typeof item !== "object") continue;
+    const { distribution_name: template, is_default: isDefault, name } = item as {
+      distribution_name?: unknown;
+      is_default?: unknown;
+      name?: unknown;
+    };
+    if (typeof template !== "string" || !template.trim()) continue;
+    const key = isDefault === true || name === "default" ? MAIN_AGENT_TAB.profile : String(name ?? "");
+    templates.set(key, template.trim());
+  }
   const byProfile = new Map<string, ChatRun[]>();
   for (const run of runs) {
     const list = byProfile.get(run.profile);
@@ -132,6 +147,7 @@ export function agentRows({
       step: activity === "idle" || activity === "unknown" ? "" : cleanStep(run),
       unread: activityKnown && run?.unread === true,
       updatedAt: activityKnown && run ? run.updated_at : null,
+      template: templates.get(tab.profile) ?? null,
     } satisfies DashboardAgentRow;
   });
   return rows.sort((a, b) => {

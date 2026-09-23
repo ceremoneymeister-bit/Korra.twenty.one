@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 
 import type { WidgetSize } from "@/lib/dashboard-layout";
+import type { DashboardState } from "@/lib/dashboard-state";
 
 export interface DashboardWidgetBodyProps {
   /**
@@ -45,6 +46,13 @@ export interface DashboardWidget {
   pinned?: boolean;
   /** Куда уйти за полной картиной. Только существующие экраны. */
   action?: DashboardWidgetAction;
+  /**
+   * Есть ли этой карточке место на этой установке. Нет — карточки нет ни на
+   * доске, ни в каталоге (квота Codex без подписки). Сохранённое место и
+   * размер при этом не теряются: вернётся источник — вернётся и карточка.
+   * Без функции карточка доступна всегда.
+   */
+  isAvailable?: (state: DashboardState | null) => boolean;
   /** Содержимое карточки: у каждого виджета своё и живёт в его файле. */
   Body: ComponentType<DashboardWidgetBodyProps>;
 }

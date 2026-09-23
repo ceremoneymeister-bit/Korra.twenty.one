@@ -6,6 +6,7 @@ import { Link } from "react-router";
 
 import { ProductButton } from "@/components/ProductButton";
 import { FittedText } from "@/components/dashboard/FittedText";
+import { ActivityBars, AgentAvatar } from "@/components/dashboard/visuals";
 import type {
   DashboardWidget,
   DashboardWidgetBodyProps,
@@ -25,6 +26,12 @@ import {
   type AgentActivity,
   type DashboardAgentRow,
 } from "@/lib/dashboard-agents";
+import {
+  $dashboardState,
+  dashboardTimeZone,
+  formatMoment,
+  sectionReady,
+} from "@/lib/dashboard-state";
 import { cn } from "@/lib/utils";
 
 /**
@@ -67,13 +74,14 @@ const ROW_HEIGHT = 44;
  */
 const ROWS_BEFORE_MEASURE = { s: 0, m: 2, l: 4 } as const;
 
-const DOT_BY_ACTIVITY: Record<AgentActivity, string> = {
-  waiting: "bg-[var(--neo-accent-line)]",
-  working: "bg-[var(--neo-accent-line)]",
-  ready: "bg-[var(--neo-accent-line)]",
-  failed: "bg-[var(--neo-text-secondary)]",
-  idle: "bg-[var(--neo-text-secondary)]/40",
-  unknown: "bg-[var(--neo-text-secondary)]/40",
+/** Слово состояния справа в строке: «Работает / Свободен» с первого взгляда. */
+const STATUS_WORD: Record<AgentActivity, string> = {
+  waiting: "Ждёт решения",
+  working: "Работает",
+  ready: "Ответ готов",
+  failed: "Сбой",
+  idle: "Свободен",
+  unknown: "",
 };
 
 /** Сколько целых строк помещается в измеренную высоту. */
@@ -89,6 +97,7 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
   const [profiles, setProfiles] = useState<unknown>(null);
   const [rosterState, setRosterState] = useState<"loading" | "ready" | "error">("loading");
   const [listRef, listHeight] = useAvailableHeight<HTMLDivElement>();
+  const dashboard = useStore($dashboardState);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -181,14 +190,24 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
     (runsReachable === false || now - runsUpdatedAt > STALE_AFTER_MS);
   const activityState = !activityKnown ? "unknown" : stale ? "stale" : "live";
   const busy = busyAgentCount(rows);
+  // Когда агент в последний раз работал — из общей сводки дашборда. Только
+  // как пояснение к «Свободен»: состояние по-прежнему решает поток работ.
+  const lastActive = new Map<string, number>();
+  if (dashboard && sectionReady(dashboard.agents)) {
+    for (const item of dashboard.agents.agents) {
+      if (item.last_active_at) lastActive.set(item.profile, item.last_active_at);
+    }
+  }
+  const timeZone = dashboardTimeZone(dashboard);
+  const nowSeconds = now / 1000;
 
   if (size === "s") {
     const unknown = activityState === "unknown";
     return (
       <div className="flex min-h-0 flex-1 flex-col justify-center gap-1">
-        <p className="text-5xl leading-none font-medium text-[var(--neo-text-primary)]">
+        <p className="kdw-metric-value leading-none text-[var(--neo-text-primary)]">
           {unknown ? "—" : busy}
-          <span className="ml-2 text-base text-[var(--neo-text-secondary)]">
+          <span className="ml-2 text-base font-normal tracking-normal text-[var(--neo-text-secondary)]">
             {unknown ? `всего ${rows.length}` : `из ${rows.length}`}
           </span>
         </p>
@@ -197,6 +216,17 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
             {busy === 0 ? "никто не занят" : "сейчас в работе"}
           </p>
         )}
+        <span className="kdw-avatar-stack" aria-hidden>
+          {rows.slice(0, 3).map((row) => (
+            <AgentAvatar
+              key={row.profile || "__main__"}
+              label={row.label}
+              profile={row.profile}
+              template={row.template}
+              size="sm"
+            />
+          ))}
+        </span>
         <StatusLine size={size} state={activityState} />
       </div>
     );
@@ -220,20 +250,37 @@ function AgentsBody({ size = "m" }: DashboardWidgetBodyProps) {
                   to={agentHref(row)}
                   className="flex min-w-0 flex-1 items-center gap-3 rounded-[var(--neo-radius-control)] px-2 transition-shadow hover:shadow-[var(--neo-inset-compact)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--neo-accent-line)]"
                 >
-                  <AgentMark row={row} />
+                  <AgentAvatar
+                    label={row.label}
+                    profile={row.profile}
+                    template={row.template}
+                    busy={row.activity === "working" || row.activity === "waiting"}
+                  />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold text-[var(--neo-text-primary)]">
                       {row.label}
                     </span>
-                    {/* После snapshot состояние остаётся словом на любом
-                        размере: точка у метки его лишь дублирует. На L к нему
-                        добавляется само поручение — там для этого есть ширина. */}
+                    {/* Вторая строка — чем агент занят: поручение, если оно
+                        есть, иначе состояние словами. У свободного — когда он
+                        работал в последний раз. */}
                     {row.activity === "unknown" ? null : (
                       <span className="block truncate text-xs text-[var(--neo-text-secondary)]">
-                        {size === "l" && row.step ? `${row.note} · ${row.step}` : row.note}
+                        {rowNote(row, size, lastActive.get(row.profile), nowSeconds, timeZone)}
                       </span>
                     )}
                   </span>
+                  {row.activity === "unknown" ? null : (
+                    <span
+                      className={cn(
+                        "kdw-status",
+                        (row.activity === "working" || row.activity === "waiting") && "kdw-status--busy",
+                        size === "m" && "kdw-status--narrow",
+                      )}
+                    >
+                      {row.activity === "working" ? <ActivityBars /> : <span className="kdw-status-dot" aria-hidden />}
+                      <span>{STATUS_WORD[row.activity]}</span>
+                    </span>
+                  )}
                   <ChevronRight
                     aria-hidden
                     className="size-4 shrink-0 text-[var(--neo-text-secondary)]"
@@ -321,30 +368,32 @@ function StatusLine({
 }
 
 /**
- * Метка агента: первая буква его настоящего имени.
+ * Вторая строка агента: чем он занят.
  *
- * Никаких придуманных портретов и цветов по вкусу — знак строится из того,
- * как агента зовут в этом контуре, а состояние по-прежнему читается точкой и
- * словом рядом.
+ * Работающий — его поручение (на M — если оно есть, иначе «Работает»);
+ * свободный — «Готов к поручению» и, если известно, когда он работал в
+ * последний раз.
  */
-function AgentMark({ row }: { row: DashboardAgentRow }) {
-  return (
-    <span
-      aria-hidden
-      className="relative grid size-8 shrink-0 place-items-center rounded-[var(--neo-radius-control)] text-sm font-semibold text-[var(--neo-text-primary)] shadow-[var(--neo-inset-compact)]"
-    >
-      {row.label.trim().slice(0, 1).toUpperCase()}
-      {row.activity === "unknown" ? null : (
-        <span
-          className={cn(
-            "absolute -right-0.5 -top-0.5 size-2 rounded-full",
-            DOT_BY_ACTIVITY[row.activity],
-          )}
-        />
-      )}
-    </span>
-  );
+function rowNote(
+  row: DashboardAgentRow,
+  size: "m" | "l",
+  lastActive: number | undefined,
+  nowSeconds: number,
+  timeZone: string,
+): string {
+  if (row.activity === "idle") {
+    return lastActive && nowSeconds > 0
+      ? `${row.note} · был в работе ${formatMoment(lastActive, nowSeconds, timeZone)}`
+      : row.note;
+  }
+  // Ожидание решения сервер описывает той же фразой, что и состояние:
+  // повторять её через точку незачем.
+  if (!row.step || row.step === DECISION_PLACEHOLDER) return row.note;
+  return size === "l" ? `${row.note} · ${row.step}` : row.step;
 }
+
+/** Подпись, которой поток работ отмечает разговор, ждущий решения. */
+const DECISION_PLACEHOLDER = "Ожидает вашего решения";
 
 /**
  * Текущее время как подписка, а не как чтение часов в рендере.

@@ -4,8 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { dashboardStateFixture, FIXTURE_NOW } from "@/components/dashboard/dashboard-state.fixture";
 import { AGENTS_WIDGET } from "@/components/dashboard/widgets/AgentsWidget";
 import type { WidgetSize } from "@/lib/dashboard-layout";
+import { $dashboardState } from "@/lib/dashboard-state";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -280,6 +282,42 @@ describe("Карточка «Агенты» на реальном источни
     expect(container.textContent).toContain("Агентов пока нет");
     expect(container.textContent).not.toContain("Корра");
     expect(links()).toEqual(["/profiles"]);
+  });
+
+  it("у каждого агента свой знак и слово состояния; свободный — с временем последней работы", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(FIXTURE_NOW * 1000);
+    api.getProfiles.mockResolvedValue({
+      profiles: [
+        { name: "default", is_default: true, display_name: "Корра" },
+        { name: "designer", is_default: false, display_name: "Дизайнер", distribution_name: "designer" },
+      ],
+    });
+    // Сводка дашборда знает, когда главный агент работал в последний раз.
+    $dashboardState.set(dashboardStateFixture());
+    serveRuns([
+      {
+        message_id: "m1",
+        session_id: "s-42",
+        profile: "designer",
+        status: "running",
+        updated_at: FIXTURE_NOW - 10,
+        history_count: 1,
+        user_message: { role: "user", content: "Собери презентацию" },
+      },
+    ]);
+    await mount("m");
+
+    const glyphs = Array.from(container.querySelectorAll<HTMLElement>("[data-glyph]")).map(
+      (node) => node.dataset.glyph,
+    );
+    expect(glyphs).toEqual(["design", "main"]);
+    expect(container.textContent).toContain("Работает");
+    expect(container.textContent).toContain("Собери презентацию");
+    expect(container.textContent).toContain("Свободен");
+    expect(container.textContent).toContain("Готов к поручению · был в работе сегодня в 12:20");
+    $dashboardState.set(null);
+    vi.useRealTimers();
   });
 
   describe("показывает столько строк, сколько помещается целиком", () => {
