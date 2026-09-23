@@ -158,7 +158,9 @@ export function capabilityNote(row: ConnectionsGoogleProfile, services: string[]
  * главный агент.
  */
 export function connectCandidates(rows: ConnectionsGoogleProfile[]): ConnectionsGoogleProfile[] {
-  return rows.filter((row) => row.access === "none");
+  // Агент, которому доступно подключение «всем агентам», может подключить и
+  // собственный аккаунт: свой доступ тогда важнее общего.
+  return rows.filter((row) => row.access === "none" || row.via_all);
 }
 
 export function defaultConnectTarget(

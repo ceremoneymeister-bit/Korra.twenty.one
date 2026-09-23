@@ -111,8 +111,9 @@ CONFIGURABLE_TOOLSETS = [
     ("x_search", "🐦 Поиск в X (Twitter)", "Поиск через xAI OAuth или XAI_API_KEY"),
     ("google_workspace", "🔑 Подключение Google Workspace",
      "Владелец подключает Gmail, Календарь, Диск и Таблицы прямо из переписки"),
-    # Configurable on purpose: profiles on the default list get it, a profile
-    # with an explicit (restricted) list gets it only when the list names it.
+    # Configurable on purpose: a profile can decline it, and the decline sticks
+    # (known_builtin_toolsets / agent.disabled_toolsets). First release back-fills
+    # it onto saved lists — see _RECENTLY_SHIPPED_TOOLSETS.
     ("google_calendar", "📅 Google Календарь",
      "Встречи владельца из подключённого Google-календаря; только в разговоре владельца"),
     ("tts", "🔊 Синтез речи", "Преобразование текста в речь"),
@@ -2602,7 +2603,13 @@ def _exempt_explicit_platform_native(
 #: it: an enabled toolset still ships zero schemas when its check fails — the
 #: same split Home Assistant uses. Probing a remote service from this path
 #: would put a network call on every CLI start, gateway session and cron tick.
-_RECENTLY_SHIPPED_TOOLSETS: frozenset = frozenset()
+#:
+#: 0.21.13: ``google_calendar`` — Dmitry's decision (23.09): a connected
+#: service belongs to the platform and every agent, also a ready-made one with
+#: an explicit list, uses it at the owner's request. Who may use it is checked
+#: per call (gateway.principal); a profile that must never have it declines
+#: it in its tool list or via ``agent.disabled_toolsets``. Empty this in 0.21.14.
+_RECENTLY_SHIPPED_TOOLSETS: frozenset = frozenset({"google_calendar"})
 
 
 def _enable_recently_shipped_toolsets(

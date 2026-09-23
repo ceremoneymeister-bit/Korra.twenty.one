@@ -518,6 +518,6 @@ export const CALENDAR_WIDGET: DashboardWidget = {
   id: "calendar",
   title: "Календарь",
   purpose: "Встречи из Google, задачи с датой и запуски агентов на неделю.",
-  action: { label: "Подключённые сервисы", short: "Сервисы", to: "/connections" },
+  action: { label: "Подключённые сервисы", short: "Сервисы", to: "/env#section-services" },
   Body: CalendarBody,
 };

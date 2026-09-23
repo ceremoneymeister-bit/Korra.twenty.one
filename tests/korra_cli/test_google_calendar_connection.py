@@ -207,7 +207,7 @@ def test_connect_in_cabinet_is_usable_by_the_agent_on_the_next_call(install, fak
     assistant = install / "profiles" / "assistant"
     before = _tool(monkeypatch, assistant, {"action": "list", "date": "tomorrow"})
     assert before["ok"] is False and before["error"] == "not_connected"
-    assert "Настройки → Сервисы" in before["next_step"]
+    assert "Ключи и доступы → Подключённые сервисы" in before["next_step"]
     assert fake_api.calls == []  # no grant, no request to Google
 
     # The owner completes the existing OAuth flow in the cabinet.
@@ -278,22 +278,27 @@ def test_shared_grant_reaches_curated_agents_and_detach_or_revoke_cuts_it(instal
     assert len(fake_api.calls) == calls_before
 
 
-def test_restricted_profiles_never_gain_the_tool_silently(monkeypatch, tmp_path):
-    """Default lists get the calendar; an explicit list only when it names it."""
+def test_every_profile_gets_the_tool_and_a_decline_sticks(monkeypatch, tmp_path):
+    """Decision 23.09: any agent, also a ready-made one, uses the connection at
+    the owner's request; a profile that must not have it declines it."""
     from korra_cli.tools_config import _get_platform_tools
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "probe"))
     curated = ["clarify", "memory", "session_search", "skills", "todo", "web"]
-    restricted = {"platform_toolsets": {p: list(curated) for p in ("telegram", "api_server", "cron", "cli")}}
-    opted_in = {"platform_toolsets": {p: [*curated, "google_calendar"] for p in ("telegram", "api_server")}}
+    explicit = {"platform_toolsets": {p: list(curated) for p in ("telegram", "api_server", "cron", "cli")}}
+    declined = {
+        **explicit,
+        "known_builtin_toolsets": {p: [*curated, "google_calendar"] for p in ("telegram", "api_server", "cron", "cli")},
+    }
+    disabled = {**explicit, "agent": {"disabled_toolsets": ["google_calendar"]}}
     for platform in ("telegram", "api_server", "cron", "cli"):
         assert "google_calendar" in _get_platform_tools({}, platform), platform
-        assert "google_calendar" not in _get_platform_tools(restricted, platform), platform
+        assert "google_calendar" in _get_platform_tools(explicit, platform), platform
+        # Unchecked in the tool list (offered, not kept) — stays off.
+        assert "google_calendar" not in _get_platform_tools(declined, platform), platform
+        assert "google_calendar" not in _get_platform_tools(disabled, platform), platform
         # The owner-only credential tool stays opt-in.
-        assert "google_workspace" not in _get_platform_tools(restricted, platform)
-    for platform in ("telegram", "api_server"):
-        assert "google_calendar" in _get_platform_tools(opted_in, platform), platform
-    assert "google_calendar" not in _get_platform_tools({"platform_toolsets": {"telegram": ["web"]}}, "telegram")
+        assert "google_workspace" not in _get_platform_tools(explicit, platform)
 
 
 def test_tool_schema_needs_the_installation_app_and_an_owner_turn(install, monkeypatch):
@@ -410,7 +415,7 @@ def test_event_normalization_keeps_only_what_the_owner_sees():
 
 
 # ---------------------------------------------------------------------------
-# Installation overview (the «Сервисы» screen)
+# Installation overview («Подключённые сервисы»)
 # ---------------------------------------------------------------------------
 
 
@@ -976,3 +981,45 @@ def test_reads_keep_plain_retry_advice(shared_calendar, fake_api, monkeypatch):
     fake_api.fail_with = urllib.error.URLError("offline")
     answer = _tool(monkeypatch, shared_calendar, LIST, OWNER_DM)
     assert answer["error"] == "google_unavailable" and "trying again" in answer["next_step"]
+
+
+# ---------------------------------------------------------------------------
+# «Доступно всем агентам» (decision 23.09): the platform's connection, every
+# profile — also later ones — for the owner; visitors still get nothing.
+# ---------------------------------------------------------------------------
+
+
+def test_profile_created_after_sharing_with_all_serves_the_owner_not_visitors(install, fake_api, monkeypatch):
+    _write_token(install, ("calendar",), access="tok-main")
+    fake_api.calendars["tok-main"] = [
+        _event("m", "Owner meeting", "2026-09-24T09:00:00+07:00", "2026-09-24T10:00:00+07:00"),
+    ]
+    google.configure_sharing(source_profile="default", all_profiles=True)
+    (install / "profiles" / "newbie").mkdir()  # created after the switch
+    newbie = install / "profiles" / "newbie"
+
+    owner = _tool(monkeypatch, newbie, LIST, OWNER_DM)
+    visitor = _tool(monkeypatch, newbie, LIST, OUTSIDER_DM)
+    assert owner["ok"] is True and owner["events"][0]["title"] == "Owner meeting"
+    assert visitor["error"] == "owner_only"
+    assert fake_api.calls[-1]["token"] == "tok-main" and len(fake_api.calls) == 1
+
+    # Renaming or deleting other profiles does not disturb the shared grant.
+    google.rename_profile_sharing("designer", "painter")
+    google.remove_profile_sharing("mentor")
+    assert _tool(monkeypatch, newbie, LIST, OWNER_DM)["ok"] is True
+
+    google.configure_sharing(source_profile="default", all_profiles=False)
+    assert _tool(monkeypatch, newbie, LIST, OWNER_DM)["error"] == "not_connected"
+
+
+def test_sharing_route_switches_all_without_touching_the_explicit_list(install, monkeypatch):
+    from korra_cli.web_routers import google_workspace as routes
+
+    _write_token(install, ("calendar",), access="tok-main")
+    google.configure_sharing(source_profile="default", profiles=["designer"])
+    body = routes.GoogleSharingBody(all_profiles=True)
+    result = asyncio.run(routes.google_configure_sharing(body, profile="default"))
+    assert result == {"source_profile": "default", "profiles": ["designer"], "all_profiles": True}
+    with pytest.raises(Exception):
+        routes.GoogleSharingBody.model_validate({"all_profiles": True, "everyone": True})

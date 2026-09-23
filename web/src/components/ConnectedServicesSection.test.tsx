@@ -5,7 +5,9 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionsGoogleProfile, ConnectionsResponse, GoogleWorkspaceStatus } from "@/lib/api";
-import ConnectionsPage from "./ConnectionsPage";
+import { ConnectedServicesSection } from "./ConnectedServicesSection";
+import ConnectionsRedirect from "@/pages/ConnectionsRedirect";
+import { Route, Routes, useLocation } from "react-router";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -82,7 +84,9 @@ async function flush() {
   }
 }
 
-async function mount(url = "/connections") {
+const notices = { error: vi.fn(), success: vi.fn() };
+
+async function mount(url = "/env#section-services") {
   container = document.createElement("div");
   document.body.appendChild(container);
   const created = createRoot(container);
@@ -90,7 +94,7 @@ async function mount(url = "/connections") {
   await act(async () =>
     created.render(
       <MemoryRouter initialEntries={[url]}>
-        <ConnectionsPage />
+        <ConnectedServicesSection onError={notices.error} onSuccess={notices.success} />
       </MemoryRouter>,
     ),
   );
@@ -131,7 +135,7 @@ afterEach(async () => {
   document.body.innerHTML = "";
 });
 
-describe("Экран «Сервисы»", () => {
+describe("Раздел «Подключённые сервисы» в «Ключах и доступах»", () => {
   it("показывает, через какого агента подключён Google и кому он доступен", async () => {
     await mount();
     const block = el<HTMLElement>("[data-google-source='default']");
@@ -150,22 +154,75 @@ describe("Экран «Сервисы»", () => {
     expect(el<HTMLElement>("[data-google-source='smm']").textContent).toContain("Через агента «SMM»");
   });
 
-  it("«Доступно всем агентам» открывает подключение всем, кому можно, одним запросом", async () => {
+  it("«Доступно всем агентам» — признак установки, явный список не трогается", async () => {
     await mount();
     const block = el<HTMLElement>("[data-google-source='default']");
     const all = block.querySelector<HTMLButtonElement>("[role='switch'][aria-labelledby='grant-default-all']")!;
     expect(all.getAttribute("aria-checked")).toBe("false");
     await click(all);
-    expect(api.setGoogleWorkspaceSharing).toHaveBeenCalledWith(["designer", "lawyer"], "default");
+    expect(api.setGoogleWorkspaceSharing).toHaveBeenCalledWith(null, "default", true);
     expect(api.getConnections).toHaveBeenCalledTimes(2);
+  });
+
+  it("при «всем агентам» переключатели отдельных агентов не показываются", async () => {
+    api.getConnections.mockResolvedValue({
+      google: {
+        ...connections([MAIN, DESIGNER, { ...LAWYER, access: "shared", shared_from: "default", via_all: true,
+          state: "connected", services: ["calendar", "drive"] }, SMM]).google,
+        shared_all_source: "default",
+      },
+    });
+    await mount();
+    const block = el<HTMLElement>("[data-google-source='default']");
+    const all = block.querySelector<HTMLButtonElement>("[role='switch'][aria-labelledby='grant-default-all']")!;
+    expect(all.getAttribute("aria-checked")).toBe("true");
+    expect(block.textContent).toContain("в том числе созданным позже");
+    expect(block.querySelector("[data-connection-agent='lawyer']")?.textContent).toContain("открыто всем агентам");
+    expect(block.querySelector("[data-connection-agent='lawyer'] [role='switch']")).toBeNull();
+    // Второй источник не может перехватить «всем агентам».
+    const other = el<HTMLElement>("[data-google-source='smm']");
+    expect(other.querySelector<HTMLButtonElement>("[role='switch']")?.disabled).toBe(true);
+    await click(buttonByText("Отключить Google", block));
+    expect(document.body.textContent).toContain("Доступ потеряют все агенты установки.");
+  });
+
+  it("у Google есть кнопка «Инструкция» со статьёй о подключении", async () => {
+    await mount();
+    const instruction = Array.from(document.querySelectorAll("a")).find((a) => a.textContent?.includes("Инструкция"));
+    expect(instruction?.getAttribute("href")).toBe("/help/google");
+  });
+
+  it("старый адрес /connections ведёт в раздел «Ключей и доступов» с теми же параметрами", async () => {
+    let seen = "";
+    function Probe() {
+      const location = useLocation();
+      seen = `${location.pathname}${location.search}${location.hash}`;
+      return null;
+    }
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    const created = createRoot(container);
+    root = created;
+    await act(async () =>
+      created.render(
+        <MemoryRouter initialEntries={["/connections?connect=calendar&profile=default"]}>
+          <Routes>
+            <Route path="/connections" element={<ConnectionsRedirect />} />
+            <Route path="/env" element={<Probe />} />
+          </Routes>
+        </MemoryRouter>,
+      ),
+    );
+    await flush();
+    expect(seen).toBe("/env?connect=calendar&profile=default#section-services");
   });
 
   it("переключатель агента меняет только его доступ", async () => {
     await mount();
     await click(el("[aria-label='Доступ к Google для агента «Юрист»']"));
-    expect(api.setGoogleWorkspaceSharing).toHaveBeenLastCalledWith(["designer", "lawyer"], "default");
+    expect(api.setGoogleWorkspaceSharing).toHaveBeenLastCalledWith(["designer", "lawyer"], "default", undefined);
     await click(el("[aria-label='Доступ к Google для агента «Дизайнер»']"));
-    expect(api.setGoogleWorkspaceSharing).toHaveBeenLastCalledWith([], "default");
+    expect(api.setGoogleWorkspaceSharing).toHaveBeenLastCalledWith([], "default", undefined);
   });
 
   it("отключение Google сначала закрывает общий доступ, потом отзывает", async () => {
@@ -174,7 +231,7 @@ describe("Экран «Сервисы»", () => {
     await click(buttonByText("Отключить Google", block));
     expect(document.body.textContent).toContain("Доступ потеряют «Главный агент» и ещё 1: Дизайнер.");
     await click(buttonByText("Отключить"));
-    expect(api.setGoogleWorkspaceSharing).toHaveBeenCalledWith([], "default");
+    expect(api.setGoogleWorkspaceSharing).toHaveBeenCalledWith([], "default", false);
     expect(api.revokeGoogleWorkspace).toHaveBeenCalledWith("default");
     const order = [
       api.setGoogleWorkspaceSharing.mock.invocationCallOrder[0],
@@ -191,7 +248,7 @@ describe("Экран «Сервисы»", () => {
 
   it("из «Календаря» открывает подключение для названного агента", async () => {
     api.getConnections.mockResolvedValue(connections([row("default"), LAWYER]));
-    await mount("/connections?connect=calendar&profile=default");
+    await mount("/env?connect=calendar&profile=default#section-services");
     expect(document.body.textContent).toContain("Подключить Google");
     expect(api.getGoogleWorkspaceStatus).toHaveBeenCalledWith("default");
     const calendar = Array.from(document.querySelectorAll<HTMLLabelElement>("label")).find((node) =>
@@ -207,7 +264,7 @@ describe("Экран «Сервисы»", () => {
     api.getConnections.mockResolvedValue(
       connections([{ ...MAIN, services: ["drive"], shared_with: [] }, LAWYER]),
     );
-    await mount("/connections?connect=calendar&profile=default");
+    await mount("/env?connect=calendar&profile=default#section-services");
     expect(document.body.textContent).toContain("Чтобы добавить календарь, отключите Google у агента «Главный агент»");
     expect(api.getGoogleWorkspaceStatus).toHaveBeenCalledWith("default");
   });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router";
-import { CalendarCheck, Plus, RefreshCw, ShieldCheck, ShieldOff } from "lucide-react";
+import { Link, useLocation, useSearchParams } from "react-router";
+import { BookOpen, CalendarCheck, Plus, RefreshCw, ShieldCheck, ShieldOff } from "lucide-react";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import {
   Card,
@@ -10,12 +10,9 @@ import {
   CardTitle,
 } from "@nous-research/ui/ui/components/card";
 import { Switch } from "@nous-research/ui/ui/components/switch";
-import { Toast } from "@nous-research/ui/ui/components/toast";
-import { useToast } from "@nous-research/ui/hooks/use-toast";
 
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { GoogleWorkspaceProfileCard } from "@/components/GoogleWorkspaceCard";
-import { KorraLoader } from "@/components/KorraLoader";
 import { ProductButton } from "@/components/ProductButton";
 import { api, type ConnectionsGoogleProfile, type ConnectionsResponse } from "@/lib/api";
 import {
@@ -34,23 +31,37 @@ import {
 } from "@/lib/connections";
 import { ownerFacingError } from "@/lib/owner-facing-error";
 
+/** Якорь раздела: сюда ведут «Подключить …» из виджетов и старый адрес /connections. */
+const SERVICES_SECTION_ID = "section-services";
+
 /**
- * «Сервисы» — что подключено к Korra и каким агентам это доступно.
+ * «Подключённые сервисы» — верхний раздел «Ключей и доступов».
  *
- * Подключение становится инструментом агента сразу: календарь — встроенный
- * инструмент каждого агента, и он отвечает тем доступом, который здесь
- * открыт. Отключение здесь же закрывает доступ со следующего обращения.
+ * Решение Дмитрия 23.09: подключение принадлежит платформе Korra, а не
+ * агенту. Здесь видно, что подключено и кому доступно; «Доступно всем
+ * агентам» открывает подключение всем агентам установки, в том числе
+ * созданным позже. Кто вправе им пользоваться в конкретном разговоре,
+ * решает сервер при каждом вызове: владелец или его фоновая работа, но не
+ * посетители общих ботов.
  *
- * Экран ничего не хранит сам: сводку отдаёт `GET /api/connections`, а все
+ * Раздел ничего не хранит сам: сводку отдаёт `GET /api/connections`, а все
  * изменения идут прежними маршрутами Google (`start/complete/cancel/revoke`,
  * `PUT sharing`), которые уже проверены периметром кабинета.
  */
-export default function ConnectionsPage() {
-  const { toast, showToast } = useToast();
+export function ConnectedServicesSection({
+  onError,
+  onSuccess,
+}: {
+  onError: (message: string) => void;
+  onSuccess: (message: string) => void;
+}) {
   const [params] = useSearchParams();
+  const { hash } = useLocation();
   const [data, setData] = useState<ConnectionsResponse | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const ticket = useRef(0);
+  const scrolled = useRef(false);
+  const sectionRef = useRef<HTMLElement | null>(null);
 
   const load = useCallback(async () => {
     const current = ++ticket.current;
@@ -62,9 +73,9 @@ export default function ConnectionsPage() {
     } catch (error) {
       if (current !== ticket.current) return;
       setLoadState((previous) => (previous === "ready" ? previous : "error"));
-      showToast(ownerFacingError(error, "Не удалось получить список подключений."), "error");
+      onError(ownerFacingError(error, "Не удалось получить список подключений."));
     }
-  }, [showToast]);
+  }, [onError]);
 
   useEffect(() => {
     void (async () => {
@@ -72,29 +83,41 @@ export default function ConnectionsPage() {
     })();
   }, [load]);
 
-  const notifyError = useCallback((message: string) => showToast(message, "error"), [showToast]);
-  const notifySuccess = useCallback((message: string) => showToast(message, "success"), [showToast]);
+  // Переход по ссылке «Подключить …» или со старого /connections: раздел
+  // выше каталога ключей, но страница собирается не сразу — дожидаемся сводки.
+  useEffect(() => {
+    if (scrolled.current || hash !== `#${SERVICES_SECTION_ID}` || loadState === "loading") return;
+    scrolled.current = true;
+    const frame = window.requestAnimationFrame(() => sectionRef.current?.scrollIntoView?.({ block: "start" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [hash, loadState]);
 
   const requestedConnect = params.get("connect");
   const requestedProfile = params.get("profile");
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-      <Toast toast={toast} />
+    <section
+      id={SERVICES_SECTION_ID}
+      ref={sectionRef}
+      aria-labelledby={`${SERVICES_SECTION_ID}-title`}
+      className="flex scroll-mt-4 flex-col gap-3"
+    >
       <div className="flex flex-col gap-1">
+        <h2 id={`${SERVICES_SECTION_ID}-title`} className="text-base font-semibold">
+          Подключённые сервисы
+        </h2>
         <p className="text-sm text-muted-foreground">
-          Подключите сервис один раз — агенты пользуются им сами, без настройки. Здесь видно, кому что доступно.
-        </p>
-        <p className="text-xs text-text-tertiary">
-          Отключение действует сразу: агент теряет доступ со следующего обращения.
+          Сервис подключается к Korra один раз — агенты пользуются им по вашей просьбе, без настройки.
         </p>
         <p className="text-xs text-text-tertiary" data-owner-only-note>
-          Подключения — ваши: в Telegram и других мессенджерах агент пользуется ими только в вашем личном
-          чате, когда вы указаны владельцем бота. Посетители общих ботов и группы их не получают.
+          Подключения — ваши: в мессенджерах агент пользуется ими только в вашем личном чате, когда вы указаны
+          владельцем бота. Посетители общих ботов и группы их не получают. Отключение действует сразу.
         </p>
       </div>
 
-      {loadState === "loading" && !data ? <KorraLoader className="py-16" /> : null}
+      {loadState === "loading" && !data ? (
+        <p className="text-sm text-muted-foreground" aria-busy="true">Читаем подключения…</p>
+      ) : null}
 
       {loadState === "error" && !data ? (
         <Card role="alert">
@@ -113,11 +136,11 @@ export default function ConnectionsPage() {
           focusCalendar={requestedConnect === "calendar"}
           requestedProfile={requestedProfile}
           onChanged={load}
-          onError={notifyError}
-          onSuccess={notifySuccess}
+          onError={onError}
+          onSuccess={onSuccess}
         />
       ) : null}
-    </div>
+    </section>
   );
 }
 
@@ -162,7 +185,7 @@ function GoogleSection({ focusCalendar, google, onChanged, onError, onSuccess, r
       : `Доступно агентам: ${connectedCount} из ${rows.length}`;
 
   return (
-    <Card role="region" aria-labelledby="connections-google-title">
+    <Card role="region" aria-labelledby="connections-google-title" data-service="google">
       <CardHeader className="bg-transparent">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -175,11 +198,20 @@ function GoogleSection({ focusCalendar, google, onChanged, onError, onSuccess, r
               Google
             </CardTitle>
           </div>
-          <Badge>{badge}</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge>{badge}</Badge>
+            <Link
+              to="/help/google"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              <BookOpen className="size-4" aria-hidden />
+              Инструкция
+            </Link>
+          </div>
         </div>
         <CardDescription>
-          Календарь, почта, диск, таблицы и документы. Одно подключение можно открыть нескольким агентам — доступ не
-          копируется, а отключение у источника закрывает его всем.
+          Календарь, почта, диск, таблицы и документы. Одно подключение можно открыть всем агентам — доступ не
+          копируется, а отключение закрывает его всем.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 p-4">
@@ -209,6 +241,7 @@ function GoogleSection({ focusCalendar, google, onChanged, onError, onSuccess, r
           <GrantBlock
             key={source.profile}
             source={source}
+            sharedAllSource={google.shared_all_source ?? null}
             rows={rows}
             nameOf={nameOf}
             onChanged={onChanged}
@@ -261,7 +294,7 @@ function GoogleSection({ focusCalendar, google, onChanged, onError, onSuccess, r
                   />
                 ) : null}
                 <p className="text-xs text-text-tertiary">
-                  После подключения его можно открыть остальным агентам одним переключателем.
+                  После подключения его можно открыть всем агентам одним переключателем.
                 </p>
               </>
             )}
@@ -278,6 +311,7 @@ function GrantBlock({
   onError,
   onSuccess,
   rows,
+  sharedAllSource,
   source,
 }: {
   nameOf: (profile: string) => string;
@@ -285,20 +319,25 @@ function GrantBlock({
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
   rows: ConnectionsGoogleProfile[];
+  sharedAllSource: string | null;
   source: ConnectionsGoogleProfile;
 }) {
   const [busy, setBusy] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const usable = sourceIsUsable(source);
   const sharing = sharingState(rows, source);
+  // «Всем агентам» — признак установки, а не список имён: он касается и
+  // агентов, созданных позже. Явные списки остаются как есть.
+  const toAll = sharedAllSource === source.profile;
+  const allHeldElsewhere = Boolean(sharedAllSource) && !toAll;
   const services = source.services;
   const label = profileLabel(source);
   const headingId = `grant-${source.profile}`;
 
-  const applySharing = async (next: string[], success: string) => {
+  const applySharing = async (next: string[] | null, success: string, allProfiles?: boolean) => {
     setBusy("sharing");
     try {
-      await api.setGoogleWorkspaceSharing(next, source.profile);
+      await api.setGoogleWorkspaceSharing(next, source.profile, allProfiles);
       onSuccess(success);
     } catch (error) {
       onError(ownerFacingError(error, "Не удалось изменить общий доступ к Google."));
@@ -310,8 +349,11 @@ function GrantBlock({
 
   const toggleAll = (on: boolean) =>
     void applySharing(
-      on ? [...sharing.eligible].sort() : [],
-      on ? "Подключение Google открыто всем агентам." : "Общий доступ к Google закрыт.",
+      null,
+      on
+        ? "Подключение Google открыто всем агентам, в том числе новым."
+        : "Доступ «всем агентам» закрыт. Отдельно открытые агенты сохранили доступ.",
+      on,
     );
 
   const toggleOne = (profile: string, on: boolean) =>
@@ -335,7 +377,7 @@ function GrantBlock({
   const disconnect = async () => {
     setBusy("revoke");
     try {
-      if (sharing.shared.length) await api.setGoogleWorkspaceSharing([], source.profile);
+      if (sharing.shared.length || toAll) await api.setGoogleWorkspaceSharing([], source.profile, false);
       const result = await api.revokeGoogleWorkspace(source.profile);
       if (result.remote_revoked) {
         onSuccess("Google отключён. Агенты больше не имеют к нему доступа.");
@@ -395,14 +437,16 @@ function GrantBlock({
             Доступно всем агентам
           </p>
           <p className="text-xs text-muted-foreground">
-            {sharing.eligible.length === 0
-              ? "Открыть некому: у остальных агентов своё подключение или их пока нет."
-              : `Пользуются: ${sharing.shared.length} из ${sharing.eligible.length}. Новых агентов добавляйте здесь же.`}
+            {toAll
+              ? "Открыто всем агентам установки, в том числе созданным позже. У кого своё подключение Google — пользуется своим."
+              : allHeldElsewhere
+                ? `Всем агентам уже открыт Google агента «${nameOf(sharedAllSource ?? "")}». Сначала выключите его.`
+                : "Включите, чтобы подключением пользовался любой агент — и те, что появятся позже."}
           </p>
         </div>
         <Switch
-          checked={sharing.all}
-          disabled={!usable || Boolean(busy) || sharing.eligible.length === 0}
+          checked={toAll}
+          disabled={!usable || Boolean(busy) || allHeldElsewhere}
           onCheckedChange={toggleAll}
           aria-labelledby={`${headingId}-all`}
         />
@@ -412,13 +456,15 @@ function GrantBlock({
         <AgentRow row={source} status="Источник подключения" note={capabilityNote(source, services)} />
         {others.map((row) => {
           const status = borrowStatus(row, source);
-          const toggle = canToggle(status);
+          // При «всем агентам» отдельный переключатель ничего бы не менял:
+          // доступ остался бы через общий признак.
+          const toggle = canToggle(status) && !toAll;
           const on = status.kind === "shared";
           return (
             <AgentRow
               key={row.profile}
               row={row}
-              status={borrowStatusText(status, nameOf)}
+              status={on && row.via_all ? "Пользуется этим подключением — открыто всем агентам" : borrowStatusText(status, nameOf)}
               note={on ? capabilityNote(row, services) : null}
             >
               {toggle ? (
@@ -465,9 +511,11 @@ function GrantBlock({
         title="Отключить Google?"
         confirmLabel="Отключить"
         description={
-          sharing.shared.length
-            ? `Доступ потеряют «${label}» и ещё ${sharing.shared.length}: ${sharing.shared.map(nameOf).join(", ")}. Встречи пропадут с дашборда.`
-            : `Агент «${label}» потеряет доступ к Google, встречи пропадут с дашборда.`
+          toAll
+            ? "Доступ потеряют все агенты установки. Встречи пропадут с дашборда."
+            : sharing.shared.length
+              ? `Доступ потеряют «${label}» и ещё ${sharing.shared.length}: ${sharing.shared.map(nameOf).join(", ")}. Встречи пропадут с дашборда.`
+              : `Агент «${label}» потеряет доступ к Google, встречи пропадут с дашборда.`
         }
       />
     </section>

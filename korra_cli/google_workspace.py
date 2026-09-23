@@ -96,6 +96,17 @@ def sharing_policy_path(root: Path | None = None) -> Path:
     return profile_google_dir(root or get_default_hermes_root()) / "shared-access.json"
 
 
+def shared_all_path(root: Path | None = None) -> Path:
+    """«Доступно всем агентам»: one source grant for every profile.
+
+    A separate file on purpose. The explicit policy keeps its strict v1
+    schema (older engines read it unchanged after a rollback), and an engine
+    that does not know this file simply ignores it — consumers then lose the
+    borrowed access instead of the whole Google connection failing closed.
+    """
+    return profile_google_dir(root or get_default_hermes_root()) / "shared-all.json"
+
+
 def _local_active_token_path(profile_home: Path | None = None) -> Path:
     current = token_path(profile_home)
     _reject_symlink(current)
@@ -464,7 +475,45 @@ def _write_sharing_policy(payload: dict[str, Any], root: Path | None = None) -> 
     _atomic_private_json(path, payload)
 
 
-def _shared_source_name(profile_home: Path | None = None) -> str | None:
+def _read_shared_all(root: Path | None = None) -> str | None:
+    """The profile whose grant every profile may use, or None."""
+    path = shared_all_path(root)
+    _reject_symlink(path)
+    if not path.exists():
+        return None
+    try:
+        payload = _read_json(path, label="shared-all policy")
+        if payload.get("version") != 1 or set(payload) != {"version", "source_profile"}:
+            raise ValueError("unsupported schema")
+        source = payload.get("source_profile")
+        if not isinstance(source, str):
+            raise ValueError("source must be a profile id")
+        if _profile_name_for_home(_profile_home_for_name(source)) != source:
+            raise ValueError("profile id is not canonical")
+        return source
+    except (GoogleWorkspaceError, ValueError) as exc:
+        if isinstance(exc, GoogleWorkspaceError) and exc.code == "state_path_unsafe":
+            raise
+        raise GoogleWorkspaceError(
+            "sharing_policy_invalid",
+            "Google shared-with-all policy is unreadable or invalid",
+            status_code=409,
+        ) from exc
+
+
+def _write_shared_all(source: str | None, root: Path | None = None) -> None:
+    path = shared_all_path(root)
+    if source is None:
+        _safe_unlink(path)
+        return
+    _atomic_private_json(path, {"version": 1, "source_profile": source})
+
+
+def _shared_source_name(
+    profile_home: Path | None = None,
+    *,
+    include_all: bool = True,
+) -> str | None:
     # A local grant always wins.  This also keeps old installations isolated
     # when an operator manually leaves stale policy behind.
     if _local_active_token_path(profile_home).exists():
@@ -472,7 +521,20 @@ def _shared_source_name(profile_home: Path | None = None) -> str | None:
     name = _profile_name_for_home(profile_home)
     if name is None:
         return None
-    return _read_sharing_policy()["profile_sources"].get(name)
+    explicit = _read_sharing_policy()["profile_sources"].get(name)
+    if explicit or not include_all:
+        return explicit
+    # «Всем агентам» covers every profile without its own grant or an
+    # explicit mapping — including profiles created later. Who may use the
+    # grant in a given turn is decided separately (gateway.principal).
+    everyone = _read_shared_all()
+    return everyone if everyone and everyone != name else None
+
+
+def _shared_via_all(profile_home: Path | None = None) -> bool:
+    """The profile borrows its access only through «всем агентам»."""
+    source = _shared_source_name(profile_home)
+    return bool(source) and _shared_source_name(profile_home, include_all=False) is None
 
 
 def _grant_profile_home(profile_home: Path | None = None) -> Path:
@@ -485,14 +547,41 @@ def _active_token_path(profile_home: Path | None = None) -> Path:
     return _local_active_token_path(_grant_profile_home(profile_home))
 
 
-def configure_sharing(*, source_profile: str, profiles: list[str]) -> dict[str, Any]:
-    """Replace the explicit consumer set for one source grant."""
+def configure_sharing(
+    *,
+    source_profile: str,
+    profiles: list[str] | None = None,
+    all_profiles: bool | None = None,
+) -> dict[str, Any]:
+    """Replace the explicit consumers of one grant and/or share it with all.
+
+    ``profiles=None`` leaves the explicit list untouched; ``all_profiles``
+    ``True`` opens this grant to every profile without its own grant or an
+    explicit mapping (also profiles created later), ``False`` closes that if
+    it is this grant's, ``None`` leaves it as it is.
+    """
     from korra_cli import profiles as profile_store
 
     source = profile_store.normalize_profile_name(source_profile)
     profile_store.validate_profile_name(source)
     if not profile_store.profile_exists(source):
         raise GoogleWorkspaceError("profile_missing", f"Profile '{source}' does not exist", status_code=404)
+    if profiles is None and all_profiles is None:
+        raise GoogleWorkspaceError("sharing_request_empty", "Nothing to change in Google sharing")
+
+    if profiles is None:
+        with _sharing_lock():
+            explicit = sorted(
+                consumer
+                for consumer, mapped in _read_sharing_policy()["profile_sources"].items()
+                if mapped == source
+            )
+            _apply_shared_all(source, all_profiles)
+            return {
+                "source_profile": source,
+                "profiles": explicit,
+                "all_profiles": _read_shared_all() == source,
+            }
 
     consumers: list[str] = []
     for value in profiles:
@@ -570,7 +659,48 @@ def configure_sharing(*, source_profile: str, profiles: list[str]) -> dict[str, 
 
         updated = {"version": 1, "profile_sources": dict(sorted(mappings.items()))}
         _write_sharing_policy(updated)
-    return {"source_profile": source, "profiles": sorted(consumers)}
+        _apply_shared_all(source, all_profiles)
+        everyone = _read_shared_all() == source
+    return {"source_profile": source, "profiles": sorted(consumers), "all_profiles": everyone}
+
+
+def _apply_shared_all(source: str, all_profiles: bool | None) -> None:
+    """Turn «всем агентам» on or off for ``source``. Caller holds the lock."""
+    if all_profiles is None:
+        return
+    current = _read_shared_all()
+    if not all_profiles:
+        if current == source:
+            _write_shared_all(None)
+        return
+    if current and current != source:
+        raise GoogleWorkspaceError(
+            "sharing_all_conflict",
+            f"Google of profile '{current}' is already shared with all agents; turn that off first",
+            status_code=409,
+        )
+    if source in _read_sharing_policy()["profile_sources"]:
+        raise GoogleWorkspaceError(
+            "sharing_source_conflict",
+            f"Profile '{source}' already uses another profile's grant",
+            status_code=409,
+        )
+    source_home = _profile_home_for_name(source)
+    with _state_lock(source_home):
+        if not _local_active_token_path(source_home).exists():
+            raise GoogleWorkspaceError(
+                "sharing_source_unusable",
+                f"Profile '{source}' has no Google Workspace grant of its own",
+                status_code=409,
+            )
+        state = _token_status(source_home)
+        if state["state"] == "reauthorization_required" and not state.get("legacy_compatible", False):
+            raise GoogleWorkspaceError(
+                "sharing_source_unusable",
+                f"Profile '{source}' has no usable Google Workspace grant",
+                status_code=409,
+            )
+    _write_shared_all(source)
 
 
 def remove_profile_sharing(profile: str) -> None:
@@ -587,6 +717,8 @@ def remove_profile_sharing(profile: str) -> None:
             if consumer != canonical and source != canonical
         }
         _write_sharing_policy({"version": 1, "profile_sources": mappings})
+        if _read_shared_all() == canonical:
+            _write_shared_all(None)
 
 
 def rename_profile_sharing(old_profile: str, new_profile: str) -> None:
@@ -610,6 +742,8 @@ def rename_profile_sharing(old_profile: str, new_profile: str) -> None:
             for consumer, source in policy["profile_sources"].items()
         }
         _write_sharing_policy({"version": 1, "profile_sources": dict(sorted(mappings.items()))})
+        if _read_shared_all() == old:
+            _write_shared_all(new)
 
 
 def _pending_record(profile_home: Path | None = None) -> dict[str, Any] | None:
@@ -711,6 +845,8 @@ def status(*, profile_home: Path | None = None) -> dict[str, Any]:
     token = _token_status(grant_home)
     if source:
         token["shared_from"] = source
+        if _shared_via_all(profile_home):
+            token["shared_to_all"] = True
     profile_name = _profile_name_for_home(profile_home)
     if profile_name is not None and not source:
         shared_with = sorted(
@@ -720,6 +856,8 @@ def status(*, profile_home: Path | None = None) -> dict[str, Any]:
         )
         if shared_with:
             token["shared_with"] = shared_with
+        if _read_shared_all() == profile_name:
+            token["shared_with_all"] = True
     with _state_lock(profile_home):
         pending = _pending_record(profile_home)
     return {
@@ -775,7 +913,7 @@ def _pending_active(profile_home: Path) -> bool:
 def overview() -> dict[str, Any]:
     """Installation-wide, secret-free map of Google access per profile.
 
-    One consistent snapshot for the owner's «Сервисы» screen: which profile
+    One consistent snapshot for the owner's «Подключённые сервисы» section: which profile
     holds its own grant, which one borrows it through the explicit sharing
     policy, and which has none.  Nothing here creates state: no lock files,
     no ``google-workspace`` directories in profiles that never touched Google.
@@ -789,6 +927,7 @@ def overview() -> dict[str, Any]:
         app = {"configured": False, "reason": exc.code}
 
     sources = _read_sharing_policy()["profile_sources"]
+    everyone = _read_shared_all()
     rows: list[dict[str, Any]] = []
     for name in profile_store.list_profile_names():
         if not profile_store.profile_exists(name):
@@ -796,6 +935,9 @@ def overview() -> dict[str, Any]:
         home = _profile_home_for_name(name)
         own = _local_active_token_path(home).exists()
         source = None if own else sources.get(name)
+        via_all = False
+        if not own and not source and everyone and everyone != name:
+            source, via_all = everyone, True
         grant_home = _profile_home_for_name(source) if source else home
         token = _token_status(grant_home)
         state = token["state"]
@@ -816,6 +958,8 @@ def overview() -> dict[str, Any]:
         }
         if source:
             row["shared_from"] = source
+        if via_all:
+            row["via_all"] = True
         if token.get("reason"):
             row["reason"] = token["reason"]
         if token.get("legacy_compatible"):
@@ -834,6 +978,8 @@ def overview() -> dict[str, Any]:
         "app": app,
         "profiles": rows,
         "available_services": list(SERVICE_SCOPES),
+        # The grant every profile may use («Доступно всем агентам»), or None.
+        "shared_all_source": everyone,
     }
 
 
@@ -850,7 +996,10 @@ def start(
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
     now = int(time.time())
     with _sharing_guard(profile_home):
-        if _shared_source_name(profile_home):
+        # An explicit mapping must be detached first. «Всем агентам» does not
+        # block: a profile may still connect an account of its own, and its
+        # own grant then wins.
+        if _shared_source_name(profile_home, include_all=False):
             raise GoogleWorkspaceError(
                 "shared_access_active",
                 "Disconnect shared Google access before starting a separate authorization",
@@ -967,7 +1116,7 @@ def complete(
     _, app = _load_app()
     consumed: dict[str, Any]
     with _sharing_guard(profile_home), _state_lock(profile_home):
-        if _shared_source_name(profile_home):
+        if _shared_source_name(profile_home, include_all=False):
             raise GoogleWorkspaceError(
                 "shared_access_active",
                 "Disconnect shared Google access before completing a separate authorization",
@@ -1058,9 +1207,16 @@ def revoke(
     remote_revoke: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     with _sharing_guard(profile_home):
-        source = _shared_source_name(profile_home)
+        source = _shared_source_name(profile_home, include_all=False)
         profile_name = _profile_name_for_home(profile_home)
         policy = _read_sharing_policy()
+        if not source and _shared_via_all(profile_home):
+            raise GoogleWorkspaceError(
+                "shared_with_all",
+                "Google is shared with all agents; turn that off in «Подключённые сервисы» "
+                "to take it away from a single agent",
+                status_code=409,
+            )
         if source and profile_name:
             mappings = dict(policy["profile_sources"])
             mappings.pop(profile_name, None)
@@ -1078,6 +1234,12 @@ def revoke(
             raise GoogleWorkspaceError(
                 "shared_grant_in_use",
                 "Disconnect shared access from these profiles first: " + ", ".join(shared_with),
+                status_code=409,
+            )
+        if profile_name is not None and _read_shared_all() == profile_name:
+            raise GoogleWorkspaceError(
+                "shared_grant_in_use",
+                "Turn off shared access for all agents first",
                 status_code=409,
             )
 

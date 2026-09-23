@@ -162,7 +162,7 @@ def test_explicit_profiles_use_one_source_grant_without_token_copies(tmp_path, m
         profiles=["smm", "rop"],
     )
 
-    assert result == {"source_profile": "assistant", "profiles": ["rop", "smm"]}
+    assert result == {"source_profile": "assistant", "profiles": ["rop", "smm"], "all_profiles": False}
     assert google._active_token_path(rop) == google.token_path(source)
     assert google._active_token_path(smm) == google.token_path(source)
     assert not google.token_path(rop).exists()
@@ -177,6 +177,90 @@ def test_explicit_profiles_use_one_source_grant_without_token_copies(tmp_path, m
     }
     assert google.status(profile_home=source)["connection"]["shared_with"] == ["rop", "smm"]
     assert google.check_service("drive", profile_home=rop, probe=lambda *_args: None)["status"] == "ok"
+
+
+def test_sharing_with_all_covers_later_profiles_and_leaves_explicit_lists_alone(tmp_path, monkeypatch):
+    """Решение Дмитрия 23.09: подключение — платформы, «всем агентам» — и будущим."""
+    root = tmp_path / "install"
+    _installation_profiles(monkeypatch, root, "assistant", "rop", "smm", "own")
+    _write_app(root)
+    _write_token(root, ("calendar",))  # the main agent holds the grant
+    _write_token(root / "profiles" / "assistant", ("drive",))
+    _write_token(root / "profiles" / "own", ("email",))
+    google.configure_sharing(source_profile="assistant", profiles=["rop"])
+    explicit_before = google.sharing_policy_path().read_bytes()
+
+    result = google.configure_sharing(source_profile="default", all_profiles=True)
+
+    assert result == {"source_profile": "default", "profiles": [], "all_profiles": True}
+    # The explicit list is neither rewritten nor overridden.
+    assert google.sharing_policy_path().read_bytes() == explicit_before
+    assert google._active_token_path(root / "profiles" / "rop") == google.token_path(root / "profiles" / "assistant")
+    # A profile with its own grant keeps it.
+    assert google._active_token_path(root / "profiles" / "own") == google.token_path(root / "profiles" / "own")
+    # Everyone else — including a profile created after the switch — uses it.
+    assert google._active_token_path(root / "profiles" / "smm") == google.token_path(root)
+    (root / "profiles" / "newbie").mkdir()
+    newbie = root / "profiles" / "newbie"
+    assert google._active_token_path(newbie) == google.token_path(root)
+    connection = google.status(profile_home=newbie)["connection"]
+    assert connection["shared_from"] == "default" and connection["shared_to_all"] is True
+    assert google.status(profile_home=root)["connection"]["shared_with_all"] is True
+    rows = {row["profile"]: row for row in google.overview()["profiles"]}
+    assert rows["newbie"]["via_all"] is True and rows["rop"]["shared_from"] == "assistant"
+    assert google.overview()["shared_all_source"] == "default"
+    assert not google.token_path(newbie).exists()  # nothing is copied
+
+    # Turning it off takes the borrowed access away, explicit mappings stay.
+    assert google.configure_sharing(source_profile="default", all_profiles=False)["all_profiles"] is False
+    assert google.status(profile_home=newbie)["connection"]["state"] == "not_connected"
+    assert google._active_token_path(root / "profiles" / "rop") == google.token_path(root / "profiles" / "assistant")
+
+
+def test_sharing_with_all_rules_revoke_rename_delete_and_own_accounts(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    _installation_profiles(monkeypatch, root, "assistant", "rop", "smm")
+    _write_app(root)
+    source = root / "profiles" / "assistant"
+    _write_token(source, ("calendar",))
+    _write_token(root / "profiles" / "smm", ("drive",))
+
+    with pytest.raises(google.GoogleWorkspaceError) as unusable:
+        google.configure_sharing(source_profile="rop", all_profiles=True)
+    assert unusable.value.code == "sharing_source_unusable"
+    google.configure_sharing(source_profile="assistant", all_profiles=True)
+    with pytest.raises(google.GoogleWorkspaceError) as conflict:
+        google.configure_sharing(source_profile="smm", all_profiles=True)
+    assert conflict.value.code == "sharing_all_conflict"
+
+    # One agent cannot be detached from «всем»; the source cannot be revoked under it.
+    with pytest.raises(google.GoogleWorkspaceError) as single:
+        google.revoke(profile_home=root / "profiles" / "rop", remote_revoke=lambda _v: None)
+    assert single.value.code == "shared_with_all"
+    with pytest.raises(google.GoogleWorkspaceError) as in_use:
+        google.revoke(profile_home=source, remote_revoke=lambda _v: None)
+    assert in_use.value.code == "shared_grant_in_use"
+
+    # A covered profile may still connect an account of its own, which then wins.
+    flow = google.start("drive", profile_home=root / "profiles" / "rop")
+    assert flow["status"] == "pending"
+
+    google.rename_profile_sharing("assistant", "helper")
+    assert json.loads(google.shared_all_path().read_text())["source_profile"] == "helper"
+    google.remove_profile_sharing("helper")
+    assert not google.shared_all_path().exists()
+
+
+def test_invalid_shared_all_policy_fails_closed(tmp_path, monkeypatch):
+    root = tmp_path / "install"
+    _installation_profiles(monkeypatch, root, "assistant", "rop")
+    _write_app(root)
+    _write_token(root / "profiles" / "assistant", ("calendar",))
+    google.profile_google_dir(root).mkdir(parents=True, exist_ok=True)
+    google.shared_all_path().write_text('{"version": 1, "source_profile": "../x"}', encoding="utf-8")
+    with pytest.raises(google.GoogleWorkspaceError) as invalid:
+        google._active_token_path(root / "profiles" / "rop")
+    assert invalid.value.code == "sharing_policy_invalid"
 
 
 def test_shared_consumer_detaches_without_revoking_source(tmp_path, monkeypatch):
@@ -1079,7 +1163,7 @@ def test_dashboard_sharing_uses_selected_profile_as_source(monkeypatch, tmp_path
     )
 
     assert result == {"source_profile": "assistant", "profiles": ["rop"]}
-    assert calls == [{"source_profile": "assistant", "profiles": ["rop"]}]
+    assert calls == [{"source_profile": "assistant", "profiles": ["rop"], "all_profiles": None}]
 
 
 def test_google_console_legacy_auth_uri_is_accepted(tmp_path):

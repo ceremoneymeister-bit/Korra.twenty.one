@@ -38,6 +38,10 @@ beforeEach(() => {
     available_services: [],
     completion_mode: "manual_localhost_url",
   } satisfies GoogleWorkspaceStatus);
+  // Раздел «Подключённые сервисы» читает сводку установки при монтировании.
+  vi.spyOn(api, "getConnections").mockResolvedValue({
+    google: { app: { configured: false }, profiles: [], available_services: [], shared_all_source: null },
+  });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); });

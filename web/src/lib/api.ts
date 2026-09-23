@@ -1072,14 +1072,21 @@ export const api = {
         body: "{}",
       },
     ),
-  /** Одно подключение Google для нескольких агентов: `profile` — источник. */
-  setGoogleWorkspaceSharing: (profiles: string[], sourceProfile: string) =>
-    fetchJSON<{ source_profile: string; profiles: string[] }>(
+  /**
+   * Общий доступ к подключению Google: `sourceProfile` — чьё подключение.
+   * `profiles` заменяет явный список (null — не трогать), `allProfiles`
+   * открывает подключение всем агентам установки, включая будущих.
+   */
+  setGoogleWorkspaceSharing: (profiles: string[] | null, sourceProfile: string, allProfiles?: boolean) =>
+    fetchJSON<{ source_profile: string; profiles: string[]; all_profiles: boolean }>(
       appendProfileParam("/api/google-workspace/sharing", sourceProfile),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profiles }),
+        body: JSON.stringify({
+          ...(profiles ? { profiles } : {}),
+          ...(allProfiles === undefined ? {} : { all_profiles: allProfiles }),
+        }),
       },
     ),
   /** Сводка подключений установки: кто держит доступ и каким агентам он открыт. */
@@ -2684,6 +2691,10 @@ export interface GoogleWorkspaceStatus {
     legacy_compatible?: boolean;
     shared_from?: string;
     shared_with?: string[];
+    /** Агент пользуется подключением, открытым всем агентам. */
+    shared_to_all?: boolean;
+    /** Это подключение открыто всем агентам. */
+    shared_with_all?: boolean;
     action?: string | null;
   };
   pending: { active: boolean; services?: string[]; expires_at?: number };
@@ -2717,6 +2728,8 @@ export interface ConnectionsGoogleProfile {
   pending: boolean;
   shared_from?: string;
   shared_with?: string[];
+  /** Доступ получен через «Доступно всем агентам», а не явным списком. */
+  via_all?: boolean;
   reason?: string;
   legacy_compatible?: boolean;
   tools: {
@@ -2732,6 +2745,8 @@ export interface ConnectionsResponse {
     app: { configured: boolean; reason?: string };
     profiles: ConnectionsGoogleProfile[];
     available_services: string[];
+    /** Чьё подключение открыто всем агентам установки, или null. */
+    shared_all_source?: string | null;
   };
 }
 

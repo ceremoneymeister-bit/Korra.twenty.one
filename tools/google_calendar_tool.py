@@ -39,12 +39,13 @@ MAX_DAYS = 31
 _OWNER_ACTIONS = {
     google_calendar.ACTION_CONNECT: (
         "Tell the user that Google Calendar is not connected for this agent. "
-        "The owner connects it in Korra: Настройки → Сервисы (or from the "
-        "«Календарь» card on the dashboard) and can share it with this agent there."
+        "The owner connects it in Korra: Настройки → Ключи и доступы → "
+        "Подключённые сервисы (or from the «Календарь» card on the dashboard) "
+        "and can open it to all agents there."
     ),
     google_calendar.ACTION_RECONNECT: (
         "Tell the user that the owner has to reconnect Google with Calendar "
-        "selected in Korra: Настройки → Сервисы."
+        "selected in Korra: Настройки → Ключи и доступы → Подключённые сервисы."
     ),
     google_calendar.ACTION_RETRY: "Google did not answer; suggest trying again a bit later.",
     google_calendar.ACTION_SUPPORT: "Google is not set up on this Korra server; suggest contacting Korra support.",

@@ -302,12 +302,14 @@ describe("api Google Workspace helpers", () => {
     setManagementProfile("writer");
 
     await api.setGoogleWorkspaceSharing(["designer", "mentor"], "default");
+    await api.setGoogleWorkspaceSharing(null, "default", true);
     await api.getConnections();
     await api.getDashboardCalendar();
     await api.getDashboardCalendar(true);
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       // Источник — тот агент, которого назвал экран, а не выбранный в шапке.
+      "/api/google-workspace/sharing?profile=default",
       "/api/google-workspace/sharing?profile=default",
       "/api/connections",
       "/api/dashboard/calendar",
@@ -316,6 +318,8 @@ describe("api Google Workspace helpers", () => {
     const [, init] = fetchMock.mock.calls[0];
     expect(init?.method).toBe("PUT");
     expect(JSON.parse(String(init?.body))).toEqual({ profiles: ["designer", "mentor"] });
+    // «Всем агентам» не переписывает явный список: его просто нет в теле.
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ all_profiles: true });
   });
 });
 

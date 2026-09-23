@@ -158,10 +158,10 @@ TOOLSETS = {
         "includes": [],
     },
 
-    # Configurable (tools_config.CONFIGURABLE_TOOLSETS): on for profiles on
-    # the default list, off for an explicit list that does not name it — a
-    # restricted profile never gains the owner's calendar silently. Who may
-    # use it is checked per call (gateway.principal).
+    # Configurable (tools_config.CONFIGURABLE_TOOLSETS): every profile gets it
+    # (explicit lists by the first-release back-fill), a profile can decline it
+    # and the decline sticks. Who may use it is checked per call
+    # (gateway.principal): the owner and owner-delegated work only.
     "google_calendar": {
         "description": "Read and add events in the Google Calendar the owner connected in Korra",
         "tools": ["google_calendar"],

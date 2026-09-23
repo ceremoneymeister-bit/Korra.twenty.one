@@ -1,7 +1,7 @@
 """Owner's connected services and the dashboard calendar feed.
 
 ``GET /api/connections`` is the installation-wide, secret-free view behind the
-«Сервисы» screen: which agent holds a Google grant, which agents borrow it and
+«Подключённые сервисы» section of «Ключи и доступы»: which agent holds a Google grant, which agents borrow it and
 what each of them can actually do with it.  Changes still go through the
 existing profile-scoped routes (``/api/google-workspace/start|complete|
 cancel|revoke`` and ``PUT /api/google-workspace/sharing``), so this module

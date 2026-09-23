@@ -35,7 +35,10 @@ class GoogleProfileBody(BaseModel):
 class GoogleSharingBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    profiles: list[str]
+    # None keeps the explicit list as it is; all_profiles opens (True) or
+    # closes (False) this grant for every profile, including later ones.
+    profiles: Optional[list[str]] = None
+    all_profiles: Optional[bool] = None
 
 
 def _profile_home(profile: str | None) -> Path:
@@ -129,6 +132,7 @@ async def google_configure_sharing(body: GoogleSharingBody, profile: Optional[st
             google.configure_sharing,
             source_profile=_profile_name(profile),
             profiles=body.profiles,
+            all_profiles=body.all_profiles,
         )
     except google.GoogleWorkspaceError as exc:
         raise _translate(exc) from exc

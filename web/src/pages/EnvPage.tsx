@@ -27,7 +27,7 @@ import { Toast } from "@nous-research/ui/ui/components/toast";
 import { useConfirmDelete } from "@nous-research/ui/hooks/use-confirm-delete";
 import { useToast } from "@nous-research/ui/hooks/use-toast";
 import { OAuthProvidersCard } from "@/components/OAuthProvidersCard";
-import { GoogleWorkspaceCard } from "@/components/GoogleWorkspaceCard";
+import { ConnectedServicesSection } from "@/components/ConnectedServicesSection";
 import { Button } from "@nous-research/ui/ui/components/button";
 import { ListItem } from "@nous-research/ui/ui/components/list-item";
 import {
@@ -685,6 +685,7 @@ export default function EnvPage() {
   // Scroll-to sub-nav in the page header
   const sections = useMemo(() => {
     const items: { id: string; label: string }[] = [
+      { id: "section-services", label: "Подключённые сервисы" },
       { id: "section-oauth", label: "Аккаунты" },
       { id: "section-providers", label: "Сервисы ответов" },
     ];
@@ -1006,19 +1007,15 @@ export default function EnvPage() {
         </Button>
       </div>
 
+      {/* Подключения принадлежат платформе, а не агенту (решение Дмитрия
+          23.09): Google подключается и открывается агентам здесь, одним
+          разделом для всей установки. */}
+      <ConnectedServicesSection
+        onError={(msg) => showToast(msg, "error")}
+        onSuccess={(msg) => showToast(msg, "success")}
+      />
+
       <div id="section-oauth">
-        <GoogleWorkspaceCard
-          onError={(msg) => showToast(msg, "error")}
-          onSuccess={(msg) => showToast(msg, "success")}
-        />
-        <p className="mt-2 text-xs text-text-tertiary">
-          Каким агентам доступно подключение Google и общий доступ одним переключателем —{" "}
-          <Link to="/connections" className="text-primary hover:underline">
-            в разделе «Сервисы»
-          </Link>
-          .
-        </p>
-        <div className="h-3" />
         <OAuthProvidersCard
           onError={(msg) => showToast(msg, "error")}
           onSuccess={(msg) => showToast(msg, "success")}

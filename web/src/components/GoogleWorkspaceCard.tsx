@@ -93,11 +93,14 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
   }, [load]);
 
   const available = status?.available_services ?? [];
-  const connected = status?.connection.state === "connected";
-  const needsReauth = status?.connection.state === "reauthorization_required";
+  // Доступ «всем агентам» — не собственное подключение агента: ему можно
+  // подключить свой аккаунт, а отключать общий доступ — в «Подключённых сервисах».
+  const sharedToAll = Boolean(status?.connection.shared_to_all);
+  const connected = status?.connection.state === "connected" && !sharedToAll;
+  const needsReauth = status?.connection.state === "reauthorization_required" && !sharedToAll;
   const legacyServices = status?.connection.usable_services ?? [];
   const legacyCompatible = Boolean(needsReauth && status?.connection.legacy_compatible);
-  const sharedFrom = status?.connection.shared_from;
+  const sharedFrom = sharedToAll ? undefined : status?.connection.shared_from;
   const sharedWith = status?.connection.shared_with ?? [];
   const canStart = Boolean(status?.app.configured && selected.length && !busy && !needsReauth && !sharedFrom);
   const stateLabel = useMemo(() => {
@@ -107,8 +110,9 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
     if (legacyCompatible) return "Работает с текущими правами";
     if (needsReauth) return "Нужно переподключить";
     if (status.pending.active) return "Ожидает подтверждения";
+    if (sharedToAll) return "Общий доступ";
     return "Не подключено";
-  }, [connected, legacyCompatible, needsReauth, status]);
+  }, [connected, legacyCompatible, needsReauth, sharedToAll, status]);
 
   const start = async () => {
     setBusy("start");
@@ -224,6 +228,12 @@ function GoogleWorkspaceCardBody({ onError, onSuccess, onChanged, profileKey, na
         {status && !status.app.configured ? (
           <div className="rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
             Подключение Google ещё не настроено на сервере. Обратитесь в поддержку Korra.
+          </div>
+        ) : null}
+
+        {sharedToAll ? (
+          <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+            Сейчас этот агент пользуется подключением Google агента <strong>{label(status?.connection.shared_from ?? "")}</strong>, открытым всем агентам. Здесь можно подключить ему отдельный аккаунт.
           </div>
         ) : null}
 

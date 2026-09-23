@@ -19,11 +19,14 @@ export const KIND_LABELS: Record<CalendarItemKind, string> = {
   agent_run: "Запуск агента",
 };
 
-/** Куда ведёт «Подключить» из карточки: экран сервисов с нужным агентом. */
+/**
+ * Куда ведёт «Подключить» из карточки: раздел «Подключённые сервисы» в
+ * «Ключах и доступах» с нужным агентом (решение Дмитрия 23.09).
+ */
 export function connectHref(profile: string | null | undefined): string {
   const params = new URLSearchParams({ connect: "calendar" });
   if (profile) params.set("profile", profile);
-  return `/connections?${params.toString()}`;
+  return `/env?${params.toString()}#section-services`;
 }
 
 function partsIn(date: Date, timeZone: string) {
@@ -198,7 +201,7 @@ export function calendarNotice(feed: DashboardCalendarFeed): CalendarNotice | nu
         tone: "action",
         title: "Календарь не подключён",
         text: "Подключите Google — здесь появятся встречи, а агенты смогут отвечать о вашем расписании.",
-        action: { kind: "link", label: "Подключить", to },
+        action: { kind: "link", label: "Подключить Google", to },
       };
     case "calendar_not_selected":
       return {

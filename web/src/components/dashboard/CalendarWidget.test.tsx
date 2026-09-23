@@ -123,7 +123,7 @@ describe("Календарь на дашборде", () => {
     expect(CALENDAR_WIDGET).toMatchObject({
       id: "calendar",
       title: "Календарь",
-      action: { to: "/connections", short: "Сервисы" },
+      action: { to: "/env#section-services", short: "Сервисы" },
     });
   });
 
@@ -186,8 +186,8 @@ describe("Календарь на дашборде", () => {
     await mount("m");
     expect(text()).toContain("Календарь не подключён");
     expect(text()).toContain("агенты смогут отвечать о вашем расписании");
-    expect(link("Подключить").getAttribute("href")).toBe(
-      "/connections?connect=calendar&profile=default",
+    expect(link("Подключить Google").getAttribute("href")).toBe(
+      "/env?connect=calendar&profile=default#section-services",
     );
   });
 
@@ -199,7 +199,7 @@ describe("Календарь на дашборде", () => {
     expect(text()).toContain("Утренняя сводка");
     const notice = container!.querySelector("[data-calendar-notice='not_connected']");
     expect(notice?.textContent).toContain("Календарь не подключён");
-    expect(link("Подключить").getAttribute("href")).toContain("/connections?connect=calendar");
+    expect(link("Подключить Google").getAttribute("href")).toContain("/env?connect=calendar");
   });
 
   it("S без Google ведёт подключать, а не показывает запуск вместо встречи", async () => {
@@ -209,7 +209,7 @@ describe("Календарь на дашборде", () => {
     await mount("s");
     expect(container!.querySelector("[data-calendar-next]")).toBeNull();
     expect(text()).toContain("Календарь не подключён");
-    expect(link("Подключить").getAttribute("href")).toContain("/connections?connect=calendar");
+    expect(link("Подключить Google").getAttribute("href")).toContain("/env?connect=calendar");
   });
 
   it("истёкший доступ просит переподключить у источника", async () => {
@@ -219,7 +219,7 @@ describe("Календарь на дашборде", () => {
     await mount("s");
     expect(text()).toContain("Доступ к Google истёк");
     expect(link("Переподключить").getAttribute("href")).toBe(
-      "/connections?connect=calendar&profile=assistant",
+      "/env?connect=calendar&profile=assistant#section-services",
     );
   });
 

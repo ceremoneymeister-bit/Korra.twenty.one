@@ -43,7 +43,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
-  PlugZap,
   Puzzle,
   Radio,
   RefreshCw,
@@ -82,11 +81,11 @@ import type { SystemAction } from "@/contexts/system-actions-context";
 // Route pages are lazy-loaded so the initial dashboard shell does not pay for
 // every admin surface (and heavy deps like xterm) up front.
 const ConfigPage = lazy(() => import("@/pages/ConfigPage"));
-const ConnectionsPage = lazy(() => import("@/pages/ConnectionsPage"));
 const DashboardPage = lazy(() => import("@/pages/DashboardPage"));
 const DocsPage = lazy(() => import("@/pages/DocsPage"));
 const ClientHelpPage = lazy(() => import("@/pages/ClientHelpPage"));
 const EnvPage = lazy(() => import("@/pages/EnvPage"));
+const ConnectionsRedirect = lazy(() => import("@/pages/ConnectionsRedirect"));
 const FilesPage = lazy(() => import("@/pages/FilesPage"));
 const SessionsPage = lazy(() => import("@/pages/SessionsPage"));
 const LogsPage = lazy(() => import("@/pages/LogsPage"));
@@ -240,8 +239,8 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/profiles/new": ProfileBuilderPage,
   "/config": ConfigPage,
   "/env": EnvPage,
-  // «Сервисы»: подключения установки и доступ агентов к ним (0.21.13).
-  "/connections": ConnectionsPage,
+  // Прежний адрес экрана «Сервисы»: теперь это раздел «Ключей и доступов».
+  "/connections": ConnectionsRedirect,
   "/docs": DocsPage,
   "/help": ClientHelpPage,
   "/help/:article": ClientHelpPage,
@@ -298,7 +297,6 @@ const BUILTIN_NAV_REST: NavItem[] = [
   { path: "/profiles", labelKey: "profiles", label: "Профили", icon: Users },
   { path: "/config", labelKey: "config", label: "Конфигурация", icon: Settings },
   { path: "/env", labelKey: "keys", label: "Ключи", icon: KeyRound },
-  { path: "/connections", label: "Сервисы", icon: PlugZap },
   { path: "/system", label: "Система", icon: Wrench },
   {
     path: "/docs",

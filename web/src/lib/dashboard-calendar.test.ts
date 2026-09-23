@@ -120,7 +120,7 @@ describe("лента недели", () => {
 
 describe("что сказать владельцу", () => {
   it("ведёт подключать календарь к нужному агенту", () => {
-    expect(connectHref("default")).toBe("/connections?connect=calendar&profile=default");
+    expect(connectHref("default")).toBe("/env?connect=calendar&profile=default#section-services");
     const notice = calendarNotice(
       feed([], {
         google: { ...feed([]).google, state: "not_connected", action: "connect", fetched_at: null },
@@ -129,7 +129,7 @@ describe("что сказать владельцу", () => {
     expect(notice).toMatchObject({
       tone: "action",
       title: "Календарь не подключён",
-      action: { kind: "link", label: "Подключить", to: "/connections?connect=calendar&profile=default" },
+      action: { kind: "link", label: "Подключить Google", to: "/env?connect=calendar&profile=default#section-services" },
     });
   });
 
@@ -140,7 +140,7 @@ describe("что сказать владельцу", () => {
     expect(expired?.action).toEqual({
       kind: "link",
       label: "Переподключить",
-      to: "/connections?connect=calendar&profile=assistant",
+      to: "/env?connect=calendar&profile=assistant#section-services",
     });
     expect(calendarNotice(feed([], { google: { ...base, state: "calendar_not_selected" } }))?.title).toBe(
       "Google подключён без календаря",
