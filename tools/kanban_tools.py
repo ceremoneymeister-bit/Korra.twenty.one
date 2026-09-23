@@ -50,16 +50,55 @@ KANBAN_LIST_MAX_LIMIT = 200
 
 
 def _profile_has_kanban_toolset() -> bool:
+    """Whether this chat profile may plan on the board.
+
+    ``toolsets: [kanban]`` opts any profile in. Otherwise
+    ``kanban.chat_tools`` decides: ``main`` (default) gives the board to the
+    main agent only — the owner's orchestrator — so it plans with tools
+    instead of shelling out to the CLI; ``all`` gives it to every profile;
+    ``off`` to none.
+    """
     # Uses load_config() which has mtime-based caching, so this adds
     # negligible overhead. The check_fn results are further TTL-cached
     # (~30s) by the tool registry.
     try:
         from korra_cli.config import load_config
         cfg = load_config()
-        toolsets = cfg.get("toolsets", [])
-        return "kanban" in toolsets
+        toolsets = cfg.get("toolsets", []) or []
+        if "kanban" in toolsets:
+            return True
+        if korra_env("KORRA_KANBAN_TASK") or korra_env("KORRA_KANBAN_BOARD"):
+            # Inherited worker env without owning that worker (a
+            # delegate_task child, a cron job fired inside a worker): only an
+            # explicit opt-in counts, never the main-agent default.
+            return False
+        mode = str(cfg_get(cfg, "kanban", "chat_tools", default="main")).strip().lower()
+        if mode in {"off", "false", "none", "no", "0"}:
+            return False
+        if mode == "all":
+            return True
+        from korra_cli.profiles import get_active_profile_name
+        return get_active_profile_name() == "default"
     except Exception:
         return False
+
+
+def _known_profiles() -> list[tuple[str, str]]:
+    """``(name, display name)`` for every profile that can take a task."""
+    try:
+        from korra_cli.profiles import list_profiles
+        out = []
+        for info in list_profiles():
+            name = getattr(info, "name", None)
+            if name:
+                out.append((name, getattr(info, "display_name", None) or ""))
+        return out
+    except Exception:
+        try:
+            from korra_cli import kanban_db as _kb
+            return [(n, "") for n in _kb.list_profiles_on_disk()]
+        except Exception:
+            return []
 
 
 def _is_delegated_child_context() -> bool:
@@ -752,6 +791,12 @@ def _handle_complete(args: dict, **kw) -> str:
             # Only enforce when a judge is actually reachable — see
             # _goal_judge_available for why an unavailable judge fails open.
             task = kb.get_task(conn, tid)
+            if task is not None and task.actor_kind == "human":
+                return tool_error(
+                    f"{tid} is the owner's own step; only the owner marks it "
+                    "done (on the board). Prepare material for it in a "
+                    "separate step instead."
+                )
             rejection = _goal_mode_handoff_rejection(
                 task,
                 (summary or result or "").strip(),
@@ -1364,6 +1409,20 @@ def _handle_create(args: dict, **kw) -> str:
             "task (the dispatcher will only spawn tasks with an assignee). "
             "For a step the owner does themselves pass actor_kind='human'."
         )
+    if assignee and not human_step and not korra_env("KORRA_KANBAN_TASK"):
+        # Chat orchestrator (not a dispatcher worker): verify the agent exists.
+        known = _known_profiles()
+        names = {n for n, _ in known}
+        if known and str(assignee).strip().lower() not in names:
+            # An unknown assignee is never dispatched: the card would sit in
+            # the queue forever. Answer with the real list in one round trip.
+            listing = "; ".join(
+                f"{n} ({d})" if d and d != n else n for n, d in known
+            )
+            return tool_error(
+                f"unknown assignee {assignee!r}: no such agent profile. "
+                f"Available agents: {listing}."
+            )
     body = args.get("body")
     parents = args.get("parents") or []
     tenant = args.get("tenant") or korra_env("KORRA_TENANT")
@@ -1775,11 +1834,16 @@ KANBAN_COMPLETE_SCHEMA = {
     "name": "kanban_complete",
     "description": (
         "Mark your current task done with a structured handoff for "
-        "downstream workers and humans. Prefer ``summary`` for a "
-        "human-readable 1-3 sentence description of what you did; put "
-        "machine-readable facts in ``metadata`` (changed_files, "
-        "tests_run, decisions, findings, etc). At least one of "
-        "``summary`` or ``result`` is required. If you created new "
+        "downstream workers and humans. Put the deliverable itself — the "
+        "full text the task asked for (the list, answer, draft, table, "
+        "analysis with its reasons) — in ``result``: it is what the owner "
+        "reads and accepts on the board. ``summary`` is a 1-3 sentence "
+        "overview; ``metadata`` holds machine-readable facts "
+        "(changed_files, tests_run, decisions) and is NOT shown to the owner "
+        "as the result. At least one of ``summary`` or ``result`` is "
+        "required; for any task whose answer is text, send ``result``. "
+        "When the task waits for the owner's acceptance, completing "
+        "submits it for their review. If you created new "
         "tasks via ``kanban_create`` during this run, list their ids "
         "in ``created_cards`` — the kernel verifies them so phantom "
         "references are caught before they leak into downstream "
@@ -1817,10 +1881,12 @@ KANBAN_COMPLETE_SCHEMA = {
             "result": {
                 "type": "string",
                 "description": (
-                    "Short result log line (legacy field, maps to "
-                    "task.result). Use ``summary`` instead when "
-                    "possible; this exists for compatibility with "
-                    "callers that still set --result on the CLI."
+                    "The deliverable in full, in the owner's language "
+                    "and ready to read: everything the task asked for, "
+                    "including the explanations it requested. Shown on "
+                    "the board as the task's result and passed to "
+                    "dependent steps. Do not move content the owner "
+                    "asked for into metadata."
                 ),
             },
             "created_cards": {

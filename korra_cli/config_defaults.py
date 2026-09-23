@@ -2925,6 +2925,10 @@ DEFAULT_CONFIG = {
         # behaviour — e.g. for a profile that prefers explicit
         # ``kanban_notify-subscribe`` calls per task.
         "auto_subscribe_on_create": True,
+        # Who plans on the board from an ordinary chat: "main" (the main
+        # agent, the owner's orchestrator), "all" profiles, or "off".
+        # ``toolsets: [kanban]`` in a profile's config also opts it in.
+        "chat_tools": "main",
         # Run the dispatcher inside the gateway process. On by default —
         # the cost is ~300µs every `dispatch_interval_seconds` when idle,
         # and gateway is the supervisor users already have. Set to false

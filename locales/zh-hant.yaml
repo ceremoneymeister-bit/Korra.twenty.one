@@ -171,6 +171,7 @@ gateway:
     no_output:             "（無輸出）"
     wake:
       completed:           "completed"
+      submitted:           "submitted its result for the owner's review"
       gave_up:             "gave up (retries exhausted)"
       crashed:             "crashed (worker exited); dispatcher will retry"
       timed_out:           "timed out; dispatcher will retry"
@@ -184,6 +185,17 @@ gateway:
       handoff:             "結果：{summary}"
       review_detail:       "Review feedback: {reason}\nInspect the existing card and its current review run; return work to the same implementation task. Do not treat this BLOCK as approval and do not create a duplicate task."
       guidance:            "這是自動任務狀態通知，不是再次分解任務的請求。建立後續任務前請先檢查目前看板；不要重複建立已存在的任務或任務圖。"
+    notify:
+      completed:           "✔ {prefix}Kanban {task_id} done — {title}{detail}"
+      submitted:           "📝 {prefix}Kanban {task_id} is ready for your review — {title}{detail}\nAccept it or return it with a remark on the Kanban board."
+      blocked:             "⏸ {prefix}Kanban {task_id} needs your decision — {title}{detail}\nReply here or on the Kanban board."
+      gave_up:             "✖ {prefix}Kanban {task_id} gave up after repeated failures — {title}{detail}"
+      crashed:             "✖ {prefix}Kanban {task_id} worker crashed (pid gone); dispatcher will retry — {title}{detail}"
+      timed_out:           "⏱ {prefix}Kanban {task_id} timed out{detail}; will retry — {title}"
+      status:              "🔄 {prefix}Kanban {task_id} → {detail} — {title}"
+      review_requested:    "👀 {prefix}Kanban {task_id} ready for review — {title}{detail}"
+      changes_requested:   "🛑 {prefix}Kanban {task_id} review requested changes/BLOCK{detail} — {title}"
+      block_loop_detected: "🛑 {prefix}Kanban {task_id} routed to TRIAGE — needs a human decision{detail} — {title}"
 
   personality:
     none_configured:       "`{path}/config.yaml` 中未設定人格"

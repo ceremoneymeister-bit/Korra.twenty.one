@@ -88,3 +88,17 @@ def test_no_nudge_after_kanban_complete(clear_kanban_env):
 
 
 
+
+
+@pytest.mark.parametrize("tool", ["kanban_request_review", "kanban_request_changes"])
+def test_review_handoff_ends_the_turn(clear_kanban_env, tool):
+    clear_kanban_env.setenv("HERMES_KANBAN_TASK", "t_abc")
+    messages = [{"role": "assistant", "tool_calls": [{"function": {"name": tool}}]}]
+    assert session_called_kanban_terminal(messages) is True
+    assert build_kanban_stop_nudge(messages=messages) is None
+
+
+def test_nudge_asks_for_the_full_result(clear_kanban_env):
+    clear_kanban_env.setenv("HERMES_KANBAN_TASK", "t_abc")
+    nudge = build_kanban_stop_nudge(messages=[]) or ""
+    assert "result=<the full deliverable text>" in nudge

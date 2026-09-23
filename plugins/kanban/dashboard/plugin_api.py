@@ -635,12 +635,39 @@ def get_task(
         if diag_list:
             task_d["diagnostics"] = diag_list
             task_d["warnings"] = _warnings_summary_from_diagnostics(diag_list)
+        # Human-readable neighbours for the owner: what this step waits for
+        # and, for a plan step, the whole plan in order.
+        parent_tasks = [
+            {"id": r["id"], "title": r["title"], "status": r["status"],
+             "assignee": r["assignee"], "completed_at": r["completed_at"]}
+            for r in conn.execute(
+                "SELECT t.id, t.title, t.status, t.assignee, t.completed_at "
+                "FROM tasks t JOIN task_links l ON l.parent_id = t.id "
+                "WHERE l.child_id = ? ORDER BY t.created_at",
+                (task_id,),
+            )
+        ]
+        plan = None
+        if task.plan_id:
+            steps = [
+                {"id": r["id"], "title": r["title"], "status": r["status"],
+                 "assignee": r["assignee"], "actor_kind": r["actor_kind"],
+                 "acceptance": r["acceptance"]}
+                for r in conn.execute(
+                    "SELECT id, title, status, assignee, actor_kind, acceptance "
+                    "FROM tasks WHERE plan_id = ? ORDER BY created_at, id",
+                    (task.plan_id,),
+                )
+            ]
+            plan = {"id": task.plan_id, "title": task.plan_title, "steps": steps}
         return {
             "task": task_d,
             "comments": [_comment_dict(c) for c in kanban_db.list_comments(conn, task_id)],
             "events": [_event_dict(e) for e in kanban_db.list_events(conn, task_id)],
             "attachments": [_attachment_dict(a) for a in kanban_db.list_attachments(conn, task_id)],
             "links": links,
+            "parent_tasks": parent_tasks,
+            "plan": plan,
             "child_results": child_results,
             "runs": [
                 _run_dict(r)

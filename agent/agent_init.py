@@ -1638,10 +1638,17 @@ def init_agent(
     # Resolving the ~835-token block once here avoids re-running the
     # membership test + reference on every system-prompt rebuild
     # (init + each context compression).
-    from agent.prompt_builder import KANBAN_GUIDANCE
-    agent._kanban_worker_guidance = (
-        KANBAN_GUIDANCE if "kanban_show" in agent.valid_tool_names else ""
-    )
+    from agent.prompt_builder import KANBAN_GUIDANCE, KANBAN_CHAT_GUIDANCE
+    from korra_constants import korra_env as _korra_env
+    # A dispatcher-spawned worker owns ONE task and gets the worker protocol;
+    # a chat agent with board tools is the owner's planner and gets the short
+    # chat guidance instead.
+    if "kanban_show" not in agent.valid_tool_names:
+        agent._kanban_worker_guidance = ""
+    elif _korra_env("KORRA_KANBAN_TASK"):
+        agent._kanban_worker_guidance = KANBAN_GUIDANCE
+    else:
+        agent._kanban_worker_guidance = KANBAN_CHAT_GUIDANCE
 
     # Check tool requirements
     if agent.tools and not agent.quiet_mode:

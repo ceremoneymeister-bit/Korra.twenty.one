@@ -553,7 +553,11 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         tool_guidance.append(_kanban_guidance)
     elif _kanban_guidance is None and "kanban_show" in agent.valid_tool_names:
         # Fallback for code paths that bypass agent_init (rare).
-        tool_guidance.append(KANBAN_GUIDANCE)
+        from agent.prompt_builder import KANBAN_CHAT_GUIDANCE
+        from korra_constants import korra_env as _korra_env
+        tool_guidance.append(
+            KANBAN_GUIDANCE if _korra_env("KORRA_KANBAN_TASK") else KANBAN_CHAT_GUIDANCE
+        )
     if tool_guidance:
         stable_parts.append(" ".join(tool_guidance))
 

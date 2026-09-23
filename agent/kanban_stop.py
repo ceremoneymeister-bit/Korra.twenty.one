@@ -17,7 +17,12 @@ from typing import Any, Iterable, Optional
 from korra_constants import korra_env
 
 
-_TERMINAL_KANBAN_TOOLS = frozenset({"kanban_complete", "kanban_block"})
+# Review handoffs end a worker's turn just as completion does: nudging after
+# them produced false "task still running" prompts.
+_TERMINAL_KANBAN_TOOLS = frozenset({
+    "kanban_complete", "kanban_block",
+    "kanban_request_review", "kanban_request_changes",
+})
 
 _DEFAULT_MAX_ATTEMPTS = 2
 
@@ -94,8 +99,10 @@ def build_kanban_stop_nudge(
         "`kanban_complete` / `kanban_block`).\n\n"
         "Do this immediately in your next response — do not narrate intent:\n"
         "1. Finish any remaining deliverable (write the required file(s) now).\n"
-        "2. Call `kanban_complete(summary=..., artifacts=[...])` if the work "
-        "is done, OR `kanban_block(reason=...)` if you are blocked.\n\n"
+        "2. Call `kanban_complete(result=<the full deliverable text>, "
+        "summary=..., artifacts=[...])` if the work is done, OR "
+        "`kanban_block(reason=<the exact question and the material to "
+        "decide on>)` if you need the owner.\n\n"
         "Never end a turn with only a promise of future action. Repeated "
         "protocol violations will block this task and require manual intervention.]"
     )

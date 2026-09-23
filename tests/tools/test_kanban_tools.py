@@ -20,11 +20,14 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def test_kanban_tools_hidden_without_env_var(monkeypatch, tmp_path):
-    """Normal `hermes chat` sessions (no HERMES_KANBAN_TASK) must have
-    zero kanban_* tools in their schema."""
+    """Chat sessions (no HERMES_KANBAN_TASK) have zero kanban_* tools unless
+    the profile plans on the board. Korra gives the board to the main agent
+    by default (``kanban.chat_tools: main``, see
+    test_kanban_chat_orchestrator.py); with ``off`` the schema stays clean."""
     monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
     home = tmp_path / ".hermes"
     home.mkdir()
+    (home / "config.yaml").write_text("kanban:\n  chat_tools: \"off\"\n", encoding="utf-8")
     monkeypatch.setenv("HERMES_HOME", str(home))
 
     import tools.kanban_tools  # ensure registered
